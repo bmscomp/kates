@@ -14,6 +14,11 @@ deploy:
 	@echo "📦 Deploying Kafka and Dashboards..."
 	./deploy-kafka.sh kafka
 
+# Deploy everything from Kind images (no registry pulls)
+deploy-offline:
+	@echo "📦 Deploying from Kind images (offline mode)..."
+	./deploy-from-kind.sh
+
 # Deploy Kafka UI only
 ui:
 	@echo "🖥️ Deploying Kafka UI..."
