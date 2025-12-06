@@ -1,4 +1,4 @@
-.PHONY: all deploy ui test destroy clean ps argo-install argo-cli-install argo-ui argo-clean
+.PHONY: all deploy deploy-offline ui test destroy clean ps argo-install argo-cli-install argo-ui argo-clean
 
 # Default target: Launch cluster, deploy Kafka, and deploy UI
 all:

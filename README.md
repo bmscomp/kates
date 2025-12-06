@@ -59,6 +59,7 @@ You can use the `Makefile` to manage the lifecycle of the cluster:
 
 - **`make all`**: 🚀 Launch cluster, deploy Kafka, and deploy UI (full setup).
 - **`make deploy`**: 📦 Deploy Kafka and Dashboards (updates existing deployment).
+- **`make deploy-offline`**: 📦 Deploy everything from Kind images only (no registry pulls).
 - **`make ui`**: 🖥️ Deploy Kafka UI.
 - **`make test`**: 🧪 Run the performance test script.
 - **`make ports`**: 🔌 Start port forwarding for Grafana, Kafka UI, and Prometheus.
@@ -83,10 +84,14 @@ You can use the `Makefile` to manage the lifecycle of the cluster:
 ### 📦 Image Management Scripts
 
 - **`./pull-images.sh`**: Pull images from registries and load into Kind
-- **`./export-kind-images.sh`**: Export all images from Kind cluster to tar archives
-- **`./import-kind-images.sh`**: Import previously exported images into Kind cluster
+- **`./deploy-from-kind.sh`**: Deploy all services using only images in Kind (offline mode)
+- **`./portability/export-kind-images.sh`**: Export all images from Kind cluster to tar archives
+- **`./portability/import-kind-images.sh`**: Import previously exported images into Kind cluster
 
-**Use Case**: Export images from one environment and import into another (air-gapped deployments, backup/restore, etc.)
+**Use Cases**: 
+- **Offline Deployment**: Use `deploy-from-kind.sh` to deploy without internet access
+- **Air-Gapped Environments**: Export/import for isolated networks
+- **Backup/Restore**: Save and restore exact image states
 
 ## 🧪 Chaos Engineering with LitmusChaos
 
