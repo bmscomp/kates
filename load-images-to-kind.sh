@@ -106,7 +106,10 @@ IMAGES=(
 if [ -f "images.txt" ]; then
     echo -e "${GREEN}Found images.txt, loading custom image list...${NC}"
     echo ""
-    mapfile -t CUSTOM_IMAGES < images.txt
+    CUSTOM_IMAGES=()
+    while IFS= read -r line; do
+        CUSTOM_IMAGES+=("$line")
+    done < images.txt
     IMAGES=("${CUSTOM_IMAGES[@]}")
 fi
 
