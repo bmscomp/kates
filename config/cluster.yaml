@@ -7,10 +7,13 @@ nodes:
     kind: InitConfiguration
     nodeRegistration:
       name: alpha
+      kubeletExtraArgs:
+        system-reserved: memory=1Gi
+        kube-reserved: memory=1Gi
   labels:
     topology.kubernetes.io/zone: alpha
-    node.kubernetes.io/instance-type: custom-3vcpu-6gb
-    node.kubernetes.io/local-storage: 10gb
+    node.kubernetes.io/instance-type: custom-4vcpu-10gb
+    node.kubernetes.io/local-storage: 20gb
   extraMounts:
   - hostPath: proxy/proxy.conf
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf
@@ -21,10 +24,13 @@ nodes:
     kind: JoinConfiguration
     nodeRegistration:
       name: sigma
+      kubeletExtraArgs:
+        system-reserved: memory=1Gi
+        kube-reserved: memory=1Gi
   labels:
     topology.kubernetes.io/zone: sigma
-    node.kubernetes.io/instance-type: custom-3vcpu-6gb
-    node.kubernetes.io/local-storage: 10gb
+    node.kubernetes.io/instance-type: custom-4vcpu-10gb
+    node.kubernetes.io/local-storage: 20gb
   extraMounts:
   - hostPath: proxy/proxy.conf
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf
@@ -35,10 +41,13 @@ nodes:
     kind: JoinConfiguration
     nodeRegistration:
       name: gamma
+      kubeletExtraArgs:
+        system-reserved: memory=1Gi
+        kube-reserved: memory=1Gi
   labels:
     topology.kubernetes.io/zone: gamma
-    node.kubernetes.io/instance-type: custom-3vcpu-6gb
-    node.kubernetes.io/local-storage: 10gb
+    node.kubernetes.io/instance-type: custom-4vcpu-10gb
+    node.kubernetes.io/local-storage: 20gb
   extraMounts:
   - hostPath: proxy/proxy.conf
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf

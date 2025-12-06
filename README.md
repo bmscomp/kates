@@ -5,7 +5,9 @@ This project provides scripts to launch a local Kubernetes cluster using [Kind](
 ## Prerequisites
 
 Ensure you have the following installed:
-- [Docker](https://www.docker.com/)
+- [Docker](https://www.docker.com/) with at least **32GB RAM** and **8 CPUs** allocated
+  - Docker Desktop: Go to Settings → Resources and set Memory to 32GB, CPUs to 8
+  - Each Kind node requires ~10GB RAM (3 nodes total)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [Kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Helm](https://helm.sh/docs/intro/install/)
