@@ -107,11 +107,16 @@ You can use the `Makefile` to manage the lifecycle of the cluster:
 ### 📦 Image Management Scripts
 
 - **`./pull-images.sh`**: Pull images from registries and load into Kind
+- **`./load-images-to-kind.sh`**: Load images from any registry to Kind (uses `images.txt`)
 - **`./deploy-from-kind.sh`**: Deploy all services using only images in Kind (offline mode)
 - **`./portability/export-kind-images.sh`**: Export all images from Kind cluster to tar archives
 - **`./portability/import-kind-images.sh`**: Import previously exported images into Kind cluster
 
+**Image List**: `images.txt` contains all required images for the full stack (Kafka, Monitoring, LitmusChaos, Argo)
+
 **Use Cases**: 
+- **Registry to Kind**: Use `load-images-to-kind.sh` to pull from any registry and load into Kind
+- **Custom Images**: Edit `images.txt` to add/remove images for selective loading
 - **Offline Deployment**: Use `deploy-from-kind.sh` to deploy without internet access
 - **Air-Gapped Environments**: Export/import for isolated networks
 - **Backup/Restore**: Save and restore exact image states

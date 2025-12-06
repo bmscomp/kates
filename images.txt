@@ -1,0 +1,31 @@
+# Required images for full stack deployment
+# This file is used by load-images-to-kind.sh
+
+# Kafka & Strimzi
+quay.io/strimzi/operator:0.49.0
+quay.io/strimzi/kafka:0.49.0-kafka-4.1.1
+provectuslabs/kafka-ui:latest
+
+# Prometheus & Grafana Stack
+quay.io/prometheus/prometheus:v3.1.0
+quay.io/prometheus/alertmanager:v0.28.1
+quay.io/prometheus/node-exporter:v1.8.2
+quay.io/prometheus-operator/prometheus-operator:v0.79.2
+quay.io/prometheus-operator/prometheus-config-reloader:v0.79.2
+docker.io/grafana/grafana:11.4.0
+registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0
+quay.io/prometheus-operator/admission-webhook:v0.79.2
+
+# LitmusChaos
+litmuschaos/chaos-operator:3.23.0
+litmuschaos/chaos-runner:3.23.0
+litmuschaos/chaos-exporter:3.23.0
+litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
+litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
+litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
+docker.io/bitnami/mongodb:latest
+
+# Argo Workflows
+quay.io/argoproj/workflow-controller:v3.5.5
+quay.io/argoproj/argocli:v3.5.5
+quay.io/argoproj/argoexec:v3.5.5
