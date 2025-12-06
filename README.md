@@ -80,6 +80,14 @@ You can use the `Makefile` to manage the lifecycle of the cluster:
 
 -✨ **Direct Image Loading**: All container images are pulled from Docker registries and loaded directly into Kind nodes for faster deployments and offline operation. Images are cached in Kind with their original names, supporting `imagePullPolicy: Never`. The `pull-images.sh` script handles all image pulling, verification, and loading into Kind.
 
+### 📦 Image Management Scripts
+
+- **`./pull-images.sh`**: Pull images from registries and load into Kind
+- **`./export-kind-images.sh`**: Export all images from Kind cluster to tar archives
+- **`./import-kind-images.sh`**: Import previously exported images into Kind cluster
+
+**Use Case**: Export images from one environment and import into another (air-gapped deployments, backup/restore, etc.)
+
 ## 🧪 Chaos Engineering with LitmusChaos
 
 This project integrates [LitmusChaos](https://litmuschaos.io/) for comprehensive Kafka cluster resilience testing.
