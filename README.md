@@ -108,6 +108,8 @@ You can use the `Makefile` to manage the lifecycle of the cluster:
 
 - **`./pull-images.sh`**: Pull images from registries and load into Kind
 - **`./load-images-to-kind.sh`**: Load images from any registry to Kind (uses `images.txt`)
+  - Add `-v` or `--verbose` for detailed output
+  - Add `-d` or `--debug` for full debugging information
 - **`./deploy-from-kind.sh`**: Deploy all services using only images in Kind (offline mode)
 - **`./portability/export-kind-images.sh`**: Export all images from Kind cluster to tar archives
 - **`./portability/import-kind-images.sh`**: Import previously exported images into Kind cluster
