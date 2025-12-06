@@ -14,29 +14,45 @@ Ensure you have the following installed:
 
 ## Quick Start
 
-1. **Launch the cluster:**
-   ```bash
-   ./launch.sh
-   ```
-   This script will:
-   - Create a Kind cluster named `panda`.
-   - Provision 3 nodes (1 control-plane, 2 workers) with zone labels (`alpha`, `sigma`, `gamma`).
-   - Install `kube-prometheus-stack` (Prometheus + Grafana).
+### Option 1: Full Stack (Recommended)
+```bash
+make all
+```
+This will:
+- Create Kind cluster with 3 nodes (`alpha`, `sigma`, `gamma`)
+- Install Prometheus & Grafana monitoring
+- Deploy Kafka cluster
+- Install LitmusChaos
 
-2. **Access Grafana:**
-   - URL: http://localhost:30080
-   - Username: `admin`
-   - Password: `admin`
+### Option 2: Step by Step
+```bash
+# 1. Create Kind cluster
+./launch.sh
 
-   *Note: If you cannot access the URL directly, run the following command to forward the port:*
-   ```bash
-   kubectl port-forward svc/monitoring-grafana 30080:80 -n monitoring
-   ```
+# 2. Install monitoring (Prometheus + Grafana)
+make monitoring
 
-3. **Destroy the cluster:**
-   ```bash
-   ./destroy.sh
-   ```
+# 3. Deploy Kafka
+make deploy
+
+# 4. Install LitmusChaos (optional)
+make chaos-install
+```
+
+### Access Services
+- **Grafana**: http://localhost:30080 (admin/admin)
+- **Kafka UI**: http://localhost:30081
+- **Prometheus**: http://localhost:30090
+
+*Note: Use port-forwarding if NodePort is not accessible:*
+```bash
+make ports
+```
+
+### Cleanup
+```bash
+make destroy
+```
 
 ## Kafka Deployment
 
@@ -57,24 +73,31 @@ To deploy a Kafka Strimzi cluster with KRaft mode and monitoring:
 
 You can use the `Makefile` to manage the lifecycle of the cluster:
 
-- **`make all`**: 🚀 Launch cluster, deploy Kafka, and deploy UI (full setup).
-- **`make deploy`**: 📦 Deploy Kafka and Dashboards (updates existing deployment).
+**Cluster & Deployment:**
+- **`make all`**: 🚀 Launch cluster + monitoring + Kafka + LitmusChaos (full stack).
+- **`make monitoring`**: 📊 Deploy Prometheus & Grafana monitoring stack.
+- **`make deploy`**: 📦 Deploy Kafka and Dashboards.
 - **`make deploy-offline`**: 📦 Deploy everything from Kind images only (no registry pulls).
 - **`make ui`**: 🖥️ Deploy Kafka UI.
+
+**Testing & Monitoring:**
 - **`make test`**: 🧪 Run the performance test script.
 - **`make ports`**: 🔌 Start port forwarding for Grafana, Kafka UI, and Prometheus.
-- **`make registry-setup`**: 🐳 Setup local Docker registry and pull all images.
-- **`make registry-status`**: 📊 Check registry status and contents.
-- **`make registry-clean`**: 🧹 Clean up local registry.
+- **`make ps`**: 📊 Show cluster status (nodes, pods, CPU, memory).
+
+**Chaos Engineering:**
 - **`make chaos-install`**: ⚡ Install LitmusChaos operator.
 - **`make chaos-ui`**: 🖥️ Open LitmusChaos UI.
 - **`make chaos-experiments`**: 🧪 Deploy sample chaos experiments.
 - **`make chaos-clean`**: 🧹 Remove LitmusChaos.
+
+**Argo Workflows:**
 - **`make argo-install`**: ⚡ Install Argo Workflows.
 - **`make argo-cli-install`**: 📦 Install Argo CLI (required for workflows).
 - **`make argo-ui`**: 🖥️ Open Argo Workflows UI.
 - **`make argo-clean`**: 🧹 Remove Argo Workflows.
-- **`make ps`**: 📊 Show cluster status (nodes, pods, CPU, memory).
+
+**Cleanup:**
 - **`make destroy`**: 💥 Destroy the cluster.
 
 ## Features

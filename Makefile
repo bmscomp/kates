@@ -1,13 +1,21 @@
-.PHONY: all deploy deploy-offline ui test destroy clean ps argo-install argo-cli-install argo-ui argo-clean
+.PHONY: all deploy deploy-offline monitoring ui test destroy clean ps argo-install argo-cli-install argo-ui argo-clean
 
-# Default target: Launch cluster, deploy Kafka, and deploy UI
+# Default target: Launch cluster, deploy monitoring, Kafka, and LitmusChaos
 all:
 	@echo "🚀 Launching full stack..."
 	./launch.sh
+	@echo "📊 Installing monitoring stack..."
+	./deploy-monitoring.sh
+	@echo "📦 Deploying Kafka..."
 	./deploy-kafka.sh
-	@echo "Installing LitmusChaos..."
+	@echo "⚡ Installing LitmusChaos..."
 	./deploy-litmuschaos.sh
 	@echo "✅ Stack deployed!"
+
+# Deploy monitoring stack
+monitoring:
+	@echo "📊 Deploying Monitoring Stack..."
+	./deploy-monitoring.sh
 
 # Deploy Kafka and Dashboards only
 deploy:
