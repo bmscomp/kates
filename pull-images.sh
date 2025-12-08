@@ -83,6 +83,10 @@ push_to_local_registry "litmuschaos/chaos-operator:3.23.0"
 push_to_local_registry "litmuschaos/chaos-runner:3.23.0"
 push_to_local_registry "litmuschaos/chaos-exporter:3.23.0"
 
+# Additional LitmusChaos components
+push_to_local_registry "litmuschaos/litmusportal-subscriber:3.23.0"
+push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
+
 # Portal Images (from scarf.sh)
 # These need special handling because the source is different from standard docker hub
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
@@ -96,6 +100,14 @@ docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-fro
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
 docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
 docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
+
+# MongoDB images from scarf.sh
+docker pull litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
+docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
+
+# Alternative MongoDB image from docker.io
+push_to_local_registry "docker.io/litmuschaos/mongo:6"
 
 # Dependencies
 push_to_local_registry "docker.io/bitnami/mongodb:latest"

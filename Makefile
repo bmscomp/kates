@@ -1,17 +1,33 @@
-.PHONY: all deploy ui test destroy clean
+.PHONY: all cluster monitoring deploy deploy-all deploy-kafka ui test destroy clean
 
-# Default target: Launch cluster, deploy Kafka, and deploy UI
+# Default target: Launch cluster and monitoring
 all:
-	@echo "🚀 Launching full stack..."
+	@echo "🚀 Launching cluster and monitoring..."
 	./launch.sh
-	./deploy-kafka.sh
-	./deploy-kafka-ui.sh
-	@echo "✅ Stack deployed!"
+	@echo "✅ Launch complete!"
 
-# Deploy Kafka and Dashboards only
-deploy:
-	@echo "📦 Deploying Kafka and Dashboards..."
+# Start Kind cluster only
+cluster:
+	@echo "🎯 Starting Kind cluster..."
+	./start-cluster.sh
+
+# Deploy monitoring stack only
+monitoring:
+	@echo "📊 Deploying monitoring stack..."
+	./deploy-monitoring.sh
+
+# Deploy full stack (monitoring, Kafka, UI, Litmus)
+deploy-all:
+	@echo "🚀 Deploying full stack..."
+	./deploy-all-from-kind.sh
+
+# Deploy Kafka only
+deploy-kafka:
+	@echo "📦 Deploying Kafka..."
 	./deploy-kafka.sh
+
+# Legacy alias for deploy-kafka
+deploy: deploy-kafka
 
 # Deploy Kafka UI only
 ui:
@@ -46,6 +62,11 @@ registry-clean:
 chaos-install:
 	@echo "⚡ Installing LitmusChaos..."
 	./deploy-litmuschaos.sh
+
+chaos-ui:
+	@echo "🌐 Port-forwarding Litmus UI..."
+	@echo "Access at: http://localhost:9091 (admin/litmus)"
+	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus
 
 chaos-experiments:
 	@echo "🧪 Deploying chaos experiments..."

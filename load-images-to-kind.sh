@@ -107,15 +107,19 @@ echo -e "${YELLOW}Note: Pulling portal images from litmuschaos.docker.scarf.sh${
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 || true
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 || true
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 || true
+docker pull litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 || true
 
 # MongoDB from docker.io (compatible with chart)
 docker pull docker.io/bitnami/mongodb:latest || true
+docker pull docker.io/litmuschaos/mongo:6 || true
 
 # Load portal images
 kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 --name "${KIND_CLUSTER_NAME}" || true
 kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 --name "${KIND_CLUSTER_NAME}" || true
 kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 --name "${KIND_CLUSTER_NAME}" || true
+kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 --name "${KIND_CLUSTER_NAME}" || true
 kind load docker-image docker.io/bitnami/mongodb:latest --name "${KIND_CLUSTER_NAME}" || true
+kind load docker-image docker.io/litmuschaos/mongo:6 --name "${KIND_CLUSTER_NAME}" || true
 
 echo ""
 echo -e "${GREEN}=== MongoDB Init Container ===${NC}"
