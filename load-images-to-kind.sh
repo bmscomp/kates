@@ -14,21 +14,27 @@ KIND_CLUSTER_NAME="panda"
 # Temporarily unset proxy for Docker operations
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 
-echo -e "${GREEN}Loading images from local registry into Kind cluster '${KIND_CLUSTER_NAME}'...${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Loading Images into Kind Cluster${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
 
 # Check if kind cluster exists
 if ! kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then
     echo -e "${RED}Error: Kind cluster '${KIND_CLUSTER_NAME}' not found${NC}"
-    echo "Please run ./launch.sh first to create the cluster"
+    echo "Please run 'make cluster' or './start-cluster.sh' first"
     exit 1
 fi
 
 # Check if local registry is running
 if ! curl -s http://${REGISTRY}/v2/_catalog > /dev/null 2>&1; then
     echo -e "${RED}Error: Local registry is not running at ${REGISTRY}${NC}"
-    echo "Please run ./setup-registry.sh first"
+    echo "Please run './setup-registry.sh' first"
     exit 1
 fi
+
+echo -e "${BLUE}Loading images from local registry (${REGISTRY}) into Kind cluster '${KIND_CLUSTER_NAME}'...${NC}"
+echo ""
 
 # Function to pull from local registry and load into kind
 load_from_local_registry() {
@@ -102,35 +108,58 @@ load_from_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
 
 echo ""
 echo -e "${GREEN}=== LitmusChaos Portal Images (from scarf.sh) ===${NC}"
-# Note: These use scarf.sh registry which tracks downloads
-echo -e "${YELLOW}Note: Pulling portal images from litmuschaos.docker.scarf.sh${NC}"
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 || true
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 || true
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 || true
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 || true
+# Note: These are pulled from local registry where scarf.sh images were pushed
+echo -e "${BLUE}Loading portal images from local registry...${NC}"
 
-# MongoDB from docker.io (compatible with chart)
-docker pull docker.io/bitnami/mongodb:latest || true
-docker pull docker.io/litmuschaos/mongo:6 || true
+# Function to load scarf.sh images from local registry
+load_scarf_image() {
+    local image=$1
+    local local_image="${REGISTRY}/${image}"
+    
+    echo -e "${BLUE}Processing: ${image}${NC}"
+    
+    # Check if image already exists in kind cluster
+    if docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep -q "${image}"; then
+        echo -e "${YELLOW}  Image already exists in kind cluster, skipping...${NC}"
+        return 0
+    fi
+    
+    # Pull from local registry
+    echo "  Pulling from local registry..."
+    if docker pull "${local_image}" 2>/dev/null; then
+        # Tag back to original name
+        docker tag "${local_image}" "${image}"
+        # Load into kind
+        echo "  Loading into kind cluster..."
+        kind load docker-image "${image}" --name "${KIND_CLUSTER_NAME}"
+        echo -e "${GREEN}✓ Loaded ${image}${NC}"
+    else
+        echo -e "${YELLOW}  Image not in local registry, skipping...${NC}"
+    fi
+}
 
-# Load portal images
-kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 --name "${KIND_CLUSTER_NAME}" || true
-kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 --name "${KIND_CLUSTER_NAME}" || true
-kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 --name "${KIND_CLUSTER_NAME}" || true
-kind load docker-image litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 --name "${KIND_CLUSTER_NAME}" || true
-kind load docker-image docker.io/bitnami/mongodb:latest --name "${KIND_CLUSTER_NAME}" || true
-kind load docker-image docker.io/litmuschaos/mongo:6 --name "${KIND_CLUSTER_NAME}" || true
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
 
 echo ""
-echo -e "${GREEN}=== MongoDB Init Container ===${NC}"
-docker pull docker.io/bitnamilegacy/os-shell:12-debian-12-r51 || true
-kind load docker-image docker.io/bitnamilegacy/os-shell:12-debian-12-r51 --name "${KIND_CLUSTER_NAME}" || true
+echo -e "${GREEN}=== MongoDB Dependencies ===${NC}"
+load_from_local_registry "docker.io/bitnami/mongodb:latest"
+load_from_local_registry "docker.io/litmuschaos/mongo:6"
+load_from_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}All images have been loaded into Kind cluster '${KIND_CLUSTER_NAME}'!${NC}"
+echo -e "${GREEN}✅ Image Loading Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "To verify images loaded in kind nodes, you can exec into a node:"
+echo "All images have been loaded into Kind cluster '${KIND_CLUSTER_NAME}'!"
+echo ""
+echo "Verify images in cluster:"
 echo "  docker exec -it ${KIND_CLUSTER_NAME}-control-plane crictl images"
+echo ""
+echo "Next steps:"
+echo "  - Deploy monitoring: make monitoring"
+echo "  - Deploy full stack: make deploy-all"
 echo ""
