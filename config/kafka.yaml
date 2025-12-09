@@ -24,6 +24,7 @@ spec:
       memory: 2Gi
   template:
     pod:
+      imagePullPolicy: Never
       metadata:
         labels:
           zone: alpha
@@ -67,6 +68,7 @@ spec:
       memory: 2Gi
   template:
     pod:
+      imagePullPolicy: Never
       metadata:
         labels:
           zone: sigma
@@ -106,6 +108,7 @@ spec:
       memory: 2Gi
   template:
     pod:
+      imagePullPolicy: Never
       metadata:
         labels:
           zone: gamma
