@@ -11,6 +11,7 @@ grafana:
     image:
       tag: "1.27.6"
       pullPolicy: Never
+    imagePullPolicy: Never
     dashboards:
       enabled: true
     datasources:
