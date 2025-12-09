@@ -2,9 +2,12 @@
 
 # Default target: Launch cluster and monitoring
 all:
-	@echo "🚀 Launching cluster and monitoring..."
-	./launch.sh
-	@echo "✅ Launch complete!"
+	@echo "🚀 Launching complete cluster setup..."
+	./start-cluster.sh
+	./setup-registry.sh
+	./pull-images.sh
+	./deploy-all-from-kind.sh
+	@echo "✅ Setup complete!"
 
 # Start Kind cluster only
 cluster:

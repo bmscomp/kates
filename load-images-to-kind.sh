@@ -138,6 +138,7 @@ load_scarf_image() {
     fi
 }
 
+
 load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
 load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
 load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
@@ -146,6 +147,7 @@ load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
 echo ""
 echo -e "${GREEN}=== MongoDB Dependencies ===${NC}"
 load_from_local_registry "docker.io/bitnami/mongodb:latest"
+
 load_from_local_registry "docker.io/litmuschaos/mongo:6"
 load_from_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
