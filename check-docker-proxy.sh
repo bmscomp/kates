@@ -25,7 +25,7 @@ if [ -n "$PROXY_INFO" ]; then
     echo "2. Go to Settings → Resources → Proxies"
     echo "3. In the 'Bypass proxy settings for these hosts & domains' field, add:"
     echo ""
-    echo -e "${GREEN}   localhost,127.0.0.1,docker.io,*.docker.io,quay.io,*.quay.io,gcr.io,*.gcr.io,registry.k8s.io,*.registry.k8s.io,kind-registry${NC}"
+    echo -e "${GREEN}   localhost,127.0.0.1,docker.io,*.docker.io,quay.io,*.quay.io,gcr.io,*.gcr.io,registry.k8s.io,*.registry.k8s.io,litmuschaos.docker.scarf.sh,*.scarf.sh,kind-registry${NC}"
     echo ""
     echo "4. Click 'Apply & Restart'"
     echo ""

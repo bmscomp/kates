@@ -27,7 +27,7 @@ echo "Creating backup: $BACKUP_FILE"
 cp "$DOCKER_SETTINGS" "$BACKUP_FILE"
 
 # NO_PROXY entries for container registries and local registry
-NO_PROXY_ENTRIES="localhost,127.0.0.1,docker.io,*.docker.io,quay.io,*.quay.io,gcr.io,*.gcr.io,registry.k8s.io,*.registry.k8s.io,kind-registry,hubproxy.docker.internal"
+NO_PROXY_ENTRIES="localhost,127.0.0.1,docker.io,*.docker.io,quay.io,*.quay.io,gcr.io,*.gcr.io,registry.k8s.io,*.registry.k8s.io,litmuschaos.docker.scarf.sh,*.scarf.sh,kind-registry,hubproxy.docker.internal"
 
 echo ""
 echo "Updating proxy settings..."

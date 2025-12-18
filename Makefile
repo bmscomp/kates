@@ -63,8 +63,24 @@ registry-clean:
 
 # LitmusChaos Management
 chaos-install:
-	@echo "⚡ Installing LitmusChaos..."
+	@echo "⚡ Installing LitmusChaos (online)..."
 	./deploy-litmuschaos.sh
+
+litmus-offline-setup:
+	@echo "📥 Setting up Litmus for offline installation..."
+	./setup-litmus-offline.sh
+
+litmus-offline:
+	@echo "⚡ Installing LitmusChaos (offline mode)..."
+	./deploy-litmuschaos-offline.sh
+
+litmus-download-charts:
+	@echo "📦 Downloading Litmus Helm charts..."
+	./download-litmus-charts.sh
+
+litmus-pull-images:
+	@echo "🐳 Pulling Litmus images to local registry..."
+	./pull-litmus-images.sh
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."
