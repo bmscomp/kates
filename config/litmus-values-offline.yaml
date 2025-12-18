@@ -48,7 +48,7 @@ portal:
   server:
     enabled: true  
     image:
-      repository: localhost:5001/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server
+      repository: localhost:5001/litmuschaos/litmusportal-server
       tag: "3.23.0"
       pullPolicy: Never
     service:
@@ -58,7 +58,7 @@ portal:
   frontend:
     enabled: true
     image:
-      repository: localhost:5001/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend
+      repository: localhost:5001/litmuschaos/litmusportal-frontend
       tag: "3.23.0"
       pullPolicy: Never
     service:
@@ -69,7 +69,7 @@ portal:
   authServer:
     enabled: true
     image:
-      repository: localhost:5001/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server
+      repository: localhost:5001/litmuschaos/litmusportal-auth-server
       tag: "3.23.0"
       pullPolicy: Never
 

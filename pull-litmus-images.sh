@@ -54,37 +54,33 @@ push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
 
 echo ""
 echo "=== LitmusChaos Portal Images (from scarf.sh) ==="
-# Portal Images (from scarf.sh)
-# These need special handling because the source is different from standard docker hub
+# Portal Images (from scarf.sh) - re-tagged to simple names for local registry
 echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
 
 echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0${NC}"
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0${NC}"
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0${NC}"
 
 echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0${NC}"
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0${NC}"
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0${NC}"
 
 echo ""
 echo "=== MongoDB Images ==="
-# MongoDB images from scarf.sh
+# MongoDB images from scarf.sh - re-tagged to simple name
 echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/mongo:6${NC}"
 docker pull litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6${NC}"
-
-# Alternative MongoDB image from docker.io
-push_to_local_registry "docker.io/litmuschaos/mongo:6"
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 ${REGISTRY}/litmuschaos/mongo:6
+docker push ${REGISTRY}/litmuschaos/mongo:6
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/mongo:6${NC}"
 
 echo ""
 echo "=== MongoDB Dependencies ==="
