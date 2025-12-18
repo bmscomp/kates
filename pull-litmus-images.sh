@@ -93,17 +93,13 @@ push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
 echo ""
 echo "=== LitmusChaos Experiment Images ==="
-# Common experiment images
+# Common experiment images - using go-runner as the main experiment executor
 push_to_local_registry "litmuschaos/go-runner:3.23.0"
-push_to_local_registry "litmuschaos/litmus-checker:3.23.0"
 
-# Specific chaos experiments
-push_to_local_registry "litmuschaos/litmus-app-pod-delete:3.23.0"
-push_to_local_registry "litmuschaos/litmus-app-pod-network-latency:3.23.0"
-push_to_local_registry "litmuschaos/litmus-app-pod-network-loss:3.23.0"
-push_to_local_registry "litmuschaos/litmus-app-pod-cpu-hog:3.23.0"
-push_to_local_registry "litmuschaos/litmus-app-pod-memory-hog:3.23.0"
-push_to_local_registry "litmuschaos/litmus-app-container-kill:3.23.0"
+# Litmus experiments use go-runner with different experiment definitions
+# The actual chaos logic is in the go-runner image, not separate images per experiment
+echo -e "${YELLOW}Note: Litmus 3.x uses go-runner for all experiments${NC}"
+echo -e "${YELLOW}Experiment definitions are loaded from ChaosHub or custom CRDs${NC}"
 
 echo ""
 echo -e "${GREEN}All LitmusChaos images have been pushed to local registry!${NC}"

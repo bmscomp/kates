@@ -85,14 +85,9 @@ This pulls all required images to the local registry:
 - `docker.io/bitnamilegacy/os-shell:12-debian-12-r51`
 
 **Experiment Images:**
-- `litmuschaos/go-runner:3.23.0`
-- `litmuschaos/litmus-checker:3.23.0`
-- `litmuschaos/litmus-app-pod-delete:3.23.0`
-- `litmuschaos/litmus-app-pod-network-latency:3.23.0`
-- `litmuschaos/litmus-app-pod-network-loss:3.23.0`
-- `litmuschaos/litmus-app-pod-cpu-hog:3.23.0`
-- `litmuschaos/litmus-app-pod-memory-hog:3.23.0`
-- `litmuschaos/litmus-app-container-kill:3.23.0`
+- `litmuschaos/go-runner:3.23.0` (executes all chaos experiments)
+
+> **Note:** Litmus 3.x uses a single `go-runner` image for all experiments. Experiment definitions are loaded from ChaosHub or custom CRDs, not separate container images.
 
 ### Phase 2: Offline Installation
 

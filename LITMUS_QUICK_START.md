@@ -29,9 +29,8 @@ All images cached in local registry at `localhost:5001`:
 - MongoDB + utilities
 
 **Experiments:**
-- go-runner, litmus-checker
-- pod-delete, network-latency, network-loss
-- cpu-hog, memory-hog, container-kill
+- go-runner (executes all chaos experiments)
+- Experiment definitions loaded from ChaosHub/CRDs
 
 ## Commands
 
