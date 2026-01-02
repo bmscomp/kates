@@ -3,25 +3,31 @@ set -e
 
 # Colors for output
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}Deploying Kafka Strimzi Cluster...${NC}"
+CHARTS_DIR="./charts"
+STRIMZI_CHART_DIR="${CHARTS_DIR}/strimzi-kafka-operator"
+
+echo -e "${GREEN}Deploying Kafka Strimzi Cluster from local chart...${NC}"
+
+# Check if local chart exists
+if [ ! -d "${STRIMZI_CHART_DIR}" ]; then
+    echo -e "${YELLOW}Error: Strimzi chart not found at ${STRIMZI_CHART_DIR}${NC}"
+    echo "Please run ./download-charts.sh first to download the charts"
+    exit 1
+fi
 
 # Create namespace
 kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
 
-# Install Strimzi Operator
-echo -e "${GREEN}Installing Strimzi Operator...${NC}"
-helm repo remove strimzi 2>/dev/null || true
-helm repo add strimzi https://strimzi.io/charts/
-helm repo update
-helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
-  --version 0.49.0 \
+# Install Strimzi Operator from local chart
+echo -e "${GREEN}Installing Strimzi Operator from local chart...${NC}"
+helm upgrade --install strimzi-kafka-operator "${STRIMZI_CHART_DIR}" \
   --namespace kafka \
   --set watchAnyNamespace=true \
-  --set imagePullPolicy=Never \
-  --set imageRegistry="" \
-  --set imageRepository="" \
+  --set image.imagePullPolicy=Never \
+  --timeout 10m \
   --wait
 
 # Apply Metrics Config

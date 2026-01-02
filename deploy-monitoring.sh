@@ -3,30 +3,29 @@ set -e
 
 # Colors for output
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}Deploying Monitoring Stack (Prometheus & Grafana)${NC}"
+CHARTS_DIR="./charts"
+MONITORING_CHART_DIR="${CHARTS_DIR}/kube-prometheus-stack"
 
-# Add repo if not exists (though we rely on local images, helm chart might still need repo if not local chart)
-# Warning: Helm pull might try to reach internet. User said "do not fetch any data".
-# If we want pure offline, we should have the chart locally.
-# But usually "do not fetch any data" refers to images. Helm chart fetch is metadata.
-# If user wants PURE offline, I'd need the chart tgz.
-# For now, I'll assume they mean *images*.
-# But I will try to respect "do not fetch *any* data".
-# If the chart is not local, `helm install` will fetch it.
-# The previous scripts did `helm repo add`.
+echo -e "${GREEN}Deploying Monitoring Stack (Prometheus & Grafana) from local chart...${NC}"
 
-echo -e "${GREEN}Installing Prometheus and Grafana...${NC}"
-helm repo remove prometheus-community 2>/dev/null || true
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
+# Check if local chart exists
+if [ ! -d "${MONITORING_CHART_DIR}" ]; then
+    echo -e "${YELLOW}Error: kube-prometheus-stack chart not found at ${MONITORING_CHART_DIR}${NC}"
+    echo "Please run ./download-charts.sh first to download the charts"
+    exit 1
+fi
 
-helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-  --version 79.11.0 \
+# Create namespace
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+echo -e "${GREEN}Installing Prometheus and Grafana from local chart...${NC}"
+helm upgrade --install monitoring "${MONITORING_CHART_DIR}" \
   --namespace monitoring \
-  --create-namespace \
   --values config/monitoring.yaml \
+  --timeout 10m \
   --wait
 
 echo -e "${GREEN}Applying custom dashboards...${NC}"

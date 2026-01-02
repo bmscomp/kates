@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy deploy-all deploy-kafka ui test destroy clean
+.PHONY: all cluster monitoring deploy-all kafka ui test destroy clean download-charts litmus
 
 # Default target: Launch cluster and monitoring
 all:
@@ -24,13 +24,10 @@ deploy-all:
 	@echo "🚀 Deploying full stack..."
 	./deploy-all-from-kind.sh
 
-# Deploy Kafka only
-deploy-kafka:
-	@echo "📦 Deploying Kafka..."
+# Deploy Kafka only (from local chart)
+kafka:
+	@echo "📦 Deploying Kafka from local chart..."
 	./deploy-kafka.sh
-
-# Legacy alias for deploy-kafka
-deploy: deploy-kafka
 
 # Deploy Kafka UI only
 ui:
@@ -61,22 +58,15 @@ registry-clean:
 	@echo "🧹 Cleaning up registry..."
 	./cleanup-registry.sh
 
+# Download all Helm charts for offline use
+download-charts:
+	@echo "📦 Downloading all Helm charts..."
+	./download-charts.sh
+
 # LitmusChaos Management
-chaos-install:
-	@echo "⚡ Installing LitmusChaos (online)..."
+litmus:
+	@echo "⚡ Installing LitmusChaos from local chart..."
 	./deploy-litmuschaos.sh
-
-litmus-offline-setup:
-	@echo "📥 Setting up Litmus for offline installation..."
-	./setup-litmus-offline.sh
-
-litmus-offline:
-	@echo "⚡ Installing LitmusChaos (offline mode)..."
-	./deploy-litmuschaos-offline.sh
-
-litmus-download-charts:
-	@echo "📦 Downloading Litmus Helm charts..."
-	./download-litmus-charts.sh
 
 litmus-pull-images:
 	@echo "🐳 Pulling Litmus images to local registry..."

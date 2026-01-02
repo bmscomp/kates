@@ -6,7 +6,17 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}Deploying LitmusChaos...${NC}"
+CHARTS_DIR="./charts"
+LITMUS_CHART_DIR="${CHARTS_DIR}/litmus"
+
+echo -e "${GREEN}Deploying LitmusChaos from local chart...${NC}"
+
+# Check if local chart exists
+if [ ! -d "${LITMUS_CHART_DIR}" ]; then
+    echo -e "${YELLOW}Error: Litmus chart not found at ${LITMUS_CHART_DIR}${NC}"
+    echo "Please run ./download-litmus-charts.sh first to download the charts"
+    exit 1
+fi
 
 # Detect Apple Silicon (arm64) hosts which need x86_64 Litmus images
 ARCH=$(uname -m)
@@ -19,24 +29,39 @@ fi
 # Create namespace
 kubectl create namespace litmus --dry-run=client -o yaml | kubectl apply -f -
 
-# Add Helm repository
-echo -e "${GREEN}Adding LitmusChaos Helm repository...${NC}"
-helm repo remove litmuschaos 2>/dev/null || true
-helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
-helm repo update
-
-# Install LitmusChaos
-echo -e "${GREEN}Installing LitmusChaos Operator...${NC}"
-helm upgrade --install chaos litmuschaos/litmus \
+# Step 1: Deploy MongoDB first (disable other components)
+echo -e "${GREEN}Step 1: Deploying MongoDB first...${NC}"
+helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --namespace litmus \
-  --version 3.23.0 \
   --values config/litmus-values.yaml \
+  --set portal.frontend.replicas=0 \
+  --set portal.server.replicas=0 \
+  --set portal.server.authServer.replicas=0 \
+  --timeout 10m \
+  --wait
+
+# Wait for MongoDB to be fully ready
+echo -e "${GREEN}Waiting for MongoDB StatefulSet to be ready (this may take a few minutes)...${NC}"
+kubectl rollout status statefulset/chaos-mongodb -n litmus --timeout=600s
+
+# Additional wait to ensure MongoDB is accepting connections
+echo -e "${GREEN}Waiting additional 30s for MongoDB to stabilize...${NC}"
+sleep 30
+
+# Step 2: Deploy remaining Litmus components
+echo -e "${GREEN}Step 2: Deploying Litmus portal components...${NC}"
+helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
+  --namespace litmus \
+  --values config/litmus-values.yaml \
+  --timeout 10m \
   --wait
 
 # Wait for operator to be ready
 echo -e "${GREEN}Waiting for LitmusChaos operator to be ready...${NC}"
-kubectl wait --for=condition=available --timeout=300s \
-  deployment/chaos-operator-ce -n litmus
+kubectl wait --for=condition=available --timeout=600s \
+  deployment/chaos-operator-ce -n litmus 2>/dev/null || \
+  kubectl wait --for=condition=available --timeout=600s \
+  deployment -l app.kubernetes.io/component=operator -n litmus
 
 # Create ServiceMonitor for Prometheus integration
 echo -e "${GREEN}Creating ServiceMonitor for Prometheus integration...${NC}"

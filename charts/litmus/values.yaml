@@ -31,6 +31,9 @@ image:
   # Optional pod imagePullSecrets
   imagePullSecrets: []
 
+# Global image pull policy - Never pull from remote
+imagePullPolicy: Never
+
 internalTLS:
   # If internal TLS enabled
   enabled: false
@@ -129,7 +132,7 @@ portal:
     image:
       repository: litmusportal-frontend
       tag: 3.23.0
-      pullPolicy: "Always"
+      pullPolicy: "Never"
     containerPort: 8185
     customLabels: {}
     # my.company.com/tier: "frontend"
@@ -193,7 +196,7 @@ portal:
       image:
         repository: mongo
         tag: 6
-        pullPolicy: "Always"
+        pullPolicy: "Never"
       securityContext:
         {}
         # runAsUser: 101
@@ -233,7 +236,7 @@ portal:
       image:
         repository: litmusportal-server
         tag: 3.23.0
-        pullPolicy: "Always"
+        pullPolicy: "Never"
       ports:
         - name: gql-server
           containerPort: 8080
@@ -309,7 +312,7 @@ portal:
       image:
         repository: litmusportal-auth-server
         tag: 3.23.0
-        pullPolicy: "Always"
+        pullPolicy: "Never"
       ports:
         - name: auth-server
           containerPort: 3000
@@ -362,11 +365,18 @@ mongodb:
     registry: docker.io
     repository: bitnamilegacy/mongodb
     tag: 8.0.13-debian-12-r0
+    pullPolicy: Never
   # For some environments, mongo pings can take time to resolve
   livenessProbe:
-    timeoutSeconds: 20
+    initialDelaySeconds: 60
+    timeoutSeconds: 30
+    periodSeconds: 20
+    failureThreshold: 10
   readinessProbe:
-    timeoutSeconds: 20
+    initialDelaySeconds: 60
+    timeoutSeconds: 30
+    periodSeconds: 20
+    failureThreshold: 10
   # Required when using Mac M1 - https://github.com/bitnami/containers/issues/40947#issuecomment-1968364385
   # extraEnvVars:
   #   - name: EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU
@@ -388,6 +398,7 @@ mongodb:
       registry: docker.io
       repository: bitnamilegacy/os-shell
       tag: 12-debian-12-r51
+      pullPolicy: Never
   metrics:
     enabled: false
     prometheusRule:

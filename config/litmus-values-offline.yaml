@@ -2,20 +2,25 @@
 # Fully offline configuration using local registry (localhost:5001)
 # All images are pulled from local registry with pullPolicy: Never
 
+# Global image configuration
+image:
+  imageRegistryName: localhost:5001
+  imagePullSecrets: []
+
 # Global image pull policy
 imagePullPolicy: Never
 
 # Operator configuration
 operator:
   image:
-    repository: localhost:5001/litmuschaos/chaos-operator
+    repository: litmuschaos/chaos-operator
     tag: "3.23.0"
     pullPolicy: Never
 
 # Runner configuration  
 runner:
   image:
-    repository: localhost:5001/litmuschaos/chaos-runner
+    repository: litmuschaos/chaos-runner
     tag: "3.23.0"
     pullPolicy: Never
 
@@ -23,7 +28,7 @@ runner:
 exporter:
   enabled: true
   image:
-    repository: localhost:5001/litmuschaos/chaos-exporter
+    repository: litmuschaos/chaos-exporter
     tag: "3.23.0"
     pullPolicy: Never
   service:
@@ -48,9 +53,14 @@ portal:
   server:
     enabled: true  
     image:
-      repository: localhost:5001/litmuschaos/litmusportal-server
+      repository: litmuschaos/litmusportal-server
       tag: "3.23.0"
       pullPolicy: Never
+    waitForMongodb:
+      image:
+        repository: litmuschaos/mongo
+        tag: "6"
+        pullPolicy: Never
     service:
       type: ClusterIP
       port: 9002
@@ -58,7 +68,7 @@ portal:
   frontend:
     enabled: true
     image:
-      repository: localhost:5001/litmuschaos/litmusportal-frontend
+      repository: litmuschaos/litmusportal-frontend
       tag: "3.23.0"
       pullPolicy: Never
     service:
@@ -69,7 +79,7 @@ portal:
   authServer:
     enabled: true
     image:
-      repository: localhost:5001/litmuschaos/litmusportal-auth-server
+      repository: litmuschaos/litmusportal-auth-server
       tag: "3.23.0"
       pullPolicy: Never
 
@@ -83,24 +93,30 @@ mongodb:
   enabled: true
   image:
     registry: localhost:5001
-    repository: docker.io/bitnami/mongodb
+    repository: bitnami/mongodb
     tag: "latest"
     pullPolicy: Never
   auth:
-    enabled: false
+    enabled: true
+    rootUser: "root"
+    rootPassword: "1234"
+  architecture: replicaset
+  replicaCount: 3
   persistence:
     enabled: true
     size: 8Gi
+  livenessProbe:
+    timeoutSeconds: 20
+  readinessProbe:
+    timeoutSeconds: 20
   extraEnvVars:
     - name: EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU
       value: "1"
-  arbiter:
-    enabled: false
   volumePermissions:
     enabled: true
     image:
       registry: localhost:5001
-      repository: docker.io/bitnamilegacy/os-shell
+      repository: bitnamilegacy/os-shell
       tag: "12-debian-12-r51"
       pullPolicy: Never
 
@@ -108,7 +124,7 @@ mongodb:
 subscriber:
   enabled: true
   image:
-    repository: localhost:5001/litmuschaos/litmusportal-subscriber
+    repository: litmuschaos/litmusportal-subscriber
     tag: "3.23.0"
     pullPolicy: Never
 
@@ -116,20 +132,20 @@ subscriber:
 eventTracker:
   enabled: true
   image:
-    repository: localhost:5001/litmuschaos/litmusportal-event-tracker
+    repository: litmuschaos/litmusportal-event-tracker
     tag: "3.23.0"
     pullPolicy: Never
 
 # Workflow controller (if needed)
 workflowController:
   image:
-    repository: localhost:5001/litmuschaos/workflow-controller
+    repository: litmuschaos/workflow-controller
     tag: "v3.4.16"
     pullPolicy: Never
 
 # Default chaos experiment runner
 chaosRunner:
   image:
-    repository: localhost:5001/litmuschaos/go-runner
+    repository: litmuschaos/go-runner
     tag: "3.23.0"
     pullPolicy: Never
