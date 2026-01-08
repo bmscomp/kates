@@ -98,7 +98,6 @@ echo ""
 echo -e "${GREEN}=== Grafana Images ===${NC}"
 load_from_local_registry "docker.io/grafana/grafana:12.3.1"
 # Updated to v2.2.3 - newer version works without manifest corruption
-load_from_local_registry "quay.io/kiwigrid/k8s-sidecar:2.2.3"
 
 echo ""
 echo -e "${GREEN}=== Kube State Metrics Images ===${NC}"
