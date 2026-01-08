@@ -6,9 +6,28 @@ featureGates:
   "KubeletCgroupDriverFromCRI": true
 containerdConfigPatches:
 - |-
+  # Localhost registry mirror
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
     endpoint = ["http://kind-registry:5000"]
   [plugins."io.containerd.grpc.v1.cri".registry.configs."localhost:5001".tls]
+    insecure_skip_verify = true
+  
+  # registry.k8s.io mirror - for Kubernetes images
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.k8s.io"]
+    endpoint = ["http://kind-registry:5000"]
+  [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.k8s.io".tls]
+    insecure_skip_verify = true
+  
+  # quay.io mirror - for Prometheus, Strimzi, etc.
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."quay.io"]
+    endpoint = ["http://kind-registry:5000"]
+  [plugins."io.containerd.grpc.v1.cri".registry.configs."quay.io".tls]
+    insecure_skip_verify = true
+  
+  # docker.io mirror - for Grafana, MongoDB, etc.
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+    endpoint = ["http://kind-registry:5000"]
+  [plugins."io.containerd.grpc.v1.cri".registry.configs."docker.io".tls]
     insecure_skip_verify = true
 # Add cluster configuration to increase timeout
 kubeadmConfigPatches:
