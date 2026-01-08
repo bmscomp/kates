@@ -51,7 +51,7 @@ push_to_local_registry() {
 
 echo ""
 echo "=== Kafka UI Images ==="
-push_to_local_registry "provectuslabs/kafka-ui:latest"
+push_to_local_registry "provectuslabs/kafka-ui:v0.7.2"
 
 echo ""
 echo "=== Strimzi Kafka Images ==="
