@@ -129,7 +129,7 @@ portal:
     image:
       repository: litmusportal-frontend
       tag: 3.23.0
-      pullPolicy: "Always"
+      pullPolicy: "Never"
     containerPort: 8185
     customLabels: {}
     # my.company.com/tier: "frontend"
@@ -191,11 +191,11 @@ portal:
     # my.company.com/tier: "backend"
     waitForMongodb:
       # -- Set to false to skip the wait-for-mongodb initContainer when using external MongoDB
-      enabled: true
+      enabled: false
       image:
         repository: mongo
         tag: 6
-        pullPolicy: "Always"
+        pullPolicy: "Never"
       securityContext:
         {}
         # runAsUser: 101
@@ -235,7 +235,7 @@ portal:
       image:
         repository: litmusportal-server
         tag: 3.23.0
-        pullPolicy: "Always"
+        pullPolicy: "Never"
       ports:
         - name: gql-server
           containerPort: 8080
@@ -311,7 +311,7 @@ portal:
       image:
         repository: litmusportal-auth-server
         tag: 3.23.0
-        pullPolicy: "Always"
+        pullPolicy: "Never"
       ports:
         - name: auth-server
           containerPort: 3000
