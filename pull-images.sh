@@ -32,6 +32,12 @@ push_to_local_registry() {
     
     echo -e "${BLUE}Processing: ${image}${NC}"
     
+    # Check if image already exists in local registry
+    if curl -s "http://${REGISTRY}/v2/${image%:*}/tags/list" | grep -q "\"${image##*:}\""; then
+        echo -e "${YELLOW}  Image already in registry, skipping pull${NC}"
+        return 0
+    fi
+    
     # Pull from public registry with platform specification for Kind compatibility
     docker pull ${PLATFORM} ${image}
     
