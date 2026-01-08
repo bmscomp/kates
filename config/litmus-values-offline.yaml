@@ -8,21 +8,21 @@ image:
   imagePullSecrets: []
 
 # Global image pull policy
-imagePullPolicy: Never
+imagePullPolicy: IfNotPresent
 
 # Operator configuration
 operator:
   image:
     repository: litmuschaos/chaos-operator
     tag: "3.23.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Runner configuration  
 runner:
   image:
     repository: litmuschaos/chaos-runner
     tag: "3.23.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Exporter configuration
 exporter:
@@ -30,7 +30,7 @@ exporter:
   image:
     repository: litmuschaos/chaos-exporter
     tag: "3.23.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   service:
     type: ClusterIP
     port: 8080
@@ -55,12 +55,12 @@ portal:
     image:
       repository: litmuschaos/litmusportal-server
       tag: "3.23.0"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     waitForMongodb:
       image:
         repository: litmuschaos/mongo
         tag: "6"
-        pullPolicy: Never
+        pullPolicy: IfNotPresent
     service:
       type: ClusterIP
       port: 9002
@@ -70,7 +70,7 @@ portal:
     image:
       repository: litmuschaos/litmusportal-frontend
       tag: "3.23.0"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     service:
       type: NodePort
       port: 9091
@@ -81,7 +81,7 @@ portal:
     image:
       repository: litmuschaos/litmusportal-auth-server
       tag: "3.23.0"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
 
 # ServiceAccount
 serviceAccount:
@@ -95,7 +95,7 @@ mongodb:
     registry: localhost:5001
     repository: bitnami/mongodb
     tag: "latest"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   auth:
     enabled: true
     rootUser: "root"
@@ -118,7 +118,7 @@ mongodb:
       registry: localhost:5001
       repository: bitnamilegacy/os-shell
       tag: "12-debian-12-r51"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
 
 # Subscriber configuration
 subscriber:
@@ -126,7 +126,7 @@ subscriber:
   image:
     repository: litmuschaos/litmusportal-subscriber
     tag: "3.23.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Event tracker configuration
 eventTracker:
@@ -134,18 +134,18 @@ eventTracker:
   image:
     repository: litmuschaos/litmusportal-event-tracker
     tag: "3.23.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Workflow controller (if needed)
 workflowController:
   image:
     repository: litmuschaos/workflow-controller
     tag: "v3.4.16"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Default chaos experiment runner
 chaosRunner:
   image:
     repository: litmuschaos/go-runner
     tag: "3.23.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent

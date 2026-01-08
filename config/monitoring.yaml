@@ -2,7 +2,7 @@ grafana:
   adminPassword: "admin"
   image:
     tag: "12.3.1"  # Updated from 11.4.0
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   service:
     type: NodePort
     nodePort: 30080
@@ -11,8 +11,8 @@ grafana:
   sidecar:
     image:
       tag: "2.2.3"  # Updated from 1.27.6
-      pullPolicy: Never
-    imagePullPolicy: Never
+      pullPolicy: IfNotPresent
+    imagePullPolicy: IfNotPresent
     dashboards:
       enabled: true  # Re-enabled with working version
     datasources:
@@ -22,7 +22,7 @@ prometheus:
   prometheusSpec:
     image:
       tag: v3.9.1  # Updated from v3.1.0
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -31,51 +31,51 @@ prometheus:
             requests:
               storage: 1Gi
 
-# Global image pull policy - use images already in Kind
+# Global image pull policy - pull from local registry if not present
 global:
-  imagePullPolicy: Never
+  imagePullPolicy: IfNotPresent
 
 # Component configurations
 prometheusOperator:
   image:
     tag: v0.79.2
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   prometheusConfigReloader:
     image:
       tag: v0.79.2
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
   admissionWebhooks:
     patch:
       image:
-        pullPolicy: Never
+        pullPolicy: IfNotPresent
 
 alertmanager:
   alertmanagerSpec:
     image:
       tag: v0.28.1
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
 
 kube-state-metrics:
   image:
     tag: v2.14.0
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 prometheus-node-exporter:
   image:
     tag: v1.8.2
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 admissionWebhooks:
   enabled: true
   deployment:
     image:
       tag: v0.79.2
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
   patch:
     enabled: true
     image:
       tag: v1.6.5
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
 
 # Ensure all init containers and sidecars also use Never
 defaultRules:
