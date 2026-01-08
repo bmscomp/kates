@@ -85,8 +85,8 @@ load_from_local_registry "quay.io/strimzi/operator:0.49.0"
 
 echo ""
 echo -e "${GREEN}=== Strimzi Kafka Images ===${NC}"
-load_from_local_registry "quay.io/strimzi/operator:0.49.1"
-load_from_local_registry "quay.io/strimzi/kafka:0.49.1-kafka-4.1.1"
+load_from_local_registry "quay.io/strimzi/operator:0.49.0"
+load_from_local_registry "quay.io/strimzi/kafka:0.49.0-kafka-4.1.1"
 
 echo ""
 echo -e "${GREEN}=== Prometheus Stack Images ===${NC}"

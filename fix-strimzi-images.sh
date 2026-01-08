@@ -13,8 +13,8 @@ echo ""
 # List of Strimzi images
 IMAGES=(
     "quay.io/strimzi/operator:0.49.0"
-    "quay.io/strimzi/operator:0.49.1"
-    "quay.io/strimzi/kafka:0.49.1-kafka-4.1.1"
+    "quay.io/strimzi/operator:0.49.0"
+    "quay.io/strimzi/kafka:0.49.0-kafka-4.1.1"
 )
 
 for image in "${IMAGES[@]}"; do
