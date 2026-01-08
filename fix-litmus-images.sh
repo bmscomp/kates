@@ -11,15 +11,15 @@ echo ""
 
 # List of LitmusChaos images
 IMAGES=(
-    "litmuschaos/chaos-operator:3.23.0"
-    "litmuschaos/chaos-runner:3.23.0"
-    "litmuschaos/chaos-exporter:3.23.0"
-    "litmuschaos/litmusportal-subscriber:3.23.0"
-    "litmuschaos/litmusportal-event-tracker:3.23.0"
-    "litmuschaos/go-runner:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
+    "litmuschaos/chaos-operator:3.24.0"
+    "litmuschaos/chaos-runner:3.24.0"
+    "litmuschaos/chaos-exporter:3.24.0"
+    "litmuschaos/litmusportal-subscriber:3.24.0"
+    "litmuschaos/litmusportal-event-tracker:3.24.0"
+    "litmuschaos/go-runner:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
 )
 

@@ -14,14 +14,14 @@ imagePullPolicy: Never
 operator:
   image:
     repository: litmuschaos/chaos-operator
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
 
 # Runner configuration  
 runner:
   image:
     repository: litmuschaos/chaos-runner
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
 
 # Exporter configuration
@@ -29,7 +29,7 @@ exporter:
   enabled: true
   image:
     repository: litmuschaos/chaos-exporter
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
   service:
     type: ClusterIP
@@ -54,7 +54,7 @@ portal:
     enabled: true  
     image:
       repository: litmuschaos/litmusportal-server
-      tag: "3.23.0"
+      tag: "3.24.0"
       pullPolicy: Never
     waitForMongodb:
       image:
@@ -69,7 +69,7 @@ portal:
     enabled: true
     image:
       repository: litmuschaos/litmusportal-frontend
-      tag: "3.23.0"
+      tag: "3.24.0"
       pullPolicy: Never
     service:
       type: NodePort
@@ -80,7 +80,7 @@ portal:
     enabled: true
     image:
       repository: litmuschaos/litmusportal-auth-server
-      tag: "3.23.0"
+      tag: "3.24.0"
       pullPolicy: Never
 
 # ServiceAccount
@@ -125,7 +125,7 @@ subscriber:
   enabled: true
   image:
     repository: litmuschaos/litmusportal-subscriber
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
 
 # Event tracker configuration
@@ -133,7 +133,7 @@ eventTracker:
   enabled: true
   image:
     repository: litmuschaos/litmusportal-event-tracker
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
 
 # Workflow controller (if needed)
@@ -147,5 +147,5 @@ workflowController:
 chaosRunner:
   image:
     repository: litmuschaos/go-runner
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
