@@ -11,6 +11,15 @@ NC='\033[0m' # No Color
 REGISTRY="localhost:5001"
 KIND_CLUSTER_NAME="panda"
 
+# Detect platform architecture
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+    echo -e "${YELLOW}Apple Silicon detected (arm64). Ensuring linux/amd64 images for Kind compatibility.${NC}"
+    PLATFORM="--platform linux/amd64"
+else
+    PLATFORM=""
+fi
+
 # Temporarily unset proxy for Docker operations
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 
@@ -49,9 +58,9 @@ load_from_local_registry() {
         return 0
     fi
     
-    # Pull from local registry
+    # Pull from local registry (with platform specification for Kind compatibility)
     echo "  Pulling from local registry..."
-    docker pull "${local_image}"
+    docker pull ${PLATFORM} "${local_image}"
     
     # Tag back to original name (kind load expects original image name)
     docker tag "${local_image}" "${image}"
