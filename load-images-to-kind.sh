@@ -53,7 +53,10 @@ load_from_local_registry() {
     echo -e "${BLUE}Processing: ${image}${NC}"
     
     # Check if image already exists in kind cluster
-    if docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep -q "${image}"; then
+    # Extract image name and tag for precise matching
+    local image_name="${image%%:*}"
+    local image_tag="${image##*:}"
+    if docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep "${image_name}" | grep -q "${image_tag}"; then
         echo -e "${YELLOW}  Image already exists in kind cluster, skipping...${NC}"
         return 0
     fi
