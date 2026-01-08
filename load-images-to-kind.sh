@@ -11,14 +11,9 @@ NC='\033[0m' # No Color
 REGISTRY="localhost:5001"
 KIND_CLUSTER_NAME="panda"
 
-# Detect platform architecture
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-    echo -e "${YELLOW}Apple Silicon detected (arm64). Ensuring linux/amd64 images for Kind compatibility.${NC}"
-    PLATFORM="--platform linux/amd64"
-else
-    PLATFORM=""
-fi
+# Use native platform - kind matches host architecture
+# On Apple Silicon (arm64), kind runs arm64 containers
+PLATFORM=""
 
 # Temporarily unset proxy for Docker operations
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
