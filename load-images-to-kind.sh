@@ -27,6 +27,13 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Loading Images into Kind Cluster${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+echo -e "${YELLOW}⚠️  DEPRECATION NOTICE  ⚠️${NC}"
+echo -e "${YELLOW}This script is deprecated. Images are now pulled directly from the local registry.${NC}"
+echo -e "${YELLOW}The kind cluster is configured to pull from localhost:5001 automatically.${NC}"
+echo -e "${YELLOW}Use ./pull-images.sh to populate the registry instead.${NC}"
+echo ""
+echo -e "${BLUE}Continuing with image loading for backward compatibility...${NC}"
+echo ""
 
 # Check if kind cluster exists
 if ! kind get clusters | grep -q "^${KIND_CLUSTER_NAME}$"; then

@@ -13,9 +13,15 @@ echo -e "${GREEN}Deploying Full Stack with Local Images${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
-# Step 1: Load images into kind
-echo -e "${BLUE}Step 1: Loading images from local registry into Kind cluster${NC}"
-./load-images-to-kind.sh
+# Step 1: Verify local registry is available
+echo -e "${BLUE}Step 1: Verifying local registry is available${NC}"
+if ! curl -s http://localhost:5001/v2/_catalog > /dev/null 2>&1; then
+    echo -e "${RED}Local registry not running!${NC}"
+    echo "Run ./setup-registry.sh and ./pull-images.sh first"
+    exit 1
+fi
+IMAGE_COUNT=$(curl -s http://localhost:5001/v2/_catalog | jq -r '.repositories | length')
+echo -e "${GREEN}✓ Registry available with ${IMAGE_COUNT} images${NC}"
 
 echo ""
 echo -e "${BLUE}Step 2: Deploying Monitoring Stack (Prometheus & Grafana)${NC}"
