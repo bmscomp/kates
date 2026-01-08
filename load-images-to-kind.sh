@@ -74,7 +74,7 @@ load_from_local_registry() {
 
 echo ""
 echo -e "${GREEN}=== Kafka UI Images ===${NC}"
-load_from_local_registry "provectuslabs/kafka-ui:latest"
+load_from_local_registry "provectuslabs/kafka-ui:v0.7.2"
 
 echo ""
 echo -e "${GREEN}=== Strimzi Operator Images ===${NC}"
