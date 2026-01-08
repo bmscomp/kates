@@ -11,9 +11,14 @@ NC='\033[0m' # No Color
 REGISTRY="localhost:5001"
 KIND_CLUSTER_NAME="panda"
 
-# Use native platform - kind matches host architecture
-# On Apple Silicon (arm64), kind runs arm64 containers
-PLATFORM=""
+# Detect platform and set explicit platform for Docker pulls
+# This ensures we get the correct architecture for kind nodes
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+    PLATFORM="--platform linux/arm64"
+else
+    PLATFORM="--platform linux/amd64"
+fi
 
 # Temporarily unset proxy for Docker operations
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy

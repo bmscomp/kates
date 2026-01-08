@@ -9,9 +9,15 @@ NC='\033[0m' # No Color
 
 REGISTRY="localhost:5001"
 
-# Use native platform - kind matches host architecture
-# On Apple Silicon (arm64), kind runs arm64 containers
-PLATFORM=""
+# Detect platform and set explicit platform for Docker pulls
+# This ensures we get the correct architecture for kind nodes
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+    echo "Apple Silicon detected - using linux/arm64 platform"
+    PLATFORM="--platform linux/arm64"
+else
+    PLATFORM="--platform linux/amd64"
+fi
 
 # Temporarily unset proxy for Docker operations to avoid timeout issues
 # This ensures direct connection to Docker registries
