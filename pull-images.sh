@@ -9,6 +9,15 @@ NC='\033[0m' # No Color
 
 REGISTRY="localhost:5001"
 
+# Detect platform architecture
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+    echo -e "${YELLOW}Apple Silicon detected (arm64). Forcing linux/amd64 platform for Kind compatibility.${NC}"
+    PLATFORM="--platform linux/amd64"
+else
+    PLATFORM=""
+fi
+
 # Temporarily unset proxy for Docker operations to avoid timeout issues
 # This ensures direct connection to Docker registries
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
@@ -28,8 +37,8 @@ push_to_local_registry() {
     
     echo -e "${BLUE}Processing: ${image}${NC}"
     
-    # Pull from public registry
-    docker pull ${image}
+    # Pull from public registry with platform specification for Kind compatibility
+    docker pull ${PLATFORM} ${image}
     
     # Tag for local registry
     docker tag ${image} ${local_image}
@@ -89,20 +98,20 @@ push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
 
 # Portal Images (from scarf.sh)
 # These need special handling because the source is different from standard docker hub
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
 docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
 docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
 
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
 docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
 docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
 
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
 docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
 docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
 
 # MongoDB images from scarf.sh
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
 docker tag litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
 docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
 
