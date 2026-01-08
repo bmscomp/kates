@@ -19,20 +19,8 @@ echo -e "${BLUE}Step 1: Loading images from local registry into Kind cluster${NC
 
 echo ""
 echo -e "${BLUE}Step 2: Deploying Monitoring Stack (Prometheus & Grafana)${NC}"
-echo -e "${GREEN}Installing Prometheus and Grafana...${NC}"
-helm repo remove prometheus-community 2>/dev/null || true
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-
-helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-  --version 79.11.0 \
-  --namespace monitoring \
-  --create-namespace \
-  --values config/monitoring.yaml \
-  --wait
-
-echo -e "${GREEN}Applying custom dashboards...${NC}"
-kubectl apply -f config/custom-dashboard.yaml
+echo -e "${GREEN}Calling deploy-monitoring.sh...${NC}"
+./deploy-monitoring.sh
 
 echo ""
 echo -e "${BLUE}Step 3: Deploying Kafka (Strimzi)${NC}"
