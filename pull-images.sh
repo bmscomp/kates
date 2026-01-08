@@ -72,7 +72,8 @@ push_to_local_registry "quay.io/prometheus-operator/prometheus-config-reloader:v
 push_to_local_registry "docker.io/grafana/grafana:11.4.0"
 
 # Grafana sidecar (used for dashboards/datasources)
-push_to_local_registry "quay.io/kiwigrid/k8s-sidecar:1.27.6"
+# Updated to v2.2.3 - newer version works without manifest corruption
+push_to_local_registry "quay.io/kiwigrid/k8s-sidecar:2.2.3"
 
 # Node exporter
 push_to_local_registry "quay.io/prometheus/node-exporter:v1.8.2"
