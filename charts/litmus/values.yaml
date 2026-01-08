@@ -31,9 +31,6 @@ image:
   # Optional pod imagePullSecrets
   imagePullSecrets: []
 
-# Global image pull policy - Never pull from remote
-imagePullPolicy: Never
-
 internalTLS:
   # If internal TLS enabled
   enabled: false
@@ -132,7 +129,7 @@ portal:
     image:
       repository: litmusportal-frontend
       tag: 3.23.0
-      pullPolicy: "Never"
+      pullPolicy: "Always"
     containerPort: 8185
     customLabels: {}
     # my.company.com/tier: "frontend"
@@ -193,10 +190,12 @@ portal:
     customLabels: {}
     # my.company.com/tier: "backend"
     waitForMongodb:
+      # -- Set to false to skip the wait-for-mongodb initContainer when using external MongoDB
+      enabled: true
       image:
         repository: mongo
         tag: 6
-        pullPolicy: "Never"
+        pullPolicy: "Always"
       securityContext:
         {}
         # runAsUser: 101
@@ -236,7 +235,7 @@ portal:
       image:
         repository: litmusportal-server
         tag: 3.23.0
-        pullPolicy: "Never"
+        pullPolicy: "Always"
       ports:
         - name: gql-server
           containerPort: 8080
@@ -312,7 +311,7 @@ portal:
       image:
         repository: litmusportal-auth-server
         tag: 3.23.0
-        pullPolicy: "Never"
+        pullPolicy: "Always"
       ports:
         - name: auth-server
           containerPort: 3000
@@ -365,18 +364,11 @@ mongodb:
     registry: docker.io
     repository: bitnamilegacy/mongodb
     tag: 8.0.13-debian-12-r0
-    pullPolicy: Never
   # For some environments, mongo pings can take time to resolve
   livenessProbe:
-    initialDelaySeconds: 60
-    timeoutSeconds: 30
-    periodSeconds: 20
-    failureThreshold: 10
+    timeoutSeconds: 20
   readinessProbe:
-    initialDelaySeconds: 60
-    timeoutSeconds: 30
-    periodSeconds: 20
-    failureThreshold: 10
+    timeoutSeconds: 20
   # Required when using Mac M1 - https://github.com/bitnami/containers/issues/40947#issuecomment-1968364385
   # extraEnvVars:
   #   - name: EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU
@@ -398,7 +390,6 @@ mongodb:
       registry: docker.io
       repository: bitnamilegacy/os-shell
       tag: 12-debian-12-r51
-      pullPolicy: Never
   metrics:
     enabled: false
     prometheusRule:

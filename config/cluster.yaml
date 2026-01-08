@@ -1,18 +1,33 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+# Use a stable Kubernetes version (v1.31.4) to avoid cgroup v2 issues
+# v1.35.0 has known kubelet health check issues with cgroup v2
+featureGates:
+  "KubeletCgroupDriverFromCRI": true
 containerdConfigPatches:
 - |-
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
     endpoint = ["http://localhost:5001"]
   [plugins."io.containerd.grpc.v1.cri".registry.configs."localhost:5001".tls]
     insecure_skip_verify = true
+# Add cluster configuration to increase timeout
+kubeadmConfigPatches:
+- |
+  kind: ClusterConfiguration
+  apiServer:
+    timeoutForControlPlane: 8m0s
 nodes:
 - role: control-plane
+  # Use Kubernetes v1.31.4 instead of v1.35.0
+  image: kindest/node:v1.31.4
   kubeadmConfigPatches:
   - |
     kind: InitConfiguration
     nodeRegistration:
       name: alpha
+      kubeletExtraArgs:
+        cgroup-driver: systemd
+        runtime-request-timeout: 15m
   labels:
     topology.kubernetes.io/zone: alpha
     node.kubernetes.io/instance-type: custom-3vcpu-6gb
@@ -22,11 +37,15 @@ nodes:
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf
     readOnly: true
 - role: worker
+  # Use Kubernetes v1.31.4 instead of v1.35.0
+  image: kindest/node:v1.31.4
   kubeadmConfigPatches:
   - |
     kind: JoinConfiguration
     nodeRegistration:
       name: sigma
+      kubeletExtraArgs:
+        cgroup-driver: systemd
   labels:
     topology.kubernetes.io/zone: sigma
     node.kubernetes.io/instance-type: custom-3vcpu-6gb
@@ -36,11 +55,15 @@ nodes:
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf
     readOnly: true
 - role: worker
+  # Use Kubernetes v1.31.4 instead of v1.35.0
+  image: kindest/node:v1.31.4
   kubeadmConfigPatches:
   - |
     kind: JoinConfiguration
     nodeRegistration:
       name: gamma
+      kubeletExtraArgs:
+        cgroup-driver: systemd
   labels:
     topology.kubernetes.io/zone: gamma
     node.kubernetes.io/instance-type: custom-3vcpu-6gb
