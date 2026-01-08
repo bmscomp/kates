@@ -6,17 +6,12 @@ grafana:
   service:
     type: NodePort
     nodePort: 30080
-  # Updated to v2.2.3 to avoid platform architecture manifest issues with v1.27.6
-  # Newer version has cleaner manifests and works properly on Apple Silicon
+  # Sidecar disabled - dashboards and datasources configured statically
   sidecar:
-    image:
-      tag: "2.2.3"  # Updated from 1.27.6
-      pullPolicy: Never
-    imagePullPolicy: Never
     dashboards:
-      enabled: true  # Re-enabled with working version
+      enabled: false
     datasources:
-      enabled: true  # Re-enabled with working version
+      enabled: false
 
 prometheus:
   prometheusSpec:
