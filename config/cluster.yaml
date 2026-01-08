@@ -7,7 +7,7 @@ featureGates:
 containerdConfigPatches:
 - |-
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
-    endpoint = ["http://localhost:5001"]
+    endpoint = ["http://kind-registry:5000"]
   [plugins."io.containerd.grpc.v1.cri".registry.configs."localhost:5001".tls]
     insecure_skip_verify = true
 # Add cluster configuration to increase timeout
