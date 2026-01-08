@@ -16,10 +16,21 @@ else
     PLATFORM=""
 fi
 
-# Clean up existing images
-echo "Removing existing k8s-sidecar images..."
-docker rmi localhost:5001/quay.io/kiwigrid/k8s-sidecar:1.27.6 2>/dev/null || true
-docker rmi quay.io/kiwigrid/k8s-sidecar:1.27.6 2>/dev/null || true
+# Clean up existing images and manifests aggressively
+echo "Removing ALL k8s-sidecar images and references..."
+docker rmi -f localhost:5001/quay.io/kiwigrid/k8s-sidecar:1.27.6 2>/dev/null || true
+docker rmi -f quay.io/kiwigrid/k8s-sidecar:1.27.6 2>/dev/null || true
+
+# Remove any dangling/untagged images related to k8s-sidecar
+echo "Cleaning up dangling images..."
+docker images -f "dangling=true" -q --filter=reference='*kiwigrid/k8s-sidecar*' | xargs -r docker rmi -f 2>/dev/null || true
+docker images -q quay.io/kiwigrid/k8s-sidecar | xargs -r docker rmi -f 2>/dev/null || true
+
+# Prune to remove any leftover manifests
+echo "Pruning Docker system..."
+docker image prune -f >/dev/null 2>&1 || true
+
+echo "Cleanup complete. Starting fresh pull..."
 
 # Pull correct platform
 echo "Pulling linux/amd64 version..."
