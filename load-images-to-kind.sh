@@ -82,12 +82,12 @@ load_from_local_registry "quay.io/strimzi/operator:0.49.0"
 
 echo ""
 echo -e "${GREEN}=== Strimzi Kafka Images ===${NC}"
-load_from_local_registry "quay.io/strimzi/kafka:0.49.0-kafka-4.1.1"
-load_from_local_registry "quay.io/strimzi/kafka:0.49.0-kafka-4.0.0"
+load_from_local_registry "quay.io/strimzi/operator:0.49.1"
+load_from_local_registry "quay.io/strimzi/kafka:0.49.1-kafka-4.1.1"
 
 echo ""
 echo -e "${GREEN}=== Prometheus Stack Images ===${NC}"
-load_from_local_registry "quay.io/prometheus/prometheus:v3.1.0"
+load_from_local_registry "quay.io/prometheus/prometheus:v3.9.1"
 load_from_local_registry "quay.io/prometheus/alertmanager:v0.28.1"
 load_from_local_registry "quay.io/prometheus-operator/prometheus-operator:v0.79.2"
 load_from_local_registry "quay.io/prometheus-operator/prometheus-config-reloader:v0.79.2"
@@ -96,7 +96,7 @@ load_from_local_registry "quay.io/prometheus/node-exporter:v1.8.2"
 
 echo ""
 echo -e "${GREEN}=== Grafana Images ===${NC}"
-load_from_local_registry "docker.io/grafana/grafana:11.4.0"
+load_from_local_registry "docker.io/grafana/grafana:12.3.1"
 # Updated to v2.2.3 - newer version works without manifest corruption
 load_from_local_registry "quay.io/kiwigrid/k8s-sidecar:2.2.3"
 
