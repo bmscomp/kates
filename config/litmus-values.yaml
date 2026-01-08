@@ -5,14 +5,14 @@
 operator:
   image:
     repository: litmuschaos/chaos-operator
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
 
 # Runner configuration  
 runner:
   image:
     repository: litmuschaos/chaos-runner
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
 
 # Exporter configuration
@@ -20,7 +20,7 @@ exporter:
   enabled: true
   image:
     repository: litmuschaos/chaos-exporter
-    tag: "3.23.0"
+    tag: "3.24.0"
     pullPolicy: Never
   service:
     type: ClusterIP
@@ -46,7 +46,7 @@ portal:
     enabled: true  
     image:
       repository: litmusportal-server
-      tag: "3.23.0"
+      tag: "3.24.0"
       pullPolicy: Never
     service:
       type: ClusterIP
@@ -55,7 +55,7 @@ portal:
     enabled: true
     image:
       repository: litmusportal-frontend
-      tag: "3.23.0"
+      tag: "3.24.0"
       pullPolicy: Never
     service:
       type: ClusterIP
