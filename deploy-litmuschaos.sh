@@ -18,13 +18,7 @@ if [ ! -d "${LITMUS_CHART_DIR}" ]; then
     exit 1
 fi
 
-# Detect Apple Silicon (arm64) hosts which need x86_64 Litmus images
-ARCH=$(uname -m)
-if [[ "${ARCH}" == "arm64" && -z "${SKIP_APPLE_SILICON_LITMUS_FIX}" ]]; then
-  echo -e "${GREEN}Apple Silicon detected (arm64). Ensuring linux/amd64 Litmus images are loaded...${NC}"
-  ./force-platform-load.sh
-  echo -e "${GREEN}Litmus images for amd64 loaded successfully.${NC}"
-fi
+# Apple Silicon fix logic removed - handled by fix-litmus-images.sh and load-images-to-kind.sh
 
 # Create namespace
 kubectl create namespace litmus --dry-run=client -o yaml | kubectl apply -f -
