@@ -130,7 +130,11 @@ push_to_local_registry "docker.io/bitnami/mongodb:latest"
 push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
 echo ""
-echo -e "${GREEN}All images have been pushed to local registry!${NC}"
+# Apicurio Registry
+push_to_local_registry "apicurio/apicurio-registry-kafkasql:2.2.5.Final"
+
+echo ""
+echo -e "${GREEN}All images processed!${NC}"
 echo ""
 echo "To view all images in the registry:"
 echo "  curl http://${REGISTRY}/v2/_catalog | jq"

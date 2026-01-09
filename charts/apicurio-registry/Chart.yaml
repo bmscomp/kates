@@ -1,0 +1,12 @@
+apiVersion: v2
+appVersion: 2.2.5.Final
+dependencies:
+- condition: kafka.enabled
+  name: kafka
+  repository: https://charts.bitnami.com/bitnami
+  version: 17.2.6
+description: A Helm chart for Kubernetes of Apicurio Registry
+icon: https://design.jboss.org/apicurio/logo/logofiles/apicurio_icon_lightbkg_color.svg
+name: apicurio-registry
+type: application
+version: 0.1.5

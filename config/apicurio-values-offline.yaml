@@ -1,0 +1,30 @@
+# Apicurio Registry Helm Values Configuration
+# Fully offline configuration using local registry (localhost:5001)
+
+# Image Configuration
+image:
+  repository: apicurio/apicurio-registry-kafkasql
+  tag: "2.2.5.Final"
+  pullPolicy: Never
+
+# Reploca Configuration
+replicaCount: 1
+
+# Disable internal Kafka dependency
+kafka:
+  enabled: false
+
+# Configure external Kafka connection (Strimzi)
+global:
+  kafka:
+    bootstrapServers:
+      - "my-cluster-kafka-bootstrap.kafka.svc:9092"
+
+# Service Configuration
+service:
+  type: NodePort
+  port: 8080
+  nodePort: 30082  # Exposed port for access
+
+# Environment Variables (Optional explicit overrides)
+# KAFKA_BOOTSTRAP_SERVERS is set automatically by the chart based on global values

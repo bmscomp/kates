@@ -31,7 +31,12 @@ echo -e "${BLUE}Step 4: Deploying Kafka UI${NC}"
 ./deploy-kafka-ui.sh
 
 echo ""
-echo -e "${BLUE}Step 5: Deploying LitmusChaos${NC}"
+echo ""
+echo -e "${BLUE}Step 5: Deploying Apicurio Registry${NC}"
+./deploy-apicurio.sh
+
+echo ""
+echo -e "${BLUE}Step 6: Deploying LitmusChaos${NC}"
 ./deploy-litmuschaos.sh
 
 echo ""
