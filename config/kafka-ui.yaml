@@ -39,7 +39,7 @@ spec:
     spec:
       containers:
       - name: kafka-ui
-        image: localhost:5001/provectuslabs/kafka-ui:v0.7.2
+        image: provectuslabs/kafka-ui:v0.7.2
         imagePullPolicy: Never
         ports:
         - containerPort: 8080
