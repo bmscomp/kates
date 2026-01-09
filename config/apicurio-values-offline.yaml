@@ -18,7 +18,7 @@ kafka:
 global:
   kafka:
     bootstrapServers:
-      - "my-cluster-kafka-bootstrap.kafka.svc:9092"
+      - "krafter-kafka-bootstrap.kafka.svc:9092"
 
 # Service Configuration
 service:
