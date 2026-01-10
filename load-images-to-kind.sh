@@ -87,6 +87,14 @@ echo ""
 echo -e "${GREEN}=== Strimzi Kafka Images ===${NC}"
 load_from_local_registry "quay.io/strimzi/operator:0.49.0"
 load_from_local_registry "quay.io/strimzi/kafka:0.49.0-kafka-4.1.1"
+load_from_local_registry "apicurio/apicurio-registry-kafkasql:2.2.5.Final"
+
+# Velero & MinIO
+load_from_local_registry "velero/velero:v1.17.1"
+load_from_local_registry "velero/velero-plugin-for-aws:v1.10.0"
+load_from_local_registry "docker.io/minio/minio:RELEASE.2024-09-22T00-33-43Z"
+load_from_local_registry "docker.io/minio/mc:RELEASE.2024-09-16T17-43-14Z"
+load_from_local_registry "docker.io/bitnamilegacy/kubectl:1.17.1"
 
 echo ""
 echo -e "${GREEN}=== Prometheus Stack Images ===${NC}"
