@@ -18,14 +18,14 @@ KIND_CLUSTER_NAME="panda"
 # LitmusChaos images that are actually used by the Helm chart
 IMAGES=(
     # Core LitmusChaos images
-    "litmuschaos/chaos-operator:3.23.0"
-    "litmuschaos/chaos-runner:3.23.0"
-    "litmuschaos/chaos-exporter:3.23.0"
+    "litmuschaos/chaos-operator:3.25.0"
+    "litmuschaos/chaos-runner:3.25.0"
+    "litmuschaos/chaos-exporter:3.25.0"
     
     # Portal/UI images (from scarf.sh registry)
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
     
     # MongoDB images (latest tag works across architectures)

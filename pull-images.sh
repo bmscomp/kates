@@ -95,9 +95,9 @@ push_to_local_registry "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.
 echo ""
 echo "=== LitmusChaos Images ==="
 # LitmusChaos chaos engineering images - updated to latest version
-push_to_local_registry "litmuschaos/chaos-operator:3.24.0"
-push_to_local_registry "litmuschaos/chaos-runner:3.24.0"
-push_to_local_registry "litmuschaos/chaos-exporter:3.24.0"
+push_to_local_registry "litmuschaos/chaos-operator:3.25.0"
+push_to_local_registry "litmuschaos/chaos-runner:3.25.0"
+push_to_local_registry "litmuschaos/chaos-exporter:3.25.0"
 
 # Additional LitmusChaos components
 push_to_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"

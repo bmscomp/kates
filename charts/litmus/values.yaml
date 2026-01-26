@@ -16,7 +16,7 @@ existingSecret: ""
 allowedOrigins: ".*"
 
 adminConfig:
-  VERSION: "3.24.0"
+  VERSION: "3.25.0"
   SKIP_SSL_VERIFY: "false"
   # -- leave empty if uses Mongo DB deployed by this chart
   DBPASSWORD: ""
@@ -255,17 +255,17 @@ portal:
         EVENT_TRACKER_IMAGE: "litmusportal-event-tracker:3.24.0"
         ARGO_WORKFLOW_CONTROLLER_IMAGE: "workflow-controller:v3.3.1"
         ARGO_WORKFLOW_EXECUTOR_IMAGE: "argoexec:v3.3.1"
-        LITMUS_CHAOS_OPERATOR_IMAGE: "chaos-operator:3.24.0"
-        LITMUS_CHAOS_RUNNER_IMAGE: "chaos-runner:3.24.0"
-        LITMUS_CHAOS_EXPORTER_IMAGE: "chaos-exporter:3.24.0"
+        LITMUS_CHAOS_OPERATOR_IMAGE: "chaos-operator:3.25.0"
+        LITMUS_CHAOS_RUNNER_IMAGE: "chaos-runner:3.25.0"
+        LITMUS_CHAOS_EXPORTER_IMAGE: "chaos-exporter:3.25.0"
       genericEnv:
         TLS_CERT_64: ""
         CONTAINER_RUNTIME_EXECUTOR: "k8sapi"
         DEFAULT_HUB_BRANCH_NAME: "v3.23.x"
         INFRA_DEPLOYMENTS: '["app=chaos-exporter", "name=chaos-operator", "app=event-tracker", "app=workflow-controller"]'
-        WORKFLOW_HELPER_IMAGE_VERSION: "3.24.0"
+        WORKFLOW_HELPER_IMAGE_VERSION: "3.25.0"
         REMOTE_HUB_MAX_SIZE: "5000000"
-        INFRA_COMPATIBLE_VERSIONS: '["3.24.0"]'
+        INFRA_COMPATIBLE_VERSIONS: '["3.25.0", "3.24.0"]'
         # Provide UI endpoint if using namespaced scope
         CHAOS_CENTER_UI_ENDPOINT: ""
         ENABLE_GQL_INTROSPECTION: "false"

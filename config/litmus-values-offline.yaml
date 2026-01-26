@@ -14,14 +14,14 @@ imagePullPolicy: Never
 operator:
   image:
     repository: litmuschaos/chaos-operator
-    tag: "3.24.0"
+    tag: "3.25.0"
     pullPolicy: Never
 
 # Runner configuration  
 runner:
   image:
     repository: litmuschaos/chaos-runner
-    tag: "3.24.0"
+    tag: "3.25.0"
     pullPolicy: Never
 
 # Exporter configuration
@@ -29,7 +29,7 @@ exporter:
   enabled: true
   image:
     repository: litmuschaos/chaos-exporter
-    tag: "3.24.0"
+    tag: "3.25.0"
     pullPolicy: Never
   service:
     type: ClusterIP
@@ -147,5 +147,5 @@ workflowController:
 chaosRunner:
   image:
     repository: litmuschaos/go-runner
-    tag: "3.24.0"
+    tag: "3.25.0"
     pullPolicy: Never

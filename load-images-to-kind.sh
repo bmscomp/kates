@@ -121,9 +121,9 @@ load_from_local_registry "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.
 
 echo ""
 echo -e "${GREEN}=== LitmusChaos Images ===${NC}"
-load_from_local_registry "litmuschaos/chaos-operator:3.24.0"
-load_from_local_registry "litmuschaos/chaos-runner:3.24.0"
-load_from_local_registry "litmuschaos/chaos-exporter:3.24.0"
+load_from_local_registry "litmuschaos/chaos-operator:3.25.0"
+load_from_local_registry "litmuschaos/chaos-runner:3.25.0"
+load_from_local_registry "litmuschaos/chaos-exporter:3.25.0"
 load_from_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"
 load_from_local_registry "litmuschaos/litmusportal-event-tracker:3.24.0"
 

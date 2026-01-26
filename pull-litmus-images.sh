@@ -41,37 +41,37 @@ push_to_local_registry() {
 
 echo ""
 echo "=== LitmusChaos Core Images ==="
-# LitmusChaos chaos engineering images (version 3.23.0)
-push_to_local_registry "litmuschaos/chaos-operator:3.23.0"
-push_to_local_registry "litmuschaos/chaos-runner:3.23.0"
-push_to_local_registry "litmuschaos/chaos-exporter:3.23.0"
+# LitmusChaos chaos engineering images (version 3.25.0)
+push_to_local_registry "litmuschaos/chaos-operator:3.25.0"
+push_to_local_registry "litmuschaos/chaos-runner:3.25.0"
+push_to_local_registry "litmuschaos/chaos-exporter:3.25.0"
 
 echo ""
 echo "=== LitmusChaos Portal Components ==="
 # Additional LitmusChaos components
-push_to_local_registry "litmuschaos/litmusportal-subscriber:3.23.0"
-push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
+push_to_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"
+push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.24.0"
 
 echo ""
 echo "=== LitmusChaos Portal Images (from scarf.sh) ==="
 # Portal Images (from scarf.sh) - re-tagged to simple names for local registry
-echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0
-docker push ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
+echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0${NC}"
+docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0 ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.24.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.24.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.24.0${NC}"
 
-echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0${NC}"
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0
-docker push ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0${NC}"
+echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0${NC}"
+docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0 ${REGISTRY}/litmuschaos/litmusportal-frontend:3.24.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-frontend:3.24.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-frontend:3.24.0${NC}"
 
-echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0${NC}"
-docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0
-docker push ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0${NC}"
+echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0${NC}"
+docker pull litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0 ${REGISTRY}/litmuschaos/litmusportal-server:3.24.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-server:3.24.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-server:3.24.0${NC}"
 
 echo ""
 echo "=== MongoDB Images ==="
@@ -90,7 +90,7 @@ push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 echo ""
 echo "=== LitmusChaos Experiment Images ==="
 # Common experiment images - using go-runner as the main experiment executor
-push_to_local_registry "litmuschaos/go-runner:3.23.0"
+push_to_local_registry "litmuschaos/go-runner:3.25.0"
 
 # Litmus experiments use go-runner with different experiment definitions
 # The actual chaos logic is in the go-runner image, not separate images per experiment
