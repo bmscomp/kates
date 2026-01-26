@@ -43,8 +43,8 @@ spec:
             type: cmdProbe
             mode: Continuous
             runProperties:
-              probeTimeout: 10
-              interval: 5
+              probeTimeout: "10s"
+              interval: "5s"
               retry: 2
             cmdProbe/inputs:
               command: kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-broker-api-versions.sh --bootstrap-server localhost:9092

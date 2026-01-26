@@ -39,8 +39,8 @@ spec:
             type: cmdProbe
             mode: Continuous
             runProperties:
-              probeTimeout: 5
-              interval: 2
+              probeTimeout: "5s"
+              interval: "2s"
               retry: 1
             cmdProbe/inputs:
               command: kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
