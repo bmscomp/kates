@@ -20,7 +20,7 @@ metadata:
 data:
   containerRuntimeExecutor: k8sapi
   executor: |
-    imagePullPolicy: IfNotPresent
+    imagePullPolicy: Never
   instanceID: 918e89f0-694e-4254-956f-4ad621355611
 ---
 apiVersion: v1
@@ -476,7 +476,7 @@ spec:
             - chaos-operator
           args:
             - -leader-elect=true
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           securityContext:
             runAsUser: 2000
             allowPrivilegeEscalation: false
@@ -529,7 +529,7 @@ spec:
       #{NODE_SELECTOR}
       containers:
         - image: litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           name: chaos-exporter
           securityContext:
             runAsUser: 2000
@@ -4174,7 +4174,7 @@ metadata:
   name: subscriber-config
   namespace: litmus
 data:
-  SERVER_ADDR: http://localhost:9091/api/query
+  SERVER_ADDR: http://chaos-litmus-server-service.litmus.svc.cluster.local:9002/query
   INFRA_SCOPE: cluster
   VERSION: 3.23.0
   START_TIME: "1765363202836"
@@ -4216,7 +4216,7 @@ spec:
       containers:
         - name: subscriber
           image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           securityContext:
             runAsUser: 2000
             allowPrivilegeEscalation: false
@@ -4263,7 +4263,7 @@ spec:
       serviceAccountName: litmus
       containers:
         - image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           securityContext:
             runAsUser: 2000
             allowPrivilegeEscalation: false

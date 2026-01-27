@@ -120,12 +120,13 @@ echo -e "${GREEN}=== Webhook Certgen Images ===${NC}"
 load_from_local_registry "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.5"
 
 echo ""
-echo -e "${GREEN}=== LitmusChaos Images ===${NC}"
-load_from_local_registry "litmuschaos/chaos-operator:3.25.0"
-load_from_local_registry "litmuschaos/chaos-runner:3.25.0"
-load_from_local_registry "litmuschaos/chaos-exporter:3.25.0"
-load_from_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"
-load_from_local_registry "litmuschaos/litmusportal-event-tracker:3.24.0"
+echo -e "${GREEN}=== LitmusChaos Images (3.23.0 - matches manifest) ===${NC}"
+load_from_local_registry "litmuschaos/chaos-operator:3.23.0"
+load_from_local_registry "litmuschaos/chaos-runner:3.23.0"
+load_from_local_registry "litmuschaos/chaos-exporter:3.23.0"
+load_from_local_registry "litmuschaos/go-runner:3.23.0"
+load_from_local_registry "litmuschaos/litmusportal-subscriber:3.23.0"
+load_from_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
 
 echo ""
 echo -e "${GREEN}=== LitmusChaos Portal Images (from scarf.sh) ===${NC}"
@@ -163,9 +164,12 @@ load_scarf_image() {
 }
 
 
-load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
-load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
-load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0"
 load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
 
 echo ""
