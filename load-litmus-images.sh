@@ -14,20 +14,22 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 
 KIND_CLUSTER_NAME="panda"
+PLATFORM="--platform linux/arm64"
 
-# Unified LitmusChaos images - versions match chaos-litmus-chaos-enable.yml manifest
+# Complete list of LitmusChaos images needed for deployment
+# Using 3.24.0 to match the Litmus Helm chart defaults
 IMAGES=(
-    # Core LitmusChaos components (3.23.0 - matches manifest)
+    # Core LitmusChaos components
     "litmuschaos/chaos-operator:3.24.0"
     "litmuschaos/chaos-runner:3.24.0"
     "litmuschaos/chaos-exporter:3.24.0"
     "litmuschaos/go-runner:3.24.0"
     
-    # Portal components (3.23.0 - matches manifest)
+    # Portal components
     "litmuschaos/litmusportal-subscriber:3.24.0"
     "litmuschaos/litmusportal-event-tracker:3.24.0"
     
-    # Portal Images from scarf.sh (3.23.0 - matches manifest)
+    # Portal Images from scarf.sh (required by Helm chart)
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
@@ -35,11 +37,13 @@ IMAGES=(
     # Workflow controller
     "litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1"
     
-    # MongoDB
+    # MongoDB (for standalone mode)
     "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
     
+    # MongoDB (Bitnami - for replicaset mode)
+    "docker.io/bitnami/mongodb:latest"
+    
     # MongoDB dependencies
-    "docker.io/mongo:8.0"
     "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 )
 
@@ -50,7 +54,9 @@ for image in "${IMAGES[@]}"; do
     echo -e "${YELLOW}Processing: ${image}${NC}"
     
     # Check if image exists in Kind
-    if docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep -q "${image}"; then
+    image_name="${image%%:*}"
+    image_tag="${image##*:}"
+    if docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep "${image_name}" | grep -q "${image_tag}"; then
         echo -e "  ${GREEN}✓ Already in Kind${NC}"
         continue
     fi
@@ -58,7 +64,7 @@ for image in "${IMAGES[@]}"; do
     # Check if image exists locally in Docker
     if ! docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${image}$"; then
         echo -e "  ${BLUE}Pulling from remote...${NC}"
-        if docker pull "${image}"; then
+        if docker pull ${PLATFORM} "${image}"; then
             echo -e "  ${GREEN}✓ Pulled${NC}"
         else
             echo -e "  ${RED}✗ Failed to pull, skipping...${NC}"

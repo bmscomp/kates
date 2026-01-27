@@ -143,6 +143,7 @@ push_to_local_registry "docker.io/litmuschaos/mongo:6"
 
 # Dependencies
 push_to_local_registry "docker.io/mongo:8.0"
+push_to_local_registry "docker.io/bitnami/mongodb:latest"
 push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
 echo ""

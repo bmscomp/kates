@@ -66,24 +66,28 @@ serviceAccount:
   create: true
   name: litmus
 
-# MongoDB configuration - using litmuschaos mongo image with proper permissions
+# MongoDB configuration - using Bitnami image for replicaset mode
 mongodb:
   enabled: true
   image:
-    registry: litmuschaos.docker.scarf.sh
-    repository: litmuschaos/mongo
-    tag: "6"
+    registry: docker.io
+    repository: bitnami/mongodb
+    tag: "latest"
     pullPolicy: Never
-  # Use standalone mode (no replica set) to reduce resource needs
-  architecture: standalone
-  # Run as root to avoid permission issues
+  # ReplicaSet mode required - litmus server expects replica set topology
+  architecture: replicaset
+  replicaCount: 1
+  # Arbiter disabled for single replica
+  arbiter:
+    enabled: false
+  # Security context for volume permissions
   podSecurityContext:
     enabled: true
-    fsGroup: 0
+    fsGroup: 1001
   containerSecurityContext:
     enabled: true
-    runAsUser: 0
-    runAsNonRoot: false
+    runAsUser: 1001
+    runAsNonRoot: true
   persistence:
     enabled: true
     size: 2Gi

@@ -175,7 +175,7 @@ load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
 echo ""
 echo -e "${GREEN}=== MongoDB Dependencies ===${NC}"
 load_from_local_registry "docker.io/mongo:8.0"
-
+load_from_local_registry "docker.io/bitnami/mongodb:latest"
 load_from_local_registry "docker.io/litmuschaos/mongo:6"
 load_from_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
