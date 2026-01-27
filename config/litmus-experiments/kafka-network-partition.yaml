@@ -1,0 +1,77 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-network-partition
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-network-partition
+      spec:
+        components:
+          env:
+            # Total chaos duration in seconds
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            
+            # Target namespace
+            - name: APP_NS
+              value: 'kafka'
+            
+            # Target pod by label
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            
+            # Isolate this specific pod
+            - name: TARGET_PODS
+              value: 'krafter-pool-alpha-0'
+            
+            # Container name
+            - name: TARGET_CONTAINER
+              value: 'kafka'
+            
+            # Network interface
+            - name: NETWORK_INTERFACE
+              value: 'eth0'
+            
+            # Destination hosts to block (other Kafka brokers)
+            - name: DESTINATION_HOSTS
+              value: 'krafter-pool-gamma-1.krafter-kafka-brokers.kafka.svc,krafter-pool-sigma-2.krafter-kafka-brokers.kafka.svc'
+            
+            # Ports to block (Kafka internal ports)
+            - name: DESTINATION_PORTS
+              value: '9091,9092,9093'
+        probe:
+          - name: check-kafka-survives-partition
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "15s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+              comparator:
+                type: string
+                criteria: equal
+                value: "True"
+          - name: check-leader-election
+            type: cmdProbe
+            mode: OnChaos
+            runProperties:
+              probeTimeout: "30s"
+              interval: "15s"
+              retry: 2
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-gamma-1 -- kafka-metadata.sh \
+                  --snapshot /var/lib/kafka/data/__cluster_metadata-0/00000000000000000000.log \
+                  --command "leader" 2>&1 | grep -c "LeaderId" || echo "0"
+              comparator:
+                type: int
+                criteria: ">="
+                value: "0"
+---
+# Reuse the litmus-admin service account from kafka-pod-delete.yaml

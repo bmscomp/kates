@@ -1,0 +1,148 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-consumer-latency-test
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-network-latency
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            - name: NETWORK_LATENCY
+              value: '500'  # 500ms latency
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            - name: TARGET_PODS
+              value: 'krafter-pool-gamma-1'
+            - name: NETWORK_INTERFACE
+              value: 'eth0'
+        probe:
+          # End-to-end latency probe
+          - name: consumer-latency-check
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "120s"
+              interval: "20s"
+              retry: 3
+              stopOnFailure: false
+            cmdProbe/inputs:
+              command: |
+                # Measure end-to-end latency using console consumer with timeout
+                TOPIC="chaos-latency-test"
+                TIMEOUT=10000  # 10 second max acceptable latency
+                
+                # Create test topic
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+                  --create --if-not-exists \
+                  --topic $TOPIC \
+                  --bootstrap-server localhost:9092 \
+                  --partitions 1 \
+                  --replication-factor 2 2>/dev/null
+                
+                # Send a timestamped message
+                SEND_TIME=$(date +%s%3N)
+                echo "$SEND_TIME|test-message" | kubectl exec -i -n kafka krafter-pool-alpha-0 -- \
+                  kafka-console-producer.sh \
+                  --bootstrap-server localhost:9092 \
+                  --topic $TOPIC 2>/dev/null
+                
+                # Consume and measure latency
+                RECEIVE=$(kubectl exec -n kafka krafter-pool-alpha-0 -- \
+                  kafka-console-consumer.sh \
+                  --bootstrap-server localhost:9092 \
+                  --topic $TOPIC \
+                  --from-beginning \
+                  --max-messages 1 \
+                  --timeout-ms 15000 2>/dev/null | tail -1)
+                
+                RECEIVE_TIME=$(date +%s%3N)
+                
+                if [ -n "$RECEIVE" ]; then
+                  MSG_TIME=$(echo "$RECEIVE" | cut -d'|' -f1)
+                  LATENCY=$((RECEIVE_TIME - MSG_TIME))
+                  echo "E2E Latency: ${LATENCY}ms"
+                  
+                  if [ "$LATENCY" -lt "$TIMEOUT" ]; then
+                    echo "PASS"
+                    exit 0
+                  fi
+                fi
+                echo "TIMEOUT or high latency"
+                exit 1
+              comparator:
+                type: string
+                criteria: contains
+                value: "PASS"
+              source:
+                image: bitnami/kubectl:latest
+                hostNetwork: false
+---
+# Consumer latency monitoring ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consumer-latency-probe-config
+  namespace: kafka
+data:
+  probe-script.sh: |
+    #!/bin/bash
+    # Kafka Consumer E2E Latency Probe
+    # Measures time from produce to consume
+    
+    TOPIC="${TOPIC:-chaos-latency-test}"
+    MAX_LATENCY_MS="${MAX_LATENCY_MS:-10000}"
+    BOOTSTRAP_SERVER="${BOOTSTRAP_SERVER:-localhost:9092}"
+    
+    # Create test topic
+    kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+      --create --if-not-exists \
+      --topic $TOPIC \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --partitions 1 \
+      --replication-factor 2 2>/dev/null
+    
+    # Send timestamped message
+    SEND_TIME=$(date +%s%3N)
+    MESSAGE="$SEND_TIME|latency-test-$(uuidgen)"
+    
+    echo "$MESSAGE" | kubectl exec -i -n kafka krafter-pool-alpha-0 -- \
+      kafka-console-producer.sh \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --topic $TOPIC 2>/dev/null
+    
+    # Consume with timeout
+    START=$(date +%s%3N)
+    RECEIVED=$(kubectl exec -n kafka krafter-pool-alpha-0 -- \
+      kafka-console-consumer.sh \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --topic $TOPIC \
+      --partition 0 \
+      --offset latest \
+      --max-messages 1 \
+      --timeout-ms $((MAX_LATENCY_MS + 5000)) 2>/dev/null | grep "latency-test" | head -1)
+    END=$(date +%s%3N)
+    
+    if [ -z "$RECEIVED" ]; then
+      echo "FAIL: Message not received within timeout"
+      exit 1
+    fi
+    
+    E2E_LATENCY=$((END - START))
+    echo "E2E Latency: ${E2E_LATENCY}ms"
+    
+    if [ "$E2E_LATENCY" -le "$MAX_LATENCY_MS" ]; then
+      echo "PASS: Latency within acceptable range"
+      exit 0
+    else
+      echo "FAIL: Latency exceeds threshold ($MAX_LATENCY_MS ms)"
+      exit 1
+    fi

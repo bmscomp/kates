@@ -1,0 +1,347 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "panels": [
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "title": "Chaos Experiment Status",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 1
+            },
+            "id": 2,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto"
+            },
+            "title": "Active Chaos Engines",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "count(kube_customresource_chaosengine_status_engine_status{status=\"initialized\"} == 1) or vector(0)",
+                    "legendFormat": "Active",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 1
+            },
+            "id": 3,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto"
+            },
+            "title": "Passed Experiments",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "sum(litmuschaos_passed_experiments) or vector(0)",
+                    "legendFormat": "Passed",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 12,
+                "y": 1
+            },
+            "id": 4,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto"
+            },
+            "title": "Failed Experiments",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "sum(litmuschaos_failed_experiments) or vector(0)",
+                    "legendFormat": "Failed",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 18,
+                "y": 1
+            },
+            "id": 5,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto"
+            },
+            "title": "Probe Success Rate",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "avg(litmuschaos_probe_success_percentage) or vector(0)",
+                    "legendFormat": "Success %",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 7
+            },
+            "id": 6,
+            "title": "Kafka Health During Chaos",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "id": 7,
+            "options": {
+                "legend": {
+                    "displayMode": "list"
+                }
+            },
+            "title": "Kafka Broker Pod Status",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (pod) (kube_pod_status_ready{namespace=\"kafka\", pod=~\"krafter-pool-.*\"})",
+                    "legendFormat": "{{pod}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "id": 8,
+            "options": {
+                "legend": {
+                    "displayMode": "list"
+                }
+            },
+            "title": "Kafka Broker Restarts",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"kafka\", pod=~\"krafter-pool-.*\"}[5m]))",
+                    "legendFormat": "{{pod}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 16
+            },
+            "id": 9,
+            "options": {
+                "legend": {
+                    "displayMode": "list"
+                }
+            },
+            "title": "Kafka Broker CPU Usage",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"kafka\", pod=~\"krafter-pool-.*\", container=\"kafka\"}[5m])) * 100",
+                    "legendFormat": "{{pod}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "bytes"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 16
+            },
+            "id": 10,
+            "options": {
+                "legend": {
+                    "displayMode": "list"
+                }
+            },
+            "title": "Kafka Broker Memory Usage",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (pod) (container_memory_usage_bytes{namespace=\"kafka\", pod=~\"krafter-pool-.*\", container=\"kafka\"})",
+                    "legendFormat": "{{pod}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 24
+            },
+            "id": 11,
+            "title": "Chaos Experiment History",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 25
+            },
+            "id": 12,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                }
+            },
+            "title": "Experiment Duration Over Time",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "litmuschaos_experiment_duration_seconds",
+                    "legendFormat": "{{engine_name}} - {{experiment_name}}",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 38,
+    "tags": [
+        "kafka",
+        "chaos",
+        "litmus"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "Kafka Chaos Dashboard",
+    "uid": "kafka-chaos-dashboard",
+    "version": 1
+}

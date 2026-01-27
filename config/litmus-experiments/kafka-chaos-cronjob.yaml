@@ -1,0 +1,184 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: kafka-chaos-scheduled
+  namespace: kafka
+  labels:
+    app: kafka-chaos
+    type: scheduled-chaos
+spec:
+  # Run every Sunday at 2:00 AM UTC (low-traffic window)
+  schedule: "0 2 * * 0"
+  
+  # Timezone for schedule
+  timezone: "UTC"
+  
+  # Concurrency policy
+  concurrencyPolicy: "Forbid"
+  
+  # Keep last 5 runs
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+  
+  # Suspend by default (enable when ready)
+  suspend: true
+  
+  workflowSpec:
+    entrypoint: weekly-chaos
+    serviceAccountName: argo-chaos
+    
+    ttlStrategy:
+      secondsAfterCompletion: 604800  # Keep for 7 days
+    
+    templates:
+      - name: weekly-chaos
+        steps:
+          # Step 1: Pre-flight check
+          - - name: preflight
+              template: preflight-check
+          
+          # Step 2: Run pod-delete chaos
+          - - name: broker-failure
+              template: chaos-experiment
+              arguments:
+                parameters:
+                  - name: experiment
+                    value: "pod-delete"
+                  - name: duration
+                    value: "30"
+          
+          # Step 3: Wait and verify
+          - - name: verify-recovery
+              template: verify-cluster
+          
+          # Step 4: Send notification
+          - - name: notify
+              template: send-notification
+
+      # Pre-flight check
+      - name: preflight-check
+        container:
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash"]
+          args:
+            - -c
+            - |
+              echo "Pre-flight checks for scheduled chaos..."
+              
+              # Check if Kafka is healthy
+              READY=$(kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+              if [ "$READY" != "True" ]; then
+                echo "ERROR: Kafka cluster is not healthy. Aborting chaos."
+                exit 1
+              fi
+              
+              # Check if all brokers are running
+              RUNNING=$(kubectl get pods -n kafka -l strimzi.io/component-type=kafka --no-headers | grep -c Running)
+              if [ "$RUNNING" -lt 3 ]; then
+                echo "ERROR: Not all Kafka brokers are running ($RUNNING/3). Aborting."
+                exit 1
+              fi
+              
+              # Check for existing chaos
+              ACTIVE=$(kubectl get chaosengine -n kafka --no-headers 2>/dev/null | wc -l)
+              if [ "$ACTIVE" -gt 0 ]; then
+                echo "WARNING: Active chaos experiments found. Cleaning up..."
+                kubectl delete chaosengine -n kafka --all
+              fi
+              
+              echo "Pre-flight checks passed!"
+
+      # Run chaos experiment
+      - name: chaos-experiment
+        inputs:
+          parameters:
+            - name: experiment
+            - name: duration
+        container:
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash"]
+          args:
+            - -c
+            - |
+              echo "Running {{inputs.parameters.experiment}} for {{inputs.parameters.duration}}s..."
+              
+              cat <<EOF | kubectl apply -f -
+              apiVersion: litmuschaos.io/v1alpha1
+              kind: ChaosEngine
+              metadata:
+                name: scheduled-{{inputs.parameters.experiment}}
+                namespace: kafka
+              spec:
+                annotationCheck: 'false'
+                engineState: active
+                chaosServiceAccount: litmus-admin
+                experiments:
+                  - name: {{inputs.parameters.experiment}}
+                    spec:
+                      components:
+                        env:
+                          - name: TOTAL_CHAOS_DURATION
+                            value: '{{inputs.parameters.duration}}'
+                          - name: APP_NS
+                            value: 'kafka'
+                          - name: APP_LABEL
+                            value: 'strimzi.io/component-type=kafka'
+                          - name: TARGET_PODS
+                            value: 'krafter-pool-alpha-0'
+              EOF
+              
+              # Wait for completion
+              echo "Waiting for experiment to complete..."
+              sleep $(({{inputs.parameters.duration}} + 60))
+              
+              # Get result
+              kubectl get chaosresult -n kafka -o yaml
+              
+              # Cleanup
+              kubectl delete chaosengine scheduled-{{inputs.parameters.experiment}} -n kafka --ignore-not-found
+
+      # Verify cluster recovery
+      - name: verify-cluster
+        container:
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash"]
+          args:
+            - -c
+            - |
+              echo "Verifying cluster recovery..."
+              
+              # Wait for pods to stabilize
+              sleep 60
+              
+              # Check Kafka status
+              for i in {1..10}; do
+                READY=$(kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+                if [ "$READY" == "True" ]; then
+                  echo "Kafka cluster recovered successfully!"
+                  exit 0
+                fi
+                echo "Waiting for recovery... ($i/10)"
+                sleep 15
+              done
+              
+              echo "ERROR: Kafka did not recover within expected time!"
+              exit 1
+
+      # Send notification (placeholder)
+      - name: send-notification
+        container:
+          image: curlimages/curl:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh"]
+          args:
+            - -c
+            - |
+              echo "Chaos run completed. Add your notification webhook here."
+              # Example Slack notification:
+              # curl -X POST -H 'Content-type: application/json' \
+              #   --data '{"text":"Weekly Kafka chaos completed successfully"}' \
+              #   $SLACK_WEBHOOK_URL
+              echo "Notification sent (placeholder)"

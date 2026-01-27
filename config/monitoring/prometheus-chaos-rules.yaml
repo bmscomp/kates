@@ -1,0 +1,99 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kafka-chaos-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app: kube-prometheus-stack
+spec:
+  groups:
+    - name: kafka-chaos-expected
+      rules:
+        # Alert ONLY during active chaos experiments
+        - alert: KafkaChaosExperimentActive
+          expr: |
+            count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) > 0
+          for: 0m
+          labels:
+            severity: info
+            chaos: expected
+          annotations:
+            summary: "Chaos experiment is actively running in Kafka namespace"
+            description: "A LitmusChaos experiment is currently in progress. Alerts may be expected."
+
+    - name: kafka-chaos-unexpected
+      rules:
+        # Pod restart during NO active chaos = real issue
+        - alert: KafkaBrokerRestartUnexpected
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="kafka", pod=~"krafter-pool-.*"}[5m]) > 0
+            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka broker {{ $labels.pod }} restarted unexpectedly"
+            description: "Broker restarted without any active chaos experiment. Investigate immediately."
+
+        # High CPU after chaos completed = potential issue
+        - alert: KafkaHighCPUPostChaos
+          expr: |
+            sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="kafka", pod=~"krafter-pool-.*", container="kafka"}[5m])) > 0.8
+            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka broker {{ $labels.pod }} has high CPU after chaos"
+            description: "CPU usage is above 80% with no active chaos experiment."
+
+        # Kafka cluster not ready after chaos completed
+        - alert: KafkaClusterNotReadyPostChaos
+          expr: |
+            kube_customresource_kafka_status_ready{namespace="kafka", name="krafter"} != 1
+            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka cluster is not ready after chaos experiment"
+            description: "The Kafka cluster has not recovered after chaos. Manual investigation required."
+
+    - name: kafka-chaos-results
+      rules:
+        # Experiment failed
+        - alert: ChaosExperimentFailed
+          expr: |
+            litmuschaos_failed_experiments > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Chaos experiment failed"
+            description: "A chaos experiment has failed. Check Litmus UI for details."
+
+        # Low probe success rate
+        - alert: ChaosProbeSuccessLow
+          expr: |
+            litmuschaos_probe_success_percentage < 50
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Chaos probe success rate is low"
+            description: "Probe success is {{ $value }}%. System may not be resilient."
+
+    - name: kafka-gameday
+      rules:
+        # GameDay workflow tracking
+        - alert: GameDayWorkflowStarted
+          expr: |
+            count(kube_workflow_status{namespace="kafka", workflow=~"kafka-gameday-.*"} == 1) > 0
+          for: 0m
+          labels:
+            severity: info
+            gameday: active
+          annotations:
+            summary: "GameDay workflow is in progress"
+            description: "A scheduled GameDay chaos workflow has started."

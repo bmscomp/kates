@@ -1,0 +1,77 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-cpu-stress
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-cpu-hog
+      spec:
+        components:
+          env:
+            # CPU cores to stress (e.g., 2 = 200% CPU usage)
+            - name: CPU_CORES
+              value: '2'
+            
+            # Total chaos duration in seconds
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            
+            # CPU load percentage
+            - name: CPU_LOAD
+              value: '80'
+            
+            # Target namespace
+            - name: APP_NS
+              value: 'kafka'
+            
+            # Target pods by label
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            
+            # Target specific pod
+            - name: TARGET_PODS
+              value: 'krafter-pool-gamma-1'
+            
+            # Container to stress
+            - name: TARGET_CONTAINER
+              value: 'kafka'
+        probe:
+          - name: check-kafka-health
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "10s"
+              interval: "5s"
+              retry: 2
+            cmdProbe/inputs:
+              command: kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+              comparator:
+                type: string
+                criteria: equal
+                value: "True"
+          - name: check-producer-latency
+            type: cmdProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: "30s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-producer-perf-test.sh \
+                  --topic test-chaos \
+                  --num-records 100 \
+                  --record-size 100 \
+                  --throughput -1 \
+                  --producer-props bootstrap.servers=localhost:9092 2>&1 | \
+                  grep -oP '\d+\.\d+ ms avg latency' | head -1 || echo "latency check"
+              comparator:
+                type: string
+                criteria: contains
+                value: "ms"
+---
+# Reuse the litmus-admin service account from kafka-pod-delete.yaml

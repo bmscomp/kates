@@ -1,0 +1,99 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-producer-probe-test
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '30'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            - name: TARGET_PODS
+              value: 'krafter-pool-sigma-2'
+        probe:
+          # Producer throughput probe - verifies messages can still be produced
+          - name: producer-throughput-check
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "60s"
+              interval: "15s"
+              retry: 3
+              stopOnFailure: false
+            cmdProbe/inputs:
+              command: |
+                # Produce 100 messages and measure throughput
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-producer-perf-test.sh \
+                  --topic chaos-test-topic \
+                  --num-records 100 \
+                  --record-size 1024 \
+                  --throughput -1 \
+                  --producer-props bootstrap.servers=localhost:9092 2>&1 | \
+                  tail -1 | awk '{print $4}' | sed 's/,//' || echo "0"
+              comparator:
+                type: float
+                criteria: ">="
+                value: "10.0"  # Minimum 10 records/sec
+              source:
+                image: bitnami/kubectl:latest
+                hostNetwork: false
+---
+# Standalone producer throughput ConfigMap for reuse
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: producer-throughput-probe-config
+  namespace: kafka
+data:
+  probe-script.sh: |
+    #!/bin/bash
+    # Kafka Producer Throughput Probe
+    # Tests that the cluster can accept new messages at acceptable rate
+    
+    TOPIC="${TOPIC:-chaos-test-topic}"
+    NUM_RECORDS="${NUM_RECORDS:-100}"
+    RECORD_SIZE="${RECORD_SIZE:-1024}"
+    MIN_THROUGHPUT="${MIN_THROUGHPUT:-10}"
+    BOOTSTRAP_SERVER="${BOOTSTRAP_SERVER:-localhost:9092}"
+    
+    # Create topic if not exists
+    kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+      --create --if-not-exists \
+      --topic $TOPIC \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --partitions 3 \
+      --replication-factor 2 2>/dev/null
+    
+    # Run perf test
+    RESULT=$(kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-producer-perf-test.sh \
+      --topic $TOPIC \
+      --num-records $NUM_RECORDS \
+      --record-size $RECORD_SIZE \
+      --throughput -1 \
+      --producer-props bootstrap.servers=$BOOTSTRAP_SERVER 2>&1)
+    
+    # Parse throughput
+    THROUGHPUT=$(echo "$RESULT" | tail -1 | awk '{print $4}' | sed 's/,//')
+    AVG_LATENCY=$(echo "$RESULT" | grep -oP '\d+\.\d+ ms avg latency' | head -1)
+    
+    echo "Throughput: $THROUGHPUT records/sec"
+    echo "Latency: $AVG_LATENCY"
+    
+    # Check threshold
+    if (( $(echo "$THROUGHPUT >= $MIN_THROUGHPUT" | bc -l) )); then
+      echo "PASS: Throughput is acceptable"
+      exit 0
+    else
+      echo "FAIL: Throughput below minimum ($MIN_THROUGHPUT)"
+      exit 1
+    fi

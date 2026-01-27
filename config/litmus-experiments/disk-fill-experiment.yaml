@@ -1,0 +1,66 @@
+apiVersion: litmuschaos.io/v1alpha1
+description:
+  message: |
+    Fills disk space on target pods
+kind: ChaosExperiment
+metadata:
+  name: disk-fill
+  labels:
+    name: disk-fill
+    app.kubernetes.io/part-of: litmus
+    app.kubernetes.io/component: chaosexperiment
+    app.kubernetes.io/version: 3.0.0
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create", "delete", "get", "list", "patch", "update", "deletecollection"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create", "get", "list", "patch", "update"]
+      - apiGroups: [""]
+        resources: ["pods/log", "pods/exec"]
+        verbs: ["get", "list", "create"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["create", "list", "get", "delete", "deletecollection"]
+      - apiGroups: ["litmuschaos.io"]
+        resources: ["chaosengines", "chaosexperiments", "chaosresults"]
+        verbs: ["create", "list", "get", "patch", "update", "delete"]
+    image: litmuschaos/go-runner:3.25.0
+    imagePullPolicy: IfNotPresent
+    args:
+      - -c
+      - ./experiments -name disk-fill
+    command:
+      - /bin/bash
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: "60"
+      - name: FILL_PERCENTAGE
+        value: "80"
+      - name: FILL_PATH
+        value: "/tmp"
+      - name: EPHEMERAL_STORAGE_MEBIBYTES
+        value: ""
+      - name: TARGET_CONTAINER
+        value: ""
+      - name: TARGET_PODS
+        value: ""
+      - name: PODS_AFFECTED_PERC
+        value: ""
+      - name: CONTAINER_RUNTIME
+        value: "containerd"
+      - name: SOCKET_PATH
+        value: "/run/containerd/containerd.sock"
+      - name: DEFAULT_HEALTH_CHECK
+        value: "false"
+      - name: SEQUENCE
+        value: parallel
+    labels:
+      name: disk-fill
+      app.kubernetes.io/part-of: litmus
+      app.kubernetes.io/component: experiment-job
+      app.kubernetes.io/version: 3.0.0

@@ -1,0 +1,150 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-isr-health-test
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '30'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            - name: TARGET_PODS
+              value: 'krafter-pool-alpha-0'
+        probe:
+          # ISR (In-Sync Replica) health probe
+          - name: isr-health-check
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "30s"
+              interval: "10s"
+              retry: 3
+              stopOnFailure: false
+            cmdProbe/inputs:
+              command: |
+                # Check ISR status for all partitions
+                ISR_STATUS=$(kubectl exec -n kafka krafter-pool-gamma-1 -- kafka-topics.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe \
+                  --under-replicated-partitions 2>/dev/null)
+                
+                UNDER_REPLICATED=$(echo "$ISR_STATUS" | grep -c "Topic:" || echo "0")
+                
+                echo "Under-replicated partitions: $UNDER_REPLICATED"
+                
+                # Allow some under-replication during chaos (1 broker down)
+                # but not all partitions should be under-replicated
+                if [ "$UNDER_REPLICATED" -lt 50 ]; then
+                  echo "PASS: ISR health acceptable"
+                  echo $UNDER_REPLICATED
+                else
+                  echo "FAIL: Too many under-replicated partitions"
+                  exit 1
+                fi
+              comparator:
+                type: string
+                criteria: contains
+                value: "PASS"
+              source:
+                image: bitnami/kubectl:latest
+                hostNetwork: false
+          
+          # Min ISR check - ensure partitions can still accept writes
+          - name: min-isr-check
+            type: cmdProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: "30s"
+              interval: "15s"
+              retry: 2
+            cmdProbe/inputs:
+              command: |
+                # Check that partitions still meet min.insync.replicas
+                OFFLINE=$(kubectl exec -n kafka krafter-pool-gamma-1 -- kafka-topics.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe \
+                  --unavailable-partitions 2>/dev/null | grep -c "Topic:" || echo "0")
+                
+                echo "Unavailable partitions: $OFFLINE"
+                
+                if [ "$OFFLINE" -eq 0 ]; then
+                  echo "PASS: No unavailable partitions"
+                else
+                  echo "WARN: Some partitions unavailable"
+                fi
+                echo $OFFLINE
+              comparator:
+                type: int
+                criteria: "<="
+                value: "5"  # Allow up to 5 unavailable during chaos
+              source:
+                image: bitnami/kubectl:latest
+                hostNetwork: false
+---
+# ISR health monitoring ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: isr-health-probe-config
+  namespace: kafka
+data:
+  probe-script.sh: |
+    #!/bin/bash
+    # Kafka ISR (In-Sync Replica) Health Probe
+    # Monitors replica synchronization during chaos
+    
+    BOOTSTRAP_SERVER="${BOOTSTRAP_SERVER:-localhost:9092}"
+    MAX_UNDER_REPLICATED="${MAX_UNDER_REPLICATED:-50}"
+    MAX_UNAVAILABLE="${MAX_UNAVAILABLE:-5}"
+    
+    echo "=== ISR Health Check ==="
+    
+    # Get under-replicated partitions
+    echo "Checking under-replicated partitions..."
+    UNDER_REPLICATED=$(kubectl exec -n kafka krafter-pool-gamma-1 -- kafka-topics.sh \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --describe \
+      --under-replicated-partitions 2>/dev/null)
+    
+    UNDER_COUNT=$(echo "$UNDER_REPLICATED" | grep -c "Topic:" || echo "0")
+    echo "Under-replicated partitions: $UNDER_COUNT"
+    
+    # Get unavailable partitions (serious issue)
+    echo "Checking unavailable partitions..."
+    UNAVAILABLE=$(kubectl exec -n kafka krafter-pool-gamma-1 -- kafka-topics.sh \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --describe \
+      --unavailable-partitions 2>/dev/null)
+    
+    UNAVAIL_COUNT=$(echo "$UNAVAILABLE" | grep -c "Topic:" || echo "0")
+    echo "Unavailable partitions: $UNAVAIL_COUNT"
+    
+    # Overall ISR status
+    echo "Getting ISR details..."
+    kubectl exec -n kafka krafter-pool-gamma-1 -- kafka-topics.sh \
+      --bootstrap-server $BOOTSTRAP_SERVER \
+      --describe \
+      --topics-with-overrides 2>/dev/null | head -20
+    
+    # Evaluate
+    if [ "$UNAVAIL_COUNT" -gt "$MAX_UNAVAILABLE" ]; then
+      echo "FAIL: Too many unavailable partitions ($UNAVAIL_COUNT > $MAX_UNAVAILABLE)"
+      exit 1
+    fi
+    
+    if [ "$UNDER_COUNT" -gt "$MAX_UNDER_REPLICATED" ]; then
+      echo "WARN: High number of under-replicated partitions"
+    fi
+    
+    echo "=== ISR Health: OK ==="
+    exit 0

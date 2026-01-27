@@ -1,0 +1,77 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-disk-fill
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: disk-fill
+      spec:
+        components:
+          env:
+            # Percentage of disk to fill
+            - name: FILL_PERCENTAGE
+              value: '80'
+            
+            # Total chaos duration in seconds
+            - name: TOTAL_CHAOS_DURATION
+              value: '120'
+            
+            # Target namespace
+            - name: APP_NS
+              value: 'kafka'
+            
+            # Target pods by label
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            
+            # Target specific pod
+            - name: TARGET_PODS
+              value: 'krafter-pool-sigma-2'
+            
+            # Container name
+            - name: TARGET_CONTAINER
+              value: 'kafka'
+            
+            # Data directory path in Kafka
+            - name: FILL_PATH
+              value: '/var/lib/kafka/data'
+            
+            # Size to fill in MB (alternative to percentage)
+            - name: EPHEMERAL_STORAGE_MEBIBYTES
+              value: ''
+        probe:
+          - name: check-kafka-health
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "15s"
+              interval: "10s"
+              retry: 2
+            cmdProbe/inputs:
+              command: kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+              comparator:
+                type: string
+                criteria: equal
+                value: "True"
+          - name: check-log-dirs
+            type: cmdProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: "20s"
+              interval: "15s"
+              retry: 2
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-sigma-2 -- kafka-log-dirs.sh \
+                  --describe \
+                  --bootstrap-server localhost:9092 2>&1 | grep -c "partition" || echo "0"
+              comparator:
+                type: int
+                criteria: ">="
+                value: "1"
+---
+# Reuse the litmus-admin service account from kafka-pod-delete.yaml

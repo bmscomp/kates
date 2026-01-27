@@ -1,0 +1,74 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-consumer-chaos
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            # Total chaos duration
+            - name: TOTAL_CHAOS_DURATION
+              value: '30'
+            
+            # Chaos interval
+            - name: CHAOS_INTERVAL
+              value: '10'
+            
+            # Force delete
+            - name: FORCE
+              value: 'true'
+            
+            # Target namespace
+            - name: APP_NS
+              value: 'kafka'
+            
+            # Target consumer pods (example label)
+            - name: APP_LABEL
+              value: 'app=kafka-consumer'
+            
+            # Percentage of pods to affect
+            - name: PODS_AFFECTED_PERC
+              value: '50'
+        probe:
+          - name: check-consumer-group-recovery
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "60s"
+              interval: "10s"
+              retry: 5
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-consumer-groups.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe --all-groups 2>&1 | grep -c "STABLE\|Empty" || echo "0"
+              comparator:
+                type: int
+                criteria: ">="
+                value: "0"
+          - name: check-consumer-lag
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "30s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-consumer-groups.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe --all-groups 2>&1 | \
+                  awk '/LAG/ {sum+=$6} END {print sum}' || echo "0"
+              comparator:
+                type: int
+                criteria: "<="
+                value: "10000"
+---
+# Note: This experiment targets consumer applications
+# Deploy a sample consumer first or modify APP_LABEL to match your consumers
