@@ -13,19 +13,19 @@ echo ""
 # Unified LitmusChaos images - versions match the manifest
 IMAGES=(
     # Core LitmusChaos components (3.23.0 - matches manifest)
-    "litmuschaos/chaos-operator:3.23.0"
-    "litmuschaos/chaos-runner:3.23.0"
-    "litmuschaos/chaos-exporter:3.23.0"
-    "litmuschaos/go-runner:3.23.0"
+    "litmuschaos/chaos-operator:3.24.0"
+    "litmuschaos/chaos-runner:3.24.0"
+    "litmuschaos/chaos-exporter:3.24.0"
+    "litmuschaos/go-runner:3.24.0"
     
     # Portal components (3.23.0 - matches manifest)
-    "litmuschaos/litmusportal-subscriber:3.23.0"
-    "litmuschaos/litmusportal-event-tracker:3.23.0"
+    "litmuschaos/litmusportal-subscriber:3.24.0"
+    "litmuschaos/litmusportal-event-tracker:3.24.0"
     
     # Portal Images from scarf.sh (3.23.0 - matches manifest)
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
     
     # Workflow controller
     "litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1"

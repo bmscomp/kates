@@ -4,7 +4,7 @@ KIND_CLUSTER_NAME="panda"
 
 # Images that are CONFIRMED missing/needed based on pod specs
 IMAGES=(
-    "docker.io/bitnami/mongodb:latest"
+    "docker.io/mongo:8.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"

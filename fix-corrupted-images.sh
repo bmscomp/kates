@@ -47,7 +47,7 @@ IMAGES=(
     "litmuschaos/chaos-exporter:3.23.0"
     "litmuschaos/litmusportal-subscriber:3.23.0"
     "litmuschaos/litmusportal-event-tracker:3.23.0"
-    "docker.io/bitnami/mongodb:latest"
+    "docker.io/mongo:8.0"
 )
 
 echo -e "${BLUE}Step 1: Cleaning up potentially corrupted images${NC}"

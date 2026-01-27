@@ -51,36 +51,36 @@ push_to_local_registry() {
 
 echo ""
 echo "=== LitmusChaos Core Images (3.23.0) ==="
-push_to_local_registry "litmuschaos/chaos-operator:3.23.0"
-push_to_local_registry "litmuschaos/chaos-runner:3.23.0"
-push_to_local_registry "litmuschaos/chaos-exporter:3.23.0"
-push_to_local_registry "litmuschaos/go-runner:3.23.0"
+push_to_local_registry "litmuschaos/chaos-operator:3.24.0"
+push_to_local_registry "litmuschaos/chaos-runner:3.24.0"
+push_to_local_registry "litmuschaos/chaos-exporter:3.24.0"
+push_to_local_registry "litmuschaos/go-runner:3.24.0"
 
 echo ""
 echo "=== LitmusChaos Portal Components (3.23.0) ==="
-push_to_local_registry "litmuschaos/litmusportal-subscriber:3.23.0"
-push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
+push_to_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"
+push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.24.0"
 
 echo ""
 echo "=== LitmusChaos Portal Images (from scarf.sh) ==="
 # Portal Images (from scarf.sh) - re-tagged to simple names for local registry
-echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0
-docker push ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.23.0${NC}"
+echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0${NC}"
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0 ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.24.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.24.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-auth-server:3.24.0${NC}"
 
-echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0${NC}"
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0
-docker push ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-frontend:3.23.0${NC}"
+echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0${NC}"
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0 ${REGISTRY}/litmuschaos/litmusportal-frontend:3.24.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-frontend:3.24.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-frontend:3.24.0${NC}"
 
-echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0${NC}"
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0
-docker push ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0
-echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-server:3.23.0${NC}"
+echo -e "${BLUE}Processing: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0${NC}"
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0 ${REGISTRY}/litmuschaos/litmusportal-server:3.24.0
+docker push ${REGISTRY}/litmuschaos/litmusportal-server:3.24.0
+echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/litmusportal-server:3.24.0${NC}"
 
 echo ""
 echo "=== Workflow Controller ==="
@@ -100,7 +100,7 @@ echo -e "${GREEN}✓ Pushed: ${REGISTRY}/litmuschaos/mongo:6${NC}"
 
 echo ""
 echo "=== MongoDB Dependencies ==="
-push_to_local_registry "docker.io/bitnami/mongodb:latest"
+push_to_local_registry "docker.io/mongo:8.0"
 push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
 echo ""

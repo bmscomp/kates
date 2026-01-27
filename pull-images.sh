@@ -95,28 +95,28 @@ push_to_local_registry "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.
 echo ""
 echo "=== LitmusChaos Images (3.23.0 - matches manifest) ==="
 # LitmusChaos chaos engineering images - unified version matching manifest
-push_to_local_registry "litmuschaos/chaos-operator:3.23.0"
-push_to_local_registry "litmuschaos/chaos-runner:3.23.0"
-push_to_local_registry "litmuschaos/chaos-exporter:3.23.0"
-push_to_local_registry "litmuschaos/go-runner:3.23.0"
+push_to_local_registry "litmuschaos/chaos-operator:3.24.0"
+push_to_local_registry "litmuschaos/chaos-runner:3.24.0"
+push_to_local_registry "litmuschaos/chaos-exporter:3.24.0"
+push_to_local_registry "litmuschaos/go-runner:3.24.0"
 
 # Additional LitmusChaos components
-push_to_local_registry "litmuschaos/litmusportal-subscriber:3.23.0"
-push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.23.0"
+push_to_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"
+push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.24.0"
 
 # Portal Images (from scarf.sh)
 # These need special handling because the source is different from standard docker hub
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
+docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
 
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
+docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
 
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
+docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
 
 # Workflow controller
 docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1
@@ -124,14 +124,14 @@ docker tag litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1 ${
 docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1
 
 # Subscriber (scarf.sh)
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
+docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
 
 # Event Tracker (scarf.sh)
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0
+docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
+docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
+docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
 
 # MongoDB images from scarf.sh
 docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
@@ -142,7 +142,7 @@ docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
 push_to_local_registry "docker.io/litmuschaos/mongo:6"
 
 # Dependencies
-push_to_local_registry "docker.io/bitnami/mongodb:latest"
+push_to_local_registry "docker.io/mongo:8.0"
 push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 
 echo ""

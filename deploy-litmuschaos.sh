@@ -34,13 +34,20 @@ helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --timeout 10m \
   --wait
 
-# Wait for MongoDB to be fully ready
-echo -e "${GREEN}Waiting for MongoDB StatefulSet to be ready (this may take a few minutes)...${NC}"
-kubectl rollout status statefulset/chaos-mongodb -n litmus --timeout=600s
+# Wait for MongoDB to be fully ready (handles both StatefulSet and Deployment)
+echo -e "${GREEN}Waiting for MongoDB to be ready (this may take a few minutes)...${NC}"
+if kubectl get statefulset chaos-mongodb -n litmus &>/dev/null; then
+    kubectl rollout status statefulset/chaos-mongodb -n litmus --timeout=600s
+elif kubectl get deployment chaos-mongodb -n litmus &>/dev/null; then
+    kubectl rollout status deployment/chaos-mongodb -n litmus --timeout=600s
+else
+    echo -e "${YELLOW}Waiting for MongoDB pods to be ready...${NC}"
+    kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=mongodb -n litmus --timeout=600s
+fi
 
 # Additional wait to ensure MongoDB is accepting connections
-echo -e "${GREEN}Waiting additional 30s for MongoDB to stabilize...${NC}"
-sleep 30
+echo -e "${GREEN}Waiting additional 15s for MongoDB to stabilize...${NC}"
+sleep 15
 
 # Step 2: Deploy remaining Litmus components
 echo -e "${GREEN}Step 2: Deploying Litmus portal components...${NC}"

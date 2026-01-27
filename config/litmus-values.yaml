@@ -1,5 +1,6 @@
 # LitmusChaos Helm Values Configuration
 # Customized for Kind cluster with local registry
+# Using 3.24.0 versions matching the Litmus Helm chart defaults
 
 # Operator configuration
 operator:
@@ -40,7 +41,6 @@ resources:
     memory: 256Mi
 
 # Portal/UI configuration
-# Portal/UI configuration
 portal:
   server:
     enabled: true  
@@ -66,21 +66,27 @@ serviceAccount:
   create: true
   name: litmus
 
-# MongoDB configuration
+# MongoDB configuration - using litmuschaos mongo image with proper permissions
 mongodb:
   enabled: true
   image:
-    registry: docker.io
-    repository: bitnami/mongodb
-    tag: "latest"
+    registry: litmuschaos.docker.scarf.sh
+    repository: litmuschaos/mongo
+    tag: "6"
     pullPolicy: Never
-  extraEnvVars:
-    - name: EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU
-      value: "1"
-  arbiter:
-    extraEnvVars:
-      - name: EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU
-        value: "1"
+  # Use standalone mode (no replica set) to reduce resource needs
+  architecture: standalone
+  # Run as root to avoid permission issues
+  podSecurityContext:
+    enabled: true
+    fsGroup: 0
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 0
+    runAsNonRoot: false
+  persistence:
+    enabled: true
+    size: 2Gi
   volumePermissions:
     enabled: true
     image:
@@ -88,3 +94,13 @@ mongodb:
       repository: bitnamilegacy/os-shell
       tag: "12-debian-12-r51"
       pullPolicy: Never
+    securityContext:
+      runAsUser: 0
+  # Resource limits
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi

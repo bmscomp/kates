@@ -18,19 +18,19 @@ KIND_CLUSTER_NAME="panda"
 # Unified LitmusChaos images - versions match chaos-litmus-chaos-enable.yml manifest
 IMAGES=(
     # Core LitmusChaos components (3.23.0 - matches manifest)
-    "litmuschaos/chaos-operator:3.23.0"
-    "litmuschaos/chaos-runner:3.23.0"
-    "litmuschaos/chaos-exporter:3.23.0"
-    "litmuschaos/go-runner:3.23.0"
+    "litmuschaos/chaos-operator:3.24.0"
+    "litmuschaos/chaos-runner:3.24.0"
+    "litmuschaos/chaos-exporter:3.24.0"
+    "litmuschaos/go-runner:3.24.0"
     
     # Portal components (3.23.0 - matches manifest)
-    "litmuschaos/litmusportal-subscriber:3.23.0"
-    "litmuschaos/litmusportal-event-tracker:3.23.0"
+    "litmuschaos/litmusportal-subscriber:3.24.0"
+    "litmuschaos/litmusportal-event-tracker:3.24.0"
     
     # Portal Images from scarf.sh (3.23.0 - matches manifest)
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.23.0"
-    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.23.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
     
     # Workflow controller
     "litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1"
@@ -39,7 +39,7 @@ IMAGES=(
     "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
     
     # MongoDB dependencies
-    "docker.io/bitnami/mongodb:latest"
+    "docker.io/mongo:8.0"
     "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
 )
 
