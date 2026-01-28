@@ -18,8 +18,9 @@ PLATFORM="--platform linux/arm64"
 
 # Complete list of LitmusChaos images needed for deployment
 # Using 3.24.0 to match the Litmus Helm chart defaults
+# Also includes 3.23.0 for chaos-litmus-chaos-enable.yml manifest
 IMAGES=(
-    # Core LitmusChaos components
+    # Core LitmusChaos components (3.24.0 for Helm chart)
     "litmuschaos/chaos-operator:3.24.0"
     "litmuschaos/chaos-runner:3.24.0"
     "litmuschaos/chaos-exporter:3.24.0"
@@ -29,10 +30,16 @@ IMAGES=(
     "litmuschaos/litmusportal-subscriber:3.24.0"
     "litmuschaos/litmusportal-event-tracker:3.24.0"
     
-    # Portal Images from scarf.sh (required by Helm chart)
+    # Portal Images from scarf.sh (required by Helm chart - 3.24.0)
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0"
     "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0"
+    
+    # Scarf.sh images (3.23.0 for chaos-litmus-chaos-enable.yml manifest)
+    "litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0"
+    "litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0"
     
     # Workflow controller
     "litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1"

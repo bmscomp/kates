@@ -172,6 +172,12 @@ load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscribe
 load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0"
 load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/mongo:6"
 
+# 3.23.0 images for chaos-litmus-chaos-enable.yml manifest
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0"
+load_scarf_image "litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0"
+
 echo ""
 echo -e "${GREEN}=== MongoDB Dependencies ===${NC}"
 load_from_local_registry "docker.io/mongo:8.0"
