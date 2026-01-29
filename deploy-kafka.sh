@@ -34,6 +34,10 @@ helm upgrade --install strimzi-kafka-operator "${STRIMZI_CHART_DIR}" \
 echo -e "${GREEN}Applying Metrics Configuration...${NC}"
 kubectl apply -f config/kafka-metrics.yaml
 
+# Apply Zone-Specific Storage Classes
+echo -e "${GREEN}Creating Zone-Specific Storage Classes...${NC}"
+kubectl apply -f config/storage-classes.yaml
+
 # Apply Kafka Cluster
 echo -e "${GREEN}Deploying Kafka Cluster (KRaft)...${NC}"
 kubectl apply -f config/kafka.yaml

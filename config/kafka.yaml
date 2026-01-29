@@ -16,6 +16,7 @@ spec:
       - id: 0
         type: persistent-claim
         size: 10Gi
+        class: local-storage-alpha
         deleteClaim: false
   resources:
     requests:
@@ -59,6 +60,7 @@ spec:
       - id: 0
         type: persistent-claim
         size: 10Gi
+        class: local-storage-sigma
         deleteClaim: false
   resources:
     requests:
@@ -98,6 +100,7 @@ spec:
       - id: 0
         type: persistent-claim
         size: 10Gi
+        class: local-storage-gamma
         deleteClaim: false
   resources:
     requests:
