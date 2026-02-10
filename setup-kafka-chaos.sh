@@ -102,7 +102,7 @@ spec:
       - -name
       - pod-delete
     command:
-      - /bin/bash
+      - ./experiments
     env:
       - name: TOTAL_CHAOS_DURATION
         value: '30'
@@ -152,7 +152,7 @@ spec:
       - -name
       - pod-network-partition
     command:
-      - /bin/bash
+      - ./experiments
     env:
       - name: TOTAL_CHAOS_DURATION
         value: '60'
@@ -195,7 +195,7 @@ spec:
       - -name
       - pod-cpu-hog
     command:
-      - /bin/bash
+      - ./experiments
     env:
       - name: TOTAL_CHAOS_DURATION
         value: '60'
