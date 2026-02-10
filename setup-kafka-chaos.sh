@@ -30,7 +30,7 @@ echo -e "${GREEN}✓ Kafka cluster and Litmus portal are running${NC}"
 echo ""
 echo -e "${BLUE}Step 2: Registering chaos infrastructure...${NC}"
 
-INFRA_MANIFEST="config/litmus-experiments/chaos-litmus-chaos-enable.yml"
+INFRA_MANIFEST="config/litmus/chaos-litmus-chaos-enable.yml"
 if [ ! -f "${INFRA_MANIFEST}" ]; then
     echo -e "${RED}Error: Infrastructure manifest not found at ${INFRA_MANIFEST}${NC}"
     echo ""
@@ -43,10 +43,18 @@ if [ ! -f "${INFRA_MANIFEST}" ]; then
     exit 1
 fi
 
-# Fix imagePullPolicy in the manifest for offline Kind
-echo -e "  Patching manifest for offline deployment (imagePullPolicy: Never)..."
+# Fix imagePullPolicy, versions, and image names for offline Kind
+echo -e "  Patching manifest for offline deployment..."
 PATCHED_MANIFEST=$(mktemp)
-sed 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Never/g' "${INFRA_MANIFEST}" > "${PATCHED_MANIFEST}"
+sed -e 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Never/g' \
+    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0|litmuschaos/chaos-operator:3.24.0|g' \
+    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/chaos-runner:3.23.0|litmuschaos/chaos-runner:3.24.0|g' \
+    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0|litmuschaos/chaos-exporter:3.24.0|g' \
+    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:3.24.0|g' \
+    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0|litmuschaos/litmusportal-event-tracker:3.24.0|g' \
+    -e 's|litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:3.24.0|g' \
+    -e 's|litmuschaos/litmusportal-event-tracker:3.23.0|litmuschaos/litmusportal-event-tracker:3.24.0|g' \
+    "${INFRA_MANIFEST}" > "${PATCHED_MANIFEST}"
 
 echo -e "  Applying infrastructure manifest..."
 kubectl apply -f "${PATCHED_MANIFEST}" 2>&1 | grep -v "^Warning:" || true
