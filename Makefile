@@ -4,43 +4,31 @@
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
-	@echo "Step 1: Starting Kind cluster..."
+	@echo "Step 1: Starting Kind cluster (includes registry + image pull)..."
 	./start-cluster.sh
 	@echo ""
-	@echo "Step 2: Setting up local registry..."
-	./setup-registry.sh
-	@echo ""
-	@echo "Step 3: Pulling all images to local registry..."
-	./pull-images.sh
-	@echo ""
-	@echo "Step 4: Loading images into Kind cluster..."
+	@echo "Step 2: Loading images into Kind cluster..."
 	./load-images-to-kind.sh
 	@echo ""
-	@echo "Step 5: Deploying Monitoring (Prometheus & Grafana)..."
+	@echo "Step 3: Deploying Monitoring (Prometheus & Grafana)..."
 	./deploy-monitoring.sh
 	@echo ""
-	@echo "Step 6: Waiting for monitoring to be ready..."
+	@echo "Step 4: Waiting for monitoring to be ready..."
 	@kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true
 	@echo ""
-	@echo "Step 7: Deploying Kafka (Strimzi)..."
+	@echo "Step 5: Deploying Kafka (Strimzi)..."
 	./deploy-kafka.sh
 	@echo ""
-	@echo "Step 8: Waiting for Kafka to be ready..."
-	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=kafka-cluster -n kafka --timeout=300s || true
+	@echo "Step 6: Waiting for Kafka to be ready..."
+	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true
 	@echo ""
-	@echo "Step 9: Deploying Kafka UI..."
+	@echo "Step 7: Deploying Kafka UI..."
 	./deploy-kafka-ui.sh
 	@echo ""
-	@echo "Step 10: Deploying Apicurio Registry..."
+	@echo "Step 8: Deploying Apicurio Registry..."
 	./deploy-apicurio.sh
 	@echo ""
-	@echo "Step 11: Pulling Litmus images..."
-	./pull-litmus-images.sh
-	@echo ""
-	@echo "Step 12: Loading Litmus images to Kind..."
-	./load-litmus-images.sh
-	@echo ""
-	@echo "Step 13: Deploying LitmusChaos..."
+	@echo "Step 9: Deploying LitmusChaos..."
 	./deploy-litmuschaos.sh
 	@echo ""
 	@echo "✅ Complete setup finished!"
@@ -72,13 +60,11 @@ cluster:
 	@echo "🎯 Starting Kind cluster..."
 	./start-cluster.sh
 
-# Setup registry and pull images
+# Setup registry, pull all images, and load into Kind
 images: registry-ensure
 	@echo "🐳 Pulling and loading all images..."
 	./pull-images.sh
 	./load-images-to-kind.sh
-	./pull-litmus-images.sh
-	./load-litmus-images.sh
 
 # Ensure registry is running
 registry-ensure:
@@ -147,17 +133,7 @@ download-charts:
 # LitmusChaos Management
 litmus: registry-ensure
 	@echo "⚡ Installing LitmusChaos..."
-	./pull-litmus-images.sh
-	./load-litmus-images.sh
 	./deploy-litmuschaos.sh
-
-litmus-pull-images:
-	@echo "🐳 Pulling Litmus images to local registry..."
-	./pull-litmus-images.sh
-
-litmus-load-images:
-	@echo "🐳 Loading Litmus images to Kind..."
-	./load-litmus-images.sh
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."

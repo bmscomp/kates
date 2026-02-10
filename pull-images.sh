@@ -1,168 +1,111 @@
 #!/bin/bash
 set -e
 
-# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/images.env"
 
 REGISTRY="localhost:5001"
 
-# Detect platform and set explicit platform for Docker pulls
-# This ensures we get the correct architecture for kind nodes
 ARCH=$(uname -m)
 if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-    echo "Apple Silicon detected - using linux/arm64 platform"
+    echo -e "${BLUE}Apple Silicon detected — using linux/arm64${NC}"
     PLATFORM="--platform linux/arm64"
 else
     PLATFORM="--platform linux/amd64"
 fi
 
-# Temporarily unset proxy for Docker operations to avoid timeout issues
-# This ensures direct connection to Docker registries
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 
-echo -e "${GREEN}Pulling and pushing images to local registry...${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Pulling Images to Local Registry${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
 
-# Check if registry is running
 if ! curl -s http://${REGISTRY}/v2/_catalog > /dev/null 2>&1; then
-    echo -e "${YELLOW}Local registry is not running. Please run ./setup-registry.sh first${NC}"
+    echo -e "${RED}Local registry is not running. Please run ./setup-registry.sh first${NC}"
     exit 1
 fi
 
-# Function to pull, tag, and push an image
+TOTAL=0
+SKIPPED=0
+PULLED=0
+FAILED=0
+
 push_to_local_registry() {
     local image=$1
     local local_image="${REGISTRY}/${image}"
-    
-    echo -e "${BLUE}Processing: ${image}${NC}"
-    
-    # Check if image already exists in local registry
+    TOTAL=$((TOTAL + 1))
+
+    echo -e "${BLUE}[${TOTAL}] ${image}${NC}"
+
     if curl -s "http://${REGISTRY}/v2/${image%:*}/tags/list" | grep -q "\"${image##*:}\""; then
-        echo -e "${YELLOW}  Image already in registry, skipping pull${NC}"
+        echo -e "  ${YELLOW}already in registry, skipping${NC}"
+        SKIPPED=$((SKIPPED + 1))
         return 0
     fi
-    
-    # Pull from public registry with platform specification for Kind compatibility
-    docker pull ${PLATFORM} ${image}
-    
-    # Tag for local registry
-    docker tag ${image} ${local_image}
-    
-    # Push to local registry
-    docker push ${local_image}
-    
-    echo -e "${GREEN}✓ Pushed: ${local_image}${NC}"
+
+    if docker pull ${PLATFORM} "${image}"; then
+        docker tag "${image}" "${local_image}"
+        docker push "${local_image}"
+        echo -e "  ${GREEN}✓ pushed${NC}"
+        PULLED=$((PULLED + 1))
+    else
+        echo -e "  ${RED}✗ failed to pull${NC}"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
 }
 
-echo ""
-echo "=== Kafka UI Images ==="
-push_to_local_registry "provectuslabs/kafka-ui:v0.7.2"
+push_scarf_image() {
+    local entry=$1
+    local scarf_src="${entry%%|*}"
+    local canonical="${entry##*|}"
+    local local_image="${REGISTRY}/${canonical}"
+    TOTAL=$((TOTAL + 1))
+
+    echo -e "${BLUE}[${TOTAL}] ${scarf_src} → ${canonical}${NC}"
+
+    if curl -s "http://${REGISTRY}/v2/${canonical%:*}/tags/list" | grep -q "\"${canonical##*:}\""; then
+        echo -e "  ${YELLOW}already in registry, skipping${NC}"
+        SKIPPED=$((SKIPPED + 1))
+        return 0
+    fi
+
+    if docker pull ${PLATFORM} "${scarf_src}"; then
+        docker tag "${scarf_src}" "${local_image}"
+        docker push "${local_image}"
+        echo -e "  ${GREEN}✓ pushed as ${canonical}${NC}"
+        PULLED=$((PULLED + 1))
+    else
+        echo -e "  ${RED}✗ failed to pull${NC}"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+}
+
+echo -e "${GREEN}--- Standard Images ---${NC}"
+for img in "${ALL_STANDARD_IMAGES[@]}"; do
+    push_to_local_registry "${img}"
+done
 
 echo ""
-echo "=== Strimzi Kafka Images ==="
-# Strimzi operator and Kafka images (version 0.49.0 as seen in deployment)
-push_to_local_registry "quay.io/strimzi/operator:0.49.1"
-push_to_local_registry "quay.io/strimzi/kafka:0.49.1-kafka-4.1.1"
+echo -e "${GREEN}--- LitmusChaos Portal Images (scarf.sh) ---${NC}"
+for entry in "${LITMUS_SCARF_IMAGES[@]}"; do
+    push_scarf_image "${entry}"
+done
 
 echo ""
-echo "=== Prometheus Stack Images ==="
-# Core monitoring components - updated to latest stable versions
-push_to_local_registry "quay.io/prometheus/prometheus:v3.9.1"
-push_to_local_registry "quay.io/prometheus/alertmanager:v0.28.1"
-push_to_local_registry "quay.io/prometheus-operator/prometheus-operator:v0.79.2"
-push_to_local_registry "quay.io/prometheus-operator/prometheus-config-reloader:v0.79.2"
-
-# Grafana
-push_to_local_registry "docker.io/grafana/grafana:12.3.1"
-
-# Grafana sidecar (used for dashboards/datasources)
-# Updated to v2.2.3 - newer version works without manifest corruption
-push_to_local_registry "quay.io/kiwigrid/k8s-sidecar:2.2.3"
-
-# Node exporter
-push_to_local_registry "quay.io/prometheus/node-exporter:v1.8.2"
-
-# Kube-state-metrics
-push_to_local_registry "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0"
-
-# Admission webhook
-# Admission webhook
-push_to_local_registry "quay.io/prometheus-operator/admission-webhook:v0.79.2"
-push_to_local_registry "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.5"
-
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Pull Complete!${NC}"
+echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "=== LitmusChaos Images (3.23.0 - matches manifest) ==="
-# LitmusChaos chaos engineering images - unified version matching manifest
-push_to_local_registry "litmuschaos/chaos-operator:3.24.0"
-push_to_local_registry "litmuschaos/chaos-runner:3.24.0"
-push_to_local_registry "litmuschaos/chaos-exporter:3.24.0"
-push_to_local_registry "litmuschaos/go-runner:3.24.0"
-
-# Additional LitmusChaos components
-push_to_local_registry "litmuschaos/litmusportal-subscriber:3.24.0"
-push_to_local_registry "litmuschaos/litmusportal-event-tracker:3.24.0"
-
-# Portal Images (from scarf.sh)
-# These need special handling because the source is different from standard docker hub
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-auth-server:3.24.0
-
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-frontend:3.24.0
-
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-server:3.24.0
-
-# Workflow controller
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1
-
-# Subscriber (scarf.sh)
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
-
-# Event Tracker (scarf.sh)
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
-
-# MongoDB images from scarf.sh
-docker pull ${PLATFORM} litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
-docker tag litmuschaos.docker.scarf.sh/litmuschaos/mongo:6 ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
-docker push ${REGISTRY}/litmuschaos.docker.scarf.sh/litmuschaos/mongo:6
-
-# Alternative MongoDB image from docker.io
-push_to_local_registry "docker.io/litmuschaos/mongo:6"
-
-# Dependencies
-push_to_local_registry "docker.io/mongo:8.0"
-push_to_local_registry "docker.io/bitnami/mongodb:latest"
-push_to_local_registry "docker.io/bitnamilegacy/os-shell:12-debian-12-r51"
-
+echo "Total: ${TOTAL}  Pulled: ${PULLED}  Skipped: ${SKIPPED}  Failed: ${FAILED}"
 echo ""
-# Apicurio Registry
-push_to_local_registry "apicurio/apicurio-registry-kafkasql:2.2.5.Final"
-
-echo ""
-echo "=== Velero Backup Images ==="
-push_to_local_registry "velero/velero:v1.17.1"
-push_to_local_registry "velero/velero-plugin-for-aws:v1.10.0"
-push_to_local_registry "docker.io/minio/minio:RELEASE.2024-09-22T00-33-43Z"
-push_to_local_registry "docker.io/minio/mc:RELEASE.2024-09-16T17-43-14Z"
-push_to_local_registry "docker.io/bitnamilegacy/kubectl:1.17.1"
-
-echo ""
-echo -e "${GREEN}All images processed!${NC}"
-echo ""
-echo "To view all images in the registry:"
-echo "  curl http://${REGISTRY}/v2/_catalog | jq"
-echo ""
-echo "Total images in registry:"
-curl -s http://${REGISTRY}/v2/_catalog | jq '.repositories | length'
+echo "Registry contents:"
+curl -s http://${REGISTRY}/v2/_catalog | jq '.repositories | length' 2>/dev/null || echo "(jq not installed)"
