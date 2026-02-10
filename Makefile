@@ -147,6 +147,45 @@ chaos-experiments:
 	@echo "🧪 Deploying chaos experiments..."
 	kubectl apply -f config/litmus-experiments/
 
+# Kafka Chaos Testing
+chaos-kafka:
+	@echo "⚡ Setting up Kafka chaos testing environment..."
+	./setup-kafka-chaos.sh
+
+chaos-kafka-pod-delete:
+	@echo "💥 Running Kafka broker pod-delete chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-pod-delete.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-network-partition:
+	@echo "🔌 Running Kafka network partition chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-network-partition.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-cpu-stress:
+	@echo "🔥 Running Kafka CPU stress chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-cpu-stress.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-all:
+	@echo "🌪️ Running ALL Kafka chaos experiments..."
+	kubectl apply -f config/litmus-experiments/kafka-pod-delete.yaml
+	kubectl apply -f config/litmus-experiments/kafka-network-partition.yaml
+	kubectl apply -f config/litmus-experiments/kafka-cpu-stress.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-status:
+	@echo "📊 Kafka Chaos Status:"
+	@echo ""
+	@echo "=== Chaos Engines ==="
+	@kubectl get chaosengines -n kafka 2>/dev/null || echo "No engines found"
+	@echo ""
+	@echo "=== Chaos Results ==="
+	@kubectl get chaosresults -n kafka 2>/dev/null || echo "No results found"
+	@echo ""
+	@echo "=== Infrastructure Pods ==="
+	@kubectl get pods -n litmus -l 'app in (chaos-operator,chaos-exporter,subscriber,workflow-controller,event-tracker)' 2>/dev/null || echo "No infra pods found"
+
 chaos-clean:
 	@echo "🧹 Removing LitmusChaos..."
 	helm uninstall chaos -n litmus || true
