@@ -57,12 +57,10 @@ helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --timeout 10m \
   --wait
 
-# Wait for operator to be ready
-echo -e "${GREEN}Waiting for LitmusChaos operator to be ready...${NC}"
-kubectl wait --for=condition=available --timeout=600s \
-  deployment/chaos-operator-ce -n litmus 2>/dev/null || \
-  kubectl wait --for=condition=available --timeout=600s \
-  deployment -l app.kubernetes.io/component=operator -n litmus
+# Wait for Litmus portal to be ready
+echo -e "${GREEN}Waiting for LitmusChaos portal to be ready...${NC}"
+kubectl wait --for=condition=available --timeout=300s \
+  deployment/chaos-litmus-server -n litmus
 
 # Create ServiceMonitor for Prometheus integration
 echo -e "${GREEN}Creating ServiceMonitor for Prometheus integration...${NC}"
