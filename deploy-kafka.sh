@@ -26,6 +26,7 @@ echo -e "${GREEN}Installing Strimzi Operator from local chart...${NC}"
 helm upgrade --install strimzi-kafka-operator "${STRIMZI_CHART_DIR}" \
   --namespace kafka \
   --set watchAnyNamespace=true \
+  --set defaultImageTag=0.49.1 \
   --set image.imagePullPolicy=Never \
   --timeout 10m \
   --wait
