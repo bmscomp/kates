@@ -1,162 +1,188 @@
-# Local Kubernetes Cluster with Monitoring
+# klster — Local Kubernetes Cluster
 
-This project provides scripts to launch a local Kubernetes cluster using [Kind](https://kind.sigs.k8s.io/) with 3 nodes simulating different availability zones, and sets up monitoring with Prometheus and Grafana.
+Local Kubernetes cluster using [Kind](https://kind.sigs.k8s.io/) with 3 nodes simulating availability zones, fully offline container image management, and a complete Kafka + monitoring stack.
 
 ## Features
 
-✨ **Local Docker Registry**: All container images are cached locally for faster deployments and offline operation  
-🚀 **Quick Setup**: One-command deployment of full Kafka + monitoring stack  
-📊 **Comprehensive Monitoring**: Prometheus, Grafana, and custom Kafka dashboards  
-⚡ **Performance Testing**: Built-in Kafka performance test scripts  
-🖥️ **Kafka UI**: Web-based interface for Kafka cluster management
+- **Offline-first** — all images pulled once, loaded into Kind, deployed with `imagePullPolicy: Never`
+- **One-command setup** — `make all` brings up the entire stack
+- **Multi-AZ simulation** — 3 nodes labeled `alpha`, `sigma`, `gamma`
+- **Monitoring** — Prometheus, Grafana, and custom Kafka dashboards
+- **Kafka (Strimzi KRaft)** — 3-broker cluster with rack awareness
+- **Chaos engineering** — LitmusChaos with Prometheus integration
+- **Schema registry** — Apicurio connected to Kafka
+- **Performance testing** — built-in 1M-message Kafka benchmark
 
 ## Prerequisites
 
-Ensure you have the following installed:
 - [Docker](https://www.docker.com/)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
-- [Kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Helm](https://helm.sh/docs/intro/install/)
-- [jq](https://stedolan.github.io/jq/) (optional, for registry status display)
-
+- [jq](https://stedolan.github.io/jq/) (optional, for registry status)
 
 ## Quick Start
 
-1. **Launch the cluster:**
-   ```bash
-   ./launch.sh
-   ```
-   This script will:
-   - Create a Kind cluster named `panda`.
-   - Provision 3 nodes (1 control-plane, 2 workers) with zone labels (`alpha`, `sigma`, `gamma`).
-   - Install `kube-prometheus-stack` (Prometheus + Grafana).
-
-2. **Access Grafana:**
-   - URL: http://localhost:30080
-   - Username: `admin`
-   - Password: `admin`
-
-   *Note: If you cannot access the URL directly, run the following command to forward the port:*
-   ```bash
-   kubectl port-forward svc/monitoring-grafana 30080:80 -n monitoring
-   ```
-
-3. **Destroy the cluster:**
-   ```bash
-   ./destroy.sh
-   ```
-
-## Kafka Deployment
-
-To deploy a Kafka Strimzi cluster with KRaft mode and monitoring:
-
-1. **Run the deployment script:**
-   ```bash
-   ./deploy-kafka.sh
-   ```
-   This will:
-   - Install the Strimzi Cluster Operator via Helm.
-   - Deploy a Kafka cluster with 3 brokers (one per zone).
-   - Configure Prometheus metrics and a custom Grafana dashboard.
-
-2. **Access the Dashboards:**
-   - Go to Grafana (http://localhost:30080).
-   - Look for the## 🐳 Local Docker Registry
-
-This project includes a local Docker registry to cache all container images, enabling:
-- **Faster deployments**: No need to pull images from external registries
-- **Offline operation**: Deploy cluster without internet connection
-- **Reliability**: No dependency on external registry availability
-
-### Setup Registry
-
-The registry is automatically set up when you run `make all`. To manually manage the registry:
-
 ```bash
-# Setup registry and pull all images (one-time setup)
-make registry-setup
-
-# Check registry status and contents
-make registry-status
-
-# Clean up registry
-make registry-clean
+make all
 ```
 
-The registry runs on `localhost:5001` and caches 11 essential images including Kafka, Prometheus, Grafana, and supporting components.
+This runs a 10-step pipeline:
 
-## 🛠️ Makefile Shortcuts
+| Step | Action |
+|------|--------|
+| 1 | Create Kind cluster `panda` + local Docker registry |
+| 2 | Pull all images to local registry (`localhost:5001`) |
+| 3 | Load images from registry into Kind nodes |
+| 4 | Deploy Prometheus & Grafana |
+| 5 | Wait for monitoring readiness |
+| 6 | Deploy Strimzi Kafka (KRaft mode) |
+| 7 | Wait for Kafka readiness |
+| 8 | Deploy Kafka UI |
+| 9 | Deploy Apicurio Registry |
+| 10 | Deploy LitmusChaos |
 
-You can use the `Makefile` to manage the lifecycle of the cluster:
+### Access Points
 
-- **`make all`**: 🚀 Launch cluster, deploy Kafka, and deploy UI (full setup).
-- **`make deploy`**: 📦 Deploy Kafka and Dashboards (updates existing deployment).
-- **`make ui`**: 🖥️ Deploy Kafka UI.
-- **`make test`**: 🧪 Run the performance test script.
-- **`make ports`**: 🔌 Start port forwarding for Grafana, Kafka UI, and Prometheus.
-- **`make registry-setup`**: 🐳 Setup local Docker registry and pull all images.
-- **`make registry-status`**: 📊 Check registry status and contents.
-- **`make registry-clean`**: 🧹 Clean up local registry.
-- **`make destroy`**: 💥 Destroy the cluster.
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Grafana | http://localhost:30080 | admin / admin |
+| Kafka UI | http://localhost:30081 | — |
+| Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
 
-## 📊 Monitoring & Dashboards
- (all working ✅):
-     - **kafka**: ⭐ **User Requested** - All possible metrics + Kubernetes Node Affinity
-     - **Kafka - Complete Monitoring**: Primary Dashboard - All metrics, brokers, topics, zones, JVM
-     - **Kafka Cluster Health**: ✅ Broker status, offline partitions, zone distribution
-     - **Kafka Performance Metrics**: ✅ Topic size growth, partitions, broker count
-     - **Kafka Performance Test Results**: ✅ perf-test topic metrics, message counts, data sizes
-     - **Kafka JVM Metrics**: ✅ Heap memory, GC rate, thread count (with zones)
-     - **Kafka Cluster Metrics (Working)**: Simplified view of broker status and topics
+### Destroy
+
+```bash
+make destroy
+```
+
+## Image Management
+
+All images are defined in `images.env` — the single source of truth. Both `pull-images.sh` and `load-images-to-kind.sh` source this file, eliminating version drift.
+
+### How It Works
+
+1. **Pull** — `pull-images.sh` downloads images to a local Docker registry (`localhost:5001`), detecting platform (arm64/amd64) automatically
+2. **Load** — `load-images-to-kind.sh` pulls from the local registry and loads into Kind nodes. No internet fallback — fails if the image isn't in the registry
+3. **Deploy** — all Helm values and manifests use `imagePullPolicy: Never`, ensuring Kubernetes only uses images already on Kind nodes
+
+### Managing Images Individually
+
+```bash
+# Pull all images (skips already-cached)
+./pull-images.sh
+
+# Load all images into Kind (skips already-loaded)
+./load-images-to-kind.sh
+
+# Check what's in the registry
+make registry-status
+
+# Check what's loaded in Kind
+docker exec -it panda-control-plane crictl images
+```
+
+### Updating an Image
+
+```bash
+# 1. Pull the new version
+docker pull provectuslabs/kafka-ui:v1.0.0
+
+# 2. Tag and push to local registry
+docker tag provectuslabs/kafka-ui:v1.0.0 localhost:5001/provectuslabs/kafka-ui:v1.0.0
+docker push localhost:5001/provectuslabs/kafka-ui:v1.0.0
+
+# 3. Load into Kind
+kind load docker-image provectuslabs/kafka-ui:v1.0.0 --name panda
+
+# 4. Update the tag in images.env and the relevant config, then redeploy
+```
+
+## Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make all` | Full setup (cluster + registry + images + all services) |
+| `make cluster` | Start Kind cluster only |
+| `make images` | Pull and load all images |
+| `make monitoring` | Deploy Prometheus & Grafana |
+| `make kafka` | Deploy Kafka (Strimzi) |
+| `make ui` | Deploy Kafka UI |
+| `make apicurio` | Deploy Apicurio Registry |
+| `make litmus` | Deploy LitmusChaos |
+| `make chaos-ui` | Port-forward Litmus UI |
+| `make chaos-experiments` | Apply chaos experiments |
+| `make velero` | Deploy Velero backup |
+| `make test` | Run Kafka performance test (1M messages) |
+| `make ports` | Start port forwarding |
+| `make status` | Check cluster status |
+| `make destroy` | Destroy cluster |
+
+## Monitoring & Dashboards
+
+Custom Grafana dashboards (auto-provisioned):
+- **Kafka Complete Monitoring** — all metrics, brokers, topics, zones, JVM
+- **Kafka Cluster Health** — broker status, offline partitions, zone distribution
+- **Kafka Performance Metrics** — topic growth, partitions, broker count
+- **Kafka Performance Test Results** — perf-test throughput, message counts
+- **Kafka JVM Metrics** — heap memory, GC rate, thread count per zone
 
 ## Performance Testing
 
-To test Kafka cluster performance with 1 million messages:
+```bash
+make test
+```
 
-1. **Run the performance test:**
-   ```bash
-   ./test-kafka-performance.sh
-   ```
-   This will:
-   - Create a `performance` namespace
-   - Create a test topic with 3 partitions
-   - Deploy a producer that sends 1 million messages
-   - Deploy a consumer that reads those messages
-   - Display throughput and latency metrics
+Creates a `performance` namespace, produces 1M messages across 3 partitions, consumes them, and displays throughput/latency metrics.
 
-2. **Cleanup after testing:**
-   ```bash
-   kubectl delete namespace performance
-   ```
+## Cluster Topology
 
-## Kafka UI
+Defined in `config/cluster.yaml`:
 
-A web-based UI to manage and browse your Kafka cluster:
+| Node | Role | Zone |
+|------|------|------|
+| alpha | Control Plane + Worker | alpha |
+| sigma | Worker | sigma |
+| gamma | Worker | gamma |
 
-1. **Deploy Kafka UI:**
-   ```bash
-   ./deploy-kafka-ui.sh
-   ```
+Resource labels simulate instance types (3 CPU, 6 GB RAM, 10 GB storage). Kind uses host Docker resources.
 
-2. **Access the UI:**
-   - URL: http://localhost:30081
-   - Features:
-     - Browse topics and partitions
-     - View message content and headers
-     - Monitor consumer groups and lag
-     - View broker configurations
-     - Full KRaft mode support
+## Troubleshooting
 
-## Configuration
+### Pod stuck in `ErrImageNeverPull`
 
-- **`config/cluster.yaml`**: Defines the Kind cluster topology.
-    - Node 1 (Control Plane): Name `alpha`, Zone `alpha`
-    - Node 2 (Worker): Name `sigma`, Zone `sigma`
-    - Node 3 (Worker): Name `gamma`, Zone `gamma`
-    - *Note: Resource limits (3CPU/6GB/10GB Storage) are defined as instance types labels for simulation, as Kind relies on host Docker resources.*
+Image not loaded in Kind nodes. Fix:
+```bash
+./load-images-to-kind.sh
+```
 
-- **`config/monitoring.yaml`**: Helm values for `kube-prometheus-stack`.
-    - Configures Grafana admin password and NodePort.
+Or load a specific image manually:
+```bash
+kind load docker-image <image>:<tag> --name panda
+```
 
-- **`config/custom-dashboard.yaml`**: ConfigMap containing a custom "Global Resource Vision" dashboard.
+### Pull timeout (quay.io, scarf.sh)
 
+The pull script continues past failures. Re-run to retry only the failed images:
+```bash
+./pull-images.sh
+```
+
+### Check pod image pull status
+
+```bash
+kubectl describe pod <pod-name> -n <namespace> | grep -A5 Events
+```
+
+## Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `images.env` | Central image manifest (all image:tag definitions) |
+| `config/cluster.yaml` | Kind cluster topology (3 nodes, 3 zones) |
+| `config/monitoring.yaml` | Prometheus + Grafana Helm values |
+| `config/kafka.yaml` | Kafka KRaft cluster + node pools |
+| `config/kafka-ui.yaml` | Kafka UI deployment manifest |
+| `config/apicurio-values-offline.yaml` | Apicurio Registry Helm values |
+| `config/litmus-values.yaml` | LitmusChaos Helm values |
+| `config/storage-classes.yaml` | Zone-specific storage classes |
