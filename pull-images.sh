@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# No set -e: continue past individual pull failures and report at the end
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -91,13 +91,13 @@ push_scarf_image() {
 
 echo -e "${GREEN}--- Standard Images ---${NC}"
 for img in "${ALL_STANDARD_IMAGES[@]}"; do
-    push_to_local_registry "${img}"
+    push_to_local_registry "${img}" || true
 done
 
 echo ""
 echo -e "${GREEN}--- LitmusChaos Portal Images (scarf.sh) ---${NC}"
 for entry in "${LITMUS_SCARF_IMAGES[@]}"; do
-    push_scarf_image "${entry}"
+    push_scarf_image "${entry}" || true
 done
 
 echo ""
@@ -109,3 +109,8 @@ echo "Total: ${TOTAL}  Pulled: ${PULLED}  Skipped: ${SKIPPED}  Failed: ${FAILED}
 echo ""
 echo "Registry contents:"
 curl -s http://${REGISTRY}/v2/_catalog | jq '.repositories | length' 2>/dev/null || echo "(jq not installed)"
+
+if [ "${FAILED}" -gt 0 ]; then
+    echo -e "${YELLOW}Re-run this script to retry the ${FAILED} failed image(s).${NC}"
+    exit 1
+fi

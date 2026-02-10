@@ -29,10 +29,6 @@ echo -e "${GREEN}Connecting registry to kind network...${NC}"
 docker network create kind 2>/dev/null || true
 docker network connect kind kind-registry 2>/dev/null || true
 
-# Pull and push images to local registry
-echo -e "${GREEN}Populating local registry with required images...${NC}"
-./pull-images.sh
-
 # Create Cluster
 echo -e "${GREEN}Creating Kind cluster...${NC}"
 kind delete cluster --name panda || true

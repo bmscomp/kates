@@ -4,31 +4,34 @@
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
-	@echo "Step 1: Starting Kind cluster (includes registry + image pull)..."
+	@echo "Step 1: Starting Kind cluster + registry..."
 	./start-cluster.sh
 	@echo ""
-	@echo "Step 2: Loading images into Kind cluster..."
+	@echo "Step 2: Pulling images to local registry..."
+	./pull-images.sh
+	@echo ""
+	@echo "Step 3: Loading images into Kind cluster..."
 	./load-images-to-kind.sh
 	@echo ""
-	@echo "Step 3: Deploying Monitoring (Prometheus & Grafana)..."
+	@echo "Step 4: Deploying Monitoring (Prometheus & Grafana)..."
 	./deploy-monitoring.sh
 	@echo ""
-	@echo "Step 4: Waiting for monitoring to be ready..."
+	@echo "Step 5: Waiting for monitoring to be ready..."
 	@kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true
 	@echo ""
-	@echo "Step 5: Deploying Kafka (Strimzi)..."
+	@echo "Step 6: Deploying Kafka (Strimzi)..."
 	./deploy-kafka.sh
 	@echo ""
-	@echo "Step 6: Waiting for Kafka to be ready..."
+	@echo "Step 7: Waiting for Kafka to be ready..."
 	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true
 	@echo ""
-	@echo "Step 7: Deploying Kafka UI..."
+	@echo "Step 8: Deploying Kafka UI..."
 	./deploy-kafka-ui.sh
 	@echo ""
-	@echo "Step 8: Deploying Apicurio Registry..."
+	@echo "Step 9: Deploying Apicurio Registry..."
 	./deploy-apicurio.sh
 	@echo ""
-	@echo "Step 9: Deploying LitmusChaos..."
+	@echo "Step 10: Deploying LitmusChaos..."
 	./deploy-litmuschaos.sh
 	@echo ""
 	@echo "✅ Complete setup finished!"
