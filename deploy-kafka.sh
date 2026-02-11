@@ -58,6 +58,7 @@ kubectl apply -f config/kafka-perf-test-dashboard.yaml
 kubectl apply -f config/kafka-working-dashboard.yaml
 kubectl apply -f config/kafka-comprehensive-dashboard.yaml
 kubectl apply -f config/kafka-all-metrics-dashboard.yaml
+kubectl apply -f config/kafka-perf-global-dashboard.yaml
 
 echo -e "${GREEN}Waiting for Kafka cluster to be ready (this may take a few minutes)...${NC}"
 kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n kafka 
