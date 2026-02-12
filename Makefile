@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test destroy clean download-charts litmus
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus
 
 # Default target: Launch complete cluster setup with all services
 all: check-prerequisites
@@ -108,6 +108,30 @@ apicurio:
 test:
 	@echo "🧪 Running Performance Test..."
 	./test-kafka-performance.sh
+
+test-load:
+	@echo "🧪 Running Load Test..."
+	./test-perf-load.sh
+
+test-stress:
+	@echo "🧪 Running Stress Test..."
+	./test-perf-stress.sh
+
+test-spike:
+	@echo "🧪 Running Spike Test..."
+	./test-perf-spike.sh
+
+test-endurance:
+	@echo "🧪 Running Endurance (Soak) Test..."
+	./test-perf-endurance.sh
+
+test-volume:
+	@echo "🧪 Running Volume Test..."
+	./test-perf-volume.sh
+
+test-capacity:
+	@echo "🧪 Running Capacity Test..."
+	./test-perf-capacity.sh
 
 # Port Forwarding
 ports:
@@ -231,4 +255,11 @@ help:
 	@echo "  ports            - Start port forwarding"
 	@echo "  status           - Check cluster status"
 	@echo "  destroy          - Destroy cluster"
+	@echo "  test             - Run baseline 1M-message perf test"
+	@echo "  test-load        - Run load test (concurrent producers/consumers)"
+	@echo "  test-stress      - Run stress test (ramp to breaking point)"
+	@echo "  test-spike       - Run spike test (flash sale simulation)"
+	@echo "  test-endurance   - Run endurance/soak test (sustained load)"
+	@echo "  test-volume      - Run volume test (large data)"
+	@echo "  test-capacity    - Run capacity test (find max throughput)"
 	@echo "  help             - Show this help"

@@ -158,12 +158,12 @@ Leader receives ProduceRequest
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                      KafkaConsumer                            │
+│                      KafkaConsumer                           │
 │                                                              │
 │  1. poll(Duration) → triggers FetchRequest to broker         │
 │     └─ fetch.min.bytes: minimum data before broker responds  │
 │     └─ fetch.max.wait.ms: max time broker waits to fill      │
-│     └─ max.partition.fetch.bytes: max data per partition      │
+│     └─ max.partition.fetch.bytes: max data per partition     │
 │  2. Broker reads from log (usually served from page cache)   │
 │  3. Deserialize records                                      │
 │  4. Application processes records                            │
@@ -1159,6 +1159,565 @@ Throughput lower than expected?
         ├─ Heap > 80%? → Reduce -Xmx or add memory to node pool
         └─ UnderReplicatedPartitions > 0? → Check follower broker health
 ```
+
+---
+
+## Chapter 11: Types of Performance Testing
+
+Performance testing is not a single activity — it is a family of related methodologies, each designed to answer a different question about system behavior. This chapter defines the seven standard types, maps each one to concrete scenarios on the krafter cluster, and provides ready-to-run commands and pass/fail criteria.
+
+### Taxonomy
+
+| Type | Question It Answers | Duration | Load Profile |
+|------|---------------------|----------|--------------|
+| Load | Can the system handle expected production traffic? | 10–30 min | Steady, at target rate |
+| Stress | Where does the system break? | 15–45 min | Ramping beyond limits |
+| Spike | How does the system react to sudden bursts? | 5–15 min | Sharp peaks and valleys |
+| Endurance (Soak) | Does the system degrade over time? | 2–72 hours | Steady, extended |
+| Scalability | How well does the system scale up or out? | 30–60 min | Steady, across configurations |
+| Volume | Can the system handle large datasets? | 30–120 min | Bulk data injection |
+| Capacity | What is the maximum the system can sustain? | 30–60 min | Binary-search ramp |
+
+### 1. Load Testing
+
+**Goal:** Verify that the system performs within acceptable limits under expected production workloads. Load testing does not try to break the system — it validates that normal operating conditions produce acceptable throughput, latency, and resource usage.
+
+**What it measures:**
+- Throughput at target load (records/sec, MB/sec)
+- Latency percentiles (P50, P95, P99) at target load
+- Resource consumption (CPU, heap, disk I/O) under sustained expected traffic
+- Consumer lag stability
+
+**Scenario for krafter:** Simulate 5 concurrent producers each sending 200,000 messages (1KB) at a combined rate of 25,000 msg/sec, while 3 consumers read from the same topic. This mimics a realistic multi-application production environment.
+
+```bash
+# Automated via:
+make test-load
+
+# Or manually — create the topic
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-topics.sh --create --if-not-exists \
+    --bootstrap-server localhost:9092 \
+    --topic load-test \
+    --partitions 3 \
+    --replication-factor 3 \
+    --config min.insync.replicas=2
+
+# Deploy 5 concurrent producer Jobs
+for i in 1 2 3 4 5; do
+cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: load-producer-$i
+  namespace: kafka
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: producer
+        image: quay.io/strimzi/kafka:0.49.0-kafka-4.1.1
+        imagePullPolicy: Never
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          bin/kafka-producer-perf-test.sh \
+            --topic load-test \
+            --num-records 200000 \
+            --record-size 1024 \
+            --throughput 5000 \
+            --producer-props \
+              bootstrap.servers=krafter-kafka-bootstrap.kafka.svc:9092 \
+              acks=all \
+              batch.size=65536 \
+              linger.ms=5 \
+              compression.type=lz4
+EOF
+done
+
+# Deploy 3 concurrent consumer Jobs
+for i in 1 2 3; do
+cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: load-consumer-$i
+  namespace: kafka
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: consumer
+        image: quay.io/strimzi/kafka:0.49.0-kafka-4.1.1
+        imagePullPolicy: Never
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          bin/kafka-consumer-perf-test.sh \
+            --topic load-test \
+            --bootstrap-server krafter-kafka-bootstrap.kafka.svc:9092 \
+            --messages 333334 \
+            --group load-test-group \
+            --show-detailed-stats
+EOF
+done
+```
+
+**Metrics to watch (Grafana — "Kafka Performance Testing" dashboard):**
+- Row 2 (Throughput): Bytes In/sec should show ~25 MB/sec aggregate, balanced across brokers
+- Row 4 (Broker Internals): Request Handler Idle should stay above 50%
+- Row 5 (JVM): Heap usage in a healthy sawtooth pattern
+
+**Pass criteria:**
+- Aggregate throughput ≥ 20,000 records/sec
+- P99 latency < 100ms
+- Consumer lag returns to 0 within 60 seconds of producers finishing
+- No under-replicated partitions
+
+**Cleanup:**
+```bash
+kubectl delete jobs -n kafka -l 'job-name in (load-producer-1,load-producer-2,load-producer-3,load-producer-4,load-producer-5,load-consumer-1,load-consumer-2,load-consumer-3)'
+kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-topics.sh --delete --bootstrap-server localhost:9092 --topic load-test
+```
+
+### 2. Stress Testing
+
+**Goal:** Push the system beyond its normal operating limits to discover the breaking point. Stress testing answers the question: "at what throughput does the cluster start failing, and does it recover gracefully after the overload stops?"
+
+**What it measures:**
+- The throughput at which errors first appear
+- The nature of the failure (timeout, `NotEnoughReplicasException`, OOM, thread starvation)
+- Recovery time after overload is removed
+- Whether data integrity is maintained through the failure and recovery cycle
+
+**Scenario for krafter:** Ramp throughput in steps — 10K, 25K, 50K, 100K, unlimited — and observe where the 2Gi brokers begin to fail. On a 3-broker Kind cluster, memory and request handler threads are the expected bottleneck.
+
+```bash
+# Automated via:
+make test-stress
+
+# Or manually — ramp through increasing throughput targets
+for THROUGHPUT in 10000 25000 50000 100000 -1; do
+  TOPIC="stress-$THROUGHPUT"
+  kubectl exec -n kafka krafter-pool-alpha-0 -- \
+    bin/kafka-topics.sh --create --if-not-exists \
+      --bootstrap-server localhost:9092 \
+      --topic $TOPIC --partitions 3 --replication-factor 3
+
+  echo "=== Throughput target: $THROUGHPUT msg/sec ==="
+  kubectl exec -n kafka krafter-pool-alpha-0 -- \
+    bin/kafka-producer-perf-test.sh \
+      --topic $TOPIC \
+      --num-records 500000 \
+      --record-size 1024 \
+      --throughput $THROUGHPUT \
+      --producer-props \
+        bootstrap.servers=localhost:9092 \
+        acks=all \
+        batch.size=131072 \
+        linger.ms=10
+
+  echo "--- Cooling down 30 seconds ---"
+  sleep 30
+done
+```
+
+**Recovery validation:** After the unlimited-rate run (which is likely to stress the cluster), run a simple 100K-message test at a known-good rate to verify the cluster returns to baseline performance:
+
+```bash
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-producer-perf-test.sh \
+    --topic stress-recovery \
+    --num-records 100000 \
+    --record-size 1024 \
+    --throughput 10000 \
+    --producer-props \
+      bootstrap.servers=localhost:9092 \
+      acks=all
+```
+
+**Integration with chaos experiments:** Combine stress testing with `make chaos-kafka-cpu-stress` to test the cluster under simultaneous CPU pressure and high throughput. This is where stress testing and chaos engineering overlap.
+
+**Metrics to watch:**
+- Row 4 (Broker Internals): Request Handler Idle dropping below 30% signals thread starvation
+- Row 5 (JVM): watch for GC pauses exceeding 200ms
+- Row 3 (Replication): ISR shrinks indicate followers can't keep up
+
+**Pass criteria:**
+- Cluster sustains ≥ 50,000 msg/sec without errors (stress test — not the breaking point)
+- After overload, recovery to baseline throughput within 2 minutes
+- No data corruption or permanent ISR loss
+
+### 3. Spike Testing
+
+**Goal:** Test the system's response to sudden, dramatic changes in load — both spikes up and drops back down. This simulates real-world events like flash sales, DDoS attacks, or marketing campaign launches.
+
+**What it measures:**
+- System stability during abrupt load increase (10× baseline or more)
+- Latency behavior during the spike (how bad does P99 get?)
+- Recovery speed after the spike subsides
+- Whether any messages are lost or duplicated during the transition
+
+**Scenario for krafter:** Simulate a flash sale by running a low baseline (1,000 msg/sec), then spiking to 50,000 msg/sec for 2 minutes, then dropping back to baseline.
+
+```bash
+# Automated via:
+make test-spike
+
+# Or manually — Phase 1: baseline (1 minute at 1K msg/sec)
+echo "=== Phase 1: Baseline (1,000 msg/sec for 60s) ==="
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-producer-perf-test.sh \
+    --topic spike-test \
+    --num-records 60000 \
+    --record-size 1024 \
+    --throughput 1000 \
+    --producer-props \
+      bootstrap.servers=localhost:9092 \
+      acks=all \
+      batch.size=65536 \
+      linger.ms=5
+
+# Phase 2: spike (2 minutes at unlimited throughput, 3 concurrent producers)
+echo "=== Phase 2: SPIKE (3 concurrent producers, unlimited) ==="
+for i in 1 2 3; do
+cat <<EOF | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spike-burst-$i
+  namespace: kafka
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: producer
+        image: quay.io/strimzi/kafka:0.49.0-kafka-4.1.1
+        imagePullPolicy: Never
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          bin/kafka-producer-perf-test.sh \
+            --topic spike-test \
+            --num-records 500000 \
+            --record-size 1024 \
+            --throughput -1 \
+            --producer-props \
+              bootstrap.servers=krafter-kafka-bootstrap.kafka.svc:9092 \
+              acks=all \
+              batch.size=131072 \
+              linger.ms=10
+EOF
+done
+
+# Wait for burst to complete
+kubectl wait --for=condition=complete --timeout=300s job/spike-burst-1 job/spike-burst-2 job/spike-burst-3 -n kafka || true
+
+# Phase 3: recovery (back to baseline)
+echo "=== Phase 3: Recovery baseline (1,000 msg/sec) ==="
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-producer-perf-test.sh \
+    --topic spike-test \
+    --num-records 60000 \
+    --record-size 1024 \
+    --throughput 1000 \
+    --producer-props \
+      bootstrap.servers=localhost:9092 \
+      acks=all
+```
+
+**Metrics to watch:**
+- Row 2 (Throughput): should show a flat line → sharp spike → flat line pattern
+- Row 4 (Broker Internals): Request Handler Idle will dip during spike — how low?
+- Row 3 (Replication): any ISR churn during the spike?
+
+**Pass criteria:**
+- No message loss across all 3 phases
+- P99 latency during spike stays below 500ms
+- Post-spike baseline performance matches pre-spike within 10%
+- No under-replicated partitions during or after the spike
+
+### 4. Endurance (Soak) Testing
+
+**Goal:** Run the system under expected load for an extended period to detect problems that only emerge over time: memory leaks, GC degradation, log segment accumulation, file descriptor exhaustion, and performance drift.
+
+**What it measures:**
+- Throughput stability over hours (does it stay constant or decay?)
+- Heap usage trend (sawtooth is healthy; climbing is a memory leak)
+- GC pause duration trend (constant is good; growing means old-gen filling)
+- Disk usage growth and log segment rolling behavior
+- Thread count stability
+
+**Scenario for krafter:** Produce at a steady 5,000 msg/sec for 1 hour (the default, can be extended to 48–72 hours for full soak). This is conservative enough that the 2Gi brokers should handle it indefinitely — the point is to watch for slow degradation.
+
+```bash
+# Automated via:
+make test-endurance
+
+# For a longer soak (adjust DURATION_MINUTES):
+DURATION_MINUTES=2880 ./test-perf-endurance.sh  # 48 hours
+
+# Or manually — 1-hour sustained test
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-producer-perf-test.sh \
+    --topic endurance-test \
+    --num-records 18000000 \
+    --record-size 1024 \
+    --throughput 5000 \
+    --producer-props \
+      bootstrap.servers=localhost:9092 \
+      acks=all \
+      batch.size=65536 \
+      linger.ms=5 \
+      compression.type=lz4
+```
+
+This builds on Chapter 8 Scenario 1 (Sustained Load Over Time) but adds formal structure and explicit degradation-detection criteria.
+
+**What to watch during a soak — periodic checkpoints:**
+
+Run this every 15 minutes during the soak to capture JVM state:
+
+```bash
+# Heap and GC snapshot
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bash -c 'echo "=== $(date) ==="; \
+    echo "Heap:"; \
+    cat /proc/$(pgrep -f kafka)/status | grep -E "VmRSS|VmSize"; \
+    echo "Threads: $(ls /proc/$(pgrep -f kafka)/task | wc -l)"'
+```
+
+Or use the Grafana "Kafka JVM Metrics" dashboard to observe trends continuously.
+
+**Pass criteria:**
+- Throughput variance < 10% across the entire duration
+- Heap usage peaks remain consistent (no upward trend)
+- GC pause durations do not increase over time
+- No under-replicated partitions
+- Thread count remains stable (±5 threads)
+- Disk usage grows linearly (no unexpected spikes from log segment issues)
+
+### 5. Scalability Testing
+
+**Goal:** Measure how performance changes when you scale system resources up (more memory/CPU per broker) or out (more partitions, more consumers). Scalability testing determines the relationship between resource investment and performance gain.
+
+**What it measures:**
+- Throughput improvement per additional partition
+- Throughput improvement per additional consumer
+- Effect of increased broker memory on latency
+- Whether adding resources yields linear, sub-linear, or no improvement
+
+**Scenario for krafter:** Test the same workload across increasing partition counts to measure horizontal scalability within the existing 3-broker cluster.
+
+```bash
+# Horizontal scalability: partitions
+for PARTITIONS in 1 3 6 9 12; do
+  TOPIC="scale-p${PARTITIONS}"
+  kubectl exec -n kafka krafter-pool-alpha-0 -- \
+    bin/kafka-topics.sh --create --if-not-exists \
+      --bootstrap-server localhost:9092 \
+      --topic $TOPIC --partitions $PARTITIONS --replication-factor 3
+
+  echo "=== Partitions: $PARTITIONS ==="
+  kubectl exec -n kafka krafter-pool-alpha-0 -- \
+    bin/kafka-producer-perf-test.sh \
+      --topic $TOPIC \
+      --num-records 500000 \
+      --record-size 1024 \
+      --throughput -1 \
+      --producer-props \
+        bootstrap.servers=localhost:9092 \
+        acks=all \
+        batch.size=65536 \
+        linger.ms=5
+
+  sleep 15
+done
+```
+
+**Consumer scalability:** Test how throughput scales with consumer count by deploying 1, 2, and 3 consumers against a 3-partition topic (see Chapter 5 — Consumer Parallelism for the theory).
+
+**Vertical scalability (resource adjustment):** To test the effect of more memory, temporarily modify the `KafkaNodePool` resources in `config/kafka.yaml` (see Chapter 6 — Strimzi Resource Requests in Practice), run the same benchmark, and compare. Remember to restore original values afterward.
+
+**Pass criteria:**
+- Throughput scales at least 2× from 1 partition to 3 partitions
+- Throughput scales at least 1.5× from 3 partitions to 9 partitions (sub-linear is expected)
+- Beyond 12 partitions on this cluster, diminishing returns are expected (document the plateau)
+
+### 6. Volume Testing
+
+**Goal:** Test system performance when processing very large amounts of data. Volume testing is about data quantity — millions of records, large messages, or both — and its impact on disk, compaction, page cache, and segment management.
+
+**What it measures:**
+- Throughput degradation as total data volume grows
+- Log segment rolling and compaction behavior
+- Disk I/O patterns under heavy write load
+- Impact of large messages on batch efficiency and memory pressure
+- Consumer performance reading from large topics
+
+**Scenario for krafter:** Produce 5 million records at 100KB each (≈500 GB before replication), then measure consumer throughput. On the krafter cluster with 10Gi per broker, this will fill the disks, so use short retention.
+
+```bash
+# Automated via:
+make test-volume
+
+# Or manually — create topic with short retention
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-topics.sh --create --if-not-exists \
+    --bootstrap-server localhost:9092 \
+    --topic volume-test \
+    --partitions 3 \
+    --replication-factor 3 \
+    --config min.insync.replicas=2 \
+    --config retention.ms=1800000 \
+    --config max.message.bytes=1048576
+
+# Large-message volume test (100KB per record)
+echo "=== Volume test: 50,000 x 100KB ==="
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-producer-perf-test.sh \
+    --topic volume-test \
+    --num-records 50000 \
+    --record-size 102400 \
+    --throughput -1 \
+    --producer-props \
+      bootstrap.servers=localhost:9092 \
+      acks=all \
+      max.request.size=1048576 \
+      batch.size=131072
+
+# High-count volume test (5M x 1KB)
+echo "=== Volume test: 5,000,000 x 1KB ==="
+kubectl exec -n kafka krafter-pool-alpha-0 -- \
+  bin/kafka-producer-perf-test.sh \
+    --topic volume-test-count \
+    --num-records 5000000 \
+    --record-size 1024 \
+    --throughput -1 \
+    --producer-props \
+      bootstrap.servers=localhost:9092 \
+      acks=all \
+      batch.size=131072 \
+      linger.ms=10 \
+      compression.type=lz4
+```
+
+**Metrics to watch:**
+- Row 6 (Resource Usage): disk space growth per broker
+- Row 7 (Test Topic Detail): log segment count and size per partition
+- Row 5 (JVM): heap pressure from large batches
+- Row 2 (Throughput): throughput curve — does it flatten as disk fills?
+
+**Pass criteria:**
+- Large messages (100KB): throughput ≥ 10 MB/sec sustained
+- High count (5M × 1KB): no throughput degradation in the last 20% of the run compared to the first 20%
+- Log segments roll correctly at `log.segment.bytes` boundary
+- Disk usage stays within available capacity (retention policy handles cleanup)
+
+### 7. Capacity Testing
+
+**Goal:** Determine the absolute maximum sustained throughput and concurrent user count the system can handle before performance drops below acceptable thresholds. Unlike stress testing (which finds the breaking point), capacity testing finds the usable maximum — the highest load where SLAs are still met.
+
+**What it measures:**
+- Maximum sustained throughput where P99 latency stays below a defined threshold
+- Maximum number of concurrent producers before latency degrades
+- Effective cluster bandwidth ceiling
+- The relationship between throughput and latency (the "latency knee")
+
+**Scenario for krafter:** Use a binary-search approach to find the maximum throughput where P99 stays under 500ms. Start at 1,000 msg/sec, double until P99 exceeds threshold, then bisect to find the precise capacity point.
+
+```bash
+# Automated via:
+make test-capacity
+
+# Or manually — stepwise capacity discovery
+for THROUGHPUT in 5000 10000 20000 40000 80000 -1; do
+  echo "=== Capacity probe: $THROUGHPUT msg/sec ==="
+  kubectl exec -n kafka krafter-pool-alpha-0 -- \
+    bin/kafka-producer-perf-test.sh \
+      --topic capacity-test \
+      --num-records 200000 \
+      --record-size 1024 \
+      --throughput $THROUGHPUT \
+      --producer-props \
+        bootstrap.servers=localhost:9092 \
+        acks=all \
+        batch.size=65536 \
+        linger.ms=5
+
+  echo "--- Record the P99 latency from the output above ---"
+  sleep 10
+done
+```
+
+The first throughput level where P99 exceeds your threshold (e.g., 500ms) is your capacity ceiling. The level just below it is your maximum sustainable throughput.
+
+**Multi-producer capacity:** Repeat the test with increasing producer counts (1, 2, 3, 5, 10 concurrent producers) to find the maximum concurrent producer count.
+
+**Documenting the capacity envelope:**
+
+After running capacity tests, fill in this table for your cluster:
+
+| Metric | Value |
+|--------|-------|
+| Max throughput (single producer, P99 < 100ms) | ___ msg/sec |
+| Max throughput (single producer, P99 < 500ms) | ___ msg/sec |
+| Max throughput (5 producers, P99 < 500ms) | ___ msg/sec aggregate |
+| Max concurrent producers (P99 < 500ms @ 10K msg/sec each) | ___ producers |
+| Max consumer throughput (single consumer) | ___ MB/sec |
+| Max sustained throughput (1-hour soak, P99 < 200ms) | ___ msg/sec |
+
+This table becomes the cluster's performance specification and the basis for capacity planning decisions.
+
+### Choosing the Right Test Type
+
+Use this flowchart to decide which test type to run:
+
+```
+What do you need to know?
+    │
+    ├─ "Can it handle our expected traffic?"
+    │   └─ Load Testing (Section 1)
+    │
+    ├─ "Where does it break?"
+    │   └─ Stress Testing (Section 2)
+    │
+    ├─ "Can it handle sudden surges?"
+    │   └─ Spike Testing (Section 3)
+    │
+    ├─ "Will it degrade over time?"
+    │   └─ Endurance Testing (Section 4)
+    │
+    ├─ "Does adding resources help?"
+    │   └─ Scalability Testing (Section 5)
+    │
+    ├─ "Can it handle massive datasets?"
+    │   └─ Volume Testing (Section 6)
+    │
+    └─ "What's the absolute maximum?"
+        └─ Capacity Testing (Section 7)
+```
+
+### Automation Scripts
+
+Each test type has a corresponding script in the project root:
+
+| Script | Makefile Target | Default Duration |
+|--------|----------------|-----------------|
+| `test-perf-load.sh` | `make test-load` | ~10 min |
+| `test-perf-stress.sh` | `make test-stress` | ~15 min |
+| `test-perf-spike.sh` | `make test-spike` | ~10 min |
+| `test-perf-endurance.sh` | `make test-endurance` | ~60 min |
+| `test-perf-volume.sh` | `make test-volume` | ~20 min |
+| `test-perf-capacity.sh` | `make test-capacity` | ~15 min |
+
+All scripts are configurable via environment variables (e.g., `PRODUCERS=5`, `DURATION_MINUTES=120`). Run with `--help` or read the script header for details.
 
 ---
 
