@@ -1,6 +1,6 @@
 # Testing Guide
 
-KATES has 88 tests across 9 test classes. All tests run with `mvn test`.
+Kates has 88 tests across 9 test classes. All tests run with `mvn test`.
 
 ## Test Architecture
 

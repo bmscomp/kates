@@ -156,8 +156,14 @@ curl -X POST http://localhost:8080/api/tests \
 
 ## Test Spec Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
+All parameters are configurable at three levels (in priority order):
+
+1. **API request** — values in the `spec` object of `POST /api/tests` always win
+2. **Per-type defaults** — `kates.tests.{type}.*` properties or `KATES_TESTS_{TYPE}_*` env vars
+3. **Built-in defaults** — hardcoded fallbacks in `TestTypeDefaults`
+
+| Parameter | Global Default | Description |
+|-----------|---------------|-------------|
 | `topic` | auto-generated | Topic name (e.g. `load-test`, `stress-test`) |
 | `numProducers` | `1` | Number of concurrent producer tasks |
 | `numConsumers` | `1` | Number of concurrent consumer tasks |
@@ -172,3 +178,29 @@ curl -X POST http://localhost:8080/api/tests \
 | `batchSize` | `65,536` | Producer batch.size in bytes |
 | `lingerMs` | `5` | Producer linger.ms |
 | `compressionType` | `lz4` | Producer compression codec |
+
+### Per-Type Defaults Summary
+
+| Type | Partitions | Batch Size | Linger | Acks | Compression | Producers | Duration |
+|------|-----------|------------|--------|------|-------------|-----------|----------|
+| LOAD | 3 | 64 KB | 5 ms | all | lz4 | 1 | 10 min |
+| STRESS | **6** | **128 KB** | **10 ms** | all | lz4 | **3** | **15 min** |
+| SPIKE | 3 | 128 KB | **0 ms** | **1** | **none** | 1 | **5 min** |
+| ENDURANCE | 3 | 64 KB | 5 ms | all | lz4 | 1 | **1 hour** |
+| VOLUME | **6** | **256 KB** | **50 ms** | all | lz4 | 1 | 10 min |
+| CAPACITY | **12** | 128 KB | 10 ms | all | lz4 | **5** | **20 min** |
+| ROUNDTRIP | 3 | **16 KB** | **0 ms** | all | **none** | 1 | 10 min |
+
+Bold values indicate overrides from the global default.
+
+### Overriding via ConfigMap
+
+To change a per-type default without rebuilding:
+
+```bash
+kubectl edit configmap kates-config -n kates
+# Change KATES_TESTS_STRESS_PARTITIONS: "12"
+kubectl rollout restart deployment/kates -n kates
+```
+
+The `/api/health` endpoint shows the effective per-type configuration.

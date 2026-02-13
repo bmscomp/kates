@@ -16,6 +16,7 @@ Content-Type: application/json
 ```json
 {
   "type": "LOAD",
+  "backend": "native",
   "spec": {
     "topic": "my-perf-test",
     "numProducers": 3,
@@ -35,7 +36,7 @@ Content-Type: application/json
 }
 ```
 
-The `spec` object is optional — all fields have sensible defaults. Only `type` is required.
+Only `type` is required. The optional `backend` field selects the execution engine (`native` or `trogdor`, defaults to the configured `kates.engine.default-backend`). The `spec` object is optional — omitted values are filled from per-test-type defaults (see [Test Types](test-types.md)).
 
 **Response: `202 Accepted`**
 
@@ -163,15 +164,29 @@ GET /api/health
 ```json
 {
   "status": "UP",
+  "engine": {
+    "activeBackend": "native",
+    "availableBackends": ["native", "trogdor"]
+  },
   "kafka": {
     "status": "UP",
-    "message": "Kafka cluster is reachable"
+    "message": "Kafka cluster is reachable",
+    "bootstrapServers": "krafter-kafka-bootstrap.kafka.svc:9092"
   },
-  "trogdor": {
-    "status": "UNKNOWN",
-    "message": "Trogdor health check requires coordinator deployment"
+  "tests": {
+    "load": {
+      "partitions": 3, "batchSize": 65536, "numProducers": 1, "..."
+    },
+    "stress": {
+      "partitions": 6, "batchSize": 131072, "numProducers": 3, "..."
+    },
+    "spike": { "acks": "1", "lingerMs": 0, "compressionType": "none", "..." },
+    "endurance": { "throughput": 5000, "durationMs": 3600000, "..." },
+    "volume": { "recordSize": 10240, "batchSize": 262144, "..." },
+    "capacity": { "partitions": 12, "numProducers": 5, "..." },
+    "roundtrip": { "batchSize": 16384, "compressionType": "none", "..." }
   }
 }
 ```
 
-The overall `status` is `UP` when Kafka is reachable, or `DEGRADED` when it is not.
+The `tests` section shows the effective per-type configuration, reflecting values from the ConfigMap, `application.properties`, and built-in defaults. This is useful for verifying that ConfigMap changes are active.
