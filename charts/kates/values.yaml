@@ -1,0 +1,111 @@
+replicaCount: 1
+
+image:
+  repository: kates
+  tag: latest
+  pullPolicy: Never
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+kafka:
+  bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+
+trogdor:
+  coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"
+
+engine:
+  defaultBackend: "native"
+
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    database: kates
+    username: kates
+    password: kates
+  storage:
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "250m"
+
+defaults:
+  replicationFactor: "3"
+  partitions: "3"
+  minInsyncReplicas: "2"
+  acks: "all"
+  batchSize: "65536"
+  lingerMs: "5"
+  compressionType: "lz4"
+  recordSize: "1024"
+  numRecords: "1000000"
+  throughput: "-1"
+  durationMs: "600000"
+  numProducers: "1"
+  numConsumers: "1"
+
+tests:
+  load:
+    partitions: "3"
+    batchSize: "65536"
+    lingerMs: "5"
+    numRecords: "1000000"
+    durationMs: "600000"
+    numProducers: "1"
+  stress:
+    partitions: "6"
+    batchSize: "131072"
+    lingerMs: "10"
+    numRecords: "5000000"
+    durationMs: "900000"
+    numProducers: "3"
+  spike:
+    acks: "1"
+    batchSize: "131072"
+    lingerMs: "0"
+    compressionType: "none"
+    numRecords: "2000000"
+    durationMs: "300000"
+  endurance:
+    numRecords: "10000000"
+    throughput: "5000"
+    durationMs: "3600000"
+  volume:
+    partitions: "6"
+    batchSize: "262144"
+    lingerMs: "50"
+    recordSize: "10240"
+    numRecords: "2000000"
+  capacity:
+    partitions: "12"
+    batchSize: "131072"
+    lingerMs: "10"
+    numRecords: "10000000"
+    durationMs: "1200000"
+    numProducers: "5"
+  roundtrip:
+    batchSize: "16384"
+    lingerMs: "0"
+    compressionType: "none"
+    numRecords: "500000"
+    throughput: "10000"

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: kates
+description: Kates — Kafka Advanced Testing & Engineering Suite
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - kafka
+  - testing
+  - benchmarking
+  - chaos-engineering
+home: https://github.com/klster/kates
+maintainers:
+  - name: klster

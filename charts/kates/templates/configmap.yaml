@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kates.fullname" . }}-config
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+data:
+  KATES_KAFKA_BOOTSTRAP_SERVERS: {{ .Values.kafka.bootstrapServers | quote }}
+  KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
+  KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}
+
+  {{- if .Values.postgresql.enabled }}
+  QUARKUS_DATASOURCE_DB_KIND: "postgresql"
+  QUARKUS_DATASOURCE_JDBC_URL: {{ include "kates.postgresql.jdbcUrl" . | quote }}
+  QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: "none"
+  QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+  QUARKUS_FLYWAY_BASELINE_ON_MIGRATE: "true"
+  {{- end }}
+
+  KATES_DEFAULTS_REPLICATION_FACTOR: {{ .Values.defaults.replicationFactor | quote }}
+  KATES_DEFAULTS_PARTITIONS: {{ .Values.defaults.partitions | quote }}
+  KATES_DEFAULTS_MIN_INSYNC_REPLICAS: {{ .Values.defaults.minInsyncReplicas | quote }}
+  KATES_DEFAULTS_ACKS: {{ .Values.defaults.acks | quote }}
+  KATES_DEFAULTS_BATCH_SIZE: {{ .Values.defaults.batchSize | quote }}
+  KATES_DEFAULTS_LINGER_MS: {{ .Values.defaults.lingerMs | quote }}
+  KATES_DEFAULTS_COMPRESSION_TYPE: {{ .Values.defaults.compressionType | quote }}
+  KATES_DEFAULTS_RECORD_SIZE: {{ .Values.defaults.recordSize | quote }}
+  KATES_DEFAULTS_NUM_RECORDS: {{ .Values.defaults.numRecords | quote }}
+  KATES_DEFAULTS_THROUGHPUT: {{ .Values.defaults.throughput | quote }}
+  KATES_DEFAULTS_DURATION_MS: {{ .Values.defaults.durationMs | quote }}
+  KATES_DEFAULTS_NUM_PRODUCERS: {{ .Values.defaults.numProducers | quote }}
+  KATES_DEFAULTS_NUM_CONSUMERS: {{ .Values.defaults.numConsumers | quote }}
+
+  {{- with .Values.tests.stress }}
+  KATES_TESTS_STRESS_PARTITIONS: {{ .partitions | quote }}
+  KATES_TESTS_STRESS_BATCH_SIZE: {{ .batchSize | quote }}
+  KATES_TESTS_STRESS_LINGER_MS: {{ .lingerMs | quote }}
+  KATES_TESTS_STRESS_NUM_RECORDS: {{ .numRecords | quote }}
+  KATES_TESTS_STRESS_DURATION_MS: {{ .durationMs | quote }}
+  KATES_TESTS_STRESS_NUM_PRODUCERS: {{ .numProducers | quote }}
+  {{- end }}
+
+  {{- with .Values.tests.spike }}
+  KATES_TESTS_SPIKE_ACKS: {{ .acks | quote }}
+  KATES_TESTS_SPIKE_BATCH_SIZE: {{ .batchSize | quote }}
+  KATES_TESTS_SPIKE_LINGER_MS: {{ .lingerMs | quote }}
+  KATES_TESTS_SPIKE_COMPRESSION_TYPE: {{ .compressionType | quote }}
+  KATES_TESTS_SPIKE_NUM_RECORDS: {{ .numRecords | quote }}
+  KATES_TESTS_SPIKE_DURATION_MS: {{ .durationMs | quote }}
+  {{- end }}
+
+  {{- with .Values.tests.endurance }}
+  KATES_TESTS_ENDURANCE_NUM_RECORDS: {{ .numRecords | quote }}
+  KATES_TESTS_ENDURANCE_THROUGHPUT: {{ .throughput | quote }}
+  KATES_TESTS_ENDURANCE_DURATION_MS: {{ .durationMs | quote }}
+  {{- end }}
+
+  {{- with .Values.tests.volume }}
+  KATES_TESTS_VOLUME_PARTITIONS: {{ .partitions | quote }}
+  KATES_TESTS_VOLUME_BATCH_SIZE: {{ .batchSize | quote }}
+  KATES_TESTS_VOLUME_LINGER_MS: {{ .lingerMs | quote }}
+  KATES_TESTS_VOLUME_RECORD_SIZE: {{ .recordSize | quote }}
+  KATES_TESTS_VOLUME_NUM_RECORDS: {{ .numRecords | quote }}
+  {{- end }}
+
+  {{- with .Values.tests.capacity }}
+  KATES_TESTS_CAPACITY_PARTITIONS: {{ .partitions | quote }}
+  KATES_TESTS_CAPACITY_BATCH_SIZE: {{ .batchSize | quote }}
+  KATES_TESTS_CAPACITY_LINGER_MS: {{ .lingerMs | quote }}
+  KATES_TESTS_CAPACITY_NUM_RECORDS: {{ .numRecords | quote }}
+  KATES_TESTS_CAPACITY_DURATION_MS: {{ .durationMs | quote }}
+  KATES_TESTS_CAPACITY_NUM_PRODUCERS: {{ .numProducers | quote }}
+  {{- end }}
+
+  {{- with .Values.tests.roundtrip }}
+  KATES_TESTS_ROUNDTRIP_BATCH_SIZE: {{ .batchSize | quote }}
+  KATES_TESTS_ROUNDTRIP_LINGER_MS: {{ .lingerMs | quote }}
+  KATES_TESTS_ROUNDTRIP_COMPRESSION_TYPE: {{ .compressionType | quote }}
+  KATES_TESTS_ROUNDTRIP_NUM_RECORDS: {{ .numRecords | quote }}
+  KATES_TESTS_ROUNDTRIP_THROUGHPUT: {{ .throughput | quote }}
+  {{- end }}
