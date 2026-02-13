@@ -106,7 +106,6 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         task.getProducerConfig().forEach(props::put);
 
-        byte[] payload = new byte[task.getRecordSize()];
         long deadline = System.currentTimeMillis() + task.getDurationMs();
         long targetNanosPerMsg = task.getTargetMessagesPerSec() > 0
                 ? 1_000_000_000L / task.getTargetMessagesPerSec()
@@ -129,12 +128,21 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     nextSendNanos = now + targetNanosPerMsg;
                 }
 
+                long seq = sent;
+                long tsNanos = System.nanoTime();
+                byte[] payload = SequencedPayload.encode(
+                        seq, tsNanos, state.runIdHash, task.getRecordSize());
+                state.ackTracker.recordSent(seq, tsNanos);
+
                 long sendStart = System.nanoTime();
                 producer.send(
                         new ProducerRecord<>(task.getTopic(), payload),
                         (metadata, exception) -> {
                             if (exception != null) {
                                 state.errors.incrementAndGet();
+                                state.ackTracker.recordFailed(seq);
+                            } else {
+                                state.ackTracker.recordAcked(seq);
                             }
                         });
                 long latencyNs = System.nanoTime() - sendStart;
@@ -185,6 +193,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         final AtomicLong errors = new AtomicLong();
         final AtomicBoolean stopRequested = new AtomicBoolean();
         final LatencyHistogram histogram = new LatencyHistogram();
+        final AckTracker ackTracker = new AckTracker();
+        final long runIdHash;
 
         volatile TaskStatus status = TaskStatus.PENDING;
         volatile long startTimeMs;
@@ -194,6 +204,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
+            this.runIdHash = SequencedPayload.hashRunId(task.getTaskId());
         }
 
         BenchmarkStatus toStatus() {

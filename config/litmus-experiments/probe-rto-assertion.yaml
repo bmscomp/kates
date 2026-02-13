@@ -1,0 +1,143 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rto-rpo-probe-config
+  namespace: kafka
+  labels:
+    app.kubernetes.io/managed-by: kates
+    kates.klster.com/component: chaos-probe
+data:
+  rto-probe.sh: |
+    #!/bin/bash
+    # RTO Assertion Probe
+    # Measures time from fault injection to recovery condition being met.
+    #
+    # Required env vars:
+    #   SLA_RTO_SEC       - Maximum acceptable RTO in seconds (e.g., 30)
+    #   RECOVERY_CMD      - Shell command that exits 0 when recovered
+    #   POLL_INTERVAL_SEC - Polling interval (default: 5)
+    #
+    # Outputs:
+    #   RTO_SECONDS=N     - Measured recovery time
+    #   Exit 0 if RTO ≤ SLA, exit 1 if RTO > SLA
+
+    set -euo pipefail
+
+    POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-5}"
+    MAX_WAIT_SEC="${MAX_WAIT_SEC:-300}"
+    FAULT_START_EPOCH="${FAULT_START_EPOCH:-$(date +%s)}"
+
+    echo "RTO Probe: SLA=${SLA_RTO_SEC}s, poll=${POLL_INTERVAL_SEC}s, max_wait=${MAX_WAIT_SEC}s"
+
+    ELAPSED=0
+    while [ "$ELAPSED" -lt "$MAX_WAIT_SEC" ]; do
+      if eval "$RECOVERY_CMD" > /dev/null 2>&1; then
+        RECOVERY_EPOCH=$(date +%s)
+        RTO_SECONDS=$((RECOVERY_EPOCH - FAULT_START_EPOCH))
+        echo "RTO_SECONDS=${RTO_SECONDS}"
+
+        if [ "$RTO_SECONDS" -le "$SLA_RTO_SEC" ]; then
+          echo "PASS: RTO ${RTO_SECONDS}s ≤ SLA ${SLA_RTO_SEC}s"
+          exit 0
+        else
+          echo "FAIL: RTO ${RTO_SECONDS}s > SLA ${SLA_RTO_SEC}s"
+          exit 1
+        fi
+      fi
+      sleep "$POLL_INTERVAL_SEC"
+      ELAPSED=$((ELAPSED + POLL_INTERVAL_SEC))
+    done
+
+    echo "FAIL: Recovery not achieved within ${MAX_WAIT_SEC}s"
+    exit 1
+
+  rpo-probe.sh: |
+    #!/bin/bash
+    # RPO Assertion Probe
+    # Measures data loss by comparing produced vs consumed record counts.
+    #
+    # Required env vars:
+    #   SLA_MAX_LOSS_PCT  - Maximum acceptable data loss percentage (e.g., 0.1)
+    #   TOPIC             - Kafka topic to check
+    #   EXPECTED_RECORDS  - Number of records that were produced
+    #   BOOTSTRAP_SERVER  - Kafka bootstrap server (default: localhost:9092)
+
+    set -euo pipefail
+
+    BOOTSTRAP_SERVER="${BOOTSTRAP_SERVER:-localhost:9092}"
+    BROKER_POD="${BROKER_POD:-krafter-pool-alpha-0}"
+
+    echo "RPO Probe: topic=${TOPIC}, expected=${EXPECTED_RECORDS}, max_loss=${SLA_MAX_LOSS_PCT}%"
+
+    # Count records across all partitions
+    ACTUAL=$(kubectl exec -n kafka "$BROKER_POD" -- kafka-run-class.sh \
+      kafka.tools.GetOffsetShell \
+      --broker-list "$BOOTSTRAP_SERVER" \
+      --topic "$TOPIC" \
+      --time -1 2>/dev/null | \
+      awk -F ':' '{sum += $3} END {print sum}')
+
+    if [ -z "$ACTUAL" ] || [ "$ACTUAL" -eq 0 ]; then
+      echo "FAIL: Could not read topic offsets"
+      exit 1
+    fi
+
+    LOST=$((EXPECTED_RECORDS - ACTUAL))
+    if [ "$LOST" -lt 0 ]; then LOST=0; fi
+
+    LOSS_PCT=$(echo "scale=4; $LOST * 100 / $EXPECTED_RECORDS" | bc -l)
+    echo "CONSUMED=${ACTUAL} LOST=${LOST} LOSS_PCT=${LOSS_PCT}%"
+
+    PASS=$(echo "$LOSS_PCT <= $SLA_MAX_LOSS_PCT" | bc -l)
+    if [ "$PASS" -eq 1 ]; then
+      echo "PASS: Data loss ${LOSS_PCT}% ≤ SLA ${SLA_MAX_LOSS_PCT}%"
+      exit 0
+    else
+      echo "FAIL: Data loss ${LOSS_PCT}% > SLA ${SLA_MAX_LOSS_PCT}%"
+      exit 1
+    fi
+
+  throughput-recovery-probe.sh: |
+    #!/bin/bash
+    # Throughput Recovery Probe
+    # Measures time until producer throughput returns to baseline.
+    #
+    # Required env vars:
+    #   BASELINE_THROUGHPUT - Minimum acceptable throughput (records/sec)
+    #   SLA_RECOVERY_SEC    - Max time to recover throughput
+    #   BOOTSTRAP_SERVER    - Kafka bootstrap server
+
+    set -euo pipefail
+
+    BOOTSTRAP_SERVER="${BOOTSTRAP_SERVER:-localhost:9092}"
+    BROKER_POD="${BROKER_POD:-krafter-pool-alpha-0}"
+    POLL_INTERVAL=10
+    START_EPOCH=$(date +%s)
+
+    echo "Throughput Recovery Probe: baseline=${BASELINE_THROUGHPUT} rec/s, SLA=${SLA_RECOVERY_SEC}s"
+
+    while true; do
+      ELAPSED=$(( $(date +%s) - START_EPOCH ))
+      if [ "$ELAPSED" -gt "$SLA_RECOVERY_SEC" ]; then
+        echo "FAIL: Throughput not recovered within ${SLA_RECOVERY_SEC}s"
+        exit 1
+      fi
+
+      RESULT=$(kubectl exec -n kafka "$BROKER_POD" -- kafka-producer-perf-test.sh \
+        --topic chaos-throughput-check \
+        --num-records 200 \
+        --record-size 1024 \
+        --throughput -1 \
+        --producer-props bootstrap.servers="$BOOTSTRAP_SERVER" 2>&1 | \
+        tail -1 | awk '{print $4}' | sed 's/,//' || echo "0")
+
+      echo "Throughput: ${RESULT} rec/s (elapsed: ${ELAPSED}s)"
+
+      PASS=$(echo "${RESULT} >= ${BASELINE_THROUGHPUT}" | bc -l 2>/dev/null || echo "0")
+      if [ "$PASS" -eq 1 ]; then
+        echo "PASS: Throughput recovered to ${RESULT} rec/s in ${ELAPSED}s"
+        exit 0
+      fi
+
+      sleep "$POLL_INTERVAL"
+    done

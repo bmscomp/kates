@@ -1,5 +1,6 @@
 package com.klster.kates.engine;
 
+import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.domain.MetricsSample;
 import com.klster.kates.domain.TestResult.TaskStatus;
 
@@ -23,6 +24,7 @@ public class BenchmarkStatus {
     private final double p999LatencyMs;
     private final double maxLatencyMs;
     private final String error;
+    private final IntegrityResult integrityResult;
     private final List<MetricsSample> timeSeries;
     private final Map<String, Double> latencyHistogram;
 
@@ -38,6 +40,7 @@ public class BenchmarkStatus {
         this.p999LatencyMs = builder.p999LatencyMs;
         this.maxLatencyMs = builder.maxLatencyMs;
         this.error = builder.error;
+        this.integrityResult = builder.integrityResult;
         this.timeSeries = builder.timeSeries != null ? List.copyOf(builder.timeSeries) : List.of();
         this.latencyHistogram = builder.latencyHistogram != null ? Map.copyOf(builder.latencyHistogram) : Map.of();
     }
@@ -53,6 +56,7 @@ public class BenchmarkStatus {
     public double getP999LatencyMs() { return p999LatencyMs; }
     public double getMaxLatencyMs() { return maxLatencyMs; }
     public String getError() { return error; }
+    public IntegrityResult getIntegrityResult() { return integrityResult; }
     public List<MetricsSample> getTimeSeries() { return timeSeries; }
     public Map<String, Double> getLatencyHistogram() { return latencyHistogram; }
 
@@ -76,6 +80,7 @@ public class BenchmarkStatus {
         private double p999LatencyMs;
         private double maxLatencyMs;
         private String error;
+        private IntegrityResult integrityResult;
         private List<MetricsSample> timeSeries;
         private Map<String, Double> latencyHistogram;
 
@@ -93,6 +98,7 @@ public class BenchmarkStatus {
         public Builder p999LatencyMs(double l) { this.p999LatencyMs = l; return this; }
         public Builder maxLatencyMs(double l) { this.maxLatencyMs = l; return this; }
         public Builder error(String e) { this.error = e; return this; }
+        public Builder integrityResult(IntegrityResult ir) { this.integrityResult = ir; return this; }
         public Builder timeSeries(List<MetricsSample> ts) { this.timeSeries = ts; return this; }
         public Builder latencyHistogram(Map<String, Double> h) { this.latencyHistogram = h; return this; }
 

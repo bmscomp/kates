@@ -1,0 +1,66 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-multi-broker-kill
+  namespace: kafka
+  labels:
+    app.kubernetes.io/managed-by: kates
+    kates.klster.com/scenario: multi-broker-kill
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            - name: CHAOS_INTERVAL
+              value: '60'
+            - name: FORCE
+              value: 'true'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            # Kill 2 of 3 brokers — below min.insync.replicas (2)
+            # Partitions will go offline, producers will fail
+            - name: PODS_AFFECTED_PERC
+              value: '67'
+        probe:
+          - name: verify-cluster-recovers
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "300s"
+              interval: "15s"
+              retry: 10
+            cmdProbe/inputs:
+              command: |
+                READY=$(kubectl get kafka krafter -n kafka \
+                  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+                RUNNING=$(kubectl get pods -n kafka \
+                  -l strimzi.io/component-type=kafka --no-headers | grep -c Running)
+                echo "${READY}-${RUNNING}"
+              comparator:
+                type: string
+                criteria: "equal"
+                value: "True-3"
+          - name: verify-partitions-online
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "120s"
+              interval: "15s"
+              retry: 4
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe --unavailable-partitions 2>&1 | wc -l
+              comparator:
+                type: int
+                criteria: "<="
+                value: "1"

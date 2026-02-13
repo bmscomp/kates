@@ -1,0 +1,80 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-rolling-restart
+  namespace: kafka
+  labels:
+    app.kubernetes.io/managed-by: kates
+    kates.klster.com/scenario: rolling-restart
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '180'
+            # Interval between pod deletions — allows recovery before next kill
+            - name: CHAOS_INTERVAL
+              value: '60'
+            # Graceful shutdown (not force)
+            - name: FORCE
+              value: 'false'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            # One pod at a time
+            - name: PODS_AFFECTED_PERC
+              value: '34'
+        probe:
+          - name: verify-zero-data-loss-baseline
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "120s"
+              interval: "15s"
+              retry: 4
+            cmdProbe/inputs:
+              command: |
+                READY=$(kubectl get kafka krafter -n kafka \
+                  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+                echo "$READY"
+              comparator:
+                type: string
+                criteria: "equal"
+                value: "True"
+          - name: verify-all-brokers-running
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "120s"
+              interval: "15s"
+              retry: 4
+            cmdProbe/inputs:
+              command: |
+                kubectl get pods -n kafka -l strimzi.io/component-type=kafka \
+                  --no-headers | grep -c Running
+              comparator:
+                type: int
+                criteria: "=="
+                value: "3"
+          - name: verify-no-under-replicated
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "60s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe --under-replicated-partitions 2>&1 | wc -l
+              comparator:
+                type: int
+                criteria: "<="
+                value: "1"

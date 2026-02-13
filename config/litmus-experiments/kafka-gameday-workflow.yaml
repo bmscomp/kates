@@ -6,144 +6,191 @@ metadata:
   labels:
     app: kafka-gameday
     type: chaos-workflow
+    app.kubernetes.io/managed-by: kates
 spec:
   entrypoint: kafka-gameday-chaos
   serviceAccountName: argo-chaos
-  
-  # Workflow-level configuration
+
   ttlStrategy:
-    secondsAfterCompletion: 86400  # Keep for 24 hours
-  
+    secondsAfterCompletion: 86400
+
   arguments:
     parameters:
       - name: chaos-duration
         value: "60"
+      - name: recovery-wait
+        value: "60"
       - name: target-namespace
         value: "kafka"
-  
+      - name: scenarios
+        value: "rolling-restart,leader-kill,network-partition,cpu-stress,pod-delete,disk-stress,multi-broker-kill"
+      - name: sla-rto-sec
+        value: "30"
+      - name: sla-max-loss-pct
+        value: "0.1"
+
   templates:
-    # Main orchestration template
     - name: kafka-gameday-chaos
       steps:
-        # Step 1: Pre-chaos health check
+        # Pre-flight health check
         - - name: pre-chaos-health
             template: kafka-health-check
             arguments:
               parameters:
                 - name: phase
                   value: "pre-chaos"
-        
-        # Step 2: Network latency injection
-        - - name: network-latency
-            template: run-chaos-engine
+
+        # Scenario 1: Rolling restart (baseline — should yield zero loss)
+        - - name: rolling-restart
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'rolling-restart'"
             arguments:
               parameters:
-                - name: engine-name
-                  value: "gameday-network-latency"
-                - name: experiment-type
-                  value: "pod-network-latency"
-        
-        # Step 3: Wait for recovery
-        - - name: recovery-wait-1
-            template: wait
-            arguments:
-              parameters:
-                - name: duration
-                  value: "30s"
-        
-        # Step 4: Mid-chaos health check
-        - - name: mid-chaos-health
-            template: kafka-health-check
-            arguments:
-              parameters:
-                - name: phase
-                  value: "mid-chaos"
-        
-        # Step 5: CPU stress injection
-        - - name: cpu-stress
-            template: run-chaos-engine
-            arguments:
-              parameters:
-                - name: engine-name
-                  value: "gameday-cpu-stress"
-                - name: experiment-type
-                  value: "pod-cpu-hog"
-        
-        # Step 6: Wait for recovery
-        - - name: recovery-wait-2
-            template: wait
-            arguments:
-              parameters:
-                - name: duration
-                  value: "30s"
-        
-        # Step 7: Pod delete (broker failure)
-        - - name: pod-delete
-            template: run-chaos-engine
-            arguments:
-              parameters:
-                - name: engine-name
-                  value: "gameday-pod-delete"
+                - name: scenario-name
+                  value: "rolling-restart"
                 - name: experiment-type
                   value: "pod-delete"
-        
-        # Step 8: Wait for full recovery
-        - - name: recovery-wait-3
-            template: wait
-            arguments:
-              parameters:
-                - name: duration
-                  value: "60s"
-        
-        # Step 9: Final health check
-        - - name: post-chaos-health
-            template: kafka-health-check
+                - name: extra-env
+                  value: "FORCE=false,CHAOS_INTERVAL=60,PODS_AFFECTED_PERC=34"
+
+        - - name: recovery-1
+            template: wait-and-verify
             arguments:
               parameters:
                 - name: phase
-                  value: "post-chaos"
-        
-        # Step 10: Generate report
+                  value: "rolling-restart"
+
+        # Scenario 2: Leader kill (core RPO test)
+        - - name: leader-kill
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'leader-kill'"
+            arguments:
+              parameters:
+                - name: scenario-name
+                  value: "leader-kill"
+                - name: experiment-type
+                  value: "pod-delete"
+                - name: extra-env
+                  value: "FORCE=true,TARGET_PODS=krafter-pool-alpha-0,PODS_AFFECTED_PERC=100"
+
+        - - name: recovery-2
+            template: wait-and-verify
+            arguments:
+              parameters:
+                - name: phase
+                  value: "leader-kill"
+
+        # Scenario 3: Network partition (split-brain)
+        - - name: network-partition
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'network-partition'"
+            arguments:
+              parameters:
+                - name: scenario-name
+                  value: "network-partition"
+                - name: experiment-type
+                  value: "pod-network-loss"
+                - name: extra-env
+                  value: "NETWORK_PACKET_LOSS_PERCENTAGE=100,NETWORK_INTERFACE=eth0"
+
+        - - name: recovery-3
+            template: wait-and-verify
+            arguments:
+              parameters:
+                - name: phase
+                  value: "network-partition"
+
+        # Scenario 4: CPU stress (degraded performance)
+        - - name: cpu-stress
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'cpu-stress'"
+            arguments:
+              parameters:
+                - name: scenario-name
+                  value: "cpu-stress"
+                - name: experiment-type
+                  value: "pod-cpu-hog"
+                - name: extra-env
+                  value: "CPU_CORES=2,CPU_LOAD=80"
+
+        - - name: recovery-4
+            template: wait-and-verify
+            arguments:
+              parameters:
+                - name: phase
+                  value: "cpu-stress"
+
+        # Scenario 5: Single broker pod delete
+        - - name: pod-delete
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'pod-delete'"
+            arguments:
+              parameters:
+                - name: scenario-name
+                  value: "pod-delete"
+                - name: experiment-type
+                  value: "pod-delete"
+                - name: extra-env
+                  value: "FORCE=false,PODS_AFFECTED_PERC=33"
+
+        - - name: recovery-5
+            template: wait-and-verify
+            arguments:
+              parameters:
+                - name: phase
+                  value: "pod-delete"
+
+        # Scenario 6: Disk I/O stress
+        - - name: disk-stress
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'disk-stress'"
+            arguments:
+              parameters:
+                - name: scenario-name
+                  value: "disk-stress"
+                - name: experiment-type
+                  value: "pod-io-stress"
+                - name: extra-env
+                  value: "FILESYSTEM_UTILIZATION_PERCENTAGE=80,NUMBER_OF_WORKERS=4"
+
+        - - name: recovery-6
+            template: wait-and-verify
+            arguments:
+              parameters:
+                - name: phase
+                  value: "disk-stress"
+
+        # Scenario 7: Multi-broker kill (catastrophic — last)
+        - - name: multi-broker-kill
+            template: run-scenario
+            when: "'{{workflow.parameters.scenarios}}' =~ 'multi-broker-kill'"
+            arguments:
+              parameters:
+                - name: scenario-name
+                  value: "multi-broker-kill"
+                - name: experiment-type
+                  value: "pod-delete"
+                - name: extra-env
+                  value: "FORCE=true,PODS_AFFECTED_PERC=67"
+
+        - - name: recovery-7
+            template: wait-and-verify
+            arguments:
+              parameters:
+                - name: phase
+                  value: "multi-broker-kill"
+
+        # Final report
         - - name: generate-report
             template: chaos-report
 
-    # Kafka health check template
-    - name: kafka-health-check
+    # Run a single chaos scenario
+    - name: run-scenario
       inputs:
         parameters:
-          - name: phase
-      container:
-        image: bitnami/kubectl:latest
-        imagePullPolicy: IfNotPresent
-        command: ["/bin/bash"]
-        args:
-          - -c
-          - |
-            echo "=== {{inputs.parameters.phase}} Health Check ==="
-            echo "Checking Kafka cluster status..."
-            READY=$(kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-            echo "Kafka Ready: $READY"
-            
-            echo "Checking broker pods..."
-            kubectl get pods -n kafka -l strimzi.io/component-type=kafka
-            
-            echo "Checking consumer groups..."
-            kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-consumer-groups.sh \
-              --bootstrap-server localhost:9092 \
-              --list 2>/dev/null || echo "No consumer groups"
-            
-            if [ "$READY" != "True" ]; then
-              echo "ERROR: Kafka is not ready!"
-              exit 1
-            fi
-            echo "Health check passed!"
-
-    # Run chaos engine template
-    - name: run-chaos-engine
-      inputs:
-        parameters:
-          - name: engine-name
+          - name: scenario-name
           - name: experiment-type
+          - name: extra-env
       container:
         image: bitnami/kubectl:latest
         imagePullPolicy: IfNotPresent
@@ -151,14 +198,25 @@ spec:
         args:
           - -c
           - |
-            echo "Starting {{inputs.parameters.experiment-type}} experiment..."
-            
-            # Create inline chaos engine
+            echo "=== Starting scenario: {{inputs.parameters.scenario-name}} ==="
+            FAULT_START=$(date +%s)
+
+            # Parse extra env into ChaosEngine env block
+            ENV_BLOCK=""
+            IFS=',' read -ra PAIRS <<< "{{inputs.parameters.extra-env}}"
+            for pair in "${PAIRS[@]}"; do
+              KEY=$(echo "$pair" | cut -d= -f1)
+              VAL=$(echo "$pair" | cut -d= -f2-)
+              ENV_BLOCK="${ENV_BLOCK}
+                        - name: ${KEY}
+                          value: '${VAL}'"
+            done
+
             cat <<EOF | kubectl apply -f -
             apiVersion: litmuschaos.io/v1alpha1
             kind: ChaosEngine
             metadata:
-              name: {{inputs.parameters.engine-name}}
+              name: gameday-{{inputs.parameters.scenario-name}}
               namespace: kafka
             spec:
               annotationCheck: 'false'
@@ -175,24 +233,91 @@ spec:
                           value: 'kafka'
                         - name: APP_LABEL
                           value: 'strimzi.io/component-type=kafka'
-                        - name: TARGET_PODS
-                          value: 'krafter-pool-alpha-0'
+            ${ENV_BLOCK}
             EOF
-            
-            # Wait for engine to complete
-            echo "Waiting for chaos engine to complete..."
-            sleep 90
-            
-            # Check result
-            STATUS=$(kubectl get chaosengine {{inputs.parameters.engine-name}} -n kafka -o jsonpath='{.status.engineStatus}')
-            VERDICT=$(kubectl get chaosresult -n kafka -o jsonpath='{.items[0].status.experimentStatus.verdict}' 2>/dev/null || echo "N/A")
-            
-            echo "Engine Status: $STATUS"
-            echo "Experiment Verdict: $VERDICT"
-            
-            # Cleanup
-            kubectl delete chaosengine {{inputs.parameters.engine-name}} -n kafka --ignore-not-found
+
+            echo "ChaosEngine created. Waiting for completion..."
+            sleep $(({{workflow.parameters.chaos-duration}} + 30))
+
+            VERDICT=$(kubectl get chaosresult -n kafka \
+              -o jsonpath='{.items[0].status.experimentStatus.verdict}' 2>/dev/null || echo "N/A")
+            echo "Verdict: $VERDICT"
+
+            kubectl delete chaosengine gameday-{{inputs.parameters.scenario-name}} \
+              -n kafka --ignore-not-found
             kubectl delete chaosresult -n kafka --all --ignore-not-found
+
+            echo "Scenario {{inputs.parameters.scenario-name}} complete (started at epoch $FAULT_START)"
+
+    # Wait for recovery and verify health
+    - name: wait-and-verify
+      inputs:
+        parameters:
+          - name: phase
+      container:
+        image: bitnami/kubectl:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash"]
+        args:
+          - -c
+          - |
+            echo "=== Recovery phase: {{inputs.parameters.phase}} ==="
+            RECOVERY_START=$(date +%s)
+
+            echo "Waiting {{workflow.parameters.recovery-wait}}s for recovery..."
+            sleep {{workflow.parameters.recovery-wait}}
+
+            # Check cluster health
+            READY=$(kubectl get kafka krafter -n kafka \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+            BROKERS=$(kubectl get pods -n kafka -l strimzi.io/component-type=kafka \
+              --no-headers 2>/dev/null | grep -c Running || echo "0")
+
+            RECOVERY_END=$(date +%s)
+            RTO=$((RECOVERY_END - RECOVERY_START))
+
+            echo "Phase: {{inputs.parameters.phase}}"
+            echo "Kafka Ready: $READY"
+            echo "Running brokers: $BROKERS"
+            echo "Recovery check duration: ${RTO}s"
+
+            if [ "$READY" != "True" ]; then
+              echo "WARNING: Kafka not ready after recovery wait!"
+              exit 1
+            fi
+
+            # Check under-replicated partitions
+            URP=$(kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+              --bootstrap-server localhost:9092 \
+              --describe --under-replicated-partitions 2>&1 | wc -l)
+            echo "Under-replicated partitions: $URP"
+
+            echo "Recovery verified for {{inputs.parameters.phase}}"
+
+    # Health check template
+    - name: kafka-health-check
+      inputs:
+        parameters:
+          - name: phase
+      container:
+        image: bitnami/kubectl:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash"]
+        args:
+          - -c
+          - |
+            echo "=== {{inputs.parameters.phase}} Health Check ==="
+            READY=$(kubectl get kafka krafter -n kafka \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+            echo "Kafka Ready: $READY"
+
+            kubectl get pods -n kafka -l strimzi.io/component-type=kafka --no-headers
+
+            if [ "$READY" != "True" ]; then
+              echo "ERROR: Kafka is not ready!"
+              exit 1
+            fi
+            echo "Health check passed!"
 
     # Wait template
     - name: wait
@@ -205,7 +330,7 @@ spec:
         command: ["sleep"]
         args: ["{{inputs.parameters.duration}}"]
 
-    # Generate chaos report
+    # Final report
     - name: chaos-report
       container:
         image: bitnami/kubectl:latest
@@ -215,22 +340,29 @@ spec:
           - -c
           - |
             echo "========================================"
-            echo "       KAFKA GAMEDAY CHAOS REPORT"
+            echo "     KAFKA GAMEDAY CHAOS REPORT"
             echo "========================================"
             echo ""
             echo "Workflow: $HOSTNAME"
             echo "Date: $(date -Iseconds)"
+            echo "Scenarios: {{workflow.parameters.scenarios}}"
+            echo "Duration per scenario: {{workflow.parameters.chaos-duration}}s"
+            echo "SLA RTO: {{workflow.parameters.sla-rto-sec}}s"
+            echo "SLA Max Loss: {{workflow.parameters.sla-max-loss-pct}}%"
             echo ""
             echo "=== Final Cluster Status ==="
-            kubectl get kafka krafter -n kafka -o jsonpath='{.status}' | jq '.' 2>/dev/null || echo "Could not get status"
+            kubectl get kafka krafter -n kafka \
+              -o jsonpath='{.status}' | jq '.' 2>/dev/null || echo "Could not get status"
             echo ""
             echo "=== Broker Pod Status ==="
             kubectl get pods -n kafka -l strimzi.io/component-type=kafka
             echo ""
-            echo "=== Chaos Results Summary ==="
-            kubectl get chaosresult -n kafka -o custom-columns='NAME:.metadata.name,VERDICT:.status.experimentStatus.verdict,PHASE:.status.experimentStatus.phase' 2>/dev/null || echo "No results found"
+            echo "=== Under-Replicated Partitions ==="
+            kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
+              --bootstrap-server localhost:9092 \
+              --describe --under-replicated-partitions 2>&1 || echo "N/A"
             echo ""
-            echo "=== Events During GameDay ==="
+            echo "=== Recent Events ==="
             kubectl get events -n kafka --sort-by='.lastTimestamp' | tail -20
             echo ""
             echo "========================================"

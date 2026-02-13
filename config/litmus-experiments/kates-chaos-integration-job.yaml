@@ -1,0 +1,142 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: kates-chaos-run-
+  namespace: kafka
+  labels:
+    app.kubernetes.io/managed-by: kates
+    kates.klster.com/component: chaos-integration
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: kates-chaos-integration
+    spec:
+      serviceAccountName: litmus-admin
+      restartPolicy: Never
+      containers:
+        - name: chaos-runner
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KATES_API_URL
+              value: "http://kates.kafka.svc.cluster.local:8080"
+            - name: CHAOS_ENGINE_FILE
+              value: "/chaos/engine.yaml"
+            - name: STEADY_STATE_DURATION
+              value: "30"
+            - name: RECOVERY_WAIT_DURATION
+              value: "90"
+            - name: SLA_RTO_SEC
+              value: "30"
+            - name: SLA_MAX_LOSS_PCT
+              value: "0.1"
+            - name: BENCHMARK_TOPIC
+              value: "kates-chaos-integrity-test"
+            - name: BENCHMARK_DURATION_SEC
+              value: "300"
+            - name: BENCHMARK_RATE
+              value: "1000"
+          command: ["/bin/bash"]
+          args:
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "=== KATES Chaos Integration Run ==="
+              echo "Start: $(date -Iseconds)"
+              echo ""
+
+              # Step 1: Start KATES SequencedPayload benchmark
+              echo "[1/6] Starting KATES integrity benchmark..."
+              BENCHMARK_ID=$(curl -sf -X POST "${KATES_API_URL}/api/benchmark/start" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"workloadType\": \"PRODUCE\",
+                  \"topic\": \"${BENCHMARK_TOPIC}\",
+                  \"targetMessagesPerSec\": ${BENCHMARK_RATE},
+                  \"durationMs\": $((BENCHMARK_DURATION_SEC * 1000)),
+                  \"recordSize\": 1024,
+                  \"producerConfig\": {
+                    \"acks\": \"all\",
+                    \"enable.idempotence\": \"true\"
+                  }
+                }" | jq -r '.taskId' 2>/dev/null || echo "")
+
+              if [ -z "$BENCHMARK_ID" ]; then
+                echo "WARNING: Could not start KATES benchmark. Running chaos without instrumentation."
+                BENCHMARK_ID="manual"
+              else
+                echo "  Benchmark started: $BENCHMARK_ID"
+              fi
+
+              # Step 2: Wait for steady state
+              echo "[2/6] Waiting ${STEADY_STATE_DURATION}s for steady state..."
+              sleep "$STEADY_STATE_DURATION"
+
+              # Step 3: Record fault start time and inject chaos
+              FAULT_START_EPOCH=$(date +%s)
+              echo "[3/6] Injecting chaos at epoch ${FAULT_START_EPOCH}..."
+              if [ -f "$CHAOS_ENGINE_FILE" ]; then
+                kubectl apply -f "$CHAOS_ENGINE_FILE"
+                ENGINE_NAME=$(kubectl get -f "$CHAOS_ENGINE_FILE" -o jsonpath='{.metadata.name}')
+                echo "  ChaosEngine created: $ENGINE_NAME"
+              else
+                echo "  No engine file mounted. Expecting manual fault injection."
+                ENGINE_NAME="manual"
+              fi
+
+              # Step 4: Wait for chaos duration + recovery window
+              echo "[4/6] Waiting for chaos + recovery (${RECOVERY_WAIT_DURATION}s)..."
+              sleep "$RECOVERY_WAIT_DURATION"
+
+              # Step 5: RTO assertion
+              echo "[5/6] Checking RTO..."
+              RECOVERY_EPOCH=$(date +%s)
+              READY=$(kubectl get kafka krafter -n kafka \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+
+              if [ "$READY" = "True" ]; then
+                RTO_SECONDS=$((RECOVERY_EPOCH - FAULT_START_EPOCH))
+                echo "  Kafka Ready=True. RTO=${RTO_SECONDS}s"
+                if [ "$RTO_SECONDS" -le "$SLA_RTO_SEC" ]; then
+                  echo "  RTO PASS: ${RTO_SECONDS}s ≤ ${SLA_RTO_SEC}s"
+                else
+                  echo "  RTO FAIL: ${RTO_SECONDS}s > ${SLA_RTO_SEC}s"
+                fi
+              else
+                echo "  RTO FAIL: Kafka not ready after ${RECOVERY_WAIT_DURATION}s"
+              fi
+
+              # Step 6: Verify data integrity via KATES
+              echo "[6/6] Verifying data integrity..."
+              if [ "$BENCHMARK_ID" != "manual" ]; then
+                INTEGRITY=$(curl -sf "${KATES_API_URL}/api/benchmark/${BENCHMARK_ID}/integrity" 2>/dev/null || echo "{}")
+                LOSS_PCT=$(echo "$INTEGRITY" | jq -r '.dataLossPercent // "unknown"' 2>/dev/null || echo "unknown")
+                PRODUCER_RTO=$(echo "$INTEGRITY" | jq -r '.producerRto // "unknown"' 2>/dev/null || echo "unknown")
+                CONSUMER_RTO=$(echo "$INTEGRITY" | jq -r '.consumerRto // "unknown"' 2>/dev/null || echo "unknown")
+                echo "  Data Loss: ${LOSS_PCT}%"
+                echo "  Producer RTO: ${PRODUCER_RTO}"
+                echo "  Consumer RTO: ${CONSUMER_RTO}"
+              else
+                echo "  Skipped: no KATES benchmark running"
+              fi
+
+              # Cleanup chaos engine
+              if [ "$ENGINE_NAME" != "manual" ]; then
+                kubectl delete chaosengine "$ENGINE_NAME" -n kafka --ignore-not-found
+              fi
+
+              echo ""
+              echo "=== Run Complete: $(date -Iseconds) ==="
+          volumeMounts:
+            - name: chaos-engine
+              mountPath: /chaos
+              readOnly: true
+      volumes:
+        - name: chaos-engine
+          configMap:
+            name: chaos-engine-config
+            optional: true

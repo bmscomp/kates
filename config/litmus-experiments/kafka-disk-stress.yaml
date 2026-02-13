@@ -1,64 +1,64 @@
 apiVersion: litmuschaos.io/v1alpha1
 kind: ChaosEngine
 metadata:
-  name: kafka-network-partition
+  name: kafka-disk-stress
   namespace: kafka
   labels:
     app.kubernetes.io/managed-by: kates
-    kates.klster.com/scenario: network-partition
+    kates.klster.com/scenario: disk-stress
 spec:
   annotationCheck: 'false'
   engineState: active
   chaosServiceAccount: litmus-admin
   experiments:
-    - name: pod-network-loss
+    - name: pod-io-stress
       spec:
         components:
           env:
             - name: TOTAL_CHAOS_DURATION
-              value: '60'
-            - name: NETWORK_INTERFACE
-              value: 'eth0'
-            # 100% packet loss = full network partition
-            - name: NETWORK_PACKET_LOSS_PERCENTAGE
-              value: '100'
+              value: '120'
+            - name: FILESYSTEM_UTILIZATION_PERCENTAGE
+              value: '80'
+            # Number of I/O workers
+            - name: NUMBER_OF_WORKERS
+              value: '4'
             - name: APP_NS
               value: 'kafka'
             - name: APP_LABEL
               value: 'strimzi.io/component-type=kafka'
             - name: TARGET_PODS
               value: 'krafter-pool-alpha-0'
-            # Only affect traffic to other brokers (not client traffic)
-            - name: DESTINATION_IPS
-              value: ''
+            # Container running Kafka within the pod
+            - name: TARGET_CONTAINER
+              value: 'kafka'
         probe:
-          - name: verify-partition-healing
+          - name: verify-broker-healthy-after-stress
             type: cmdProbe
             mode: PostChaos
             runProperties:
               probeTimeout: "120s"
               interval: "15s"
-              retry: 8
+              retry: 4
             cmdProbe/inputs:
               command: |
-                kubectl exec -n kafka krafter-pool-alpha-1 -- kafka-topics.sh \
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-topics.sh \
                   --bootstrap-server localhost:9092 \
                   --describe --under-replicated-partitions 2>&1 | wc -l
               comparator:
                 type: int
                 criteria: "<="
                 value: "1"
-          - name: verify-broker-rejoins-isr
+          - name: verify-log-segments-intact
             type: cmdProbe
             mode: PostChaos
             runProperties:
-              probeTimeout: "180s"
-              interval: "15s"
-              retry: 6
+              probeTimeout: "60s"
+              interval: "10s"
+              retry: 3
             cmdProbe/inputs:
               command: |
-                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-broker-api-versions.sh \
-                  --bootstrap-server localhost:9092 2>&1 | grep -c "ApiVersion" || echo "0"
+                kubectl exec -n kafka krafter-pool-alpha-0 -- \
+                  find /var/lib/kafka/data -name "*.log" -type f | wc -l
               comparator:
                 type: int
                 criteria: ">="

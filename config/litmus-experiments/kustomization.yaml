@@ -1,0 +1,80 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - kafka-pod-delete.yaml
+  - kafka-leader-kill.yaml
+  - kafka-network-latency.yaml
+  - kafka-network-partition.yaml
+  - kafka-cpu-stress.yaml
+  - kafka-disk-fill.yaml
+  - kafka-disk-stress.yaml
+  - kafka-multi-broker-kill.yaml
+  - kafka-rolling-restart.yaml
+  - kafka-consumer-chaos.yaml
+  - isr-health-probe.yaml
+  - consumer-latency-probe.yaml
+  - producer-throughput-probe.yaml
+  - pod-delete-experiment.yaml
+  - pod-network-loss-experiment.yaml
+  - pod-network-partition-experiment.yaml
+  - pod-cpu-hog-experiment.yaml
+  - pod-io-stress-experiment.yaml
+  - disk-fill-experiment.yaml
+
+patches:
+  # Parameterize TARGET_PODS across all ChaosEngines.
+  # Default: krafter-pool-alpha-0 (leader broker).
+  # Override by creating an overlay with a different BROKER_POD_0 value.
+  #
+  # Usage:
+  #   kustomize build config/litmus-experiments/ | kubectl apply -f -
+  #   kustomize build config/litmus-experiments/overlays/pool-beta/ | kubectl apply -f -
+
+  - target:
+      kind: ChaosEngine
+      name: kafka-pod-delete
+    patch: |-
+      - op: replace
+        path: /spec/experiments/0/spec/components/env/6/value
+        value: "${BROKER_POD_0:-krafter-pool-alpha-0}"
+
+  - target:
+      kind: ChaosEngine
+      name: kafka-leader-kill
+    patch: |-
+      - op: replace
+        path: /spec/experiments/0/spec/components/env/6/value
+        value: "${BROKER_POD_0:-krafter-pool-alpha-0}"
+
+  - target:
+      kind: ChaosEngine
+      name: kafka-network-partition
+    patch: |-
+      - op: replace
+        path: /spec/experiments/0/spec/components/env/6/value
+        value: "${BROKER_POD_0:-krafter-pool-alpha-0}"
+
+  - target:
+      kind: ChaosEngine
+      name: kafka-cpu-stress
+    patch: |-
+      - op: replace
+        path: /spec/experiments/0/spec/components/env/5/value
+        value: "${BROKER_POD_1:-krafter-pool-gamma-1}"
+
+  - target:
+      kind: ChaosEngine
+      name: kafka-disk-fill
+    patch: |-
+      - op: replace
+        path: /spec/experiments/0/spec/components/env/4/value
+        value: "${BROKER_POD_2:-krafter-pool-sigma-2}"
+
+  - target:
+      kind: ChaosEngine
+      name: kafka-disk-stress
+    patch: |-
+      - op: replace
+        path: /spec/experiments/0/spec/components/env/6/value
+        value: "${BROKER_POD_0:-krafter-pool-alpha-0}"

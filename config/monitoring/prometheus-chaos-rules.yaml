@@ -97,3 +97,79 @@ spec:
           annotations:
             summary: "GameDay workflow is in progress"
             description: "A scheduled GameDay chaos workflow has started."
+
+    - name: kafka-chaos-rto-rpo
+      interval: 15s
+      rules:
+        # Recording rules for KATES integrity metrics (from pushgateway or KATES exporter)
+        - record: kafka:chaos:producer_rto_seconds
+          expr: |
+            kates_integrity_result_producer_rto_seconds
+
+        - record: kafka:chaos:consumer_rto_seconds
+          expr: |
+            kates_integrity_result_consumer_rto_seconds
+
+        - record: kafka:chaos:max_rto_seconds
+          expr: |
+            max without(instance) (
+              kates_integrity_result_producer_rto_seconds,
+              kates_integrity_result_consumer_rto_seconds
+            )
+
+        - record: kafka:chaos:rpo_seconds
+          expr: |
+            kates_integrity_result_rpo_seconds
+
+        - record: kafka:chaos:data_loss_percent
+          expr: |
+            kates_integrity_result_data_loss_percent
+
+        - record: kafka:chaos:e2e_latency_ms
+          expr: |
+            kafka_chaos_e2e_latency_ms
+
+        - record: kafka:chaos:producer_throughput
+          expr: |
+            kafka_chaos_producer_throughput_records_per_sec
+
+        # SLA breach alerts
+        - alert: KafkaRTOExceedsSLA
+          expr: |
+            kafka:chaos:max_rto_seconds > 30
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka RTO exceeds 30s SLA"
+            description: "Max RTO is {{ $value }}s. The cluster did not recover within the SLA window."
+
+        - alert: KafkaRPOExceedsSLA
+          expr: |
+            kafka:chaos:rpo_seconds > 5
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka RPO exceeds 5s SLA"
+            description: "RPO is {{ $value }}s. Data loss window exceeds the acceptable recovery point."
+
+        - alert: KafkaDataLossDetected
+          expr: |
+            kafka:chaos:data_loss_percent > 0.1
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Data loss {{ $value }}% exceeds 0.1% SLA"
+            description: "KATES integrity verification detected data loss above the acceptable threshold."
+
+        - alert: KafkaE2ELatencySpike
+          expr: |
+            kafka:chaos:e2e_latency_ms > 10000
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka E2E latency spike: {{ $value }}ms"
+            description: "End-to-end produce-consume latency exceeds 10s during or after chaos."

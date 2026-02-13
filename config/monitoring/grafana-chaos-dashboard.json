@@ -323,6 +323,266 @@
                     "refId": "A"
                 }
             ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 28
+            },
+            "id": 20,
+            "title": "RTO / RPO / Data Integrity",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 15
+                            },
+                            {
+                                "color": "red",
+                                "value": 30
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 29
+            },
+            "id": 21,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area"
+            },
+            "title": "Producer RTO",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "kafka:chaos:producer_rto_seconds",
+                    "legendFormat": "Producer RTO",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 15
+                            },
+                            {
+                                "color": "red",
+                                "value": 30
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 29
+            },
+            "id": 22,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area"
+            },
+            "title": "Consumer RTO",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "kafka:chaos:consumer_rto_seconds",
+                    "legendFormat": "Consumer RTO",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.05
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.1
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 12,
+                "y": 29
+            },
+            "id": 23,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area"
+            },
+            "title": "Data Loss %",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "kafka:chaos:data_loss_percent",
+                    "legendFormat": "Loss",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 2
+                            },
+                            {
+                                "color": "red",
+                                "value": 5
+                            }
+                        ]
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 18,
+                "y": 29
+            },
+            "id": 24,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area"
+            },
+            "title": "RPO",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "kafka:chaos:rpo_seconds",
+                    "legendFormat": "RPO",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms",
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 20
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 35
+            },
+            "id": 25,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            },
+            "title": "E2E Latency During Chaos",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kafka:chaos:e2e_latency_ms",
+                    "legendFormat": "E2E Latency",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 20
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 35
+            },
+            "id": 26,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            },
+            "title": "Producer Throughput During Chaos",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kafka:chaos:producer_throughput",
+                    "legendFormat": "Throughput (rec/s)",
+                    "refId": "A"
+                }
+            ]
         }
     ],
     "refresh": "10s",

@@ -1,0 +1,66 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-leader-kill
+  namespace: kafka
+  labels:
+    app.kubernetes.io/managed-by: kates
+    kates.klster.com/scenario: leader-kill
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-delete
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            - name: CHAOS_INTERVAL
+              value: '60'
+            - name: FORCE
+              value: 'true'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            # Target the controller/leader broker specifically
+            - name: TARGET_PODS
+              value: 'krafter-pool-alpha-0'
+            - name: PODS_AFFECTED_PERC
+              value: '100'
+        probe:
+          - name: verify-isr-failover
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "120s"
+              interval: "10s"
+              retry: 6
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-1 -- kafka-metadata.sh \
+                  --snapshot /var/lib/kafka/data/__cluster_metadata-0/00000000000000000000.log \
+                  --cluster-id $(kubectl get kafka krafter -n kafka -o jsonpath='{.status.clusterId}') \
+                  2>&1 | grep -c "leader" || echo "0"
+              comparator:
+                type: int
+                criteria: ">="
+                value: "1"
+          - name: verify-data-availability
+            type: cmdProbe
+            mode: PostChaos
+            runProperties:
+              probeTimeout: "60s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-1 -- kafka-topics.sh \
+                  --bootstrap-server localhost:9092 \
+                  --describe --under-replicated-partitions 2>&1 | wc -l
+              comparator:
+                type: int
+                criteria: "<="
+                value: "1"

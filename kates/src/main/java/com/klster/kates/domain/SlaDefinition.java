@@ -16,6 +16,9 @@ public class SlaDefinition {
     private Double minThroughputRecPerSec;
     private Double maxErrorRate;
     private Long minRecordsProcessed;
+    private Double maxDataLossPercent;
+    private Long maxRtoMs;
+    private Long maxRpoMs;
 
     public SlaDefinition() {
     }
@@ -38,6 +41,15 @@ public class SlaDefinition {
     public Long getMinRecordsProcessed() { return minRecordsProcessed; }
     public void setMinRecordsProcessed(Long minRecordsProcessed) { this.minRecordsProcessed = minRecordsProcessed; }
 
+    public Double getMaxDataLossPercent() { return maxDataLossPercent; }
+    public void setMaxDataLossPercent(Double maxDataLossPercent) { this.maxDataLossPercent = maxDataLossPercent; }
+
+    public Long getMaxRtoMs() { return maxRtoMs; }
+    public void setMaxRtoMs(Long maxRtoMs) { this.maxRtoMs = maxRtoMs; }
+
+    public Long getMaxRpoMs() { return maxRpoMs; }
+    public void setMaxRpoMs(Long maxRpoMs) { this.maxRpoMs = maxRpoMs; }
+
     /**
      * Returns true if any threshold is defined.
      */
@@ -47,6 +59,9 @@ public class SlaDefinition {
                 || maxAvgLatencyMs != null
                 || minThroughputRecPerSec != null
                 || maxErrorRate != null
-                || minRecordsProcessed != null;
+                || minRecordsProcessed != null
+                || maxDataLossPercent != null
+                || maxRtoMs != null
+                || maxRpoMs != null;
     }
 }
