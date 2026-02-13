@@ -127,5 +127,18 @@ public class TestRunRepository {
                 .map(EntityMapper::toDomain)
                 .collect(Collectors.toList());
     }
+
+    public List<TestRun> findByTypeAndDateRange(TestType type, java.time.Instant from, java.time.Instant to) {
+        return em.createQuery(
+                        "SELECT r FROM TestRunEntity r WHERE r.testType = :type AND r.createdAt >= :from AND r.createdAt <= :to ORDER BY r.createdAt ASC",
+                        TestRunEntity.class)
+                .setParameter("type", type)
+                .setParameter("from", from)
+                .setParameter("to", to)
+                .getResultList()
+                .stream()
+                .map(EntityMapper::toDomain)
+                .collect(Collectors.toList());
+    }
 }
 

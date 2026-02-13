@@ -23,6 +23,10 @@ public class ApiError {
         this.message = message;
     }
 
+    public static ApiError of(int status, String error, String message) {
+        return new ApiError(status, error, message);
+    }
+
     public int getStatus() { return status; }
     public void setStatus(int status) { this.status = status; }
 

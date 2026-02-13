@@ -1,6 +1,8 @@
 package com.klster.kates.report;
 
 import com.klster.kates.domain.TestRun;
+import com.klster.kates.export.CsvExporter;
+import com.klster.kates.export.JunitXmlExporter;
 import com.klster.kates.service.TestRunRepository;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
@@ -26,11 +28,16 @@ public class ReportResource {
 
     private final ReportGenerator generator;
     private final TestRunRepository repository;
+    private final CsvExporter csvExporter;
+    private final JunitXmlExporter junitXmlExporter;
 
     @Inject
-    public ReportResource(ReportGenerator generator, TestRunRepository repository) {
+    public ReportResource(ReportGenerator generator, TestRunRepository repository,
+                          CsvExporter csvExporter, JunitXmlExporter junitXmlExporter) {
         this.generator = generator;
         this.repository = repository;
+        this.csvExporter = csvExporter;
+        this.junitXmlExporter = junitXmlExporter;
     }
 
     @GET
@@ -60,6 +67,32 @@ public class ReportResource {
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         return Response.ok(report.getSummary()).build();
+    }
+
+    @GET
+    @Path("/tests/{id}/report/csv")
+    @Produces("text/csv")
+    public Response getCsvReport(@PathParam("id") String id) {
+        TestRun run = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestReport report = generator.generate(run);
+        String csv = csvExporter.export(report);
+        return Response.ok(csv)
+                .header("Content-Disposition", "attachment; filename=\"kates-report-" + id + ".csv\"")
+                .build();
+    }
+
+    @GET
+    @Path("/tests/{id}/report/junit")
+    @Produces("application/xml")
+    public Response getJunitReport(@PathParam("id") String id) {
+        TestRun run = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestReport report = generator.generate(run);
+        String xml = junitXmlExporter.export(report);
+        return Response.ok(xml)
+                .header("Content-Disposition", "attachment; filename=\"kates-report-" + id + ".xml\"")
+                .build();
     }
 
     @GET
