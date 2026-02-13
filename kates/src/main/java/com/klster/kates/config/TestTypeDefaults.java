@@ -187,31 +187,31 @@ public class TestTypeDefaults {
     int capacityNumConsumers;
 
     // ROUND_TRIP — latency-focused
-    @ConfigProperty(name = "kates.tests.round-trip.replication-factor", defaultValue = "3")
+    @ConfigProperty(name = "kates.tests.roundtrip.replication-factor", defaultValue = "3")
     int roundTripReplicationFactor;
-    @ConfigProperty(name = "kates.tests.round-trip.partitions", defaultValue = "3")
+    @ConfigProperty(name = "kates.tests.roundtrip.partitions", defaultValue = "3")
     int roundTripPartitions;
-    @ConfigProperty(name = "kates.tests.round-trip.min-insync-replicas", defaultValue = "2")
+    @ConfigProperty(name = "kates.tests.roundtrip.min-insync-replicas", defaultValue = "2")
     int roundTripMinInsyncReplicas;
-    @ConfigProperty(name = "kates.tests.round-trip.acks", defaultValue = "all")
+    @ConfigProperty(name = "kates.tests.roundtrip.acks", defaultValue = "all")
     String roundTripAcks;
-    @ConfigProperty(name = "kates.tests.round-trip.batch-size", defaultValue = "16384")
+    @ConfigProperty(name = "kates.tests.roundtrip.batch-size", defaultValue = "16384")
     int roundTripBatchSize;
-    @ConfigProperty(name = "kates.tests.round-trip.linger-ms", defaultValue = "0")
+    @ConfigProperty(name = "kates.tests.roundtrip.linger-ms", defaultValue = "0")
     int roundTripLingerMs;
-    @ConfigProperty(name = "kates.tests.round-trip.compression-type", defaultValue = "none")
+    @ConfigProperty(name = "kates.tests.roundtrip.compression-type", defaultValue = "none")
     String roundTripCompressionType;
-    @ConfigProperty(name = "kates.tests.round-trip.record-size", defaultValue = "1024")
+    @ConfigProperty(name = "kates.tests.roundtrip.record-size", defaultValue = "1024")
     int roundTripRecordSize;
-    @ConfigProperty(name = "kates.tests.round-trip.num-records", defaultValue = "500000")
+    @ConfigProperty(name = "kates.tests.roundtrip.num-records", defaultValue = "500000")
     long roundTripNumRecords;
-    @ConfigProperty(name = "kates.tests.round-trip.throughput", defaultValue = "10000")
+    @ConfigProperty(name = "kates.tests.roundtrip.throughput", defaultValue = "10000")
     int roundTripThroughput;
-    @ConfigProperty(name = "kates.tests.round-trip.duration-ms", defaultValue = "600000")
+    @ConfigProperty(name = "kates.tests.roundtrip.duration-ms", defaultValue = "600000")
     long roundTripDurationMs;
-    @ConfigProperty(name = "kates.tests.round-trip.num-producers", defaultValue = "1")
+    @ConfigProperty(name = "kates.tests.roundtrip.num-producers", defaultValue = "1")
     int roundTripNumProducers;
-    @ConfigProperty(name = "kates.tests.round-trip.num-consumers", defaultValue = "1")
+    @ConfigProperty(name = "kates.tests.roundtrip.num-consumers", defaultValue = "1")
     int roundTripNumConsumers;
 
     /**
@@ -250,7 +250,11 @@ public class TestTypeDefaults {
     public Map<String, TypeConfig> allConfigs() {
         Map<String, TypeConfig> configs = new LinkedHashMap<>();
         for (TestType type : TestType.values()) {
-            configs.put(type.name().toLowerCase(), forType(type));
+            String key = switch (type) {
+                case ROUND_TRIP -> "roundtrip";
+                default -> type.name().toLowerCase();
+            };
+            configs.put(key, forType(type));
         }
         return configs;
     }

@@ -1,6 +1,5 @@
 package com.klster.kates.api;
 
-import com.klster.kates.config.TestTypeDefaults;
 import com.klster.kates.engine.TestOrchestrator;
 import com.klster.kates.service.KafkaAdminService;
 import io.quarkus.test.InjectMock;
@@ -42,12 +41,12 @@ class HealthResourceTest {
                 .body("tests.endurance", notNullValue())
                 .body("tests.volume", notNullValue())
                 .body("tests.capacity", notNullValue())
-                .body("tests.round_trip", notNullValue())
+                .body("tests.roundtrip", notNullValue())
                 .body("tests.load.partitions", is(3))
                 .body("tests.stress.partitions", is(6))
                 .body("tests.stress.numProducers", is(3))
                 .body("tests.volume.recordSize", is(10240))
-                .body("tests.round_trip.compressionType", is("none"))
+                .body("tests.roundtrip.compressionType", is("none"))
                 .body("tests.endurance.throughput", is(5000))
                 .body("tests.capacity.partitions", is(12));
     }
