@@ -52,6 +52,7 @@ echo ""
 echo -e "${BLUE}[4/5] Applying Kubernetes manifests...${NC}"
 cd "${SCRIPT_DIR}"
 kubectl apply -f kates/k8s/namespace.yaml
+kubectl apply -f kates/k8s/configmap.yaml
 kubectl apply -f kates/k8s/deployment.yaml
 kubectl apply -f kates/k8s/service.yaml
 echo -e "${GREEN}  ✓ Manifests applied${NC}"

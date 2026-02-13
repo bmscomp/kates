@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kates-config
+  namespace: kates
+  labels:
+    app: kates
+    app.kubernetes.io/name: kates
+    app.kubernetes.io/part-of: klster
+data:
+  KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
+  KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
+  KATES_DEFAULTS_REPLICATION_FACTOR: "3"
+  KATES_DEFAULTS_PARTITIONS: "3"
+  KATES_DEFAULTS_MIN_INSYNC_REPLICAS: "2"
+  KATES_DEFAULTS_ACKS: "all"
+  KATES_DEFAULTS_BATCH_SIZE: "65536"
+  KATES_DEFAULTS_LINGER_MS: "5"
+  KATES_DEFAULTS_COMPRESSION_TYPE: "lz4"
+  KATES_DEFAULTS_RECORD_SIZE: "1024"

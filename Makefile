@@ -154,6 +154,7 @@ kates-native:
 kates-deploy:
 	@echo "🚀 Deploying Kates to Kubernetes..."
 	kubectl apply -f kates/k8s/namespace.yaml
+	kubectl apply -f kates/k8s/configmap.yaml
 	kubectl apply -f kates/k8s/deployment.yaml
 	kubectl apply -f kates/k8s/service.yaml
 	kubectl rollout status deployment/kates -n kates --timeout=120s
