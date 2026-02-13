@@ -1,5 +1,6 @@
 package com.klster.kates.engine;
 
+import com.klster.kates.config.TestTypeDefaults;
 import com.klster.kates.domain.CreateTestRequest;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
@@ -23,8 +24,7 @@ import java.util.logging.Logger;
 
 /**
  * Orchestrator that routes benchmark execution to pluggable backends.
- * Replaces the Trogdor-coupled TestExecutionService with a backend-agnostic
- * implementation that supports native, trogdor, or any future backend.
+ * Applies per-test-type defaults from configuration before building tasks.
  */
 @ApplicationScoped
 public class TestOrchestrator {
@@ -41,6 +41,9 @@ public class TestOrchestrator {
     @Any
     Instance<BenchmarkBackend> backends;
 
+    @Inject
+    TestTypeDefaults typeDefaults;
+
     @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native")
     String defaultBackend;
 
@@ -51,7 +54,7 @@ public class TestOrchestrator {
 
     public TestRun executeTest(CreateTestRequest request) {
         TestType type = request.getType();
-        TestSpec spec = request.getSpec() != null ? request.getSpec() : new TestSpec();
+        TestSpec spec = applyTypeDefaults(type, request.getSpec());
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
 
         BenchmarkBackend backend = resolveBackend(backendName);
@@ -184,6 +187,48 @@ public class TestOrchestrator {
                 .toList();
     }
 
+    /**
+     * Merges per-type defaults with the user-supplied spec.
+     * User-provided values in the request take priority over type defaults.
+     */
+    TestSpec applyTypeDefaults(TestType type, TestSpec userSpec) {
+        TestTypeDefaults.TypeConfig defaults = typeDefaults.forType(type);
+        TestSpec merged = new TestSpec();
+
+        merged.setReplicationFactor(defaults.replicationFactor());
+        merged.setPartitions(defaults.partitions());
+        merged.setMinInsyncReplicas(defaults.minInsyncReplicas());
+        merged.setAcks(defaults.acks());
+        merged.setBatchSize(defaults.batchSize());
+        merged.setLingerMs(defaults.lingerMs());
+        merged.setCompressionType(defaults.compressionType());
+        merged.setRecordSize(defaults.recordSize());
+        merged.setNumRecords((int) defaults.numRecords());
+        merged.setThroughput(defaults.throughput());
+        merged.setDurationMs(defaults.durationMs());
+        merged.setNumProducers(defaults.numProducers());
+        merged.setNumConsumers(defaults.numConsumers());
+
+        if (userSpec != null) {
+            if (userSpec.getTopic() != null) merged.setTopic(userSpec.getTopic());
+            if (userSpec.getReplicationFactor() != 3) merged.setReplicationFactor(userSpec.getReplicationFactor());
+            if (userSpec.getPartitions() != 3) merged.setPartitions(userSpec.getPartitions());
+            if (userSpec.getMinInsyncReplicas() != 2) merged.setMinInsyncReplicas(userSpec.getMinInsyncReplicas());
+            if (!"all".equals(userSpec.getAcks())) merged.setAcks(userSpec.getAcks());
+            if (userSpec.getBatchSize() != 65536) merged.setBatchSize(userSpec.getBatchSize());
+            if (userSpec.getLingerMs() != 5) merged.setLingerMs(userSpec.getLingerMs());
+            if (!"lz4".equals(userSpec.getCompressionType())) merged.setCompressionType(userSpec.getCompressionType());
+            if (userSpec.getRecordSize() != 1024) merged.setRecordSize(userSpec.getRecordSize());
+            if (userSpec.getNumRecords() != 1_000_000) merged.setNumRecords(userSpec.getNumRecords());
+            if (userSpec.getThroughput() != -1) merged.setThroughput(userSpec.getThroughput());
+            if (userSpec.getDurationMs() != 600_000) merged.setDurationMs(userSpec.getDurationMs());
+            if (userSpec.getNumProducers() != 1) merged.setNumProducers(userSpec.getNumProducers());
+            if (userSpec.getNumConsumers() != 1) merged.setNumConsumers(userSpec.getNumConsumers());
+        }
+
+        return merged;
+    }
+
     private BenchmarkBackend resolveBackend(String name) {
         return backends.stream()
                 .filter(b -> b.name().equals(name))
@@ -231,15 +276,7 @@ public class TestOrchestrator {
                     consumeTask(runId + "-endurance-consume", topic, spec)
             );
             case VOLUME -> List.of(
-                    BenchmarkTask.builder(runId + "-volume-0", BenchmarkTask.WorkloadType.PRODUCE)
-                            .topic(topic)
-                            .partitions(spec.getPartitions())
-                            .targetMessagesPerSec(spec.getThroughput())
-                            .maxMessages(spec.getNumRecords())
-                            .durationMs(spec.getDurationMs())
-                            .recordSize(10240)
-                            .producerConfig(producerConfig)
-                            .build()
+                    produceTask(runId + "-volume-0", topic, spec, producerConfig)
             );
             case CAPACITY -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
