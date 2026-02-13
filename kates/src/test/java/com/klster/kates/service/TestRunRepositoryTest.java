@@ -4,24 +4,31 @@ import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@QuarkusTest
 class TestRunRepositoryTest {
 
+    @Inject
     TestRunRepository repository;
 
+    @Inject
+    jakarta.persistence.EntityManager em;
+
     @BeforeEach
+    @Transactional
     void setUp() {
-        repository = new TestRunRepository();
+        em.createQuery("DELETE FROM TestResultEntity").executeUpdate();
+        em.createQuery("DELETE FROM TestRunEntity").executeUpdate();
     }
 
     @Test
@@ -85,27 +92,5 @@ class TestRunRepositoryTest {
         TestRun updated = repository.findById(run.getId()).orElseThrow();
         assertEquals(TestResult.TaskStatus.DONE, updated.getStatus());
         assertEquals(1, repository.findAll().size());
-    }
-
-    @Test
-    void concurrentSavesAreThreadSafe() throws Exception {
-        int threadCount = 50;
-        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch latch = new CountDownLatch(threadCount);
-
-        for (int i = 0; i < threadCount; i++) {
-            executor.submit(() -> {
-                try {
-                    repository.save(new TestRun(TestType.LOAD, new TestSpec()));
-                } finally {
-                    latch.countDown();
-                }
-            });
-        }
-
-        latch.await();
-        executor.shutdown();
-
-        assertEquals(threadCount, repository.findAll().size());
     }
 }

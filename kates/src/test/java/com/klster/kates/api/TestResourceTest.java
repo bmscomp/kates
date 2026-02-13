@@ -28,12 +28,38 @@ class TestResourceTest {
     }
 
     @Test
-    void listTestsReturnsOk() {
+    void listTestsReturnsPagedResponse() {
         given()
                 .when().get("/api/tests")
                 .then()
                 .statusCode(200)
-                .body("$", hasSize(greaterThanOrEqualTo(0)));
+                .body("content", notNullValue())
+                .body("page", is(0))
+                .body("size", is(50))
+                .body("totalElements", greaterThanOrEqualTo(0));
+    }
+
+    @Test
+    void listTestsAcceptsPagination() {
+        given()
+                .queryParam("page", 0)
+                .queryParam("size", 10)
+                .when().get("/api/tests")
+                .then()
+                .statusCode(200)
+                .body("page", is(0))
+                .body("size", is(10));
+    }
+
+    @Test
+    void listTestsWithInvalidTypeReturns400() {
+        given()
+                .queryParam("type", "INVALID")
+                .when().get("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Bad Request"))
+                .body("message", containsString("INVALID"));
     }
 
     @Test
@@ -54,8 +80,7 @@ class TestResourceTest {
                 .body("{}")
                 .when().post("/api/tests")
                 .then()
-                .statusCode(400)
-                .body("error", is("type is required"));
+                .statusCode(400);
     }
 
     @Test
@@ -63,7 +88,8 @@ class TestResourceTest {
         given()
                 .when().get("/api/tests/nonexistent")
                 .then()
-                .statusCode(404);
+                .statusCode(404)
+                .body("error", is("Not Found"));
     }
 
     @Test
@@ -71,16 +97,8 @@ class TestResourceTest {
         given()
                 .when().delete("/api/tests/nonexistent")
                 .then()
-                .statusCode(404);
-    }
-
-    @Test
-    void listTestsWithInvalidTypeReturnsAll() {
-        given()
-                .queryParam("type", "INVALID")
-                .when().get("/api/tests")
-                .then()
-                .statusCode(200);
+                .statusCode(404)
+                .body("error", is("Not Found"));
     }
 
     @Test

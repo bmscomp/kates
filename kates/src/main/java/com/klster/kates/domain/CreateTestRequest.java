@@ -1,10 +1,12 @@
 package com.klster.kates.domain;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.constraints.NotNull;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class CreateTestRequest {
 
+    @NotNull(message = "Test type is required")
     private TestType type;
     private TestSpec spec;
     private String backend;
