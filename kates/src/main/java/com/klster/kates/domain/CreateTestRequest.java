@@ -7,6 +7,7 @@ public class CreateTestRequest {
 
     private TestType type;
     private TestSpec spec;
+    private String backend;
 
     public CreateTestRequest() {
     }
@@ -25,5 +26,13 @@ public class CreateTestRequest {
 
     public void setSpec(TestSpec spec) {
         this.spec = spec;
+    }
+
+    public String getBackend() {
+        return backend;
+    }
+
+    public void setBackend(String backend) {
+        this.backend = backend;
     }
 }

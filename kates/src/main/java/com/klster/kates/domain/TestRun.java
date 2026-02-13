@@ -15,6 +15,7 @@ public class TestRun {
     private TestResult.TaskStatus status;
     private List<TestResult> results;
     private String createdAt;
+    private String backend;
 
     public TestRun() {
         this.id = UUID.randomUUID().toString().substring(0, 8);
@@ -79,5 +80,13 @@ public class TestRun {
 
     public void setCreatedAt(String createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getBackend() {
+        return backend;
+    }
+
+    public void setBackend(String backend) {
+        this.backend = backend;
     }
 }

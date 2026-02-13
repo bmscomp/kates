@@ -3,7 +3,7 @@ package com.klster.kates.api;
 import com.klster.kates.domain.CreateTestRequest;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestType;
-import com.klster.kates.service.TestExecutionService;
+import com.klster.kates.engine.TestOrchestrator;
 import com.klster.kates.service.TestRunRepository;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -25,7 +25,7 @@ import java.util.List;
 public class TestResource {
 
     @Inject
-    TestExecutionService executionService;
+    TestOrchestrator orchestrator;
 
     @Inject
     TestRunRepository repository;
@@ -38,7 +38,7 @@ public class TestResource {
                     .build();
         }
 
-        TestRun run = executionService.executeTest(request);
+        TestRun run = orchestrator.executeTest(request);
         return Response.accepted(run).build();
     }
 
@@ -60,7 +60,7 @@ public class TestResource {
     public Response getTest(@PathParam("id") String id) {
         return repository.findById(id)
                 .map(run -> {
-                    executionService.refreshStatus(id);
+                    orchestrator.refreshStatus(id);
                     return Response.ok(run).build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)
@@ -73,7 +73,7 @@ public class TestResource {
     public Response deleteTest(@PathParam("id") String id) {
         return repository.findById(id)
                 .map(run -> {
-                    executionService.stopTest(id);
+                    orchestrator.stopTest(id);
                     repository.delete(id);
                     return Response.noContent().build();
                 })
@@ -87,4 +87,11 @@ public class TestResource {
     public TestType[] getTestTypes() {
         return TestType.values();
     }
+
+    @GET
+    @Path("/backends")
+    public List<String> getBackends() {
+        return orchestrator.availableBackends();
+    }
 }
+
