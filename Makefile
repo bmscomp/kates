@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy
 
 # Default target: Launch complete cluster setup with all services
 all: check-prerequisites
@@ -133,6 +133,46 @@ test-capacity:
 	@echo "🧪 Running Capacity Test..."
 	./test-perf-capacity.sh
 
+# Kates Application
+kates: kates-build kates-deploy
+	@echo "✅ Kates deployed! Run 'make ports' to access at http://localhost:30083"
+
+kates-build:
+	@echo "🔨 Building Kates (JVM)..."
+	cd kates && ./mvnw package -DskipTests -B
+	cd kates && docker build -t kates:latest .
+	kind load docker-image kates:latest --name panda
+	@echo "✅ Kates image loaded into Kind"
+
+kates-native:
+	@echo "🔨 Building Kates (native)..."
+	cd kates && ./mvnw package -Dnative -DskipTests -B
+	cd kates && docker build -f Dockerfile.native -t kates:latest .
+	kind load docker-image kates:latest --name panda
+	@echo "✅ Kates native image loaded into Kind"
+
+kates-deploy:
+	@echo "🚀 Deploying Kates to Kubernetes..."
+	kubectl apply -f kates/k8s/namespace.yaml
+	kubectl apply -f kates/k8s/deployment.yaml
+	kubectl apply -f kates/k8s/service.yaml
+	kubectl rollout status deployment/kates -n kates --timeout=120s
+	@echo "✅ Kates is running"
+
+kates-redeploy:
+	@echo "🔄 Redeploying Kates..."
+	kubectl rollout restart deployment/kates -n kates
+	kubectl rollout status deployment/kates -n kates --timeout=120s
+
+kates-logs:
+	@echo "📋 Streaming Kates logs..."
+	kubectl logs -f -l app=kates -n kates
+
+kates-undeploy:
+	@echo "🗑️  Removing Kates..."
+	kubectl delete namespace kates --ignore-not-found
+	@echo "✅ Kates removed"
+
 # Port Forwarding
 ports:
 	@echo "🔌 Starting Port Forwarding..."
@@ -241,6 +281,8 @@ clean: destroy
 # Help
 help:
 	@echo "Available targets:"
+	@echo ""
+	@echo "  Cluster & Infrastructure"
 	@echo "  all              - Complete setup (cluster, registry, images, all services)"
 	@echo "  cluster          - Start Kind cluster only"
 	@echo "  images           - Pull and load all images"
@@ -249,12 +291,18 @@ help:
 	@echo "  ui               - Deploy Kafka UI"
 	@echo "  apicurio         - Deploy Apicurio Registry"
 	@echo "  litmus           - Deploy LitmusChaos (with images)"
-	@echo "  chaos-ui         - Port-forward Litmus UI"
-	@echo "  chaos-experiments- Apply chaos experiments"
 	@echo "  velero           - Deploy Velero backup"
-	@echo "  ports            - Start port forwarding"
-	@echo "  status           - Check cluster status"
-	@echo "  destroy          - Destroy cluster"
+	@echo ""
+	@echo "  Kates Application"
+	@echo "  kates            - Build + deploy Kates (full pipeline)"
+	@echo "  kates-build      - Build Kates JVM image and load into Kind"
+	@echo "  kates-native     - Build Kates native image and load into Kind"
+	@echo "  kates-deploy     - Apply Kates K8s manifests"
+	@echo "  kates-redeploy   - Restart Kates deployment"
+	@echo "  kates-logs       - Stream Kates logs"
+	@echo "  kates-undeploy   - Remove Kates namespace"
+	@echo ""
+	@echo "  Performance Tests"
 	@echo "  test             - Run baseline 1M-message perf test"
 	@echo "  test-load        - Run load test (concurrent producers/consumers)"
 	@echo "  test-stress      - Run stress test (ramp to breaking point)"
@@ -262,4 +310,11 @@ help:
 	@echo "  test-endurance   - Run endurance/soak test (sustained load)"
 	@echo "  test-volume      - Run volume test (large data)"
 	@echo "  test-capacity    - Run capacity test (find max throughput)"
+	@echo ""
+	@echo "  Operations"
+	@echo "  ports            - Start port forwarding"
+	@echo "  status           - Check cluster status"
+	@echo "  chaos-ui         - Port-forward Litmus UI"
+	@echo "  chaos-experiments- Apply chaos experiments"
+	@echo "  destroy          - Destroy cluster"
 	@echo "  help             - Show this help"

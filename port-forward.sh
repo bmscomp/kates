@@ -26,5 +26,13 @@ kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus > /de
 echo "📚 Forwarding Apicurio Registry: http://localhost:30082"
 kubectl port-forward svc/apicurio-registry 30082:8080 -n apicurio > /dev/null 2>&1 &
 
+# Kates API (30083 -> 8080)
+if kubectl get svc kates -n kates > /dev/null 2>&1; then
+    echo "🧪 Forwarding Kates API: http://localhost:30083"
+    kubectl port-forward svc/kates 30083:8080 -n kates > /dev/null 2>&1 &
+else
+    echo "⏭️  Kates not deployed, skipping (run 'make kates' to deploy)"
+fi
+
 echo "✅ Port forwarding started in background!"
 echo "Press Ctrl+C to stop (this script exits but forwards keep running)"

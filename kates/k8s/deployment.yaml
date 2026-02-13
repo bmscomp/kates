@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kates
+  namespace: kates
+  labels:
+    app: kates
+    app.kubernetes.io/name: kates
+    app.kubernetes.io/part-of: klster
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kates
+  template:
+    metadata:
+      labels:
+        app: kates
+    spec:
+      containers:
+      - name: kates
+        image: kates:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: KATES_KAFKA_BOOTSTRAP_SERVERS
+          value: "krafter-kafka-bootstrap.kafka.svc:9092"
+        - name: KATES_TROGDOR_COORDINATOR_URL
+          value: "http://trogdor-coordinator.kafka.svc:8889"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /q/health/live
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30

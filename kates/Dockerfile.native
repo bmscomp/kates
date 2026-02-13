@@ -1,0 +1,26 @@
+# Native image build
+FROM ghcr.io/graalvm/jdk-community:25 AS builder
+WORKDIR /build
+
+COPY pom.xml .
+COPY .mvn .mvn
+COPY mvnw .
+RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
+
+COPY src src
+RUN ./mvnw package -Dnative -DskipTests -B
+
+# Minimal runtime
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
+WORKDIR /app
+
+COPY --from=builder /build/target/*-runner ./kates
+
+RUN chmod +x kates
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+    CMD curl -sf http://localhost:8080/api/health || exit 1
+
+ENTRYPOINT ["./kates"]
