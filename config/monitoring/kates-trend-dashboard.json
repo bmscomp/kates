@@ -1,0 +1,205 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "graphTooltip": 1,
+    "panels": [
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "title": "Throughput Trend",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 1
+            },
+            "id": 2,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Peak Throughput Across Runs",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "max by (run_id, test_type) (kates_benchmark_throughput_rec_sec{test_type=~\"$test_type\"})",
+                    "legendFormat": "{{run_id}} ({{test_type}})",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 9
+            },
+            "id": 10,
+            "title": "Latency Trend",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 10
+            },
+            "id": 11,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "p99 Latency Trend",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "max by (run_id) (kates_benchmark_latency_ms{test_type=~\"$test_type\", quantile=\"0.99\"})",
+                    "legendFormat": "p99 {{run_id}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 10
+            },
+            "id": 12,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "p99.9 Latency Trend",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "max by (run_id) (kates_benchmark_latency_ms{test_type=~\"$test_type\", quantile=\"0.999\"})",
+                    "legendFormat": "p99.9 {{run_id}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 18
+            },
+            "id": 20,
+            "title": "Regression Detection",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 19
+            },
+            "id": 21,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                }
+            },
+            "title": "Total Records per Run",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (run_id, test_type) (kates_benchmark_records_total{test_type=~\"$test_type\"})",
+                    "legendFormat": "{{run_id}} ({{test_type}})",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "tags": [
+        "kates",
+        "kafka",
+        "benchmark",
+        "trend"
+    ],
+    "templating": {
+        "list": [
+            {
+                "name": "test_type",
+                "type": "query",
+                "datasource": "prometheus",
+                "query": "label_values(kates_benchmark_records_total, test_type)",
+                "refresh": 2,
+                "multi": true,
+                "includeAll": true,
+                "allValue": ".*"
+            }
+        ]
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "KATES Trend Analysis",
+    "uid": "kates-trend-analysis",
+    "version": 1
+}

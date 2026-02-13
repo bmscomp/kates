@@ -1,0 +1,192 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "graphTooltip": 1,
+    "panels": [
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "title": "Phase Metrics",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 1
+            },
+            "id": 2,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Throughput by Phase",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (phase) (rate(kates_benchmark_records_total{run_id=~\"$run_id\"}[30s]))",
+                    "legendFormat": "{{phase}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 1
+            },
+            "id": 3,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Latency by Phase (p99)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_latency_ms{run_id=~\"$run_id\", quantile=\"0.99\"}",
+                    "legendFormat": "p99 {{phase}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 9
+            },
+            "id": 4,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                }
+            },
+            "title": "Records by Phase",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (phase) (kates_benchmark_records_total{run_id=~\"$run_id\"})",
+                    "legendFormat": "{{phase}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 17
+            },
+            "id": 10,
+            "title": "Phase SLA",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 18
+            },
+            "id": 11,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                }
+            },
+            "title": "SLA Violations by Phase",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (metric, severity) (kates_benchmark_sla_violations{run_id=~\"$run_id\"})",
+                    "legendFormat": "{{metric}} ({{severity}})",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 38,
+    "tags": [
+        "kates",
+        "kafka",
+        "benchmark",
+        "phase"
+    ],
+    "templating": {
+        "list": [
+            {
+                "name": "run_id",
+                "type": "query",
+                "datasource": "prometheus",
+                "query": "label_values(kates_benchmark_records_total, run_id)",
+                "refresh": 2,
+                "multi": false,
+                "includeAll": true,
+                "allValue": ".*"
+            }
+        ]
+    },
+    "time": {
+        "from": "now-30m",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "KATES Phase Deep-Dive",
+    "uid": "kates-phase-deepdive",
+    "version": 1
+}

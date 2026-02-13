@@ -1,0 +1,391 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "graphTooltip": 1,
+    "panels": [
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "title": "Benchmark Status",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 6,
+                "x": 0,
+                "y": 1
+            },
+            "id": 2,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "area"
+            },
+            "title": "Active Runs",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_active_runs",
+                    "legendFormat": "Active",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 6,
+                "x": 6,
+                "y": 1
+            },
+            "id": 3,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "area"
+            },
+            "title": "Total Records Produced",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "sum(kates_benchmark_records_total)",
+                    "legendFormat": "Records",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 6,
+                "x": 12,
+                "y": 1
+            },
+            "id": 4,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "area"
+            },
+            "title": "Total Errors",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "sum(kates_benchmark_errors_total) or vector(0)",
+                    "legendFormat": "Errors",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 6,
+                "x": 18,
+                "y": 1
+            },
+            "id": 5,
+            "options": {
+                "colorMode": "background",
+                "graphMode": "area"
+            },
+            "title": "SLA Violations",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "sum(kates_benchmark_sla_violations) or vector(0)",
+                    "legendFormat": "Violations",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 6
+            },
+            "id": 10,
+            "title": "Throughput",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 7
+            },
+            "id": 11,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Throughput (records/sec)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_throughput_rec_sec",
+                    "legendFormat": "{{run_id}} - {{test_type}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "MBs"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 7
+            },
+            "id": 12,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Throughput (MB/sec)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_throughput_mb_sec",
+                    "legendFormat": "{{run_id}} - {{test_type}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 15
+            },
+            "id": 20,
+            "title": "Latency",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 16
+            },
+            "id": 21,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Latency Percentiles",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_latency_ms{quantile=\"0.5\"}",
+                    "legendFormat": "p50 {{run_id}}",
+                    "refId": "A"
+                },
+                {
+                    "expr": "kates_benchmark_latency_ms{quantile=\"0.95\"}",
+                    "legendFormat": "p95 {{run_id}}",
+                    "refId": "B"
+                },
+                {
+                    "expr": "kates_benchmark_latency_ms{quantile=\"0.99\"}",
+                    "legendFormat": "p99 {{run_id}}",
+                    "refId": "C"
+                },
+                {
+                    "expr": "kates_benchmark_latency_ms{quantile=\"0.999\"}",
+                    "legendFormat": "p99.9 {{run_id}}",
+                    "refId": "D"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 16
+            },
+            "id": 22,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Max Latency",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_latency_ms_max",
+                    "legendFormat": "max {{run_id}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 24
+            },
+            "id": 30,
+            "title": "SLA & Errors",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 25
+            },
+            "id": 31,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                }
+            },
+            "title": "Error Rate",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(kates_benchmark_errors_total[1m])",
+                    "legendFormat": "{{run_id}} - {{phase}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 25
+            },
+            "id": 32,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                }
+            },
+            "title": "SLA Violations by Metric",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "sum by (metric, severity) (kates_benchmark_sla_violations)",
+                    "legendFormat": "{{metric}} ({{severity}})",
+                    "refId": "A"
+                }
+            ]
+        }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 38,
+    "tags": [
+        "kates",
+        "kafka",
+        "benchmark"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-30m",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "KATES Benchmark Overview",
+    "uid": "kates-benchmark-overview",
+    "version": 1
+}

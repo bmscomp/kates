@@ -2,8 +2,10 @@ package com.klster.kates.engine;
 
 import com.klster.kates.config.TestTypeDefaults;
 import com.klster.kates.domain.CreateTestRequest;
+import com.klster.kates.domain.ScenarioPhase;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
+import com.klster.kates.domain.TestScenario;
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.service.KafkaAdminService;
@@ -35,6 +37,7 @@ public class TestOrchestrator {
     private final TestRunRepository repository;
     private final Instance<BenchmarkBackend> backends;
     private final TestTypeDefaults typeDefaults;
+    private final BenchmarkMetrics benchmarkMetrics;
     private final String defaultBackend;
     private final String bootstrapServers;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
@@ -45,17 +48,23 @@ public class TestOrchestrator {
             TestRunRepository repository,
             @Any Instance<BenchmarkBackend> backends,
             TestTypeDefaults typeDefaults,
+            BenchmarkMetrics benchmarkMetrics,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.kafkaAdmin = kafkaAdmin;
         this.repository = repository;
         this.backends = backends;
         this.typeDefaults = typeDefaults;
+        this.benchmarkMetrics = benchmarkMetrics;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
     }
 
     public TestRun executeTest(CreateTestRequest request) {
+        if (request.isScenario()) {
+            return executeScenario(request);
+        }
+
         TestType type = request.getType();
         TestSpec spec = applyTypeDefaults(type, request.getSpec());
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
@@ -70,6 +79,7 @@ public class TestOrchestrator {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
             run.setStatus(TestResult.TaskStatus.RUNNING);
+            benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
 
             var handles = new java.util.ArrayList<BenchmarkHandle>();
 
@@ -112,6 +122,92 @@ public class TestOrchestrator {
         }
 
         repository.save(run);
+        if (run.getStatus() == TestResult.TaskStatus.FAILED || run.getStatus() == TestResult.TaskStatus.DONE) {
+            benchmarkMetrics.endRun(run.getId());
+        }
+        return run;
+    }
+
+    /**
+     * Executes a multi-phase scenario: each phase runs sequentially,
+     * using the resolved spec (base + phase overrides + type defaults).
+     */
+    TestRun executeScenario(CreateTestRequest request) {
+        TestScenario scenario = request.getScenario();
+        TestType type = scenario.getType() != null ? scenario.getType() : request.getType();
+        String backendName = scenario.getBackend() != null
+                ? scenario.getBackend()
+                : (request.getBackend() != null ? request.getBackend() : defaultBackend);
+
+        BenchmarkBackend backend = resolveBackend(backendName);
+
+        TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
+        TestRun run = new TestRun(type, baseSpec);
+        run.setBackend(backendName);
+        run.setScenarioName(scenario.getName());
+        run.setLabels(scenario.getLabels());
+        run.setSla(scenario.getSla());
+        run.setStatus(TestResult.TaskStatus.RUNNING);
+        repository.save(run);
+
+        try {
+            createTestTopic(baseSpec, type);
+            benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
+
+            var allHandles = new java.util.ArrayList<BenchmarkHandle>();
+
+            for (int phaseIdx = 0; phaseIdx < scenario.getPhases().size(); phaseIdx++) {
+                ScenarioPhase phase = scenario.getPhases().get(phaseIdx);
+                String phaseName = phase.getName() != null ? phase.getName() : "phase-" + phaseIdx;
+                TestSpec phaseSpec = scenario.resolveSpecForPhase(phase);
+
+                List<BenchmarkTask> tasks = buildPhaseTask(phase, phaseSpec, type, run.getId(), phaseName);
+
+                for (BenchmarkTask task : tasks) {
+                    try {
+                        BenchmarkHandle handle = backend.submit(task);
+                        allHandles.add(handle);
+
+                        TestResult result = new TestResult();
+                        result.setTaskId(task.getTaskId());
+                        result.setTestType(type);
+                        result.setStatus(TestResult.TaskStatus.RUNNING);
+                        result.setStartTime(Instant.now().toString());
+                        result.setPhaseName(phaseName);
+                        run.addResult(result);
+                        LOG.info("Scenario phase [" + phaseName + "] submitted: " + task.getTaskId());
+                    } catch (Exception e) {
+                        LOG.log(Level.WARNING, "Phase [" + phaseName + "] failed to submit: " + task.getTaskId(), e);
+                        TestResult failedResult = new TestResult();
+                        failedResult.setTaskId(task.getTaskId());
+                        failedResult.setTestType(type);
+                        failedResult.setStatus(TestResult.TaskStatus.FAILED);
+                        failedResult.setError(e.getMessage());
+                        failedResult.setStartTime(Instant.now().toString());
+                        failedResult.setEndTime(Instant.now().toString());
+                        failedResult.setPhaseName(phaseName);
+                        run.addResult(failedResult);
+                    }
+                }
+            }
+
+            activeHandles.put(run.getId(), allHandles);
+
+            boolean allFailed = run.getResults().stream()
+                    .allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
+            if (allFailed) {
+                run.setStatus(TestResult.TaskStatus.FAILED);
+            }
+
+        } catch (Exception e) {
+            LOG.log(Level.SEVERE, "Scenario execution failed for run: " + run.getId(), e);
+            run.setStatus(TestResult.TaskStatus.FAILED);
+        }
+
+        repository.save(run);
+        if (run.getStatus() == TestResult.TaskStatus.FAILED || run.getStatus() == TestResult.TaskStatus.DONE) {
+            benchmarkMetrics.endRun(run.getId());
+        }
         return run;
     }
 
@@ -301,6 +397,52 @@ public class TestOrchestrator {
                             .topic(topic)
                             .partitions(spec.getPartitions())
                             .targetMessagesPerSec(spec.getThroughput())
+                            .maxMessages(spec.getNumRecords())
+                            .durationMs(spec.getDurationMs())
+                            .recordSize(spec.getRecordSize())
+                            .producerConfig(producerConfig)
+                            .build()
+            );
+        };
+    }
+
+    private List<BenchmarkTask> buildPhaseTask(ScenarioPhase phase, TestSpec spec, TestType type,
+                                                String runId, String phaseName) {
+        String topic = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
+        Map<String, String> producerConfig = new HashMap<>();
+        producerConfig.put("acks", spec.getAcks());
+        producerConfig.put("batch.size", String.valueOf(spec.getBatchSize()));
+        producerConfig.put("linger.ms", String.valueOf(spec.getLingerMs()));
+        producerConfig.put("compression.type", spec.getCompressionType());
+
+        String taskId = runId + "-" + phaseName;
+
+        return switch (phase.getPhaseType()) {
+            case WARMUP, STEADY, COOLDOWN -> List.of(
+                    produceTask(taskId + "-produce", topic, spec, producerConfig)
+            );
+            case RAMP -> {
+                var tasks = new java.util.ArrayList<BenchmarkTask>();
+                int steps = Math.max(1, phase.getRampSteps());
+                int baseTarget = Math.max(1, spec.getThroughput() / steps);
+                for (int s = 0; s < steps; s++) {
+                    int stepTarget = baseTarget * (s + 1);
+                    TestSpec stepSpec = new TestSpec();
+                    stepSpec.setTopic(topic);
+                    stepSpec.setPartitions(spec.getPartitions());
+                    stepSpec.setThroughput(stepTarget);
+                    stepSpec.setNumRecords(spec.getNumRecords() / steps);
+                    stepSpec.setDurationMs(spec.getDurationMs() / steps);
+                    stepSpec.setRecordSize(spec.getRecordSize());
+                    tasks.add(produceTask(taskId + "-ramp-" + s, topic, stepSpec, producerConfig));
+                }
+                yield tasks;
+            }
+            case SPIKE -> List.of(
+                    BenchmarkTask.builder(taskId + "-spike", BenchmarkTask.WorkloadType.PRODUCE)
+                            .topic(topic)
+                            .partitions(spec.getPartitions())
+                            .targetMessagesPerSec(-1)
                             .maxMessages(spec.getNumRecords())
                             .durationMs(spec.getDurationMs())
                             .recordSize(spec.getRecordSize())

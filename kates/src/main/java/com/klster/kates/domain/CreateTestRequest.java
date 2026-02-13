@@ -8,6 +8,7 @@ public class CreateTestRequest {
     private TestType type;
     private TestSpec spec;
     private String backend;
+    private TestScenario scenario;
 
     public CreateTestRequest() {
     }
@@ -34,5 +35,17 @@ public class CreateTestRequest {
 
     public void setBackend(String backend) {
         this.backend = backend;
+    }
+
+    public TestScenario getScenario() {
+        return scenario;
+    }
+
+    public void setScenario(TestScenario scenario) {
+        this.scenario = scenario;
+    }
+
+    public boolean isScenario() {
+        return scenario != null && scenario.getPhases() != null && !scenario.getPhases().isEmpty();
     }
 }

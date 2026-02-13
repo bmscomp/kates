@@ -1,6 +1,10 @@
 package com.klster.kates.engine;
 
+import com.klster.kates.domain.MetricsSample;
 import com.klster.kates.domain.TestResult.TaskStatus;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Unified status snapshot returned by {@link BenchmarkBackend#poll}.
@@ -16,8 +20,11 @@ public class BenchmarkStatus {
     private final double p50LatencyMs;
     private final double p95LatencyMs;
     private final double p99LatencyMs;
+    private final double p999LatencyMs;
     private final double maxLatencyMs;
     private final String error;
+    private final List<MetricsSample> timeSeries;
+    private final Map<String, Double> latencyHistogram;
 
     private BenchmarkStatus(Builder builder) {
         this.state = builder.state;
@@ -28,8 +35,11 @@ public class BenchmarkStatus {
         this.p50LatencyMs = builder.p50LatencyMs;
         this.p95LatencyMs = builder.p95LatencyMs;
         this.p99LatencyMs = builder.p99LatencyMs;
+        this.p999LatencyMs = builder.p999LatencyMs;
         this.maxLatencyMs = builder.maxLatencyMs;
         this.error = builder.error;
+        this.timeSeries = builder.timeSeries != null ? List.copyOf(builder.timeSeries) : List.of();
+        this.latencyHistogram = builder.latencyHistogram != null ? Map.copyOf(builder.latencyHistogram) : Map.of();
     }
 
     public TaskStatus getState() { return state; }
@@ -40,8 +50,11 @@ public class BenchmarkStatus {
     public double getP50LatencyMs() { return p50LatencyMs; }
     public double getP95LatencyMs() { return p95LatencyMs; }
     public double getP99LatencyMs() { return p99LatencyMs; }
+    public double getP999LatencyMs() { return p999LatencyMs; }
     public double getMaxLatencyMs() { return maxLatencyMs; }
     public String getError() { return error; }
+    public List<MetricsSample> getTimeSeries() { return timeSeries; }
+    public Map<String, Double> getLatencyHistogram() { return latencyHistogram; }
 
     public boolean isTerminal() {
         return state == TaskStatus.DONE || state == TaskStatus.FAILED;
@@ -60,8 +73,11 @@ public class BenchmarkStatus {
         private double p50LatencyMs;
         private double p95LatencyMs;
         private double p99LatencyMs;
+        private double p999LatencyMs;
         private double maxLatencyMs;
         private String error;
+        private List<MetricsSample> timeSeries;
+        private Map<String, Double> latencyHistogram;
 
         private Builder(TaskStatus state) {
             this.state = state;
@@ -74,8 +90,11 @@ public class BenchmarkStatus {
         public Builder p50LatencyMs(double l) { this.p50LatencyMs = l; return this; }
         public Builder p95LatencyMs(double l) { this.p95LatencyMs = l; return this; }
         public Builder p99LatencyMs(double l) { this.p99LatencyMs = l; return this; }
+        public Builder p999LatencyMs(double l) { this.p999LatencyMs = l; return this; }
         public Builder maxLatencyMs(double l) { this.maxLatencyMs = l; return this; }
         public Builder error(String e) { this.error = e; return this; }
+        public Builder timeSeries(List<MetricsSample> ts) { this.timeSeries = ts; return this; }
+        public Builder latencyHistogram(Map<String, Double> h) { this.latencyHistogram = h; return this; }
 
         public BenchmarkStatus build() {
             return new BenchmarkStatus(this);

@@ -14,7 +14,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;

@@ -21,7 +21,6 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.DoubleAdder;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -142,8 +141,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 double latencyMs = latencyNs / 1_000_000.0;
 
                 state.recordsProcessed.incrementAndGet();
-                state.totalLatencyMs.add(latencyMs);
-                state.updateLatency(latencyMs);
+                state.histogram.recordLatency(latencyMs);
                 sent++;
             }
 
@@ -186,7 +184,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         final AtomicLong recordsProcessed = new AtomicLong();
         final AtomicLong errors = new AtomicLong();
         final AtomicBoolean stopRequested = new AtomicBoolean();
-        final DoubleAdder totalLatencyMs = new DoubleAdder();
+        final LatencyHistogram histogram = new LatencyHistogram();
 
         volatile TaskStatus status = TaskStatus.PENDING;
         volatile long startTimeMs;
@@ -194,19 +192,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         volatile String error;
         volatile Thread thread;
 
-        private volatile double maxLatency;
-        private final Object latencyLock = new Object();
-
         WorkerState(BenchmarkTask task) {
             this.task = task;
-        }
-
-        void updateLatency(double latencyMs) {
-            synchronized (latencyLock) {
-                if (latencyMs > maxLatency) {
-                    maxLatency = latencyMs;
-                }
-            }
         }
 
         BenchmarkStatus toStatus() {
@@ -214,16 +201,18 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             long elapsed = (endTimeMs > 0 ? endTimeMs : System.currentTimeMillis()) - startTimeMs;
             double elapsedSec = Math.max(0.001, elapsed / 1000.0);
             double throughput = records / elapsedSec;
-            double avgLatency = records > 0
-                    ? totalLatencyMs.sum() / records
-                    : 0;
 
             BenchmarkStatus.Builder builder = BenchmarkStatus.builder(status)
                     .recordsProcessed(records)
                     .throughputRecordsPerSec(throughput)
                     .throughputMBPerSec(throughput * task.getRecordSize() / (1024.0 * 1024.0))
-                    .avgLatencyMs(avgLatency)
-                    .maxLatencyMs(maxLatency);
+                    .avgLatencyMs(histogram.getMean())
+                    .p50LatencyMs(histogram.getPercentile(50))
+                    .p95LatencyMs(histogram.getPercentile(95))
+                    .p99LatencyMs(histogram.getPercentile(99))
+                    .p999LatencyMs(histogram.getPercentile(99.9))
+                    .maxLatencyMs(histogram.getMax())
+                    .latencyHistogram(histogram.snapshot());
 
             if (error != null) {
                 builder.error(error);

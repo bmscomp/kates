@@ -19,6 +19,7 @@ public class TestResult {
     private String startTime;
     private String endTime;
     private String error;
+    private String phaseName;
 
     public enum TaskStatus {
         PENDING, RUNNING, STOPPING, DONE, FAILED
@@ -138,4 +139,7 @@ public class TestResult {
     public void setError(String error) {
         this.error = error;
     }
+
+    public String getPhaseName() { return phaseName; }
+    public void setPhaseName(String phaseName) { this.phaseName = phaseName; }
 }

@@ -38,4 +38,16 @@ public class TestRunRepository {
     public void delete(String id) {
         runs.remove(id);
     }
+
+    public List<TestRun> findByLabel(String key, String value) {
+        return runs.values().stream()
+                .filter(r -> r.getLabels() != null && value.equals(r.getLabels().get(key)))
+                .collect(Collectors.toList());
+    }
+
+    public Optional<TestRun> findLatestByType(TestType type) {
+        return runs.values().stream()
+                .filter(r -> r.getTestType() == type)
+                .max((a, b) -> a.getCreatedAt().compareTo(b.getCreatedAt()));
+    }
 }
