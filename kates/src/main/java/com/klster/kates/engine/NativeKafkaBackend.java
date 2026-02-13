@@ -2,6 +2,7 @@ package com.klster.kates.engine;
 
 import com.klster.kates.domain.TestResult.TaskStatus;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -34,10 +35,14 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
     private static final Logger LOG = Logger.getLogger(NativeKafkaBackend.class.getName());
 
-    @ConfigProperty(name = "kates.kafka.bootstrap-servers")
-    String bootstrapServers;
-
+    private final String bootstrapServers;
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
+
+    @Inject
+    public NativeKafkaBackend(
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+        this.bootstrapServers = bootstrapServers;
+    }
 
     @Override
     public String name() {

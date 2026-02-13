@@ -15,8 +15,12 @@ import java.util.Set;
 @Produces(MediaType.APPLICATION_JSON)
 public class ClusterResource {
 
+    private final KafkaAdminService kafkaAdmin;
+
     @Inject
-    KafkaAdminService kafkaAdmin;
+    public ClusterResource(KafkaAdminService kafkaAdmin) {
+        this.kafkaAdmin = kafkaAdmin;
+    }
 
     @GET
     @Path("/info")

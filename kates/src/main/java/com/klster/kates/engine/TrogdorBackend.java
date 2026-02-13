@@ -22,9 +22,12 @@ public class TrogdorBackend implements BenchmarkBackend {
 
     private static final Logger LOG = Logger.getLogger(TrogdorBackend.class.getName());
 
+    private final TrogdorClient trogdorClient;
+
     @Inject
-    @RestClient
-    TrogdorClient trogdorClient;
+    public TrogdorBackend(@RestClient TrogdorClient trogdorClient) {
+        this.trogdorClient = trogdorClient;
+    }
 
     @Override
     public String name() {

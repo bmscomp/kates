@@ -86,11 +86,11 @@ The `TestOrchestrator` orchestrates the complete lifecycle of a test run using p
                        │
             ┌──────────┴─────────┐
             │                    │
-      ┌─────▼─────┐      ┌──────▼──────┐
-      │   Task     │      │   Task      │
-      │ submitted  │      │   failed    │
-      │ (RUNNING)  │      │  (FAILED)   │
-      └─────┬──────┘      └─────────────┘
+      ┌─────▼─────┐       ┌──────▼──────┐
+      │   Task    │       │   Task      │
+      │ submitted │       │   failed    │
+      │ (RUNNING) │       │  (FAILED)   │
+      └─────┬─────┘       └─────────────┘
             │
             ▼
   ┌──────────────────┐

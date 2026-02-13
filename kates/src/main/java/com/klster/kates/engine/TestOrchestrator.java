@@ -31,26 +31,29 @@ public class TestOrchestrator {
 
     private static final Logger LOG = Logger.getLogger(TestOrchestrator.class.getName());
 
-    @Inject
-    KafkaAdminService kafkaAdmin;
-
-    @Inject
-    TestRunRepository repository;
-
-    @Inject
-    @Any
-    Instance<BenchmarkBackend> backends;
-
-    @Inject
-    TestTypeDefaults typeDefaults;
-
-    @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native")
-    String defaultBackend;
-
-    @ConfigProperty(name = "kates.kafka.bootstrap-servers")
-    String bootstrapServers;
-
+    private final KafkaAdminService kafkaAdmin;
+    private final TestRunRepository repository;
+    private final Instance<BenchmarkBackend> backends;
+    private final TestTypeDefaults typeDefaults;
+    private final String defaultBackend;
+    private final String bootstrapServers;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
+
+    @Inject
+    public TestOrchestrator(
+            KafkaAdminService kafkaAdmin,
+            TestRunRepository repository,
+            @Any Instance<BenchmarkBackend> backends,
+            TestTypeDefaults typeDefaults,
+            @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+        this.kafkaAdmin = kafkaAdmin;
+        this.repository = repository;
+        this.backends = backends;
+        this.typeDefaults = typeDefaults;
+        this.defaultBackend = defaultBackend;
+        this.bootstrapServers = bootstrapServers;
+    }
 
     public TestRun executeTest(CreateTestRequest request) {
         TestType type = request.getType();

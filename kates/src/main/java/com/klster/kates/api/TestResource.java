@@ -24,11 +24,14 @@ import java.util.List;
 @Consumes(MediaType.APPLICATION_JSON)
 public class TestResource {
 
-    @Inject
-    TestOrchestrator orchestrator;
+    private final TestOrchestrator orchestrator;
+    private final TestRunRepository repository;
 
     @Inject
-    TestRunRepository repository;
+    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
+        this.orchestrator = orchestrator;
+        this.repository = repository;
+    }
 
     @POST
     public Response createTest(CreateTestRequest request) {
@@ -94,4 +97,3 @@ public class TestResource {
         return orchestrator.availableBackends();
     }
 }
-

@@ -30,8 +30,13 @@ public class KafkaAdminService {
     private static final Logger LOG = Logger.getLogger(KafkaAdminService.class.getName());
     private static final int TIMEOUT_SECONDS = 30;
 
-    @ConfigProperty(name = "kates.kafka.bootstrap-servers")
-    String bootstrapServers;
+    private final String bootstrapServers;
+
+    @Inject
+    public KafkaAdminService(
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+        this.bootstrapServers = bootstrapServers;
+    }
 
     private AdminClient createClient() {
         Properties props = new Properties();

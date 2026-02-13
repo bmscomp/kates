@@ -17,20 +17,25 @@ import java.util.Map;
 @Produces(MediaType.APPLICATION_JSON)
 public class HealthResource {
 
-    @Inject
-    KafkaAdminService kafkaAdmin;
+    private final KafkaAdminService kafkaAdmin;
+    private final TestOrchestrator orchestrator;
+    private final TestTypeDefaults typeDefaults;
+    private final String defaultBackend;
+    private final String bootstrapServers;
 
     @Inject
-    TestOrchestrator orchestrator;
-
-    @Inject
-    TestTypeDefaults typeDefaults;
-
-    @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native")
-    String defaultBackend;
-
-    @ConfigProperty(name = "kates.kafka.bootstrap-servers")
-    String bootstrapServers;
+    public HealthResource(
+            KafkaAdminService kafkaAdmin,
+            TestOrchestrator orchestrator,
+            TestTypeDefaults typeDefaults,
+            @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+        this.kafkaAdmin = kafkaAdmin;
+        this.orchestrator = orchestrator;
+        this.typeDefaults = typeDefaults;
+        this.defaultBackend = defaultBackend;
+        this.bootstrapServers = bootstrapServers;
+    }
 
     @GET
     public Map<String, Object> health() {

@@ -25,18 +25,22 @@ public class TestExecutionService {
 
     private static final Logger LOG = Logger.getLogger(TestExecutionService.class.getName());
 
-    @Inject
-    SpecFactory specFactory;
+    private final SpecFactory specFactory;
+    private final KafkaAdminService kafkaAdmin;
+    private final TestRunRepository repository;
+    private final TrogdorClient trogdorClient;
 
     @Inject
-    KafkaAdminService kafkaAdmin;
-
-    @Inject
-    TestRunRepository repository;
-
-    @Inject
-    @RestClient
-    TrogdorClient trogdorClient;
+    public TestExecutionService(
+            SpecFactory specFactory,
+            KafkaAdminService kafkaAdmin,
+            TestRunRepository repository,
+            @RestClient TrogdorClient trogdorClient) {
+        this.specFactory = specFactory;
+        this.kafkaAdmin = kafkaAdmin;
+        this.repository = repository;
+        this.trogdorClient = trogdorClient;
+    }
 
     public TestRun executeTest(CreateTestRequest request) {
         TestType type = request.getType();

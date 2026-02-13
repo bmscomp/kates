@@ -7,6 +7,7 @@ import com.klster.kates.trogdor.spec.ProduceBenchSpec;
 import com.klster.kates.trogdor.spec.RoundTripWorkloadSpec;
 import com.klster.kates.trogdor.spec.TrogdorSpec;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.ArrayList;
@@ -16,8 +17,13 @@ import java.util.Map;
 @ApplicationScoped
 public class SpecFactory {
 
-    @ConfigProperty(name = "kates.kafka.bootstrap-servers")
-    String bootstrapServers;
+    private final String bootstrapServers;
+
+    @Inject
+    public SpecFactory(
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+        this.bootstrapServers = bootstrapServers;
+    }
 
     public List<TrogdorSpec> buildSpecs(TestType type, TestSpec spec, String runId) {
         return switch (type) {
