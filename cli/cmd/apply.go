@@ -1,13 +1,14 @@
 package cmd
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -70,7 +71,6 @@ var testApplyCmd = &cobra.Command{
 			err = yaml.Unmarshal(data, &sf)
 		}
 		if err != nil {
-			// Try single scenario
 			var single TestScenario
 			if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
 				sf.Scenarios = []TestScenario{single}
@@ -100,14 +100,7 @@ var testApplyCmd = &cobra.Command{
 				scenario.Type,
 			)
 
-			req := map[string]interface{}{"testType": strings.ToUpper(scenario.Type)}
-			if scenario.Backend != "" {
-				req["backend"] = scenario.Backend
-			}
-			if scenario.Spec != nil {
-				req["spec"] = scenario.Spec
-			}
-
+			req := scenarioToRequest(scenario)
 			result, err := apiClient.CreateTest(context.Background(), req)
 			if err != nil {
 				output.Error("  Failed: " + err.Error())
@@ -115,23 +108,20 @@ var testApplyCmd = &cobra.Command{
 				continue
 			}
 
-			id := mapStr(result, "id")
-			output.Success(fmt.Sprintf("  Created: %s", truncID(id)))
+			output.Success(fmt.Sprintf("  Created: %s", truncID(result.ID)))
 
 			if applyWait {
-				finalResult, err := waitForTest(id, name)
+				finalResult, err := waitForTest(result.ID, name)
 				if err != nil {
-					results = append(results, scenarioResult{name: name, id: id, status: "ERROR", err: err.Error()})
+					results = append(results, scenarioResult{name: name, id: result.ID, status: "ERROR", err: err.Error()})
 				} else {
-					status := mapStr(finalResult, "status")
-					results = append(results, scenarioResult{name: name, id: id, status: status, validate: scenario.Validate})
+					results = append(results, scenarioResult{name: name, id: result.ID, status: finalResult.Status, validate: scenario.Validate})
 				}
 			} else {
-				results = append(results, scenarioResult{name: name, id: id, status: "SUBMITTED"})
+				results = append(results, scenarioResult{name: name, id: result.ID, status: "SUBMITTED"})
 			}
 		}
 
-		// Summary
 		fmt.Println()
 		output.SubHeader("Summary")
 		rows := make([][]string, 0, len(results))
@@ -156,14 +146,55 @@ type scenarioResult struct {
 	validate *ValidationSpec
 }
 
-func waitForTest(id, name string) (map[string]interface{}, error) {
+func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
+	req := &client.CreateTestRequest{
+		TestType: strings.ToUpper(s.Type),
+		Backend:  s.Backend,
+	}
+	if s.Spec != nil {
+		spec := &client.TestSpec{}
+		if v, ok := s.Spec["records"]; ok {
+			spec.Records = toInt(v)
+		}
+		if v, ok := s.Spec["parallelProducers"]; ok {
+			spec.ParallelProducers = toInt(v)
+		}
+		if v, ok := s.Spec["recordSizeBytes"]; ok {
+			spec.RecordSizeBytes = toInt(v)
+		}
+		if v, ok := s.Spec["durationSeconds"]; ok {
+			spec.DurationSeconds = toInt(v)
+		}
+		if v, ok := s.Spec["topic"]; ok {
+			spec.Topic = fmt.Sprintf("%v", v)
+		}
+		req.Spec = spec
+	}
+	return req
+}
+
+func toInt(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}
+
+func waitForTest(id, name string) (*client.TestRun, error) {
 	tick := 0
 	for {
 		result, err := apiClient.GetTest(context.Background(), id)
 		if err != nil {
 			return nil, err
 		}
-		status := strings.ToUpper(mapStr(result, "status"))
+		status := strings.ToUpper(result.Status)
 		switch status {
 		case "DONE", "COMPLETED":
 			fmt.Printf("\r  %s %s → %s\n",

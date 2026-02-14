@@ -38,112 +38,96 @@ var trendCmd = &cobra.Command{
 
 		output.Banner("Trend Analysis", fmt.Sprintf("%s · %s · %dd window", trendType, trendMetric, trendDays))
 
-		baseline := numVal(result, "baseline")
-		output.KeyValue("Baseline", fmt.Sprintf("%.2f", baseline))
+		output.KeyValue("Baseline", fmt.Sprintf("%.2f", result.Baseline))
 
 		higherIsBetter := strings.Contains(strings.ToLower(trendMetric), "throughput")
 
-		// Data points with sparkline
-		if points, ok := result["dataPoints"].([]interface{}); ok {
-			if len(points) == 0 {
-				output.Hint("No data points in the selected range.")
-			} else {
-				// Extract values for sparkline
-				values := make([]float64, 0, len(points))
-				for _, p := range points {
-					if pm, ok := p.(map[string]interface{}); ok {
-						values = append(values, numVal(pm, "value"))
-					}
-				}
-
-				// Sparkline chart
-				output.SubHeader("Trend Chart")
-				spark := output.SparklineColored(values, higherIsBetter)
-				trendDir := "→"
-				if len(values) >= 2 {
-					first := values[0]
-					last := values[len(values)-1]
-					if last > first*1.05 {
-						if higherIsBetter {
-							trendDir = output.SuccessStyle.Render("↗")
-						} else {
-							trendDir = output.ErrorStyle.Render("↗")
-						}
-					} else if last < first*0.95 {
-						if higherIsBetter {
-							trendDir = output.ErrorStyle.Render("↘")
-						} else {
-							trendDir = output.SuccessStyle.Render("↘")
-						}
-					} else {
-						trendDir = output.DimStyle.Render("→")
-					}
-				}
-				fmt.Printf("  %s  %s  (%d data points)\n", spark, trendDir, len(values))
-				fmt.Println()
-
-				// Min/Max/Avg summary
-				var minV, maxV, sum float64
-				minV = values[0]
-				maxV = values[0]
-				for _, v := range values {
-					sum += v
-					if v < minV {
-						minV = v
-					}
-					if v > maxV {
-						maxV = v
-					}
-				}
-				avg := sum / float64(len(values))
-				output.KeyValue("Min", fmt.Sprintf("%.2f", minV))
-				output.KeyValue("Max", fmt.Sprintf("%.2f", maxV))
-				output.KeyValue("Average", fmt.Sprintf("%.2f", avg))
-
-				// Data table
-				output.SubHeader("Data Points")
-				rows := make([][]string, 0, len(points))
-				for _, p := range points {
-					if pm, ok := p.(map[string]interface{}); ok {
-						ts := mapStr(pm, "timestamp")
-						if len(ts) > 19 {
-							ts = ts[:19]
-						}
-						value := numVal(pm, "value")
-						marker := ""
-						if baseline > 0 {
-							pct := ((value - baseline) / baseline) * 100
-							if pct > 20 {
-								marker = "▲"
-							} else if pct < -20 {
-								marker = "▼"
-							}
-						}
-						rows = append(rows, []string{
-							truncID(mapStr(pm, "runId")),
-							ts,
-							fmt.Sprintf("%.2f", value),
-							marker,
-						})
-					}
-				}
-				output.Table([]string{"Run ID", "Timestamp", "Value", ""}, rows)
+		if len(result.DataPoints) == 0 {
+			output.Hint("No data points in the selected range.")
+		} else {
+			values := make([]float64, len(result.DataPoints))
+			for i, dp := range result.DataPoints {
+				values[i] = dp.Value
 			}
+
+			output.SubHeader("Trend Chart")
+			spark := output.SparklineColored(values, higherIsBetter)
+			trendDir := "→"
+			if len(values) >= 2 {
+				first := values[0]
+				last := values[len(values)-1]
+				if last > first*1.05 {
+					if higherIsBetter {
+						trendDir = output.SuccessStyle.Render("↗")
+					} else {
+						trendDir = output.ErrorStyle.Render("↗")
+					}
+				} else if last < first*0.95 {
+					if higherIsBetter {
+						trendDir = output.ErrorStyle.Render("↘")
+					} else {
+						trendDir = output.SuccessStyle.Render("↘")
+					}
+				} else {
+					trendDir = output.DimStyle.Render("→")
+				}
+			}
+			fmt.Printf("  %s  %s  (%d data points)\n", spark, trendDir, len(values))
+			fmt.Println()
+
+			var minV, maxV, sum float64
+			minV = values[0]
+			maxV = values[0]
+			for _, v := range values {
+				sum += v
+				if v < minV {
+					minV = v
+				}
+				if v > maxV {
+					maxV = v
+				}
+			}
+			avg := sum / float64(len(values))
+			output.KeyValue("Min", fmt.Sprintf("%.2f", minV))
+			output.KeyValue("Max", fmt.Sprintf("%.2f", maxV))
+			output.KeyValue("Average", fmt.Sprintf("%.2f", avg))
+
+			output.SubHeader("Data Points")
+			rows := make([][]string, 0, len(result.DataPoints))
+			for _, dp := range result.DataPoints {
+				ts := dp.Timestamp
+				if len(ts) > 19 {
+					ts = ts[:19]
+				}
+				marker := ""
+				if result.Baseline > 0 {
+					pct := ((dp.Value - result.Baseline) / result.Baseline) * 100
+					if pct > 20 {
+						marker = "▲"
+					} else if pct < -20 {
+						marker = "▼"
+					}
+				}
+				rows = append(rows, []string{
+					truncID(dp.RunID),
+					ts,
+					fmt.Sprintf("%.2f", dp.Value),
+					marker,
+				})
+			}
+			output.Table([]string{"Run ID", "Timestamp", "Value", ""}, rows)
 		}
 
-		// Regressions
-		if regressions, ok := result["regressions"].([]interface{}); ok && len(regressions) > 0 {
+		if len(result.Regressions) > 0 {
 			output.SubHeader("⚠ Regressions Detected")
-			rows := make([][]string, 0, len(regressions))
-			for _, r := range regressions {
-				if rm, ok := r.(map[string]interface{}); ok {
-					rows = append(rows, []string{
-						mapStr(rm, "runId"),
-						fmt.Sprintf("%.2f", numVal(rm, "value")),
-						fmt.Sprintf("%.2f", numVal(rm, "baseline")),
-						fmt.Sprintf("%+.1f%%", numVal(rm, "deviationPercent")),
-					})
-				}
+			rows := make([][]string, 0, len(result.Regressions))
+			for _, r := range result.Regressions {
+				rows = append(rows, []string{
+					r.RunID,
+					fmt.Sprintf("%.2f", r.Value),
+					fmt.Sprintf("%.2f", r.Baseline),
+					fmt.Sprintf("%+.1f%%", r.DeviationPercent),
+				})
 			}
 			output.Table([]string{"Run ID", "Value", "Baseline", "Deviation"}, rows)
 		}

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"testing"
+
+	"github.com/klster/kates-cli/client"
 )
 
 func TestMapStr(t *testing.T) {
@@ -130,14 +132,14 @@ func TestDescribeType(t *testing.T) {
 }
 
 func TestCountStatuses(t *testing.T) {
-	tests := []map[string]interface{}{
-		{"status": "RUNNING"},
-		{"status": "RUNNING"},
-		{"status": "PENDING"},
-		{"status": "DONE"},
-		{"status": "COMPLETED"},
-		{"status": "FAILED"},
-		{"status": "ERROR"},
+	tests := []client.TestRun{
+		{Status: "RUNNING"},
+		{Status: "RUNNING"},
+		{Status: "PENDING"},
+		{Status: "DONE"},
+		{Status: "COMPLETED"},
+		{Status: "FAILED"},
+		{Status: "ERROR"},
 	}
 	c := CountStatuses(tests)
 	if c.Running != 2 {
@@ -161,17 +163,21 @@ func TestCountStatuses_Empty(t *testing.T) {
 	}
 }
 
-func TestParsePaged(t *testing.T) {
-	data := []byte(`{"content":[{"id":"abc"}],"page":0,"size":20,"totalItems":1,"totalPages":1}`)
-	p, err := ParsePaged(data)
-	if err != nil {
-		t.Fatalf("ParsePaged error: %v", err)
+func TestCountStatuses_CaseInsensitive(t *testing.T) {
+	tests := []client.TestRun{
+		{Status: "running"},
+		{Status: "done"},
+		{Status: "failed"},
 	}
-	if len(p.Content) != 1 {
-		t.Errorf("Content len = %d, want 1", len(p.Content))
+	c := CountStatuses(tests)
+	if c.Running != 1 {
+		t.Errorf("Running = %d, want 1", c.Running)
 	}
-	if p.TotalItems != 1 {
-		t.Errorf("TotalItems = %d, want 1", p.TotalItems)
+	if c.Done != 1 {
+		t.Errorf("Done = %d, want 1", c.Done)
+	}
+	if c.Failed != 1 {
+		t.Errorf("Failed = %d, want 1", c.Failed)
 	}
 }
 

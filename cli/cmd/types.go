@@ -1,15 +1,10 @@
 package cmd
 
-import "encoding/json"
+import (
+	"strings"
 
-// PagedResponse is the standard paginated response from the KATES API.
-type PagedResponse struct {
-	Content    []map[string]interface{} `json:"content"`
-	Page       int                      `json:"page"`
-	Size       int                      `json:"size"`
-	TotalItems int                      `json:"totalItems"`
-	TotalPages int                      `json:"totalPages"`
-}
+	"github.com/klster/kates-cli/client"
+)
 
 // TestCounts holds aggregated test status counts.
 type TestCounts struct {
@@ -19,11 +14,11 @@ type TestCounts struct {
 	Failed  int
 }
 
-// CountStatuses tallies test statuses from a list of test maps.
-func CountStatuses(tests []map[string]interface{}) TestCounts {
+// CountStatuses tallies test statuses from a list of typed test runs.
+func CountStatuses(tests []client.TestRun) TestCounts {
 	var c TestCounts
 	for _, t := range tests {
-		switch mapStr(t, "status") {
+		switch strings.ToUpper(t.Status) {
 		case "RUNNING":
 			c.Running++
 		case "PENDING":
@@ -35,11 +30,4 @@ func CountStatuses(tests []map[string]interface{}) TestCounts {
 		}
 	}
 	return c
-}
-
-// ParsePaged unmarshals raw JSON into a PagedResponse.
-func ParsePaged(data json.RawMessage) (PagedResponse, error) {
-	var p PagedResponse
-	err := json.Unmarshal(data, &p)
-	return p, err
 }

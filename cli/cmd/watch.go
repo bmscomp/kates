@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/klster/kates-cli/output"
@@ -25,39 +26,35 @@ var testWatchCmd = &cobra.Command{
 				return cmdErr("Failed to fetch test: " + err.Error())
 			}
 
-			status := mapStr(result, "status")
+			status := strings.ToUpper(result.Status)
 
-			// Clear screen
 			fmt.Print("\033[2J\033[H")
 
-			output.Banner("Test Watch", fmt.Sprintf("%s · %s", mapStr(result, "testType"), truncID(id)))
+			output.Banner("Test Watch", fmt.Sprintf("%s · %s", result.TestType, truncID(id)))
 
 			output.SubHeader("Status")
 			output.KeyValue("Test ID", id)
-			output.KeyValue("Type", mapStr(result, "testType"))
-			output.KeyValue("Backend", mapStr(result, "backend"))
+			output.KeyValue("Type", result.TestType)
+			output.KeyValue("Backend", result.Backend)
 			output.KeyValue("Status", output.StatusBadge(status))
-			output.KeyValue("Created", formatTime(mapStr(result, "createdAt")))
+			output.KeyValue("Created", formatTime(result.CreatedAt))
 
-			// Show results if available
-			if results, ok := result["results"].([]interface{}); ok && len(results) > 0 {
-				output.SubHeader(fmt.Sprintf("Results (%d phases)", len(results)))
-				rows := make([][]string, 0)
-				for _, r := range results {
-					if m, ok := r.(map[string]interface{}); ok {
-						phase := mapStr(m, "phaseName")
-						if phase == "—" {
-							phase = "main"
-						}
-						rows = append(rows, []string{
-							phase,
-							mapStr(m, "status"),
-							fmtNum(numVal(m, "recordsSent")),
-							fmtFloat(numVal(m, "throughputRecordsPerSec"), 1),
-							fmtFloat(numVal(m, "avgLatencyMs"), 2),
-							fmtFloat(numVal(m, "p99LatencyMs"), 2),
-						})
+			if len(result.Results) > 0 {
+				output.SubHeader(fmt.Sprintf("Results (%d phases)", len(result.Results)))
+				rows := make([][]string, 0, len(result.Results))
+				for _, r := range result.Results {
+					phase := r.PhaseName
+					if phase == "" {
+						phase = "main"
 					}
+					rows = append(rows, []string{
+						phase,
+						r.Status,
+						fmtNum(r.RecordsSent),
+						fmtFloat(r.ThroughputRecordsPerSec, 1),
+						fmtFloat(r.AvgLatencyMs, 2),
+						fmtFloat(r.P99LatencyMs, 2),
+					})
 				}
 				output.Table(
 					[]string{"Phase", "Status", "Records", "Throughput", "Avg Lat.", "P99 Lat."},
@@ -65,7 +62,6 @@ var testWatchCmd = &cobra.Command{
 				)
 			}
 
-			// Terminal checks
 			switch status {
 			case "DONE", "COMPLETED":
 				output.Success("Test completed successfully")
@@ -94,7 +90,7 @@ var testListWatchCmd = &cobra.Command{
 		tick := 0
 
 		for {
-			data, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
+			paged, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
 			if err != nil {
 				output.Error("Failed to list tests: " + err.Error())
 				time.Sleep(time.Duration(watchInterval) * time.Second)
@@ -102,9 +98,6 @@ var testListWatchCmd = &cobra.Command{
 				continue
 			}
 
-			paged, _ := ParsePaged(data)
-
-			// Clear screen
 			fmt.Print("\033[2J\033[H")
 			output.Header("Test Runs (live)")
 
@@ -114,11 +107,11 @@ var testListWatchCmd = &cobra.Command{
 				rows := make([][]string, 0, len(paged.Content))
 				for _, run := range paged.Content {
 					rows = append(rows, []string{
-						truncID(mapStr(run, "id")),
-						mapStr(run, "testType"),
-						mapStr(run, "status"),
-						mapStr(run, "backend"),
-						formatTime(mapStr(run, "createdAt")),
+						truncID(run.ID),
+						run.TestType,
+						run.Status,
+						run.Backend,
+						formatTime(run.CreatedAt),
 					})
 				}
 				output.Table([]string{"ID", "Type", "Status", "Backend", "Created"}, rows)
@@ -136,7 +129,6 @@ var testListWatchCmd = &cobra.Command{
 	},
 }
 
-// --wait flag for test create
 var createWait bool
 
 func pollUntilDone(id string) {
@@ -147,19 +139,18 @@ func pollUntilDone(id string) {
 			output.Error("Polling failed: " + err.Error())
 			return
 		}
-		status := mapStr(result, "status")
+		status := strings.ToUpper(result.Status)
 		switch status {
 		case "DONE", "COMPLETED":
 			fmt.Printf("\r  %s Test completed                              \n",
 				output.SuccessStyle.Render("✓"),
 			)
-			// Print summary
 			summary, err := apiClient.ReportSummary(context.Background(), id)
 			if err == nil {
 				output.SubHeader("Results")
-				output.KeyValue("Throughput", fmt.Sprintf("%s rec/s", fmtNum(numVal(summary, "avgThroughputRecPerSec"))))
-				output.KeyValue("P99 Latency", fmt.Sprintf("%s ms", fmtFloat(numVal(summary, "p99LatencyMs"), 2)))
-				output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", numVal(summary, "errorRate")*100))
+				output.KeyValue("Throughput", fmt.Sprintf("%s rec/s", fmtNum(summary.AvgThroughputRecPerSec)))
+				output.KeyValue("P99 Latency", fmt.Sprintf("%s ms", fmtFloat(summary.P99LatencyMs, 2)))
+				output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", summary.ErrorRate*100))
 			}
 			output.Hint(fmt.Sprintf("Full report: kates report show %s", id))
 			return
@@ -184,6 +175,4 @@ func pollUntilDone(id string) {
 func init() {
 	testWatchCmd.Flags().IntVar(&watchInterval, "interval", 3, "Refresh interval in seconds")
 	testCmd.AddCommand(testWatchCmd)
-	// Note: testListWatchCmd is a subcommand of 'test list', but Cobra doesn't
-	// support subcommands on commands with RunE. We add it as 'test watch' instead.
 }

@@ -22,45 +22,35 @@ var healthCmd = &cobra.Command{
 			return nil
 		}
 
-		status := mapStrEmpty(result, "status")
-		output.Banner("KATES Health Dashboard", "System Status: "+status)
+		output.Banner("KATES Health Dashboard", "System Status: "+result.Status)
 
-		// Engine
-		if eng, ok := result["engine"].(map[string]interface{}); ok {
+		if eng := result.Engine; eng != nil {
 			output.SubHeader("Engine")
-			output.KeyValue("Active Backend", mapStrEmpty(eng, "activeBackend"))
-			if backends, ok := eng["availableBackends"].([]interface{}); ok {
-				names := make([]string, len(backends))
-				for i, b := range backends {
-					names[i] = fmt.Sprintf("%v", b)
-				}
-				output.KeyValue("Available", fmt.Sprintf("%v", names))
+			output.KeyValue("Active Backend", eng.ActiveBackend)
+			if len(eng.AvailableBackends) > 0 {
+				output.KeyValue("Available", fmt.Sprintf("%v", eng.AvailableBackends))
 			}
 		}
 
-		// Kafka
-		if kafka, ok := result["kafka"].(map[string]interface{}); ok {
+		if kafka := result.Kafka; kafka != nil {
 			output.SubHeader("Kafka Cluster")
-			output.KeyValue("Status", output.StatusBadge(mapStrEmpty(kafka, "status")))
-			output.KeyValue("Bootstrap", mapStrEmpty(kafka, "bootstrapServers"))
-			output.KeyValue("Message", mapStrEmpty(kafka, "message"))
+			output.KeyValue("Status", output.StatusBadge(kafka.Status))
+			output.KeyValue("Bootstrap", kafka.BootstrapServers)
+			output.KeyValue("Message", kafka.Message)
 		}
 
-		// Test configs as table
-		if tests, ok := result["tests"].(map[string]interface{}); ok {
+		if len(result.Tests) > 0 {
 			output.SubHeader("Test Configurations")
-			rows := make([][]string, 0, len(tests))
-			for name, cfg := range tests {
-				if m, ok := cfg.(map[string]interface{}); ok {
-					rows = append(rows, []string{
-						name,
-						fmt.Sprintf("%.0f", numVal(m, "numRecords")),
-						fmt.Sprintf("%.0f", numVal(m, "partitions")),
-						fmt.Sprintf("%.0f", numVal(m, "numProducers")),
-						mapStrEmpty(m, "acks"),
-						mapStrEmpty(m, "compressionType"),
-					})
-				}
+			rows := make([][]string, 0, len(result.Tests))
+			for name, cfg := range result.Tests {
+				rows = append(rows, []string{
+					name,
+					fmt.Sprintf("%d", cfg.NumRecords),
+					fmt.Sprintf("%d", cfg.Partitions),
+					fmt.Sprintf("%d", cfg.NumProducers),
+					cfg.Acks,
+					cfg.CompressionType,
+				})
 			}
 			output.Table([]string{"Test", "Records", "Partitions", "Producers", "Acks", "Compress"}, rows)
 		}

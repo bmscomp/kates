@@ -27,40 +27,34 @@ var clusterInfoCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Banner("Kafka Cluster", "Cluster ID: "+mapStr(result, "clusterId"))
+		output.Banner("Kafka Cluster", "Cluster ID: "+result.ClusterID)
 
 		output.SubHeader("Overview")
-		output.KeyValue("Broker Count", mapStr(result, "brokerCount"))
+		output.KeyValue("Broker Count", fmt.Sprintf("%v", result.BrokerCount))
 
-		// Controller
-		if ctrl, ok := result["controller"].(map[string]interface{}); ok {
+		if ctrl := result.Controller; ctrl != nil {
 			output.SubHeader("Controller")
-			output.KeyValue("Node ID", mapStr(ctrl, "id"))
-			output.KeyValue("Host", mapStr(ctrl, "host"))
-			output.KeyValue("Port", mapStr(ctrl, "port"))
-			output.KeyValue("Rack / AZ", mapStr(ctrl, "rack"))
+			output.KeyValue("Node ID", fmt.Sprintf("%v", ctrl.ID))
+			output.KeyValue("Host", ctrl.Host)
+			output.KeyValue("Port", fmt.Sprintf("%v", ctrl.Port))
+			output.KeyValue("Rack / AZ", ctrl.Rack)
 		}
 
-		// Brokers
-		if brokers, ok := result["brokers"].([]interface{}); ok && len(brokers) > 0 {
-			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(brokers)))
-			rows := make([][]string, 0, len(brokers))
-			for _, b := range brokers {
-				if bm, ok := b.(map[string]interface{}); ok {
-					isCtrl := ""
-					if ctrl, ok := result["controller"].(map[string]interface{}); ok {
-						if mapStr(bm, "id") == mapStr(ctrl, "id") {
-							isCtrl = "★"
-						}
-					}
-					rows = append(rows, []string{
-						mapStr(bm, "id"),
-						mapStr(bm, "host"),
-						mapStr(bm, "port"),
-						mapStr(bm, "rack"),
-						isCtrl,
-					})
+		if len(result.Brokers) > 0 {
+			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(result.Brokers)))
+			rows := make([][]string, 0, len(result.Brokers))
+			for _, b := range result.Brokers {
+				isCtrl := ""
+				if result.Controller != nil && fmt.Sprintf("%v", b.ID) == fmt.Sprintf("%v", result.Controller.ID) {
+					isCtrl = "★"
 				}
+				rows = append(rows, []string{
+					fmt.Sprintf("%v", b.ID),
+					b.Host,
+					fmt.Sprintf("%v", b.Port),
+					b.Rack,
+					isCtrl,
+				})
 			}
 			output.Table([]string{"ID", "Host", "Port", "Rack / AZ", "Role"}, rows)
 		}
@@ -89,11 +83,17 @@ var clusterTopicsCmd = &cobra.Command{
 			return nil
 		}
 
-		rows := make([][]string, len(topics))
+		rows := make([]string, len(topics))
 		for i, t := range topics {
-			rows[i] = []string{fmt.Sprintf("%d", i+1), t}
+			rows[i] = fmt.Sprintf("  %d. %s", i+1, t)
 		}
-		output.Table([]string{"#", "Topic Name"}, rows)
+		output.Table([]string{"#", "Topic Name"}, func() [][]string {
+			r := make([][]string, len(topics))
+			for i, t := range topics {
+				r[i] = []string{fmt.Sprintf("%d", i+1), t}
+			}
+			return r
+		}())
 		return nil
 	},
 }

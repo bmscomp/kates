@@ -5,9 +5,37 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
+
+func summaryValue(s *client.ReportSummary, key string) float64 {
+	switch key {
+	case "totalRecords":
+		return s.TotalRecords
+	case "avgThroughputRecPerSec":
+		return s.AvgThroughputRecPerSec
+	case "peakThroughputRecPerSec":
+		return s.PeakThroughputRecPerSec
+	case "avgThroughputMBPerSec":
+		return s.AvgThroughputMBPerSec
+	case "avgLatencyMs":
+		return s.AvgLatencyMs
+	case "p50LatencyMs":
+		return s.P50LatencyMs
+	case "p95LatencyMs":
+		return s.P95LatencyMs
+	case "p99LatencyMs":
+		return s.P99LatencyMs
+	case "maxLatencyMs":
+		return s.MaxLatencyMs
+	case "errorRate":
+		return s.ErrorRate
+	default:
+		return 0
+	}
+}
 
 var reportDiffCmd = &cobra.Command{
 	Use:   "diff <id1> <id2>",
@@ -39,7 +67,7 @@ var reportDiffCmd = &cobra.Command{
 			label    string
 			key      string
 			unit     string
-			higherOK bool // true = higher is better (throughput), false = lower is better (latency)
+			higherOK bool
 		}
 
 		metrics := []metric{
@@ -56,14 +84,12 @@ var reportDiffCmd = &cobra.Command{
 
 		rows := make([][]string, 0, len(metrics))
 		for _, m := range metrics {
-			v1 := numVal(s1, m.key)
-			v2 := numVal(s2, m.key)
+			v1 := summaryValue(s1, m.key)
+			v2 := summaryValue(s2, m.key)
 
-			// Format values
 			fmtV1 := formatMetricVal(v1, m.key, m.unit)
 			fmtV2 := formatMetricVal(v2, m.key, m.unit)
 
-			// Compute delta
 			delta := ""
 			indicator := ""
 			if v1 != 0 {

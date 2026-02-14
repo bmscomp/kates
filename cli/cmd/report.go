@@ -31,51 +31,43 @@ var reportShowCmd = &cobra.Command{
 
 		output.Banner("Performance Report", "Test: "+truncID(args[0]))
 
-		if summary, ok := result["summary"].(map[string]interface{}); ok {
+		if s := result.Summary; s != nil {
 			output.SubHeader("Throughput")
-			output.KeyValue("Total Records", fmtNum(numVal(summary, "totalRecords")))
-			output.KeyValue("Avg Throughput", fmt.Sprintf("%s rec/s", fmtNum(numVal(summary, "avgThroughputRecPerSec"))))
-			output.KeyValue("Peak Throughput", fmt.Sprintf("%s rec/s", fmtNum(numVal(summary, "peakThroughputRecPerSec"))))
-			output.KeyValue("Avg MB/s", fmtFloat(numVal(summary, "avgThroughputMBPerSec"), 2))
+			output.KeyValue("Total Records", fmtNum(s.TotalRecords))
+			output.KeyValue("Avg Throughput", fmt.Sprintf("%s rec/s", fmtNum(s.AvgThroughputRecPerSec)))
+			output.KeyValue("Peak Throughput", fmt.Sprintf("%s rec/s", fmtNum(s.PeakThroughputRecPerSec)))
+			output.KeyValue("Avg MB/s", fmtFloat(s.AvgThroughputMBPerSec, 2))
 
 			output.SubHeader("Latency Distribution")
-			maxLat := numVal(summary, "maxLatencyMs")
+			maxLat := s.MaxLatencyMs
 			if maxLat == 0 {
 				maxLat = 1
 			}
-			output.MetricBar("Average", numVal(summary, "avgLatencyMs"), maxLat)
-			output.MetricBar("P50", numVal(summary, "p50LatencyMs"), maxLat)
-			output.MetricBar("P95", numVal(summary, "p95LatencyMs"), maxLat)
-			output.MetricBar("P99", numVal(summary, "p99LatencyMs"), maxLat)
-			output.MetricBar("Max", numVal(summary, "maxLatencyMs"), maxLat)
+			output.MetricBar("Average", s.AvgLatencyMs, maxLat)
+			output.MetricBar("P50", s.P50LatencyMs, maxLat)
+			output.MetricBar("P95", s.P95LatencyMs, maxLat)
+			output.MetricBar("P99", s.P99LatencyMs, maxLat)
+			output.MetricBar("Max", s.MaxLatencyMs, maxLat)
 
-			errRate := numVal(summary, "errorRate") * 100
 			output.SubHeader("Reliability")
-			output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", errRate))
+			output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", s.ErrorRate*100))
 		}
 
-		// SLA
-		if verdict, ok := result["overallSlaVerdict"].(map[string]interface{}); ok {
+		if v := result.OverallSlaVerdict; v != nil {
 			output.SubHeader("SLA Verdict")
-			passed := false
-			if p, ok := verdict["passed"].(bool); ok {
-				passed = p
-			}
-			if passed {
+			if v.Passed {
 				output.Success("All SLA thresholds met")
 			} else {
 				output.Warn("SLA violations detected")
-				if violations, ok := verdict["violations"].([]interface{}); ok {
-					rows := make([][]string, 0, len(violations))
-					for _, v := range violations {
-						if vm, ok := v.(map[string]interface{}); ok {
-							rows = append(rows, []string{
-								mapStr(vm, "metric"),
-								fmtFloat(numVal(vm, "threshold"), 2),
-								fmtFloat(numVal(vm, "actual"), 2),
-								"FAIL",
-							})
-						}
+				if len(v.Violations) > 0 {
+					rows := make([][]string, 0, len(v.Violations))
+					for _, viol := range v.Violations {
+						rows = append(rows, []string{
+							viol.Metric,
+							fmtFloat(viol.Threshold, 2),
+							fmtFloat(viol.Actual, 2),
+							"FAIL",
+						})
 					}
 					output.Table([]string{"Metric", "Threshold", "Actual", "Status"}, rows)
 				}
@@ -104,16 +96,16 @@ var reportSummaryCmd = &cobra.Command{
 
 		output.Header("Summary: " + truncID(args[0]))
 		rows := [][]string{
-			{"Total Records", fmtNum(numVal(result, "totalRecords"))},
-			{"Avg Throughput", fmt.Sprintf("%s rec/s", fmtNum(numVal(result, "avgThroughputRecPerSec")))},
-			{"Peak Throughput", fmt.Sprintf("%s rec/s", fmtNum(numVal(result, "peakThroughputRecPerSec")))},
-			{"Avg MB/s", fmtFloat(numVal(result, "avgThroughputMBPerSec"), 2)},
-			{"Avg Latency", fmt.Sprintf("%s ms", fmtFloat(numVal(result, "avgLatencyMs"), 2))},
-			{"P50 Latency", fmt.Sprintf("%s ms", fmtFloat(numVal(result, "p50LatencyMs"), 2))},
-			{"P95 Latency", fmt.Sprintf("%s ms", fmtFloat(numVal(result, "p95LatencyMs"), 2))},
-			{"P99 Latency", fmt.Sprintf("%s ms", fmtFloat(numVal(result, "p99LatencyMs"), 2))},
-			{"Max Latency", fmt.Sprintf("%s ms", fmtFloat(numVal(result, "maxLatencyMs"), 2))},
-			{"Error Rate", fmt.Sprintf("%.4f%%", numVal(result, "errorRate")*100)},
+			{"Total Records", fmtNum(result.TotalRecords)},
+			{"Avg Throughput", fmt.Sprintf("%s rec/s", fmtNum(result.AvgThroughputRecPerSec))},
+			{"Peak Throughput", fmt.Sprintf("%s rec/s", fmtNum(result.PeakThroughputRecPerSec))},
+			{"Avg MB/s", fmtFloat(result.AvgThroughputMBPerSec, 2)},
+			{"Avg Latency", fmt.Sprintf("%s ms", fmtFloat(result.AvgLatencyMs, 2))},
+			{"P50 Latency", fmt.Sprintf("%s ms", fmtFloat(result.P50LatencyMs, 2))},
+			{"P95 Latency", fmt.Sprintf("%s ms", fmtFloat(result.P95LatencyMs, 2))},
+			{"P99 Latency", fmt.Sprintf("%s ms", fmtFloat(result.P99LatencyMs, 2))},
+			{"Max Latency", fmt.Sprintf("%s ms", fmtFloat(result.MaxLatencyMs, 2))},
+			{"Error Rate", fmt.Sprintf("%.4f%%", result.ErrorRate*100)},
 		}
 		output.Table([]string{"Metric", "Value"}, rows)
 		return nil
@@ -181,7 +173,7 @@ var reportExportCmd = &cobra.Command{
 			}
 
 		default:
-			output.Error("Unknown format '" + exportFormat + "'. Use 'csv' or 'junit'.")
+			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv' or 'junit'.")
 		}
 		return nil
 	},

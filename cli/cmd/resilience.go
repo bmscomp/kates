@@ -1,11 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -38,7 +39,7 @@ var resilienceRunCmd = &cobra.Command{
 			return cmdErr("Failed to read config file: " + err.Error())
 		}
 
-		var req map[string]interface{}
+		var req interface{}
 		if err := json.Unmarshal(data, &req); err != nil {
 			return cmdErr("Invalid JSON: " + err.Error())
 		}
@@ -56,48 +57,43 @@ var resilienceRunCmd = &cobra.Command{
 		}
 
 		output.Header("Resilience Test Results")
-		output.KeyValue("Status", output.StatusBadge(mapStr(result, "status")))
+		output.KeyValue("Status", output.StatusBadge(result.Status))
 
-		// Chaos outcome
-		if chaos, ok := result["chaosOutcome"].(map[string]interface{}); ok {
+		if chaos := result.ChaosOutcome; chaos != nil {
 			output.SubHeader("Chaos Outcome")
-			output.KeyValue("Experiment", mapStr(chaos, "experimentName"))
-			output.KeyValue("Verdict", output.StatusBadge(mapStr(chaos, "verdict")))
-			output.KeyValue("Duration", mapStr(chaos, "chaosDuration"))
-			if reason := mapStr(chaos, "failureReason"); reason != "—" {
-				output.KeyValue("Failure Reason", reason)
+			output.KeyValue("Experiment", chaos.ExperimentName)
+			output.KeyValue("Verdict", output.StatusBadge(chaos.Verdict))
+			output.KeyValue("Duration", chaos.ChaosDuration)
+			if chaos.FailureReason != "" {
+				output.KeyValue("Failure Reason", chaos.FailureReason)
 			}
 		}
 
-		// Impact deltas
-		if deltas, ok := result["impactDeltas"].(map[string]interface{}); ok {
+		if len(result.ImpactDeltas) > 0 {
 			output.SubHeader("Impact Analysis (% change)")
-			rows := make([][]string, 0)
-			for metric, val := range deltas {
-				if v, ok := val.(float64); ok {
-					marker := ""
-					if v > 10 {
-						marker = "▲"
-					} else if v < -10 {
-						marker = "▼"
-					}
-					rows = append(rows, []string{metric, fmt.Sprintf("%+.1f%%", v), marker})
+			rows := make([][]string, 0, len(result.ImpactDeltas))
+			for metric, v := range result.ImpactDeltas {
+				marker := ""
+				if v > 10 {
+					marker = "▲"
+				} else if v < -10 {
+					marker = "▼"
 				}
+				rows = append(rows, []string{metric, fmt.Sprintf("%+.1f%%", v), marker})
 			}
 			output.Table([]string{"Metric", "Change", ""}, rows)
 		}
 
-		// Pre/post summaries
-		showSummary := func(label string, key string) {
-			if s, ok := result[key].(map[string]interface{}); ok {
+		showSummary := func(label string, s *client.ReportSummary) {
+			if s != nil {
 				output.SubHeader(label)
-				output.KeyValue("Throughput (rec/s)", fmt.Sprintf("%.1f", numVal(s, "avgThroughputRecPerSec")))
-				output.KeyValue("P99 Latency (ms)", fmt.Sprintf("%.2f", numVal(s, "p99LatencyMs")))
-				output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", numVal(s, "errorRate")*100))
+				output.KeyValue("Throughput (rec/s)", fmt.Sprintf("%.1f", s.AvgThroughputRecPerSec))
+				output.KeyValue("P99 Latency (ms)", fmt.Sprintf("%.2f", s.P99LatencyMs))
+				output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", s.ErrorRate*100))
 			}
 		}
-		showSummary("Pre-Chaos Baseline", "preChaosSummary")
-		showSummary("Post-Chaos Impact", "postChaosSummary")
+		showSummary("Pre-Chaos Baseline", result.PreChaosSummary)
+		showSummary("Post-Chaos Impact", result.PostChaosSummary)
 
 		return nil
 	},

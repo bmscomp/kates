@@ -22,7 +22,7 @@ var topCmd = &cobra.Command{
 			fmt.Print("\033[2J\033[H")
 
 			health, _ := apiClient.Health(context.Background())
-			data, err := apiClient.ListTests(context.Background(), "", "", 0, 50)
+			paged, err := apiClient.ListTests(context.Background(), "", "", 0, 50)
 			if err != nil {
 				output.Error("Failed to fetch tests: " + err.Error())
 				time.Sleep(time.Duration(topInterval) * time.Second)
@@ -30,14 +30,12 @@ var topCmd = &cobra.Command{
 				continue
 			}
 
-			paged, _ := ParsePaged(data)
-
 			apiStatus := "DOWN"
 			kafkaStatus := "DOWN"
 			if health != nil {
-				apiStatus = mapStrEmpty(health, "status")
-				if k, ok := health["kafka"].(map[string]interface{}); ok {
-					kafkaStatus = mapStrEmpty(k, "status")
+				apiStatus = health.Status
+				if health.Kafka != nil {
+					kafkaStatus = health.Kafka.Status
 				}
 			}
 
@@ -54,30 +52,27 @@ var topCmd = &cobra.Command{
 				output.DimStyle.Render(fmt.Sprintf("%d", paged.TotalItems)),
 			)
 
-			// Active tests (running + pending)
 			activeRows := make([][]string, 0)
 			recentRows := make([][]string, 0)
 			for _, t := range paged.Content {
-				status := strings.ToUpper(mapStr(t, "status"))
+				status := strings.ToUpper(t.Status)
 				row := []string{
-					truncID(mapStr(t, "id")),
-					mapStr(t, "testType"),
+					truncID(t.ID),
+					t.TestType,
 					status,
-					mapStr(t, "backend"),
-					formatTime(mapStr(t, "createdAt")),
+					t.Backend,
+					formatTime(t.CreatedAt),
 				}
 
 				if status == "RUNNING" || status == "PENDING" {
-					// Try to get result metrics for running tests
 					throughput := ""
 					latency := ""
 					records := ""
-					if results, ok := t["results"].([]interface{}); ok && len(results) > 0 {
-						if m, ok := results[len(results)-1].(map[string]interface{}); ok {
-							throughput = fmtNum(numVal(m, "throughputRecordsPerSec"))
-							latency = fmtFloat(numVal(m, "p99LatencyMs"), 1)
-							records = fmtNum(numVal(m, "recordsSent"))
-						}
+					if len(t.Results) > 0 {
+						r := t.Results[len(t.Results)-1]
+						throughput = fmtNum(r.ThroughputRecordsPerSec)
+						latency = fmtFloat(r.P99LatencyMs, 1)
+						records = fmtNum(r.RecordsSent)
 					}
 					activeRows = append(activeRows, append(row, records, throughput+" rec/s", latency+" ms"))
 				} else {

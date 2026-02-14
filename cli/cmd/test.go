@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -30,19 +31,13 @@ var testListCmd = &cobra.Command{
   kates test list --type LOAD --status DONE
   kates test list --page 0 --size 10`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
+		paged, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
 		if err != nil {
 			return cmdErr("Failed to list tests: " + err.Error())
 		}
 
 		if outputMode == "json" {
-			output.RawJSON(data)
-			return nil
-		}
-
-		paged, parseErr := ParsePaged(data)
-		if parseErr != nil {
-			output.RawJSON(data)
+			output.JSON(paged)
 			return nil
 		}
 
@@ -55,12 +50,13 @@ var testListCmd = &cobra.Command{
 
 		rows := make([][]string, 0, len(paged.Content))
 		for _, run := range paged.Content {
-			id := truncID(mapStr(run, "id"))
-			testType := mapStr(run, "testType")
-			status := mapStr(run, "status")
-			backend := mapStr(run, "backend")
-			created := formatTime(mapStr(run, "createdAt"))
-			rows = append(rows, []string{id, testType, status, backend, created})
+			rows = append(rows, []string{
+				truncID(run.ID),
+				run.TestType,
+				run.Status,
+				run.Backend,
+				formatTime(run.CreatedAt),
+			})
 		}
 		output.Table([]string{"ID", "Type", "Status", "Backend", "Created"}, rows)
 
@@ -89,37 +85,32 @@ var testGetCmd = &cobra.Command{
 			return nil
 		}
 
-		testType := mapStr(result, "testType")
-		status := mapStr(result, "status")
-		output.Banner("Test Run", fmt.Sprintf("%s · %s", testType, truncID(args[0])))
+		output.Banner("Test Run", fmt.Sprintf("%s · %s", result.TestType, truncID(args[0])))
 
 		output.SubHeader("Details")
-		output.KeyValue("ID", mapStr(result, "id"))
-		output.KeyValue("Type", testType)
-		output.KeyValue("Status", output.StatusBadge(status))
-		output.KeyValue("Backend", mapStr(result, "backend"))
-		output.KeyValue("Scenario", mapStr(result, "scenarioName"))
-		output.KeyValue("Created", formatTime(mapStr(result, "createdAt")))
+		output.KeyValue("ID", result.ID)
+		output.KeyValue("Type", result.TestType)
+		output.KeyValue("Status", output.StatusBadge(result.Status))
+		output.KeyValue("Backend", result.Backend)
+		output.KeyValue("Scenario", result.ScenarioName)
+		output.KeyValue("Created", formatTime(result.CreatedAt))
 
-		// Results
-		if results, ok := result["results"].([]interface{}); ok && len(results) > 0 {
-			output.SubHeader(fmt.Sprintf("Results (%d phases)", len(results)))
-			rows := make([][]string, 0)
-			for _, r := range results {
-				if m, ok := r.(map[string]interface{}); ok {
-					phase := mapStr(m, "phaseName")
-					if phase == "—" {
-						phase = "main"
-					}
-					rows = append(rows, []string{
-						phase,
-						mapStr(m, "status"),
-						fmtNum(numVal(m, "recordsSent")),
-						fmtFloat(numVal(m, "throughputRecordsPerSec"), 1),
-						fmtFloat(numVal(m, "avgLatencyMs"), 2),
-						fmtFloat(numVal(m, "p99LatencyMs"), 2),
-					})
+		if len(result.Results) > 0 {
+			output.SubHeader(fmt.Sprintf("Results (%d phases)", len(result.Results)))
+			rows := make([][]string, 0, len(result.Results))
+			for _, r := range result.Results {
+				phase := r.PhaseName
+				if phase == "" {
+					phase = "main"
 				}
+				rows = append(rows, []string{
+					phase,
+					r.Status,
+					fmtNum(r.RecordsSent),
+					fmtFloat(r.ThroughputRecordsPerSec, 1),
+					fmtFloat(r.AvgLatencyMs, 2),
+					fmtFloat(r.P99LatencyMs, 2),
+				})
 			}
 			output.Table(
 				[]string{"Phase", "Status", "Records", "Throughput", "Avg Lat.", "P99 Lat."},
@@ -148,27 +139,20 @@ var testCreateCmd = &cobra.Command{
   kates test create --type ENDURANCE --duration 300 --producers 4
   kates test create --type BURST --records 50000 --backend native`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		req := map[string]interface{}{
-			"testType": strings.ToUpper(createType),
+		req := &client.CreateTestRequest{
+			TestType: strings.ToUpper(createType),
 		}
 		if createBackend != "" {
-			req["backend"] = createBackend
+			req.Backend = createBackend
 		}
 		if createRecords > 0 {
-			spec := map[string]interface{}{"records": createRecords}
-			if createProducers > 0 {
-				spec["parallelProducers"] = createProducers
+			req.Spec = &client.TestSpec{
+				Records:           createRecords,
+				ParallelProducers: createProducers,
+				RecordSizeBytes:   createRecordSize,
+				DurationSeconds:   createDuration,
+				Topic:             createTopic,
 			}
-			if createRecordSize > 0 {
-				spec["recordSizeBytes"] = createRecordSize
-			}
-			if createDuration > 0 {
-				spec["durationSeconds"] = createDuration
-			}
-			if createTopic != "" {
-				spec["topic"] = createTopic
-			}
-			req["spec"] = spec
 		}
 
 		result, err := apiClient.CreateTest(context.Background(), req)
@@ -181,17 +165,16 @@ var testCreateCmd = &cobra.Command{
 			return nil
 		}
 
-		id := mapStr(result, "id")
 		output.Success("Test created successfully")
-		output.KeyValue("ID", id)
-		output.KeyValue("Type", mapStr(result, "testType"))
-		output.KeyValue("Status", output.StatusBadge(mapStr(result, "status")))
+		output.KeyValue("ID", result.ID)
+		output.KeyValue("Type", result.TestType)
+		output.KeyValue("Status", output.StatusBadge(result.Status))
 
 		if createWait {
 			fmt.Println()
-			pollUntilDone(id)
+			pollUntilDone(result.ID)
 		} else {
-			output.Hint("Track progress: kates test watch " + id)
+			output.Hint("Track progress: kates test watch " + result.ID)
 		}
 		return nil
 	},

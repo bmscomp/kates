@@ -1,11 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -39,16 +40,16 @@ var scheduleListCmd = &cobra.Command{
 
 		rows := make([][]string, 0, len(schedules))
 		for _, s := range schedules {
-			enabled := "disabled"
-			if e, ok := s["enabled"].(bool); ok && e {
-				enabled = "enabled"
+			state := "disabled"
+			if s.Enabled {
+				state = "enabled"
 			}
 			rows = append(rows, []string{
-				mapStr(s, "id"),
-				mapStr(s, "name"),
-				mapStr(s, "cronExpression"),
-				enabled,
-				mapStr(s, "lastRunId"),
+				s.ID,
+				s.Name,
+				s.CronExpression,
+				state,
+				s.LastRunID,
 			})
 		}
 		output.Table([]string{"ID", "Name", "Cron", "State", "Last Run"}, rows)
@@ -70,16 +71,16 @@ var scheduleGetCmd = &cobra.Command{
 			return nil
 		}
 		output.Header("Schedule: " + args[0])
-		output.KeyValue("Name", mapStr(result, "name"))
-		output.KeyValue("Cron", mapStr(result, "cronExpression"))
-		enabled := "disabled"
-		if e, ok := result["enabled"].(bool); ok && e {
-			enabled = "enabled"
+		output.KeyValue("Name", result.Name)
+		output.KeyValue("Cron", result.CronExpression)
+		state := "disabled"
+		if result.Enabled {
+			state = "enabled"
 		}
-		output.KeyValue("State", output.StatusBadge(enabled))
-		output.KeyValue("Last Run", mapStr(result, "lastRunId"))
-		output.KeyValue("Last Run At", mapStr(result, "lastRunAt"))
-		output.KeyValue("Created", mapStr(result, "createdAt"))
+		output.KeyValue("State", output.StatusBadge(state))
+		output.KeyValue("Last Run", result.LastRunID)
+		output.KeyValue("Last Run At", result.LastRunAt)
+		output.KeyValue("Created", result.CreatedAt)
 		return nil
 	},
 }
@@ -109,11 +110,11 @@ var scheduleCreateCmd = &cobra.Command{
 			return cmdErr("Invalid JSON in request file: " + err.Error())
 		}
 
-		req := map[string]interface{}{
-			"name":           schedName,
-			"cronExpression": schedCron,
-			"enabled":        true,
-			"testRequest":    testRequest,
+		req := &client.CreateScheduleRequest{
+			Name:           schedName,
+			CronExpression: schedCron,
+			Enabled:        true,
+			TestRequest:    testRequest,
 		}
 
 		result, err := apiClient.CreateSchedule(context.Background(), req)
@@ -124,8 +125,8 @@ var scheduleCreateCmd = &cobra.Command{
 			output.JSON(result)
 			return nil
 		}
-		output.Success(fmt.Sprintf("Schedule created: %s (%s)", mapStr(result, "id"), mapStr(result, "name")))
-		output.KeyValue("Cron", mapStr(result, "cronExpression"))
+		output.Success(fmt.Sprintf("Schedule created: %s (%s)", result.ID, result.Name))
+		output.KeyValue("Cron", result.CronExpression)
 		return nil
 	},
 }

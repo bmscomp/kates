@@ -41,9 +41,9 @@ var versionCmd = &cobra.Command{
 		// Try to get API version
 		health, err := apiClient.Health(context.Background())
 		if err == nil {
-			output.KeyValue("API Status", output.StatusBadge(mapStrEmpty(health, "status")))
-			if eng, ok := health["engine"].(map[string]interface{}); ok {
-				output.KeyValue("Backend", mapStrEmpty(eng, "activeBackend"))
+			output.KeyValue("API Status", output.StatusBadge(health.Status))
+			if eng := health.Engine; eng != nil {
+				output.KeyValue("Backend", eng.ActiveBackend)
 			}
 		} else {
 			output.KeyValue("API", output.DimStyle.Render("not reachable"))

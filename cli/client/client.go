@@ -38,7 +38,6 @@ func (e *APIError) String() string {
 	return fmt.Sprintf("[%d] %s: %s", e.Status, e.Error, e.Message)
 }
 
-// doRequest executes an HTTP request with error handling and optional retry.
 func (c *Client) doRequest(req *http.Request, retryable bool) ([]byte, error) {
 	attempts := 1
 	if retryable {
@@ -126,22 +125,22 @@ func (c *Client) delete(ctx context.Context, path string) error {
 	return err
 }
 
-func (c *Client) Health(ctx context.Context) (map[string]interface{}, error) {
+func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	data, err := c.get(ctx, "/api/health")
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result HealthResponse
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) ClusterInfo(ctx context.Context) (map[string]interface{}, error) {
+func (c *Client) ClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	data, err := c.get(ctx, "/api/cluster/info")
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result ClusterInfo
+	return &result, json.Unmarshal(data, &result)
 }
 
 func (c *Client) Topics(ctx context.Context) ([]string, error) {
@@ -153,7 +152,7 @@ func (c *Client) Topics(ctx context.Context) ([]string, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (json.RawMessage, error) {
+func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (*PagedTests, error) {
 	path := fmt.Sprintf("/api/tests?page=%d&size=%d", page, size)
 	if testType != "" {
 		path += "&type=" + testType
@@ -165,25 +164,26 @@ func (c *Client) ListTests(ctx context.Context, testType, status string, page, s
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(data), nil
+	var result PagedTests
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) GetTest(ctx context.Context, id string) (map[string]interface{}, error) {
+func (c *Client) GetTest(ctx context.Context, id string) (*TestRun, error) {
 	data, err := c.get(ctx, "/api/tests/"+id)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result TestRun
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) CreateTest(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) CreateTest(ctx context.Context, request *CreateTestRequest) (*TestRun, error) {
 	data, err := c.postJSON(ctx, "/api/tests", request)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result TestRun
+	return &result, json.Unmarshal(data, &result)
 }
 
 func (c *Client) DeleteTest(ctx context.Context, id string) error {
@@ -208,22 +208,22 @@ func (c *Client) Backends(ctx context.Context) ([]string, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) Report(ctx context.Context, id string) (map[string]interface{}, error) {
+func (c *Client) Report(ctx context.Context, id string) (*Report, error) {
 	data, err := c.get(ctx, "/api/tests/"+id+"/report")
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result Report
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) ReportSummary(ctx context.Context, id string) (map[string]interface{}, error) {
+func (c *Client) ReportSummary(ctx context.Context, id string) (*ReportSummary, error) {
 	data, err := c.get(ctx, "/api/tests/"+id+"/report/summary")
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result ReportSummary
+	return &result, json.Unmarshal(data, &result)
 }
 
 func (c *Client) Compare(ctx context.Context, ids string) (json.RawMessage, error) {
@@ -250,62 +250,62 @@ func (c *Client) ExportJUnit(ctx context.Context, id string) (string, error) {
 	return string(data), nil
 }
 
-func (c *Client) ListSchedules(ctx context.Context) ([]map[string]interface{}, error) {
+func (c *Client) ListSchedules(ctx context.Context) ([]Schedule, error) {
 	data, err := c.get(ctx, "/api/schedules")
 	if err != nil {
 		return nil, err
 	}
-	var result []map[string]interface{}
+	var result []Schedule
 	return result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) GetSchedule(ctx context.Context, id string) (map[string]interface{}, error) {
+func (c *Client) GetSchedule(ctx context.Context, id string) (*Schedule, error) {
 	data, err := c.get(ctx, "/api/schedules/"+id)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result Schedule
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) CreateSchedule(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) CreateSchedule(ctx context.Context, request *CreateScheduleRequest) (*Schedule, error) {
 	data, err := c.postJSON(ctx, "/api/schedules", request)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result Schedule
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) UpdateSchedule(ctx context.Context, id string, request map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) UpdateSchedule(ctx context.Context, id string, request *CreateScheduleRequest) (*Schedule, error) {
 	data, err := c.put(ctx, "/api/schedules/"+id, request)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result Schedule
+	return &result, json.Unmarshal(data, &result)
 }
 
 func (c *Client) DeleteSchedule(ctx context.Context, id string) error {
 	return c.delete(ctx, "/api/schedules/"+id)
 }
 
-func (c *Client) Trends(ctx context.Context, testType, metric string, days, baselineWindow int) (map[string]interface{}, error) {
+func (c *Client) Trends(ctx context.Context, testType, metric string, days, baselineWindow int) (*TrendResponse, error) {
 	path := fmt.Sprintf("/api/trends?type=%s&metric=%s&days=%d&baselineWindow=%d",
 		testType, metric, days, baselineWindow)
 	data, err := c.get(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result TrendResponse
+	return &result, json.Unmarshal(data, &result)
 }
 
-func (c *Client) Resilience(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) Resilience(ctx context.Context, request interface{}) (*ResilienceResult, error) {
 	data, err := c.postJSON(ctx, "/api/resilience", request)
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
-	return result, json.Unmarshal(data, &result)
+	var result ResilienceResult
+	return &result, json.Unmarshal(data, &result)
 }
