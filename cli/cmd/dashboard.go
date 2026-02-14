@@ -30,14 +30,14 @@ var dashboardCmd = &cobra.Command{
 
 			w := termWidth()
 			panelW := (w / 2) - 2
-			if panelW < 35 {
-				panelW = 35
+			if panelW < 38 {
+				panelW = 38
 			}
 
 			titleBar := lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#C4B5FD")).
-				Background(lipgloss.Color("#1F2937")).
+				Foreground(output.HeaderColor).
+				Background(output.Surface).
 				Width(w).
 				Padding(0, 1).
 				Render(fmt.Sprintf(
@@ -50,38 +50,55 @@ var dashboardCmd = &cobra.Command{
 
 			healthContent := &strings.Builder{}
 			if healthErr != nil {
-				healthContent.WriteString(output.ErrorStyle.Render("  API unreachable"))
+				healthContent.WriteString(output.ErrorStyle.Render("  ✖ API unreachable"))
 			} else {
-				healthContent.WriteString(fmt.Sprintf("  API     %s\n", output.StatusBadge(health.Status)))
+				healthContent.WriteString(fmt.Sprintf("  %-10s %s\n",
+					output.DimStyle.Render("API"),
+					output.StatusBadge(health.Status)))
 				if kafka := health.Kafka; kafka != nil {
-					healthContent.WriteString(fmt.Sprintf("  Kafka   %s\n", output.StatusBadge(kafka.Status)))
-					healthContent.WriteString(fmt.Sprintf("  Server  %s", output.DimStyle.Render(kafka.BootstrapServers)))
+					healthContent.WriteString(fmt.Sprintf("  %-10s %s\n",
+						output.DimStyle.Render("Kafka"),
+						output.StatusBadge(kafka.Status)))
+					healthContent.WriteString(fmt.Sprintf("  %-10s %s\n",
+						output.DimStyle.Render("Brokers"),
+						output.LightStyle.Render(kafka.BootstrapServers)))
 				}
 				if eng := health.Engine; eng != nil {
-					healthContent.WriteString(fmt.Sprintf("\n  Engine  %s", output.AccentStyle.Render(eng.ActiveBackend)))
+					healthContent.WriteString(fmt.Sprintf("  %-10s %s\n",
+						output.DimStyle.Render("Engine"),
+						output.AccentStyle.Render(eng.ActiveBackend)))
 				}
+				healthContent.WriteString(fmt.Sprintf("  %-10s %s",
+					output.DimStyle.Render("Configs"),
+					output.LightStyle.Render(fmt.Sprintf("%d test configs loaded", len(health.Tests)))))
 			}
 
 			var totalItems int
+			var counts TestCounts
 			if paged != nil {
 				totalItems = paged.TotalItems
+				counts = CountStatuses(paged.Content)
 			}
 
 			summaryContent := &strings.Builder{}
-			var counts TestCounts
-			if paged != nil {
-				counts = CountStatuses(paged.Content)
-			}
-			summaryContent.WriteString(fmt.Sprintf("  %s  Running   %s  Pending\n",
+			summaryContent.WriteString(fmt.Sprintf("  %s %-11s %s %s\n",
 				output.AccentStyle.Bold(true).Render(fmt.Sprintf("%3d", counts.Running)),
+				output.LightStyle.Render("Running"),
 				output.WarningStyle.Render(fmt.Sprintf("%3d", counts.Pending)),
+				output.LightStyle.Render("Pending"),
 			))
-			summaryContent.WriteString(fmt.Sprintf("  %s  Done      %s  Failed\n",
+			summaryContent.WriteString(fmt.Sprintf("  %s %-11s %s %s\n",
 				output.SuccessStyle.Render(fmt.Sprintf("%3d", counts.Done)),
+				output.LightStyle.Render("Done"),
 				coloredCount(counts.Failed),
+				output.LightStyle.Render("Failed"),
 			))
-			summaryContent.WriteString(fmt.Sprintf("  %s  Total",
-				output.LightStyle.Render(fmt.Sprintf("%3d", totalItems)),
+			summaryContent.WriteString(fmt.Sprintf("  %s\n",
+				output.DimStyle.Render(strings.Repeat("·", panelW-6)),
+			))
+			summaryContent.WriteString(fmt.Sprintf("  %s %s",
+				output.LightStyle.Bold(true).Render(fmt.Sprintf("%3d", totalItems)),
+				output.DimStyle.Render("Total tests"),
 			))
 
 			panel1 := output.Panel("System Health", healthContent.String(), panelW)
@@ -101,22 +118,22 @@ var dashboardCmd = &cobra.Command{
 					}
 					activeCount++
 
-					activeContent.WriteString(fmt.Sprintf("  %s %s %s",
+					line := fmt.Sprintf("  %s %-12s %s",
 						output.AccentStyle.Render("◉"),
 						output.LightStyle.Bold(true).Render(t.TestType),
 						output.DimStyle.Render(truncID(t.ID)),
-					))
+					)
 					if len(t.Results) > 0 {
 						r := t.Results[len(t.Results)-1]
 						latestThroughput += r.ThroughputRecordsPerSec
 						latestLatency = r.P99LatencyMs
-						activeContent.WriteString(fmt.Sprintf("  │  %s rec  %s  %s p99",
+						line += fmt.Sprintf("  │ %s rec  %s  %s p99",
 							output.LightStyle.Render(fmtNum(r.RecordsSent)),
 							output.SuccessStyle.Render(fmtNum(r.ThroughputRecordsPerSec)+" rec/s"),
 							output.WarningStyle.Render(fmtFloat(r.P99LatencyMs, 1)+" ms"),
-						))
+						)
 					}
-					activeContent.WriteString("\n")
+					activeContent.WriteString(line + "\n")
 				}
 			}
 			if activeCount == 0 {
@@ -136,8 +153,39 @@ var dashboardCmd = &cobra.Command{
 				latencyHistory = latencyHistory[len(latencyHistory)-30:]
 			}
 
-			activePanel := output.Panel("Active Tests", activeContent.String(), w-4)
-			fmt.Println(activePanel)
+			recentContent := &strings.Builder{}
+			recentCount := 0
+			if paged != nil {
+				for _, t := range paged.Content {
+					status := strings.ToUpper(t.Status)
+					if status == "RUNNING" || status == "PENDING" {
+						continue
+					}
+					if recentCount >= 5 {
+						break
+					}
+					recentCount++
+					icon := output.SuccessStyle.Render("✓")
+					if status == "FAILED" || status == "ERROR" {
+						icon = output.ErrorStyle.Render("✖")
+					}
+					recentContent.WriteString(fmt.Sprintf("  %s %-12s %s  %s  %s\n",
+						icon,
+						output.LightStyle.Render(t.TestType),
+						output.DimStyle.Render(truncID(t.ID)),
+						output.StatusBadge(status),
+						output.DimStyle.Render(formatTime(t.CreatedAt)),
+					))
+				}
+			}
+			if recentCount == 0 {
+				recentContent.WriteString(output.DimStyle.Render("  No completed tests"))
+			}
+
+			activePanel := output.Panel("Active Tests", activeContent.String(), panelW)
+			recentPanel := output.Panel("Recent Completed", recentContent.String(), panelW)
+			row2 := lipgloss.JoinHorizontal(lipgloss.Top, activePanel, "  ", recentPanel)
+			fmt.Println(row2)
 			fmt.Println()
 
 			if len(throughputHistory) > 1 || len(latencyHistory) > 1 {
@@ -161,43 +209,12 @@ var dashboardCmd = &cobra.Command{
 
 				sp1 := output.Panel("Throughput ↗", sparkContent1.String(), panelW)
 				sp2 := output.Panel("P99 Latency ↘", sparkContent2.String(), panelW)
-				row2 := lipgloss.JoinHorizontal(lipgloss.Top, sp1, "  ", sp2)
-				fmt.Println(row2)
+				row3 := lipgloss.JoinHorizontal(lipgloss.Top, sp1, "  ", sp2)
+				fmt.Println(row3)
 				fmt.Println()
 			}
 
-			recentContent := &strings.Builder{}
-			recentCount := 0
-			if paged != nil {
-				for _, t := range paged.Content {
-					status := strings.ToUpper(t.Status)
-					if status == "RUNNING" || status == "PENDING" {
-						continue
-					}
-					if recentCount >= 5 {
-						break
-					}
-					recentCount++
-					emoji := output.SuccessStyle.Render("✓")
-					if status == "FAILED" || status == "ERROR" {
-						emoji = output.ErrorStyle.Render("✖")
-					}
-					recentContent.WriteString(fmt.Sprintf("  %s %s %s %s  %s\n",
-						emoji,
-						output.LightStyle.Render(padLeftN(t.TestType, 10)),
-						output.DimStyle.Render(truncID(t.ID)),
-						output.StatusBadge(status),
-						output.DimStyle.Render(formatTime(t.CreatedAt)),
-					))
-				}
-			}
-			if recentCount == 0 {
-				recentContent.WriteString(output.DimStyle.Render("  No completed tests"))
-			}
-			recentPanel := output.Panel("Recent Completed", recentContent.String(), w-4)
-			fmt.Println(recentPanel)
-
-			fmt.Printf("\n  %s Refreshing every %ds... (Ctrl+C to stop)\n",
+			fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",
 				spinnerFrame(tick),
 				dashInterval,
 			)
