@@ -190,3 +190,27 @@ type PartitionInfo struct {
 	ISR             []int `json:"isr"`
 	UnderReplicated bool  `json:"underReplicated"`
 }
+
+// ConsumerGroupSummary from GET /api/cluster/groups
+type ConsumerGroupSummary struct {
+	GroupID string `json:"groupId"`
+	State   string `json:"state"`
+	Members int    `json:"members"`
+}
+
+// ConsumerGroupDetail from GET /api/cluster/groups/{id}
+type ConsumerGroupDetail struct {
+	GroupID  string               `json:"groupId"`
+	State    string               `json:"state"`
+	Members  int                  `json:"members"`
+	Offsets  []GroupPartitionInfo `json:"offsets"`
+	TotalLag int64                `json:"totalLag"`
+}
+
+type GroupPartitionInfo struct {
+	Topic         string `json:"topic"`
+	Partition     int    `json:"partition"`
+	CurrentOffset int64  `json:"currentOffset"`
+	EndOffset     int64  `json:"endOffset"`
+	Lag           int64  `json:"lag"`
+}

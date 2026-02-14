@@ -6,19 +6,27 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.ConsumerGroupDescription;
+import org.apache.kafka.clients.admin.ConsumerGroupListing;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
+import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.ListTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -194,6 +202,98 @@ public class KafkaAdminService {
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to describe topic: " + topicName, e);
+        }
+    }
+
+    public List<Map<String, Object>> listConsumerGroups() {
+        try (AdminClient client = createClient()) {
+            Collection<ConsumerGroupListing> groups = client.listConsumerGroups()
+                    .all()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            List<String> groupIds = groups.stream()
+                    .map(ConsumerGroupListing::groupId)
+                    .toList();
+
+            Map<String, ConsumerGroupDescription> descriptions = groupIds.isEmpty()
+                    ? Map.of()
+                    : client.describeConsumerGroups(groupIds)
+                            .all()
+                            .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (ConsumerGroupListing listing : groups) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("groupId", listing.groupId());
+                ConsumerGroupDescription desc = descriptions.get(listing.groupId());
+                item.put("state", desc != null ? desc.state().toString() : "UNKNOWN");
+                item.put("members", desc != null ? desc.members().size() : 0);
+                result.add(item);
+            }
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to list consumer groups", e);
+        }
+    }
+
+    public Map<String, Object> describeConsumerGroup(String groupId) {
+        try (AdminClient client = createClient()) {
+            ConsumerGroupDescription desc = client.describeConsumerGroups(Collections.singleton(groupId))
+                    .all()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .get(groupId);
+
+            if (desc == null) {
+                throw new RuntimeException("Consumer group not found: " + groupId);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("groupId", desc.groupId());
+            result.put("state", desc.state().toString());
+            result.put("members", desc.members().size());
+
+            Map<TopicPartition, OffsetAndMetadata> offsets = client
+                    .listConsumerGroupOffsets(groupId)
+                    .partitionsToOffsetAndMetadata()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            Map<TopicPartition, OffsetSpec> latestRequest = new HashMap<>();
+            offsets.keySet().forEach(tp -> latestRequest.put(tp, OffsetSpec.latest()));
+
+            Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> endOffsets =
+                    latestRequest.isEmpty()
+                            ? Map.of()
+                            : client.listOffsets(latestRequest)
+                                    .all()
+                                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            List<Map<String, Object>> offsetList = new ArrayList<>();
+            long totalLag = 0;
+
+            for (var entry : offsets.entrySet()) {
+                TopicPartition tp = entry.getKey();
+                long current = entry.getValue().offset();
+                long end = endOffsets.containsKey(tp)
+                        ? endOffsets.get(tp).offset()
+                        : current;
+                long lag = Math.max(0, end - current);
+                totalLag += lag;
+
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("topic", tp.topic());
+                item.put("partition", tp.partition());
+                item.put("currentOffset", current);
+                item.put("endOffset", end);
+                item.put("lag", lag);
+                offsetList.add(item);
+            }
+
+            result.put("offsets", offsetList);
+            result.put("totalLag", totalLag);
+            return result;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to describe consumer group: " + groupId, e);
         }
     }
 }

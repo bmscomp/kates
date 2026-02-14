@@ -66,4 +66,34 @@ public class ClusterResource {
                     .build();
         }
     }
+
+    @GET
+    @Path("/groups")
+    public Response getConsumerGroups() {
+        try {
+            return Response.ok(kafkaAdmin.listConsumerGroups()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(Map.of("error", "Failed to list consumer groups: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/groups/{id}")
+    public Response getConsumerGroupDetail(@PathParam("id") String id) {
+        try {
+            Map<String, Object> detail = kafkaAdmin.describeConsumerGroup(id);
+            return Response.ok(detail).build();
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().contains("not found")) {
+                return Response.status(404)
+                        .entity(Map.of("error", "Consumer group not found: " + id))
+                        .build();
+            }
+            return Response.serverError()
+                    .entity(Map.of("error", "Failed to describe consumer group: " + e.getMessage()))
+                    .build();
+        }
+    }
 }

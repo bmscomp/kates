@@ -161,6 +161,24 @@ func (c *Client) TopicDetail(ctx context.Context, name string) (*TopicDetail, er
 	return &result, json.Unmarshal(data, &result)
 }
 
+func (c *Client) ConsumerGroups(ctx context.Context) ([]ConsumerGroupSummary, error) {
+	data, err := c.get(ctx, "/api/cluster/groups")
+	if err != nil {
+		return nil, err
+	}
+	var result []ConsumerGroupSummary
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) ConsumerGroupDetail(ctx context.Context, id string) (*ConsumerGroupDetail, error) {
+	data, err := c.get(ctx, "/api/cluster/groups/"+id)
+	if err != nil {
+		return nil, err
+	}
+	var result ConsumerGroupDetail
+	return &result, json.Unmarshal(data, &result)
+}
+
 func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (*PagedTests, error) {
 	path := fmt.Sprintf("/api/tests?page=%d&size=%d", page, size)
 	if testType != "" {
