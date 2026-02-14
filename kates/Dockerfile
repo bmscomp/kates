@@ -1,23 +1,38 @@
-# JVM build
+# Stage 1: Build the KATES CLI (Go)
+FROM golang:1.24-alpine AS cli-builder
+ENV GOTOOLCHAIN=auto
+WORKDIR /cli
+COPY cli/go.mod cli/go.sum ./
+RUN go mod download
+COPY cli/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /kates .
+
+# Stage 2: Build the Java application
 FROM eclipse-temurin:25-jdk AS builder
 WORKDIR /build
 
-COPY pom.xml .
-COPY .mvn .mvn
-COPY mvnw .
+COPY kates/pom.xml .
+COPY kates/.mvn .mvn
+COPY kates/mvnw .
 RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
-COPY src src
+COPY kates/src src
 RUN ./mvnw package -DskipTests -B
 
-# Runtime
+# Stage 3: Runtime — Java app + CLI on PATH
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 
 COPY --from=builder /build/target/quarkus-app/ ./
+COPY --from=cli-builder /kates /usr/local/bin/kates
 
-RUN addgroup --system kates && adduser --system --ingroup kates kates
+RUN addgroup --system kates && adduser --system --ingroup kates --home /home/kates kates \
+  && mkdir -p /home/kates \
+  && printf 'current-context: local\ncontexts:\n  local:\n    url: http://localhost:8080\n    output: table\n' > /home/kates/.kates.yaml \
+  && chown -R kates:kates /home/kates
+
 USER kates
+ENV HOME=/home/kates
 
 EXPOSE 8080
 

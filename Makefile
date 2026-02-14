@@ -138,9 +138,9 @@ kates: kates-build kates-deploy
 	@echo "✅ Kates deployed! Run 'make ports' to access at http://localhost:30083"
 
 kates-build:
-	@echo "🔨 Building Kates (JVM)..."
+	@echo "🔨 Building Kates (JVM + CLI)..."
 	cd kates && ./mvnw package -DskipTests -B
-	cd kates && docker build -t kates:latest .
+	docker build -f kates/Dockerfile -t kates:latest .
 	kind load docker-image kates:latest --name panda
 	@echo "✅ Kates image loaded into Kind"
 
