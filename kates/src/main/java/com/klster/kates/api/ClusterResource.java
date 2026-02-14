@@ -108,4 +108,16 @@ public class ClusterResource {
                     .build();
         }
     }
+
+    @GET
+    @Path("/check")
+    public Response clusterCheck() {
+        try {
+            return Response.ok(kafkaAdmin.clusterHealthCheck()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(Map.of("error", "Cluster health check failed: " + e.getMessage()))
+                    .build();
+        }
+    }
 }

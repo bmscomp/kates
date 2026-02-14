@@ -188,6 +188,15 @@ func (c *Client) BrokerConfigs(ctx context.Context, id int) ([]BrokerConfig, err
 	return result, json.Unmarshal(data, &result)
 }
 
+func (c *Client) ClusterCheck(ctx context.Context) (*ClusterHealthReport, error) {
+	data, err := c.get(ctx, "/api/cluster/check")
+	if err != nil {
+		return nil, err
+	}
+	var result ClusterHealthReport
+	return &result, json.Unmarshal(data, &result)
+}
+
 func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (*PagedTests, error) {
 	path := fmt.Sprintf("/api/tests?page=%d&size=%d", page, size)
 	if testType != "" {

@@ -222,3 +222,21 @@ type BrokerConfig struct {
 	Source   string `json:"source"`
 	ReadOnly bool   `json:"readOnly"`
 }
+
+// ClusterHealthReport from GET /api/cluster/check
+type ClusterHealthReport struct {
+	ClusterID       string                `json:"clusterId"`
+	Brokers         int                   `json:"brokers"`
+	ControllerID    int                   `json:"controllerId"`
+	Topics          int                   `json:"topics"`
+	Partitions      int                   `json:"partitions"`
+	ConsumerGroups  int                   `json:"consumerGroups"`
+	PartitionHealth PartitionHealthReport `json:"partitionHealth"`
+	Status          string                `json:"status"`
+}
+
+type PartitionHealthReport struct {
+	UnderReplicated int                      `json:"underReplicated"`
+	Offline         int                      `json:"offline"`
+	Problems        []map[string]interface{} `json:"problems,omitempty"`
+}

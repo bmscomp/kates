@@ -325,4 +325,78 @@ public class KafkaAdminService {
             throw new RuntimeException("Failed to describe broker configs for broker " + brokerId, e);
         }
     }
+
+    @SuppressWarnings("deprecation")
+    public Map<String, Object> clusterHealthCheck() {
+        try (AdminClient client = createClient()) {
+            Map<String, Object> report = new LinkedHashMap<>();
+
+            DescribeClusterResult cluster = client.describeCluster();
+            String clusterId = cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Node controller = cluster.controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Collection<Node> nodes = cluster.nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            report.put("clusterId", clusterId);
+            report.put("brokers", nodes.size());
+            report.put("controllerId", controller.id());
+
+            Set<String> topics = client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Map<String, TopicDescription> topicDescs = topics.isEmpty()
+                    ? Map.of()
+                    : client.describeTopics(topics).allTopicNames().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            int totalPartitions = 0;
+            int underReplicated = 0;
+            int offlinePartitions = 0;
+            List<Map<String, Object>> problems = new ArrayList<>();
+
+            for (var entry : topicDescs.entrySet()) {
+                for (TopicPartitionInfo pi : entry.getValue().partitions()) {
+                    totalPartitions++;
+                    if (pi.leader() == null || pi.leader().id() < 0) {
+                        offlinePartitions++;
+                        Map<String, Object> problem = new LinkedHashMap<>();
+                        problem.put("topic", entry.getKey());
+                        problem.put("partition", pi.partition());
+                        problem.put("issue", "OFFLINE");
+                        problems.add(problem);
+                    } else if (pi.isr().size() < pi.replicas().size()) {
+                        underReplicated++;
+                        Map<String, Object> problem = new LinkedHashMap<>();
+                        problem.put("topic", entry.getKey());
+                        problem.put("partition", pi.partition());
+                        problem.put("issue", "UNDER_REPLICATED");
+                        problem.put("isr", pi.isr().size());
+                        problem.put("replicas", pi.replicas().size());
+                        problems.add(problem);
+                    }
+                }
+            }
+
+            report.put("topics", topics.size());
+            report.put("partitions", totalPartitions);
+
+            Map<String, Object> partitionHealth = new LinkedHashMap<>();
+            partitionHealth.put("underReplicated", underReplicated);
+            partitionHealth.put("offline", offlinePartitions);
+            partitionHealth.put("problems", problems);
+            report.put("partitionHealth", partitionHealth);
+
+            Collection<ConsumerGroupListing> groups = client.listConsumerGroups()
+                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            report.put("consumerGroups", groups.size());
+
+            String status = "HEALTHY";
+            if (offlinePartitions > 0) {
+                status = "CRITICAL";
+            } else if (underReplicated > 0) {
+                status = "WARNING";
+            }
+            report.put("status", status);
+
+            return report;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to perform cluster health check", e);
+        }
+    }
 }
