@@ -10,13 +10,15 @@ import (
 )
 
 var scheduleCmd = &cobra.Command{
-	Use:   "schedule",
-	Short: "Manage scheduled/recurring test runs",
+	Use:     "schedule",
+	Aliases: []string{"s", "sched"},
+	Short:   "Manage scheduled/recurring test runs",
 }
 
 var scheduleListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all scheduled tests",
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List all scheduled tests",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		schedules, err := apiClient.ListSchedules()
 		if err != nil {
@@ -134,9 +136,10 @@ var scheduleCreateCmd = &cobra.Command{
 }
 
 var scheduleDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Delete a scheduled test",
-	Args:  cobra.ExactArgs(1),
+	Use:     "delete <id>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a scheduled test",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := apiClient.DeleteSchedule(args[0])
 		if err != nil {

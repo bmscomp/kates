@@ -17,13 +17,15 @@ var (
 )
 
 var testCmd = &cobra.Command{
-	Use:   "test",
-	Short: "Manage performance test runs",
+	Use:     "test",
+	Aliases: []string{"t"},
+	Short:   "Manage performance test runs",
 }
 
 var testListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List test runs with optional filters",
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List test runs with optional filters",
 	Example: `  kates test list
   kates test list --type LOAD --status DONE
   kates test list --page 0 --size 10`,
@@ -79,9 +81,10 @@ var testListCmd = &cobra.Command{
 }
 
 var testGetCmd = &cobra.Command{
-	Use:   "get <id>",
-	Short: "Show details of a specific test run",
-	Args:  cobra.ExactArgs(1),
+	Use:     "get <id>",
+	Aliases: []string{"show", "inspect"},
+	Short:   "Show details of a specific test run",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.GetTest(args[0])
 		if err != nil {
@@ -146,8 +149,9 @@ var (
 )
 
 var testCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Start a new performance test",
+	Use:     "create",
+	Aliases: []string{"run", "start"},
+	Short:   "Start a new performance test",
 	Example: `  kates test create --type LOAD --records 100000
   kates test create --type ENDURANCE --duration 300 --producers 4
   kates test create --type BURST --records 50000 --backend native`,
@@ -186,19 +190,27 @@ var testCreateCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Success(fmt.Sprintf("Test created successfully"))
-		output.KeyValue("ID", valStr(result, "id"))
+		id := valStr(result, "id")
+		output.Success("Test created successfully")
+		output.KeyValue("ID", id)
 		output.KeyValue("Type", valStr(result, "testType"))
 		output.KeyValue("Status", output.StatusBadge(valStr(result, "status")))
-		output.Hint("Track progress: kates test get " + valStr(result, "id"))
+
+		if createWait {
+			fmt.Println()
+			pollUntilDone(id)
+		} else {
+			output.Hint("Track progress: kates test watch " + id)
+		}
 		return nil
 	},
 }
 
 var testDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Stop and delete a test run",
-	Args:  cobra.ExactArgs(1),
+	Use:     "delete <id>",
+	Aliases: []string{"rm"},
+	Short:   "Stop and delete a test run",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := apiClient.DeleteTest(args[0])
 		if err != nil {
@@ -337,6 +349,7 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createRecordSize, "record-size", 0, "Record size in bytes")
 	testCreateCmd.Flags().IntVar(&createDuration, "duration", 0, "Duration in seconds")
 	testCreateCmd.Flags().StringVar(&createTopic, "topic", "", "Kafka topic name")
+	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results")
 
 	testCmd.AddCommand(testListCmd)
 	testCmd.AddCommand(testGetCmd)

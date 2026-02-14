@@ -1,0 +1,13 @@
+scenarios:
+  - name: "Quick Load Test"
+    type: LOAD
+    spec:
+      records: 50000
+      parallelProducers: 2
+      recordSizeBytes: 512
+
+  - name: "Endurance Soak"
+    type: ENDURANCE
+    spec:
+      records: 200000
+      durationSeconds: 120

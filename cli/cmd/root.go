@@ -113,6 +113,7 @@ Docs & more:  kates <command> --help
 var rootCmd = &cobra.Command{
 	Use:   "kates",
 	Short: "KATES — Kafka Advanced Testing & Engineering Suite CLI",
+	Long:  helpTemplate,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cfg := loadConfig()
 		ctx := activeContext(cfg)
@@ -139,7 +140,6 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.SetHelpTemplate(helpTemplate)
 	rootCmd.PersistentFlags().StringVar(&apiURL, "url", "", "Override API URL for this call")
 	rootCmd.PersistentFlags().StringVarP(&outputMode, "output", "o", "", "Output format: table or json")
 	rootCmd.PersistentFlags().StringVar(&contextFlag, "context", "", "Use a specific context instead of current")

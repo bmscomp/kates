@@ -9,8 +9,9 @@ import (
 )
 
 var reportCmd = &cobra.Command{
-	Use:   "report",
-	Short: "View and export test reports",
+	Use:     "report",
+	Aliases: []string{"r"},
+	Short:   "View and export test reports",
 }
 
 var reportShowCmd = &cobra.Command{
