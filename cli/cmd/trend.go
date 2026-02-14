@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
@@ -36,17 +37,72 @@ var trendCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Header(fmt.Sprintf("Trend: %s / %s (%d days)", trendType, trendMetric, trendDays))
+		output.Banner("Trend Analysis", fmt.Sprintf("%s · %s · %dd window", trendType, trendMetric, trendDays))
 
 		baseline := numVal(result, "baseline")
 		output.KeyValue("Baseline", fmt.Sprintf("%.2f", baseline))
 
-		// Data points
+		higherIsBetter := strings.Contains(strings.ToLower(trendMetric), "throughput")
+
+		// Data points with sparkline
 		if points, ok := result["dataPoints"].([]interface{}); ok {
-			output.SubHeader("Data Points")
 			if len(points) == 0 {
-				output.Hint("  No data points in the selected range.")
+				output.Hint("No data points in the selected range.")
 			} else {
+				// Extract values for sparkline
+				values := make([]float64, 0, len(points))
+				for _, p := range points {
+					if pm, ok := p.(map[string]interface{}); ok {
+						values = append(values, numVal(pm, "value"))
+					}
+				}
+
+				// Sparkline chart
+				output.SubHeader("Trend Chart")
+				spark := output.SparklineColored(values, higherIsBetter)
+				trendDir := "→"
+				if len(values) >= 2 {
+					first := values[0]
+					last := values[len(values)-1]
+					if last > first*1.05 {
+						if higherIsBetter {
+							trendDir = output.SuccessStyle.Render("↗")
+						} else {
+							trendDir = output.ErrorStyle.Render("↗")
+						}
+					} else if last < first*0.95 {
+						if higherIsBetter {
+							trendDir = output.ErrorStyle.Render("↘")
+						} else {
+							trendDir = output.SuccessStyle.Render("↘")
+						}
+					} else {
+						trendDir = output.DimStyle.Render("→")
+					}
+				}
+				fmt.Printf("  %s  %s  (%d data points)\n", spark, trendDir, len(values))
+				fmt.Println()
+
+				// Min/Max/Avg summary
+				var minV, maxV, sum float64
+				minV = values[0]
+				maxV = values[0]
+				for _, v := range values {
+					sum += v
+					if v < minV {
+						minV = v
+					}
+					if v > maxV {
+						maxV = v
+					}
+				}
+				avg := sum / float64(len(values))
+				output.KeyValue("Min", fmt.Sprintf("%.2f", minV))
+				output.KeyValue("Max", fmt.Sprintf("%.2f", maxV))
+				output.KeyValue("Average", fmt.Sprintf("%.2f", avg))
+
+				// Data table
+				output.SubHeader("Data Points")
 				rows := make([][]string, 0, len(points))
 				for _, p := range points {
 					if pm, ok := p.(map[string]interface{}); ok {
@@ -65,7 +121,7 @@ var trendCmd = &cobra.Command{
 							}
 						}
 						rows = append(rows, []string{
-							valStr(pm, "runId"),
+							truncID(valStr(pm, "runId")),
 							ts,
 							fmt.Sprintf("%.2f", value),
 							marker,

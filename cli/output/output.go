@@ -257,6 +257,102 @@ func MetricBar(label string, value, max float64) {
 	fmt.Printf("  %-20s %s  %.1f\n", label, barStyled, value)
 }
 
+// Sparkline renders a compact sparkline chart from data values using Unicode blocks.
+func Sparkline(values []float64) string {
+	if len(values) == 0 {
+		return ""
+	}
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	min, max := values[0], values[0]
+	for _, v := range values {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	span := max - min
+	if span == 0 {
+		span = 1
+	}
+	var sb strings.Builder
+	for _, v := range values {
+		idx := int(((v - min) / span) * 7)
+		if idx > 7 {
+			idx = 7
+		}
+		if idx < 0 {
+			idx = 0
+		}
+		sb.WriteRune(blocks[idx])
+	}
+	return AccentStyle.Render(sb.String())
+}
+
+// SparklineColored renders a sparkline with color gradient based on value thresholds.
+func SparklineColored(values []float64, higherIsBetter bool) string {
+	if len(values) == 0 {
+		return ""
+	}
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	min, max := values[0], values[0]
+	for _, v := range values {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	span := max - min
+	if span == 0 {
+		span = 1
+	}
+	var sb strings.Builder
+	for _, v := range values {
+		idx := int(((v - min) / span) * 7)
+		if idx > 7 {
+			idx = 7
+		}
+		if idx < 0 {
+			idx = 0
+		}
+		ratio := (v - min) / span
+		var color lipgloss.Color
+		if higherIsBetter {
+			if ratio > 0.66 {
+				color = Green
+			} else if ratio > 0.33 {
+				color = Amber
+			} else {
+				color = Red
+			}
+		} else {
+			if ratio > 0.66 {
+				color = Red
+			} else if ratio > 0.33 {
+				color = Amber
+			} else {
+				color = Green
+			}
+		}
+		sb.WriteString(lipgloss.NewStyle().Foreground(color).Render(string(blocks[idx])))
+	}
+	return sb.String()
+}
+
+// Panel renders a titled box panel for dashboard layouts.
+func Panel(title, content string, width int) string {
+	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C4B5FD")).Render(title)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#374151")).
+		Width(width).
+		Padding(0, 1)
+	return box.Render(titleStyled + "\n" + content)
+}
+
 func padRight(s string, width int) string {
 	pure := stripAnsi(s)
 	if len(pure) >= width {

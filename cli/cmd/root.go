@@ -87,9 +87,15 @@ Core:
   report       View reports, export CSV/JUnit, compare runs
 
 Analysis:
-  trend        Historical performance trends and regression detection
+  trend        Historical performance trends with sparkline charts
   resilience   Chaos-performance correlation testing
   schedule     Automated recurring test schedules
+
+Observability:
+  dashboard    Full-screen monitoring dashboard (alias: dash)
+  top          Live view of running tests (like kubectl top)
+  status       Quick one-line system status
+  version      CLI, API, and runtime version info
 
 Configuration:
   ctx          Manage server contexts (like kubectl contexts)
@@ -103,9 +109,10 @@ Flags:
 
 Examples:
   $ kates test create --type LOAD --records 100000
-  $ kates report show <test-id>
+  $ kates test apply -f scenario.yaml --wait
+  $ kates report diff <id1> <id2>
   $ kates trend --type LOAD --metric p99LatencyMs --days 30
-  $ kates report export <test-id> --format junit > results.xml
+  $ kates dashboard
 
 Docs & more:  kates <command> --help
 `
