@@ -171,6 +171,14 @@ type TestSpec struct {
 	RecordSizeBytes   int    `json:"recordSizeBytes,omitempty"`
 	DurationSeconds   int    `json:"durationSeconds,omitempty"`
 	Topic             string `json:"topic,omitempty"`
+	Acks              string `json:"acks,omitempty"`
+	BatchSize         int    `json:"batchSize,omitempty"`
+	LingerMs          int    `json:"lingerMs,omitempty"`
+	CompressionType   string `json:"compressionType,omitempty"`
+	NumConsumers      int    `json:"numConsumers,omitempty"`
+	ReplicationFactor int    `json:"replicationFactor,omitempty"`
+	Partitions        int    `json:"partitions,omitempty"`
+	MinInsyncReplicas int    `json:"minInsyncReplicas,omitempty"`
 }
 
 // TopicDetail from GET /api/cluster/topics/{name}

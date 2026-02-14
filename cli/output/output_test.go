@@ -78,3 +78,18 @@ func TestPanel(t *testing.T) {
 		t.Error("Panel should contain the title")
 	}
 }
+
+func TestConfigList_Empty(t *testing.T) {
+	ConfigList("empty group", nil)
+	ConfigList("empty group", []ConfigEntry{})
+}
+
+func TestConfigList_WithEntries(t *testing.T) {
+	entries := []ConfigEntry{
+		{Key: "min.insync.replicas", Value: "2", Suffix: "🔒"},
+		{Key: "log.dirs", Value: "/var/lib/kafka/data-0/kafka-log0"},
+		{Key: "empty.config", Value: ""},
+		{Key: "very.long.value", Value: strings.Repeat("x", 100)},
+	}
+	ConfigList("STATIC_BROKER_CONFIG", entries)
+}

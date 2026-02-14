@@ -122,13 +122,21 @@ var testGetCmd = &cobra.Command{
 }
 
 var (
-	createType       string
-	createBackend    string
-	createRecords    int
-	createProducers  int
-	createRecordSize int
-	createDuration   int
-	createTopic      string
+	createType              string
+	createBackend           string
+	createRecords           int
+	createProducers         int
+	createRecordSize        int
+	createDuration          int
+	createTopic             string
+	createAcks              string
+	createBatchSize         int
+	createLingerMs          int
+	createCompression       string
+	createConsumers         int
+	createReplicationFactor int
+	createPartitions        int
+	createMinISR            int
 )
 
 var testCreateCmd = &cobra.Command{
@@ -137,7 +145,8 @@ var testCreateCmd = &cobra.Command{
 	Short:   "Start a new performance test",
 	Example: `  kates test create --type LOAD --records 100000
   kates test create --type ENDURANCE --duration 300 --producers 4
-  kates test create --type BURST --records 50000 --backend native`,
+  kates test create --type STRESS --records 500000 --acks 1 --compression zstd
+  kates test create --type LOAD --records 100000 --partitions 6 --replication-factor 3 --min-isr 2`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		req := &client.CreateTestRequest{
 			TestType: strings.ToUpper(createType),
@@ -145,13 +154,21 @@ var testCreateCmd = &cobra.Command{
 		if createBackend != "" {
 			req.Backend = createBackend
 		}
-		if createRecords > 0 {
+		if hasSpecOverrides() {
 			req.Spec = &client.TestSpec{
 				Records:           createRecords,
 				ParallelProducers: createProducers,
 				RecordSizeBytes:   createRecordSize,
 				DurationSeconds:   createDuration,
 				Topic:             createTopic,
+				Acks:              createAcks,
+				BatchSize:         createBatchSize,
+				LingerMs:          createLingerMs,
+				CompressionType:   createCompression,
+				NumConsumers:      createConsumers,
+				ReplicationFactor: createReplicationFactor,
+				Partitions:        createPartitions,
+				MinInsyncReplicas: createMinISR,
 			}
 		}
 
@@ -193,6 +210,14 @@ var testDeleteCmd = &cobra.Command{
 		output.Success("Test deleted: " + truncID(args[0]))
 		return nil
 	},
+}
+
+func hasSpecOverrides() bool {
+	return createRecords > 0 || createProducers > 0 || createRecordSize > 0 ||
+		createDuration > 0 || createTopic != "" || createAcks != "" ||
+		createBatchSize > 0 || createLingerMs > 0 || createCompression != "" ||
+		createConsumers > 0 || createReplicationFactor > 0 || createPartitions > 0 ||
+		createMinISR > 0
 }
 
 var testTypesCmd = &cobra.Command{
@@ -253,6 +278,14 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createDuration, "duration", 0, "Duration in seconds")
 	testCreateCmd.Flags().StringVar(&createTopic, "topic", "", "Kafka topic name")
 	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results")
+	testCreateCmd.Flags().StringVar(&createAcks, "acks", "", "Producer acks: 0, 1, or all (default: all)")
+	testCreateCmd.Flags().IntVar(&createBatchSize, "batch-size", 0, "Producer batch size in bytes (default: 65536)")
+	testCreateCmd.Flags().IntVar(&createLingerMs, "linger-ms", 0, "Producer linger time in ms (default: 5)")
+	testCreateCmd.Flags().StringVar(&createCompression, "compression", "", "Compression: none, gzip, snappy, lz4, zstd (default: lz4)")
+	testCreateCmd.Flags().IntVar(&createConsumers, "consumers", 0, "Number of parallel consumers")
+	testCreateCmd.Flags().IntVar(&createReplicationFactor, "replication-factor", 0, "Topic replication factor (default: 3)")
+	testCreateCmd.Flags().IntVar(&createPartitions, "partitions", 0, "Topic partition count (default: 3)")
+	testCreateCmd.Flags().IntVar(&createMinISR, "min-isr", 0, "Minimum in-sync replicas (default: 2)")
 
 	testCmd.AddCommand(testListCmd)
 	testCmd.AddCommand(testGetCmd)

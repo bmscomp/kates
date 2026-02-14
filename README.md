@@ -186,3 +186,159 @@ kubectl describe pod <pod-name> -n <namespace> | grep -A5 Events
 | `config/apicurio-values-offline.yaml` | Apicurio Registry Helm values |
 | `config/litmus-values.yaml` | LitmusChaos Helm values |
 | `config/storage-classes.yaml` | Zone-specific storage classes |
+
+## KATES CLI
+
+**KATES** (Kafka Advanced Testing & Engineering Suite) is a terminal-first CLI for performance testing, chaos engineering, and trend analysis against the Kafka cluster. It communicates with the KATES backend API.
+
+### Installation
+
+```bash
+cd cli
+go build -o kates .
+mv kates /usr/local/bin/  # or keep in-place
+```
+
+### Context Management
+
+KATES uses a context system similar to `kubectl`. Configuration is stored in `~/.kates.yaml`.
+
+```bash
+# Create a context pointing to the KATES API
+kates ctx set local --url http://localhost:30083
+
+# Switch to a context
+kates ctx use local
+
+# Show all contexts
+kates ctx show
+
+# Print the active context
+kates ctx current
+```
+
+### Commands
+
+#### Health & Status
+
+```bash
+kates health            # System health, Kafka connectivity, engine status
+kates status            # One-line system status
+kates version           # CLI, API, and runtime version info
+```
+
+#### Cluster Inspection
+
+```bash
+kates cluster info                 # Cluster metadata — brokers, controller, rack/AZ
+kates cluster topics               # List all Kafka topics
+kates cluster topics describe <t>  # Detailed topic metadata, configs, partition health
+kates cluster broker configs <id>  # Non-default broker config (grouped by source)
+kates cluster check                # Comprehensive cluster health check
+kates cluster groups               # List consumer groups with state and members
+kates cluster groups describe <g>  # Consumer group offsets and per-partition lag
+```
+
+#### Test Execution
+
+```bash
+kates test create --type LOAD --records 100000    # Start a load test
+kates test create --type STRESS --producers 8     # Multi-producer stress test
+kates test list                                    # List all test runs
+kates test list --type LOAD --status DONE          # Filter by type and status
+kates test show <id>                               # Inspect a specific run
+kates test delete <id>                             # Delete a test run
+kates test apply -f scenario.yaml --wait           # Apply a YAML test definition
+```
+
+Available test types: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`.
+
+#### Reports & Export
+
+```bash
+kates report show <id>              # Full report with SLA verdict
+kates report summary <id>           # Condensed metrics summary
+kates report export csv <id>        # Export results as CSV
+kates report export junit <id>      # Export as JUnit XML (CI integration)
+kates report diff <id1> <id2>       # Side-by-side comparison of two runs
+```
+
+#### Trend Analysis
+
+```bash
+kates trend --type LOAD --metric p99LatencyMs --days 30     # P99 trend over 30 days
+kates trend --type STRESS --metric throughput --days 7       # Throughput sparkline
+```
+
+#### Schedules
+
+```bash
+kates schedule list                                               # List all schedules
+kates schedule show <id>                                          # Inspect a schedule
+kates schedule create --name nightly --cron "0 2 * * *" -f s.yaml # Create a recurring test
+kates schedule delete <id>                                        # Remove a schedule
+```
+
+#### Resilience Testing
+
+```bash
+kates resilience --experiment pod-kill --duration 60s   # Chaos-performance correlation
+```
+
+#### Observability
+
+```bash
+kates dashboard      # Full-screen monitoring dashboard (alias: dash)
+kates top            # Live view of running tests (like kubectl top)
+kates watch <id>     # Real-time streaming of a running test
+```
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `-o, --output` | Output format: `table` (default) or `json` |
+| `--url` | Override API URL for a single call |
+| `--context` | Use a named context for a single call |
+| `-h, --help` | Show help for any command |
+
+### Project Structure
+
+```
+cli/
+├── main.go              # Entry point
+├── cmd/                 # Cobra command definitions
+│   ├── root.go          # Root command, context loading, flags
+│   ├── cluster.go       # cluster info/topics/broker/check
+│   ├── groups.go        # consumer group commands
+│   ├── test.go          # test create/list/show/delete/apply
+│   ├── report.go        # report show/summary/export/diff
+│   ├── trend.go         # trend analysis with sparklines
+│   ├── schedule.go      # schedule CRUD
+│   ├── resilience.go    # chaos-performance correlation
+│   ├── dashboard.go     # full-screen dashboard
+│   ├── top.go           # live test monitoring
+│   ├── watch.go         # streaming test output
+│   ├── health.go        # health check
+│   ├── status.go        # one-line status
+│   ├── config.go        # ctx set/use/show/delete/current
+│   ├── version.go       # version info
+│   ├── helpers.go       # shared formatting utilities
+│   └── helpers_test.go  # unit tests for helpers
+├── client/              # HTTP API client
+│   ├── client.go        # All API methods with retry logic
+│   ├── types.go         # Request/response type definitions
+│   └── client_test.go   # httptest-based tests for all endpoints
+├── output/              # Terminal rendering utilities
+│   ├── output.go        # Tables, banners, sparklines, config lists
+│   └── output_test.go   # Output rendering tests
+└── build.sh             # Cross-platform build script
+```
+
+### Running Tests
+
+```bash
+cd cli
+go test ./... -v
+```
+
