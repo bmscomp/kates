@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean
 
 # Default target: Launch complete cluster setup with all services
 all: check-prerequisites
@@ -133,7 +133,20 @@ test-capacity:
 	@echo "🧪 Running Capacity Test..."
 	./test-perf-capacity.sh
 
-# Kates Application
+# KATES CLI (standalone install)
+cli-build:
+	@echo "🔨 Cross-compiling KATES CLI for all platforms..."
+	cd cli && bash build.sh
+
+cli-install: cli-build
+	@echo "📦 Installing KATES CLI locally..."
+	bash install-kates.sh
+
+cli-clean:
+	@echo "🧹 Removing CLI build artifacts..."
+	rm -rf cli/dist
+
+# Kates Application (Docker + Kind)
 kates: kates-build kates-deploy
 	@echo "✅ Kates deployed! Run 'make ports' to access at http://localhost:30083"
 
@@ -294,7 +307,12 @@ help:
 	@echo "  litmus           - Deploy LitmusChaos (with images)"
 	@echo "  velero           - Deploy Velero backup"
 	@echo ""
-	@echo "  Kates Application"
+	@echo "  KATES CLI"
+	@echo "  cli-build        - Cross-compile CLI for macOS + Linux (amd64/arm64)"
+	@echo "  cli-install      - Build and install CLI on this machine"
+	@echo "  cli-clean        - Remove CLI build artifacts"
+	@echo ""
+	@echo "  Kates Application (Docker + Kind)"
 	@echo "  kates            - Build + deploy Kates (full pipeline)"
 	@echo "  kates-build      - Build Kates JVM image and load into Kind"
 	@echo "  kates-native     - Build Kates native image and load into Kind"
