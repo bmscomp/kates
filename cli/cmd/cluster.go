@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/klster/kates-cli/output"
@@ -188,21 +189,55 @@ var clusterBrokerConfigsCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Header(fmt.Sprintf("Broker %d — Configuration", id))
+		output.Banner(fmt.Sprintf("Broker %d — Configuration", id),
+			fmt.Sprintf("%d non-default entries", len(configs)))
 		if len(configs) == 0 {
 			output.Hint("All configs are at default values.")
 			return nil
 		}
 
-		rows := make([][]string, 0, len(configs))
-		for _, c := range configs {
-			roFlag := ""
-			if c.ReadOnly {
-				roFlag = "✓"
-			}
-			rows = append(rows, []string{c.Name, c.Value, c.Source, roFlag})
+		type entry struct {
+			name     string
+			value    string
+			readOnly bool
 		}
-		output.Table([]string{"Config", "Value", "Source", "RO"}, rows)
+		groups := make(map[string][]entry)
+		var sourceOrder []string
+		for _, c := range configs {
+			src := c.Source
+			if src == "" {
+				src = "DEFAULT"
+			}
+			if _, exists := groups[src]; !exists {
+				sourceOrder = append(sourceOrder, src)
+			}
+			groups[src] = append(groups[src], entry{c.Name, c.Value, c.ReadOnly})
+		}
+
+		sort.Strings(sourceOrder)
+
+		for _, src := range sourceOrder {
+			entries := groups[src]
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].name < entries[j].name
+			})
+
+			configEntries := make([]output.ConfigEntry, 0, len(entries))
+			for _, e := range entries {
+				suffix := ""
+				if e.readOnly {
+					suffix = "🔒"
+				}
+				configEntries = append(configEntries, output.ConfigEntry{
+					Key:    e.name,
+					Value:  e.value,
+					Suffix: suffix,
+				})
+			}
+			output.ConfigList(src, configEntries)
+		}
+
+		fmt.Println()
 		return nil
 	},
 }

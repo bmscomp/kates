@@ -7,7 +7,8 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
-import org.apache.kafka.clients.admin.ConsumerGroupListing;
+import org.apache.kafka.clients.admin.GroupListing;
+import org.apache.kafka.clients.admin.ListGroupsOptions;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.ListTopicsResult;
@@ -207,12 +208,12 @@ public class KafkaAdminService {
 
     public List<Map<String, Object>> listConsumerGroups() {
         try (AdminClient client = createClient()) {
-            Collection<ConsumerGroupListing> groups = client.listConsumerGroups()
+            Collection<GroupListing> groups = client.listGroups(ListGroupsOptions.forConsumerGroups())
                     .all()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<String> groupIds = groups.stream()
-                    .map(ConsumerGroupListing::groupId)
+                    .map(GroupListing::groupId)
                     .toList();
 
             Map<String, ConsumerGroupDescription> descriptions = groupIds.isEmpty()
@@ -222,11 +223,11 @@ public class KafkaAdminService {
                             .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<Map<String, Object>> result = new ArrayList<>();
-            for (ConsumerGroupListing listing : groups) {
+            for (GroupListing listing : groups) {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("groupId", listing.groupId());
                 ConsumerGroupDescription desc = descriptions.get(listing.groupId());
-                item.put("state", desc != null ? desc.state().toString() : "UNKNOWN");
+                item.put("state", desc != null ? desc.groupState().toString() : "UNKNOWN");
                 item.put("members", desc != null ? desc.members().size() : 0);
                 result.add(item);
             }
@@ -249,7 +250,7 @@ public class KafkaAdminService {
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("groupId", desc.groupId());
-            result.put("state", desc.state().toString());
+            result.put("state", desc.groupState().toString());
             result.put("members", desc.members().size());
 
             Map<TopicPartition, OffsetAndMetadata> offsets = client
@@ -326,7 +327,7 @@ public class KafkaAdminService {
         }
     }
 
-    @SuppressWarnings("deprecation")
+
     public Map<String, Object> clusterHealthCheck() {
         try (AdminClient client = createClient()) {
             Map<String, Object> report = new LinkedHashMap<>();
@@ -382,7 +383,7 @@ public class KafkaAdminService {
             partitionHealth.put("problems", problems);
             report.put("partitionHealth", partitionHealth);
 
-            Collection<ConsumerGroupListing> groups = client.listConsumerGroups()
+            Collection<GroupListing> groups = client.listGroups(ListGroupsOptions.forConsumerGroups())
                     .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             report.put("consumerGroups", groups.size());
 

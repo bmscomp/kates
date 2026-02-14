@@ -63,7 +63,7 @@ public class TestExecutionService {
                         new TrogdorClient.CreateTaskRequest(taskId, trogdorSpec);
 
                 try {
-                    JsonNode response = trogdorClient.createTask(taskReq);
+                    trogdorClient.createTask(taskReq);
                     TestResult result = new TestResult();
                     result.setTaskId(taskId);
                     result.setTestType(type);

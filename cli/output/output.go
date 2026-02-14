@@ -355,6 +355,57 @@ func Panel(title, content string, width int) string {
 	return box.Render(titleStyled + "\n" + content)
 }
 
+type ConfigEntry struct {
+	Key    string
+	Value  string
+	Suffix string
+}
+
+func ConfigList(title string, entries []ConfigEntry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	maxKey := 0
+	for _, e := range entries {
+		if len(e.Key) > maxKey {
+			maxKey = len(e.Key)
+		}
+	}
+
+	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(Indigo).Render("▸ " + title)
+	countStyled := lipgloss.NewStyle().Foreground(Gray).Render(fmt.Sprintf("  (%d)", len(entries)))
+	sep := lipgloss.NewStyle().Foreground(SeparatorColor).Render(strings.Repeat("─", 50))
+
+	fmt.Println()
+	fmt.Println(titleStyled + countStyled)
+	fmt.Println("  " + sep)
+
+	keyFg := lipgloss.NewStyle().Foreground(Cyan)
+	valFg := lipgloss.NewStyle().Foreground(Light)
+	eqFg := lipgloss.NewStyle().Foreground(Dim)
+	suffFg := lipgloss.NewStyle().Foreground(Gray)
+	bulletFg := lipgloss.NewStyle().Foreground(Purple)
+
+	for _, e := range entries {
+		key := keyFg.Render(e.Key)
+		paddedKey := padRight(key, maxKey+len(key)-len(e.Key))
+
+		val := e.Value
+		if val == "" {
+			val = suffFg.Render("(empty)")
+		} else if len(val) > 60 {
+			val = val[:57] + "..."
+		}
+
+		line := "  " + bulletFg.Render("•") + "  " + paddedKey + eqFg.Render("  =  ") + valFg.Render(val)
+		if e.Suffix != "" {
+			line += "  " + suffFg.Render(e.Suffix)
+		}
+		fmt.Println(line)
+	}
+}
+
 func padRight(s string, width int) string {
 	pure := stripAnsi(s)
 	if len(pure) >= width {
