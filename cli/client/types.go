@@ -172,3 +172,21 @@ type TestSpec struct {
 	DurationSeconds   int    `json:"durationSeconds,omitempty"`
 	Topic             string `json:"topic,omitempty"`
 }
+
+// TopicDetail from GET /api/cluster/topics/{name}
+type TopicDetail struct {
+	Name              string            `json:"name"`
+	Partitions        int               `json:"partitions"`
+	ReplicationFactor int               `json:"replicationFactor"`
+	Internal          bool              `json:"internal"`
+	Configs           map[string]string `json:"configs,omitempty"`
+	PartitionInfo     []PartitionInfo   `json:"partitionInfo,omitempty"`
+}
+
+type PartitionInfo struct {
+	Partition       int   `json:"partition"`
+	Leader          int   `json:"leader"`
+	Replicas        []int `json:"replicas"`
+	ISR             []int `json:"isr"`
+	UnderReplicated bool  `json:"underReplicated"`
+}

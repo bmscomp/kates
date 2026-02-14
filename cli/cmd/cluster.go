@@ -98,8 +98,78 @@ var clusterTopicsCmd = &cobra.Command{
 	},
 }
 
+var clusterTopicDescribeCmd = &cobra.Command{
+	Use:   "describe [topic-name]",
+	Short: "Show detailed topic metadata, configs, and partition health",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		detail, err := apiClient.TopicDetail(context.Background(), args[0])
+		if err != nil {
+			return cmdErr("Failed to describe topic: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(detail)
+			return nil
+		}
+
+		internalLabel := ""
+		if detail.Internal {
+			internalLabel = "  (internal)"
+		}
+		output.Banner("Topic: "+detail.Name+internalLabel,
+			fmt.Sprintf("Partitions: %d  │  Replication Factor: %d", detail.Partitions, detail.ReplicationFactor))
+
+		if len(detail.Configs) > 0 {
+			output.SubHeader("Configuration")
+			configRows := make([][]string, 0, len(detail.Configs))
+			for k, v := range detail.Configs {
+				configRows = append(configRows, []string{k, v})
+			}
+			output.Table([]string{"Config", "Value"}, configRows)
+		}
+
+		if len(detail.PartitionInfo) > 0 {
+			underReplicated := 0
+			for _, p := range detail.PartitionInfo {
+				if p.UnderReplicated {
+					underReplicated++
+				}
+			}
+
+			label := fmt.Sprintf("Partitions (%d)", len(detail.PartitionInfo))
+			if underReplicated > 0 {
+				label += fmt.Sprintf("  — %s", output.ErrorStyle.Render(fmt.Sprintf("%d under-replicated", underReplicated)))
+			}
+			output.SubHeader(label)
+
+			rows := make([][]string, 0, len(detail.PartitionInfo))
+			for _, p := range detail.PartitionInfo {
+				replicaStr := fmt.Sprintf("%v", p.Replicas)
+				isrStr := fmt.Sprintf("%v", p.ISR)
+				urFlag := ""
+				if p.UnderReplicated {
+					urFlag = output.ErrorStyle.Render("⚠ YES")
+				}
+
+				rows = append(rows, []string{
+					fmt.Sprintf("%d", p.Partition),
+					fmt.Sprintf("%d", p.Leader),
+					replicaStr,
+					isrStr,
+					urFlag,
+				})
+			}
+			output.Table([]string{"Partition", "Leader", "Replicas", "ISR", "Under-Replicated"}, rows)
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	clusterCmd.AddCommand(clusterInfoCmd)
 	clusterCmd.AddCommand(clusterTopicsCmd)
+	clusterTopicsCmd.AddCommand(clusterTopicDescribeCmd)
 	rootCmd.AddCommand(clusterCmd)
 }

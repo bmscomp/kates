@@ -152,6 +152,15 @@ func (c *Client) Topics(ctx context.Context) ([]string, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
+func (c *Client) TopicDetail(ctx context.Context, name string) (*TopicDetail, error) {
+	data, err := c.get(ctx, "/api/cluster/topics/"+name)
+	if err != nil {
+		return nil, err
+	}
+	var result TopicDetail
+	return &result, json.Unmarshal(data, &result)
+}
+
 func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (*PagedTests, error) {
 	path := fmt.Sprintf("/api/tests?page=%d&size=%d", page, size)
 	if testType != "" {

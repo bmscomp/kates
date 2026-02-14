@@ -4,16 +4,21 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.apache.kafka.clients.admin.ListTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.config.ConfigResource;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -131,5 +136,64 @@ public class KafkaAdminService {
             map.put("rack", node.rack());
         }
         return map;
+    }
+
+    public Map<String, Object> describeTopicDetail(String topicName) {
+        try (AdminClient client = createClient()) {
+            TopicDescription desc = client.describeTopics(Collections.singleton(topicName))
+                    .allTopicNames()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .get(topicName);
+
+            if (desc == null) {
+                throw new RuntimeException("Topic not found: " + topicName);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("name", desc.name());
+            result.put("internal", desc.isInternal());
+            result.put("partitions", desc.partitions().size());
+
+            int replicationFactor = desc.partitions().isEmpty()
+                    ? 0
+                    : desc.partitions().get(0).replicas().size();
+            result.put("replicationFactor", replicationFactor);
+
+            java.util.List<Map<String, Object>> partitionInfos = new java.util.ArrayList<>();
+            for (TopicPartitionInfo pi : desc.partitions()) {
+                Map<String, Object> pMap = new LinkedHashMap<>();
+                pMap.put("partition", pi.partition());
+                pMap.put("leader", pi.leader() != null ? pi.leader().id() : -1);
+                pMap.put("replicas", pi.replicas().stream().map(Node::id).toList());
+                pMap.put("isr", pi.isr().stream().map(Node::id).toList());
+                pMap.put("underReplicated", pi.isr().size() < pi.replicas().size());
+                partitionInfos.add(pMap);
+            }
+            result.put("partitionInfo", partitionInfos);
+
+            ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topicName);
+            Config config = client.describeConfigs(Collections.singleton(resource))
+                    .all()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .get(resource);
+
+            Map<String, String> configs = new LinkedHashMap<>();
+            for (ConfigEntry entry : config.entries()) {
+                if (entry.source() == ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG
+                        || entry.source() == ConfigEntry.ConfigSource.DEFAULT_CONFIG) {
+                    switch (entry.name()) {
+                        case "cleanup.policy", "retention.ms", "retention.bytes",
+                             "min.insync.replicas", "compression.type", "segment.bytes",
+                             "max.message.bytes", "message.timestamp.type" ->
+                                configs.put(entry.name(), entry.value());
+                    }
+                }
+            }
+            result.put("configs", configs);
+            return result;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to describe topic: " + topicName, e);
+        }
     }
 }

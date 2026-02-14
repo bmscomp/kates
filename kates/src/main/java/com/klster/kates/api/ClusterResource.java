@@ -4,6 +4,7 @@ import com.klster.kates.service.KafkaAdminService;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -44,6 +45,24 @@ public class ClusterResource {
         } catch (Exception e) {
             return Response.serverError()
                     .entity(Map.of("error", "Failed to list topics: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/topics/{name}")
+    public Response getTopicDetail(@PathParam("name") String name) {
+        try {
+            Map<String, Object> detail = kafkaAdmin.describeTopicDetail(name);
+            return Response.ok(detail).build();
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().contains("not found")) {
+                return Response.status(404)
+                        .entity(Map.of("error", "Topic not found: " + name))
+                        .build();
+            }
+            return Response.serverError()
+                    .entity(Map.of("error", "Failed to describe topic: " + e.getMessage()))
                     .build();
         }
     }
