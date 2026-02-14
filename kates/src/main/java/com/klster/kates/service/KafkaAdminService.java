@@ -296,4 +296,33 @@ public class KafkaAdminService {
             throw new RuntimeException("Failed to describe consumer group: " + groupId, e);
         }
     }
+
+    public List<Map<String, Object>> describeBrokerConfigs(int brokerId) {
+        try (AdminClient client = createClient()) {
+            ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(brokerId));
+            Config config = client.describeConfigs(Collections.singleton(resource))
+                    .all()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .get(resource);
+
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (ConfigEntry entry : config.entries()) {
+                if (entry.source() == ConfigEntry.ConfigSource.DEFAULT_CONFIG && !entry.isReadOnly()) {
+                    continue;
+                }
+                if (entry.source() == ConfigEntry.ConfigSource.DEFAULT_CONFIG) {
+                    continue;
+                }
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("name", entry.name());
+                item.put("value", entry.value());
+                item.put("source", entry.source().toString());
+                item.put("readOnly", entry.isReadOnly());
+                result.add(item);
+            }
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to describe broker configs for broker " + brokerId, e);
+        }
+    }
 }

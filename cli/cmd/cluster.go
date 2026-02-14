@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
@@ -167,9 +168,55 @@ var clusterTopicDescribeCmd = &cobra.Command{
 	},
 }
 
+var clusterBrokerConfigsCmd = &cobra.Command{
+	Use:   "configs [broker-id]",
+	Short: "Show non-default configuration for a broker",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.Atoi(args[0])
+		if err != nil {
+			return cmdErr("Broker ID must be a number")
+		}
+
+		configs, err := apiClient.BrokerConfigs(context.Background(), id)
+		if err != nil {
+			return cmdErr("Failed to get broker configs: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(configs)
+			return nil
+		}
+
+		output.Header(fmt.Sprintf("Broker %d — Configuration", id))
+		if len(configs) == 0 {
+			output.Hint("All configs are at default values.")
+			return nil
+		}
+
+		rows := make([][]string, 0, len(configs))
+		for _, c := range configs {
+			roFlag := ""
+			if c.ReadOnly {
+				roFlag = "✓"
+			}
+			rows = append(rows, []string{c.Name, c.Value, c.Source, roFlag})
+		}
+		output.Table([]string{"Config", "Value", "Source", "RO"}, rows)
+		return nil
+	},
+}
+
+var clusterBrokerCmd = &cobra.Command{
+	Use:   "broker",
+	Short: "Broker-level commands",
+}
+
 func init() {
+	clusterBrokerCmd.AddCommand(clusterBrokerConfigsCmd)
 	clusterCmd.AddCommand(clusterInfoCmd)
 	clusterCmd.AddCommand(clusterTopicsCmd)
+	clusterCmd.AddCommand(clusterBrokerCmd)
 	clusterTopicsCmd.AddCommand(clusterTopicDescribeCmd)
 	rootCmd.AddCommand(clusterCmd)
 }

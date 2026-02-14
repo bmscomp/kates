@@ -96,4 +96,16 @@ public class ClusterResource {
                     .build();
         }
     }
+
+    @GET
+    @Path("/brokers/{id}/configs")
+    public Response getBrokerConfigs(@PathParam("id") int id) {
+        try {
+            return Response.ok(kafkaAdmin.describeBrokerConfigs(id)).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(Map.of("error", "Failed to describe broker configs: " + e.getMessage()))
+                    .build();
+        }
+    }
 }

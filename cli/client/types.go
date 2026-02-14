@@ -214,3 +214,11 @@ type GroupPartitionInfo struct {
 	EndOffset     int64  `json:"endOffset"`
 	Lag           int64  `json:"lag"`
 }
+
+// BrokerConfig from GET /api/cluster/brokers/{id}/configs
+type BrokerConfig struct {
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Source   string `json:"source"`
+	ReadOnly bool   `json:"readOnly"`
+}

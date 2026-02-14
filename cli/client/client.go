@@ -179,6 +179,15 @@ func (c *Client) ConsumerGroupDetail(ctx context.Context, id string) (*ConsumerG
 	return &result, json.Unmarshal(data, &result)
 }
 
+func (c *Client) BrokerConfigs(ctx context.Context, id int) ([]BrokerConfig, error) {
+	data, err := c.get(ctx, fmt.Sprintf("/api/cluster/brokers/%d/configs", id))
+	if err != nil {
+		return nil, err
+	}
+	var result []BrokerConfig
+	return result, json.Unmarshal(data, &result)
+}
+
 func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (*PagedTests, error) {
 	path := fmt.Sprintf("/api/tests?page=%d&size=%d", page, size)
 	if testType != "" {
