@@ -88,6 +88,10 @@ public class TestScenario {
         if (phaseSpec.getDurationMs() != 600_000) merged.setDurationMs(phaseSpec.getDurationMs());
         if (phaseSpec.getNumProducers() != 1) merged.setNumProducers(phaseSpec.getNumProducers());
         if (phaseSpec.getNumConsumers() != 1) merged.setNumConsumers(phaseSpec.getNumConsumers());
+        if (phaseSpec.getConsumerGroup() != null) merged.setConsumerGroup(phaseSpec.getConsumerGroup());
+        if (phaseSpec.getTargetThroughput() != -1) merged.setTargetThroughput(phaseSpec.getTargetThroughput());
+        if (phaseSpec.getFetchMinBytes() != 1) merged.setFetchMinBytes(phaseSpec.getFetchMinBytes());
+        if (phaseSpec.getFetchMaxWaitMs() != 500) merged.setFetchMaxWaitMs(phaseSpec.getFetchMaxWaitMs());
 
         if (phase.getTargetThroughput() != -1) {
             merged.setThroughput(phase.getTargetThroughput());
@@ -115,6 +119,10 @@ public class TestScenario {
         copy.setDurationMs(src.getDurationMs());
         copy.setNumProducers(src.getNumProducers());
         copy.setNumConsumers(src.getNumConsumers());
+        copy.setConsumerGroup(src.getConsumerGroup());
+        copy.setTargetThroughput(src.getTargetThroughput());
+        copy.setFetchMinBytes(src.getFetchMinBytes());
+        copy.setFetchMaxWaitMs(src.getFetchMaxWaitMs());
         return copy;
     }
 }

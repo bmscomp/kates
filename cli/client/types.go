@@ -179,6 +179,10 @@ type TestSpec struct {
 	ReplicationFactor int    `json:"replicationFactor,omitempty"`
 	Partitions        int    `json:"partitions,omitempty"`
 	MinInsyncReplicas int    `json:"minInsyncReplicas,omitempty"`
+	ConsumerGroup     string `json:"consumerGroup,omitempty"`
+	TargetThroughput  int    `json:"targetThroughput,omitempty"`
+	FetchMinBytes     int    `json:"fetchMinBytes,omitempty"`
+	FetchMaxWaitMs    int    `json:"fetchMaxWaitMs,omitempty"`
 }
 
 // TopicDetail from GET /api/cluster/topics/{name}

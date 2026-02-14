@@ -40,9 +40,10 @@ public class SpecFactory {
     private List<TrogdorSpec> buildLoadSpecs(TestSpec spec, String runId) {
         List<TrogdorSpec> specs = new ArrayList<>();
         String topic = topicName(spec, "load-test");
+        int effectiveThroughput = effectiveThroughput(spec);
         int perProducerRecords = spec.getNumRecords() / spec.getNumProducers();
-        int perProducerThroughput = spec.getThroughput() > 0
-                ? spec.getThroughput() / spec.getNumProducers()
+        int perProducerThroughput = effectiveThroughput > 0
+                ? effectiveThroughput / spec.getNumProducers()
                 : -1;
 
         for (int i = 0; i < spec.getNumProducers(); i++) {
@@ -54,11 +55,12 @@ public class SpecFactory {
             specs.add(produce);
         }
 
+        String group = consumerGroupName(spec, "load-group-" + runId);
         for (int i = 0; i < spec.getNumConsumers(); i++) {
             ConsumeBenchSpec consume = ConsumeBenchSpec.create(
                     bootstrapServers, topic, spec.getPartitions(),
-                    perProducerRecords, spec.getDurationMs(),
-                    "load-group-" + runId);
+                    perProducerRecords, spec.getDurationMs(), group);
+            applyConsumerConf(consume, spec);
             specs.add(consume);
         }
 
@@ -122,7 +124,7 @@ public class SpecFactory {
         String topic = topicName(spec, "endurance-test");
 
         long duration = Math.max(spec.getDurationMs(), 3_600_000);
-        int throughput = spec.getThroughput() > 0 ? spec.getThroughput() : 5_000;
+        int throughput = effectiveThroughput(spec) > 0 ? effectiveThroughput(spec) : 5_000;
         long maxMessages = throughput * (duration / 1000);
 
         ProduceBenchSpec produce = ProduceBenchSpec.create(
@@ -131,9 +133,11 @@ public class SpecFactory {
         applyProducerConf(produce, spec);
         specs.add(produce);
 
+        String group = consumerGroupName(spec, "endurance-group-" + runId);
         ConsumeBenchSpec consume = ConsumeBenchSpec.create(
                 bootstrapServers, topic, spec.getPartitions(),
-                maxMessages, duration, "endurance-group-" + runId);
+                maxMessages, duration, group);
+        applyConsumerConf(consume, spec);
         specs.add(consume);
 
         return specs;
@@ -186,7 +190,7 @@ public class SpecFactory {
         List<TrogdorSpec> specs = new ArrayList<>();
         String topic = topicName(spec, "roundtrip-test");
 
-        int throughput = spec.getThroughput() > 0 ? spec.getThroughput() : 1_000;
+        int throughput = effectiveThroughput(spec) > 0 ? effectiveThroughput(spec) : 1_000;
 
         RoundTripWorkloadSpec rt = RoundTripWorkloadSpec.create(
                 bootstrapServers, topic, spec.getPartitions(),
@@ -204,6 +208,25 @@ public class SpecFactory {
         conf.put("batch.size", String.valueOf(spec.getBatchSize()));
         conf.put("linger.ms", String.valueOf(spec.getLingerMs()));
         conf.put("compression.type", spec.getCompressionType());
+    }
+
+    private void applyConsumerConf(ConsumeBenchSpec consume, TestSpec spec) {
+        Map<String, String> conf = consume.getConsumerConf();
+        if (spec.getFetchMinBytes() > 1) {
+            conf.put("fetch.min.bytes", String.valueOf(spec.getFetchMinBytes()));
+        }
+        if (spec.getFetchMaxWaitMs() != 500) {
+            conf.put("fetch.max.wait.ms", String.valueOf(spec.getFetchMaxWaitMs()));
+        }
+    }
+
+    private String consumerGroupName(TestSpec spec, String defaultName) {
+        return spec.getConsumerGroup() != null ? spec.getConsumerGroup() : defaultName;
+    }
+
+    private int effectiveThroughput(TestSpec spec) {
+        if (spec.getTargetThroughput() > 0) return spec.getTargetThroughput();
+        return spec.getThroughput();
     }
 
     private String topicName(TestSpec spec, String defaultName) {

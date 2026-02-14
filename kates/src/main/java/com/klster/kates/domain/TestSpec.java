@@ -19,6 +19,10 @@ public class TestSpec {
     private int replicationFactor = 3;
     private int partitions = 3;
     private int minInsyncReplicas = 2;
+    private String consumerGroup;
+    private int targetThroughput = -1;
+    private int fetchMinBytes = 1;
+    private int fetchMaxWaitMs = 500;
 
     public TestSpec() {
     }
@@ -133,5 +137,37 @@ public class TestSpec {
 
     public void setMinInsyncReplicas(int minInsyncReplicas) {
         this.minInsyncReplicas = minInsyncReplicas;
+    }
+
+    public String getConsumerGroup() {
+        return consumerGroup;
+    }
+
+    public void setConsumerGroup(String consumerGroup) {
+        this.consumerGroup = consumerGroup;
+    }
+
+    public int getTargetThroughput() {
+        return targetThroughput;
+    }
+
+    public void setTargetThroughput(int targetThroughput) {
+        this.targetThroughput = targetThroughput;
+    }
+
+    public int getFetchMinBytes() {
+        return fetchMinBytes;
+    }
+
+    public void setFetchMinBytes(int fetchMinBytes) {
+        this.fetchMinBytes = fetchMinBytes;
+    }
+
+    public int getFetchMaxWaitMs() {
+        return fetchMaxWaitMs;
+    }
+
+    public void setFetchMaxWaitMs(int fetchMaxWaitMs) {
+        this.fetchMaxWaitMs = fetchMaxWaitMs;
     }
 }

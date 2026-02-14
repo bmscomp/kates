@@ -137,6 +137,10 @@ var (
 	createReplicationFactor int
 	createPartitions        int
 	createMinISR            int
+	createConsumerGroup     string
+	createThroughput        int
+	createFetchMinBytes     int
+	createFetchMaxWaitMs    int
 )
 
 var testCreateCmd = &cobra.Command{
@@ -146,7 +150,8 @@ var testCreateCmd = &cobra.Command{
 	Example: `  kates test create --type LOAD --records 100000
   kates test create --type ENDURANCE --duration 300 --producers 4
   kates test create --type STRESS --records 500000 --acks 1 --compression zstd
-  kates test create --type LOAD --records 100000 --partitions 6 --replication-factor 3 --min-isr 2`,
+  kates test create --type LOAD --records 100000 --consumers 4 --consumer-group perf-cg
+  kates test create --type LOAD --records 100000 --throughput 10000 --fetch-min-bytes 1048576`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		req := &client.CreateTestRequest{
 			TestType: strings.ToUpper(createType),
@@ -169,6 +174,10 @@ var testCreateCmd = &cobra.Command{
 				ReplicationFactor: createReplicationFactor,
 				Partitions:        createPartitions,
 				MinInsyncReplicas: createMinISR,
+				ConsumerGroup:     createConsumerGroup,
+				TargetThroughput:  createThroughput,
+				FetchMinBytes:     createFetchMinBytes,
+				FetchMaxWaitMs:    createFetchMaxWaitMs,
 			}
 		}
 
@@ -217,7 +226,8 @@ func hasSpecOverrides() bool {
 		createDuration > 0 || createTopic != "" || createAcks != "" ||
 		createBatchSize > 0 || createLingerMs > 0 || createCompression != "" ||
 		createConsumers > 0 || createReplicationFactor > 0 || createPartitions > 0 ||
-		createMinISR > 0
+		createMinISR > 0 || createConsumerGroup != "" || createThroughput > 0 ||
+		createFetchMinBytes > 0 || createFetchMaxWaitMs > 0
 }
 
 var testTypesCmd = &cobra.Command{
@@ -286,6 +296,10 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createReplicationFactor, "replication-factor", 0, "Topic replication factor (default: 3)")
 	testCreateCmd.Flags().IntVar(&createPartitions, "partitions", 0, "Topic partition count (default: 3)")
 	testCreateCmd.Flags().IntVar(&createMinISR, "min-isr", 0, "Minimum in-sync replicas (default: 2)")
+	testCreateCmd.Flags().StringVar(&createConsumerGroup, "consumer-group", "", "Consumer group name (auto-generated if empty)")
+	testCreateCmd.Flags().IntVar(&createThroughput, "throughput", 0, "Target throughput in messages/sec (-1 = unlimited)")
+	testCreateCmd.Flags().IntVar(&createFetchMinBytes, "fetch-min-bytes", 0, "Consumer fetch.min.bytes (default: 1)")
+	testCreateCmd.Flags().IntVar(&createFetchMaxWaitMs, "fetch-max-wait-ms", 0, "Consumer fetch.max.wait.ms (default: 500)")
 
 	testCmd.AddCommand(testListCmd)
 	testCmd.AddCommand(testGetCmd)
