@@ -18,13 +18,11 @@ var reportDiffCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s1, err := apiClient.ReportSummary(context.Background(), args[0])
 		if err != nil {
-			output.Error("Failed to get report for " + args[0] + ": " + err.Error())
-			return nil
+			return cmdErr("Failed to get report for " + args[0] + ": " + err.Error())
 		}
 		s2, err := apiClient.ReportSummary(context.Background(), args[1])
 		if err != nil {
-			output.Error("Failed to get report for " + args[1] + ": " + err.Error())
-			return nil
+			return cmdErr("Failed to get report for " + args[1] + ": " + err.Error())
 		}
 
 		if outputMode == "json" {

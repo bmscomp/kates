@@ -22,8 +22,7 @@ var testWatchCmd = &cobra.Command{
 		for {
 			result, err := apiClient.GetTest(context.Background(), id)
 			if err != nil {
-				output.Error("Failed to fetch test: " + err.Error())
-				return nil
+				return cmdErr("Failed to fetch test: " + err.Error())
 			}
 
 			status := mapStr(result, "status")
@@ -73,8 +72,7 @@ var testWatchCmd = &cobra.Command{
 				output.Hint(fmt.Sprintf("View report: kates report show %s", id))
 				return nil
 			case "FAILED", "ERROR":
-				output.Error("Test failed")
-				return nil
+				return cmdErr("Test failed")
 			default:
 				fmt.Println()
 				fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",

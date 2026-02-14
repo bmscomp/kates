@@ -30,28 +30,24 @@ var resilienceRunCmd = &cobra.Command{
   }`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if resilienceFile == "" {
-			output.Error("--config is required (path to JSON file)")
-			return nil
+			return cmdErr("--config is required (path to JSON file)")
 		}
 
 		data, err := os.ReadFile(resilienceFile)
 		if err != nil {
-			output.Error("Failed to read config file: " + err.Error())
-			return nil
+			return cmdErr("Failed to read config file: " + err.Error())
 		}
 
 		var req map[string]interface{}
 		if err := json.Unmarshal(data, &req); err != nil {
-			output.Error("Invalid JSON: " + err.Error())
-			return nil
+			return cmdErr("Invalid JSON: " + err.Error())
 		}
 
 		fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
 
 		result, err := apiClient.Resilience(context.Background(), req)
 		if err != nil {
-			output.Error("Resilience test failed: " + err.Error())
-			return nil
+			return cmdErr("Resilience test failed: " + err.Error())
 		}
 
 		if outputMode == "json" {

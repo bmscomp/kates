@@ -22,8 +22,7 @@ var reportShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.Report(context.Background(), args[0])
 		if err != nil {
-			output.Error("Failed to get report: " + err.Error())
-			return nil
+			return cmdErr("Failed to get report: " + err.Error())
 		}
 		if outputMode == "json" {
 			output.JSON(result)
@@ -95,8 +94,7 @@ var reportSummaryCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.ReportSummary(context.Background(), args[0])
 		if err != nil {
-			output.Error("Failed to get summary: " + err.Error())
-			return nil
+			return cmdErr("Failed to get summary: " + err.Error())
 		}
 
 		if outputMode == "json" {
@@ -131,8 +129,7 @@ var reportCompareCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		data, err := apiClient.Compare(context.Background(), args[0])
 		if err != nil {
-			output.Error("Failed to compare: " + err.Error())
-			return nil
+			return cmdErr("Failed to compare: " + err.Error())
 		}
 		output.Header("Comparison")
 		output.RawJSON(data)
@@ -156,14 +153,12 @@ var reportExportCmd = &cobra.Command{
 		case "csv":
 			csv, err := apiClient.ExportCSV(context.Background(), id)
 			if err != nil {
-				output.Error("Export failed: " + err.Error())
-				return nil
+				return cmdErr("Export failed: " + err.Error())
 			}
 			if isTerminal() {
 				file := "kates-report-" + id + ".csv"
 				if err := os.WriteFile(file, []byte(csv), 0644); err != nil {
-					output.Error("Write failed: " + err.Error())
-					return nil
+					return cmdErr("Write failed: " + err.Error())
 				}
 				output.Success("Exported to " + file)
 			} else {
@@ -173,14 +168,12 @@ var reportExportCmd = &cobra.Command{
 		case "junit":
 			xml, err := apiClient.ExportJUnit(context.Background(), id)
 			if err != nil {
-				output.Error("Export failed: " + err.Error())
-				return nil
+				return cmdErr("Export failed: " + err.Error())
 			}
 			if isTerminal() {
 				file := "kates-report-" + id + ".xml"
 				if err := os.WriteFile(file, []byte(xml), 0644); err != nil {
-					output.Error("Write failed: " + err.Error())
-					return nil
+					return cmdErr("Write failed: " + err.Error())
 				}
 				output.Success("Exported to " + file)
 			} else {

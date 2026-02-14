@@ -19,8 +19,7 @@ var clusterInfoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.ClusterInfo(context.Background())
 		if err != nil {
-			output.Error("Failed to get cluster info: " + err.Error())
-			return nil
+			return cmdErr("Failed to get cluster info: " + err.Error())
 		}
 
 		if outputMode == "json" {
@@ -76,8 +75,7 @@ var clusterTopicsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		topics, err := apiClient.Topics(context.Background())
 		if err != nil {
-			output.Error("Failed to list topics: " + err.Error())
-			return nil
+			return cmdErr("Failed to list topics: " + err.Error())
 		}
 
 		if outputMode == "json" {

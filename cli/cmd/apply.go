@@ -55,14 +55,12 @@ var testApplyCmd = &cobra.Command{
         minThroughputRecPerSec: 10000`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if applyFile == "" {
-			output.Error("--file is required. Provide a YAML or JSON scenario file.")
-			return nil
+			return cmdErr("--file is required. Provide a YAML or JSON scenario file.")
 		}
 
 		data, err := os.ReadFile(applyFile)
 		if err != nil {
-			output.Error("Failed to read file: " + err.Error())
-			return nil
+			return cmdErr("Failed to read file: " + err.Error())
 		}
 
 		var sf ScenarioFile
@@ -77,14 +75,12 @@ var testApplyCmd = &cobra.Command{
 			if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
 				sf.Scenarios = []TestScenario{single}
 			} else {
-				output.Error("Invalid scenario file: " + err.Error())
-				return nil
+				return cmdErr("Invalid scenario file: " + err.Error())
 			}
 		}
 
 		if len(sf.Scenarios) == 0 {
-			output.Error("No scenarios found in file")
-			return nil
+			return cmdErr("No scenarios found in file")
 		}
 
 		output.Header(fmt.Sprintf("Applying %d scenario(s) from %s", len(sf.Scenarios), applyFile))

@@ -14,8 +14,7 @@ var healthCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.Health(context.Background())
 		if err != nil {
-			output.Error("Failed to check health: " + err.Error())
-			return nil
+			return cmdErr("Failed to check health: " + err.Error())
 		}
 
 		if outputMode == "json" {

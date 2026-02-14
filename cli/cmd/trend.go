@@ -23,14 +23,12 @@ var trendCmd = &cobra.Command{
   kates trend --type ENDURANCE --metric avgThroughputRecPerSec --days 7 --baseline 3`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if trendType == "" {
-			output.Error("--type is required (e.g. LOAD, ENDURANCE, BURST)")
-			return nil
+			return cmdErr("--type is required (e.g. LOAD, ENDURANCE, BURST)")
 		}
 
 		result, err := apiClient.Trends(context.Background(), trendType, trendMetric, trendDays, trendBaseline)
 		if err != nil {
-			output.Error("Failed to fetch trends: " + err.Error())
-			return nil
+			return cmdErr("Failed to fetch trends: " + err.Error())
 		}
 
 		if outputMode == "json" {

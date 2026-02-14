@@ -15,6 +15,19 @@ func spinnerFrame(tick int) string {
 	return output.AccentStyle.Render(spinnerFrames[tick%len(spinnerFrames)])
 }
 
+// silentErr is an error that has already been printed to the user.
+// Cobra sees it as a non-nil error (→ exit code 1) but SilenceErrors
+// prevents it from printing again.
+type silentErr struct{ msg string }
+
+func (e *silentErr) Error() string { return e.msg }
+
+// cmdErr prints a styled error and returns a silentErr so Cobra sets exit code 1.
+func cmdErr(msg string) error {
+	output.Error(msg)
+	return &silentErr{msg: msg}
+}
+
 // mapStr extracts a string value from a map, returning fallback for missing/nil keys.
 func mapStr(m map[string]interface{}, key string) string {
 	v, ok := m[key]

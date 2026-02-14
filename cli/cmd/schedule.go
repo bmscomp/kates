@@ -23,8 +23,7 @@ var scheduleListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		schedules, err := apiClient.ListSchedules(context.Background())
 		if err != nil {
-			output.Error("Failed to list schedules: " + err.Error())
-			return nil
+			return cmdErr("Failed to list schedules: " + err.Error())
 		}
 
 		if outputMode == "json" {
@@ -64,8 +63,7 @@ var scheduleGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.GetSchedule(context.Background(), args[0])
 		if err != nil {
-			output.Error("Schedule not found: " + err.Error())
-			return nil
+			return cmdErr("Schedule not found: " + err.Error())
 		}
 		if outputMode == "json" {
 			output.JSON(result)
@@ -99,19 +97,16 @@ var scheduleCreateCmd = &cobra.Command{
   kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" --request endurance.json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if schedName == "" || schedCron == "" || schedFile == "" {
-			output.Error("--name, --cron, and --request are all required")
-			return nil
+			return cmdErr("--name, --cron, and --request are all required")
 		}
 
 		data, err := os.ReadFile(schedFile)
 		if err != nil {
-			output.Error("Failed to read request file: " + err.Error())
-			return nil
+			return cmdErr("Failed to read request file: " + err.Error())
 		}
 		var testRequest interface{}
 		if err := json.Unmarshal(data, &testRequest); err != nil {
-			output.Error("Invalid JSON in request file: " + err.Error())
-			return nil
+			return cmdErr("Invalid JSON in request file: " + err.Error())
 		}
 
 		req := map[string]interface{}{
@@ -123,8 +118,7 @@ var scheduleCreateCmd = &cobra.Command{
 
 		result, err := apiClient.CreateSchedule(context.Background(), req)
 		if err != nil {
-			output.Error("Failed to create schedule: " + err.Error())
-			return nil
+			return cmdErr("Failed to create schedule: " + err.Error())
 		}
 		if outputMode == "json" {
 			output.JSON(result)
@@ -144,8 +138,7 @@ var scheduleDeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := apiClient.DeleteSchedule(context.Background(), args[0])
 		if err != nil {
-			output.Error("Failed to delete schedule: " + err.Error())
-			return nil
+			return cmdErr("Failed to delete schedule: " + err.Error())
 		}
 		output.Success("Schedule deleted: " + args[0])
 		return nil

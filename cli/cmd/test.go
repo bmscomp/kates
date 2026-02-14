@@ -32,8 +32,7 @@ var testListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		data, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
 		if err != nil {
-			output.Error("Failed to list tests: " + err.Error())
-			return nil
+			return cmdErr("Failed to list tests: " + err.Error())
 		}
 
 		if outputMode == "json" {
@@ -82,8 +81,7 @@ var testGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.GetTest(context.Background(), args[0])
 		if err != nil {
-			output.Error("Test not found: " + err.Error())
-			return nil
+			return cmdErr("Test not found: " + err.Error())
 		}
 
 		if outputMode == "json" {
@@ -175,8 +173,7 @@ var testCreateCmd = &cobra.Command{
 
 		result, err := apiClient.CreateTest(context.Background(), req)
 		if err != nil {
-			output.Error("Failed to create test: " + err.Error())
-			return nil
+			return cmdErr("Failed to create test: " + err.Error())
 		}
 
 		if outputMode == "json" {
@@ -208,8 +205,7 @@ var testDeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := apiClient.DeleteTest(context.Background(), args[0])
 		if err != nil {
-			output.Error("Failed to delete test: " + err.Error())
-			return nil
+			return cmdErr("Failed to delete test: " + err.Error())
 		}
 		output.Success("Test deleted: " + truncID(args[0]))
 		return nil
@@ -222,8 +218,7 @@ var testTypesCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		types, err := apiClient.TestTypes(context.Background())
 		if err != nil {
-			output.Error("Failed to get test types: " + err.Error())
-			return nil
+			return cmdErr("Failed to get test types: " + err.Error())
 		}
 		if outputMode == "json" {
 			output.JSON(types)
@@ -245,8 +240,7 @@ var testBackendsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		backends, err := apiClient.Backends(context.Background())
 		if err != nil {
-			output.Error("Failed to get backends: " + err.Error())
-			return nil
+			return cmdErr("Failed to get backends: " + err.Error())
 		}
 		if outputMode == "json" {
 			output.JSON(backends)
