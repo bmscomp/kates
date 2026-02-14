@@ -10,16 +10,21 @@ import (
 )
 
 var (
-	Purple  = lipgloss.Color("#7C3AED")
-	Indigo  = lipgloss.Color("#6366F1")
-	Cyan    = lipgloss.Color("#06B6D4")
-	Green   = lipgloss.Color("#10B981")
-	Red     = lipgloss.Color("#EF4444")
-	Amber   = lipgloss.Color("#F59E0B")
-	Gray    = lipgloss.Color("#6B7280")
-	Light   = lipgloss.Color("#E5E7EB")
-	Dim     = lipgloss.Color("#4B5563")
-	Surface = lipgloss.Color("#1F2937")
+	Purple  = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#7C3AED"}
+	Indigo  = lipgloss.AdaptiveColor{Light: "#4F46E5", Dark: "#6366F1"}
+	Cyan    = lipgloss.AdaptiveColor{Light: "#0891B2", Dark: "#06B6D4"}
+	Green   = lipgloss.AdaptiveColor{Light: "#059669", Dark: "#10B981"}
+	Red     = lipgloss.AdaptiveColor{Light: "#DC2626", Dark: "#EF4444"}
+	Amber   = lipgloss.AdaptiveColor{Light: "#D97706", Dark: "#F59E0B"}
+	Gray    = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#6B7280"}
+	Light   = lipgloss.AdaptiveColor{Light: "#1F2937", Dark: "#E5E7EB"}
+	Dim     = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#4B5563"}
+	Surface = lipgloss.AdaptiveColor{Light: "#F3F4F6", Dark: "#1F2937"}
+
+	HeaderColor    = lipgloss.AdaptiveColor{Light: "#6D28D9", Dark: "#C4B5FD"}
+	KeyColor       = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	BorderColor    = lipgloss.AdaptiveColor{Light: "#D1D5DB", Dark: "#374151"}
+	SeparatorColor = lipgloss.AdaptiveColor{Light: "#D1D5DB", Dark: "#374151"}
 
 	HeaderStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -39,14 +44,14 @@ var (
 	LightStyle   = lipgloss.NewStyle().Foreground(Light)
 
 	KeyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#A78BFA")).
+			Foreground(KeyColor).
 			Width(24)
 
 	ValueStyle = lipgloss.NewStyle().Foreground(Light)
 
 	BoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151")).
+			BorderForeground(BorderColor).
 			Padding(0, 2)
 
 	ActiveBadge = lipgloss.NewStyle().
@@ -81,7 +86,7 @@ func StatusBadge(status string) string {
 
 func Header(text string) {
 	bar := lipgloss.NewStyle().Foreground(Purple).Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C4B5FD")).Render("  " + text)
+	title := lipgloss.NewStyle().Bold(true).Foreground(HeaderColor).Render("  " + text)
 	fmt.Println()
 	fmt.Println(bar)
 	fmt.Println(title)
@@ -157,8 +162,8 @@ func Table(headers []string, rows [][]string) {
 		}
 	}
 
-	headerFg := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A78BFA"))
-	sepFg := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
+	headerFg := lipgloss.NewStyle().Bold(true).Foreground(KeyColor)
+	sepFg := lipgloss.NewStyle().Foreground(SeparatorColor)
 	cellFg := lipgloss.NewStyle().Foreground(Light)
 
 	var headerLine, sepLine string
@@ -217,7 +222,7 @@ func Divider() {
 func Banner(title, subtitle string) {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#C4B5FD")).
+		Foreground(HeaderColor).
 		Padding(0, 1)
 	subStyle := lipgloss.NewStyle().
 		Foreground(Cyan).
@@ -257,7 +262,6 @@ func MetricBar(label string, value, max float64) {
 	fmt.Printf("  %-20s %s  %.1f\n", label, barStyled, value)
 }
 
-// Sparkline renders a compact sparkline chart from data values using Unicode blocks.
 func Sparkline(values []float64) string {
 	if len(values) == 0 {
 		return ""
@@ -290,7 +294,6 @@ func Sparkline(values []float64) string {
 	return AccentStyle.Render(sb.String())
 }
 
-// SparklineColored renders a sparkline with color gradient based on value thresholds.
 func SparklineColored(values []float64, higherIsBetter bool) string {
 	if len(values) == 0 {
 		return ""
@@ -319,7 +322,7 @@ func SparklineColored(values []float64, higherIsBetter bool) string {
 			idx = 0
 		}
 		ratio := (v - min) / span
-		var color lipgloss.Color
+		var color lipgloss.AdaptiveColor
 		if higherIsBetter {
 			if ratio > 0.66 {
 				color = Green
@@ -342,12 +345,11 @@ func SparklineColored(values []float64, higherIsBetter bool) string {
 	return sb.String()
 }
 
-// Panel renders a titled box panel for dashboard layouts.
 func Panel(title, content string, width int) string {
-	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C4B5FD")).Render(title)
+	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(HeaderColor).Render(title)
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(BorderColor).
 		Width(width).
 		Padding(0, 1)
 	return box.Render(titleStyled + "\n" + content)
