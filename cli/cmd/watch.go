@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var watchInterval int
@@ -19,29 +17,28 @@ var testWatchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
-		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		tick := 0
 
 		for {
-			result, err := apiClient.GetTest(id)
+			result, err := apiClient.GetTest(context.Background(), id)
 			if err != nil {
 				output.Error("Failed to fetch test: " + err.Error())
 				return nil
 			}
 
-			status := valStr(result, "status")
+			status := mapStr(result, "status")
 
 			// Clear screen
 			fmt.Print("\033[2J\033[H")
 
-			output.Banner("Test Watch", fmt.Sprintf("%s · %s", valStr(result, "testType"), truncID(id)))
+			output.Banner("Test Watch", fmt.Sprintf("%s · %s", mapStr(result, "testType"), truncID(id)))
 
 			output.SubHeader("Status")
 			output.KeyValue("Test ID", id)
-			output.KeyValue("Type", valStr(result, "testType"))
-			output.KeyValue("Backend", valStr(result, "backend"))
+			output.KeyValue("Type", mapStr(result, "testType"))
+			output.KeyValue("Backend", mapStr(result, "backend"))
 			output.KeyValue("Status", output.StatusBadge(status))
-			output.KeyValue("Created", formatTime(valStr(result, "createdAt")))
+			output.KeyValue("Created", formatTime(mapStr(result, "createdAt")))
 
 			// Show results if available
 			if results, ok := result["results"].([]interface{}); ok && len(results) > 0 {
@@ -49,13 +46,13 @@ var testWatchCmd = &cobra.Command{
 				rows := make([][]string, 0)
 				for _, r := range results {
 					if m, ok := r.(map[string]interface{}); ok {
-						phase := valStr(m, "phaseName")
+						phase := mapStr(m, "phaseName")
 						if phase == "—" {
 							phase = "main"
 						}
 						rows = append(rows, []string{
 							phase,
-							valStr(m, "status"),
+							mapStr(m, "status"),
 							fmtNum(numVal(m, "recordsSent")),
 							fmtFloat(numVal(m, "throughputRecordsPerSec"), 1),
 							fmtFloat(numVal(m, "avgLatencyMs"), 2),
@@ -81,7 +78,7 @@ var testWatchCmd = &cobra.Command{
 			default:
 				fmt.Println()
 				fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-					output.AccentStyle.Render(spinner[tick%len(spinner)]),
+					spinnerFrame(tick),
 					watchInterval,
 				)
 			}
@@ -96,11 +93,10 @@ var testListWatchCmd = &cobra.Command{
 	Use:   "watch",
 	Short: "Auto-refreshing test list",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		tick := 0
 
 		for {
-			data, err := apiClient.ListTests(testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
+			data, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
 			if err != nil {
 				output.Error("Failed to list tests: " + err.Error())
 				time.Sleep(time.Duration(watchInterval) * time.Second)
@@ -108,12 +104,7 @@ var testListWatchCmd = &cobra.Command{
 				continue
 			}
 
-			var paged struct {
-				Content    []map[string]interface{} `json:"content"`
-				Page       int                      `json:"page"`
-				TotalItems int                      `json:"totalItems"`
-			}
-			json.Unmarshal(data, &paged)
+			paged, _ := ParsePaged(data)
 
 			// Clear screen
 			fmt.Print("\033[2J\033[H")
@@ -125,11 +116,11 @@ var testListWatchCmd = &cobra.Command{
 				rows := make([][]string, 0, len(paged.Content))
 				for _, run := range paged.Content {
 					rows = append(rows, []string{
-						truncID(valStr(run, "id")),
-						valStr(run, "testType"),
-						valStr(run, "status"),
-						valStr(run, "backend"),
-						formatTime(valStr(run, "createdAt")),
+						truncID(mapStr(run, "id")),
+						mapStr(run, "testType"),
+						mapStr(run, "status"),
+						mapStr(run, "backend"),
+						formatTime(mapStr(run, "createdAt")),
 					})
 				}
 				output.Table([]string{"ID", "Type", "Status", "Backend", "Created"}, rows)
@@ -137,7 +128,7 @@ var testListWatchCmd = &cobra.Command{
 			}
 
 			fmt.Printf("\n  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-				output.AccentStyle.Render(spinner[tick%len(spinner)]),
+				spinnerFrame(tick),
 				watchInterval,
 			)
 
@@ -151,22 +142,21 @@ var testListWatchCmd = &cobra.Command{
 var createWait bool
 
 func pollUntilDone(id string) {
-	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	tick := 0
 	for {
-		result, err := apiClient.GetTest(id)
+		result, err := apiClient.GetTest(context.Background(), id)
 		if err != nil {
 			output.Error("Polling failed: " + err.Error())
 			return
 		}
-		status := valStr(result, "status")
+		status := mapStr(result, "status")
 		switch status {
 		case "DONE", "COMPLETED":
 			fmt.Printf("\r  %s Test completed                              \n",
 				output.SuccessStyle.Render("✓"),
 			)
 			// Print summary
-			summary, err := apiClient.ReportSummary(id)
+			summary, err := apiClient.ReportSummary(context.Background(), id)
 			if err == nil {
 				output.SubHeader("Results")
 				output.KeyValue("Throughput", fmt.Sprintf("%s rec/s", fmtNum(numVal(summary, "avgThroughputRecPerSec"))))
@@ -183,7 +173,7 @@ func pollUntilDone(id string) {
 		default:
 			elapsed := time.Duration(tick*2) * time.Second
 			fmt.Printf("\r  %s Waiting... %s [%s]   ",
-				output.AccentStyle.Render(spinner[tick%len(spinner)]),
+				spinnerFrame(tick),
 				output.DimStyle.Render(elapsed.String()),
 				output.AccentStyle.Render(status),
 			)
@@ -191,14 +181,6 @@ func pollUntilDone(id string) {
 			time.Sleep(2 * time.Second)
 		}
 	}
-}
-
-func termWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || w == 0 {
-		return 80
-	}
-	return w
 }
 
 func init() {

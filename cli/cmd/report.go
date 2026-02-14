@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -19,7 +20,7 @@ var reportShowCmd = &cobra.Command{
 	Short: "Show the full report for a test run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.Report(args[0])
+		result, err := apiClient.Report(context.Background(), args[0])
 		if err != nil {
 			output.Error("Failed to get report: " + err.Error())
 			return nil
@@ -70,7 +71,7 @@ var reportShowCmd = &cobra.Command{
 					for _, v := range violations {
 						if vm, ok := v.(map[string]interface{}); ok {
 							rows = append(rows, []string{
-								valStr(vm, "metric"),
+								mapStr(vm, "metric"),
 								fmtFloat(numVal(vm, "threshold"), 2),
 								fmtFloat(numVal(vm, "actual"), 2),
 								"FAIL",
@@ -92,7 +93,7 @@ var reportSummaryCmd = &cobra.Command{
 	Short: "Show compact summary metrics for a test run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.ReportSummary(args[0])
+		result, err := apiClient.ReportSummary(context.Background(), args[0])
 		if err != nil {
 			output.Error("Failed to get summary: " + err.Error())
 			return nil
@@ -128,7 +129,7 @@ var reportCompareCmd = &cobra.Command{
 	Example: `  kates report compare abc123,def456
   kates report compare abc123,def456,ghi789 -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := apiClient.Compare(args[0])
+		data, err := apiClient.Compare(context.Background(), args[0])
 		if err != nil {
 			output.Error("Failed to compare: " + err.Error())
 			return nil
@@ -153,7 +154,7 @@ var reportExportCmd = &cobra.Command{
 
 		switch exportFormat {
 		case "csv":
-			csv, err := apiClient.ExportCSV(id)
+			csv, err := apiClient.ExportCSV(context.Background(), id)
 			if err != nil {
 				output.Error("Export failed: " + err.Error())
 				return nil
@@ -170,7 +171,7 @@ var reportExportCmd = &cobra.Command{
 			}
 
 		case "junit":
-			xml, err := apiClient.ExportJUnit(id)
+			xml, err := apiClient.ExportJUnit(context.Background(), id)
 			if err != nil {
 				output.Error("Export failed: " + err.Error())
 				return nil

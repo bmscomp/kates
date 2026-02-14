@@ -1,9 +1,12 @@
 package client
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +15,7 @@ import (
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+	MaxRetries int
 }
 
 func New(baseURL string) *Client {
@@ -20,6 +24,7 @@ func New(baseURL string) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		MaxRetries: 3,
 	}
 }
 
@@ -33,95 +38,96 @@ func (e *APIError) String() string {
 	return fmt.Sprintf("[%d] %s: %s", e.Status, e.Error, e.Message)
 }
 
-func (c *Client) get(path string) ([]byte, error) {
-	resp, err := c.HTTPClient.Get(c.BaseURL + path)
-	if err != nil {
-		return nil, fmt.Errorf("connection failed: %w", err)
+// doRequest executes an HTTP request with error handling and optional retry.
+func (c *Client) doRequest(req *http.Request, retryable bool) ([]byte, error) {
+	attempts := 1
+	if retryable {
+		attempts = c.MaxRetries
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
-			return nil, fmt.Errorf("%s", apiErr.String())
+
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			backoff := time.Duration(math.Pow(2, float64(i-1))) * 500 * time.Millisecond
+			time.Sleep(backoff)
 		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("connection failed: %w", err)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("read response: %w", err)
+			continue
+		}
+
+		if resp.StatusCode >= 500 && retryable && i < attempts-1 {
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			continue
+		}
+
+		if resp.StatusCode >= 400 {
+			var apiErr APIError
+			if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
+				return nil, fmt.Errorf("%s", apiErr.String())
+			}
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		}
+
+		return body, nil
 	}
-	return body, nil
+	return nil, lastErr
 }
 
-func (c *Client) postJSON(path string, payload interface{}) ([]byte, error) {
+func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.doRequest(req, true)
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, payload interface{}) ([]byte, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	resp, err := c.HTTPClient.Post(c.BaseURL+path, "application/json", strings.NewReader(string(data)))
-	if err != nil {
-		return nil, fmt.Errorf("connection failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		var apiErr APIError
-		if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
-			return nil, fmt.Errorf("%s", apiErr.String())
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return body, nil
-}
-
-func (c *Client) put(path string, payload interface{}) ([]byte, error) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-	req, err := http.NewRequest(http.MethodPut, c.BaseURL+path, strings.NewReader(string(data)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connection failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return body, nil
+	return c.doRequest(req, false)
 }
 
-func (c *Client) delete(path string) error {
-	req, err := http.NewRequest(http.MethodDelete, c.BaseURL+path, nil)
+func (c *Client) put(ctx context.Context, path string, payload interface{}) ([]byte, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.doRequest(req, false)
+}
+
+func (c *Client) delete(ctx context.Context, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("connection failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
+	_, err = c.doRequest(req, false)
+	return err
 }
 
-// Health returns the health check response.
-func (c *Client) Health() (map[string]interface{}, error) {
-	data, err := c.get("/api/health")
+func (c *Client) Health(ctx context.Context) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/health")
 	if err != nil {
 		return nil, err
 	}
@@ -129,9 +135,8 @@ func (c *Client) Health() (map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// ClusterInfo returns Kafka cluster metadata.
-func (c *Client) ClusterInfo() (map[string]interface{}, error) {
-	data, err := c.get("/api/cluster/info")
+func (c *Client) ClusterInfo(ctx context.Context) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/cluster/info")
 	if err != nil {
 		return nil, err
 	}
@@ -139,9 +144,8 @@ func (c *Client) ClusterInfo() (map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// Topics returns the list of Kafka topics.
-func (c *Client) Topics() ([]string, error) {
-	data, err := c.get("/api/cluster/topics")
+func (c *Client) Topics(ctx context.Context) ([]string, error) {
+	data, err := c.get(ctx, "/api/cluster/topics")
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +153,7 @@ func (c *Client) Topics() ([]string, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// ListTests returns paginated test runs.
-func (c *Client) ListTests(testType, status string, page, size int) (json.RawMessage, error) {
+func (c *Client) ListTests(ctx context.Context, testType, status string, page, size int) (json.RawMessage, error) {
 	path := fmt.Sprintf("/api/tests?page=%d&size=%d", page, size)
 	if testType != "" {
 		path += "&type=" + testType
@@ -158,16 +161,15 @@ func (c *Client) ListTests(testType, status string, page, size int) (json.RawMes
 	if status != "" {
 		path += "&status=" + status
 	}
-	data, err := c.get(path)
+	data, err := c.get(ctx, path)
 	if err != nil {
 		return nil, err
 	}
 	return json.RawMessage(data), nil
 }
 
-// GetTest returns a specific test run.
-func (c *Client) GetTest(id string) (map[string]interface{}, error) {
-	data, err := c.get("/api/tests/" + id)
+func (c *Client) GetTest(ctx context.Context, id string) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/tests/"+id)
 	if err != nil {
 		return nil, err
 	}
@@ -175,9 +177,8 @@ func (c *Client) GetTest(id string) (map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// CreateTest starts a new test.
-func (c *Client) CreateTest(request map[string]interface{}) (map[string]interface{}, error) {
-	data, err := c.postJSON("/api/tests", request)
+func (c *Client) CreateTest(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+	data, err := c.postJSON(ctx, "/api/tests", request)
 	if err != nil {
 		return nil, err
 	}
@@ -185,14 +186,12 @@ func (c *Client) CreateTest(request map[string]interface{}) (map[string]interfac
 	return result, json.Unmarshal(data, &result)
 }
 
-// DeleteTest removes a test run.
-func (c *Client) DeleteTest(id string) error {
-	return c.delete("/api/tests/" + id)
+func (c *Client) DeleteTest(ctx context.Context, id string) error {
+	return c.delete(ctx, "/api/tests/"+id)
 }
 
-// TestTypes returns available test types.
-func (c *Client) TestTypes() ([]string, error) {
-	data, err := c.get("/api/tests/types")
+func (c *Client) TestTypes(ctx context.Context) ([]string, error) {
+	data, err := c.get(ctx, "/api/tests/types")
 	if err != nil {
 		return nil, err
 	}
@@ -200,9 +199,8 @@ func (c *Client) TestTypes() ([]string, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// Backends returns available benchmark backends.
-func (c *Client) Backends() ([]string, error) {
-	data, err := c.get("/api/tests/backends")
+func (c *Client) Backends(ctx context.Context) ([]string, error) {
+	data, err := c.get(ctx, "/api/tests/backends")
 	if err != nil {
 		return nil, err
 	}
@@ -210,9 +208,8 @@ func (c *Client) Backends() ([]string, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// Report returns the full report for a test run.
-func (c *Client) Report(id string) (map[string]interface{}, error) {
-	data, err := c.get("/api/tests/" + id + "/report")
+func (c *Client) Report(ctx context.Context, id string) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/tests/"+id+"/report")
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +217,8 @@ func (c *Client) Report(id string) (map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// ReportSummary returns the summary for a test run.
-func (c *Client) ReportSummary(id string) (map[string]interface{}, error) {
-	data, err := c.get("/api/tests/" + id + "/report/summary")
+func (c *Client) ReportSummary(ctx context.Context, id string) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/tests/"+id+"/report/summary")
 	if err != nil {
 		return nil, err
 	}
@@ -230,36 +226,32 @@ func (c *Client) ReportSummary(id string) (map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// Compare returns comparison of multiple test runs.
-func (c *Client) Compare(ids string) (json.RawMessage, error) {
-	data, err := c.get("/api/reports/compare?ids=" + ids)
+func (c *Client) Compare(ctx context.Context, ids string) (json.RawMessage, error) {
+	data, err := c.get(ctx, "/api/reports/compare?ids="+ids)
 	if err != nil {
 		return nil, err
 	}
 	return json.RawMessage(data), nil
 }
 
-// ExportCSV returns CSV report for download.
-func (c *Client) ExportCSV(id string) (string, error) {
-	data, err := c.get("/api/tests/" + id + "/report/csv")
+func (c *Client) ExportCSV(ctx context.Context, id string) (string, error) {
+	data, err := c.get(ctx, "/api/tests/"+id+"/report/csv")
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
-// ExportJUnit returns JUnit XML report.
-func (c *Client) ExportJUnit(id string) (string, error) {
-	data, err := c.get("/api/tests/" + id + "/report/junit")
+func (c *Client) ExportJUnit(ctx context.Context, id string) (string, error) {
+	data, err := c.get(ctx, "/api/tests/"+id+"/report/junit")
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
-// ListSchedules returns all scheduled tests.
-func (c *Client) ListSchedules() ([]map[string]interface{}, error) {
-	data, err := c.get("/api/schedules")
+func (c *Client) ListSchedules(ctx context.Context) ([]map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/schedules")
 	if err != nil {
 		return nil, err
 	}
@@ -267,9 +259,8 @@ func (c *Client) ListSchedules() ([]map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// GetSchedule returns a specific schedule.
-func (c *Client) GetSchedule(id string) (map[string]interface{}, error) {
-	data, err := c.get("/api/schedules/" + id)
+func (c *Client) GetSchedule(ctx context.Context, id string) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/schedules/"+id)
 	if err != nil {
 		return nil, err
 	}
@@ -277,9 +268,8 @@ func (c *Client) GetSchedule(id string) (map[string]interface{}, error) {
 	return result, json.Unmarshal(data, &result)
 }
 
-// CreateSchedule creates a new scheduled test.
-func (c *Client) CreateSchedule(request map[string]interface{}) (map[string]interface{}, error) {
-	data, err := c.postJSON("/api/schedules", request)
+func (c *Client) CreateSchedule(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+	data, err := c.postJSON(ctx, "/api/schedules", request)
 	if err != nil {
 		return nil, err
 	}
@@ -287,9 +277,8 @@ func (c *Client) CreateSchedule(request map[string]interface{}) (map[string]inte
 	return result, json.Unmarshal(data, &result)
 }
 
-// UpdateSchedule updates an existing schedule.
-func (c *Client) UpdateSchedule(id string, request map[string]interface{}) (map[string]interface{}, error) {
-	data, err := c.put("/api/schedules/"+id, request)
+func (c *Client) UpdateSchedule(ctx context.Context, id string, request map[string]interface{}) (map[string]interface{}, error) {
+	data, err := c.put(ctx, "/api/schedules/"+id, request)
 	if err != nil {
 		return nil, err
 	}
@@ -297,16 +286,14 @@ func (c *Client) UpdateSchedule(id string, request map[string]interface{}) (map[
 	return result, json.Unmarshal(data, &result)
 }
 
-// DeleteSchedule removes a schedule.
-func (c *Client) DeleteSchedule(id string) error {
-	return c.delete("/api/schedules/" + id)
+func (c *Client) DeleteSchedule(ctx context.Context, id string) error {
+	return c.delete(ctx, "/api/schedules/"+id)
 }
 
-// Trends returns historical trend data.
-func (c *Client) Trends(testType, metric string, days, baselineWindow int) (map[string]interface{}, error) {
+func (c *Client) Trends(ctx context.Context, testType, metric string, days, baselineWindow int) (map[string]interface{}, error) {
 	path := fmt.Sprintf("/api/trends?type=%s&metric=%s&days=%d&baselineWindow=%d",
 		testType, metric, days, baselineWindow)
-	data, err := c.get(path)
+	data, err := c.get(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -314,9 +301,8 @@ func (c *Client) Trends(testType, metric string, days, baselineWindow int) (map[
 	return result, json.Unmarshal(data, &result)
 }
 
-// Resilience executes a combined resilience test.
-func (c *Client) Resilience(request map[string]interface{}) (map[string]interface{}, error) {
-	data, err := c.postJSON("/api/resilience", request)
+func (c *Client) Resilience(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+	data, err := c.postJSON(ctx, "/api/resilience", request)
 	if err != nil {
 		return nil, err
 	}

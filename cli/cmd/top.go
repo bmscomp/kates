@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -16,14 +16,13 @@ var topCmd = &cobra.Command{
 	Use:   "top",
 	Short: "Live view of running tests (like kubectl top)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		tick := 0
 
 		for {
 			fmt.Print("\033[2J\033[H")
 
-			health, _ := apiClient.Health()
-			data, err := apiClient.ListTests("", "", 0, 50)
+			health, _ := apiClient.Health(context.Background())
+			data, err := apiClient.ListTests(context.Background(), "", "", 0, 50)
 			if err != nil {
 				output.Error("Failed to fetch tests: " + err.Error())
 				time.Sleep(time.Duration(topInterval) * time.Second)
@@ -31,47 +30,27 @@ var topCmd = &cobra.Command{
 				continue
 			}
 
-			var paged struct {
-				Content    []map[string]interface{} `json:"content"`
-				TotalItems int                      `json:"totalItems"`
-			}
-			json.Unmarshal(data, &paged)
+			paged, _ := ParsePaged(data)
 
-			// Status bar
 			apiStatus := "DOWN"
 			kafkaStatus := "DOWN"
 			if health != nil {
-				apiStatus = strVal(health, "status")
+				apiStatus = mapStrEmpty(health, "status")
 				if k, ok := health["kafka"].(map[string]interface{}); ok {
-					kafkaStatus = strVal(k, "status")
+					kafkaStatus = mapStrEmpty(k, "status")
 				}
 			}
 
-			running := 0
-			pending := 0
-			done := 0
-			failed := 0
-			for _, t := range paged.Content {
-				switch strings.ToUpper(valStr(t, "status")) {
-				case "RUNNING":
-					running++
-				case "PENDING":
-					pending++
-				case "DONE", "COMPLETED":
-					done++
-				case "FAILED", "ERROR":
-					failed++
-				}
-			}
+			counts := CountStatuses(paged.Content)
 
 			fmt.Printf("  %s API: %s  Kafka: %s  │  %s running  %s pending  %s done  %s failed  │  %s total\n\n",
 				output.AccentStyle.Bold(true).Render("KATES TOP"),
 				output.StatusBadge(apiStatus),
 				output.StatusBadge(kafkaStatus),
-				output.AccentStyle.Render(fmt.Sprintf("%d", running)),
-				output.WarningStyle.Render(fmt.Sprintf("%d", pending)),
-				output.SuccessStyle.Render(fmt.Sprintf("%d", done)),
-				coloredCount(failed),
+				output.AccentStyle.Render(fmt.Sprintf("%d", counts.Running)),
+				output.WarningStyle.Render(fmt.Sprintf("%d", counts.Pending)),
+				output.SuccessStyle.Render(fmt.Sprintf("%d", counts.Done)),
+				coloredCount(counts.Failed),
 				output.DimStyle.Render(fmt.Sprintf("%d", paged.TotalItems)),
 			)
 
@@ -79,13 +58,13 @@ var topCmd = &cobra.Command{
 			activeRows := make([][]string, 0)
 			recentRows := make([][]string, 0)
 			for _, t := range paged.Content {
-				status := strings.ToUpper(valStr(t, "status"))
+				status := strings.ToUpper(mapStr(t, "status"))
 				row := []string{
-					truncID(valStr(t, "id")),
-					valStr(t, "testType"),
+					truncID(mapStr(t, "id")),
+					mapStr(t, "testType"),
 					status,
-					valStr(t, "backend"),
-					formatTime(valStr(t, "createdAt")),
+					mapStr(t, "backend"),
+					formatTime(mapStr(t, "createdAt")),
 				}
 
 				if status == "RUNNING" || status == "PENDING" {
@@ -132,7 +111,7 @@ var topCmd = &cobra.Command{
 			}
 
 			fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-				output.AccentStyle.Render(spinner[tick%len(spinner)]),
+				spinnerFrame(tick),
 				topInterval,
 			)
 

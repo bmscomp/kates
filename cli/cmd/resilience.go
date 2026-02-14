@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 
@@ -47,7 +48,7 @@ var resilienceRunCmd = &cobra.Command{
 
 		fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
 
-		result, err := apiClient.Resilience(req)
+		result, err := apiClient.Resilience(context.Background(), req)
 		if err != nil {
 			output.Error("Resilience test failed: " + err.Error())
 			return nil
@@ -59,15 +60,15 @@ var resilienceRunCmd = &cobra.Command{
 		}
 
 		output.Header("Resilience Test Results")
-		output.KeyValue("Status", output.StatusBadge(valStr(result, "status")))
+		output.KeyValue("Status", output.StatusBadge(mapStr(result, "status")))
 
 		// Chaos outcome
 		if chaos, ok := result["chaosOutcome"].(map[string]interface{}); ok {
 			output.SubHeader("Chaos Outcome")
-			output.KeyValue("Experiment", valStr(chaos, "experimentName"))
-			output.KeyValue("Verdict", output.StatusBadge(valStr(chaos, "verdict")))
-			output.KeyValue("Duration", valStr(chaos, "chaosDuration"))
-			if reason := valStr(chaos, "failureReason"); reason != "—" {
+			output.KeyValue("Experiment", mapStr(chaos, "experimentName"))
+			output.KeyValue("Verdict", output.StatusBadge(mapStr(chaos, "verdict")))
+			output.KeyValue("Duration", mapStr(chaos, "chaosDuration"))
+			if reason := mapStr(chaos, "failureReason"); reason != "—" {
 				output.KeyValue("Failure Reason", reason)
 			}
 		}

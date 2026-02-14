@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -15,12 +16,12 @@ var reportDiffCmd = &cobra.Command{
 	Example: `  kates report diff abc123 def456
   kates report diff abc123 def456 -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s1, err := apiClient.ReportSummary(args[0])
+		s1, err := apiClient.ReportSummary(context.Background(), args[0])
 		if err != nil {
 			output.Error("Failed to get report for " + args[0] + ": " + err.Error())
 			return nil
 		}
-		s2, err := apiClient.ReportSummary(args[1])
+		s2, err := apiClient.ReportSummary(context.Background(), args[1])
 		if err != nil {
 			output.Error("Failed to get report for " + args[1] + ": " + err.Error())
 			return nil
@@ -95,19 +96,6 @@ var reportDiffCmd = &cobra.Command{
 		output.Hint("▲ = improved │ ▼ = regressed │ = ≈ no change")
 		return nil
 	},
-}
-
-func formatMetricVal(v float64, key, unit string) string {
-	if key == "errorRate" {
-		return fmt.Sprintf("%.4f%%", v*100)
-	}
-	if v >= 1_000_000 {
-		return fmt.Sprintf("%.1fM %s", v/1_000_000, unit)
-	}
-	if v >= 1_000 {
-		return fmt.Sprintf("%.1fK %s", v/1_000, unit)
-	}
-	return fmt.Sprintf("%.2f %s", v, unit)
 }
 
 func init() {

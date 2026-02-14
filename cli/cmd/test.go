@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"strings"
 
@@ -30,7 +30,7 @@ var testListCmd = &cobra.Command{
   kates test list --type LOAD --status DONE
   kates test list --page 0 --size 10`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := apiClient.ListTests(testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
+		data, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
 		if err != nil {
 			output.Error("Failed to list tests: " + err.Error())
 			return nil
@@ -41,14 +41,8 @@ var testListCmd = &cobra.Command{
 			return nil
 		}
 
-		var paged struct {
-			Content    []map[string]interface{} `json:"content"`
-			Page       int                      `json:"page"`
-			Size       int                      `json:"size"`
-			TotalItems int                      `json:"totalItems"`
-			TotalPages int                      `json:"totalPages"`
-		}
-		if err := json.Unmarshal(data, &paged); err != nil {
+		paged, parseErr := ParsePaged(data)
+		if parseErr != nil {
 			output.RawJSON(data)
 			return nil
 		}
@@ -62,11 +56,11 @@ var testListCmd = &cobra.Command{
 
 		rows := make([][]string, 0, len(paged.Content))
 		for _, run := range paged.Content {
-			id := truncID(valStr(run, "id"))
-			testType := valStr(run, "testType")
-			status := valStr(run, "status")
-			backend := valStr(run, "backend")
-			created := formatTime(valStr(run, "createdAt"))
+			id := truncID(mapStr(run, "id"))
+			testType := mapStr(run, "testType")
+			status := mapStr(run, "status")
+			backend := mapStr(run, "backend")
+			created := formatTime(mapStr(run, "createdAt"))
 			rows = append(rows, []string{id, testType, status, backend, created})
 		}
 		output.Table([]string{"ID", "Type", "Status", "Backend", "Created"}, rows)
@@ -86,7 +80,7 @@ var testGetCmd = &cobra.Command{
 	Short:   "Show details of a specific test run",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.GetTest(args[0])
+		result, err := apiClient.GetTest(context.Background(), args[0])
 		if err != nil {
 			output.Error("Test not found: " + err.Error())
 			return nil
@@ -97,17 +91,17 @@ var testGetCmd = &cobra.Command{
 			return nil
 		}
 
-		testType := valStr(result, "testType")
-		status := valStr(result, "status")
+		testType := mapStr(result, "testType")
+		status := mapStr(result, "status")
 		output.Banner("Test Run", fmt.Sprintf("%s · %s", testType, truncID(args[0])))
 
 		output.SubHeader("Details")
-		output.KeyValue("ID", valStr(result, "id"))
+		output.KeyValue("ID", mapStr(result, "id"))
 		output.KeyValue("Type", testType)
 		output.KeyValue("Status", output.StatusBadge(status))
-		output.KeyValue("Backend", valStr(result, "backend"))
-		output.KeyValue("Scenario", valStr(result, "scenarioName"))
-		output.KeyValue("Created", formatTime(valStr(result, "createdAt")))
+		output.KeyValue("Backend", mapStr(result, "backend"))
+		output.KeyValue("Scenario", mapStr(result, "scenarioName"))
+		output.KeyValue("Created", formatTime(mapStr(result, "createdAt")))
 
 		// Results
 		if results, ok := result["results"].([]interface{}); ok && len(results) > 0 {
@@ -115,13 +109,13 @@ var testGetCmd = &cobra.Command{
 			rows := make([][]string, 0)
 			for _, r := range results {
 				if m, ok := r.(map[string]interface{}); ok {
-					phase := valStr(m, "phaseName")
+					phase := mapStr(m, "phaseName")
 					if phase == "—" {
 						phase = "main"
 					}
 					rows = append(rows, []string{
 						phase,
-						valStr(m, "status"),
+						mapStr(m, "status"),
 						fmtNum(numVal(m, "recordsSent")),
 						fmtFloat(numVal(m, "throughputRecordsPerSec"), 1),
 						fmtFloat(numVal(m, "avgLatencyMs"), 2),
@@ -179,7 +173,7 @@ var testCreateCmd = &cobra.Command{
 			req["spec"] = spec
 		}
 
-		result, err := apiClient.CreateTest(req)
+		result, err := apiClient.CreateTest(context.Background(), req)
 		if err != nil {
 			output.Error("Failed to create test: " + err.Error())
 			return nil
@@ -190,11 +184,11 @@ var testCreateCmd = &cobra.Command{
 			return nil
 		}
 
-		id := valStr(result, "id")
+		id := mapStr(result, "id")
 		output.Success("Test created successfully")
 		output.KeyValue("ID", id)
-		output.KeyValue("Type", valStr(result, "testType"))
-		output.KeyValue("Status", output.StatusBadge(valStr(result, "status")))
+		output.KeyValue("Type", mapStr(result, "testType"))
+		output.KeyValue("Status", output.StatusBadge(mapStr(result, "status")))
 
 		if createWait {
 			fmt.Println()
@@ -212,7 +206,7 @@ var testDeleteCmd = &cobra.Command{
 	Short:   "Stop and delete a test run",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := apiClient.DeleteTest(args[0])
+		err := apiClient.DeleteTest(context.Background(), args[0])
 		if err != nil {
 			output.Error("Failed to delete test: " + err.Error())
 			return nil
@@ -226,7 +220,7 @@ var testTypesCmd = &cobra.Command{
 	Use:   "types",
 	Short: "List available test types",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		types, err := apiClient.TestTypes()
+		types, err := apiClient.TestTypes(context.Background())
 		if err != nil {
 			output.Error("Failed to get test types: " + err.Error())
 			return nil
@@ -249,7 +243,7 @@ var testBackendsCmd = &cobra.Command{
 	Use:   "backends",
 	Short: "List available benchmark backends",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		backends, err := apiClient.Backends()
+		backends, err := apiClient.Backends(context.Background())
 		if err != nil {
 			output.Error("Failed to get backends: " + err.Error())
 			return nil
@@ -266,74 +260,6 @@ var testBackendsCmd = &cobra.Command{
 		output.Table([]string{"Backend"}, rows)
 		return nil
 	},
-}
-
-func valStr(m map[string]interface{}, key string) string {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return "—"
-	}
-	return fmt.Sprintf("%v", v)
-}
-
-func numVal(m map[string]interface{}, key string) float64 {
-	v, ok := m[key]
-	if !ok {
-		return 0
-	}
-	if f, ok := v.(float64); ok {
-		return f
-	}
-	return 0
-}
-
-func fmtNum(v float64) string {
-	if v >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", v/1_000_000)
-	}
-	if v >= 1_000 {
-		return fmt.Sprintf("%.1fK", v/1_000)
-	}
-	return fmt.Sprintf("%.0f", v)
-}
-
-func fmtFloat(v float64, precision int) string {
-	return fmt.Sprintf("%.*f", precision, v)
-}
-
-func truncID(id string) string {
-	if len(id) > 12 {
-		return id[:12] + "…"
-	}
-	return id
-}
-
-func formatTime(ts string) string {
-	if len(ts) > 19 {
-		return ts[:10] + " " + ts[11:19]
-	}
-	return ts
-}
-
-func describeType(t string) string {
-	switch t {
-	case "LOAD":
-		return "Standard load test with target throughput"
-	case "STRESS":
-		return "High-volume multi-producer stress test"
-	case "SPIKE":
-		return "Sudden burst of traffic to test elasticity"
-	case "ENDURANCE":
-		return "Long-running soak test for stability"
-	case "VOLUME":
-		return "Large message payload throughput test"
-	case "CAPACITY":
-		return "Maximum capacity planning workload"
-	case "ROUND_TRIP":
-		return "End-to-end produce → consume latency"
-	default:
-		return ""
-	}
 }
 
 func init() {

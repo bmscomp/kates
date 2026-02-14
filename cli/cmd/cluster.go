@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/klster/kates-cli/output"
@@ -16,7 +17,7 @@ var clusterInfoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Show Kafka cluster metadata",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.ClusterInfo()
+		result, err := apiClient.ClusterInfo(context.Background())
 		if err != nil {
 			output.Error("Failed to get cluster info: " + err.Error())
 			return nil
@@ -27,18 +28,18 @@ var clusterInfoCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Banner("Kafka Cluster", "Cluster ID: "+valStr(result, "clusterId"))
+		output.Banner("Kafka Cluster", "Cluster ID: "+mapStr(result, "clusterId"))
 
 		output.SubHeader("Overview")
-		output.KeyValue("Broker Count", valStr(result, "brokerCount"))
+		output.KeyValue("Broker Count", mapStr(result, "brokerCount"))
 
 		// Controller
 		if ctrl, ok := result["controller"].(map[string]interface{}); ok {
 			output.SubHeader("Controller")
-			output.KeyValue("Node ID", valStr(ctrl, "id"))
-			output.KeyValue("Host", valStr(ctrl, "host"))
-			output.KeyValue("Port", valStr(ctrl, "port"))
-			output.KeyValue("Rack / AZ", valStr(ctrl, "rack"))
+			output.KeyValue("Node ID", mapStr(ctrl, "id"))
+			output.KeyValue("Host", mapStr(ctrl, "host"))
+			output.KeyValue("Port", mapStr(ctrl, "port"))
+			output.KeyValue("Rack / AZ", mapStr(ctrl, "rack"))
 		}
 
 		// Brokers
@@ -49,15 +50,15 @@ var clusterInfoCmd = &cobra.Command{
 				if bm, ok := b.(map[string]interface{}); ok {
 					isCtrl := ""
 					if ctrl, ok := result["controller"].(map[string]interface{}); ok {
-						if valStr(bm, "id") == valStr(ctrl, "id") {
+						if mapStr(bm, "id") == mapStr(ctrl, "id") {
 							isCtrl = "★"
 						}
 					}
 					rows = append(rows, []string{
-						valStr(bm, "id"),
-						valStr(bm, "host"),
-						valStr(bm, "port"),
-						valStr(bm, "rack"),
+						mapStr(bm, "id"),
+						mapStr(bm, "host"),
+						mapStr(bm, "port"),
+						mapStr(bm, "rack"),
 						isCtrl,
 					})
 				}
@@ -73,7 +74,7 @@ var clusterTopicsCmd = &cobra.Command{
 	Use:   "topics",
 	Short: "List all Kafka topics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		topics, err := apiClient.Topics()
+		topics, err := apiClient.Topics(context.Background())
 		if err != nil {
 			output.Error("Failed to list topics: " + err.Error())
 			return nil

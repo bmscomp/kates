@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -111,14 +112,14 @@ var testApplyCmd = &cobra.Command{
 				req["spec"] = scenario.Spec
 			}
 
-			result, err := apiClient.CreateTest(req)
+			result, err := apiClient.CreateTest(context.Background(), req)
 			if err != nil {
 				output.Error("  Failed: " + err.Error())
 				results = append(results, scenarioResult{name: name, status: "FAILED", err: err.Error()})
 				continue
 			}
 
-			id := valStr(result, "id")
+			id := mapStr(result, "id")
 			output.Success(fmt.Sprintf("  Created: %s", truncID(id)))
 
 			if applyWait {
@@ -126,7 +127,7 @@ var testApplyCmd = &cobra.Command{
 				if err != nil {
 					results = append(results, scenarioResult{name: name, id: id, status: "ERROR", err: err.Error()})
 				} else {
-					status := valStr(finalResult, "status")
+					status := mapStr(finalResult, "status")
 					results = append(results, scenarioResult{name: name, id: id, status: status, validate: scenario.Validate})
 				}
 			} else {
@@ -160,14 +161,13 @@ type scenarioResult struct {
 }
 
 func waitForTest(id, name string) (map[string]interface{}, error) {
-	spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	tick := 0
 	for {
-		result, err := apiClient.GetTest(id)
+		result, err := apiClient.GetTest(context.Background(), id)
 		if err != nil {
 			return nil, err
 		}
-		status := strings.ToUpper(valStr(result, "status"))
+		status := strings.ToUpper(mapStr(result, "status"))
 		switch status {
 		case "DONE", "COMPLETED":
 			fmt.Printf("\r  %s %s → %s\n",
@@ -185,7 +185,7 @@ func waitForTest(id, name string) (map[string]interface{}, error) {
 			return result, nil
 		default:
 			fmt.Printf("\r  %s %s [%s]   ",
-				output.AccentStyle.Render(spinner[tick%len(spinner)]),
+				spinnerFrame(tick),
 				output.DimStyle.Render(name),
 				output.AccentStyle.Render(status),
 			)

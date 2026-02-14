@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -18,7 +18,6 @@ var dashboardCmd = &cobra.Command{
 	Aliases: []string{"dash"},
 	Short:   "Full-screen monitoring dashboard with live metrics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		tick := 0
 		throughputHistory := make([]float64, 0, 30)
 		latencyHistory := make([]float64, 0, 30)
@@ -26,16 +25,10 @@ var dashboardCmd = &cobra.Command{
 		for {
 			fmt.Print("\033[2J\033[H")
 
-			health, healthErr := apiClient.Health()
-			testsData, _ := apiClient.ListTests("", "", 0, 50)
+			health, healthErr := apiClient.Health(context.Background())
+			testsData, _ := apiClient.ListTests(context.Background(), "", "", 0, 50)
 
-			var paged struct {
-				Content    []map[string]interface{} `json:"content"`
-				TotalItems int                      `json:"totalItems"`
-			}
-			if testsData != nil {
-				json.Unmarshal(testsData, &paged)
-			}
+			paged, _ := ParsePaged(testsData)
 
 			w := termWidth()
 			panelW := (w / 2) - 2
@@ -62,42 +55,27 @@ var dashboardCmd = &cobra.Command{
 			if healthErr != nil {
 				healthContent.WriteString(output.ErrorStyle.Render("  API unreachable"))
 			} else {
-				apiStatus := strVal(health, "status")
+				apiStatus := mapStrEmpty(health, "status")
 				healthContent.WriteString(fmt.Sprintf("  API     %s\n", output.StatusBadge(apiStatus)))
 				if k, ok := health["kafka"].(map[string]interface{}); ok {
-					healthContent.WriteString(fmt.Sprintf("  Kafka   %s\n", output.StatusBadge(strVal(k, "status"))))
-					healthContent.WriteString(fmt.Sprintf("  Server  %s", output.DimStyle.Render(strVal(k, "bootstrapServers"))))
+					healthContent.WriteString(fmt.Sprintf("  Kafka   %s\n", output.StatusBadge(mapStrEmpty(k, "status"))))
+					healthContent.WriteString(fmt.Sprintf("  Server  %s", output.DimStyle.Render(mapStrEmpty(k, "bootstrapServers"))))
 				}
 				if eng, ok := health["engine"].(map[string]interface{}); ok {
-					healthContent.WriteString(fmt.Sprintf("\n  Engine  %s", output.AccentStyle.Render(strVal(eng, "activeBackend"))))
+					healthContent.WriteString(fmt.Sprintf("\n  Engine  %s", output.AccentStyle.Render(mapStrEmpty(eng, "activeBackend"))))
 				}
 			}
 
 			// Panel 2: Test Summary
 			summaryContent := &strings.Builder{}
-			running := 0
-			pending := 0
-			done := 0
-			failed := 0
-			for _, t := range paged.Content {
-				switch strings.ToUpper(valStr(t, "status")) {
-				case "RUNNING":
-					running++
-				case "PENDING":
-					pending++
-				case "DONE", "COMPLETED":
-					done++
-				case "FAILED", "ERROR":
-					failed++
-				}
-			}
+			counts := CountStatuses(paged.Content)
 			summaryContent.WriteString(fmt.Sprintf("  %s  Running   %s  Pending\n",
-				output.AccentStyle.Bold(true).Render(fmt.Sprintf("%3d", running)),
-				output.WarningStyle.Render(fmt.Sprintf("%3d", pending)),
+				output.AccentStyle.Bold(true).Render(fmt.Sprintf("%3d", counts.Running)),
+				output.WarningStyle.Render(fmt.Sprintf("%3d", counts.Pending)),
 			))
 			summaryContent.WriteString(fmt.Sprintf("  %s  Done      %s  Failed\n",
-				output.SuccessStyle.Render(fmt.Sprintf("%3d", done)),
-				coloredCount(failed),
+				output.SuccessStyle.Render(fmt.Sprintf("%3d", counts.Done)),
+				coloredCount(counts.Failed),
 			))
 			summaryContent.WriteString(fmt.Sprintf("  %s  Total",
 				output.LightStyle.Render(fmt.Sprintf("%3d", paged.TotalItems)),
@@ -114,13 +92,13 @@ var dashboardCmd = &cobra.Command{
 			activeCount := 0
 			var latestThroughput, latestLatency float64
 			for _, t := range paged.Content {
-				status := strings.ToUpper(valStr(t, "status"))
+				status := strings.ToUpper(mapStr(t, "status"))
 				if status != "RUNNING" && status != "PENDING" {
 					continue
 				}
 				activeCount++
-				testType := valStr(t, "testType")
-				id := truncID(valStr(t, "id"))
+				testType := mapStr(t, "testType")
+				id := truncID(mapStr(t, "id"))
 
 				tput := ""
 				lat := ""
@@ -204,7 +182,7 @@ var dashboardCmd = &cobra.Command{
 			recentContent := &strings.Builder{}
 			recentCount := 0
 			for _, t := range paged.Content {
-				status := strings.ToUpper(valStr(t, "status"))
+				status := strings.ToUpper(mapStr(t, "status"))
 				if status == "RUNNING" || status == "PENDING" {
 					continue
 				}
@@ -218,10 +196,10 @@ var dashboardCmd = &cobra.Command{
 				}
 				recentContent.WriteString(fmt.Sprintf("  %s %s %s %s  %s\n",
 					emoji,
-					output.LightStyle.Render(padLeftN(valStr(t, "testType"), 10)),
-					output.DimStyle.Render(truncID(valStr(t, "id"))),
+					output.LightStyle.Render(padLeftN(mapStr(t, "testType"), 10)),
+					output.DimStyle.Render(truncID(mapStr(t, "id"))),
 					output.StatusBadge(status),
-					output.DimStyle.Render(formatTime(valStr(t, "createdAt"))),
+					output.DimStyle.Render(formatTime(mapStr(t, "createdAt"))),
 				))
 			}
 			if recentCount == 0 {
@@ -231,7 +209,7 @@ var dashboardCmd = &cobra.Command{
 			fmt.Println(recentPanel)
 
 			fmt.Printf("\n  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-				output.AccentStyle.Render(spinner[tick%len(spinner)]),
+				spinnerFrame(tick),
 				dashInterval,
 			)
 
@@ -239,13 +217,6 @@ var dashboardCmd = &cobra.Command{
 			time.Sleep(time.Duration(dashInterval) * time.Second)
 		}
 	},
-}
-
-func padLeftN(s string, n int) string {
-	if len(s) >= n {
-		return s
-	}
-	return strings.Repeat(" ", n-len(s)) + s
 }
 
 func init() {

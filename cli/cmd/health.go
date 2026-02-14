@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/klster/kates-cli/output"
@@ -11,7 +12,7 @@ var healthCmd = &cobra.Command{
 	Use:   "health",
 	Short: "Show KATES system health and Kafka connectivity",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.Health()
+		result, err := apiClient.Health(context.Background())
 		if err != nil {
 			output.Error("Failed to check health: " + err.Error())
 			return nil
@@ -22,13 +23,13 @@ var healthCmd = &cobra.Command{
 			return nil
 		}
 
-		status := strVal(result, "status")
+		status := mapStrEmpty(result, "status")
 		output.Banner("KATES Health Dashboard", "System Status: "+status)
 
 		// Engine
 		if eng, ok := result["engine"].(map[string]interface{}); ok {
 			output.SubHeader("Engine")
-			output.KeyValue("Active Backend", strVal(eng, "activeBackend"))
+			output.KeyValue("Active Backend", mapStrEmpty(eng, "activeBackend"))
 			if backends, ok := eng["availableBackends"].([]interface{}); ok {
 				names := make([]string, len(backends))
 				for i, b := range backends {
@@ -41,9 +42,9 @@ var healthCmd = &cobra.Command{
 		// Kafka
 		if kafka, ok := result["kafka"].(map[string]interface{}); ok {
 			output.SubHeader("Kafka Cluster")
-			output.KeyValue("Status", output.StatusBadge(strVal(kafka, "status")))
-			output.KeyValue("Bootstrap", strVal(kafka, "bootstrapServers"))
-			output.KeyValue("Message", strVal(kafka, "message"))
+			output.KeyValue("Status", output.StatusBadge(mapStrEmpty(kafka, "status")))
+			output.KeyValue("Bootstrap", mapStrEmpty(kafka, "bootstrapServers"))
+			output.KeyValue("Message", mapStrEmpty(kafka, "message"))
 		}
 
 		// Test configs as table
@@ -57,8 +58,8 @@ var healthCmd = &cobra.Command{
 						fmt.Sprintf("%.0f", numVal(m, "numRecords")),
 						fmt.Sprintf("%.0f", numVal(m, "partitions")),
 						fmt.Sprintf("%.0f", numVal(m, "numProducers")),
-						strVal(m, "acks"),
-						strVal(m, "compressionType"),
+						mapStrEmpty(m, "acks"),
+						mapStrEmpty(m, "compressionType"),
 					})
 				}
 			}
@@ -67,14 +68,6 @@ var healthCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func strVal(m map[string]interface{}, key string) string {
-	v, ok := m[key]
-	if !ok {
-		return ""
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 func init() {

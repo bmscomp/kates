@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 
@@ -8,7 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const cliVersion = "1.0.0"
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
@@ -16,25 +21,29 @@ var versionCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if outputMode == "json" {
 			output.JSON(map[string]interface{}{
-				"cli":  cliVersion,
-				"go":   runtime.Version(),
-				"os":   runtime.GOOS,
-				"arch": runtime.GOARCH,
+				"cli":       Version,
+				"commit":    Commit,
+				"buildDate": BuildDate,
+				"go":        runtime.Version(),
+				"os":        runtime.GOOS,
+				"arch":      runtime.GOARCH,
 			})
 			return
 		}
 
 		output.Header("Version")
-		output.KeyValue("KATES CLI", cliVersion)
+		output.KeyValue("KATES CLI", Version)
+		output.KeyValue("Commit", Commit)
+		output.KeyValue("Built", BuildDate)
 		output.KeyValue("Go", runtime.Version())
 		output.KeyValue("OS/Arch", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 
 		// Try to get API version
-		health, err := apiClient.Health()
+		health, err := apiClient.Health(context.Background())
 		if err == nil {
-			output.KeyValue("API Status", output.StatusBadge(strVal(health, "status")))
+			output.KeyValue("API Status", output.StatusBadge(mapStrEmpty(health, "status")))
 			if eng, ok := health["engine"].(map[string]interface{}); ok {
-				output.KeyValue("Backend", strVal(eng, "activeBackend"))
+				output.KeyValue("Backend", mapStrEmpty(eng, "activeBackend"))
 			}
 		} else {
 			output.KeyValue("API", output.DimStyle.Render("not reachable"))

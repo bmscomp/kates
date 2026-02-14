@@ -5,7 +5,12 @@ WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
 RUN go mod download
 COPY cli/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /kates .
+RUN CGO_ENABLED=0 GOOS=linux go build \
+  -trimpath \
+  -ldflags="-s -w \
+  -X github.com/klster/kates-cli/cmd.Version=1.0.0 \
+  -X github.com/klster/kates-cli/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o /kates .
 
 # Stage 2: Build the Java application
 FROM eclipse-temurin:25-jdk AS builder

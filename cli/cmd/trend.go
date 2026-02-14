@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,7 @@ var trendCmd = &cobra.Command{
 			return nil
 		}
 
-		result, err := apiClient.Trends(trendType, trendMetric, trendDays, trendBaseline)
+		result, err := apiClient.Trends(context.Background(), trendType, trendMetric, trendDays, trendBaseline)
 		if err != nil {
 			output.Error("Failed to fetch trends: " + err.Error())
 			return nil
@@ -106,7 +107,7 @@ var trendCmd = &cobra.Command{
 				rows := make([][]string, 0, len(points))
 				for _, p := range points {
 					if pm, ok := p.(map[string]interface{}); ok {
-						ts := valStr(pm, "timestamp")
+						ts := mapStr(pm, "timestamp")
 						if len(ts) > 19 {
 							ts = ts[:19]
 						}
@@ -121,7 +122,7 @@ var trendCmd = &cobra.Command{
 							}
 						}
 						rows = append(rows, []string{
-							truncID(valStr(pm, "runId")),
+							truncID(mapStr(pm, "runId")),
 							ts,
 							fmt.Sprintf("%.2f", value),
 							marker,
@@ -139,7 +140,7 @@ var trendCmd = &cobra.Command{
 			for _, r := range regressions {
 				if rm, ok := r.(map[string]interface{}); ok {
 					rows = append(rows, []string{
-						valStr(rm, "runId"),
+						mapStr(rm, "runId"),
 						fmt.Sprintf("%.2f", numVal(rm, "value")),
 						fmt.Sprintf("%.2f", numVal(rm, "baseline")),
 						fmt.Sprintf("%+.1f%%", numVal(rm, "deviationPercent")),

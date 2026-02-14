@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 
@@ -20,7 +21,7 @@ var scheduleListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List all scheduled tests",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		schedules, err := apiClient.ListSchedules()
+		schedules, err := apiClient.ListSchedules(context.Background())
 		if err != nil {
 			output.Error("Failed to list schedules: " + err.Error())
 			return nil
@@ -44,11 +45,11 @@ var scheduleListCmd = &cobra.Command{
 				enabled = "enabled"
 			}
 			rows = append(rows, []string{
-				valStr(s, "id"),
-				valStr(s, "name"),
-				valStr(s, "cronExpression"),
+				mapStr(s, "id"),
+				mapStr(s, "name"),
+				mapStr(s, "cronExpression"),
 				enabled,
-				valStr(s, "lastRunId"),
+				mapStr(s, "lastRunId"),
 			})
 		}
 		output.Table([]string{"ID", "Name", "Cron", "State", "Last Run"}, rows)
@@ -61,7 +62,7 @@ var scheduleGetCmd = &cobra.Command{
 	Short: "Show details of a scheduled test",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.GetSchedule(args[0])
+		result, err := apiClient.GetSchedule(context.Background(), args[0])
 		if err != nil {
 			output.Error("Schedule not found: " + err.Error())
 			return nil
@@ -71,16 +72,16 @@ var scheduleGetCmd = &cobra.Command{
 			return nil
 		}
 		output.Header("Schedule: " + args[0])
-		output.KeyValue("Name", valStr(result, "name"))
-		output.KeyValue("Cron", valStr(result, "cronExpression"))
+		output.KeyValue("Name", mapStr(result, "name"))
+		output.KeyValue("Cron", mapStr(result, "cronExpression"))
 		enabled := "disabled"
 		if e, ok := result["enabled"].(bool); ok && e {
 			enabled = "enabled"
 		}
 		output.KeyValue("State", output.StatusBadge(enabled))
-		output.KeyValue("Last Run", valStr(result, "lastRunId"))
-		output.KeyValue("Last Run At", valStr(result, "lastRunAt"))
-		output.KeyValue("Created", valStr(result, "createdAt"))
+		output.KeyValue("Last Run", mapStr(result, "lastRunId"))
+		output.KeyValue("Last Run At", mapStr(result, "lastRunAt"))
+		output.KeyValue("Created", mapStr(result, "createdAt"))
 		return nil
 	},
 }
@@ -120,7 +121,7 @@ var scheduleCreateCmd = &cobra.Command{
 			"testRequest":    testRequest,
 		}
 
-		result, err := apiClient.CreateSchedule(req)
+		result, err := apiClient.CreateSchedule(context.Background(), req)
 		if err != nil {
 			output.Error("Failed to create schedule: " + err.Error())
 			return nil
@@ -129,8 +130,8 @@ var scheduleCreateCmd = &cobra.Command{
 			output.JSON(result)
 			return nil
 		}
-		output.Success(fmt.Sprintf("Schedule created: %s (%s)", valStr(result, "id"), valStr(result, "name")))
-		output.KeyValue("Cron", valStr(result, "cronExpression"))
+		output.Success(fmt.Sprintf("Schedule created: %s (%s)", mapStr(result, "id"), mapStr(result, "name")))
+		output.KeyValue("Cron", mapStr(result, "cronExpression"))
 		return nil
 	},
 }
@@ -141,7 +142,7 @@ var scheduleDeleteCmd = &cobra.Command{
 	Short:   "Delete a scheduled test",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := apiClient.DeleteSchedule(args[0])
+		err := apiClient.DeleteSchedule(context.Background(), args[0])
 		if err != nil {
 			output.Error("Failed to delete schedule: " + err.Error())
 			return nil

@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 
 	"github.com/klster/kates-cli/output"
@@ -17,7 +17,7 @@ var statusCmd = &cobra.Command{
 		ctx := activeContext(cfg)
 
 		// Health check
-		health, err := apiClient.Health()
+		health, err := apiClient.Health(context.Background())
 		if err != nil {
 			fmt.Printf("  %s %s │ %s │ %s\n",
 				output.ErrorStyle.Render("✖"),
@@ -28,15 +28,15 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
-		status := strVal(health, "status")
+		status := mapStrEmpty(health, "status")
 
 		// Count brokers
 		brokerCount := "?"
-		if bc := strVal(health, "brokerCount"); bc != "" && bc != "0" {
+		if bc := mapStrEmpty(health, "brokerCount"); bc != "" && bc != "0" {
 			brokerCount = bc
 		}
 		if kafka, ok := health["kafka"].(map[string]interface{}); ok {
-			if strVal(kafka, "status") == "UP" {
+			if mapStrEmpty(kafka, "status") == "UP" {
 				brokerCount = "✓"
 			}
 		}
@@ -45,22 +45,14 @@ var statusCmd = &cobra.Command{
 		running := 0
 		done := 0
 		failed := 0
-		data, err := apiClient.ListTests("", "", 0, 100)
+		data, err := apiClient.ListTests(context.Background(), "", "", 0, 100)
 		if err == nil {
-			var paged struct {
-				Content []map[string]interface{} `json:"content"`
-			}
-			if json.Unmarshal(data, &paged) == nil {
-				for _, t := range paged.Content {
-					switch valStr(t, "status") {
-					case "RUNNING", "PENDING":
-						running++
-					case "DONE", "COMPLETED":
-						done++
-					case "FAILED", "ERROR":
-						failed++
-					}
-				}
+			paged, parseErr := ParsePaged(data)
+			if parseErr == nil {
+				counts := CountStatuses(paged.Content)
+				running = counts.Running + counts.Pending
+				done = counts.Done
+				failed = counts.Failed
 			}
 		}
 
@@ -83,13 +75,6 @@ var statusCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func coloredCount(n int) string {
-	if n > 0 {
-		return output.ErrorStyle.Render(fmt.Sprintf("%d", n))
-	}
-	return output.DimStyle.Render("0")
 }
 
 func init() {
