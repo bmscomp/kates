@@ -23,10 +23,15 @@ type TestScenario struct {
 }
 
 type ValidationSpec struct {
-	MaxP99Latency float64 `yaml:"maxP99LatencyMs,omitempty" json:"maxP99LatencyMs,omitempty"`
-	MaxAvgLatency float64 `yaml:"maxAvgLatencyMs,omitempty" json:"maxAvgLatencyMs,omitempty"`
-	MinThroughput float64 `yaml:"minThroughputRecPerSec,omitempty" json:"minThroughputRecPerSec,omitempty"`
-	MaxErrorRate  float64 `yaml:"maxErrorRate,omitempty" json:"maxErrorRate,omitempty"`
+	MaxP99Latency  float64 `yaml:"maxP99LatencyMs,omitempty" json:"maxP99LatencyMs,omitempty"`
+	MaxAvgLatency  float64 `yaml:"maxAvgLatencyMs,omitempty" json:"maxAvgLatencyMs,omitempty"`
+	MinThroughput  float64 `yaml:"minThroughputRecPerSec,omitempty" json:"minThroughputRecPerSec,omitempty"`
+	MaxErrorRate   float64 `yaml:"maxErrorRate,omitempty" json:"maxErrorRate,omitempty"`
+	MaxDataLoss    float64 `yaml:"maxDataLossPercent,omitempty" json:"maxDataLossPercent,omitempty"`
+	MaxRtoMs       float64 `yaml:"maxRtoMs,omitempty" json:"maxRtoMs,omitempty"`
+	MaxRpoMs       float64 `yaml:"maxRpoMs,omitempty" json:"maxRpoMs,omitempty"`
+	MaxOutOfOrder  int64   `yaml:"maxOutOfOrder,omitempty" json:"maxOutOfOrder,omitempty"`
+	MaxCrcFailures int64   `yaml:"maxCrcFailures,omitempty" json:"maxCrcFailures,omitempty"`
 }
 
 type ScenarioFile struct {
@@ -204,6 +209,15 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 		if v, ok := s.Spec["fetchMaxWaitMs"]; ok {
 			spec.FetchMaxWaitMs = toInt(v)
 		}
+		if v, ok := s.Spec["enableIdempotence"]; ok {
+			spec.EnableIdempotence = toBool(v)
+		}
+		if v, ok := s.Spec["enableTransactions"]; ok {
+			spec.EnableTransactions = toBool(v)
+		}
+		if v, ok := s.Spec["enableCrc"]; ok {
+			spec.EnableCrc = toBool(v)
+		}
 		req.Spec = spec
 	}
 	return req
@@ -220,6 +234,17 @@ func toInt(v interface{}) int {
 		return int(i)
 	default:
 		return 0
+	}
+}
+
+func toBool(v interface{}) bool {
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		return b == "true"
+	default:
+		return false
 	}
 }
 

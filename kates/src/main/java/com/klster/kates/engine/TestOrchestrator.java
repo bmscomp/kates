@@ -404,8 +404,19 @@ public class TestOrchestrator {
                             .build()
             );
             case INTEGRITY -> List.of(
-                    produceTask(runId + "-integrity-produce", topic, spec, producerConfig),
-                    consumeTask(runId + "-integrity-consume", topic, spec)
+                    BenchmarkTask.builder(runId + "-integrity-0", BenchmarkTask.WorkloadType.INTEGRITY)
+                            .topic(topic)
+                            .partitions(spec.getPartitions())
+                            .targetMessagesPerSec(spec.getThroughput())
+                            .maxMessages(spec.getNumRecords())
+                            .durationMs(spec.getDurationMs())
+                            .recordSize(spec.getRecordSize())
+                            .consumerGroup(spec.getConsumerGroup() != null ? spec.getConsumerGroup() : "integrity-cg")
+                            .producerConfig(producerConfig)
+                            .enableIdempotence(spec.isEnableIdempotence())
+                            .enableTransactions(spec.isEnableTransactions())
+                            .enableCrc(spec.isEnableCrc())
+                            .build()
             );
         };
     }

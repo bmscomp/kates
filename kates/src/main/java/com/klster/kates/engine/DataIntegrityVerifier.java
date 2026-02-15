@@ -9,6 +9,8 @@ import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
 /**
@@ -18,8 +20,8 @@ import java.util.logging.Logger;
  * <p>Usage:
  * <pre>
  *   var verifier = new DataIntegrityVerifier(ackTracker);
- *   verifier.recordConsumed(sequenceNumber);  // called for each consumed record
- *   IntegrityResult result = verifier.verify(chaosStartNanos);
+ *   verifier.recordConsumed(seq, crcValid, partition);
+ *   IntegrityResult result = verifier.verify(chaosStartNanos, true, true, false, false);
  * </pre>
  *
  * <p>All timestamps use {@link System#nanoTime()} (monotonic clock) for accuracy.
@@ -31,7 +33,10 @@ public class DataIntegrityVerifier {
     private final AckTracker ackTracker;
     private final BitSet consumedSet = new BitSet();
     private final Map<Long, Integer> consumedCounts = new HashMap<>();
-    private long totalConsumed;
+    private final AtomicLong totalConsumed = new AtomicLong();
+    private final AtomicLong crcFailures = new AtomicLong();
+    private final AtomicLong outOfOrderCount = new AtomicLong();
+    private final ConcurrentHashMap<Integer, Long> perPartitionLastSeq = new ConcurrentHashMap<>();
 
     private volatile long firstConsumeGapNanos = -1;
     private volatile long firstConsumeRecoveryNanos = -1;
@@ -43,15 +48,27 @@ public class DataIntegrityVerifier {
     }
 
     /**
-     * Record a consumed sequence number.
-     * Called for each record read by the verification consumer.
-     * Tracks consumer-side gaps for consumer RTO computation.
+     * Record a consumed sequence number with optional CRC and ordering checks.
+     *
+     * @param sequence the sequence number from the payload
+     * @param crcValid whether the CRC32 checksum matched
+     * @param partition the Kafka partition this record came from
      */
-    public void recordConsumed(long sequence) {
+    public void recordConsumed(long sequence, boolean crcValid, int partition) {
         int seq = (int) sequence;
         consumedSet.set(seq);
         consumedCounts.merge(sequence, 1, Integer::sum);
-        totalConsumed++;
+        totalConsumed.incrementAndGet();
+
+        if (!crcValid) {
+            crcFailures.incrementAndGet();
+        }
+
+        Long lastSeq = perPartitionLastSeq.get(partition);
+        if (lastSeq != null && sequence < lastSeq) {
+            outOfOrderCount.incrementAndGet();
+        }
+        perPartitionLastSeq.put(partition, sequence);
 
         if (previousConsumedSeq >= 0 && sequence > previousConsumedSeq + 1) {
             if (!inConsumeGap) {
@@ -66,25 +83,32 @@ public class DataIntegrityVerifier {
     }
 
     /**
+     * Legacy overload for callers that don't need CRC/ordering.
+     */
+    public void recordConsumed(long sequence) {
+        recordConsumed(sequence, true, 0);
+    }
+
+    /**
      * Performs the reconciliation and returns the integrity result.
      *
-     * @param chaosStartNanos monotonic nano timestamp from
-     *        {@link com.klster.kates.chaos.ChaosOutcome#chaosStartNanos()}
-     *        for RPO computation. Pass -1 if no chaos was triggered.
+     * @param chaosStartNanos monotonic nano timestamp for RPO computation. Pass -1 if no chaos.
+     * @param crcVerified whether CRC checking was enabled
+     * @param orderingVerified whether ordering checking was enabled
+     * @param idempotenceEnabled whether idempotent producer was used
+     * @param transactionsEnabled whether transactional producer was used
      */
-    public IntegrityResult verify(long chaosStartNanos) {
+    public IntegrityResult verify(long chaosStartNanos,
+                                   boolean crcVerified,
+                                   boolean orderingVerified,
+                                   boolean idempotenceEnabled,
+                                   boolean transactionsEnabled) {
         BitSet ackedSet = ackTracker.getAckedSet();
 
-        // lost = acked but not consumed (data the broker claimed to persist but didn't)
+        // lost = acked but not consumed
         BitSet lostSet = (BitSet) ackedSet.clone();
         lostSet.andNot(consumedSet);
         long lostCount = lostSet.cardinality();
-
-        // unacked lost = failed sends that also weren't consumed (expected losses)
-        BitSet failedSet = ackTracker.getFailedSet();
-        BitSet unackedLostSet = (BitSet) failedSet.clone();
-        unackedLostSet.andNot(consumedSet);
-        long unackedLost = unackedLostSet.cardinality();
 
         // duplicates
         long duplicates = consumedCounts.values().stream()
@@ -92,15 +116,13 @@ public class DataIntegrityVerifier {
                 .mapToLong(c -> c - 1)
                 .sum();
 
-        // lost ranges (contiguous gaps in the acked-but-not-consumed set)
         List<LostRange> lostRanges = computeLostRanges(lostSet);
 
-        // producer RTO: max across all failure windows
+        // producer RTO
         long maxProducerRtoNanos = ackTracker.maxRtoNanos();
-        Duration producerRto = maxProducerRtoNanos > 0
-                ? Duration.ofNanos(maxProducerRtoNanos) : Duration.ZERO;
+        Duration producerRto = maxProducerRtoNanos > 0 ? Duration.ofNanos(maxProducerRtoNanos) : Duration.ZERO;
 
-        // consumer RTO: time from first gap detection to gap closure
+        // consumer RTO
         Duration consumerRto = Duration.ZERO;
         if (firstConsumeGapNanos > 0 && firstConsumeRecoveryNanos > 0) {
             long consumerRtoNanos = firstConsumeRecoveryNanos - firstConsumeGapNanos;
@@ -109,10 +131,9 @@ public class DataIntegrityVerifier {
             }
         }
 
-        // max RTO across both producer and consumer perspectives
         Duration maxRto = producerRto.compareTo(consumerRto) >= 0 ? producerRto : consumerRto;
 
-        // RPO: time between chaos start and last acknowledged record (both nanoTime)
+        // RPO
         Duration rpo = Duration.ZERO;
         if (chaosStartNanos > 0 && ackTracker.getLastAckedSendNanos() > 0) {
             long rpoNanos = chaosStartNanos - ackTracker.getLastAckedSendNanos();
@@ -121,37 +142,49 @@ public class DataIntegrityVerifier {
             }
         }
 
-        // data loss percent
         long totalSent = ackTracker.getTotalSent();
         double lossPercent = totalSent > 0 ? (double) lostCount / totalSent * 100.0 : 0.0;
 
-        // failure windows for detailed reporting
         List<AckTracker.FailureWindow> failureWindows = ackTracker.getCompletedWindows();
 
-        IntegrityResult result = IntegrityResult.builder()
-                .totalSent(totalSent)
-                .totalAcked(ackTracker.getTotalAcked())
-                .totalConsumed(totalConsumed)
-                .lostRecords(lostCount)
-                .unackedLost(unackedLost)
-                .duplicateRecords(duplicates)
-                .lostRanges(lostRanges)
-                .producerRto(producerRto)
-                .consumerRto(consumerRto)
-                .maxRto(maxRto)
-                .rpo(rpo)
-                .dataLossPercent(lossPercent)
-                .failureWindows(failureWindows)
-                .build();
+        IntegrityResult result = new IntegrityResult(
+                totalSent,
+                ackTracker.getTotalAcked(),
+                totalConsumed.get(),
+                lostCount,
+                duplicates,
+                lossPercent,
+                lostRanges,
+                producerRto,
+                consumerRto,
+                maxRto,
+                rpo,
+                failureWindows,
+                outOfOrderCount.get(),
+                crcFailures.get(),
+                orderingVerified,
+                crcVerified,
+                idempotenceEnabled,
+                transactionsEnabled
+        );
 
         LOG.info(String.format(
                 "Integrity: sent=%d acked=%d consumed=%d lost=%d dupes=%d " +
-                        "producerRTO=%s consumerRTO=%s rpo=%s loss=%.4f%% windows=%d",
-                totalSent, ackTracker.getTotalAcked(), totalConsumed,
-                lostCount, duplicates, producerRto, consumerRto, rpo,
-                lossPercent, failureWindows.size()));
+                        "ooo=%d crc_fail=%d producerRTO=%s consumerRTO=%s rpo=%s " +
+                        "loss=%.4f%% windows=%d verdict=%s",
+                totalSent, ackTracker.getTotalAcked(), totalConsumed.get(),
+                lostCount, duplicates, outOfOrderCount.get(), crcFailures.get(),
+                producerRto, consumerRto, rpo,
+                lossPercent, failureWindows.size(), result.verdict()));
 
         return result;
+    }
+
+    /**
+     * Legacy overload for callers that only need basic reconciliation.
+     */
+    public IntegrityResult verify(long chaosStartNanos) {
+        return verify(chaosStartNanos, false, false, false, false);
     }
 
     private List<LostRange> computeLostRanges(BitSet lostSet) {

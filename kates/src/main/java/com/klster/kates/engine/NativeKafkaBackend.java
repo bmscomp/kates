@@ -1,10 +1,12 @@
 package com.klster.kates.engine;
 
+import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.domain.TestResult.TaskStatus;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -88,6 +90,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 case PRODUCE -> runProducer(task, state);
                 case CONSUME -> runConsumer(task, state);
                 case ROUND_TRIP -> runProducer(task, state);
+                case INTEGRITY -> runIntegrity(task, state);
             }
             state.status = TaskStatus.DONE;
         } catch (Exception e) {
@@ -99,11 +102,43 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         }
     }
 
+    private void runIntegrity(BenchmarkTask task, WorkerState state) {
+        LOG.info("Integrity: starting produce phase for " + task.getTaskId());
+        runProducer(task, state);
+
+        LOG.info("Integrity: produce complete (" + state.recordsProcessed.get() +
+                " records). Starting consume phase...");
+
+        state.verifier = new DataIntegrityVerifier(state.ackTracker);
+        runIntegrityConsumer(task, state);
+
+        LOG.info("Integrity: consume complete. Running reconciliation...");
+
+        state.integrityResult = state.verifier.verify(
+                -1,
+                task.isEnableCrc(),
+                true,
+                task.isEnableIdempotence(),
+                task.isEnableTransactions()
+        );
+    }
+
     private void runProducer(BenchmarkTask task, WorkerState state) {
         Properties props = new Properties();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+
+        if (task.isEnableIdempotence()) {
+            props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+            props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "5");
+        }
+
+        if (task.isEnableTransactions()) {
+            props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "kates-" + task.getTaskId());
+            props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+        }
+
         task.getProducerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
@@ -112,8 +147,13 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 : 0;
 
         try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(props)) {
+            if (task.isEnableTransactions()) {
+                producer.initTransactions();
+            }
+
             long sent = 0;
             long nextSendNanos = System.nanoTime();
+            int txBatchSize = 100;
 
             while (!state.stopRequested.get()
                     && sent < task.getMaxMessages()
@@ -126,6 +166,11 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                         continue;
                     }
                     nextSendNanos = now + targetNanosPerMsg;
+                }
+
+                if (task.isEnableTransactions() && sent % txBatchSize == 0) {
+                    if (sent > 0) producer.commitTransaction();
+                    producer.beginTransaction();
                 }
 
                 long seq = sent;
@@ -151,6 +196,10 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 state.recordsProcessed.incrementAndGet();
                 state.histogram.recordLatency(latencyMs);
                 sent++;
+            }
+
+            if (task.isEnableTransactions()) {
+                producer.commitTransaction();
             }
 
             producer.flush();
@@ -187,6 +236,66 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         }
     }
 
+    private void runIntegrityConsumer(BenchmarkTask task, WorkerState state) {
+        Properties props = new Properties();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, task.getConsumerGroup() + "-integrity");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+
+        if (task.isEnableTransactions()) {
+            props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        }
+
+        task.getConsumerConfig().forEach(props::put);
+
+        long deadline = System.currentTimeMillis() + task.getDurationMs();
+        long expectedRecords = state.recordsProcessed.get();
+        int emptyPollStreak = 0;
+        int maxEmptyPolls = 20;
+
+        try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(props)) {
+            consumer.subscribe(Collections.singletonList(task.getTopic()));
+
+            long consumed = 0;
+            while (!state.stopRequested.get()
+                    && System.currentTimeMillis() < deadline) {
+
+                ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(1000));
+                if (records.isEmpty()) {
+                    emptyPollStreak++;
+                    if (emptyPollStreak >= maxEmptyPolls && consumed >= expectedRecords) {
+                        break;
+                    }
+                    continue;
+                }
+                emptyPollStreak = 0;
+
+                for (ConsumerRecord<byte[], byte[]> record : records) {
+                    try {
+                        SequencedPayload payload = SequencedPayload.decode(record.value());
+
+                        if (payload.getRunIdHash() != state.runIdHash) {
+                            continue;
+                        }
+
+                        boolean crcOk = !task.isEnableCrc() || payload.isCrcValid();
+                        state.verifier.recordConsumed(
+                                payload.getSequence(), crcOk, record.partition());
+                        consumed++;
+                    } catch (Exception e) {
+                        LOG.fine("Skipping malformed record at offset " + record.offset());
+                    }
+                }
+            }
+
+            LOG.info("Integrity consumer: consumed " + consumed + " records (expected " + expectedRecords + ")");
+        } catch (Exception e) {
+            throw new BenchmarkException("Integrity consumer failed: " + e.getMessage(), e);
+        }
+    }
+
     static class WorkerState {
         final BenchmarkTask task;
         final AtomicLong recordsProcessed = new AtomicLong();
@@ -201,6 +310,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         volatile long endTimeMs;
         volatile String error;
         volatile Thread thread;
+        volatile DataIntegrityVerifier verifier;
+        volatile IntegrityResult integrityResult;
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
@@ -228,6 +339,11 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             if (error != null) {
                 builder.error(error);
             }
+
+            if (integrityResult != null) {
+                builder.integrityResult(integrityResult);
+            }
+
             return builder.build();
         }
     }

@@ -2,6 +2,7 @@ package com.klster.kates.resilience;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.klster.kates.chaos.ChaosOutcome;
+import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
 
@@ -19,6 +20,7 @@ public class ResilienceReport {
     private ReportSummary postChaosSummary;
     private Map<String, Double> impactDeltas;
     private String status;
+    private IntegrityResult integrityResult;
 
     public TestReport getPerformanceReport() { return performanceReport; }
     public void setPerformanceReport(TestReport performanceReport) { this.performanceReport = performanceReport; }
@@ -37,4 +39,7 @@ public class ResilienceReport {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public IntegrityResult getIntegrityResult() { return integrityResult; }
+    public void setIntegrityResult(IntegrityResult integrityResult) { this.integrityResult = integrityResult; }
 }

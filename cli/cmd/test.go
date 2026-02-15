@@ -127,17 +127,43 @@ var testGetCmd = &cobra.Command{
 					output.KeyValue("Lost", fmtNum(float64(ir.LostRecords)))
 					output.KeyValue("Duplicates", fmtNum(float64(ir.DuplicateRecords)))
 					output.KeyValue("Data Loss", fmt.Sprintf("%.4f%%", ir.DataLossPercent))
+					if ir.ProducerRtoMs > 0 {
+						output.KeyValue("Producer RTO", fmt.Sprintf("%.0f ms", ir.ProducerRtoMs))
+					}
+					if ir.ConsumerRtoMs > 0 {
+						output.KeyValue("Consumer RTO", fmt.Sprintf("%.0f ms", ir.ConsumerRtoMs))
+					}
 					if ir.MaxRtoMs > 0 {
 						output.KeyValue("Max RTO", fmt.Sprintf("%.0f ms", ir.MaxRtoMs))
 					}
 					if ir.RpoMs > 0 {
 						output.KeyValue("RPO", fmt.Sprintf("%.0f ms", ir.RpoMs))
 					}
-					if ir.LostRecords == 0 {
-						output.KeyValue("Verdict", output.StatusBadge("PASS"))
-					} else {
-						output.KeyValue("Verdict", output.StatusBadge("FAIL"))
+					if ir.CrcVerified {
+						output.KeyValue("CRC Failures", fmtNum(float64(ir.CrcFailures)))
 					}
+					if ir.OrderingVerified {
+						output.KeyValue("Out of Order", fmtNum(float64(ir.OutOfOrderCount)))
+					}
+					modes := ""
+					if ir.IdempotenceEnabled {
+						modes += "idempotent "
+					}
+					if ir.TransactionsEnabled {
+						modes += "transactional "
+					}
+					if modes != "" {
+						output.KeyValue("Mode", modes)
+					}
+					verdict := ir.Verdict
+					if verdict == "" {
+						if ir.LostRecords == 0 {
+							verdict = "PASS"
+						} else {
+							verdict = "DATA_LOSS"
+						}
+					}
+					output.KeyValue("Verdict", output.StatusBadge(verdict))
 					if len(ir.LostRanges) > 0 {
 						output.SubHeader("Lost Ranges")
 						lostRows := make([][]string, 0, len(ir.LostRanges))

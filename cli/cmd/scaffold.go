@@ -321,9 +321,9 @@ scenarios:
 }
 
 func scaffoldIntegrity() string {
-	return `# INTEGRITY TEST — Data loss and duplication verification
-# Produces sequenced records, consumes them back, and reconciles
-# to detect lost, duplicated, or out-of-order records.
+	return `# INTEGRITY TEST — Data loss, corruption, and ordering verification
+# Produces CRC-protected sequenced records, consumes them back, and
+# reconciles to detect lost, duplicated, corrupted, or out-of-order records.
 #
 # Usage: kates test apply -f integrity-test.yaml --wait
 
@@ -345,8 +345,14 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
+      enableCrc: true
+      enableIdempotence: true
     validate:
       maxDataLossPercent: 0
+      maxRtoMs: 5000
+      maxRpoMs: 1000
+      maxOutOfOrder: 0
+      maxCrcFailures: 0
 `
 }
 

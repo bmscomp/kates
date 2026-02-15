@@ -64,17 +64,24 @@ type PhaseResult struct {
 }
 
 type IntegrityResult struct {
-	TotalSent        int64       `json:"totalSent"`
-	TotalAcked       int64       `json:"totalAcked"`
-	TotalConsumed    int64       `json:"totalConsumed"`
-	LostRecords      int64       `json:"lostRecords"`
-	DuplicateRecords int64       `json:"duplicateRecords"`
-	DataLossPercent  float64     `json:"dataLossPercent"`
-	LostRanges       []LostRange `json:"lostRanges,omitempty"`
-	ProducerRtoMs    float64     `json:"producerRtoMs,omitempty"`
-	ConsumerRtoMs    float64     `json:"consumerRtoMs,omitempty"`
-	MaxRtoMs         float64     `json:"maxRtoMs,omitempty"`
-	RpoMs            float64     `json:"rpoMs,omitempty"`
+	TotalSent           int64       `json:"totalSent"`
+	TotalAcked          int64       `json:"totalAcked"`
+	TotalConsumed       int64       `json:"totalConsumed"`
+	LostRecords         int64       `json:"lostRecords"`
+	DuplicateRecords    int64       `json:"duplicateRecords"`
+	DataLossPercent     float64     `json:"dataLossPercent"`
+	LostRanges          []LostRange `json:"lostRanges,omitempty"`
+	ProducerRtoMs       float64     `json:"producerRtoMs,omitempty"`
+	ConsumerRtoMs       float64     `json:"consumerRtoMs,omitempty"`
+	MaxRtoMs            float64     `json:"maxRtoMs,omitempty"`
+	RpoMs               float64     `json:"rpoMs,omitempty"`
+	OutOfOrderCount     int64       `json:"outOfOrderCount"`
+	CrcFailures         int64       `json:"crcFailures"`
+	OrderingVerified    bool        `json:"orderingVerified"`
+	CrcVerified         bool        `json:"crcVerified"`
+	IdempotenceEnabled  bool        `json:"idempotenceEnabled"`
+	TransactionsEnabled bool        `json:"transactionsEnabled"`
+	Verdict             string      `json:"verdict,omitempty"`
 }
 
 type LostRange struct {
@@ -187,23 +194,26 @@ type CreateTestRequest struct {
 }
 
 type TestSpec struct {
-	Records           int    `json:"records,omitempty"`
-	ParallelProducers int    `json:"parallelProducers,omitempty"`
-	RecordSizeBytes   int    `json:"recordSizeBytes,omitempty"`
-	DurationSeconds   int    `json:"durationSeconds,omitempty"`
-	Topic             string `json:"topic,omitempty"`
-	Acks              string `json:"acks,omitempty"`
-	BatchSize         int    `json:"batchSize,omitempty"`
-	LingerMs          int    `json:"lingerMs,omitempty"`
-	CompressionType   string `json:"compressionType,omitempty"`
-	NumConsumers      int    `json:"numConsumers,omitempty"`
-	ReplicationFactor int    `json:"replicationFactor,omitempty"`
-	Partitions        int    `json:"partitions,omitempty"`
-	MinInsyncReplicas int    `json:"minInsyncReplicas,omitempty"`
-	ConsumerGroup     string `json:"consumerGroup,omitempty"`
-	TargetThroughput  int    `json:"targetThroughput,omitempty"`
-	FetchMinBytes     int    `json:"fetchMinBytes,omitempty"`
-	FetchMaxWaitMs    int    `json:"fetchMaxWaitMs,omitempty"`
+	Records            int    `json:"records,omitempty"`
+	ParallelProducers  int    `json:"parallelProducers,omitempty"`
+	RecordSizeBytes    int    `json:"recordSizeBytes,omitempty"`
+	DurationSeconds    int    `json:"durationSeconds,omitempty"`
+	Topic              string `json:"topic,omitempty"`
+	Acks               string `json:"acks,omitempty"`
+	BatchSize          int    `json:"batchSize,omitempty"`
+	LingerMs           int    `json:"lingerMs,omitempty"`
+	CompressionType    string `json:"compressionType,omitempty"`
+	NumConsumers       int    `json:"numConsumers,omitempty"`
+	ReplicationFactor  int    `json:"replicationFactor,omitempty"`
+	Partitions         int    `json:"partitions,omitempty"`
+	MinInsyncReplicas  int    `json:"minInsyncReplicas,omitempty"`
+	ConsumerGroup      string `json:"consumerGroup,omitempty"`
+	TargetThroughput   int    `json:"targetThroughput,omitempty"`
+	FetchMinBytes      int    `json:"fetchMinBytes,omitempty"`
+	FetchMaxWaitMs     int    `json:"fetchMaxWaitMs,omitempty"`
+	EnableIdempotence  bool   `json:"enableIdempotence,omitempty"`
+	EnableTransactions bool   `json:"enableTransactions,omitempty"`
+	EnableCrc          bool   `json:"enableCrc,omitempty"`
 }
 
 // TopicDetail from GET /api/cluster/topics/{name}

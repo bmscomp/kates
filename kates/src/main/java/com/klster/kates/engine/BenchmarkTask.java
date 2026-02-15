@@ -9,7 +9,7 @@ import java.util.Map;
 public class BenchmarkTask {
 
     public enum WorkloadType {
-        PRODUCE, CONSUME, ROUND_TRIP
+        PRODUCE, CONSUME, ROUND_TRIP, INTEGRITY
     }
 
     private final String taskId;
@@ -24,6 +24,9 @@ public class BenchmarkTask {
     private final String consumerGroup;
     private final Map<String, String> producerConfig;
     private final Map<String, String> consumerConfig;
+    private final boolean enableIdempotence;
+    private final boolean enableTransactions;
+    private final boolean enableCrc;
 
     private BenchmarkTask(Builder builder) {
         this.taskId = builder.taskId;
@@ -38,6 +41,9 @@ public class BenchmarkTask {
         this.consumerGroup = builder.consumerGroup;
         this.producerConfig = Map.copyOf(builder.producerConfig);
         this.consumerConfig = Map.copyOf(builder.consumerConfig);
+        this.enableIdempotence = builder.enableIdempotence;
+        this.enableTransactions = builder.enableTransactions;
+        this.enableCrc = builder.enableCrc;
     }
 
     public String getTaskId() { return taskId; }
@@ -52,6 +58,9 @@ public class BenchmarkTask {
     public String getConsumerGroup() { return consumerGroup; }
     public Map<String, String> getProducerConfig() { return producerConfig; }
     public Map<String, String> getConsumerConfig() { return consumerConfig; }
+    public boolean isEnableIdempotence() { return enableIdempotence; }
+    public boolean isEnableTransactions() { return enableTransactions; }
+    public boolean isEnableCrc() { return enableCrc; }
 
     public static Builder builder(String taskId, WorkloadType type) {
         return new Builder(taskId, type);
@@ -70,6 +79,9 @@ public class BenchmarkTask {
         private String consumerGroup = "benchmark-group";
         private Map<String, String> producerConfig = Map.of();
         private Map<String, String> consumerConfig = Map.of();
+        private boolean enableIdempotence = false;
+        private boolean enableTransactions = false;
+        private boolean enableCrc = true;
 
         private Builder(String taskId, WorkloadType workloadType) {
             this.taskId = taskId;
@@ -86,6 +98,9 @@ public class BenchmarkTask {
         public Builder consumerGroup(String g) { this.consumerGroup = g; return this; }
         public Builder producerConfig(Map<String, String> c) { this.producerConfig = c; return this; }
         public Builder consumerConfig(Map<String, String> c) { this.consumerConfig = c; return this; }
+        public Builder enableIdempotence(boolean b) { this.enableIdempotence = b; return this; }
+        public Builder enableTransactions(boolean b) { this.enableTransactions = b; return this; }
+        public Builder enableCrc(boolean b) { this.enableCrc = b; return this; }
 
         public BenchmarkTask build() {
             return new BenchmarkTask(this);

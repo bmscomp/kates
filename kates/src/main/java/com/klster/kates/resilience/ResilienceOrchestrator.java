@@ -85,6 +85,12 @@ public class ResilienceOrchestrator {
                 report.setImpactDeltas(computeImpactDeltas(preChaos, postChaos));
             }
 
+            // 9. Extract integrity result if present (INTEGRITY test type)
+            run.getResults().stream()
+                    .filter(r -> r.getIntegrity() != null)
+                    .findFirst()
+                    .ifPresent(r -> report.setIntegrityResult(r.getIntegrity()));
+
             report.setStatus(outcome.isPass() ? "COMPLETED" : "CHAOS_FAILED");
 
         } catch (InterruptedException e) {

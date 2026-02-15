@@ -23,6 +23,9 @@ public class TestSpec {
     private int targetThroughput = -1;
     private int fetchMinBytes = 1;
     private int fetchMaxWaitMs = 500;
+    private boolean enableIdempotence = false;
+    private boolean enableTransactions = false;
+    private boolean enableCrc = true;
 
     public TestSpec() {
     }
@@ -169,5 +172,29 @@ public class TestSpec {
 
     public void setFetchMaxWaitMs(int fetchMaxWaitMs) {
         this.fetchMaxWaitMs = fetchMaxWaitMs;
+    }
+
+    public boolean isEnableIdempotence() {
+        return enableIdempotence;
+    }
+
+    public void setEnableIdempotence(boolean enableIdempotence) {
+        this.enableIdempotence = enableIdempotence;
+    }
+
+    public boolean isEnableTransactions() {
+        return enableTransactions;
+    }
+
+    public void setEnableTransactions(boolean enableTransactions) {
+        this.enableTransactions = enableTransactions;
+    }
+
+    public boolean isEnableCrc() {
+        return enableCrc;
+    }
+
+    public void setEnableCrc(boolean enableCrc) {
+        this.enableCrc = enableCrc;
     }
 }
