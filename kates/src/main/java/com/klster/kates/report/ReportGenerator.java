@@ -102,6 +102,9 @@ public class ReportGenerator {
         List<BrokerMetrics> brokers = new ArrayList<>();
         for (ClusterSnapshot.BrokerInfo broker : snapshot.brokers()) {
             int leaderCount = snapshot.leaderCountForBroker(broker.id());
+            int replicaCount = snapshot.replicaCountForBroker(broker.id());
+            int isrCount = snapshot.isrCountForBroker(broker.id());
+            int underReplicated = snapshot.underReplicatedCountForBroker(broker.id());
             double share = (double) leaderCount / totalPartitions;
 
             ReportSummary projected = new ReportSummary(
@@ -122,9 +125,11 @@ public class ReportGenerator {
 
             brokers.add(new BrokerMetrics(
                     broker.id(), broker.host(), broker.rack(),
-                    leaderCount, totalPartitions,
+                    broker.id() == snapshot.controllerId(),
+                    leaderCount, replicaCount, isrCount, underReplicated,
+                    totalPartitions,
                     Math.round(share * 10000.0) / 100.0,
-                    projected, false
+                    0.0, false, projected
             ));
         }
 
@@ -134,13 +139,14 @@ public class ReportGenerator {
 
         if (avgThroughput > 0) {
             brokers = brokers.stream().map(b -> {
-                double deviation = Math.abs(
-                        b.metrics().avgThroughputRecPerSec() - avgThroughput) / avgThroughput;
+                double deviation = (b.metrics().avgThroughputRecPerSec() - avgThroughput) / avgThroughput;
+                double deviationPct = Math.round(deviation * 10000.0) / 100.0;
                 return new BrokerMetrics(
-                        b.brokerId(), b.host(), b.rack(),
-                        b.leaderPartitions(), b.totalPartitions(),
-                        b.leaderSharePercent(), b.metrics(),
-                        deviation > 0.20);
+                        b.brokerId(), b.host(), b.rack(), b.isController(),
+                        b.leaderPartitions(), b.replicaPartitions(),
+                        b.isrPartitions(), b.underReplicatedPartitions(),
+                        b.totalPartitions(), b.leaderSharePercent(),
+                        deviationPct, Math.abs(deviation) > 0.20, b.metrics());
             }).toList();
         }
 

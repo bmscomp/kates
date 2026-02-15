@@ -128,6 +128,54 @@ public class TrendService {
         return new ArrayList<>(phases);
     }
 
+    /**
+     * Compute trend for a specific broker's projected metrics across test runs.
+     * For each run, generates the report, finds the matching broker in the
+     * broker metrics list, and extracts the requested metric value.
+     */
+    public BrokerTrendResponse computeBrokerTrend(
+            TestType type, String metric, int brokerId, int days, int baselineWindow) {
+        List<TestRun> runs = findRuns(type, days);
+
+        Function<ReportSummary, Double> extractor = metricExtractor(metric);
+        if (extractor == null) {
+            BrokerTrendResponse resp = new BrokerTrendResponse();
+            resp.setBrokerId(brokerId);
+            resp.setTestType(type.name());
+            resp.setMetric(metric);
+            resp.setDataPoints(List.of());
+            resp.setRegressions(List.of());
+            return resp;
+        }
+
+        List<TrendResponse.DataPoint> dataPoints = new ArrayList<>();
+        for (TestRun run : runs) {
+            TestReport report = reportGenerator.generate(run);
+            if (report.getBrokerMetrics() == null) continue;
+
+            report.getBrokerMetrics().stream()
+                    .filter(b -> b.brokerId() == brokerId)
+                    .findFirst()
+                    .ifPresent(bm -> {
+                        double value = extractor.apply(bm.metrics());
+                        dataPoints.add(new TrendResponse.DataPoint(
+                                run.getCreatedAt(), run.getId(), value));
+                    });
+        }
+
+        double baseline = computeBaseline(dataPoints, baselineWindow);
+        List<TrendResponse.Regression> regressions = detectRegressions(dataPoints, baseline, metric);
+
+        BrokerTrendResponse resp = new BrokerTrendResponse();
+        resp.setBrokerId(brokerId);
+        resp.setTestType(type.name());
+        resp.setMetric(metric);
+        resp.setBaseline(baseline);
+        resp.setDataPoints(dataPoints);
+        resp.setRegressions(regressions);
+        return resp;
+    }
+
     private List<TestRun> findRuns(TestType type, int days) {
         Instant from = Instant.now().minus(days, ChronoUnit.DAYS);
         Instant to = Instant.now();

@@ -85,6 +85,30 @@ public class TrendResource {
         return Response.ok(breakdown).build();
     }
 
+    @GET
+    @Path("/broker")
+    public Response getBrokerTrend(
+            @QueryParam("type") String typeStr,
+            @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @QueryParam("brokerId") @DefaultValue("0") int brokerId,
+            @QueryParam("days") @DefaultValue("30") int days,
+            @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
+
+        TestType type = parseType(typeStr);
+        if (type == null) {
+            return badRequest(typeStr == null || typeStr.isBlank()
+                    ? "Query param 'type' is required"
+                    : "Unknown test type: " + typeStr);
+        }
+
+        Response validation = validateDays(days);
+        if (validation != null) return validation;
+
+        BrokerTrendResponse trend = trendService.computeBrokerTrend(
+                type, metric, brokerId, days, baselineWindow);
+        return Response.ok(trend).build();
+    }
+
     private TestType parseType(String typeStr) {
         if (typeStr == null || typeStr.isBlank()) return null;
         try {

@@ -632,34 +632,49 @@ func TestReportBrokers(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode([]BrokerMetricsResponse{
 			{
-				BrokerID:         0,
-				Host:             "broker-0",
-				Rack:             "zone-a",
-				LeaderPartitions: 4,
-				TotalPartitions:  12,
-				LeaderSharePct:   33.33,
-				Metrics:          BrokerMetricsSummary{AvgThroughputRecPerSec: 12000, P99LatencyMs: 3.2},
-				Skewed:           false,
+				BrokerID:                  0,
+				Host:                      "broker-0",
+				Rack:                      "zone-a",
+				IsController:              true,
+				LeaderPartitions:          4,
+				ReplicaPartitions:         8,
+				IsrPartitions:             8,
+				UnderReplicatedPartitions: 0,
+				TotalPartitions:           12,
+				LeaderSharePct:            33.33,
+				SkewPercent:               0.5,
+				Skewed:                    false,
+				Metrics:                   BrokerMetricsSummary{AvgThroughputRecPerSec: 12000, P99LatencyMs: 3.2},
 			},
 			{
-				BrokerID:         1,
-				Host:             "broker-1",
-				Rack:             "zone-b",
-				LeaderPartitions: 4,
-				TotalPartitions:  12,
-				LeaderSharePct:   33.33,
-				Metrics:          BrokerMetricsSummary{AvgThroughputRecPerSec: 11800, P99LatencyMs: 3.8},
-				Skewed:           false,
+				BrokerID:                  1,
+				Host:                      "broker-1",
+				Rack:                      "zone-b",
+				IsController:              false,
+				LeaderPartitions:          4,
+				ReplicaPartitions:         8,
+				IsrPartitions:             7,
+				UnderReplicatedPartitions: 1,
+				TotalPartitions:           12,
+				LeaderSharePct:            33.33,
+				SkewPercent:               -1.2,
+				Skewed:                    false,
+				Metrics:                   BrokerMetricsSummary{AvgThroughputRecPerSec: 11800, P99LatencyMs: 3.8},
 			},
 			{
-				BrokerID:         2,
-				Host:             "broker-2",
-				Rack:             "zone-c",
-				LeaderPartitions: 4,
-				TotalPartitions:  12,
-				LeaderSharePct:   33.34,
-				Metrics:          BrokerMetricsSummary{AvgThroughputRecPerSec: 7200, P99LatencyMs: 7.1},
-				Skewed:           true,
+				BrokerID:                  2,
+				Host:                      "broker-2",
+				Rack:                      "zone-c",
+				IsController:              false,
+				LeaderPartitions:          4,
+				ReplicaPartitions:         8,
+				IsrPartitions:             8,
+				UnderReplicatedPartitions: 0,
+				TotalPartitions:           12,
+				LeaderSharePct:            33.34,
+				SkewPercent:               -25.3,
+				Skewed:                    true,
+				Metrics:                   BrokerMetricsSummary{AvgThroughputRecPerSec: 7200, P99LatencyMs: 7.1},
 			},
 		})
 	})
@@ -673,8 +688,17 @@ func TestReportBrokers(t *testing.T) {
 	if brokers[0].Host != "broker-0" {
 		t.Errorf("brokers[0].Host = %q", brokers[0].Host)
 	}
+	if !brokers[0].IsController {
+		t.Errorf("brokers[0].IsController = false, want true")
+	}
+	if brokers[1].UnderReplicatedPartitions != 1 {
+		t.Errorf("brokers[1].UnderReplicatedPartitions = %d, want 1", brokers[1].UnderReplicatedPartitions)
+	}
 	if brokers[2].Skewed != true {
 		t.Errorf("brokers[2].Skewed = %v, want true", brokers[2].Skewed)
+	}
+	if brokers[2].SkewPercent != -25.3 {
+		t.Errorf("brokers[2].SkewPercent = %f, want -25.3", brokers[2].SkewPercent)
 	}
 	if brokers[0].Metrics.AvgThroughputRecPerSec != 12000 {
 		t.Errorf("brokers[0].Metrics.AvgThroughputRecPerSec = %f", brokers[0].Metrics.AvgThroughputRecPerSec)
@@ -716,6 +740,49 @@ func TestReportSnapshot(t *testing.T) {
 	}
 	if snap.Leaders[0].LeaderID != 0 {
 		t.Errorf("Leaders[0].LeaderID = %d", snap.Leaders[0].LeaderID)
+	}
+}
+
+func TestBrokerTrend(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/trends/broker" {
+			t.Errorf("path = %s, want /api/trends/broker", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("brokerId") != "1" {
+			t.Errorf("brokerId = %s, want 1", q.Get("brokerId"))
+		}
+		if q.Get("type") != "LOAD" {
+			t.Errorf("type = %s, want LOAD", q.Get("type"))
+		}
+		json.NewEncoder(w).Encode(BrokerTrendResponse{
+			BrokerID: 1,
+			TestType: "LOAD",
+			Metric:   "avgThroughputRecPerSec",
+			Baseline: 11500,
+			DataPoints: []DataPoint{
+				{RunID: "r1", Value: 11200},
+				{RunID: "r2", Value: 11800},
+				{RunID: "r3", Value: 12100},
+			},
+			Regressions: []Regression{},
+		})
+	})
+	resp, err := c.BrokerTrend(context.Background(), "LOAD", "avgThroughputRecPerSec", 1, 30, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.BrokerID != 1 {
+		t.Errorf("BrokerID = %d, want 1", resp.BrokerID)
+	}
+	if resp.Baseline != 11500 {
+		t.Errorf("Baseline = %f, want 11500", resp.Baseline)
+	}
+	if len(resp.DataPoints) != 3 {
+		t.Fatalf("DataPoints count = %d, want 3", len(resp.DataPoints))
+	}
+	if resp.DataPoints[2].Value != 12100 {
+		t.Errorf("DataPoints[2].Value = %f, want 12100", resp.DataPoints[2].Value)
 	}
 }
 

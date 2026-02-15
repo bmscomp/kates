@@ -174,14 +174,19 @@ type PhaseTrend struct {
 
 // BrokerMetricsResponse from GET /api/tests/{id}/report/brokers
 type BrokerMetricsResponse struct {
-	BrokerID         int                  `json:"brokerId"`
-	Host             string               `json:"host"`
-	Rack             string               `json:"rack,omitempty"`
-	LeaderPartitions int                  `json:"leaderPartitions"`
-	TotalPartitions  int                  `json:"totalPartitions"`
-	LeaderSharePct   float64              `json:"leaderSharePercent"`
-	Metrics          BrokerMetricsSummary `json:"metrics"`
-	Skewed           bool                 `json:"skewed"`
+	BrokerID                  int                  `json:"brokerId"`
+	Host                      string               `json:"host"`
+	Rack                      string               `json:"rack,omitempty"`
+	IsController              bool                 `json:"isController"`
+	LeaderPartitions          int                  `json:"leaderPartitions"`
+	ReplicaPartitions         int                  `json:"replicaPartitions"`
+	IsrPartitions             int                  `json:"isrPartitions"`
+	UnderReplicatedPartitions int                  `json:"underReplicatedPartitions"`
+	TotalPartitions           int                  `json:"totalPartitions"`
+	LeaderSharePct            float64              `json:"leaderSharePercent"`
+	SkewPercent               float64              `json:"skewPercent"`
+	Skewed                    bool                 `json:"skewed"`
+	Metrics                   BrokerMetricsSummary `json:"metrics"`
 }
 
 type BrokerMetricsSummary struct {
@@ -195,6 +200,16 @@ type BrokerMetricsSummary struct {
 	P99LatencyMs            float64 `json:"p99LatencyMs"`
 	P999LatencyMs           float64 `json:"p999LatencyMs"`
 	MaxLatencyMs            float64 `json:"maxLatencyMs"`
+}
+
+// BrokerTrendResponse from GET /api/trends/broker
+type BrokerTrendResponse struct {
+	BrokerID    int          `json:"brokerId"`
+	TestType    string       `json:"testType"`
+	Metric      string       `json:"metric"`
+	Baseline    float64      `json:"baseline"`
+	DataPoints  []DataPoint  `json:"dataPoints,omitempty"`
+	Regressions []Regression `json:"regressions,omitempty"`
 }
 
 // ClusterSnapshotResponse from GET /api/tests/{id}/report/snapshot

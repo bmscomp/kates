@@ -17,6 +17,7 @@ var (
 	trendBaseline  int
 	trendPhase     string
 	trendAllPhases bool
+	trendBroker    int
 )
 
 var trendCmd = &cobra.Command{
@@ -33,6 +34,10 @@ var trendCmd = &cobra.Command{
 
 		if trendAllPhases {
 			return runAllPhases()
+		}
+
+		if trendBroker >= 0 {
+			return runBrokerTrend()
 		}
 
 		result, err := apiClient.Trends(context.Background(), trendType, trendMetric, trendDays, trendBaseline, trendPhase)
@@ -228,6 +233,42 @@ func renderTrendRegressions(regressions []client.Regression) {
 	output.Table([]string{"Run ID", "Value", "Baseline", "Deviation"}, rows)
 }
 
+func runBrokerTrend() error {
+	result, err := apiClient.BrokerTrend(
+		context.Background(), trendType, trendMetric, trendBroker, trendDays, trendBaseline)
+	if err != nil {
+		return cmdErr("Failed to fetch broker trend: " + err.Error())
+	}
+
+	if outputMode == "json" {
+		output.JSON(result)
+		return nil
+	}
+
+	output.Banner("Broker Trend Analysis",
+		fmt.Sprintf("%s · broker:%d · %s · %dd window", trendType, trendBroker, trendMetric, trendDays))
+
+	output.KeyValue("Baseline", fmt.Sprintf("%.2f", result.Baseline))
+
+	higherIsBetter := strings.Contains(strings.ToLower(trendMetric), "throughput")
+
+	if len(result.DataPoints) == 0 {
+		output.Hint("No data points for this broker in the selected range.")
+	} else {
+		values := make([]float64, len(result.DataPoints))
+		for i, dp := range result.DataPoints {
+			values[i] = dp.Value
+		}
+		output.SubHeader("Sparkline")
+		fmt.Println("  " + output.SparklineColored(values, higherIsBetter))
+		fmt.Println()
+		renderTrendDataPoints(result.DataPoints, result.Baseline, higherIsBetter)
+	}
+
+	renderTrendRegressions(result.Regressions)
+	return nil
+}
+
 func init() {
 	trendCmd.Flags().StringVar(&trendType, "type", "", "Test type (required)")
 	trendCmd.Flags().StringVar(&trendMetric, "metric", "avgThroughputRecPerSec", "Metric to analyze")
@@ -235,6 +276,7 @@ func init() {
 	trendCmd.Flags().IntVar(&trendBaseline, "baseline", 5, "Number of recent runs for baseline")
 	trendCmd.Flags().StringVar(&trendPhase, "phase", "", "Phase name to analyze (omit for overall)")
 	trendCmd.Flags().BoolVar(&trendAllPhases, "all-phases", false, "Show trends for all phases side-by-side")
+	trendCmd.Flags().IntVar(&trendBroker, "broker", -1, "Broker ID to scope trend analysis")
 
 	trendPhasesCmd.Flags().StringVar(&trendType, "type", "", "Test type (required)")
 	trendPhasesCmd.Flags().IntVar(&trendDays, "days", 30, "Look-back window in days")

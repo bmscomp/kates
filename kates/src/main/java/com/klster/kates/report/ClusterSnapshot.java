@@ -29,4 +29,26 @@ public record ClusterSnapshot(
         if (leaders == null) return 0;
         return (int) leaders.stream().filter(l -> l.leaderId() == brokerId).count();
     }
+
+    public int replicaCountForBroker(int brokerId) {
+        if (leaders == null) return 0;
+        return (int) leaders.stream()
+                .filter(l -> l.replicas() != null && l.replicas().contains(brokerId))
+                .count();
+    }
+
+    public int isrCountForBroker(int brokerId) {
+        if (leaders == null) return 0;
+        return (int) leaders.stream()
+                .filter(l -> l.isr() != null && l.isr().contains(brokerId))
+                .count();
+    }
+
+    public int underReplicatedCountForBroker(int brokerId) {
+        if (leaders == null) return 0;
+        return (int) leaders.stream()
+                .filter(l -> l.replicas() != null && l.replicas().contains(brokerId))
+                .filter(l -> l.isr() != null && l.isr().size() < l.replicas().size())
+                .count();
+    }
 }

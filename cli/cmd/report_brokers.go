@@ -3,7 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -31,39 +34,124 @@ var reportBrokersCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Banner("Broker-Correlated Metrics",
-			fmt.Sprintf("Run: %s  │  %d brokers", runID, len(brokers)))
+		skewCount := 0
+		urpCount := 0
+		for _, b := range brokers {
+			if b.Skewed {
+				skewCount++
+			}
+			urpCount += b.UnderReplicatedPartitions
+		}
+
+		subtitle := fmt.Sprintf("Run: %s  │  %d brokers", runID, len(brokers))
+		if skewCount > 0 {
+			subtitle += fmt.Sprintf("  │  %s", output.ErrorStyle.Render(fmt.Sprintf("%d skewed", skewCount)))
+		}
+		if urpCount > 0 {
+			subtitle += fmt.Sprintf("  │  %s", output.WarningStyle.Render(fmt.Sprintf("%d under-replicated", urpCount)))
+		}
+		output.Banner("Broker-Correlated Metrics", subtitle)
 
 		rows := make([][]string, 0, len(brokers))
+		maxThroughput := 0.0
+		for _, b := range brokers {
+			if b.Metrics.AvgThroughputRecPerSec > maxThroughput {
+				maxThroughput = b.Metrics.AvgThroughputRecPerSec
+			}
+		}
+
 		for _, b := range brokers {
 			rackLabel := b.Rack
 			if rackLabel == "" {
 				rackLabel = "-"
 			}
 
-			skewFlag := ""
-			if b.Skewed {
-				skewFlag = output.ErrorStyle.Render("⚠ SKEW")
+			brokerLabel := fmt.Sprintf("%d", b.BrokerID)
+			if b.IsController {
+				brokerLabel = fmt.Sprintf("%d ★", b.BrokerID)
 			}
 
+			skewLabel := renderSkew(b.SkewPercent, b.Skewed)
+
+			urpLabel := fmt.Sprintf("%d", b.UnderReplicatedPartitions)
+			if b.UnderReplicatedPartitions > 0 {
+				urpLabel = output.WarningStyle.Render(fmt.Sprintf("%d ⚠", b.UnderReplicatedPartitions))
+			}
+
+			throughputBar := renderThroughputBar(b.Metrics.AvgThroughputRecPerSec, maxThroughput)
+
 			rows = append(rows, []string{
-				fmt.Sprintf("%d", b.BrokerID),
+				brokerLabel,
 				fmt.Sprintf("%s (%s)", b.Host, rackLabel),
 				fmt.Sprintf("%d / %d", b.LeaderPartitions, b.TotalPartitions),
 				fmt.Sprintf("%.1f%%", b.LeaderSharePct),
-				fmt.Sprintf("%.1f rec/s", b.Metrics.AvgThroughputRecPerSec),
+				throughputBar,
 				fmt.Sprintf("%.2f ms", b.Metrics.P99LatencyMs),
-				skewFlag,
+				skewLabel,
+				urpLabel,
 			})
 		}
 
 		output.Table([]string{
 			"Broker", "Host (Rack)", "Leaders / Total",
-			"Share", "Throughput", "p99 Latency", "Skew",
+			"Share", "Throughput", "p99 Latency", "Skew", "URP",
 		}, rows)
+
+		output.Divider()
+		output.SubHeader("Partition Balance")
+		balanceScore := computeBalanceScore(brokers)
+		scoreLabel := fmt.Sprintf("%.0f%%", balanceScore)
+		if balanceScore >= 90 {
+			output.KeyValue("Balance Score", output.SuccessStyle.Render(scoreLabel+" — Excellent"))
+		} else if balanceScore >= 70 {
+			output.KeyValue("Balance Score", output.WarningStyle.Render(scoreLabel+" — Fair"))
+		} else {
+			output.KeyValue("Balance Score", output.ErrorStyle.Render(scoreLabel+" — Poor"))
+		}
+		fmt.Println()
 
 		return nil
 	},
+}
+
+func renderSkew(pct float64, skewed bool) string {
+	label := fmt.Sprintf("%+.1f%%", pct)
+	if skewed {
+		return output.ErrorStyle.Render(label + " ⚠")
+	}
+	if math.Abs(pct) > 10 {
+		return output.WarningStyle.Render(label)
+	}
+	return output.DimStyle.Render(label)
+}
+
+func renderThroughputBar(value, max float64) string {
+	barWidth := 12
+	filled := 0
+	if max > 0 {
+		filled = int((value / max) * float64(barWidth))
+		if filled > barWidth {
+			filled = barWidth
+		}
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	return fmt.Sprintf("%s %.0f", bar, value)
+}
+
+func computeBalanceScore(brokers []client.BrokerMetricsResponse) float64 {
+	if len(brokers) == 0 {
+		return 100
+	}
+	idealShare := 100.0 / float64(len(brokers))
+	totalDeviation := 0.0
+	for _, b := range brokers {
+		totalDeviation += math.Abs(b.LeaderSharePct - idealShare)
+	}
+	maxDeviation := 2 * (100.0 - idealShare)
+	if maxDeviation == 0 {
+		return 100
+	}
+	return math.Max(0, 100-(totalDeviation/maxDeviation)*100)
 }
 
 var reportSnapshotCmd = &cobra.Command{
@@ -98,8 +186,12 @@ var reportSnapshotCmd = &cobra.Command{
 				if rack == "" {
 					rack = "-"
 				}
+				ctrlBadge := ""
+				if b.ID == snapshot.ControllerID {
+					ctrlBadge = " ★"
+				}
 				rows = append(rows, []string{
-					fmt.Sprintf("%d", b.ID),
+					fmt.Sprintf("%d%s", b.ID, ctrlBadge),
 					b.Host,
 					fmt.Sprintf("%d", b.Port),
 					rack,
