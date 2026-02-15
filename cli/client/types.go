@@ -172,6 +172,55 @@ type PhaseTrend struct {
 	Regressions []Regression `json:"regressions,omitempty"`
 }
 
+// BrokerMetricsResponse from GET /api/tests/{id}/report/brokers
+type BrokerMetricsResponse struct {
+	BrokerID         int                  `json:"brokerId"`
+	Host             string               `json:"host"`
+	Rack             string               `json:"rack,omitempty"`
+	LeaderPartitions int                  `json:"leaderPartitions"`
+	TotalPartitions  int                  `json:"totalPartitions"`
+	LeaderSharePct   float64              `json:"leaderSharePercent"`
+	Metrics          BrokerMetricsSummary `json:"metrics"`
+	Skewed           bool                 `json:"skewed"`
+}
+
+type BrokerMetricsSummary struct {
+	TotalRecords            int64   `json:"totalRecords"`
+	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec"`
+	PeakThroughputRecPerSec float64 `json:"peakThroughputRecPerSec"`
+	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec"`
+	AvgLatencyMs            float64 `json:"avgLatencyMs"`
+	P50LatencyMs            float64 `json:"p50LatencyMs"`
+	P95LatencyMs            float64 `json:"p95LatencyMs"`
+	P99LatencyMs            float64 `json:"p99LatencyMs"`
+	P999LatencyMs           float64 `json:"p999LatencyMs"`
+	MaxLatencyMs            float64 `json:"maxLatencyMs"`
+}
+
+// ClusterSnapshotResponse from GET /api/tests/{id}/report/snapshot
+type ClusterSnapshotResponse struct {
+	ClusterID    string                `json:"clusterId"`
+	BrokerCount  int                   `json:"brokerCount"`
+	ControllerID int                   `json:"controllerId"`
+	Brokers      []SnapshotBrokerInfo  `json:"brokers,omitempty"`
+	Leaders      []PartitionAssignment `json:"leaders,omitempty"`
+}
+
+type SnapshotBrokerInfo struct {
+	ID   int    `json:"id"`
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	Rack string `json:"rack,omitempty"`
+}
+
+type PartitionAssignment struct {
+	Topic     string `json:"topic"`
+	Partition int    `json:"partition"`
+	LeaderID  int    `json:"leaderId"`
+	Replicas  []int  `json:"replicas,omitempty"`
+	ISR       []int  `json:"isr,omitempty"`
+}
+
 // Schedule from GET /api/schedules and GET /api/schedules/:id
 type Schedule struct {
 	ID             string      `json:"id"`

@@ -370,6 +370,26 @@ func (c *Client) TrendBreakdown(ctx context.Context, testType, metric string, da
 	return &result, json.Unmarshal(data, &result)
 }
 
+func (c *Client) ReportBrokers(ctx context.Context, runID string) ([]BrokerMetricsResponse, error) {
+	path := fmt.Sprintf("/api/tests/%s/report/brokers", runID)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []BrokerMetricsResponse
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) ReportSnapshot(ctx context.Context, runID string) (*ClusterSnapshotResponse, error) {
+	path := fmt.Sprintf("/api/tests/%s/report/snapshot", runID)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result ClusterSnapshotResponse
+	return &result, json.Unmarshal(data, &result)
+}
+
 func (c *Client) Resilience(ctx context.Context, request interface{}) (*ResilienceResult, error) {
 	data, err := c.postJSON(ctx, "/api/resilience", request)
 	if err != nil {

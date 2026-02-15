@@ -6,7 +6,9 @@ import com.klster.kates.domain.SlaVerdict;
 import com.klster.kates.domain.SlaViolation;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
+import com.klster.kates.service.KafkaAdminService;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,6 +23,9 @@ import java.util.stream.Collectors;
  */
 @ApplicationScoped
 public class ReportGenerator {
+
+    @Inject
+    KafkaAdminService kafkaAdminService;
 
     public TestReport generate(TestRun run) {
         TestReport report = new TestReport();
@@ -63,8 +68,83 @@ public class ReportGenerator {
             report.setPhases(phases);
         }
 
+        String topic = (run.getSpec() != null) ? run.getSpec().getTopic() : null;
+        if (topic != null && !topic.isBlank()) {
+            try {
+                ClusterSnapshot snapshot = kafkaAdminService.captureSnapshot(topic);
+                if (snapshot != null) {
+                    report.setClusterSnapshot(snapshot);
+                    report.setBrokerMetrics(
+                            computeBrokerMetrics(snapshot, report.getSummary()));
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
         report.setOverallSlaVerdict(SlaVerdict.pass());
         return report;
+    }
+
+    /**
+     * Project overall test metrics onto individual brokers using partition
+     * leadership ratio as weight. Detects skew when a broker deviates >20%
+     * from the mean throughput.
+     */
+    public List<BrokerMetrics> computeBrokerMetrics(
+            ClusterSnapshot snapshot, ReportSummary overall) {
+        if (snapshot == null || overall == null || snapshot.brokers() == null) {
+            return List.of();
+        }
+
+        int totalPartitions = snapshot.leaders() != null ? snapshot.leaders().size() : 0;
+        if (totalPartitions == 0) return List.of();
+
+        List<BrokerMetrics> brokers = new ArrayList<>();
+        for (ClusterSnapshot.BrokerInfo broker : snapshot.brokers()) {
+            int leaderCount = snapshot.leaderCountForBroker(broker.id());
+            double share = (double) leaderCount / totalPartitions;
+
+            ReportSummary projected = new ReportSummary(
+                    Math.round(overall.totalRecords() * share),
+                    overall.avgThroughputRecPerSec() * share,
+                    overall.peakThroughputRecPerSec() * share,
+                    overall.avgThroughputMBPerSec() * share,
+                    overall.avgLatencyMs(),
+                    overall.p50LatencyMs(),
+                    overall.p95LatencyMs(),
+                    overall.p99LatencyMs(),
+                    overall.p999LatencyMs(),
+                    overall.maxLatencyMs(),
+                    Math.round(overall.totalErrors() * share),
+                    overall.errorRate(),
+                    overall.durationMs()
+            );
+
+            brokers.add(new BrokerMetrics(
+                    broker.id(), broker.host(), broker.rack(),
+                    leaderCount, totalPartitions,
+                    Math.round(share * 10000.0) / 100.0,
+                    projected, false
+            ));
+        }
+
+        double avgThroughput = brokers.stream()
+                .mapToDouble(b -> b.metrics().avgThroughputRecPerSec())
+                .average().orElse(0);
+
+        if (avgThroughput > 0) {
+            brokers = brokers.stream().map(b -> {
+                double deviation = Math.abs(
+                        b.metrics().avgThroughputRecPerSec() - avgThroughput) / avgThroughput;
+                return new BrokerMetrics(
+                        b.brokerId(), b.host(), b.rack(),
+                        b.leaderPartitions(), b.totalPartitions(),
+                        b.leaderSharePercent(), b.metrics(),
+                        deviation > 0.20);
+            }).toList();
+        }
+
+        return brokers;
     }
 
     public String toMarkdown(TestReport report) {

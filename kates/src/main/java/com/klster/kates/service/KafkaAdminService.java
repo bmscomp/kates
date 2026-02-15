@@ -37,6 +37,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.klster.kates.report.ClusterSnapshot;
+
 @ApplicationScoped
 public class KafkaAdminService {
 
@@ -327,6 +329,50 @@ public class KafkaAdminService {
         }
     }
 
+
+
+    /**
+     * Capture a point-in-time cluster topology snapshot for a specific topic.
+     * Records broker membership and partition leadership for correlation with test metrics.
+     */
+    public ClusterSnapshot captureSnapshot(String topicName) {
+        try (AdminClient client = createClient()) {
+            DescribeClusterResult cluster = client.describeCluster();
+            String clusterId = cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Node controller = cluster.controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Collection<Node> nodes = cluster.nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            List<ClusterSnapshot.BrokerInfo> brokers = nodes.stream()
+                    .map(n -> new ClusterSnapshot.BrokerInfo(n.id(), n.host(), n.port(), n.rack()))
+                    .toList();
+
+            List<ClusterSnapshot.PartitionAssignment> leaders = new ArrayList<>();
+            if (topicName != null && !topicName.isBlank()) {
+                TopicDescription desc = client.describeTopics(Collections.singleton(topicName))
+                        .allTopicNames()
+                        .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                        .get(topicName);
+
+                if (desc != null) {
+                    for (TopicPartitionInfo pi : desc.partitions()) {
+                        leaders.add(new ClusterSnapshot.PartitionAssignment(
+                                topicName,
+                                pi.partition(),
+                                pi.leader() != null ? pi.leader().id() : -1,
+                                pi.replicas().stream().map(Node::id).toList(),
+                                pi.isr().stream().map(Node::id).toList()
+                        ));
+                    }
+                }
+            }
+
+            return new ClusterSnapshot(
+                    clusterId, nodes.size(), controller.id(), brokers, leaders);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to capture cluster snapshot", e);
+            return null;
+        }
+    }
 
     public Map<String, Object> clusterHealthCheck() {
         try (AdminClient client = createClient()) {

@@ -625,6 +625,100 @@ func TestTrendBreakdown(t *testing.T) {
 	}
 }
 
+func TestReportBrokers(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tests/abc123/report/brokers" {
+			t.Errorf("path = %s, want /api/tests/abc123/report/brokers", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]BrokerMetricsResponse{
+			{
+				BrokerID:         0,
+				Host:             "broker-0",
+				Rack:             "zone-a",
+				LeaderPartitions: 4,
+				TotalPartitions:  12,
+				LeaderSharePct:   33.33,
+				Metrics:          BrokerMetricsSummary{AvgThroughputRecPerSec: 12000, P99LatencyMs: 3.2},
+				Skewed:           false,
+			},
+			{
+				BrokerID:         1,
+				Host:             "broker-1",
+				Rack:             "zone-b",
+				LeaderPartitions: 4,
+				TotalPartitions:  12,
+				LeaderSharePct:   33.33,
+				Metrics:          BrokerMetricsSummary{AvgThroughputRecPerSec: 11800, P99LatencyMs: 3.8},
+				Skewed:           false,
+			},
+			{
+				BrokerID:         2,
+				Host:             "broker-2",
+				Rack:             "zone-c",
+				LeaderPartitions: 4,
+				TotalPartitions:  12,
+				LeaderSharePct:   33.34,
+				Metrics:          BrokerMetricsSummary{AvgThroughputRecPerSec: 7200, P99LatencyMs: 7.1},
+				Skewed:           true,
+			},
+		})
+	})
+	brokers, err := c.ReportBrokers(context.Background(), "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(brokers) != 3 {
+		t.Fatalf("Brokers count = %d, want 3", len(brokers))
+	}
+	if brokers[0].Host != "broker-0" {
+		t.Errorf("brokers[0].Host = %q", brokers[0].Host)
+	}
+	if brokers[2].Skewed != true {
+		t.Errorf("brokers[2].Skewed = %v, want true", brokers[2].Skewed)
+	}
+	if brokers[0].Metrics.AvgThroughputRecPerSec != 12000 {
+		t.Errorf("brokers[0].Metrics.AvgThroughputRecPerSec = %f", brokers[0].Metrics.AvgThroughputRecPerSec)
+	}
+}
+
+func TestReportSnapshot(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tests/abc123/report/snapshot" {
+			t.Errorf("path = %s, want /api/tests/abc123/report/snapshot", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(ClusterSnapshotResponse{
+			ClusterID:    "test-cluster-123",
+			BrokerCount:  3,
+			ControllerID: 0,
+			Brokers: []SnapshotBrokerInfo{
+				{ID: 0, Host: "broker-0", Port: 9092, Rack: "zone-a"},
+				{ID: 1, Host: "broker-1", Port: 9092, Rack: "zone-b"},
+				{ID: 2, Host: "broker-2", Port: 9092, Rack: "zone-c"},
+			},
+			Leaders: []PartitionAssignment{
+				{Topic: "test-topic", Partition: 0, LeaderID: 0, Replicas: []int{0, 1, 2}, ISR: []int{0, 1, 2}},
+				{Topic: "test-topic", Partition: 1, LeaderID: 1, Replicas: []int{1, 2, 0}, ISR: []int{1, 2, 0}},
+			},
+		})
+	})
+	snap, err := c.ReportSnapshot(context.Background(), "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.ClusterID != "test-cluster-123" {
+		t.Errorf("ClusterID = %q", snap.ClusterID)
+	}
+	if snap.BrokerCount != 3 {
+		t.Errorf("BrokerCount = %d", snap.BrokerCount)
+	}
+	if len(snap.Leaders) != 2 {
+		t.Errorf("Leaders count = %d, want 2", len(snap.Leaders))
+	}
+	if snap.Leaders[0].LeaderID != 0 {
+		t.Errorf("Leaders[0].LeaderID = %d", snap.Leaders[0].LeaderID)
+	}
+}
+
 func TestResilience(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

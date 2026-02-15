@@ -17,6 +17,8 @@ public class TestReport {
     private TestRun run;
     private ReportSummary summary;
     private List<PhaseReport> phases;
+    private ClusterSnapshot clusterSnapshot;
+    private List<BrokerMetrics> brokerMetrics;
     private SlaVerdict overallSlaVerdict;
     private Map<String, String> metadata;
     private String generatedAt;
@@ -32,6 +34,12 @@ public class TestReport {
 
     public List<PhaseReport> getPhases() { return phases; }
     public void setPhases(List<PhaseReport> phases) { this.phases = phases; }
+
+    public ClusterSnapshot getClusterSnapshot() { return clusterSnapshot; }
+    public void setClusterSnapshot(ClusterSnapshot clusterSnapshot) { this.clusterSnapshot = clusterSnapshot; }
+
+    public List<BrokerMetrics> getBrokerMetrics() { return brokerMetrics; }
+    public void setBrokerMetrics(List<BrokerMetrics> brokerMetrics) { this.brokerMetrics = brokerMetrics; }
 
     public SlaVerdict getOverallSlaVerdict() { return overallSlaVerdict; }
     public void setOverallSlaVerdict(SlaVerdict overallSlaVerdict) { this.overallSlaVerdict = overallSlaVerdict; }

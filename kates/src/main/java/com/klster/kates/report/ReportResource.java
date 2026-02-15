@@ -96,6 +96,33 @@ public class ReportResource {
     }
 
     @GET
+    @Path("/tests/{id}/report/brokers")
+    public Response getBrokerMetrics(@PathParam("id") String id) {
+        TestRun run = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestReport report = generator.generate(run);
+        List<BrokerMetrics> metrics = report.getBrokerMetrics();
+        if (metrics == null || metrics.isEmpty()) {
+            return Response.ok(List.of()).build();
+        }
+        return Response.ok(metrics).build();
+    }
+
+    @GET
+    @Path("/tests/{id}/report/snapshot")
+    public Response getClusterSnapshot(@PathParam("id") String id) {
+        TestRun run = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestReport report = generator.generate(run);
+        ClusterSnapshot snapshot = report.getClusterSnapshot();
+        if (snapshot == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity("No cluster snapshot available for run: " + id).build();
+        }
+        return Response.ok(snapshot).build();
+    }
+
+    @GET
     @Path("/reports/compare")
     public Response compare(@QueryParam("ids") String ids) {
         if (ids == null || ids.isBlank()) {
