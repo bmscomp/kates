@@ -1,17 +1,20 @@
-# klster — Local Kubernetes Cluster
+# KATES — Kafka Advanced Testing & Engineering Suite
 
-Local Kubernetes cluster using [Kind](https://kind.sigs.k8s.io/) with 3 nodes simulating availability zones, fully offline container image management, and a complete Kafka + monitoring stack.
+A terminal-first platform for **performance testing**, **chaos engineering**, and **operational resilience** of Apache Kafka clusters. Runs on a local Kind-based Kubernetes environment with production-parity infrastructure.
 
 ## Features
 
-- **Offline-first** — all images pulled once, loaded into Kind, deployed with `imagePullPolicy: Never`
+- **8 test types** — LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY
+- **Chaos engineering** — 6 built-in playbooks with LitmusChaos, SLA grading, and safety guardrails
+- **Scenario files** — Declarative YAML test definitions with SLA gates for CI/CD
+- **CLI** — Full-featured terminal client with dashboards, sparklines, trend analysis, and export
+- **Backend API** — Quarkus REST API with PostgreSQL persistence and native image support
+- **Offline-first infrastructure** — all images pulled once, loaded into Kind, deployed with `imagePullPolicy: Never`
 - **One-command setup** — `make all` brings up the entire stack
-- **Multi-AZ simulation** — 3 nodes labeled `alpha`, `sigma`, `gamma`
-- **Monitoring** — Prometheus, Grafana, and custom Kafka dashboards
-- **Kafka (Strimzi KRaft)** — 3-broker cluster with rack awareness
-- **Chaos engineering** — LitmusChaos with Prometheus integration
+- **Multi-AZ simulation** — 3-node Kind cluster labeled `alpha`, `sigma`, `gamma`
+- **Monitoring** — Prometheus, Grafana with custom Kafka dashboards
+- **Kafka (Strimzi KRaft)** — 3-broker cluster with rack awareness, no ZooKeeper
 - **Schema registry** — Apicurio connected to Kafka
-- **Performance testing** — built-in 1M-message Kafka benchmark
 
 ## Prerequisites
 
@@ -126,6 +129,13 @@ Custom Grafana dashboards (auto-provisioned):
 - **Kafka Performance Metrics** — topic growth, partitions, broker count
 - **Kafka Performance Test Results** — perf-test throughput, message counts
 - **Kafka JVM Metrics** — heap memory, GC rate, thread count per zone
+
+## Documentation
+
+| Resource | Content |
+|----------|---------|
+| [The Definitive Guide](docs/book/README.md) | 14-chapter book covering architecture, performance theory, test types, chaos engineering, data integrity, observability, CLI/API reference, deployment, scenario files, and recipes |
+| [Tutorials](docs/tutorials/README.md) | 6 hands-on tutorials from first test to CI/CD integration |
 
 ## Performance Testing
 
