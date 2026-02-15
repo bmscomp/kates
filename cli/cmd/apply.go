@@ -120,7 +120,7 @@ var testApplyCmd = &cobra.Command{
 				if err != nil {
 					results = append(results, scenarioResult{name: name, id: result.ID, status: "ERROR", err: err.Error()})
 				} else {
-					results = append(results, scenarioResult{name: name, id: result.ID, status: finalResult.Status, validate: scenario.Validate})
+					results = append(results, scenarioResult{name: name, id: result.ID, status: finalResult.Status, validate: scenario.Validate, testRun: finalResult})
 				}
 			} else {
 				results = append(results, scenarioResult{name: name, id: result.ID, status: "SUBMITTED"})
@@ -130,14 +130,29 @@ var testApplyCmd = &cobra.Command{
 		fmt.Println()
 		output.SubHeader("Summary")
 		rows := make([][]string, 0, len(results))
+		hasViolation := false
 		for _, r := range results {
 			extra := ""
 			if r.err != "" {
 				extra = r.err
+			} else if r.validate != nil && r.testRun != nil {
+				violations := validateSLAs(r.testRun, r.validate)
+				if len(violations) > 0 {
+					extra = strings.Join(violations, "; ")
+					hasViolation = true
+				} else {
+					extra = "✓ SLA Pass"
+				}
 			}
 			rows = append(rows, []string{r.name, truncID(r.id), r.status, extra})
 		}
 		output.Table([]string{"Scenario", "ID", "Status", "Note"}, rows)
+
+		if hasViolation {
+			fmt.Println()
+			output.Error("One or more SLA gates violated")
+			os.Exit(1)
+		}
 
 		return nil
 	},
@@ -149,6 +164,7 @@ type scenarioResult struct {
 	status   string
 	err      string
 	validate *ValidationSpec
+	testRun  *client.TestRun
 }
 
 func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
@@ -246,6 +262,43 @@ func toBool(v interface{}) bool {
 	default:
 		return false
 	}
+}
+
+func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
+	var violations []string
+
+	for _, r := range run.Results {
+		if v.MaxP99Latency > 0 && r.P99LatencyMs > v.MaxP99Latency {
+			violations = append(violations, fmt.Sprintf("p99=%.0fms > %.0fms", r.P99LatencyMs, v.MaxP99Latency))
+		}
+		if v.MaxAvgLatency > 0 && r.AvgLatencyMs > v.MaxAvgLatency {
+			violations = append(violations, fmt.Sprintf("avg=%.0fms > %.0fms", r.AvgLatencyMs, v.MaxAvgLatency))
+		}
+		if v.MinThroughput > 0 && r.ThroughputRecordsPerSec < v.MinThroughput {
+			violations = append(violations, fmt.Sprintf("throughput=%.0f < %.0f rec/s", r.ThroughputRecordsPerSec, v.MinThroughput))
+		}
+
+		if r.Integrity != nil {
+			ir := r.Integrity
+			if v.MaxDataLoss >= 0 && ir.DataLossPercent > v.MaxDataLoss {
+				violations = append(violations, fmt.Sprintf("dataLoss=%.4f%% > %.4f%%", ir.DataLossPercent, v.MaxDataLoss))
+			}
+			if v.MaxRtoMs > 0 && ir.MaxRtoMs > v.MaxRtoMs {
+				violations = append(violations, fmt.Sprintf("rto=%.0fms > %.0fms", ir.MaxRtoMs, v.MaxRtoMs))
+			}
+			if v.MaxRpoMs > 0 && ir.RpoMs > v.MaxRpoMs {
+				violations = append(violations, fmt.Sprintf("rpo=%.0fms > %.0fms", ir.RpoMs, v.MaxRpoMs))
+			}
+			if v.MaxOutOfOrder >= 0 && ir.OutOfOrderCount > v.MaxOutOfOrder {
+				violations = append(violations, fmt.Sprintf("outOfOrder=%d > %d", ir.OutOfOrderCount, v.MaxOutOfOrder))
+			}
+			if v.MaxCrcFailures >= 0 && ir.CrcFailures > v.MaxCrcFailures {
+				violations = append(violations, fmt.Sprintf("crcFail=%d > %d", ir.CrcFailures, v.MaxCrcFailures))
+			}
+		}
+	}
+
+	return violations
 }
 
 func waitForTest(id, name string) (*client.TestRun, error) {

@@ -1,11 +1,13 @@
 package com.klster.kates.engine;
 
+import com.klster.kates.domain.IntegrityEvent;
 import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.domain.LostRange;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +39,8 @@ public class DataIntegrityVerifier {
     private final AtomicLong crcFailures = new AtomicLong();
     private final AtomicLong outOfOrderCount = new AtomicLong();
     private final ConcurrentHashMap<Integer, Long> perPartitionLastSeq = new ConcurrentHashMap<>();
+    private final List<IntegrityEvent> timeline = Collections.synchronizedList(new ArrayList<>());
+    private static final int MAX_TIMELINE_EVENTS = 1000;
 
     private volatile long firstConsumeGapNanos = -1;
     private volatile long firstConsumeRecoveryNanos = -1;
@@ -62,11 +66,17 @@ public class DataIntegrityVerifier {
 
         if (!crcValid) {
             crcFailures.incrementAndGet();
+            if (timeline.size() < MAX_TIMELINE_EVENTS) {
+                timeline.add(IntegrityEvent.crcFailure(partition, sequence));
+            }
         }
 
         Long lastSeq = perPartitionLastSeq.get(partition);
         if (lastSeq != null && sequence < lastSeq) {
             outOfOrderCount.incrementAndGet();
+            if (timeline.size() < MAX_TIMELINE_EVENTS) {
+                timeline.add(IntegrityEvent.outOfOrder(partition, lastSeq + 1, sequence));
+            }
         }
         perPartitionLastSeq.put(partition, sequence);
 
@@ -165,7 +175,8 @@ public class DataIntegrityVerifier {
                 orderingVerified,
                 crcVerified,
                 idempotenceEnabled,
-                transactionsEnabled
+                transactionsEnabled,
+                buildTimeline(lostRanges, lostCount, duplicates)
         );
 
         LOG.info(String.format(
@@ -200,5 +211,20 @@ public class DataIntegrityVerifier {
             pos = lostSet.nextSetBit(end + 1);
         }
         return List.copyOf(ranges);
+    }
+
+    private List<IntegrityEvent> buildTimeline(List<LostRange> lostRanges, long lostCount, long duplicates) {
+        List<IntegrityEvent> result = new ArrayList<>(timeline);
+        for (LostRange lr : lostRanges) {
+            if (result.size() < MAX_TIMELINE_EVENTS) {
+                result.add(IntegrityEvent.lostRange(lr.fromSeq(), lr.toSeq(), lr.count()));
+            }
+        }
+        String verdict = lostCount > 0 ? "DATA_LOSS" :
+                crcFailures.get() > 0 ? "CORRUPTION" :
+                outOfOrderCount.get() > 0 ? "ORDERING_VIOLATION" :
+                duplicates > 0 ? "DUPLICATES_DETECTED" : "PASS";
+        result.add(IntegrityEvent.summary(verdict, lostCount, duplicates));
+        return List.copyOf(result);
     }
 }

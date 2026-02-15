@@ -30,7 +30,8 @@ public record IntegrityResult(
         boolean orderingVerified,
         boolean crcVerified,
         boolean idempotenceEnabled,
-        boolean transactionsEnabled
+        boolean transactionsEnabled,
+        List<IntegrityEvent> timeline
 ) {
     public double producerRtoMs() { return producerRto != null ? producerRto.toNanos() / 1_000_000.0 : 0; }
     public double consumerRtoMs() { return consumerRto != null ? consumerRto.toNanos() / 1_000_000.0 : 0; }

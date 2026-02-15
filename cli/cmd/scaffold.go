@@ -45,14 +45,15 @@ var testScaffoldCmd = &cobra.Command{
 }
 
 var scaffoldTemplates = map[string]func() string{
-	"LOAD":       scaffoldLoad,
-	"STRESS":     scaffoldStress,
-	"SPIKE":      scaffoldSpike,
-	"ENDURANCE":  scaffoldEndurance,
-	"VOLUME":     scaffoldVolume,
-	"CAPACITY":   scaffoldCapacity,
-	"ROUND_TRIP": scaffoldRoundTrip,
-	"INTEGRITY":  scaffoldIntegrity,
+	"LOAD":            scaffoldLoad,
+	"STRESS":          scaffoldStress,
+	"SPIKE":           scaffoldSpike,
+	"ENDURANCE":       scaffoldEndurance,
+	"VOLUME":          scaffoldVolume,
+	"CAPACITY":        scaffoldCapacity,
+	"ROUND_TRIP":      scaffoldRoundTrip,
+	"INTEGRITY":       scaffoldIntegrity,
+	"INTEGRITY_CHAOS": scaffoldIntegrityChaos,
 }
 
 func scaffoldLoad() string {
@@ -356,8 +357,49 @@ scenarios:
 `
 }
 
+func scaffoldIntegrityChaos() string {
+	return `# INTEGRITY_CHAOS TEST — Data integrity under fault injection
+# Runs an integrity test while injecting a chaos fault mid-way.
+# Measures data loss, corruption, and ordering under failure conditions.
+#
+# Usage: kates test apply -f integrity-chaos.yaml --wait
+
+scenarios:
+  - name: "Integrity Under Chaos"
+    type: INTEGRITY
+    backend: native
+    spec:
+      records: 500000
+      parallelProducers: 1
+      numConsumers: 1
+      recordSizeBytes: 512
+      durationSeconds: 600
+      topic: "integrity-chaos-test"
+      acks: "all"
+      batchSize: 65536
+      lingerMs: 5
+      compressionType: "lz4"
+      consumerGroup: "integrity-chaos-cg"
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      enableCrc: true
+      enableIdempotence: true
+    chaos:
+      experimentName: "kafka-broker-kill"
+      chaosDurationSec: 30
+      steadyStateSec: 60
+    validate:
+      maxDataLossPercent: 0
+      maxRtoMs: 10000
+      maxRpoMs: 5000
+      maxOutOfOrder: 0
+      maxCrcFailures: 0
+`
+}
+
 func init() {
-	testScaffoldCmd.Flags().StringVar(&scaffoldType, "type", "LOAD", "Test type to scaffold (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY)")
+	testScaffoldCmd.Flags().StringVar(&scaffoldType, "type", "LOAD", "Test type (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, INTEGRITY_CHAOS)")
 	testScaffoldCmd.Flags().StringVarP(&scaffoldOutput, "output", "o", "", "Write scaffold to file instead of stdout")
 	testCmd.AddCommand(testScaffoldCmd)
 }

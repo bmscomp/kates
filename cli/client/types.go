@@ -64,24 +64,31 @@ type PhaseResult struct {
 }
 
 type IntegrityResult struct {
-	TotalSent           int64       `json:"totalSent"`
-	TotalAcked          int64       `json:"totalAcked"`
-	TotalConsumed       int64       `json:"totalConsumed"`
-	LostRecords         int64       `json:"lostRecords"`
-	DuplicateRecords    int64       `json:"duplicateRecords"`
-	DataLossPercent     float64     `json:"dataLossPercent"`
-	LostRanges          []LostRange `json:"lostRanges,omitempty"`
-	ProducerRtoMs       float64     `json:"producerRtoMs,omitempty"`
-	ConsumerRtoMs       float64     `json:"consumerRtoMs,omitempty"`
-	MaxRtoMs            float64     `json:"maxRtoMs,omitempty"`
-	RpoMs               float64     `json:"rpoMs,omitempty"`
-	OutOfOrderCount     int64       `json:"outOfOrderCount"`
-	CrcFailures         int64       `json:"crcFailures"`
-	OrderingVerified    bool        `json:"orderingVerified"`
-	CrcVerified         bool        `json:"crcVerified"`
-	IdempotenceEnabled  bool        `json:"idempotenceEnabled"`
-	TransactionsEnabled bool        `json:"transactionsEnabled"`
-	Verdict             string      `json:"verdict,omitempty"`
+	TotalSent           int64            `json:"totalSent"`
+	TotalAcked          int64            `json:"totalAcked"`
+	TotalConsumed       int64            `json:"totalConsumed"`
+	LostRecords         int64            `json:"lostRecords"`
+	DuplicateRecords    int64            `json:"duplicateRecords"`
+	DataLossPercent     float64          `json:"dataLossPercent"`
+	LostRanges          []LostRange      `json:"lostRanges,omitempty"`
+	ProducerRtoMs       float64          `json:"producerRtoMs,omitempty"`
+	ConsumerRtoMs       float64          `json:"consumerRtoMs,omitempty"`
+	MaxRtoMs            float64          `json:"maxRtoMs,omitempty"`
+	RpoMs               float64          `json:"rpoMs,omitempty"`
+	OutOfOrderCount     int64            `json:"outOfOrderCount"`
+	CrcFailures         int64            `json:"crcFailures"`
+	OrderingVerified    bool             `json:"orderingVerified"`
+	CrcVerified         bool             `json:"crcVerified"`
+	IdempotenceEnabled  bool             `json:"idempotenceEnabled"`
+	TransactionsEnabled bool             `json:"transactionsEnabled"`
+	Verdict             string           `json:"verdict,omitempty"`
+	Timeline            []IntegrityEvent `json:"timeline,omitempty"`
+}
+
+type IntegrityEvent struct {
+	TimestampMs int64  `json:"timestampMs"`
+	Type        string `json:"type"`
+	Detail      string `json:"detail"`
 }
 
 type LostRange struct {

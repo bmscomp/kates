@@ -176,6 +176,24 @@ var testGetCmd = &cobra.Command{
 						}
 						output.Table([]string{"From Seq", "To Seq", "Count"}, lostRows)
 					}
+					if len(ir.Timeline) > 0 {
+						output.SubHeader("Integrity Timeline")
+						maxEvents := 20
+						start := 0
+						if len(ir.Timeline) > maxEvents {
+							start = len(ir.Timeline) - maxEvents
+							output.Hint(fmt.Sprintf("  (showing last %d of %d events)", maxEvents, len(ir.Timeline)))
+						}
+						tlRows := make([][]string, 0, maxEvents)
+						for _, ev := range ir.Timeline[start:] {
+							tlRows = append(tlRows, []string{
+								fmt.Sprintf("%d", ev.TimestampMs),
+								ev.Type,
+								ev.Detail,
+							})
+						}
+						output.Table([]string{"Timestamp", "Type", "Detail"}, tlRows)
+					}
 					break
 				}
 			}

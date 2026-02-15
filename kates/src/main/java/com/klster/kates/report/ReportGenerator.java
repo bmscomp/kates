@@ -1,5 +1,7 @@
 package com.klster.kates.report;
 
+import com.klster.kates.domain.IntegrityEvent;
+import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.domain.SlaVerdict;
 import com.klster.kates.domain.SlaViolation;
 import com.klster.kates.domain.TestResult;
@@ -126,6 +128,48 @@ public class ReportGenerator {
                             .append(" |\n");
                 }
             }
+        }
+
+        // Data Integrity section
+        if (report.getRun() != null && report.getRun().getResults() != null) {
+            report.getRun().getResults().stream()
+                    .filter(r -> r.getIntegrity() != null)
+                    .findFirst()
+                    .ifPresent(r -> {
+                        IntegrityResult ir = r.getIntegrity();
+                        sb.append("## Data Integrity\n\n");
+                        sb.append("| Metric | Value |\n|---|---|\n");
+                        sb.append("| Sent | ").append(ir.totalSent()).append(" |\n");
+                        sb.append("| Acked | ").append(ir.totalAcked()).append(" |\n");
+                        sb.append("| Consumed | ").append(ir.totalConsumed()).append(" |\n");
+                        sb.append("| Lost | ").append(ir.lostRecords()).append(" |\n");
+                        sb.append("| Duplicates | ").append(ir.duplicateRecords()).append(" |\n");
+                        sb.append("| Data Loss (%) | ").append(String.format("%.4f", ir.dataLossPercent())).append(" |\n");
+                        sb.append("| Producer RTO (ms) | ").append(String.format("%.0f", ir.producerRtoMs())).append(" |\n");
+                        sb.append("| Consumer RTO (ms) | ").append(String.format("%.0f", ir.consumerRtoMs())).append(" |\n");
+                        sb.append("| RPO (ms) | ").append(String.format("%.0f", ir.rpoMs())).append(" |\n");
+                        sb.append("| CRC Verified | ").append(ir.crcVerified()).append(" |\n");
+                        sb.append("| CRC Failures | ").append(ir.crcFailures()).append(" |\n");
+                        sb.append("| Ordering Verified | ").append(ir.orderingVerified()).append(" |\n");
+                        sb.append("| Out of Order | ").append(ir.outOfOrderCount()).append(" |\n");
+                        sb.append("| Idempotence | ").append(ir.idempotenceEnabled()).append(" |\n");
+                        sb.append("| Transactions | ").append(ir.transactionsEnabled()).append(" |\n");
+                        sb.append("| **Verdict** | **").append(ir.verdict()).append("** |\n\n");
+                        if (ir.timeline() != null && !ir.timeline().isEmpty()) {
+                            sb.append("### Timeline\n\n");
+                            sb.append("| Timestamp | Type | Detail |\n|---|---|---|\n");
+                            int max = Math.min(ir.timeline().size(), 50);
+                            int start = ir.timeline().size() - max;
+                            for (int i = start; i < ir.timeline().size(); i++) {
+                                IntegrityEvent ev = ir.timeline().get(i);
+                                sb.append("| ").append(ev.timestampMs())
+                                        .append(" | ").append(ev.type())
+                                        .append(" | ").append(ev.detail())
+                                        .append(" |\n");
+                            }
+                            sb.append("\n");
+                        }
+                    });
         }
 
         return sb.toString();
