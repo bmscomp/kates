@@ -133,10 +133,12 @@ var exportFormat string
 
 var reportExportCmd = &cobra.Command{
 	Use:   "export <id>",
-	Short: "Export report as CSV or JUnit XML",
+	Short: "Export report as CSV, JUnit XML, or Heatmap",
 	Args:  cobra.ExactArgs(1),
 	Example: `  kates report export abc123 --format csv
   kates report export abc123 --format junit
+  kates report export abc123 --format heatmap
+  kates report export abc123 --format heatmap-csv
   kates report export abc123 --format csv > report.csv`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
@@ -172,8 +174,38 @@ var reportExportCmd = &cobra.Command{
 				fmt.Print(xml)
 			}
 
+		case "heatmap":
+			heatmap, err := apiClient.ExportHeatmap(context.Background(), id, "json")
+			if err != nil {
+				return cmdErr("Export failed: " + err.Error())
+			}
+			if isTerminal() {
+				file := "kates-heatmap-" + id + ".json"
+				if err := os.WriteFile(file, []byte(heatmap), 0644); err != nil {
+					return cmdErr("Write failed: " + err.Error())
+				}
+				output.Success("Exported to " + file)
+			} else {
+				fmt.Print(heatmap)
+			}
+
+		case "heatmap-csv":
+			heatmapCsv, err := apiClient.ExportHeatmap(context.Background(), id, "csv")
+			if err != nil {
+				return cmdErr("Export failed: " + err.Error())
+			}
+			if isTerminal() {
+				file := "kates-heatmap-" + id + ".csv"
+				if err := os.WriteFile(file, []byte(heatmapCsv), 0644); err != nil {
+					return cmdErr("Write failed: " + err.Error())
+				}
+				output.Success("Exported to " + file)
+			} else {
+				fmt.Print(heatmapCsv)
+			}
+
 		default:
-			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv' or 'junit'.")
+			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv', 'junit', 'heatmap', or 'heatmap-csv'.")
 		}
 		return nil
 	},
@@ -188,7 +220,7 @@ func isTerminal() bool {
 }
 
 func init() {
-	reportExportCmd.Flags().StringVar(&exportFormat, "format", "csv", "Export format: csv or junit")
+	reportExportCmd.Flags().StringVar(&exportFormat, "format", "csv", "Export format: csv, junit, heatmap, or heatmap-csv")
 
 	reportCmd.AddCommand(reportShowCmd)
 	reportCmd.AddCommand(reportSummaryCmd)

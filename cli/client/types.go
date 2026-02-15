@@ -127,14 +127,21 @@ type Report struct {
 }
 
 type SlaVerdict struct {
-	Passed     bool           `json:"passed"`
-	Violations []SlaViolation `json:"violations,omitempty"`
+	Grade        string         `json:"grade"`
+	Passed       bool           `json:"passed"`
+	Violated     bool           `json:"violated"`
+	Violations   []SlaViolation `json:"violations,omitempty"`
+	TotalChecks  int            `json:"totalChecks"`
+	PassedChecks int            `json:"passedChecks"`
 }
 
 type SlaViolation struct {
-	Metric    string  `json:"metric"`
-	Threshold float64 `json:"threshold"`
-	Actual    float64 `json:"actual"`
+	Metric     string  `json:"metric"`
+	MetricName string  `json:"metricName"`
+	Constraint string  `json:"constraint"`
+	Threshold  float64 `json:"threshold"`
+	Actual     float64 `json:"actual"`
+	Severity   string  `json:"severity"`
 }
 
 // TrendResponse from GET /api/trends
@@ -266,6 +273,7 @@ type ResilienceResult struct {
 }
 
 type ChaosOutcome struct {
+	EngineName     string `json:"engineName"`
 	ExperimentName string `json:"experimentName"`
 	Verdict        string `json:"verdict"`
 	ChaosDuration  string `json:"chaosDuration"`
@@ -368,4 +376,160 @@ type PartitionHealthReport struct {
 	UnderReplicated int                      `json:"underReplicated"`
 	Offline         int                      `json:"offline"`
 	Problems        []map[string]interface{} `json:"problems,omitempty"`
+}
+
+// DisruptionRunResponse from POST /api/disruptions
+type DisruptionRunResponse struct {
+	ID     string           `json:"id"`
+	Report DisruptionReport `json:"report"`
+}
+
+type DisruptionReport struct {
+	PlanName           string             `json:"planName"`
+	Status             string             `json:"status"`
+	StepReports        []StepReport       `json:"stepReports,omitempty"`
+	Summary            *DisruptionSummary `json:"summary,omitempty"`
+	ValidationWarnings []string           `json:"validationWarnings,omitempty"`
+	SlaVerdict         *SlaVerdict        `json:"slaVerdict,omitempty"`
+}
+
+type StepReport struct {
+	StepName              string             `json:"stepName"`
+	DisruptionType        string             `json:"disruptionType"`
+	ChaosOutcome          *ChaosOutcome      `json:"chaosOutcome,omitempty"`
+	PodTimeline           []PodEvent         `json:"podTimeline,omitempty"`
+	TimeToFirstReady      string             `json:"timeToFirstReady,omitempty"`
+	TimeToAllReady        string             `json:"timeToAllReady,omitempty"`
+	StrimziRecoveryTime   string             `json:"strimziRecoveryTime,omitempty"`
+	PreDisruptionMetrics  *ReportSummary     `json:"preDisruptionMetrics,omitempty"`
+	PostDisruptionMetrics *ReportSummary     `json:"postDisruptionMetrics,omitempty"`
+	ImpactDeltas          map[string]float64 `json:"impactDeltas,omitempty"`
+	TargetedLeaderBroker  *int               `json:"targetedLeaderBrokerId,omitempty"`
+	IsrMetrics            *IsrMetrics        `json:"isrMetrics,omitempty"`
+	LagMetrics            *LagMetrics        `json:"lagMetrics,omitempty"`
+	RolledBack            bool               `json:"rolledBack,omitempty"`
+	RollbackReason        string             `json:"rollbackReason,omitempty"`
+}
+
+type PodEvent struct {
+	Timestamp string `json:"timestamp"`
+	PodName   string `json:"podName"`
+	EventType string `json:"eventType"`
+	Phase     string `json:"phase"`
+	Reason    string `json:"reason"`
+	Message   string `json:"message"`
+}
+
+type DisruptionSummary struct {
+	TotalSteps               int     `json:"totalSteps"`
+	PassedSteps              int     `json:"passedSteps"`
+	WorstRecovery            string  `json:"worstRecovery,omitempty"`
+	AvgThroughputDegradation float64 `json:"avgThroughputDegradation"`
+	MaxP99LatencySpike       float64 `json:"maxP99LatencySpike"`
+	SlaViolated              bool    `json:"slaViolated"`
+	WorstIsrRecovery         string  `json:"worstIsrRecovery,omitempty"`
+	PeakConsumerLag          int64   `json:"peakConsumerLag,omitempty"`
+}
+
+type DisruptionTypeInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type DisruptionTimeline struct {
+	Step             string     `json:"step"`
+	Type             string     `json:"type"`
+	Events           []PodEvent `json:"events"`
+	TimeToFirstReady string     `json:"timeToFirstReady"`
+	TimeToAllReady   string     `json:"timeToAllReady"`
+}
+
+type IsrMetrics struct {
+	TimeToFullIsr       string     `json:"timeToFullIsr,omitempty"`
+	MinIsrDepth         int        `json:"minIsrDepth"`
+	UnderReplicatedPeak int        `json:"underReplicatedPeakCount"`
+	TotalPartitions     int        `json:"totalPartitions"`
+	Timeline            []IsrEntry `json:"timeline,omitempty"`
+}
+
+type IsrEntry struct {
+	Timestamp         string `json:"timestamp"`
+	Topic             string `json:"topic"`
+	Partition         int    `json:"partition"`
+	LeaderId          int    `json:"leaderId"`
+	Isr               []int  `json:"isr"`
+	ReplicationFactor int    `json:"replicationFactor"`
+}
+
+type LagMetrics struct {
+	BaselineLag       int64      `json:"baselineLag"`
+	PeakLag           int64      `json:"peakLag"`
+	TimeToLagRecovery string     `json:"timeToLagRecovery,omitempty"`
+	Timeline          []LagEntry `json:"timeline,omitempty"`
+}
+
+type LagEntry struct {
+	Timestamp   string           `json:"timestamp"`
+	GroupId     string           `json:"groupId"`
+	TotalLag    int64            `json:"totalLag"`
+	PerTopicLag map[string]int64 `json:"perTopicLag,omitempty"`
+}
+
+type KafkaMetricsEntry struct {
+	Step                   string      `json:"step"`
+	DisruptionType         string      `json:"disruptionType"`
+	TargetedLeaderBrokerId *int        `json:"targetedLeaderBrokerId,omitempty"`
+	Isr                    *IsrMetrics `json:"isr,omitempty"`
+	Lag                    *LagMetrics `json:"lag,omitempty"`
+}
+
+type DryRunResult struct {
+	WouldSucceed bool          `json:"wouldSucceed"`
+	TotalBrokers int           `json:"totalBrokers"`
+	Steps        []StepPreview `json:"steps,omitempty"`
+	Warnings     []string      `json:"warnings,omitempty"`
+	Errors       []string      `json:"errors,omitempty"`
+}
+
+type StepPreview struct {
+	Name             string   `json:"name"`
+	DisruptionType   string   `json:"disruptionType"`
+	TargetPod        string   `json:"targetPod,omitempty"`
+	ResolvedLeaderId *int     `json:"resolvedLeaderId,omitempty"`
+	AffectedPods     []string `json:"affectedPods,omitempty"`
+	Warnings         []string `json:"warnings,omitempty"`
+}
+
+type DisruptionListEntry struct {
+	ID        string `json:"id"`
+	PlanName  string `json:"planName"`
+	Status    string `json:"status"`
+	SlaGrade  string `json:"slaGrade"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type PlaybookEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Steps       int    `json:"steps"`
+}
+
+type DisruptionScheduleEntry struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	CronExpression string `json:"cronExpression"`
+	Enabled        bool   `json:"enabled"`
+	PlaybookName   string `json:"playbookName"`
+	LastRunID      string `json:"lastRunId"`
+	LastRunAt      string `json:"lastRunAt"`
+	CreatedAt      string `json:"createdAt"`
+}
+
+type DisruptionSSEEvent struct {
+	DisruptionID string `json:"disruptionId"`
+	Type         string `json:"type"`
+	StepName     string `json:"stepName"`
+	Message      string `json:"message"`
+	Timestamp    string `json:"timestamp"`
 }

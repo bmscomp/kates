@@ -287,6 +287,18 @@ func (c *Client) ExportCSV(ctx context.Context, id string) (string, error) {
 	return string(data), nil
 }
 
+func (c *Client) ExportHeatmap(ctx context.Context, id string, format string) (string, error) {
+	path := "/api/tests/" + id + "/report/heatmap"
+	if format != "" {
+		path += "?format=" + format
+	}
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func (c *Client) ExportJUnit(ctx context.Context, id string) (string, error) {
 	data, err := c.get(ctx, "/api/tests/"+id+"/report/junit")
 	if err != nil {
@@ -408,4 +420,108 @@ func (c *Client) Resilience(ctx context.Context, request interface{}) (*Resilien
 	}
 	var result ResilienceResult
 	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*DisruptionRunResponse, error) {
+	data, err := c.postJSON(ctx, "/api/disruptions", plan)
+	if err != nil {
+		return nil, err
+	}
+	var result DisruptionRunResponse
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) RunDryRun(ctx context.Context, plan interface{}) (*DryRunResult, error) {
+	data, err := c.postJSON(ctx, "/api/disruptions?dryRun=true", plan)
+	if err != nil {
+		return nil, err
+	}
+	var result DryRunResult
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionStatus(ctx context.Context, id string) (*DisruptionReport, error) {
+	path := fmt.Sprintf("/api/disruptions/%s", id)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result DisruptionReport
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionTimelineData(ctx context.Context, id string) ([]DisruptionTimeline, error) {
+	path := fmt.Sprintf("/api/disruptions/%s/timeline", id)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []DisruptionTimeline
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionTypes(ctx context.Context) ([]DisruptionTypeInfo, error) {
+	data, err := c.get(ctx, "/api/disruptions/types")
+	if err != nil {
+		return nil, err
+	}
+	var result []DisruptionTypeInfo
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionList(ctx context.Context, limit int) ([]DisruptionListEntry, error) {
+	path := fmt.Sprintf("/api/disruptions?limit=%d", limit)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []DisruptionListEntry
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionKafkaMetrics(ctx context.Context, id string) ([]KafkaMetricsEntry, error) {
+	path := fmt.Sprintf("/api/disruptions/%s/kafka-metrics", id)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []KafkaMetricsEntry
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) PlaybookList(ctx context.Context) ([]PlaybookEntry, error) {
+	data, err := c.get(ctx, "/api/disruptions/playbooks")
+	if err != nil {
+		return nil, err
+	}
+	var result []PlaybookEntry
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) PlaybookRun(ctx context.Context, name string) (*DisruptionRunResponse, error) {
+	path := fmt.Sprintf("/api/disruptions/playbooks/%s", name)
+	data, err := c.postJSON(ctx, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result DisruptionRunResponse
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionScheduleList(ctx context.Context) ([]DisruptionScheduleEntry, error) {
+	data, err := c.get(ctx, "/api/disruptions/schedules")
+	if err != nil {
+		return nil, err
+	}
+	var result []DisruptionScheduleEntry
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) DisruptionScheduleCreate(ctx context.Context, body map[string]interface{}) (json.RawMessage, error) {
+	return c.postJSON(ctx, "/api/disruptions/schedules", body)
+}
+
+func (c *Client) DisruptionScheduleDelete(ctx context.Context, id string) error {
+	path := fmt.Sprintf("/api/disruptions/schedules/%s", id)
+	return c.delete(ctx, path)
 }

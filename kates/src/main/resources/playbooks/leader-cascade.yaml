@@ -1,0 +1,29 @@
+name: leader-cascade
+description: "Kill partition leaders sequentially to test cascading election recovery"
+category: kafka
+maxAffectedBrokers: 2
+autoRollback: true
+isrTrackingTopic: __consumer_offsets
+steps:
+  - name: kill-leader-partition-0
+    faultSpec:
+      experimentName: leader-cascade-p0
+      disruptionType: POD_KILL
+      targetTopic: __consumer_offsets
+      targetPartition: 0
+      chaosDurationSec: 10
+      gracePeriodSec: 0
+    steadyStateSec: 30
+    observationWindowSec: 60
+    requireRecovery: true
+  - name: kill-leader-partition-1
+    faultSpec:
+      experimentName: leader-cascade-p1
+      disruptionType: POD_KILL
+      targetTopic: __consumer_offsets
+      targetPartition: 1
+      chaosDurationSec: 10
+      gracePeriodSec: 0
+    steadyStateSec: 15
+    observationWindowSec: 60
+    requireRecovery: true

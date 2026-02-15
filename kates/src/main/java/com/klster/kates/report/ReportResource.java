@@ -1,10 +1,15 @@
 package com.klster.kates.report;
 
 import com.klster.kates.domain.TestRun;
+import com.klster.kates.engine.LatencyHistogram;
+import com.klster.kates.engine.TestOrchestrator;
 import com.klster.kates.export.CsvExporter;
+import com.klster.kates.export.HeatmapExporter;
 import com.klster.kates.export.JunitXmlExporter;
+import com.klster.kates.export.LatencyHeatmapData;
 import com.klster.kates.service.TestRunRepository;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -30,14 +35,19 @@ public class ReportResource {
     private final TestRunRepository repository;
     private final CsvExporter csvExporter;
     private final JunitXmlExporter junitXmlExporter;
+    private final HeatmapExporter heatmapExporter;
+    private final TestOrchestrator orchestrator;
 
     @Inject
     public ReportResource(ReportGenerator generator, TestRunRepository repository,
-                          CsvExporter csvExporter, JunitXmlExporter junitXmlExporter) {
+                          CsvExporter csvExporter, JunitXmlExporter junitXmlExporter,
+                          HeatmapExporter heatmapExporter, TestOrchestrator orchestrator) {
         this.generator = generator;
         this.repository = repository;
         this.csvExporter = csvExporter;
         this.junitXmlExporter = junitXmlExporter;
+        this.heatmapExporter = heatmapExporter;
+        this.orchestrator = orchestrator;
     }
 
     @GET
@@ -93,6 +103,39 @@ public class ReportResource {
         return Response.ok(xml)
                 .header("Content-Disposition", "attachment; filename=\"kates-report-" + id + ".xml\"")
                 .build();
+    }
+
+    @GET
+    @Path("/tests/{id}/report/heatmap")
+    public Response getHeatmapReport(@PathParam("id") String id,
+                                     @QueryParam("format") @DefaultValue("json") String format) {
+        TestRun run = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+
+        java.util.List<LatencyHeatmapData.HeatmapRow> rows = orchestrator.getHeatmapRows(id);
+        if (rows.isEmpty()) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity("No heatmap data available for run: " + id).build();
+        }
+
+        double[] boundaries = LatencyHistogram.HEATMAP_BOUNDARIES;
+        LatencyHeatmapData data = new LatencyHeatmapData(
+                id,
+                run.getTestType() != null ? run.getTestType().name() : null,
+                LatencyHeatmapData.buildLabels(boundaries),
+                LatencyHeatmapData.buildBoundaries(boundaries),
+                rows);
+
+        if ("csv".equalsIgnoreCase(format)) {
+            String csv = heatmapExporter.exportCsv(data);
+            return Response.ok(csv, "text/csv")
+                    .header("Content-Disposition",
+                            "attachment; filename=\"kates-heatmap-" + id + ".csv\"")
+                    .build();
+        }
+
+        String json = heatmapExporter.exportJson(data);
+        return Response.ok(json, MediaType.APPLICATION_JSON).build();
     }
 
     @GET

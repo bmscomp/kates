@@ -27,6 +27,7 @@ public class BenchmarkStatus {
     private final IntegrityResult integrityResult;
     private final List<MetricsSample> timeSeries;
     private final Map<String, Double> latencyHistogram;
+    private final long[] heatmapBuckets;
 
     private BenchmarkStatus(Builder builder) {
         this.state = builder.state;
@@ -43,6 +44,7 @@ public class BenchmarkStatus {
         this.integrityResult = builder.integrityResult;
         this.timeSeries = builder.timeSeries != null ? List.copyOf(builder.timeSeries) : List.of();
         this.latencyHistogram = builder.latencyHistogram != null ? Map.copyOf(builder.latencyHistogram) : Map.of();
+        this.heatmapBuckets = builder.heatmapBuckets;
     }
 
     public TaskStatus getState() { return state; }
@@ -59,6 +61,7 @@ public class BenchmarkStatus {
     public IntegrityResult getIntegrityResult() { return integrityResult; }
     public List<MetricsSample> getTimeSeries() { return timeSeries; }
     public Map<String, Double> getLatencyHistogram() { return latencyHistogram; }
+    public long[] getHeatmapBuckets() { return heatmapBuckets; }
 
     public boolean isTerminal() {
         return state == TaskStatus.DONE || state == TaskStatus.FAILED;
@@ -83,6 +86,7 @@ public class BenchmarkStatus {
         private IntegrityResult integrityResult;
         private List<MetricsSample> timeSeries;
         private Map<String, Double> latencyHistogram;
+        private long[] heatmapBuckets;
 
         private Builder(TaskStatus state) {
             this.state = state;
@@ -101,6 +105,7 @@ public class BenchmarkStatus {
         public Builder integrityResult(IntegrityResult ir) { this.integrityResult = ir; return this; }
         public Builder timeSeries(List<MetricsSample> ts) { this.timeSeries = ts; return this; }
         public Builder latencyHistogram(Map<String, Double> h) { this.latencyHistogram = h; return this; }
+        public Builder heatmapBuckets(long[] b) { this.heatmapBuckets = b; return this; }
 
         public BenchmarkStatus build() {
             return new BenchmarkStatus(this);

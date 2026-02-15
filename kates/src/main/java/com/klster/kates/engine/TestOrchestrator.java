@@ -8,6 +8,7 @@ import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestScenario;
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
+import com.klster.kates.export.LatencyHeatmapData;
 import com.klster.kates.service.KafkaAdminService;
 import com.klster.kates.service.TestRunRepository;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -41,6 +42,7 @@ public class TestOrchestrator {
     private final String defaultBackend;
     private final String bootstrapServers;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
+    private final Map<String, List<LatencyHeatmapData.HeatmapRow>> heatmapRows = new ConcurrentHashMap<>();
 
     @Inject
     public TestOrchestrator(
@@ -233,8 +235,16 @@ public class TestOrchestrator {
                 BenchmarkHandle handle = handleMap.get(result.getTaskId());
                 if (handle != null) {
                     try {
-                        BenchmarkStatus status = backend.poll(handle);
-                        applyStatus(result, status);
+                    BenchmarkStatus status = backend.poll(handle);
+                    applyStatus(result, status);
+
+                    if (status.getHeatmapBuckets() != null) {
+                        heatmapRows.computeIfAbsent(runId, k -> new java.util.ArrayList<>())
+                                .add(new LatencyHeatmapData.HeatmapRow(
+                                        System.currentTimeMillis(),
+                                        result.getPhaseName(),
+                                        status.getHeatmapBuckets()));
+                    }
                     } catch (Exception e) {
                         LOG.log(Level.WARNING, "Failed to poll task: " + result.getTaskId(), e);
                     }
@@ -251,9 +261,9 @@ public class TestOrchestrator {
         }
 
         if (allDone) {
-            run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
-            activeHandles.remove(runId);
-        }
+        run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
+        activeHandles.remove(runId);
+    }
 
         repository.save(run);
         return run;
@@ -284,6 +294,10 @@ public class TestOrchestrator {
                 .map(BenchmarkBackend::name)
                 .sorted()
                 .toList();
+    }
+
+    public List<LatencyHeatmapData.HeatmapRow> getHeatmapRows(String runId) {
+        return heatmapRows.getOrDefault(runId, List.of());
     }
 
     /**

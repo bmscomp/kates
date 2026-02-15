@@ -1,0 +1,17 @@
+name: storage-pressure
+description: "Fill broker log directories to 90% to simulate storage exhaustion"
+category: storage
+maxAffectedBrokers: 1
+autoRollback: true
+steps:
+  - name: fill-broker-disk
+    faultSpec:
+      experimentName: storage-pressure-fill
+      disruptionType: DISK_FILL
+      targetLabel: "strimzi.io/component-type=kafka"
+      targetBrokerId: 0
+      fillPercentage: 90
+      chaosDurationSec: 120
+    steadyStateSec: 30
+    observationWindowSec: 120
+    requireRecovery: true

@@ -1,0 +1,16 @@
+name: az-failure
+description: "Simulate availability zone failure by killing all brokers in one rack"
+category: infrastructure
+maxAffectedBrokers: 3
+autoRollback: true
+steps:
+  - name: kill-rack-0-brokers
+    faultSpec:
+      experimentName: az-failure-rack-0
+      disruptionType: POD_KILL
+      targetLabel: "strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a"
+      chaosDurationSec: 30
+      gracePeriodSec: 0
+    steadyStateSec: 30
+    observationWindowSec: 120
+    requireRecovery: true

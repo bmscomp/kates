@@ -106,6 +106,61 @@ public class LatencyHistogram {
             lock.writeLock().unlock();
         }
     }
+    /**
+     * 32 logarithmic bucket boundaries (in ms) for heatmap export.
+     * Covers 0 → 10,000 ms with increasing granularity at lower latencies.
+     */
+    public static final double[] HEATMAP_BOUNDARIES = {
+        0, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100,
+        150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000
+    };
+
+    /**
+     * Compresses 1024 internal buckets into {@link #HEATMAP_BOUNDARIES} ranges.
+     * Returns an array of length {@code HEATMAP_BOUNDARIES.length - 1} where each
+     * entry is the count of latencies falling within that range.
+     */
+    public long[] exportBuckets() {
+        int heatmapLen = HEATMAP_BOUNDARIES.length - 1;
+        long[] heatmap = new long[heatmapLen];
+        lock.readLock().lock();
+        try {
+            for (int i = 0; i < BUCKET_COUNT; i++) {
+                if (buckets[i] == 0) continue;
+                double latencyMs = fromBucket(i);
+                int target = findHeatmapBucket(latencyMs);
+                heatmap[target] += buckets[i];
+            }
+        } finally {
+            lock.readLock().unlock();
+        }
+        return heatmap;
+    }
+
+    /**
+     * Atomically captures the current bucket distribution compressed to heatmap
+     * boundaries and resets all counters. Used for windowed collection.
+     */
+    public long[] snapshotAndReset() {
+        int heatmapLen = HEATMAP_BOUNDARIES.length - 1;
+        long[] heatmap = new long[heatmapLen];
+        lock.writeLock().lock();
+        try {
+            for (int i = 0; i < BUCKET_COUNT; i++) {
+                if (buckets[i] == 0) continue;
+                double latencyMs = fromBucket(i);
+                int target = findHeatmapBucket(latencyMs);
+                heatmap[target] += buckets[i];
+            }
+            Arrays.fill(buckets, 0);
+            totalCount.set(0);
+            maxValue = 0;
+            sumValue = 0;
+        } finally {
+            lock.writeLock().unlock();
+        }
+        return heatmap;
+    }
 
     private int toBucket(double latencyMs) {
         if (latencyMs <= 0) return 0;
@@ -115,5 +170,14 @@ public class LatencyHistogram {
 
     private double fromBucket(int bucket) {
         return Math.exp((double) bucket / (BUCKET_COUNT - 1) * LOG_BASE) - 1;
+    }
+
+    private static int findHeatmapBucket(double latencyMs) {
+        for (int i = HEATMAP_BOUNDARIES.length - 2; i >= 0; i--) {
+            if (latencyMs >= HEATMAP_BOUNDARIES[i]) {
+                return i;
+            }
+        }
+        return 0;
     }
 }

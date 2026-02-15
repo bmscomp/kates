@@ -1,0 +1,16 @@
+name: split-brain
+description: "Network-partition the controller/leader broker from all followers"
+category: network
+maxAffectedBrokers: 1
+autoRollback: true
+steps:
+  - name: isolate-controller
+    faultSpec:
+      experimentName: split-brain-partition
+      disruptionType: NETWORK_PARTITION
+      targetLabel: "strimzi.io/component-type=kafka"
+      targetBrokerId: 0
+      chaosDurationSec: 60
+    steadyStateSec: 30
+    observationWindowSec: 90
+    requireRecovery: true

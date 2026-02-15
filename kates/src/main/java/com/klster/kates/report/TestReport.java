@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.klster.kates.domain.SlaVerdict;
 import com.klster.kates.domain.TestRun;
 
+import com.klster.kates.export.LatencyHeatmapData;
+
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +24,7 @@ public class TestReport {
     private SlaVerdict overallSlaVerdict;
     private Map<String, String> metadata;
     private String generatedAt;
+    private LatencyHeatmapData heatmapData;
 
     public TestReport() {
     }
@@ -49,4 +52,7 @@ public class TestReport {
 
     public String getGeneratedAt() { return generatedAt; }
     public void setGeneratedAt(String generatedAt) { this.generatedAt = generatedAt; }
+
+    public LatencyHeatmapData getHeatmapData() { return heatmapData; }
+    public void setHeatmapData(LatencyHeatmapData heatmapData) { this.heatmapData = heatmapData; }
 }

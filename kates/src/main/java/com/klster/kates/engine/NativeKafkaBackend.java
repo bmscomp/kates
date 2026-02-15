@@ -334,7 +334,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     .p99LatencyMs(histogram.getPercentile(99))
                     .p999LatencyMs(histogram.getPercentile(99.9))
                     .maxLatencyMs(histogram.getMax())
-                    .latencyHistogram(histogram.snapshot());
+                    .latencyHistogram(histogram.snapshot())
+            .heatmapBuckets(histogram.exportBuckets());
 
             if (error != null) {
                 builder.error(error);

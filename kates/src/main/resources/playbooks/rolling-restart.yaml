@@ -1,0 +1,16 @@
+name: rolling-restart
+description: "Trigger a graceful rolling restart of the Kafka StatefulSet"
+category: operations
+maxAffectedBrokers: 1
+autoRollback: false
+steps:
+  - name: rolling-restart-brokers
+    faultSpec:
+      experimentName: rolling-restart-sts
+      disruptionType: ROLLING_RESTART
+      targetLabel: "strimzi.io/component-type=kafka"
+      chaosDurationSec: 300
+      gracePeriodSec: 30
+    steadyStateSec: 30
+    observationWindowSec: 180
+    requireRecovery: true

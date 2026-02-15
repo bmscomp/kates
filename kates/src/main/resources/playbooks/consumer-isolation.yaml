@@ -1,0 +1,16 @@
+name: consumer-isolation
+description: "Network-partition consumer pods from Kafka brokers to test consumer resilience"
+category: network
+maxAffectedBrokers: -1
+autoRollback: true
+steps:
+  - name: partition-consumers
+    faultSpec:
+      experimentName: consumer-isolation-net
+      disruptionType: NETWORK_PARTITION
+      targetLabel: "app=kafka-consumer"
+      targetNamespace: kates
+      chaosDurationSec: 60
+    steadyStateSec: 30
+    observationWindowSec: 90
+    requireRecovery: true
