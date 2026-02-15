@@ -751,6 +751,11 @@ Lost records in a contiguous range during chaos suggests they were acked but the
 | `make chaos-kafka-status` | View chaos engines and results |
 | `make test` | Run 1M-message performance test |
 | `make chaos-ui` | Open Litmus UI (http://localhost:9091) |
+| `kates test scaffold --type INTEGRITY_CHAOS -o test.yaml` | Generate integrity + chaos test |
+| `kates test apply -f test.yaml --wait` | Run test with SLA validation |
+| `kates resilience run --config resilience.json` | Performance + chaos correlation |
+| `kates cluster check` | Cluster health check |
+| `kates cluster watch` | Live cluster health dashboard |
 
 ### Monitoring
 

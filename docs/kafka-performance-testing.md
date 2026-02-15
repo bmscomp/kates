@@ -2172,6 +2172,248 @@ kates test apply -f idempotent.yaml --wait
 # Compare data loss and duplicate counts between the two runs
 ```
 
+### Context Management
+
+KATES uses a kubectl-style context system stored in `~/.kates.yaml`. This lets you switch between local, staging, and production environments without re-typing URLs.
+
+| Command | Description |
+|---------|-------------|
+| `kates ctx show` | List all contexts with active marker (`→`) |
+| `kates ctx set <name> --url <url>` | Create or update a context |
+| `kates ctx use <name>` | Switch active context |
+| `kates ctx current` | Print active context name and URL |
+| `kates ctx delete <name>` | Remove a context |
+
+**Quick start example:**
+```bash
+kates ctx set local --url http://localhost:30083
+kates ctx use local
+kates ctx set staging --url https://kates-staging.company.com --output json
+kates ctx show
+```
+
+**Config file structure (`~/.kates.yaml`):**
+```yaml
+current-context: local
+contexts:
+  local:
+    url: http://localhost:30083
+    output: table
+  staging:
+    url: https://kates-staging.company.com
+    output: json
+```
+
+### Cluster Inspection
+
+Inspect Kafka cluster state without leaving the terminal. All commands support `-o json` for scripting.
+
+| Command | Description |
+|---------|-------------|
+| `kates cluster info` | Cluster metadata: ID, controller, broker table (ID, host, port, rack, role) |
+| `kates cluster topics` | List all Kafka topics |
+| `kates cluster topics describe <topic>` | Topic detail: partitions, replication factor, configs, per-partition ISR/leader, under-replicated flags |
+| `kates cluster groups` | List consumer groups with state and member count |
+| `kates cluster groups describe <group>` | Per-partition lag table (topic, partition, current, end, lag) |
+| `kates cluster broker configs <id>` | Non-default broker configuration, grouped by source (STATIC_BROKER, DYNAMIC, etc.) |
+| `kates cluster check` | Full cluster health check: broker count, partition health, under-replicated/offline partitions, problems list |
+| `kates cluster watch` | Live-refresh cluster health with sparkline trends (under-replicated, offline, partitions) |
+
+**Example — diagnosing under-replicated partitions:**
+```bash
+kates cluster check                     # Overall health report
+kates cluster topics describe my-topic  # Which partitions are under-replicated?
+kates cluster broker configs 0          # Is min.insync.replicas configured?
+kates cluster watch --interval 5        # Watch partition health in real-time
+```
+
+**Example — consumer group lag investigation:**
+```bash
+kates cluster groups                       # Find group ID
+kates cluster groups describe my-consumer  # Per-partition lag with color-coded high-lag cells
+```
+
+### Test Lifecycle
+
+Create, run, and monitor performance tests.
+
+| Command | Description | Key Flags |
+|---------|-------------|-----------|
+| `kates test create` | Create and run a test | `--type`, `--records`, `--partitions`, `--acks` |
+| `kates test scaffold` | Generate a YAML test spec | `--type` (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, INTEGRITY_CHAOS) |
+| `kates test apply` | Submit a YAML spec to the engine | `-f`, `--wait` |
+| `kates test list` | List all test runs | `--type`, `--status`, `--page`, `--size` |
+| `kates test list watch` | Auto-refresh test list | `--interval` |
+| `kates test get <id>` | Show test details | |
+| `kates test watch <id>` | Live-watch a running test until completion | `--interval` |
+| `kates test status <id>` | Check SLA pass/fail status | |
+| `kates test delete <id>` | Delete a test run | |
+
+**Workflow — imperative test run:**
+```bash
+kates test create --type LOAD --records 500000 --partitions 6 --acks all --wait
+```
+
+**Workflow — YAML-driven test run:**
+```bash
+kates test scaffold --type ENDURANCE -o endurance.yaml
+# Edit YAML to customize spec, chaos, and validation blocks
+kates test apply -f endurance.yaml --wait
+```
+
+**Workflow — watch a running test:**
+```bash
+kates test list          # Find the run ID
+kates test watch abc123  # Live view: status, phases, throughput, latency
+```
+
+### Reporting & Analysis
+
+View, compare, and export test results.
+
+| Command | Description | Key Flags |
+|---------|-------------|-----------|
+| `kates report show <id>` | Full report: throughput, latency distribution (bar chart), error rate, SLA verdict | |
+| `kates report summary <id>` | Compact metrics table | |
+| `kates report diff <id1> <id2>` | Side-by-side metric comparison with delta percentages and ▲/▼ indicators | |
+| `kates report compare <id1,id2,...>` | Compare metrics across multiple runs | |
+| `kates report export <id>` | Export to file or stdout | `--format csv\|junit` |
+
+**Example — regression detection between two runs:**
+```bash
+$ kates report diff abc123 def456
+
+  ╔══════════════════════════════════╗
+  ║          Report Diff             ║
+  ╟──────────────────────────────────╢
+  ║  abc123 vs def456                ║
+  ╚══════════════════════════════════╝
+
+  ┌─────────────────┬───────────┬───────────┬─────────┬───┐
+  │ Metric          │ abc123    │ def456    │ Delta   │   │
+  ├─────────────────┼───────────┼───────────┼─────────┼───┤
+  │ Avg Throughput  │ 45,231    │ 42,100    │ -6.9%   │ ▼ │
+  │ P99 Latency     │ 12.5 ms   │ 18.3 ms   │ +46.4%  │ ▼ │
+  │ Error Rate      │ 0.00%     │ 0.00%     │ =       │ = │
+  └─────────────────┴───────────┴───────────┴─────────┴───┘
+```
+
+**Example — CI artifact export:**
+```bash
+kates report export abc123 --format junit > test-results.xml
+kates report export abc123 --format csv > metrics.csv
+```
+
+When piped (non-terminal), output goes to stdout; when run interactively, it writes to `kates-report-<id>.csv` or `kates-report-<id>.xml`.
+
+### Observability
+
+Real-time monitoring tools for live clusters and running tests.
+
+**`kates dashboard` (alias: `dash`)**
+
+Full-screen TUI with auto-refresh. Displays:
+- System Health panel (API, Kafka, engine, config count)
+- Test Summary panel (running, pending, done, failed counts)
+- Active Tests panel (per-test throughput and latency)
+- Recent Completed panel (last 5 finished tests)
+- Sparkline charts: Throughput ↗ and P99 Latency ↘ trends
+
+```bash
+kates dashboard --interval 3   # Refresh every 3 seconds
+kates dash                     # Short alias
+```
+
+**`kates top`**
+
+Like `kubectl top` but for KATES tests. Shows a one-liner status bar plus active/recent test tables with throughput and latency columns.
+
+```bash
+kates top --interval 5
+```
+
+**`kates status`**
+
+Single-line system status. Perfect for shell prompts or quick checks:
+
+```
+  ✓ local │ UP │ Kafka ✓ │ 4 configs │ 1 running │ 12 done │ 0 failed
+```
+
+**`kates trend`**
+
+Historical metric analysis with sparkline charts and automatic regression detection.
+
+```bash
+kates trend --type LOAD --metric p99LatencyMs --days 30
+kates trend --type ENDURANCE --metric avgThroughputRecPerSec --days 7 --baseline 3
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | (required) | Test type to analyze |
+| `--metric` | `avgThroughputRecPerSec` | Metric to plot |
+| `--days` | `30` | Look-back window |
+| `--baseline` | `5` | Number of recent runs for baseline calculation |
+
+Output includes: sparkline with trend direction (↗/→/↘), min/max/average statistics, per-run data points, and any detected regressions (>20% deviation from baseline).
+
+### Resilience Testing
+
+Correlate performance metrics with chaos experiments in a single run.
+
+```bash
+kates resilience run --config resilience-test.json
+```
+
+**Config file format (`resilience-test.json`):**
+```json
+{
+  "testRequest": {
+    "testType": "LOAD",
+    "spec": { "records": 100000 }
+  },
+  "chaosSpec": {
+    "experimentName": "kafka-pod-kill",
+    "targetNamespace": "kafka"
+  },
+  "steadyStateSec": 30
+}
+```
+
+**Output includes:**
+- Chaos Outcome (experiment, verdict, duration)
+- Impact Analysis (per-metric % change with ▲/▼ markers)
+- Pre-Chaos Baseline vs Post-Chaos Impact (throughput, P99 latency, error rate)
+
+This differs from `kates test apply` with `INTEGRITY_CHAOS` in that `resilience run` focuses on **performance impact measurement** (before vs after), while `INTEGRITY_CHAOS` focuses on **per-record data loss and corruption detection**.
+
+### Scheduling
+
+Automate recurring test runs with cron expressions.
+
+| Command | Description |
+|---------|-------------|
+| `kates schedule list` | List all schedules (ID, name, cron, state, last run) |
+| `kates schedule get <id>` | Show schedule details |
+| `kates schedule create` | Create a new scheduled test |
+| `kates schedule delete <id>` | Remove a schedule |
+
+**Example — hourly smoke test and nightly endurance:**
+```bash
+# Create a request file
+cat > load-test.json << 'EOF'
+{
+  "testType": "LOAD",
+  "spec": { "records": 10000, "partitions": 3 }
+}
+EOF
+
+kates schedule create --name "Hourly Smoke" --cron "0 * * * *" --request load-test.json
+kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" --request endurance.json
+kates schedule list
+```
+
 ---
 
 ## Quick Reference
@@ -2183,12 +2425,26 @@ kates test apply -f idempotent.yaml --wait
 | `make test` | Run the standard 1M-message perf test |
 | `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-producer-perf-test.sh ...` | Custom producer perf test |
 | `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-consumer-perf-test.sh ...` | Custom consumer perf test |
-| `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-topics.sh --describe ...` | Inspect topic configuration |
-| `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-consumer-groups.sh --describe ...` | Check consumer lag |
+| `kates health` | System health and Kafka connectivity |
+| `kates status` | One-line system status (for scripts/prompts) |
+| `kates cluster info` | Cluster metadata and broker table |
+| `kates cluster topics describe <topic>` | Topic config, partitions, ISR detail |
+| `kates cluster groups describe <group>` | Consumer group per-partition lag |
+| `kates cluster broker configs <id>` | Non-default broker configuration |
+| `kates cluster check` | Full cluster health check |
+| `kates cluster watch` | Live cluster health dashboard |
 | `kates test scaffold --type <TYPE> -o test.yaml` | Generate a KATES test definition |
 | `kates test apply -f test.yaml --wait` | Run a KATES test with SLA validation |
-| `kates test status <id>` | Check test run status |
 | `kates test list` | List recent test runs |
+| `kates test watch <id>` | Live-watch a running test |
+| `kates report show <id>` | Full performance report |
+| `kates report diff <id1> <id2>` | Side-by-side run comparison |
+| `kates report export <id> --format csv\|junit` | Export report |
+| `kates trend --type <TYPE> --metric <metric>` | Historical trend with spark charts |
+| `kates resilience run --config <file>` | Performance + chaos correlation test |
+| `kates schedule create --name <n> --cron <expr> --request <file>` | Recurring test schedule |
+| `kates dashboard` | Full-screen monitoring TUI |
+| `kates top` | Live test activity view |
 
 ### Monitoring
 
