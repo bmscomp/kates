@@ -1,10 +1,10 @@
 # Tutorial 2: Running Every Test Type
 
-This tutorial walks through all 8 KATES test types with real commands and expected outputs. By the end, you'll understand which test to use for every scenario.
+This tutorial walks through all 8 Kates test types with real commands and expected outputs. By the end, you'll understand which test to use for every scenario.
 
 ## Prerequisites
 
-- KATES stack deployed and CLI configured (see [Tutorial 1](01-getting-started.md))
+- Kates stack deployed and CLI configured (see [Tutorial 1](01-getting-started.md))
 - System health verified: `kates health`
 
 ## 1. LOAD Test — Baseline Performance

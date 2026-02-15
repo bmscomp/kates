@@ -1,4 +1,4 @@
-# KATES — Kafka Advanced Testing & Engineering Suite
+# Kates — Kafka Advanced Testing & Engineering Suite
 
 A terminal-first platform for **performance testing**, **chaos engineering**, and **operational resilience** of Apache Kafka clusters. Runs on a local Kind-based Kubernetes environment with production-parity infrastructure.
 
@@ -197,9 +197,9 @@ kubectl describe pod <pod-name> -n <namespace> | grep -A5 Events
 | `config/litmus-values.yaml` | LitmusChaos Helm values |
 | `config/storage-classes.yaml` | Zone-specific storage classes |
 
-## KATES CLI
+## Kates CLI
 
-**KATES** (Kafka Advanced Testing & Engineering Suite) is a terminal-first CLI for performance testing, chaos engineering, and trend analysis against the Kafka cluster. It communicates with the KATES backend API.
+**Kates** (Kafka Advanced Testing & Engineering Suite) is a terminal-first CLI for performance testing, chaos engineering, and trend analysis against the Kafka cluster. It communicates with the Kates backend API.
 
 ### Installation
 
@@ -211,10 +211,10 @@ mv kates /usr/local/bin/  # or keep in-place
 
 ### Context Management
 
-KATES uses a context system similar to `kubectl`. Configuration is stored in `~/.kates.yaml`.
+Kates uses a context system similar to `kubectl`. Configuration is stored in `~/.kates.yaml`.
 
 ```bash
-# Create a context pointing to the KATES API
+# Create a context pointing to the Kates API
 kates ctx set local --url http://localhost:30083
 
 # Switch to a context

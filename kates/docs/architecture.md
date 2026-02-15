@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the internal architecture of the KATES backend, covering package structure, class responsibilities, and the test execution lifecycle.
+This document describes the internal architecture of the Kates backend, covering package structure, class responsibilities, and the test execution lifecycle.
 
 ## Package Structure
 
@@ -151,7 +151,7 @@ This enables running tests without external dependencies (native backend) or wit
 
 ### Trogdor Specs as POJOs
 
-Rather than depending on the Trogdor library JAR, KATES models Trogdor's JSON specification format using plain Java objects with Jackson annotations. This avoids dependency conflicts, tight coupling, and size bloat.
+Rather than depending on the Trogdor library JAR, Kates models Trogdor's JSON specification format using plain Java objects with Jackson annotations. This avoids dependency conflicts, tight coupling, and size bloat.
 
 ### In-Memory Repository
 

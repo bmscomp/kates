@@ -1,6 +1,6 @@
 # Chapter 7: Chaos Engineering in Practice
 
-This chapter covers how KATES implements chaos engineering: disruption types, playbooks, safety guardrails, SLA grading, and the full execution lifecycle.
+This chapter covers how Kates implements chaos engineering: disruption types, playbooks, safety guardrails, SLA grading, and the full execution lifecycle.
 
 ## Disruption Architecture
 
@@ -47,7 +47,7 @@ graph TB
 
 ## Disruption Types
 
-KATES supports 10 disruption types across two implementation backends:
+Kates supports 10 disruption types across two implementation backends:
 
 ### Direct Kubernetes API
 
@@ -91,7 +91,7 @@ The `HybridChaosProvider` routes each disruption to the appropriate backend base
 
 ## Built-In Playbooks
 
-KATES ships with 6 production-tested playbooks located in `kates/src/main/resources/playbooks/`. Each playbook is a YAML file that defines a complete disruption scenario with safety parameters, fault steps, and observation windows.
+Kates ships with 6 production-tested playbooks located in `kates/src/main/resources/playbooks/`. Each playbook is a YAML file that defines a complete disruption scenario with safety parameters, fault steps, and observation windows.
 
 ### leader-cascade
 
@@ -99,20 +99,20 @@ Kills partition leaders sequentially to test cascading election recovery. This i
 
 ```mermaid
 sequenceDiagram
-    participant KATES
+    participant Kates
     participant Broker0 as Broker 0 (Leader P0)
     participant Broker1 as Broker 1 (Leader P1)
     participant Cluster
     
-    KATES->>Broker0: POD_KILL (step 1)
+    Kates->>Broker0: POD_KILL (step 1)
     Note over Cluster: Leader election for P0
-    KATES->>KATES: Wait 30s steady state
-    KATES->>KATES: Observe 60s recovery window
+    Kates->>Kates: Wait 30s steady state
+    Kates->>Kates: Observe 60s recovery window
     
-    KATES->>Broker1: POD_KILL (step 2)
+    Kates->>Broker1: POD_KILL (step 2)
     Note over Cluster: Leader election for P1<br/>(while P0 still recovering)
-    KATES->>KATES: Wait 15s steady state
-    KATES->>KATES: Observe 60s recovery window
+    Kates->>Kates: Wait 15s steady state
+    Kates->>Kates: Observe 60s recovery window
 ```
 
 ```yaml
@@ -351,7 +351,7 @@ The `KafkaIntelligenceService` provides Kafka-aware targeting and monitoring:
 
 ### Leader Resolution
 
-Instead of targeting arbitrary pods, KATES can target the **leader broker for a specific partition**:
+Instead of targeting arbitrary pods, Kates can target the **leader broker for a specific partition**:
 
 ```yaml
 steps:
@@ -360,14 +360,14 @@ steps:
       disruptionType: POD_KILL
       targetTopic: __consumer_offsets
       targetPartition: 0
-      # KATES resolves which broker hosts the leader
+      # Kates resolves which broker hosts the leader
 ```
 
 The intelligence service queries Kafka metadata to resolve which broker currently leads the target partition, then directs the disruption at that specific pod.
 
 ### ISR Tracking
 
-During execution, KATES captures ISR snapshots:
+During execution, Kates captures ISR snapshots:
 
 ```bash
 # View ISR tracking data
@@ -383,7 +383,7 @@ Output includes:
 
 ### Consumer Lag Monitoring
 
-For consumer-facing tests, KATES tracks consumer group lag:
+For consumer-facing tests, Kates tracks consumer group lag:
 
 - Peak lag during disruption
 - Lag recovery rate (messages/second of drain)
@@ -465,7 +465,7 @@ stateDiagram-v2
 
 ## Real-Time Monitoring
 
-During execution, KATES provides real-time progress via Server-Sent Events (SSE):
+During execution, Kates provides real-time progress via Server-Sent Events (SSE):
 
 ```bash
 # Watch disruption progress in real-time

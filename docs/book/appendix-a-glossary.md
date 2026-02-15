@@ -12,7 +12,7 @@ Quick reference for terms used throughout this book.
 | **Consumer Group** | A set of consumers that cooperatively read from topic partitions. Kafka assigns each partition to exactly one consumer within the group |
 | **Consumer Lag** | The difference between the latest offset produced and the latest offset consumed. Indicates how far behind a consumer is |
 | **Coordinated Omission** | A measurement bias where slow responses prevent new requests from being issued, causing artificially low latency measurements |
-| **CRC32** | A checksum algorithm used to verify message integrity. KATES can attach CRC32 checksums to test messages for corruption detection |
+| **CRC32** | A checksum algorithm used to verify message integrity. Kates can attach CRC32 checksums to test messages for corruption detection |
 | **Disruption** | A controlled fault injection — killing pods, partitioning networks, or stressing resources |
 | **Game Day** | A structured chaos engineering session with defined hypotheses, controlled experiments, and documented findings |
 | **Heatmap** | A visualization showing the full latency distribution over time. Each row is one second; each column is a latency bucket |

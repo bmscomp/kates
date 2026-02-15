@@ -1,6 +1,6 @@
 # Test Types
 
-KATES supports seven performance test types, each designed to stress different aspects of a Kafka cluster. Every test type translates into specific Trogdor task specifications via the `SpecFactory`.
+Kates supports seven performance test types, each designed to stress different aspects of a Kafka cluster. Every test type translates into specific Trogdor task specifications via the `SpecFactory`.
 
 ## LOAD — Steady-State Throughput
 

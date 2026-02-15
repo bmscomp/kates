@@ -142,12 +142,12 @@ Prometheus scrapes JMX metrics from each broker every 15 seconds via sidecar exp
 |---------|-----|-------------|
 | Grafana | http://localhost:30080 | admin / admin |
 | Kafka UI | http://localhost:30081 | — |
-| KATES API | http://localhost:30083 | — |
+| Kates API | http://localhost:30083 | — |
 | Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
 
 ## Using the CLI to Inspect the Cluster
 
-KATES provides built-in cluster inspection commands:
+Kates provides built-in cluster inspection commands:
 
 ```bash
 # Cluster overview
@@ -168,4 +168,4 @@ kates cluster brokers
 kates health
 ```
 
-These commands use the Kafka AdminClient API through the KATES backend — no direct broker access needed from the CLI.
+These commands use the Kafka AdminClient API through the Kates backend — no direct broker access needed from the CLI.

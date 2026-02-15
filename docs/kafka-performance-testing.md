@@ -1010,7 +1010,7 @@ The generated YAML includes:
 
 ```
 ╭─────────────────────────────────────────────╮
-│  KATES Test Summary                         │
+│  Kates Test Summary                         │
 ├──────────────┬────────┬─────────────────────┤
 │ Scenario     │ Status │ Result              │
 ├──────────────┼────────┼─────────────────────┤
@@ -1771,7 +1771,7 @@ kates test scaffold --type ROUND_TRIP -o round-trip.yaml
 kates test apply -f round-trip.yaml --wait
 ```
 
-The KATES CLI uses the ROUND_TRIP workload, which embeds a nanosecond timestamp in each record's payload. The consumer extracts the timestamp and computes the delivery latency per record, then aggregates into percentiles.
+The Kates CLI uses the ROUND_TRIP workload, which embeds a nanosecond timestamp in each record's payload. The consumer extracts the timestamp and computes the delivery latency per record, then aggregates into percentiles.
 
 **Pass criteria:**
 - P99 round-trip latency < 200ms (with `acks=all`, RF=3, ISR=2)
@@ -1790,7 +1790,7 @@ The KATES CLI uses the ROUND_TRIP workload, which embeds a nanosecond timestamp 
 - **RTO (Recovery Time Objective)** — how long write/read availability was interrupted
 - **RPO (Recovery Point Objective)** — how much data was at risk during a failure window
 
-**How it works:** The KATES native backend implements a produce→consume→verify pipeline:
+**How it works:** The Kates native backend implements a produce→consume→verify pipeline:
 
 ```
 Producer                          Kafka                         Consumer
@@ -1953,11 +1953,11 @@ Each test type has a corresponding script in the project root:
 
 All scripts are configurable via environment variables (e.g., `PRODUCERS=5`, `DURATION_MINUTES=120`). Run with `--help` or read the script header for details.
 
-**KATES CLI tests** (scaffold + apply workflow):
+**Kates CLI tests** (scaffold + apply workflow):
 
 | Command | Test Type | What It Does |
 |---------|-----------|-------------|
-| `kates test scaffold --type LOAD` | Load | Scaffold a KATES load test YAML |
+| `kates test scaffold --type LOAD` | Load | Scaffold a Kates load test YAML |
 | `kates test scaffold --type STRESS` | Stress | Scaffold a stress-ramp scenario |
 | `kates test scaffold --type SPIKE` | Spike | Scaffold a spike-burst scenario |
 | `kates test scaffold --type ENDURANCE` | Endurance | Scaffold a long-running soak test |
@@ -1978,15 +1978,15 @@ The `--wait` flag blocks until completion and runs SLA validation. Exit code 0 =
 
 ---
 
-## Chapter 12: KATES CLI-Driven Testing
+## Chapter 12: Kates CLI-Driven Testing
 
-The previous chapters cover manual performance testing using raw Kafka tools (`kafka-producer-perf-test.sh`, `kafka-consumer-perf-test.sh`) and infrastructure-level chaos experiments. KATES (Kafka Advanced Testing & Engineering Suite) provides a higher-level abstraction: **declarative test scenarios** that combine workload specification, execution, monitoring, integrity verification, and SLA enforcement into a single workflow.
+The previous chapters cover manual performance testing using raw Kafka tools (`kafka-producer-perf-test.sh`, `kafka-consumer-perf-test.sh`) and infrastructure-level chaos experiments. Kates (Kafka Advanced Testing & Engineering Suite) provides a higher-level abstraction: **declarative test scenarios** that combine workload specification, execution, monitoring, integrity verification, and SLA enforcement into a single workflow.
 
-### Why KATES?
+### Why Kates?
 
-Manual perf tests give you raw numbers. KATES gives you **verdicts**.
+Manual perf tests give you raw numbers. Kates gives you **verdicts**.
 
-| Capability | Manual Tools | KATES |
+| Capability | Manual Tools | Kates |
 |------------|-------------|-------|
 | Throughput measurement | ✓ | ✓ |
 | Latency percentiles | ✓ | ✓ |
@@ -2000,13 +2000,13 @@ Manual perf tests give you raw numbers. KATES gives you **verdicts**.
 
 ### The Scaffold → Apply → Validate Workflow
 
-Every KATES test follows a three-step workflow:
+Every Kates test follows a three-step workflow:
 
 ```
 1. Scaffold       Generate a YAML test definition
    kates test scaffold --type INTEGRITY -o test.yaml
 
-2. Apply          Submit to the KATES backend and execute
+2. Apply          Submit to the Kates backend and execute
    kates test apply -f test.yaml --wait
 
 3. Validate       Automatic SLA checks on completion
@@ -2095,7 +2095,7 @@ The `validate` block supports 9 gates split into two categories:
 | `maxOutOfOrder` | Ordering violations | `outOfOrder=3 > 0` |
 | `maxCrcFailures` | Checksum mismatches | `crcFailures=1 > 0` |
 
-When all gates pass, the CLI prints `✓ SLA Pass`. When any gate is violated, it prints each violation and exits with code 1. This makes KATES tests suitable for CI/CD pipelines where a non-zero exit code blocks the pipeline.
+When all gates pass, the CLI prints `✓ SLA Pass`. When any gate is violated, it prints each violation and exits with code 1. This makes Kates tests suitable for CI/CD pipelines where a non-zero exit code blocks the pipeline.
 
 ### Integrity Result Display
 
@@ -2133,7 +2133,7 @@ If timeline events were recorded (CRC failures, ordering violations, or lost ran
 
 ### Report Export
 
-The KATES backend generates a markdown report for each completed test. For tests with integrity results, the report includes a "Data Integrity" section with a full metrics table and up to 50 timeline events.
+The Kates backend generates a markdown report for each completed test. For tests with integrity results, the report includes a "Data Integrity" section with a full metrics table and up to 50 timeline events.
 
 ### Practical Examples
 
@@ -2174,7 +2174,7 @@ kates test apply -f idempotent.yaml --wait
 
 ### Context Management
 
-KATES uses a kubectl-style context system stored in `~/.kates.yaml`. This lets you switch between local, staging, and production environments without re-typing URLs.
+Kates uses a kubectl-style context system stored in `~/.kates.yaml`. This lets you switch between local, staging, and production environments without re-typing URLs.
 
 | Command | Description |
 |---------|-------------|
@@ -2326,7 +2326,7 @@ kates dash                     # Short alias
 
 **`kates top`**
 
-Like `kubectl top` but for KATES tests. Shows a one-liner status bar plus active/recent test tables with throughput and latency columns.
+Like `kubectl top` but for Kates tests. Shows a one-liner status bar plus active/recent test tables with throughput and latency columns.
 
 ```bash
 kates top --interval 5
@@ -2433,8 +2433,8 @@ kates schedule list
 | `kates cluster broker configs <id>` | Non-default broker configuration |
 | `kates cluster check` | Full cluster health check |
 | `kates cluster watch` | Live cluster health dashboard |
-| `kates test scaffold --type <TYPE> -o test.yaml` | Generate a KATES test definition |
-| `kates test apply -f test.yaml --wait` | Run a KATES test with SLA validation |
+| `kates test scaffold --type <TYPE> -o test.yaml` | Generate a Kates test definition |
+| `kates test apply -f test.yaml --wait` | Run a Kates test with SLA validation |
 | `kates test list` | List recent test runs |
 | `kates test watch <id>` | Live-watch a running test |
 | `kates report show <id>` | Full performance report |

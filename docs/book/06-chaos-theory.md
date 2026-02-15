@@ -1,6 +1,6 @@
 # Chapter 6: Chaos Engineering Theory
 
-Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production. This chapter covers the theory — Chapter 7 covers how KATES implements it.
+Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production. This chapter covers the theory — Chapter 7 covers how Kates implements it.
 
 ## Why Chaos Engineering?
 
@@ -93,7 +93,7 @@ Chaos experiments in a toy environment prove nothing. The Kind cluster in this p
 
 ### 4. Automate Experiments to Run Continuously
 
-One-off chaos tests are useful; scheduled, repeating chaos tests are powerful. KATES supports cron-based scheduling:
+One-off chaos tests are useful; scheduled, repeating chaos tests are powerful. Kates supports cron-based scheduling:
 
 ```bash
 # Run an integrity chaos test every night at 2 AM
@@ -244,4 +244,4 @@ During rebalancing, **all consumers in the group stop processing**. This "stop-t
 | **Leader election rate** | Should equal the number of partitions on the failed broker |
 | **Recovery time** | Time from failure to all ISRs fully expanded |
 
-These metrics form the foundation of SLA grading in KATES disruption tests.
+These metrics form the foundation of SLA grading in Kates disruption tests.

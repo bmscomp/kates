@@ -12,11 +12,11 @@ Before injecting any chaos, it helps to understand what we're trying to break.
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                   Kind Cluster "panda"                │
+│                   Kind Cluster "panda"               │
 │                                                      │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐  │
-│  │  Node: alpha  │ │  Node: sigma  │ │  Node: gamma  │ │
-│  │  Control+Work │ │  Worker       │ │  Worker       │ │
+│  │  Node: alpha │ │  Node: sigma │ │  Node: gamma │  │
+│  │  Control+Work│ │  Worker      │ │  Worker      │  │
 │  │              │ │              │ │              │  │
 │  │  pool-alpha-0│ │  pool-sigma-0│ │  pool-gamma-0│  │
 │  │  Broker+Ctrl │ │  Broker+Ctrl │ │  Broker+Ctrl │  │
@@ -73,30 +73,30 @@ For Kafka specifically, chaos engineering answers questions like:
 
 ```
 ┌─────────────────────────────────────────────┐
-│                litmus namespace              │
+│                litmus namespace             │
 │                                             │
-│  ┌─────────────┐     ┌──────────────────┐   │
-│  │ Litmus       │     │ Chaos Operator   │   │
-│  │ Portal       │────▶│ (watches for     │   │
-│  │ (UI + API)   │     │  ChaosEngines)   │   │
-│  └─────────────┘     └────────┬─────────┘   │
-│                               │              │
+│  ┌─────────────┐     ┌───────────────────┐  │
+│  │ Litmus      │     │ Chaos Operator    │  │
+│  │ Portal      │────▶│ (watches for      │  │
+│  │ (UI + API)  │     │  ChaosEngines)    │  │
+│  └─────────────┘     └────────┬──────────┘  │
+│                               │             │
 │  ┌─────────────┐     ┌───────▼──────────┐   │
-│  │ Subscriber   │     │ Workflow         │   │
-│  │ (connects    │     │ Controller       │   │
-│  │  infra to    │     │ (Argo-based)     │   │
-│  │  portal)     │     └────────┬─────────┘   │
-│  └─────────────┘              │              │
-│                               │              │
+│  │ Subscriber  │     │ Workflow         │   │
+│  │ (connects   │     │ Controller       │   │
+│  │  infra to   │     │ (Argo-based)     │   │
+│  │  portal)    │     └────────┬─────────┘   │
+│  └─────────────┘              │             │
+│                               │             │
 │  ┌─────────────┐     ┌───────▼──────────┐   │
-│  │ Event        │     │ Chaos Exporter   │   │
-│  │ Tracker      │     │ (metrics →       │   │
-│  │              │     │  Prometheus)     │   │
+│  │ Event       │     │ Chaos Exporter   │   │
+│  │ Tracker     │     │ (metrics →       │   │
+│  │             │     │  Prometheus)     │   │
 │  └─────────────┘     └──────────────────┘   │
 └─────────────────────────────────────────────┘
                         │
                 ┌───────▼──────────┐
-                │  kafka namespace  │
+                │  kafka namespace │
                 │                  │
                 │  ChaosEngine     │
                 │  → chaos-runner  │
@@ -660,9 +660,9 @@ But you **cannot** verify:
 - Exact RTO (how long writes were unavailable)
 - Exact RPO (how much data was at risk)
 
-### KATES Integrity + Chaos Testing
+### Kates Integrity + Chaos Testing
 
-KATES provides an `INTEGRITY_CHAOS` test type that combines per-record verification with fault injection in a single declarative YAML:
+Kates provides an `INTEGRITY_CHAOS` test type that combines per-record verification with fault injection in a single declarative YAML:
 
 ```bash
 kates test scaffold --type INTEGRITY_CHAOS -o chaos-integrity.yaml
@@ -672,10 +672,10 @@ kates test apply -f chaos-integrity.yaml --wait
 **What happens during the test:**
 
 ```
-1. KATES produces sequenced, CRC32-checksummed records
+1. Kates produces sequenced, CRC32-checksummed records
 2. A chaos experiment (broker kill, network partition, etc.) fires mid-test
-3. KATES continues producing through the failure
-4. After production completes, KATES consumes all records
+3. Kates continues producing through the failure
+4. After production completes, Kates consumes all records
 5. DataIntegrityVerifier reconciles produced vs consumed:
    - BitSet-based sequence tracking (every record accounted for)
    - CRC32 verification (no bit-level corruption)

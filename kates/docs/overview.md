@@ -1,8 +1,8 @@
-# KATES — Kafka Advanced Testing & Engineering Suite
+# Kates — Kafka Advanced Testing & Engineering Suite
 
-KATES is a Quarkus-based backend service that orchestrates Kafka performance tests using pluggable execution backends. It provides a REST API for running, monitoring, and analyzing benchmarks against a Strimzi-managed Kafka cluster.
+Kates is a Quarkus-based backend service that orchestrates Kafka performance tests using pluggable execution backends. It provides a REST API for running, monitoring, and analyzing benchmarks against a Strimzi-managed Kafka cluster.
 
-## Why KATES?
+## Why Kates?
 
 Performance testing Kafka typically involves writing shell scripts around `kafka-producer-perf-test.sh` and `kafka-consumer-perf-test.sh`. This approach suffers from several limitations:
 
@@ -11,7 +11,7 @@ Performance testing Kafka typically involves writing shell scripts around `kafka
 - **No persistence** — results are ephemeral, written to stdout and lost unless manually captured
 - **No API** — impossible to integrate with dashboards or CI/CD pipelines
 
-KATES solves these problems by providing a structured, API-driven test execution engine with pluggable backends and per-test-type configuration.
+Kates solves these problems by providing a structured, API-driven test execution engine with pluggable backends and per-test-type configuration.
 
 ## Architecture
 
@@ -49,7 +49,7 @@ KATES solves these problems by providing a structured, API-driven test execution
 3. **TestOrchestrator** creates the necessary Kafka topics via `KafkaAdminService`
 4. **TestOrchestrator** selects the execution backend (native or trogdor) and builds backend-agnostic `BenchmarkTask` objects
 5. The chosen **BenchmarkBackend** executes the actual workloads against the Kafka cluster
-6. **KATES** polls the backend for status updates and aggregates results
+6. **Kates** polls the backend for status updates and aggregates results
 
 ### Execution Backends
 

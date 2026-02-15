@@ -1,18 +1,18 @@
 # Chapter 2: Architecture & Design
 
-KATES is composed of four major subsystems: the **backend engine**, the **CLI**, the **infrastructure layer**, and the **observability stack**. This chapter explains how they fit together.
+Kates is composed of four major subsystems: the **backend engine**, the **CLI**, the **infrastructure layer**, and the **observability stack**. This chapter explains how they fit together.
 
 ## High-Level Architecture
 
 ```mermaid
 graph TB
-    subgraph CLI["KATES CLI (Go)"]
+    subgraph CLI["Kates CLI (Go)"]
         CLI1[test / report / disruption]
         CLI2[trend / dashboard / top]
         CLI3[cluster / health / scaffold]
     end
     
-    subgraph Backend["KATES Backend (Quarkus / Java)"]
+    subgraph Backend["Kates Backend (Quarkus / Java)"]
         API[REST API]
         ORCH[TestOrchestrator]
         ENG[Benchmark Engine]
@@ -250,7 +250,7 @@ graph TD
 
 Key design decisions:
 
-- **Multi-context support** — like `kubectl`, the CLI supports named contexts for targeting different KATES instances
+- **Multi-context support** — like `kubectl`, the CLI supports named contexts for targeting different Kates instances
 - **Rich terminal output** — tables, colored badges, metric bars, sparkline charts, and ASCII banners
 - **Scaffold templates** — `kates test scaffold --type LOAD` generates ready-to-use YAML scenario files
 - **Streaming watch** — `kates test watch` and `kates disruption watch` provide real-time progress updates
@@ -261,7 +261,7 @@ This diagram traces a complete test execution from CLI command to final report:
 
 ```mermaid
 sequenceDiagram
-    participant CLI as KATES CLI
+    participant CLI as Kates CLI
     participant API as REST API
     participant Orch as TestOrchestrator
     participant Engine as NativeKafkaBackend
@@ -312,7 +312,7 @@ sequenceDiagram
 
 ## Data Model
 
-KATES uses PostgreSQL for persistent storage. The schema is managed by Flyway migrations in `kates/src/main/resources/db/migration/`.
+Kates uses PostgreSQL for persistent storage. The schema is managed by Flyway migrations in `kates/src/main/resources/db/migration/`.
 
 ```mermaid
 erDiagram

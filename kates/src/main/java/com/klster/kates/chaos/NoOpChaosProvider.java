@@ -8,7 +8,7 @@ import java.util.logging.Logger;
 /**
  * No-op chaos provider for environments without a chaos backend.
  * Used in tests and for manual fault injection workflows where the
- * operator triggers faults externally while KATES measures the impact.
+ * operator triggers faults externally while Kates measures the impact.
  */
 @ApplicationScoped
 @Named("noop")

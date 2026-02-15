@@ -1,6 +1,6 @@
 # Chapter 8: Data Integrity Verification
 
-Data integrity is the highest-stakes property of any messaging system. This chapter explains how KATES verifies that Kafka delivers on its durability and ordering guarantees — and how to test these guarantees under failure conditions.
+Data integrity is the highest-stakes property of any messaging system. This chapter explains how Kates verifies that Kafka delivers on its durability and ordering guarantees — and how to test these guarantees under failure conditions.
 
 ## Why Data Integrity Matters
 
@@ -142,11 +142,11 @@ kates test apply -f integrity-tx.yaml --wait
 
 ## Integrity Under Chaos
 
-The real power of integrity testing emerges when combined with fault injection. KATES provides a dedicated `INTEGRITY_CHAOS` scaffold:
+The real power of integrity testing emerges when combined with fault injection. Kates provides a dedicated `INTEGRITY_CHAOS` scaffold:
 
 ```mermaid
 sequenceDiagram
-    participant Engine as KATES Engine
+    participant Engine as Kates Engine
     participant Producer as Producer
     participant Kafka as Kafka Cluster
     participant Consumer as Consumer

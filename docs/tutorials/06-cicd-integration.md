@@ -1,6 +1,6 @@
 # Tutorial 6: CI/CD Integration
 
-This tutorial shows how to integrate KATES into your CI/CD pipeline for automated performance gates, chaos validation, and regression detection.
+This tutorial shows how to integrate Kates into your CI/CD pipeline for automated performance gates, chaos validation, and regression detection.
 
 ## Overview
 

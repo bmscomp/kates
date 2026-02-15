@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-KATES runs as a Quarkus application and requires:
+Kates runs as a Quarkus application and requires:
 
 1. **Kafka Cluster** — a running Kafka cluster accessible via bootstrap servers
 2. **Execution Backend** (choose one):
@@ -18,7 +18,7 @@ cd kates
 mvn quarkus:dev
 ```
 
-This starts KATES on port 8080 with hot reload, Swagger UI at `/q/swagger-ui`, and live coding.
+This starts Kates on port 8080 with hot reload, Swagger UI at `/q/swagger-ui`, and live coding.
 
 Override the default cluster connection in `application.properties` or via environment variables:
 
@@ -37,7 +37,7 @@ java -jar target/quarkus-app/quarkus-run.jar
 
 ## Kubernetes Deployment
 
-KATES ships with ready-to-use manifests in `kates/k8s/`. The deploy script applies them in order:
+Kates ships with ready-to-use manifests in `kates/k8s/`. The deploy script applies them in order:
 
 ```bash
 make kates-deploy
@@ -50,7 +50,7 @@ kubectl apply -f kates/k8s/service.yaml
 
 ### ConfigMap — `kates-config`
 
-The ConfigMap is the primary way to configure KATES in Kubernetes. It contains environment variables that MicroProfile Config maps to application properties automatically (`KATES_TESTS_STRESS_PARTITIONS` → `kates.tests.stress.partitions`).
+The ConfigMap is the primary way to configure Kates in Kubernetes. It contains environment variables that MicroProfile Config maps to application properties automatically (`KATES_TESTS_STRESS_PARTITIONS` → `kates.tests.stress.partitions`).
 
 **To change test defaults at runtime:**
 
@@ -104,7 +104,7 @@ Each test type has its own set of tuned environment variables. Only the values t
 
 The full list of env vars is in `kates/k8s/configmap.yaml`.
 
-### KATES Deployment
+### Kates Deployment
 
 The deployment uses `envFrom` to inject all ConfigMap values as environment variables:
 

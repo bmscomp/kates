@@ -1,6 +1,6 @@
 # Chapter 12: Deployment Guide
 
-This chapter covers everything needed to deploy and operate the full KATES stack — from prerequisites to production operation.
+This chapter covers everything needed to deploy and operate the full Kates stack — from prerequisites to production operation.
 
 ## Prerequisites
 
@@ -105,7 +105,7 @@ make chaos-ui
 make chaos-experiments
 ```
 
-### KATES Application
+### Kates Application
 
 ```bash
 # Build + deploy (full pipeline)
@@ -119,7 +119,7 @@ make kates-deploy    # Apply K8s manifests
 make kates-native
 ```
 
-### KATES CLI
+### Kates CLI
 
 ```bash
 # Build + install locally
@@ -144,13 +144,13 @@ make ports
 |---------|-----|-------------|
 | Grafana | http://localhost:30080 | admin / admin |
 | Kafka UI | http://localhost:30081 | — |
-| KATES API | http://localhost:30083 | — |
+| Kates API | http://localhost:30083 | — |
 | Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
 
 ## CLI Configuration
 
 ```bash
-# Connect the CLI to KATES
+# Connect the CLI to Kates
 kates ctx set local --url http://localhost:30083
 kates ctx use local
 
@@ -173,7 +173,7 @@ graph TB
         LITMUS[make litmus]
     end
     
-    subgraph KATES
+    subgraph Kates
         K[make kates]
         KB[make kates-build]
         KN[make kates-native]
@@ -227,19 +227,19 @@ graph TB
 | `make ui` | Deploy Kafka UI |
 | `make apicurio` | Deploy Apicurio Registry |
 | `make litmus` | Deploy LitmusChaos |
-| `make kates` | Build + deploy KATES application |
-| `make kates-build` | Build KATES JVM image |
-| `make kates-native` | Build KATES native image (see below) |
-| `make kates-deploy` | Apply KATES K8s manifests |
-| `make kates-redeploy` | Restart KATES deployment |
-| `make kates-logs` | Stream KATES logs |
-| `make kates-undeploy` | Remove KATES |
+| `make kates` | Build + deploy Kates application |
+| `make kates-build` | Build Kates JVM image |
+| `make kates-native` | Build Kates native image (see below) |
+| `make kates-deploy` | Apply Kates K8s manifests |
+| `make kates-redeploy` | Restart Kates deployment |
+| `make kates-logs` | Stream Kates logs |
+| `make kates-undeploy` | Remove Kates |
 | `make cli-build` | Cross-compile CLI |
 | `make cli-install` | Build + install CLI locally |
 
 ### Native Image Build
 
-`make kates-native` builds a GraalVM native image of the KATES backend using Quarkus's native compilation pipeline. This produces a standalone binary with dramatically faster startup.
+`make kates-native` builds a GraalVM native image of the Kates backend using Quarkus's native compilation pipeline. This produces a standalone binary with dramatically faster startup.
 
 **Prerequisites:**
 - GraalVM 21+ with `native-image` component installed
@@ -305,13 +305,13 @@ kubectl logs -f deployment/strimzi-cluster-operator -n kafka
 kubectl describe pod pool-alpha-0 -n kafka
 ```
 
-### KATES Can't Connect to Kafka
+### Kates Can't Connect to Kafka
 
 ```bash
 # Verify Kafka service
 kubectl get svc -n kafka
 
-# Check KATES logs
+# Check Kates logs
 make kates-logs
 
 # Verify bootstrap address in configmap

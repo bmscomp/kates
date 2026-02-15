@@ -1,4 +1,4 @@
-# KATES — The Definitive Guide
+# Kates — The Definitive Guide
 
 **Kafka Advanced Testing & Engineering Suite**
 
@@ -8,7 +8,7 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 
 | Chapter | Title | Description |
 |---------|-------|-------------|
-| 1 | [Introduction](01-introduction.md) | What KATES is, why it exists, and the problems it solves |
+| 1 | [Introduction](01-introduction.md) | What Kates is, why it exists, and the problems it solves |
 | 2 | [Architecture & Design](02-architecture.md) | Platform architecture, component design, data model, and technology choices |
 | 3 | [The Cluster Under Test](03-cluster.md) | Understanding the krafter Kafka cluster topology |
 | 4 | [Performance Theory](04-performance-theory.md) | Measuring performance: latency, throughput, percentiles, and statistics |
@@ -17,7 +17,7 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 | 7 | [Chaos Engineering in Practice](07-chaos-practice.md) | Disruption types, playbooks (with full YAML), safety guardrails, and SLA grading |
 | 8 | [Data Integrity Verification](08-data-integrity.md) | Ensuring zero message loss under fault conditions |
 | 9 | [Observability & Monitoring](09-observability.md) | Metrics, dashboards, heatmaps, and trend analysis |
-| 10 | [CLI Reference](10-cli-reference.md) | Complete KATES CLI command reference with all subcommands and aliases |
+| 10 | [CLI Reference](10-cli-reference.md) | Complete Kates CLI command reference with all subcommands and aliases |
 | 11 | [REST API Reference](11-api-reference.md) | Backend API endpoints and data models |
 | 12 | [Deployment Guide](12-deployment.md) | Installing and operating the full stack |
 | 13 | [Scenario Files & SLA Gates](13-scenario-files.md) | YAML scenario format, spec fields, and automated SLA enforcement |

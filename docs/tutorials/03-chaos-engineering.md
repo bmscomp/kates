@@ -1,10 +1,10 @@
-# Tutorial 3: Chaos Engineering with KATES
+# Tutorial 3: Chaos Engineering with Kates
 
 This tutorial teaches you to inject controlled failures into your Kafka cluster and measure the impact. You'll kill brokers, create network partitions, and run built-in playbooks.
 
 ## Prerequisites
 
-- KATES stack deployed and CLI configured
+- Kates stack deployed and CLI configured
 - LitmusChaos deployed (`make litmus`)
 - A baseline LOAD test completed (from Tutorial 1)
 
@@ -39,9 +39,9 @@ kubectl get pods -n kafka -w
 # Open http://localhost:30080 → Kafka Cluster Health dashboard
 ```
 
-## Part 2: KATES Disruption Plans
+## Part 2: Kates Disruption Plans
 
-For structured, repeatable chaos testing, use KATES disruption plans.
+For structured, repeatable chaos testing, use Kates disruption plans.
 
 ### Step 1: View Available Disruption Types
 
@@ -157,7 +157,7 @@ kates disruption kafka-metrics <id>
 
 ## Part 3: Built-In Playbooks
 
-KATES ships with 6 battle-tested playbooks. These represent common production failure scenarios:
+Kates ships with 6 battle-tested playbooks. These represent common production failure scenarios:
 
 ### leader-cascade
 
@@ -165,16 +165,16 @@ Tests cascading leader election recovery:
 
 ```mermaid
 sequenceDiagram
-    participant KATES
+    participant Kates
     participant P0 as Leader P0
     participant P1 as Leader P1
     
-    KATES->>P0: POD_KILL
+    Kates->>P0: POD_KILL
     Note over P0: Leader election
-    KATES->>KATES: Wait 30s + observe 60s
-    KATES->>P1: POD_KILL (while P0 recovering)
+    Kates->>Kates: Wait 30s + observe 60s
+    Kates->>P1: POD_KILL (while P0 recovering)
     Note over P1: Leader election under stress
-    KATES->>KATES: Wait 15s + observe 60s
+    Kates->>Kates: Wait 15s + observe 60s
 ```
 
 ### split-brain

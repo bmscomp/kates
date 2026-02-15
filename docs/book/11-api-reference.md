@@ -1,6 +1,6 @@
 # Chapter 11: REST API Reference
 
-The KATES backend exposes a RESTful API that the CLI and other clients use to manage tests, reports, and disruptions.
+The Kates backend exposes a RESTful API that the CLI and other clients use to manage tests, reports, and disruptions.
 
 ## Base URL
 

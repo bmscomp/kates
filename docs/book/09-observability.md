@@ -1,6 +1,6 @@
 # Chapter 9: Observability & Monitoring
 
-KATES provides multiple layers of observability — from real-time dashboards to historical trend analysis. This chapter covers how to get the most from the monitoring stack.
+Kates provides multiple layers of observability — from real-time dashboards to historical trend analysis. This chapter covers how to get the most from the monitoring stack.
 
 ## Observability Architecture
 
@@ -8,23 +8,23 @@ KATES provides multiple layers of observability — from real-time dashboards to
 graph TB
     subgraph Sources["Data Sources"]
         KB[Kafka Brokers<br/>JMX metrics]
-        KE[KATES Engine<br/>Test metrics]
+        KE[Kates Engine<br/>Test metrics]
         K8S[Kubernetes<br/>Pod events]
     end
     
     subgraph Collection["Collection"]
         JMX[JMX Exporter<br/>Sidecar]
-        API[KATES REST API]
+        API[Kates REST API]
     end
     
     subgraph Storage["Storage"]
         PROM[Prometheus<br/>Time-series DB]
-        DB[KATES DB<br/>PostgreSQL]
+        DB[Kates DB<br/>PostgreSQL]
     end
     
     subgraph Visualization["Visualization"]
         GRAF[Grafana<br/>Dashboards]
-        CLI[KATES CLI<br/>Terminal UI]
+        CLI[Kates CLI<br/>Terminal UI]
         HM[Heatmap Export<br/>JSON/CSV]
     end
     
@@ -37,7 +37,7 @@ graph TB
 
 ## Grafana Dashboards
 
-KATES deploys 7 Grafana dashboards, each focused on a specific monitoring dimension.
+Kates deploys 7 Grafana dashboards, each focused on a specific monitoring dimension.
 
 ### Kafka Cluster Health
 
@@ -96,7 +96,7 @@ For understanding replication health during chaos tests:
 | Under-replicated Partitions | 0 | Spikes |
 | Replica Lag (bytes) | Near 0 | Spikes then recovers |
 
-## KATES CLI Observability
+## Kates CLI Observability
 
 ### Live Dashboard
 
@@ -116,7 +116,7 @@ It shows:
 
 ### Top (Live View)
 
-Like `kubectl top`, but for KATES tests:
+Like `kubectl top`, but for Kates tests:
 
 ```bash
 kates top
@@ -156,7 +156,7 @@ Sparklines use Unicode block characters (▁▂▃▄▅▆▇█) to show the t
 
 ## Latency Heatmaps
 
-Heatmaps are KATES's most powerful observability feature. They preserve the **full latency distribution over time**, revealing patterns invisible in aggregate percentiles.
+Heatmaps are Kates's most powerful observability feature. They preserve the **full latency distribution over time**, revealing patterns invisible in aggregate percentiles.
 
 ### How Heatmaps Work
 
@@ -238,7 +238,7 @@ Interpretation: during this second, 832 messages had latency between 1–5ms, 45
 
 ## Trend Analysis
 
-KATES stores historical test results, enabling trend analysis over time:
+Kates stores historical test results, enabling trend analysis over time:
 
 ```bash
 # View P99 latency trend for LOAD tests over the last 30 days
@@ -260,7 +260,7 @@ A sudden upward spike in the sparkline chart indicates a regression.
 
 ## Report Comparison
 
-KATES supports comparing multiple test runs side-by-side:
+Kates supports comparing multiple test runs side-by-side:
 
 ```bash
 # Compare two runs
@@ -283,7 +283,7 @@ The diff command highlights meaningful differences:
 
 ## Broker Metrics Correlation
 
-KATES captures per-broker metrics as part of every test report:
+Kates captures per-broker metrics as part of every test report:
 
 ```bash
 kates report brokers <id>

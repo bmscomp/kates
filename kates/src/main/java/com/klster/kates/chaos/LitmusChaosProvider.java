@@ -224,7 +224,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .delete();
-            LOG.info("Cleaned up KATES-managed ChaosEngines");
+            LOG.info("Cleaned up Kates-managed ChaosEngines");
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ChaosEngine cleanup failed", e);
         }

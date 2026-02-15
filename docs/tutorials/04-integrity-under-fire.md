@@ -4,7 +4,7 @@ This tutorial verifies that your Kafka cluster delivers on its "no data loss" gu
 
 ## Prerequisites
 
-- KATES stack deployed and CLI configured
+- Kates stack deployed and CLI configured
 - LitmusChaos deployed for chaos-aware tests
 
 ## Part 1: Baseline Integrity Test

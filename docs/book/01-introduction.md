@@ -2,14 +2,14 @@
 
 ## What Is Kates?
 
-**KATES** — Kafka Advanced Testing & Engineering Suite — is a purpose-built platform for performance testing and chaos engineering on Apache Kafka clusters. It combines a Quarkus-based backend engine, a rich CLI, and deep Kubernetes integration to answer the questions that matter most in production:
+**Kates** — Kafka Advanced Testing & Engineering Suite — is a purpose-built platform for performance testing and chaos engineering on Apache Kafka clusters. It combines a Quarkus-based backend engine, a rich CLI, and deep Kubernetes integration to answer the questions that matter most in production:
 
 - *How many messages per second can my cluster sustain before latency degrades?*
 - *What happens to in-flight messages when a broker dies?*
 - *Does my cluster recover from a network partition within my SLA?*
 - *Is there any data loss under cascading failures?*
 
-Unlike generic load testing tools, KATES understands Kafka semantics — producer acknowledgments, consumer group rebalancing, ISR tracking, and partition leadership. Unlike basic `kafka-perf-test`, KATES provides structured reports, SLA enforcement, historical trend analysis, and automated disruption testing with safety guardrails.
+Unlike generic load testing tools, Kates understands Kafka semantics — producer acknowledgments, consumer group rebalancing, ISR tracking, and partition leadership. Unlike basic `kafka-perf-test`, Kates provides structured reports, SLA enforcement, historical trend analysis, and automated disruption testing with safety guardrails.
 
 ## The Problem Space
 
@@ -34,11 +34,11 @@ graph TD
     D --> D3[Exactly-once semantics]
 ```
 
-Most teams validate these properties manually — running ad-hoc scripts, eyeballing Grafana dashboards, and hoping their cluster survives the next incident. KATES replaces this with **repeatable, automated, SLA-graded testing**.
+Most teams validate these properties manually — running ad-hoc scripts, eyeballing Grafana dashboards, and hoping their cluster survives the next incident. Kates replaces this with **repeatable, automated, SLA-graded testing**.
 
 ## Design Philosophy
 
-KATES was built around five principles:
+Kates was built around five principles:
 
 ### 1. Kafka-Native
 
@@ -46,11 +46,11 @@ Every test type understands Kafka protocol semantics. The engine configures prod
 
 ### 2. Kubernetes-First
 
-KATES runs inside Kubernetes, targets Strimzi-managed clusters, and uses the Kubernetes API directly for disruption injection — no external chaos tooling required (though Litmus integration is available for advanced scenarios).
+Kates runs inside Kubernetes, targets Strimzi-managed clusters, and uses the Kubernetes API directly for disruption injection — no external chaos tooling required (though Litmus integration is available for advanced scenarios).
 
 ### 3. SLA-Driven
 
-Every test can define SLA thresholds. The engine evaluates results against these thresholds and produces a pass/fail verdict. This makes KATES suitable for CI/CD pipelines where a performance regression should block deployment.
+Every test can define SLA thresholds. The engine evaluates results against these thresholds and produces a pass/fail verdict. This makes Kates suitable for CI/CD pipelines where a performance regression should block deployment.
 
 ### 4. Observable
 
@@ -58,7 +58,7 @@ All test execution produces structured data — JSON reports, CSV exports, JUnit
 
 ### 5. Safe by Default
 
-Disruption tests include safety guardrails: maximum affected broker limits, automatic rollback, ISR tracking, and pre-flight validation. KATES will refuse to execute a disruption plan that could cause data loss beyond configured thresholds.
+Disruption tests include safety guardrails: maximum affected broker limits, automatic rollback, ISR tracking, and pre-flight validation. Kates will refuse to execute a disruption plan that could cause data loss beyond configured thresholds.
 
 ## Feature Overview
 
@@ -74,7 +74,7 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 | **Scheduling** | Cron-based recurring tests for regression detection |
 | **Resilience Testing** | Combined performance + chaos tests with before/after impact analysis |
 
-## How KATES Fits Into Your Workflow
+## How Kates Fits Into Your Workflow
 
 ```mermaid
 graph LR
@@ -82,7 +82,7 @@ graph LR
         A[Code Change] --> B[Build Pipeline]
     end
     
-    subgraph KATES
+    subgraph Kates
         B --> C[Performance Gate]
         C -->|SLA Pass| D[Staging Deploy]
         D --> E[Chaos Gate]
@@ -98,7 +98,7 @@ graph LR
     end
 ```
 
-KATES can serve as both a **development-time validation tool** (run a quick load test before merging) and a **production-readiness gate** (run the full chaos suite before promoting to production).
+Kates can serve as both a **development-time validation tool** (run a quick load test before merging) and a **production-readiness gate** (run the full chaos suite before promoting to production).
 
 ## Quick Start
 
@@ -106,7 +106,7 @@ KATES can serve as both a **development-time validation tool** (run a quick load
 # Install the CLI
 make cli-install
 
-# Connect to a running KATES instance
+# Connect to a running Kates instance
 kates ctx set local --url http://localhost:30083
 kates ctx use local
 

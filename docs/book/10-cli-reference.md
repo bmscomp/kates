@@ -1,6 +1,6 @@
 # Chapter 10: CLI Reference
 
-Complete reference for the KATES CLI — every command, flag, and output format.
+Complete reference for the Kates CLI — every command, flag, and output format.
 
 ## Installation
 
@@ -15,7 +15,7 @@ make cli-build
 
 ## Configuration
 
-KATES CLI uses a config file at `~/.kates.yaml` for managing server contexts.
+Kates CLI uses a config file at `~/.kates.yaml` for managing server contexts.
 
 ### Context Management
 

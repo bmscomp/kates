@@ -225,7 +225,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .delete();
-            LOG.info("Cleaned up KATES-managed NetworkPolicies");
+            LOG.info("Cleaned up Kates-managed NetworkPolicies");
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Cleanup failed", e);
         }

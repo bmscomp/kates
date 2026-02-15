@@ -1,6 +1,6 @@
 # Chapter 13: Scenario Files & SLA Gates
 
-Scenario files are the declarative way to define, execute, and validate KATES test runs. Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let KATES orchestrate everything — including automated pass/fail enforcement against SLA thresholds.
+Scenario files are the declarative way to define, execute, and validate Kates test runs. Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against SLA thresholds.
 
 ## Why Scenario Files?
 
@@ -17,7 +17,7 @@ graph LR
         Y[scenario.yaml] --> CLI[kates test apply -f]
     end
     
-    subgraph KATES
+    subgraph Kates
         CLI --> P1[Scenario 1\nLOAD test]
         CLI --> P2[Scenario 2\nSTRESS test]
         CLI --> P3[Scenario 3\nINTEGRITY test]
@@ -67,7 +67,7 @@ scenarios:
 
 ## Spec Reference
 
-The `spec` object controls all test parameters. Every field is optional; KATES applies sensible defaults per test type when a field is omitted.
+The `spec` object controls all test parameters. Every field is optional; Kates applies sensible defaults per test type when a field is omitted.
 
 ### Producer Configuration
 
@@ -116,7 +116,7 @@ The `spec` object controls all test parameters. Every field is optional; KATES a
 
 ## Validation Reference (SLA Gates)
 
-The `validate` section defines pass/fail criteria that KATES checks after the test completes. If any threshold is breached, the scenario is marked as failed, and the CLI exits with a non-zero status code — making it ideal for CI/CD gate enforcement.
+The `validate` section defines pass/fail criteria that Kates checks after the test completes. If any threshold is breached, the scenario is marked as failed, and the CLI exits with a non-zero status code — making it ideal for CI/CD gate enforcement.
 
 ```mermaid
 graph TD
@@ -278,9 +278,9 @@ kates test apply -f scenarios.yaml --wait
 
 ### How Execution Works
 
-1. KATES parses the file and validates the schema
+1. Kates parses the file and validates the schema
 2. Each scenario is submitted to the backend sequentially
-3. If `--wait` is specified, KATES polls until each test completes before submitting the next
+3. If `--wait` is specified, Kates polls until each test completes before submitting the next
 4. After all scenarios complete, SLA gates are evaluated
 5. A summary table is printed showing each scenario's result
 

@@ -1,6 +1,6 @@
-# Tutorial 1: Getting Started with KATES
+# Tutorial 1: Getting Started with Kates
 
-This tutorial walks you through deploying the KATES stack, running your first performance test, and understanding the results.
+This tutorial walks you through deploying the Kates stack, running your first performance test, and understanding the results.
 
 ## Step 1: Deploy the Infrastructure
 
@@ -20,13 +20,13 @@ make status
 
 Expected output: all pods across `kafka`, `monitoring`, and `litmus` namespaces should be `Running`.
 
-## Step 2: Deploy KATES
+## Step 2: Deploy Kates
 
 ```bash
 make kates
 ```
 
-This builds the KATES Quarkus application, creates a Docker image, loads it into Kind, and deploys it to the `kates` namespace.
+This builds the Kates Quarkus application, creates a Docker image, loads it into Kind, and deploys it to the `kates` namespace.
 
 Verify:
 
@@ -34,7 +34,7 @@ Verify:
 kubectl get pods -n kates
 ```
 
-You should see the KATES pod running.
+You should see the Kates pod running.
 
 ## Step 3: Install and Configure the CLI
 
@@ -56,7 +56,7 @@ kates health
 Expected output:
 
 ```
-  KATES Health Check
+  Kates Health Check
   ─────────────────────
   Engine      ✅ UP
   Kafka       ✅ Connected (3 brokers)

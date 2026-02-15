@@ -1,11 +1,11 @@
 # Tutorial 5: Heatmaps, Trends, and Exports
 
-This tutorial teaches you to extract deep insights from KATES test data using heatmaps, trend analysis, report comparison, and export formats.
+This tutorial teaches you to extract deep insights from Kates test data using heatmaps, trend analysis, report comparison, and export formats.
 
 ## Prerequisites
 
 - At least 3 completed test runs (from previous tutorials)
-- KATES CLI configured
+- Kates CLI configured
 
 ## Part 1: Latency Heatmaps
 

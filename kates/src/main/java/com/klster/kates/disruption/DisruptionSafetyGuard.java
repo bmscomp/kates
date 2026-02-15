@@ -197,7 +197,7 @@ public class DisruptionSafetyGuard {
         try {
             switch (spec.disruptionType()) {
                 case NETWORK_PARTITION -> {
-                    LOG.info("ROLLBACK: removing KATES-managed NetworkPolicies");
+                    LOG.info("ROLLBACK: removing Kates-managed NetworkPolicies");
                     kubeClient.network().networkPolicies()
                             .inNamespace(spec.targetNamespace())
                             .withLabel("managed-by", "kates")

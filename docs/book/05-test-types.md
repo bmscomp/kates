@@ -1,6 +1,6 @@
 # Chapter 5: Test Types Deep Dive
 
-KATES supports eight distinct test types, each designed to answer a specific question about your Kafka cluster's behavior. This chapter explains the methodology, use case, and configuration for every type.
+Kates supports eight distinct test types, each designed to answer a specific question about your Kafka cluster's behavior. This chapter explains the methodology, use case, and configuration for every type.
 
 ## Test Type Overview
 

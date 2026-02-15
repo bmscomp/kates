@@ -1,6 +1,6 @@
 # Chapter 14: Recipes & Patterns
 
-Practical, ready-to-use recipes for common KATES workflows. Each recipe is a self-contained procedure you can adapt to your environment.
+Practical, ready-to-use recipes for common Kates workflows. Each recipe is a self-contained procedure you can adapt to your environment.
 
 ## Recipe 1: Validate a Kafka Upgrade
 

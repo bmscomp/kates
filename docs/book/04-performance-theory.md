@@ -1,6 +1,6 @@
 # Chapter 4: Performance Theory
 
-This chapter covers the fundamentals of measuring distributed system performance. Understanding these concepts is essential before running any KATES test — without them, you'll collect numbers but not learn anything.
+This chapter covers the fundamentals of measuring distributed system performance. Understanding these concepts is essential before running any Kates test — without them, you'll collect numbers but not learn anything.
 
 ## The Two Pillars: Throughput and Latency
 
@@ -39,7 +39,7 @@ For Kafka, throughput is measured in two dimensions:
 
 Both matter. A system processing 100,000 tiny 100-byte messages/s has very different characteristics than one processing 10,000 large 10KB messages/s — even though the MB/s might be similar.
 
-In KATES, we measure:
+In Kates, we measure:
 
 - **Average throughput** — total records / total duration
 - **Peak throughput** — highest throughput observed in any sampling window
@@ -99,7 +99,7 @@ Percentiles tell you about the **distribution** of latency, not just the center:
 | **P99.9** | 99.9% of requests are faster than this | Your "everything except rare outliers" |
 | **Max** | Worst single observation | Your "worst case" |
 
-KATES reports P50, P95, P99, and Max for every test run.
+Kates reports P50, P95, P99, and Max for every test run.
 
 ### The Long Tail Problem
 
@@ -153,9 +153,9 @@ sequenceDiagram
 
 During the stall, the tool should have sent 19 more requests (at t=30, 40, 50... 210ms). All those "phantom requests" would have experienced 200ms+ latency. But the tool only measured the one request it actually sent.
 
-### How KATES Handles It
+### How Kates Handles It
 
-KATES uses a throughput-stable measurement loop. The producer maintains a fixed target rate regardless of response times. If the system stalls, the producer detects the gap and records corrected latencies for the missed window. This is implemented in the `LatencyHistogram` — all observations are recorded, including the time spent waiting.
+Kates uses a throughput-stable measurement loop. The producer maintains a fixed target rate regardless of response times. If the system stalls, the producer detects the gap and records corrected latencies for the missed window. This is implemented in the `LatencyHistogram` — all observations are recorded, including the time spent waiting.
 
 ## Heatmaps: Seeing the Full Picture
 
@@ -180,7 +180,7 @@ A heatmap answers questions that percentiles cannot:
 | "Is latency bimodal?" | "P50=5ms, P99=200ms" | "Yes — 90% at 5ms, 10% at 200ms. Two distinct populations." |
 | "When did the latency regime change?" | "Before/after averages differ" | "At t=45s, latency shifted from 5ms to 50ms permanently" |
 
-KATES exports heatmap data in two formats:
+Kates exports heatmap data in two formats:
 
 - **JSON** — structured data for Grafana visualization
 - **CSV** — tabular data for spreadsheet analysis
@@ -199,11 +199,11 @@ Running a test once and drawing conclusions is dangerous. Performance measuremen
 
 ### Warm-Up Phase
 
-Always discard the first few seconds of data. KATES test types like LOAD and STRESS include configurable warm-up phases where the engine runs at reduced throughput before measuring at full speed.
+Always discard the first few seconds of data. Kates test types like LOAD and STRESS include configurable warm-up phases where the engine runs at reduced throughput before measuring at full speed.
 
 ### Multiple Runs
 
-For critical decisions, run the same test 3–5 times and compare. KATES provides:
+For critical decisions, run the same test 3–5 times and compare. Kates provides:
 
 ```bash
 # Run the same test multiple times
@@ -229,4 +229,4 @@ There is no universal "good" latency or throughput. It depends entirely on your 
 | Batch data pipeline | \< 1s | 1M+ rec/s |
 | Financial transactions | \< 5ms | 1K–10K rec/s |
 
-KATES lets you define SLA thresholds per test type, so "good" is whatever you define it to be.
+Kates lets you define SLA thresholds per test type, so "good" is whatever you define it to be.
