@@ -168,6 +168,42 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 		if v, ok := s.Spec["topic"]; ok {
 			spec.Topic = fmt.Sprintf("%v", v)
 		}
+		if v, ok := s.Spec["acks"]; ok {
+			spec.Acks = fmt.Sprintf("%v", v)
+		}
+		if v, ok := s.Spec["batchSize"]; ok {
+			spec.BatchSize = toInt(v)
+		}
+		if v, ok := s.Spec["lingerMs"]; ok {
+			spec.LingerMs = toInt(v)
+		}
+		if v, ok := s.Spec["compressionType"]; ok {
+			spec.CompressionType = fmt.Sprintf("%v", v)
+		}
+		if v, ok := s.Spec["numConsumers"]; ok {
+			spec.NumConsumers = toInt(v)
+		}
+		if v, ok := s.Spec["replicationFactor"]; ok {
+			spec.ReplicationFactor = toInt(v)
+		}
+		if v, ok := s.Spec["partitions"]; ok {
+			spec.Partitions = toInt(v)
+		}
+		if v, ok := s.Spec["minInsyncReplicas"]; ok {
+			spec.MinInsyncReplicas = toInt(v)
+		}
+		if v, ok := s.Spec["consumerGroup"]; ok {
+			spec.ConsumerGroup = fmt.Sprintf("%v", v)
+		}
+		if v, ok := s.Spec["targetThroughput"]; ok {
+			spec.TargetThroughput = toInt(v)
+		}
+		if v, ok := s.Spec["fetchMinBytes"]; ok {
+			spec.FetchMinBytes = toInt(v)
+		}
+		if v, ok := s.Spec["fetchMaxWaitMs"]; ok {
+			spec.FetchMaxWaitMs = toInt(v)
+		}
 		req.Spec = spec
 	}
 	return req
