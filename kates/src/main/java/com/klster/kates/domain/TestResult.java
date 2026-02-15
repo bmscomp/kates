@@ -20,6 +20,7 @@ public class TestResult {
     private String endTime;
     private String error;
     private String phaseName;
+    private IntegrityResult integrity;
 
     public enum TaskStatus {
         PENDING, RUNNING, STOPPING, DONE, FAILED
@@ -142,4 +143,7 @@ public class TestResult {
 
     public String getPhaseName() { return phaseName; }
     public void setPhaseName(String phaseName) { this.phaseName = phaseName; }
+
+    public IntegrityResult getIntegrity() { return integrity; }
+    public void setIntegrity(IntegrityResult integrity) { this.integrity = integrity; }
 }

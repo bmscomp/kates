@@ -116,6 +116,43 @@ var testGetCmd = &cobra.Command{
 				[]string{"Phase", "Status", "Records", "Throughput", "Avg Lat.", "P99 Lat."},
 				rows,
 			)
+
+			for _, r := range result.Results {
+				if r.Integrity != nil {
+					ir := r.Integrity
+					output.SubHeader("Data Integrity")
+					output.KeyValue("Sent", fmtNum(float64(ir.TotalSent)))
+					output.KeyValue("Acked", fmtNum(float64(ir.TotalAcked)))
+					output.KeyValue("Consumed", fmtNum(float64(ir.TotalConsumed)))
+					output.KeyValue("Lost", fmtNum(float64(ir.LostRecords)))
+					output.KeyValue("Duplicates", fmtNum(float64(ir.DuplicateRecords)))
+					output.KeyValue("Data Loss", fmt.Sprintf("%.4f%%", ir.DataLossPercent))
+					if ir.MaxRtoMs > 0 {
+						output.KeyValue("Max RTO", fmt.Sprintf("%.0f ms", ir.MaxRtoMs))
+					}
+					if ir.RpoMs > 0 {
+						output.KeyValue("RPO", fmt.Sprintf("%.0f ms", ir.RpoMs))
+					}
+					if ir.LostRecords == 0 {
+						output.KeyValue("Verdict", output.StatusBadge("PASS"))
+					} else {
+						output.KeyValue("Verdict", output.StatusBadge("FAIL"))
+					}
+					if len(ir.LostRanges) > 0 {
+						output.SubHeader("Lost Ranges")
+						lostRows := make([][]string, 0, len(ir.LostRanges))
+						for _, lr := range ir.LostRanges {
+							lostRows = append(lostRows, []string{
+								fmt.Sprintf("%d", lr.FromSeq),
+								fmt.Sprintf("%d", lr.ToSeq),
+								fmt.Sprintf("%d", lr.Count),
+							})
+						}
+						output.Table([]string{"From Seq", "To Seq", "Count"}, lostRows)
+					}
+					break
+				}
+			}
 		}
 		return nil
 	},

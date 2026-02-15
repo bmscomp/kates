@@ -241,6 +241,9 @@ public class TestTypeDefaults {
             case ROUND_TRIP -> new TypeConfig(roundTripReplicationFactor, roundTripPartitions, roundTripMinInsyncReplicas,
                     roundTripAcks, roundTripBatchSize, roundTripLingerMs, roundTripCompressionType, roundTripRecordSize,
                     roundTripNumRecords, roundTripThroughput, roundTripDurationMs, roundTripNumProducers, roundTripNumConsumers);
+            case INTEGRITY -> new TypeConfig(loadReplicationFactor, loadPartitions, loadMinInsyncReplicas,
+                    "all", loadBatchSize, loadLingerMs, loadCompressionType, loadRecordSize,
+                    loadNumRecords, loadThroughput, loadDurationMs, loadNumProducers, loadNumConsumers);
         };
     }
 

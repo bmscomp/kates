@@ -52,6 +52,7 @@ var scaffoldTemplates = map[string]func() string{
 	"VOLUME":     scaffoldVolume,
 	"CAPACITY":   scaffoldCapacity,
 	"ROUND_TRIP": scaffoldRoundTrip,
+	"INTEGRITY":  scaffoldIntegrity,
 }
 
 func scaffoldLoad() string {
@@ -319,8 +320,38 @@ scenarios:
 `
 }
 
+func scaffoldIntegrity() string {
+	return `# INTEGRITY TEST — Data loss and duplication verification
+# Produces sequenced records, consumes them back, and reconciles
+# to detect lost, duplicated, or out-of-order records.
+#
+# Usage: kates test apply -f integrity-test.yaml --wait
+
+scenarios:
+  - name: "Data Integrity Verification"
+    type: INTEGRITY
+    spec:
+      records: 500000
+      parallelProducers: 1
+      numConsumers: 1
+      recordSizeBytes: 512
+      durationSeconds: 300
+      topic: "integrity-benchmark"
+      acks: "all"
+      batchSize: 65536
+      lingerMs: 5
+      compressionType: "lz4"
+      consumerGroup: "integrity-cg"
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+    validate:
+      maxDataLossPercent: 0
+`
+}
+
 func init() {
-	testScaffoldCmd.Flags().StringVar(&scaffoldType, "type", "LOAD", "Test type to scaffold (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP)")
+	testScaffoldCmd.Flags().StringVar(&scaffoldType, "type", "LOAD", "Test type to scaffold (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY)")
 	testScaffoldCmd.Flags().StringVarP(&scaffoldOutput, "output", "o", "", "Write scaffold to file instead of stdout")
 	testCmd.AddCommand(testScaffoldCmd)
 }

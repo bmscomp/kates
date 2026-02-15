@@ -403,6 +403,10 @@ public class TestOrchestrator {
                             .producerConfig(producerConfig)
                             .build()
             );
+            case INTEGRITY -> List.of(
+                    produceTask(runId + "-integrity-produce", topic, spec, producerConfig),
+                    consumeTask(runId + "-integrity-consume", topic, spec)
+            );
         };
     }
 
@@ -500,6 +504,9 @@ public class TestOrchestrator {
 
         if (status.getError() != null) {
             result.setError(status.getError());
+        }
+        if (status.getIntegrityResult() != null) {
+            result.setIntegrity(status.getIntegrityResult());
         }
         if (status.isTerminal()) {
             result.setEndTime(Instant.now().toString());

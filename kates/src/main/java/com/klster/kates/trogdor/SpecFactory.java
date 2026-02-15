@@ -34,6 +34,7 @@ public class SpecFactory {
             case VOLUME -> buildVolumeSpecs(spec, runId);
             case CAPACITY -> buildCapacitySpecs(spec, runId);
             case ROUND_TRIP -> buildRoundTripSpecs(spec, runId);
+            case INTEGRITY -> buildLoadSpecs(spec, runId);
         };
     }
 

@@ -7,5 +7,6 @@ public enum TestType {
     ENDURANCE,
     VOLUME,
     CAPACITY,
-    ROUND_TRIP
+    ROUND_TRIP,
+    INTEGRITY
 }

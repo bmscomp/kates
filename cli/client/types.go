@@ -54,12 +54,33 @@ type TestRun struct {
 }
 
 type PhaseResult struct {
-	PhaseName               string  `json:"phaseName"`
-	Status                  string  `json:"status"`
-	RecordsSent             float64 `json:"recordsSent"`
-	ThroughputRecordsPerSec float64 `json:"throughputRecordsPerSec"`
-	AvgLatencyMs            float64 `json:"avgLatencyMs"`
-	P99LatencyMs            float64 `json:"p99LatencyMs"`
+	PhaseName               string           `json:"phaseName"`
+	Status                  string           `json:"status"`
+	RecordsSent             float64          `json:"recordsSent"`
+	ThroughputRecordsPerSec float64          `json:"throughputRecordsPerSec"`
+	AvgLatencyMs            float64          `json:"avgLatencyMs"`
+	P99LatencyMs            float64          `json:"p99LatencyMs"`
+	Integrity               *IntegrityResult `json:"integrity,omitempty"`
+}
+
+type IntegrityResult struct {
+	TotalSent        int64       `json:"totalSent"`
+	TotalAcked       int64       `json:"totalAcked"`
+	TotalConsumed    int64       `json:"totalConsumed"`
+	LostRecords      int64       `json:"lostRecords"`
+	DuplicateRecords int64       `json:"duplicateRecords"`
+	DataLossPercent  float64     `json:"dataLossPercent"`
+	LostRanges       []LostRange `json:"lostRanges,omitempty"`
+	ProducerRtoMs    float64     `json:"producerRtoMs,omitempty"`
+	ConsumerRtoMs    float64     `json:"consumerRtoMs,omitempty"`
+	MaxRtoMs         float64     `json:"maxRtoMs,omitempty"`
+	RpoMs            float64     `json:"rpoMs,omitempty"`
+}
+
+type LostRange struct {
+	FromSeq int64 `json:"fromSeq"`
+	ToSeq   int64 `json:"toSeq"`
+	Count   int64 `json:"count"`
 }
 
 // PagedTests from GET /api/tests (paginated)
