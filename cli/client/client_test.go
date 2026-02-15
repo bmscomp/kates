@@ -525,13 +525,16 @@ func TestTrends(t *testing.T) {
 		if q.Get("baselineWindow") != "5" {
 			t.Errorf("baselineWindow = %s", q.Get("baselineWindow"))
 		}
+		if q.Get("phase") != "" {
+			t.Errorf("phase should be empty, got %s", q.Get("phase"))
+		}
 		json.NewEncoder(w).Encode(TrendResponse{
 			Baseline:    10.5,
 			DataPoints:  []DataPoint{{RunID: "r1", Value: 11.0}},
 			Regressions: []Regression{{RunID: "r2", Value: 25.0, Baseline: 10.5, DeviationPercent: 138}},
 		})
 	})
-	resp, err := c.Trends(context.Background(), "LOAD", "p99LatencyMs", 30, 5)
+	resp, err := c.Trends(context.Background(), "LOAD", "p99LatencyMs", 30, 5, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,6 +546,82 @@ func TestTrends(t *testing.T) {
 	}
 	if len(resp.Regressions) != 1 {
 		t.Errorf("Regressions = %d", len(resp.Regressions))
+	}
+}
+
+func TestTrends_WithPhase(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("phase") != "spike" {
+			t.Errorf("phase = %q, want spike", q.Get("phase"))
+		}
+		json.NewEncoder(w).Encode(TrendResponse{
+			Phase:      "spike",
+			Baseline:   8.0,
+			DataPoints: []DataPoint{{RunID: "r1", Value: 9.5}},
+		})
+	})
+	resp, err := c.Trends(context.Background(), "SPIKE", "p99LatencyMs", 14, 3, "spike")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Phase != "spike" {
+		t.Errorf("Phase = %q, want spike", resp.Phase)
+	}
+	if resp.Baseline != 8.0 {
+		t.Errorf("Baseline = %f", resp.Baseline)
+	}
+}
+
+func TestTrendPhases(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/trends/phases") {
+			t.Errorf("path = %s, want /api/trends/phases", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("type") != "ENDURANCE" {
+			t.Errorf("type = %s", q.Get("type"))
+		}
+		json.NewEncoder(w).Encode([]string{"warmup", "sustained", "cooldown"})
+	})
+	phases, err := c.TrendPhases(context.Background(), "ENDURANCE", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(phases) != 3 {
+		t.Errorf("Phases count = %d, want 3", len(phases))
+	}
+	if phases[0] != "warmup" {
+		t.Errorf("phases[0] = %q", phases[0])
+	}
+}
+
+func TestTrendBreakdown(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/trends/breakdown") {
+			t.Errorf("path = %s, want /api/trends/breakdown", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(PhaseTrendResponse{
+			TestType: "SPIKE",
+			Metric:   "p99LatencyMs",
+			Phases: []PhaseTrend{
+				{Phase: "ramp", Baseline: 5.0, DataPoints: []DataPoint{{RunID: "r1", Value: 4.8}}},
+				{Phase: "spike", Baseline: 15.0, DataPoints: []DataPoint{{RunID: "r1", Value: 18.2}}},
+			},
+		})
+	})
+	resp, err := c.TrendBreakdown(context.Background(), "SPIKE", "p99LatencyMs", 30, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Phases) != 2 {
+		t.Fatalf("Phases count = %d, want 2", len(resp.Phases))
+	}
+	if resp.Phases[0].Phase != "ramp" {
+		t.Errorf("phases[0].Phase = %q", resp.Phases[0].Phase)
+	}
+	if resp.Phases[1].Baseline != 15.0 {
+		t.Errorf("phases[1].Baseline = %f", resp.Phases[1].Baseline)
 	}
 }
 

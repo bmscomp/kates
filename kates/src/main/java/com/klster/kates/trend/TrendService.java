@@ -2,6 +2,7 @@ package com.klster.kates.trend;
 
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestType;
+import com.klster.kates.report.PhaseReport;
 import com.klster.kates.report.ReportGenerator;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
@@ -11,13 +12,13 @@ import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.function.Function;
 
 /**
  * Computes historical metric trends from completed test runs.
- * Supports rolling baselines and automatic regression detection.
+ * Supports rolling baselines, automatic regression detection,
+ * and per-phase metric extraction for multi-phase test types.
  */
 @ApplicationScoped
 public class TrendService {
@@ -28,21 +29,36 @@ public class TrendService {
     @Inject
     ReportGenerator reportGenerator;
 
+    /**
+     * Compute trend for overall run metrics (backward-compatible).
+     */
     public TrendResponse computeTrend(TestType type, String metric, int days, int baselineWindow) {
-        Instant from = Instant.now().minus(days, ChronoUnit.DAYS);
-        Instant to = Instant.now();
+        return computeTrend(type, metric, days, baselineWindow, null);
+    }
 
-        List<TestRun> runs = repository.findByTypeAndDateRange(type, from, to);
+    /**
+     * Compute trend for a specific metric, optionally scoped to a single phase.
+     * When {@code phase} is non-null, the metric is extracted from the matching
+     * {@link PhaseReport} instead of the overall {@link ReportSummary}.
+     * Runs that do not contain the requested phase are silently skipped.
+     */
+    public TrendResponse computeTrend(TestType type, String metric, int days, int baselineWindow, String phase) {
+        List<TestRun> runs = findRuns(type, days);
 
         Function<ReportSummary, Double> extractor = metricExtractor(metric);
         if (extractor == null) {
-            return TrendResponse.empty(type.name(), metric);
+            return phase != null
+                    ? TrendResponse.empty(type.name(), metric, phase)
+                    : TrendResponse.empty(type.name(), metric);
         }
 
         List<TrendResponse.DataPoint> dataPoints = new ArrayList<>();
         for (TestRun run : runs) {
             TestReport report = reportGenerator.generate(run);
-            ReportSummary summary = report.getSummary();
+            ReportSummary summary = phase != null
+                    ? findPhaseSummary(report, phase)
+                    : report.getSummary();
+
             if (summary != null) {
                 double value = extractor.apply(summary);
                 dataPoints.add(new TrendResponse.DataPoint(run.getCreatedAt(), run.getId(), value));
@@ -52,7 +68,79 @@ public class TrendService {
         double baseline = computeBaseline(dataPoints, baselineWindow);
         List<TrendResponse.Regression> regressions = detectRegressions(dataPoints, baseline, metric);
 
-        return new TrendResponse(type.name(), metric, dataPoints, baseline, regressions);
+        return new TrendResponse(type.name(), metric, phase, dataPoints, baseline, regressions);
+    }
+
+    /**
+     * Compute trend breakdown for all phases in a single response.
+     * Each distinct phase name found across matching runs gets its own
+     * sparkline, baseline, and regression list.
+     */
+    public PhaseTrendResponse computeBreakdown(TestType type, String metric, int days, int baselineWindow) {
+        List<TestRun> runs = findRuns(type, days);
+
+        Function<ReportSummary, Double> extractor = metricExtractor(metric);
+        if (extractor == null) {
+            return new PhaseTrendResponse(type.name(), metric, List.of());
+        }
+
+        Map<String, List<TrendResponse.DataPoint>> byPhase = new LinkedHashMap<>();
+
+        for (TestRun run : runs) {
+            TestReport report = reportGenerator.generate(run);
+            List<PhaseReport> phases = report.getPhases();
+            if (phases == null) continue;
+
+            for (PhaseReport pr : phases) {
+                if (pr.getMetrics() == null) continue;
+                double value = extractor.apply(pr.getMetrics());
+                byPhase.computeIfAbsent(pr.getPhaseName(), k -> new ArrayList<>())
+                        .add(new TrendResponse.DataPoint(run.getCreatedAt(), run.getId(), value));
+            }
+        }
+
+        List<PhaseTrendResponse.PhaseTrend> phaseTrends = new ArrayList<>();
+        for (Map.Entry<String, List<TrendResponse.DataPoint>> entry : byPhase.entrySet()) {
+            double baseline = computeBaseline(entry.getValue(), baselineWindow);
+            List<TrendResponse.Regression> regressions = detectRegressions(entry.getValue(), baseline, metric);
+            phaseTrends.add(new PhaseTrendResponse.PhaseTrend(
+                    entry.getKey(), entry.getValue(), baseline, regressions));
+        }
+
+        return new PhaseTrendResponse(type.name(), metric, phaseTrends);
+    }
+
+    /**
+     * Discover distinct phase names across completed runs of the given type.
+     */
+    public List<String> discoverPhases(TestType type, int days) {
+        List<TestRun> runs = findRuns(type, days);
+        Set<String> phases = new LinkedHashSet<>();
+
+        for (TestRun run : runs) {
+            TestReport report = reportGenerator.generate(run);
+            if (report.getPhases() != null) {
+                for (PhaseReport pr : report.getPhases()) {
+                    phases.add(pr.getPhaseName());
+                }
+            }
+        }
+        return new ArrayList<>(phases);
+    }
+
+    private List<TestRun> findRuns(TestType type, int days) {
+        Instant from = Instant.now().minus(days, ChronoUnit.DAYS);
+        Instant to = Instant.now();
+        return repository.findByTypeAndDateRange(type, from, to);
+    }
+
+    private ReportSummary findPhaseSummary(TestReport report, String phase) {
+        if (report.getPhases() == null) return null;
+        return report.getPhases().stream()
+                .filter(p -> phase.equalsIgnoreCase(p.getPhaseName()))
+                .map(PhaseReport::getMetrics)
+                .findFirst()
+                .orElse(null);
     }
 
     private double computeBaseline(List<TrendResponse.DataPoint> points, int window) {
@@ -69,13 +157,11 @@ public class TrendService {
         if (baseline == 0) return List.of();
 
         boolean isLatencyMetric = metric.toLowerCase().contains("latency");
-        double threshold = 0.20; // 20% degradation
+        double threshold = 0.20;
 
         List<TrendResponse.Regression> regressions = new ArrayList<>();
         for (TrendResponse.DataPoint point : points) {
             double deviation = (point.value() - baseline) / baseline;
-
-            // For latency metrics, increase = regression. For throughput, decrease = regression.
             boolean isRegression = isLatencyMetric ? deviation > threshold : deviation < -threshold;
 
             if (isRegression) {

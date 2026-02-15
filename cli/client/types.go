@@ -139,6 +139,7 @@ type SlaViolation struct {
 
 // TrendResponse from GET /api/trends
 type TrendResponse struct {
+	Phase       string       `json:"phase,omitempty"`
 	Baseline    float64      `json:"baseline"`
 	DataPoints  []DataPoint  `json:"dataPoints,omitempty"`
 	Regressions []Regression `json:"regressions,omitempty"`
@@ -155,6 +156,20 @@ type Regression struct {
 	Value            float64 `json:"value"`
 	Baseline         float64 `json:"baseline"`
 	DeviationPercent float64 `json:"deviationPercent"`
+}
+
+// PhaseTrendResponse from GET /api/trends/breakdown
+type PhaseTrendResponse struct {
+	TestType string       `json:"testType"`
+	Metric   string       `json:"metric"`
+	Phases   []PhaseTrend `json:"phases,omitempty"`
+}
+
+type PhaseTrend struct {
+	Phase       string       `json:"phase"`
+	DataPoints  []DataPoint  `json:"dataPoints,omitempty"`
+	Baseline    float64      `json:"baseline"`
+	Regressions []Regression `json:"regressions,omitempty"`
 }
 
 // Schedule from GET /api/schedules and GET /api/schedules/:id

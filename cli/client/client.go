@@ -335,14 +335,38 @@ func (c *Client) DeleteSchedule(ctx context.Context, id string) error {
 	return c.delete(ctx, "/api/schedules/"+id)
 }
 
-func (c *Client) Trends(ctx context.Context, testType, metric string, days, baselineWindow int) (*TrendResponse, error) {
+func (c *Client) Trends(ctx context.Context, testType, metric string, days, baselineWindow int, phase string) (*TrendResponse, error) {
 	path := fmt.Sprintf("/api/trends?type=%s&metric=%s&days=%d&baselineWindow=%d",
 		testType, metric, days, baselineWindow)
+	if phase != "" {
+		path += "&phase=" + phase
+	}
 	data, err := c.get(ctx, path)
 	if err != nil {
 		return nil, err
 	}
 	var result TrendResponse
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) TrendPhases(ctx context.Context, testType string, days int) ([]string, error) {
+	path := fmt.Sprintf("/api/trends/phases?type=%s&days=%d", testType, days)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []string
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) TrendBreakdown(ctx context.Context, testType, metric string, days, baselineWindow int) (*PhaseTrendResponse, error) {
+	path := fmt.Sprintf("/api/trends/breakdown?type=%s&metric=%s&days=%d&baselineWindow=%d",
+		testType, metric, days, baselineWindow)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result PhaseTrendResponse
 	return &result, json.Unmarshal(data, &result)
 }
 
