@@ -984,6 +984,78 @@ kubectl exec -n kafka krafter-pool-alpha-0 -- \
 
 The consumer's `MB.sec` divided by the producer's `MB/sec` gives you the consumption/production ratio. If the consumer is faster than the producer, lag stays at zero. If slower, lag builds.
 
+### Scenario 7: Data Integrity Under Chaos
+
+The ultimate validation: produce sequenced records with CRC32 checksums, inject a broker failure mid-flight, then verify every record was delivered without corruption or reordering.
+
+Unlike Scenario 4 (which only watches for throughput dips), this scenario verifies **data correctness** through the failure window.
+
+```bash
+# Scaffold the combined integrity + chaos test:
+kates test scaffold --type INTEGRITY_CHAOS -o integrity-chaos.yaml
+
+# Review the generated YAML (it includes chaos config and SLA gates)
+cat integrity-chaos.yaml
+
+# Run it:
+kates test apply -f integrity-chaos.yaml --wait
+```
+
+The generated YAML includes:
+- INTEGRITY workload with `enableCrc: true` and `enableIdempotence: true`
+- A `chaos` block targeting a specific Litmus experiment
+- SLA gates for data loss, RTO, RPO, ordering, and CRC integrity
+
+**Example output:**
+
+```
+╭─────────────────────────────────────────────╮
+│  KATES Test Summary                         │
+├──────────────┬────────┬─────────────────────┤
+│ Scenario     │ Status │ Result              │
+├──────────────┼────────┼─────────────────────┤
+│ Integrity    │ DONE   │ ✓ SLA Pass          │
+│ Under Chaos  │        │                     │
+╰──────────────┴────────┴─────────────────────╯
+
+  Data Integrity
+    Sent        500,000
+    Consumed    500,000
+    Lost        0
+    CRC Fail    0
+    Out of Ord  0
+    Verdict     ✓ PASS
+
+  Integrity Timeline
+    ┌───────────────┬──────────┬─────────────────────┐
+    │ Timestamp     │ Type     │ Detail              │
+    ├───────────────┼──────────┼─────────────────────┤
+    │ 1707933600000 │ SUMMARY  │ verdict=PASS lost=0 │
+    └───────────────┴──────────┴─────────────────────┘
+```
+
+If any SLA gate is violated, the CLI prints the violations and exits with code 1:
+
+```
+  ✗ SLA Violations:
+    p99=142ms > 100ms
+    dataLoss=0.02% > 0.00%
+```
+
+**What makes this different from manual chaos testing:**
+- Every record is tracked by sequence number, not just aggregate throughput
+- CRC32 detects bit-level corruption that throughput tests miss
+- Per-partition ordering verification catches reordering bugs
+- RTO/RPO give measurable recovery metrics, not just visual Grafana inspection
+- SLA gates make it CI/CD-compatible — the test either passes or fails with a clear reason
+
+**Pass criteria:**
+- Zero data loss with idempotent producer + `acks=all`
+- RTO < 10,000ms
+- RPO < 5,000ms
+- Zero CRC failures
+- Zero ordering violations
+
 ---
 
 ## Chapter 9: Strimzi-Specific Considerations
@@ -1177,6 +1249,8 @@ Performance testing is not a single activity — it is a family of related metho
 | Scalability | How well does the system scale up or out? | 30–60 min | Steady, across configurations |
 | Volume | Can the system handle large datasets? | 30–120 min | Bulk data injection |
 | Capacity | What is the maximum the system can sustain? | 30–60 min | Binary-search ramp |
+| Round-Trip | What is the true produce→consume latency? | 10–30 min | Steady, measured per-record |
+| Integrity | Is every record accounted for without corruption? | 10–60 min | Produce→consume→verify |
 
 ### 1. Load Testing
 
@@ -1675,6 +1749,160 @@ After running capacity tests, fill in this table for your cluster:
 
 This table becomes the cluster's performance specification and the basis for capacity planning decisions.
 
+### 8. Round-Trip Testing
+
+**Goal:** Measure the true end-to-end latency from the moment a record is produced to the moment it is consumed. Unlike separate producer/consumer perf tests, round-trip testing uses a single pipeline that timestamps each record and measures the actual deliver-through latency.
+
+**What it measures:**
+- Produce-to-consume latency (P50, P95, P99)
+- End-to-end throughput through the entire pipeline
+- The gap between producer-side latency and true delivery latency
+- Impact of consumer group rebalances on end-to-end timing
+
+**When to use:** When your application cares about how fast a consumer sees a produced message, not just how fast the producer gets an ack. This is critical for event-driven architectures, CDC pipelines, and stream processing.
+
+**Scenario for krafter:** Produce 100,000 records at a controlled rate, consume them from the same topic, and measure per-record round-trip time.
+
+```bash
+# Scaffold a round-trip test:
+kates test scaffold --type ROUND_TRIP -o round-trip.yaml
+
+# Run it:
+kates test apply -f round-trip.yaml --wait
+```
+
+The KATES CLI uses the ROUND_TRIP workload, which embeds a nanosecond timestamp in each record's payload. The consumer extracts the timestamp and computes the delivery latency per record, then aggregates into percentiles.
+
+**Pass criteria:**
+- P99 round-trip latency < 200ms (with `acks=all`, RF=3, ISR=2)
+- No records lost in transit
+- Consumer lag returns to 0 within 30 seconds after producers finish
+
+### 9. Data Integrity Testing
+
+**Goal:** Verify that every record produced is consumed exactly once, without corruption, in the correct order, and within acceptable recovery time bounds. Integrity testing goes beyond throughput and latency — it answers the question: "did the cluster lose, corrupt, duplicate, or reorder any data?"
+
+**What it measures:**
+- **Data loss** — records that were acked by the broker but never consumed
+- **Duplicates** — records consumed more than once
+- **CRC32 corruption** — payload checksum mismatches indicating bit-level corruption
+- **Ordering violations** — records arriving out of sequence within a partition
+- **RTO (Recovery Time Objective)** — how long write/read availability was interrupted
+- **RPO (Recovery Point Objective)** — how much data was at risk during a failure window
+
+**How it works:** The KATES native backend implements a produce→consume→verify pipeline:
+
+```
+Producer                          Kafka                         Consumer
+┌─────────────┐                ┌─────────┐                ┌──────────────┐
+│ Sequenced   │──── acks=all──▶│ Topic   │──── fetch ────▶│ Decode       │
+│ Payload     │                │ (RF=3)  │                │ Verify CRC   │
+│ ┌─────────┐ │                └─────────┘                │ Check Order  │
+│ │ RunID   │ │                                           │ Track Seq    │
+│ │ SeqNum  │ │                                           └──────┬───────┘
+│ │ Stamp   │ │                                                  │
+│ │ CRC32   │ │           ┌──────────────────────┐               │
+│ │ Payload │ │           │ DataIntegrityVerifier │◀──────────────┘
+│ └─────────┘ │           │ BitSet reconciliation │
+└─────────────┘           │ LostRange detection   │
+                          │ Timeline events        │
+                          └──────────┬─────────────┘
+                                     │
+                              IntegrityResult
+                           ┌──────────────────┐
+                           │ totalSent         │
+                           │ totalConsumed     │
+                           │ lostRecords       │
+                           │ crcFailures       │
+                           │ outOfOrderCount   │
+                           │ producerRtoMs     │
+                           │ consumerRtoMs     │
+                           │ rpoMs             │
+                           │ verdict           │
+                           │ timeline[]        │
+                           └──────────────────┘
+```
+
+Each record carries a 28-byte header: 4-byte run ID hash, 8-byte sequence number, 8-byte nanosecond timestamp, 4-byte partition hint, and 4-byte CRC32 computed over the payload. The consumer decodes, verifies the CRC, checks per-partition ordering, and feeds sequence numbers into a `BitSet`-based reconciler that detects gaps (lost records) and overlaps (duplicates).
+
+**Scenario for krafter:**
+
+```bash
+# Scaffold an integrity test:
+kates test scaffold --type INTEGRITY -o integrity.yaml
+
+# Run it with SLA enforcement:
+kates test apply -f integrity.yaml --wait
+```
+
+The scaffold generates a ready-to-use YAML:
+
+```yaml
+scenarios:
+  - name: "Data Integrity Baseline"
+    type: INTEGRITY
+    backend: native
+    spec:
+      records: 1000000
+      parallelProducers: 1
+      numConsumers: 1
+      recordSizeBytes: 512
+      topic: "integrity-test"
+      acks: "all"
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      enableCrc: true
+      enableIdempotence: true
+    validate:
+      maxDataLossPercent: 0
+      maxRtoMs: 5000
+      maxRpoMs: 1000
+      maxOutOfOrder: 0
+      maxCrcFailures: 0
+```
+
+**SLA validation gates:** The `validate` block defines pass/fail thresholds. After the test completes, the CLI checks each gate and either prints "✓ SLA Pass" or lists the violations and exits with code 1. This is suitable for CI/CD pipelines.
+
+| Gate | What It Checks |
+|------|----------------|
+| `maxDataLossPercent` | % of acked records not consumed |
+| `maxRtoMs` | Maximum acceptable recovery time |
+| `maxRpoMs` | Maximum acceptable recovery point |
+| `maxOutOfOrder` | Maximum per-partition ordering violations |
+| `maxCrcFailures` | Maximum payload checksum mismatches |
+
+**Producer modes:**
+
+| Mode | Config | Effect |
+|------|--------|--------|
+| Standard | (default) | Fire-and-forget acks, no dedup |
+| Idempotent | `enableIdempotence: true` | Exactly-once per partition via producer epoch |
+| Transactional | `enableTransactions: true` | Atomic batch commits, consumer reads `read_committed` |
+
+**Timeline events:** The integrity verifier records timestamped events during analysis:
+
+| Type | When Emitted |
+|------|--------------|
+| `CRC_FAILURE` | A record's CRC32 doesn't match its payload |
+| `OUT_OF_ORDER` | A record arrives before its expected sequence within a partition |
+| `LOST_RANGE` | A contiguous range of acked sequences was never consumed |
+| `SUMMARY` | Final verdict with aggregate lost/duplicate counts |
+
+The CLI displays the last 20 timeline events in a table after the integrity result panel. The report generator includes up to 50 events in the exported markdown.
+
+**Pass criteria (baseline — no chaos):**
+- Zero data loss (every acked record consumed)
+- Zero CRC failures
+- Zero ordering violations
+- Verdict = `PASS`
+
+**Pass criteria (with chaos):**
+- Data loss ≤ threshold (depends on chaos type and `acks` setting)
+- RTO < 10,000ms (cluster recovers within 10 seconds)
+- RPO < 5,000ms (at most 5 seconds of data at risk)
+- Zero CRC failures (corruption is never acceptable)
+
 ### Choosing the Right Test Type
 
 Use this flowchart to decide which test type to run:
@@ -1700,8 +1928,14 @@ What do you need to know?
     ├─ "Can it handle massive datasets?"
     │   └─ Volume Testing (Section 6)
     │
-    └─ "What's the absolute maximum?"
-        └─ Capacity Testing (Section 7)
+    ├─ "What's the absolute maximum?"
+    │   └─ Capacity Testing (Section 7)
+    │
+    ├─ "What's the true produce→consume latency?"
+    │   └─ Round-Trip Testing (Section 8)
+    │
+    └─ "Is every record accounted for?"
+        └─ Data Integrity Testing (Section 9)
 ```
 
 ### Automation Scripts
@@ -1719,6 +1953,225 @@ Each test type has a corresponding script in the project root:
 
 All scripts are configurable via environment variables (e.g., `PRODUCERS=5`, `DURATION_MINUTES=120`). Run with `--help` or read the script header for details.
 
+**KATES CLI tests** (scaffold + apply workflow):
+
+| Command | Test Type | What It Does |
+|---------|-----------|-------------|
+| `kates test scaffold --type LOAD` | Load | Scaffold a KATES load test YAML |
+| `kates test scaffold --type STRESS` | Stress | Scaffold a stress-ramp scenario |
+| `kates test scaffold --type SPIKE` | Spike | Scaffold a spike-burst scenario |
+| `kates test scaffold --type ENDURANCE` | Endurance | Scaffold a long-running soak test |
+| `kates test scaffold --type VOLUME` | Volume | Scaffold a high-volume data test |
+| `kates test scaffold --type CAPACITY` | Capacity | Scaffold a binary-search capacity test |
+| `kates test scaffold --type ROUND_TRIP` | Round-Trip | Scaffold a produce→consume latency test |
+| `kates test scaffold --type INTEGRITY` | Integrity | Scaffold per-record reconciliation + CRC |
+| `kates test scaffold --type INTEGRITY_CHAOS` | Integrity + Chaos | Scaffold integrity test with fault injection |
+
+Generate a YAML, then run it:
+
+```bash
+kates test scaffold --type INTEGRITY -o integrity.yaml
+kates test apply -f integrity.yaml --wait
+```
+
+The `--wait` flag blocks until completion and runs SLA validation. Exit code 0 = all SLAs passed; exit code 1 = violations detected.
+
+---
+
+## Chapter 12: KATES CLI-Driven Testing
+
+The previous chapters cover manual performance testing using raw Kafka tools (`kafka-producer-perf-test.sh`, `kafka-consumer-perf-test.sh`) and infrastructure-level chaos experiments. KATES (Kafka Advanced Testing & Engineering Suite) provides a higher-level abstraction: **declarative test scenarios** that combine workload specification, execution, monitoring, integrity verification, and SLA enforcement into a single workflow.
+
+### Why KATES?
+
+Manual perf tests give you raw numbers. KATES gives you **verdicts**.
+
+| Capability | Manual Tools | KATES |
+|------------|-------------|-------|
+| Throughput measurement | ✓ | ✓ |
+| Latency percentiles | ✓ | ✓ |
+| Per-record data integrity | ✗ | ✓ |
+| CRC32 corruption detection | ✗ | ✓ |
+| Per-partition ordering verification | ✗ | ✓ |
+| Automated SLA pass/fail | ✗ | ✓ |
+| CI/CD exit codes | ✗ | ✓ |
+| Report generation | ✗ | ✓ |
+| Chaos + integrity combined | Manual setup | Declarative YAML |
+
+### The Scaffold → Apply → Validate Workflow
+
+Every KATES test follows a three-step workflow:
+
+```
+1. Scaffold       Generate a YAML test definition
+   kates test scaffold --type INTEGRITY -o test.yaml
+
+2. Apply          Submit to the KATES backend and execute
+   kates test apply -f test.yaml --wait
+
+3. Validate       Automatic SLA checks on completion
+   ✓ SLA Pass  (exit 0)  or  ✗ Violations listed (exit 1)
+```
+
+### Available Test Types
+
+| Type | Backend | What It Does |
+|------|---------|-------------|
+| `LOAD` | trogdor/native | Sustained producer throughput at target rate |
+| `STRESS` | trogdor/native | Ramping throughput to find breaking point |
+| `SPIKE` | trogdor/native | Sudden burst followed by recovery |
+| `ENDURANCE` | trogdor/native | Extended soak for degradation detection |
+| `VOLUME` | trogdor/native | Large dataset processing |
+| `CAPACITY` | trogdor/native | Binary-search for maximum throughput |
+| `ROUND_TRIP` | native | Produce→consume latency measurement |
+| `INTEGRITY` | native | Per-record reconciliation + CRC + ordering |
+| `INTEGRITY_CHAOS` | native | Integrity test with fault injection |
+
+The `native` backend is required for INTEGRITY and ROUND_TRIP because these need per-record sequencing that the Trogdor backend does not support.
+
+### YAML Anatomy
+
+A test definition has three sections: `spec` (workload), optional `chaos` (fault injection), and optional `validate` (SLA gates).
+
+```yaml
+scenarios:
+  - name: "Descriptive name"
+    type: INTEGRITY              # Test type from the table above
+    backend: native              # "native" or "trogdor"
+    spec:
+      records: 1000000           # Total records to produce
+      parallelProducers: 1       # Concurrent producer count
+      numConsumers: 1            # Consumer count
+      recordSizeBytes: 512       # Payload size per record
+      durationSeconds: 300       # Max duration (0 = unlimited)
+      topic: "my-test"           # Kafka topic name
+      acks: "all"                # Producer acks setting
+      batchSize: 65536           # Producer batch size
+      lingerMs: 5                # Producer linger
+      compressionType: "lz4"     # Compression codec
+      consumerGroup: "my-cg"     # Consumer group ID
+      partitions: 6              # Topic partitions
+      replicationFactor: 3       # Topic replication factor
+      minInsyncReplicas: 2       # Topic min ISR
+      enableCrc: true            # CRC32 per-record checksums
+      enableIdempotence: true    # Idempotent producer
+      enableTransactions: false  # Transactional producer
+    chaos:                       # Optional: fault injection
+      experimentName: "kafka-broker-kill"
+      chaosDurationSec: 30
+      steadyStateSec: 60
+    validate:                    # Optional: SLA gates
+      maxP99Latency: 100         # Max P99 latency (ms)
+      maxAvgLatency: 50          # Max average latency (ms)
+      minThroughput: 10000       # Min throughput (records/sec)
+      maxErrorRate: 0            # Max error rate (%)
+      maxDataLossPercent: 0      # Max data loss (%)
+      maxRtoMs: 5000             # Max recovery time (ms)
+      maxRpoMs: 1000             # Max recovery point (ms)
+      maxOutOfOrder: 0           # Max ordering violations
+      maxCrcFailures: 0          # Max CRC mismatches
+```
+
+### SLA Validation
+
+The `validate` block supports 9 gates split into two categories:
+
+**Performance gates:**
+
+| Gate | Threshold | Violation Example |
+|------|-----------|-------------------|
+| `maxP99Latency` | P99 latency in ms | `p99=142ms > 100ms` |
+| `maxAvgLatency` | Average latency in ms | `avg=65ms > 50ms` |
+| `minThroughput` | Minimum records/sec | `throughput=8200 < 10000` |
+| `maxErrorRate` | Error percentage | `errors=2.5% > 0%` |
+
+**Integrity gates:**
+
+| Gate | Threshold | Violation Example |
+|------|-----------|-------------------|
+| `maxDataLossPercent` | % of acked records not consumed | `dataLoss=0.02% > 0%` |
+| `maxRtoMs` | Recovery time in ms | `rto=12000ms > 10000ms` |
+| `maxRpoMs` | Recovery point in ms | `rpo=6000ms > 5000ms` |
+| `maxOutOfOrder` | Ordering violations | `outOfOrder=3 > 0` |
+| `maxCrcFailures` | Checksum mismatches | `crcFailures=1 > 0` |
+
+When all gates pass, the CLI prints `✓ SLA Pass`. When any gate is violated, it prints each violation and exits with code 1. This makes KATES tests suitable for CI/CD pipelines where a non-zero exit code blocks the pipeline.
+
+### Integrity Result Display
+
+After an INTEGRITY test completes, the CLI displays a detailed panel:
+
+```
+  Data Integrity
+    Sent          1,000,000
+    Acked         1,000,000
+    Consumed      1,000,000
+    Lost          0
+    Duplicates    0
+    Data Loss     0.0000%
+    Producer RTO  0 ms
+    Consumer RTO  0 ms
+    CRC Failures  0
+    Out of Order  0
+    Mode          idempotent
+    Verdict       ✓ PASS
+```
+
+If timeline events were recorded (CRC failures, ordering violations, or lost ranges), the CLI displays the last 20 in a table:
+
+```
+  Integrity Timeline
+    ┌───────────────┬──────────────┬──────────────────────────────┐
+    │ Timestamp     │ Type         │ Detail                       │
+    ├───────────────┼──────────────┼──────────────────────────────┤
+    │ 1707933612345 │ CRC_FAILURE  │ partition=2 seq=48721        │
+    │ 1707933612890 │ OUT_OF_ORDER │ partition=1 expected=5 got=3 │
+    │ 1707933650000 │ LOST_RANGE   │ from=48722 to=48730 count=9  │
+    │ 1707933660000 │ SUMMARY      │ verdict=DATA_LOSS lost=9     │
+    └───────────────┴──────────────┴──────────────────────────────┘
+```
+
+### Report Export
+
+The KATES backend generates a markdown report for each completed test. For tests with integrity results, the report includes a "Data Integrity" section with a full metrics table and up to 50 timeline events.
+
+### Practical Examples
+
+**Baseline integrity (no chaos):**
+```bash
+kates test scaffold --type INTEGRITY -o baseline.yaml
+kates test apply -f baseline.yaml --wait
+```
+
+**Integrity under broker kill:**
+```bash
+kates test scaffold --type INTEGRITY_CHAOS -o chaos.yaml
+kates test apply -f chaos.yaml --wait
+```
+
+**CI/CD pipeline integration:**
+```bash
+#!/bin/bash
+set -e
+kates test scaffold --type INTEGRITY -o /tmp/integrity.yaml
+kates test apply -f /tmp/integrity.yaml --wait
+# Exit code 1 if any SLA is violated — pipeline fails automatically
+```
+
+**Compare producer modes:**
+```bash
+# Standard (no dedup)
+kates test scaffold --type INTEGRITY -o standard.yaml
+# Edit: set enableIdempotence: false
+kates test apply -f standard.yaml --wait
+
+# Idempotent
+kates test scaffold --type INTEGRITY -o idempotent.yaml
+kates test apply -f idempotent.yaml --wait
+
+# Compare data loss and duplicate counts between the two runs
+```
+
 ---
 
 ## Quick Reference
@@ -1732,6 +2185,10 @@ All scripts are configurable via environment variables (e.g., `PRODUCERS=5`, `DU
 | `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-consumer-perf-test.sh ...` | Custom consumer perf test |
 | `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-topics.sh --describe ...` | Inspect topic configuration |
 | `kubectl exec -n kafka krafter-pool-alpha-0 -- bin/kafka-consumer-groups.sh --describe ...` | Check consumer lag |
+| `kates test scaffold --type <TYPE> -o test.yaml` | Generate a KATES test definition |
+| `kates test apply -f test.yaml --wait` | Run a KATES test with SLA validation |
+| `kates test status <id>` | Check test run status |
+| `kates test list` | List recent test runs |
 
 ### Monitoring
 

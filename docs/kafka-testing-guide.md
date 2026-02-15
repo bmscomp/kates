@@ -641,7 +641,103 @@ Simulates a storage failure. The broker should come up with an empty log directo
 
 ---
 
+## Part 4: Data Integrity Verification During Chaos
+
+Manual chaos testing (Parts 1-3) tells you whether the cluster recovers and whether throughput resumes. But it cannot tell you whether **every single record** survived the failure without corruption. Data integrity verification closes that gap.
+
+### Why Manual Chaos Testing Is Not Enough
+
+When you run `make chaos-kafka-pod-delete` during a `make test`, you can observe:
+- Throughput dip and recovery (Grafana)
+- Under-replicated partitions (Grafana)
+- Producer errors in terminal output
+- Consumer lag spike and recovery
+
+But you **cannot** verify:
+- Whether any acked records were silently lost
+- Whether any records were corrupted at the byte level
+- Whether per-partition ordering was violated during failover
+- Exact RTO (how long writes were unavailable)
+- Exact RPO (how much data was at risk)
+
+### KATES Integrity + Chaos Testing
+
+KATES provides an `INTEGRITY_CHAOS` test type that combines per-record verification with fault injection in a single declarative YAML:
+
+```bash
+kates test scaffold --type INTEGRITY_CHAOS -o chaos-integrity.yaml
+kates test apply -f chaos-integrity.yaml --wait
+```
+
+**What happens during the test:**
+
+```
+1. KATES produces sequenced, CRC32-checksummed records
+2. A chaos experiment (broker kill, network partition, etc.) fires mid-test
+3. KATES continues producing through the failure
+4. After production completes, KATES consumes all records
+5. DataIntegrityVerifier reconciles produced vs consumed:
+   - BitSet-based sequence tracking (every record accounted for)
+   - CRC32 verification (no bit-level corruption)
+   - Per-partition ordering check (no reordering)
+   - RTO/RPO measurement (recovery metrics)
+6. SLA gates enforce pass/fail thresholds
+```
+
+### SLA Gates for Chaos Scenarios
+
+The `validate` block in the YAML defines thresholds. Reasonable defaults for a 3-broker cluster with `acks=all` and idempotent producer:
+
+| Gate | Recommended Value | Rationale |
+|------|-------------------|-----------|
+| `maxDataLossPercent` | `0` | Idempotent + acks=all should guarantee no loss |
+| `maxRtoMs` | `10000` | Leader election + ISR rebuild in <10s |
+| `maxRpoMs` | `5000` | At most 5s of data at risk |
+| `maxOutOfOrder` | `0` | Single-partition ordering is a Kafka guarantee |
+| `maxCrcFailures` | `0` | Bit-level corruption is never acceptable |
+
+### Interpreting Results
+
+**Clean pass (healthy cluster):**
+```
+  Data Integrity
+    Sent        500,000    Consumed    500,000
+    Lost        0          CRC Fail    0
+    Out of Ord  0          Verdict     ✓ PASS
+```
+
+**Data loss during chaos (investigation needed):**
+```
+  Data Integrity
+    Sent        500,000    Consumed    499,982
+    Lost        18         CRC Fail    0
+    Out of Ord  0          Verdict     ✗ DATA_LOSS
+
+  Integrity Timeline
+    ┌───────────────┬────────────┬──────────────────────────────┐
+    │ Timestamp     │ Type       │ Detail                       │
+    ├───────────────┼────────────┼──────────────────────────────┤
+    │ 1707933650000 │ LOST_RANGE │ from=248721 to=248738 cnt=18 │
+    │ 1707933660000 │ SUMMARY    │ verdict=DATA_LOSS lost=18    │
+    └───────────────┴────────────┴──────────────────────────────┘
+```
+
+Lost records in a contiguous range during chaos suggests they were acked but the broker died before replication completed. With idempotent producer and `acks=all`, this should not happen — investigate whether `min.insync.replicas` was correctly set and whether the chaos experiment killed more than one broker.
+
+### Recommended Test Matrix
+
+| Chaos Experiment | Expected Result | Notes |
+|-----------------|-----------------|-------|
+| Pod delete (1 broker) | Zero loss, RTO < 10s | Baseline resilience validation |
+| Network partition (1 broker) | Zero loss, RTO < 30s | ISR shrink/expand cycle |
+| CPU stress (1 broker) | Zero loss, latency increase | Broker may fall out of ISR |
+| Dual broker failure | Data loss expected | Only 1 broker remains, ISR < min.insync |
+| Rolling restart | Zero loss, RTO per restart < 15s | Tests Strimzi operator behavior |
+
+---
+
 ## Quick Reference
+
 
 ### Commands
 
