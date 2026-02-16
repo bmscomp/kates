@@ -61,22 +61,22 @@ make destroy
 
 ## Image Management
 
-All images are defined in `images.env` — the single source of truth. Both `pull-images.sh` and `load-images-to-kind.sh` source this file, eliminating version drift.
+All images are defined in `images.env` — the single source of truth. Both `scripts/pull-images.sh` and `scripts/load-images-to-kind.sh` source this file, eliminating version drift.
 
 ### How It Works
 
-1. **Pull** — `pull-images.sh` downloads images to a local Docker registry (`localhost:5001`), detecting platform (arm64/amd64) automatically
-2. **Load** — `load-images-to-kind.sh` pulls from the local registry and loads into Kind nodes. No internet fallback — fails if the image isn't in the registry
+1. **Pull** — `scripts/pull-images.sh` downloads images to a local Docker registry (`localhost:5001`), detecting platform (arm64/amd64) automatically
+2. **Load** — `scripts/load-images-to-kind.sh` pulls from the local registry and loads into Kind nodes. No internet fallback — fails if the image isn't in the registry
 3. **Deploy** — all Helm values and manifests use `imagePullPolicy: Never`, ensuring Kubernetes only uses images already on Kind nodes
 
 ### Managing Images Individually
 
 ```bash
 # Pull all images (skips already-cached)
-./pull-images.sh
+./scripts/pull-images.sh
 
 # Load all images into Kind (skips already-loaded)
-./load-images-to-kind.sh
+./scripts/load-images-to-kind.sh
 
 # Check what's in the registry
 make registry-status
@@ -163,7 +163,7 @@ Resource labels simulate instance types (3 CPU, 6 GB RAM, 10 GB storage). Kind u
 
 Image not loaded in Kind nodes. Fix:
 ```bash
-./load-images-to-kind.sh
+./scripts/load-images-to-kind.sh
 ```
 
 Or load a specific image manually:
@@ -175,7 +175,7 @@ kind load docker-image <image>:<tag> --name panda
 
 The pull script continues past failures. Re-run to retry only the failed images:
 ```bash
-./pull-images.sh
+./scripts/pull-images.sh
 ```
 
 ### Check pod image pull status

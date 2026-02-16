@@ -5,34 +5,34 @@ all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
 	@echo "Step 1: Starting Kind cluster + registry..."
-	./start-cluster.sh
+	./scripts/start-cluster.sh
 	@echo ""
 	@echo "Step 2: Pulling images to local registry..."
-	./pull-images.sh
+	./scripts/pull-images.sh
 	@echo ""
 	@echo "Step 3: Loading images into Kind cluster..."
-	./load-images-to-kind.sh
+	./scripts/load-images-to-kind.sh
 	@echo ""
 	@echo "Step 4: Deploying Monitoring (Prometheus & Grafana)..."
-	./deploy-monitoring.sh
+	./scripts/deploy-monitoring.sh
 	@echo ""
 	@echo "Step 5: Waiting for monitoring to be ready..."
 	@kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true
 	@echo ""
 	@echo "Step 6: Deploying Kafka (Strimzi)..."
-	./deploy-kafka.sh
+	./scripts/deploy-kafka.sh
 	@echo ""
 	@echo "Step 7: Waiting for Kafka to be ready..."
 	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true
 	@echo ""
 	@echo "Step 8: Deploying Kafka UI..."
-	./deploy-kafka-ui.sh
+	./scripts/deploy-kafka-ui.sh
 	@echo ""
 	@echo "Step 9: Deploying Apicurio Registry..."
-	./deploy-apicurio.sh
+	./scripts/deploy-apicurio.sh
 	@echo ""
 	@echo "Step 10: Deploying LitmusChaos..."
-	./deploy-litmuschaos.sh
+	./scripts/deploy-litmuschaos.sh
 	@echo ""
 	@echo "✅ Complete setup finished!"
 	@echo ""
@@ -61,20 +61,20 @@ check-prerequisites:
 # Start Kind cluster only
 cluster:
 	@echo "🎯 Starting Kind cluster..."
-	./start-cluster.sh
+	./scripts/start-cluster.sh
 
 # Setup registry, pull all images, and load into Kind
 images: registry-ensure
 	@echo "🐳 Pulling and loading all images..."
-	./pull-images.sh
-	./load-images-to-kind.sh
+	./scripts/pull-images.sh
+	./scripts/load-images-to-kind.sh
 
 # Ensure registry is running
 registry-ensure:
 	@echo "🐳 Ensuring local registry is running..."
 	@if ! curl -s http://localhost:5001/v2/_catalog > /dev/null 2>&1; then \
 		echo "Starting registry..."; \
-		./setup-registry.sh; \
+		./scripts/setup-registry.sh; \
 	else \
 		echo "✅ Registry already running"; \
 	fi
@@ -82,65 +82,65 @@ registry-ensure:
 # Deploy monitoring stack only
 monitoring:
 	@echo "📊 Deploying monitoring stack..."
-	./deploy-monitoring.sh
+	./scripts/deploy-monitoring.sh
 
 # Deploy full stack (monitoring, Kafka, UI, Litmus)
 deploy-all:
 	@echo "🚀 Deploying full stack..."
-	./deploy-all-from-kind.sh
+	./scripts/deploy-all-from-kind.sh
 
 # Deploy Kafka only (from local chart)
 kafka:
 	@echo "📦 Deploying Kafka from local chart..."
-	./deploy-kafka.sh
+	./scripts/deploy-kafka.sh
 
 # Deploy Kafka UI only
 ui:
 	@echo "🖥️ Deploying Kafka UI..."
-	./deploy-kafka-ui.sh
+	./scripts/deploy-kafka-ui.sh
 
 # Deploy Apicurio Registry
 apicurio:
 	@echo "📝 Deploying Apicurio Registry..."
-	./deploy-apicurio.sh
+	./scripts/deploy-apicurio.sh
 
 # Run Performance Test
 test:
 	@echo "🧪 Running Performance Test..."
-	./test-kafka-performance.sh
+	./scripts/test-kafka-performance.sh
 
 test-load:
 	@echo "🧪 Running Load Test..."
-	./test-perf-load.sh
+	./scripts/test-perf-load.sh
 
 test-stress:
 	@echo "🧪 Running Stress Test..."
-	./test-perf-stress.sh
+	./scripts/test-perf-stress.sh
 
 test-spike:
 	@echo "🧪 Running Spike Test..."
-	./test-perf-spike.sh
+	./scripts/test-perf-spike.sh
 
 test-endurance:
 	@echo "🧪 Running Endurance (Soak) Test..."
-	./test-perf-endurance.sh
+	./scripts/test-perf-endurance.sh
 
 test-volume:
 	@echo "🧪 Running Volume Test..."
-	./test-perf-volume.sh
+	./scripts/test-perf-volume.sh
 
 test-capacity:
 	@echo "🧪 Running Capacity Test..."
-	./test-perf-capacity.sh
+	./scripts/test-perf-capacity.sh
 
-# KATES CLI (standalone install)
+# Kates CLI (standalone install)
 cli-build:
-	@echo "🔨 Cross-compiling KATES CLI for all platforms..."
+	@echo "🔨 Cross-compiling Kates CLI for all platforms..."
 	cd cli && bash build.sh
 
 cli-install: cli-build
-	@echo "📦 Installing KATES CLI locally..."
-	bash install-kates.sh
+	@echo "📦 Installing Kates CLI locally..."
+	bash scripts/install-kates.sh
 
 cli-clean:
 	@echo "🧹 Removing CLI build artifacts..."
@@ -190,31 +190,31 @@ kates-undeploy:
 # Port Forwarding
 ports:
 	@echo "🔌 Starting Port Forwarding..."
-	./port-forward.sh
+	./scripts/port-forward.sh
 
 # Registry Management
 registry-setup:
 	@echo "🐳 Setting up local Docker registry..."
-	./setup-registry.sh
-	./pull-images.sh
+	./scripts/setup-registry.sh
+	./scripts/pull-images.sh
 
 registry-status:
 	@echo "📊 Checking registry status..."
-	./registry-status.sh
+	./scripts/registry-status.sh
 
 registry-clean:
 	@echo "🧹 Cleaning up registry..."
-	./cleanup-registry.sh
+	./scripts/cleanup-registry.sh
 
 # Download all Helm charts for offline use
 download-charts:
 	@echo "📦 Downloading all Helm charts..."
-	./download-charts.sh
+	./scripts/download-charts.sh
 
 # LitmusChaos Management
 litmus: registry-ensure
 	@echo "⚡ Installing LitmusChaos..."
-	./deploy-litmuschaos.sh
+	./scripts/deploy-litmuschaos.sh
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."
@@ -228,7 +228,7 @@ chaos-experiments:
 # Kafka Chaos Testing
 chaos-kafka:
 	@echo "⚡ Setting up Kafka chaos testing environment..."
-	./setup-kafka-chaos.sh
+	./scripts/setup-kafka-chaos.sh
 
 chaos-kafka-pod-delete:
 	@echo "💥 Running Kafka broker pod-delete chaos..."
@@ -272,7 +272,7 @@ chaos-clean:
 # Velero backup
 velero:
 	@echo "💾 Deploying Velero backup..."
-	./deploy-velero.sh
+	./scripts/deploy-velero.sh
 
 # Status check
 status:
@@ -287,7 +287,7 @@ status:
 # Destroy Cluster
 destroy:
 	@echo "💥 Destroying Cluster..."
-	./destroy.sh
+	./scripts/destroy.sh
 
 # Alias for destroy
 clean: destroy
@@ -307,7 +307,7 @@ help:
 	@echo "  litmus           - Deploy LitmusChaos (with images)"
 	@echo "  velero           - Deploy Velero backup"
 	@echo ""
-	@echo "  KATES CLI"
+	@echo "  Kates CLI"
 	@echo "  cli-build        - Cross-compile CLI for macOS + Linux (amd64/arm64)"
 	@echo "  cli-install      - Build and install CLI on this machine"
 	@echo "  cli-clean        - Remove CLI build artifacts"
