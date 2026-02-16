@@ -34,6 +34,22 @@ all: check-prerequisites
 	@echo "Step 10: Deploying LitmusChaos..."
 	./scripts/deploy-litmuschaos.sh
 	@echo ""
+	@echo "Step 11: Enabling chaos environment..."
+	kubectl apply -f config/litmus/
+	@echo ""
+	@echo "Step 12: Building and deploying Kates..."
+	cd kates && ./mvnw package -DskipTests -B
+	docker build -f kates/Dockerfile -t kates:latest .
+	kind load docker-image kates:latest --name panda
+	kubectl apply -f kates/k8s/namespace.yaml
+	kubectl apply -f kates/k8s/configmap.yaml
+	kubectl apply -f kates/k8s/postgres.yaml
+	@echo "Waiting for PostgreSQL to be ready..."
+	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
+	kubectl apply -f kates/k8s/deployment.yaml
+	kubectl apply -f kates/k8s/service.yaml
+	@kubectl rollout status deployment/kates -n kates --timeout=120s
+	@echo ""
 	@echo "✅ Complete setup finished!"
 	@echo ""
 	@echo "📊 Services deployed:"
@@ -41,11 +57,13 @@ all: check-prerequisites
 	@echo "  ✓ Kafka Cluster (Strimzi KRaft mode)"
 	@echo "  ✓ Kafka UI"
 	@echo "  ✓ Apicurio Registry"
-	@echo "  ✓ LitmusChaos"
+	@echo "  ✓ LitmusChaos + Chaos Experiments"
+	@echo "  ✓ Kates"
 	@echo ""
 	@echo "🔗 Access points:"
 	@echo "  - Grafana: http://localhost:30080 (admin/admin)"
 	@echo "  - Kafka UI: http://localhost:30081"
+	@echo "  - Kates: http://localhost:30083"
 	@echo "  - Litmus UI: make chaos-ui then http://localhost:9091 (admin/litmus)"
 	@echo ""
 
@@ -168,6 +186,9 @@ kates-deploy:
 	@echo "🚀 Deploying Kates to Kubernetes..."
 	kubectl apply -f kates/k8s/namespace.yaml
 	kubectl apply -f kates/k8s/configmap.yaml
+	kubectl apply -f kates/k8s/postgres.yaml
+	@echo "Waiting for PostgreSQL to be ready..."
+	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
 	kubectl apply -f kates/k8s/deployment.yaml
 	kubectl apply -f kates/k8s/service.yaml
 	kubectl rollout status deployment/kates -n kates --timeout=120s
