@@ -8,6 +8,7 @@ import com.klster.kates.export.HeatmapExporter;
 import com.klster.kates.export.JunitXmlExporter;
 import com.klster.kates.export.LatencyHeatmapData;
 import com.klster.kates.service.TestRunRepository;
+import com.klster.kates.util.MetricUtils;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -208,16 +209,11 @@ public class ReportResource {
 
     private Map<String, Double> computeDeltas(ReportSummary baseline, ReportSummary latest) {
         Map<String, Double> deltas = new LinkedHashMap<>();
-        deltas.put("throughputRecPerSec", pctChange(baseline.avgThroughputRecPerSec(), latest.avgThroughputRecPerSec()));
-        deltas.put("avgLatencyMs", pctChange(baseline.avgLatencyMs(), latest.avgLatencyMs()));
-        deltas.put("p99LatencyMs", pctChange(baseline.p99LatencyMs(), latest.p99LatencyMs()));
-        deltas.put("maxLatencyMs", pctChange(baseline.maxLatencyMs(), latest.maxLatencyMs()));
-        deltas.put("totalRecords", pctChange(baseline.totalRecords(), latest.totalRecords()));
+        deltas.put("throughputRecPerSec", MetricUtils.pctChange(baseline.avgThroughputRecPerSec(), latest.avgThroughputRecPerSec()));
+        deltas.put("avgLatencyMs", MetricUtils.pctChange(baseline.avgLatencyMs(), latest.avgLatencyMs()));
+        deltas.put("p99LatencyMs", MetricUtils.pctChange(baseline.p99LatencyMs(), latest.p99LatencyMs()));
+        deltas.put("maxLatencyMs", MetricUtils.pctChange(baseline.maxLatencyMs(), latest.maxLatencyMs()));
+        deltas.put("totalRecords", MetricUtils.pctChange(baseline.totalRecords(), latest.totalRecords()));
         return deltas;
-    }
-
-    private double pctChange(double base, double current) {
-        if (base == 0) return current == 0 ? 0 : 100.0;
-        return ((current - base) / base) * 100.0;
     }
 }

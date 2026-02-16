@@ -8,6 +8,7 @@ import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.engine.KatesMetrics;
 import com.klster.kates.service.KafkaAdminService;
+import com.klster.kates.util.MetricUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -50,12 +51,12 @@ public class ReportGenerator {
 
         List<TestResult> results = run.getResults();
         if (results == null || results.isEmpty()) {
-            report.setSummary(emptySummary());
+            report.setSummary(MetricUtils.computeSummary(List.of()));
             report.setOverallSlaVerdict(SlaVerdict.pass());
             return report;
         }
 
-        report.setSummary(computeSummary(results));
+        report.setSummary(MetricUtils.computeSummary(results));
 
         Map<String, List<TestResult>> byPhase = results.stream()
                 .filter(r -> r.getPhaseName() != null)
@@ -66,7 +67,7 @@ public class ReportGenerator {
             for (Map.Entry<String, List<TestResult>> entry : byPhase.entrySet()) {
                 PhaseReport pr = new PhaseReport();
                 pr.setPhaseName(entry.getKey());
-                pr.setMetrics(computeSummary(entry.getValue()));
+                pr.setMetrics(MetricUtils.computeSummary(entry.getValue()));
                 phases.add(pr);
             }
             report.setPhases(phases);
@@ -269,27 +270,4 @@ public class ReportGenerator {
         return sb.toString();
     }
 
-    private ReportSummary computeSummary(List<TestResult> results) {
-        long totalRecords = results.stream().mapToLong(TestResult::getRecordsSent).sum();
-        double avgThroughput = results.stream().mapToDouble(TestResult::getThroughputRecordsPerSec).average().orElse(0);
-        double peakThroughput = results.stream().mapToDouble(TestResult::getThroughputRecordsPerSec).max().orElse(0);
-        double avgThroughputMB = results.stream().mapToDouble(TestResult::getThroughputMBPerSec).average().orElse(0);
-        double avgLatency = results.stream().mapToDouble(TestResult::getAvgLatencyMs).average().orElse(0);
-        double p50 = results.stream().mapToDouble(TestResult::getP50LatencyMs).average().orElse(0);
-        double p95 = results.stream().mapToDouble(TestResult::getP95LatencyMs).average().orElse(0);
-        double p99 = results.stream().mapToDouble(TestResult::getP99LatencyMs).average().orElse(0);
-        double maxLatency = results.stream().mapToDouble(TestResult::getMaxLatencyMs).max().orElse(0);
-        long totalErrors = results.stream().filter(r -> r.getError() != null).count();
-        double errorRate = totalRecords > 0 ? (double) totalErrors / totalRecords : 0;
-
-        return new ReportSummary(
-                totalRecords, avgThroughput, peakThroughput, avgThroughputMB,
-                avgLatency, p50, p95, p99, 0, maxLatency,
-                totalErrors, errorRate, 0
-        );
-    }
-
-    private ReportSummary emptySummary() {
-        return new ReportSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    }
 }

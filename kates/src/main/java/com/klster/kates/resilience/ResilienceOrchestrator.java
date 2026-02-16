@@ -2,17 +2,16 @@ package com.klster.kates.resilience;
 
 import com.klster.kates.chaos.ChaosCoordinator;
 import com.klster.kates.chaos.ChaosOutcome;
-import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.engine.TestOrchestrator;
 import com.klster.kates.report.ReportGenerator;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
+import com.klster.kates.util.MetricUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -58,7 +57,7 @@ public class ResilienceOrchestrator {
 
             // 3. Snapshot pre-chaos results
             testOrchestrator.refreshStatus(run.getId());
-            ReportSummary preChaos = computePartialSummary(run);
+            ReportSummary preChaos = MetricUtils.computeSummary(run.getResults());
             report.setPreChaosSummary(preChaos);
 
             // 4. Inject fault
@@ -84,7 +83,13 @@ public class ResilienceOrchestrator {
 
             // 8. Compute impact deltas
             if (preChaos != null && postChaos != null) {
-                report.setImpactDeltas(computeImpactDeltas(preChaos, postChaos));
+                Map<String, Double> deltas = new LinkedHashMap<>();
+                deltas.put("throughputRecPerSec", MetricUtils.pctChange(preChaos.avgThroughputRecPerSec(), postChaos.avgThroughputRecPerSec()));
+                deltas.put("avgLatencyMs", MetricUtils.pctChange(preChaos.avgLatencyMs(), postChaos.avgLatencyMs()));
+                deltas.put("p99LatencyMs", MetricUtils.pctChange(preChaos.p99LatencyMs(), postChaos.p99LatencyMs()));
+                deltas.put("maxLatencyMs", MetricUtils.pctChange(preChaos.maxLatencyMs(), postChaos.maxLatencyMs()));
+                deltas.put("errorRate", MetricUtils.pctChange(preChaos.errorRate(), postChaos.errorRate()));
+                report.setImpactDeltas(deltas);
             }
 
             // 9. Extract integrity result if present (INTEGRITY test type)
@@ -107,40 +112,4 @@ public class ResilienceOrchestrator {
         return report;
     }
 
-    private ReportSummary computePartialSummary(TestRun run) {
-        List<TestResult> results = run.getResults();
-        if (results == null || results.isEmpty()) {
-            return new ReportSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        }
-
-        long totalRecords = results.stream().mapToLong(TestResult::getRecordsSent).sum();
-        double avgThroughput = results.stream().mapToDouble(TestResult::getThroughputRecordsPerSec).average().orElse(0);
-        double peakThroughput = results.stream().mapToDouble(TestResult::getThroughputRecordsPerSec).max().orElse(0);
-        double avgThroughputMB = results.stream().mapToDouble(TestResult::getThroughputMBPerSec).average().orElse(0);
-        double avgLatency = results.stream().mapToDouble(TestResult::getAvgLatencyMs).average().orElse(0);
-        double p50 = results.stream().mapToDouble(TestResult::getP50LatencyMs).average().orElse(0);
-        double p95 = results.stream().mapToDouble(TestResult::getP95LatencyMs).average().orElse(0);
-        double p99 = results.stream().mapToDouble(TestResult::getP99LatencyMs).average().orElse(0);
-        double max = results.stream().mapToDouble(TestResult::getMaxLatencyMs).max().orElse(0);
-        long errors = results.stream().filter(r -> r.getError() != null).count();
-        double errorRate = totalRecords > 0 ? (double) errors / totalRecords : 0;
-
-        return new ReportSummary(totalRecords, avgThroughput, peakThroughput, avgThroughputMB,
-                avgLatency, p50, p95, p99, 0, max, errors, errorRate, 0);
-    }
-
-    private Map<String, Double> computeImpactDeltas(ReportSummary pre, ReportSummary post) {
-        Map<String, Double> deltas = new LinkedHashMap<>();
-        deltas.put("throughputRecPerSec", pctChange(pre.avgThroughputRecPerSec(), post.avgThroughputRecPerSec()));
-        deltas.put("avgLatencyMs", pctChange(pre.avgLatencyMs(), post.avgLatencyMs()));
-        deltas.put("p99LatencyMs", pctChange(pre.p99LatencyMs(), post.p99LatencyMs()));
-        deltas.put("maxLatencyMs", pctChange(pre.maxLatencyMs(), post.maxLatencyMs()));
-        deltas.put("errorRate", pctChange(pre.errorRate(), post.errorRate()));
-        return deltas;
-    }
-
-    private double pctChange(double base, double current) {
-        if (base == 0) return current == 0 ? 0 : 100.0;
-        return ((current - base) / base) * 100.0;
-    }
 }
