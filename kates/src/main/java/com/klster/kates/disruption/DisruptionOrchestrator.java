@@ -1,5 +1,6 @@
 package com.klster.kates.disruption;
 
+import com.klster.kates.engine.KatesMetrics;
 import com.klster.kates.chaos.*;
 import com.klster.kates.report.ReportSummary;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -49,6 +50,9 @@ public class DisruptionOrchestrator {
     @Inject
     DisruptionEventBus eventBus;
 
+    @Inject
+    KatesMetrics katesMetrics;
+
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
     String kafkaNamespace;
 
@@ -62,6 +66,7 @@ public class DisruptionOrchestrator {
     int recoveryTimeoutSec;
 
     public DisruptionReport execute(DisruptionPlan plan) {
+        long startMs = System.currentTimeMillis();
         String disruptionId = plan.getName();
         DisruptionReport report = new DisruptionReport();
         report.setPlanName(plan.getName());
@@ -152,6 +157,9 @@ public class DisruptionOrchestrator {
                     avgThroughputDeg, maxP99Spike, slaViolated,
                     worstIsrRecovery, peakConsumerLag));
             report.setStatus(passedSteps == totalSteps ? "COMPLETED" : "PARTIAL");
+            katesMetrics.recordDisruptionCompleted(plan.getName(), report.getStatus().toLowerCase());
+            katesMetrics.recordDisruptionDuration(plan.getName(),
+                    java.time.Duration.ofMillis(System.currentTimeMillis() - startMs));
             eventBus.emit(disruptionId, DisruptionEventBus.EventType.COMPLETED, null,
                     "Plan completed: " + report.getStatus());
 
@@ -159,6 +167,9 @@ public class DisruptionOrchestrator {
             LOG.log(Level.SEVERE, "Disruption plan failed", e);
             report.setStepReports(stepReports);
             report.setStatus("FAILED");
+            katesMetrics.recordDisruptionCompleted(plan.getName(), "failed");
+            katesMetrics.recordDisruptionDuration(plan.getName(),
+                    java.time.Duration.ofMillis(System.currentTimeMillis() - startMs));
             eventBus.emit(disruptionId, DisruptionEventBus.EventType.FAILED, null,
                     "Plan failed: " + e.getMessage());
         }

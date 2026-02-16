@@ -39,6 +39,7 @@ public class TestOrchestrator {
     private final Instance<BenchmarkBackend> backends;
     private final TestTypeDefaults typeDefaults;
     private final BenchmarkMetrics benchmarkMetrics;
+    private final KatesMetrics katesMetrics;
     private final String defaultBackend;
     private final String bootstrapServers;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
@@ -51,6 +52,7 @@ public class TestOrchestrator {
             @Any Instance<BenchmarkBackend> backends,
             TestTypeDefaults typeDefaults,
             BenchmarkMetrics benchmarkMetrics,
+            KatesMetrics katesMetrics,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.kafkaAdmin = kafkaAdmin;
@@ -58,6 +60,7 @@ public class TestOrchestrator {
         this.backends = backends;
         this.typeDefaults = typeDefaults;
         this.benchmarkMetrics = benchmarkMetrics;
+        this.katesMetrics = katesMetrics;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
     }
@@ -263,6 +266,26 @@ public class TestOrchestrator {
         if (allDone) {
         run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
         activeHandles.remove(runId);
+
+        String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
+        String outcome = anyFailed ? "failed" : "done";
+        katesMetrics.recordTestCompleted(typeName, outcome);
+
+        if (run.getCreatedAt() != null) {
+            try {
+                var start = java.time.Instant.parse(run.getCreatedAt());
+                katesMetrics.recordTestDuration(typeName, java.time.Duration.between(start, java.time.Instant.now()));
+            } catch (Exception ignored) {}
+        }
+
+        for (TestResult r : run.getResults()) {
+            if (r.getThroughputRecordsPerSec() > 0) {
+                katesMetrics.recordFinalThroughput(typeName, r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
+            }
+            if (r.getRecordsSent() > 0) {
+                katesMetrics.recordRecordsProcessed(typeName, r.getRecordsSent());
+            }
+        }
     }
 
         repository.save(run);

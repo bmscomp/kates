@@ -6,6 +6,7 @@ import com.klster.kates.domain.SlaVerdict;
 import com.klster.kates.domain.SlaViolation;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
+import com.klster.kates.engine.KatesMetrics;
 import com.klster.kates.service.KafkaAdminService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -26,6 +27,9 @@ public class ReportGenerator {
 
     @Inject
     KafkaAdminService kafkaAdminService;
+
+    @Inject
+    KatesMetrics katesMetrics;
 
     public TestReport generate(TestRun run) {
         TestReport report = new TestReport();
@@ -82,6 +86,10 @@ public class ReportGenerator {
         }
 
         report.setOverallSlaVerdict(SlaVerdict.pass());
+
+        String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
+        katesMetrics.recordSlaEvaluation(typeName, report.getOverallSlaVerdict().passed());
+
         return report;
     }
 
