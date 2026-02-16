@@ -8,7 +8,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/images.env"
+source "${SCRIPT_DIR}/../images.env"
 
 REGISTRY="localhost:5001"
 
