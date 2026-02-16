@@ -68,9 +68,9 @@ class TestResourceTest {
                 .when().get("/api/tests/types")
                 .then()
                 .statusCode(200)
-                .body("$", hasSize(7))
+                .body("$", hasSize(8))
                 .body("$", hasItems("LOAD", "STRESS", "SPIKE", "ENDURANCE",
-                        "VOLUME", "CAPACITY", "ROUND_TRIP"));
+                        "VOLUME", "CAPACITY", "ROUND_TRIP", "INTEGRITY"));
     }
 
     @Test

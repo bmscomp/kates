@@ -12,6 +12,7 @@ import com.klster.kates.trogdor.TrogdorClient;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,9 @@ class TestExecutionServiceTest {
 
     @InjectMock
     KafkaAdminService kafkaAdmin;
+
+    @Inject
+    EntityManager em;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -166,6 +170,7 @@ class TestExecutionServiceTest {
         executionService.stopTest(run.getId());
 
         verify(trogdorClient, atLeastOnce()).stopTask(anyString());
+        em.clear();
         TestRun stopped = repository.findById(run.getId()).orElseThrow();
         assertEquals(TestResult.TaskStatus.STOPPING, stopped.getStatus());
     }
