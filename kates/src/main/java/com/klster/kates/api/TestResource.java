@@ -19,12 +19,17 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
 
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Tests")
 public class TestResource {
 
     private final TestOrchestrator orchestrator;
@@ -37,17 +42,21 @@ public class TestResource {
     }
 
     @POST
+    @Operation(summary = "Create and execute a test", description = "Submits a new performance test run for asynchronous execution")
+    @APIResponse(responseCode = "202", description = "Test accepted for execution")
     public Response createTest(@Valid CreateTestRequest request) {
         TestRun run = orchestrator.executeTest(request);
         return Response.accepted(run).build();
     }
 
     @GET
+    @Operation(summary = "List test runs", description = "Returns paginated test runs, optionally filtered by type or status")
+    @APIResponse(responseCode = "200", description = "Paginated list of test runs")
     public Response listTests(
-            @QueryParam("type") String type,
-            @QueryParam("status") String status,
-            @QueryParam("page") @DefaultValue("0") int page,
-            @QueryParam("size") @DefaultValue("50") int size) {
+            @Parameter(description = "Filter by test type") @QueryParam("type") String type,
+            @Parameter(description = "Filter by status") @QueryParam("status") String status,
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
 
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(size, 200));
@@ -84,7 +93,10 @@ public class TestResource {
 
     @GET
     @Path("/{id}")
-    public Response getTest(@PathParam("id") String id) {
+    @Operation(summary = "Get a test run", description = "Returns a single test run by ID, refreshing its status")
+    @APIResponse(responseCode = "200", description = "Test run details")
+    @APIResponse(responseCode = "404", description = "Test run not found")
+    public Response getTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         return repository.findById(id)
                 .map(run -> {
                     orchestrator.refreshStatus(id);
@@ -97,7 +109,10 @@ public class TestResource {
 
     @DELETE
     @Path("/{id}")
-    public Response deleteTest(@PathParam("id") String id) {
+    @Operation(summary = "Delete a test run", description = "Stops the test if running and removes it")
+    @APIResponse(responseCode = "204", description = "Test run deleted")
+    @APIResponse(responseCode = "404", description = "Test run not found")
+    public Response deleteTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         return repository.findById(id)
                 .map(run -> {
                     orchestrator.stopTest(id);
@@ -111,12 +126,14 @@ public class TestResource {
 
     @GET
     @Path("/types")
+    @Operation(summary = "List available test types")
     public TestType[] getTestTypes() {
         return TestType.values();
     }
 
     @GET
     @Path("/backends")
+    @Operation(summary = "List available test backends")
     public List<String> getBackends() {
         return orchestrator.availableBackends();
     }

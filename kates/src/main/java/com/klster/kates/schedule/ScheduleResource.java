@@ -8,6 +8,10 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.UUID;
 
@@ -17,6 +21,7 @@ import java.util.UUID;
 @Path("/api/schedules")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Schedules")
 public class ScheduleResource {
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -25,13 +30,17 @@ public class ScheduleResource {
     ScheduledTestRunRepository repository;
 
     @GET
+    @Operation(summary = "List all schedules")
     public Response listSchedules() {
         return Response.ok(repository.findAll()).build();
     }
 
     @GET
     @Path("/{id}")
-    public Response getSchedule(@PathParam("id") String id) {
+    @Operation(summary = "Get a schedule")
+    @APIResponse(responseCode = "200", description = "Schedule details")
+    @APIResponse(responseCode = "404", description = "Schedule not found")
+    public Response getSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id) {
         return repository.findById(id)
                 .map(s -> Response.ok(s).build())
                 .orElseGet(() -> Response.status(404)
@@ -39,6 +48,8 @@ public class ScheduleResource {
     }
 
     @POST
+    @Operation(summary = "Create a schedule", description = "Creates a new recurring test schedule")
+    @APIResponse(responseCode = "201", description = "Schedule created")
     public Response createSchedule(CreateScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
@@ -71,7 +82,10 @@ public class ScheduleResource {
 
     @PUT
     @Path("/{id}")
-    public Response updateSchedule(@PathParam("id") String id, CreateScheduleRequest request) {
+    @Operation(summary = "Update a schedule")
+    @APIResponse(responseCode = "200", description = "Schedule updated")
+    @APIResponse(responseCode = "404", description = "Schedule not found")
+    public Response updateSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id, CreateScheduleRequest request) {
         return repository.findById(id)
                 .map(schedule -> {
                     if (request.name != null) schedule.setName(request.name);
@@ -93,7 +107,10 @@ public class ScheduleResource {
 
     @DELETE
     @Path("/{id}")
-    public Response deleteSchedule(@PathParam("id") String id) {
+    @Operation(summary = "Delete a schedule")
+    @APIResponse(responseCode = "204", description = "Schedule deleted")
+    @APIResponse(responseCode = "404", description = "Schedule not found")
+    public Response deleteSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id) {
         return repository.findById(id)
                 .map(s -> {
                     repository.delete(id);

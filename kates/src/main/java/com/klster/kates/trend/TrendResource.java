@@ -6,6 +6,9 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
 
@@ -15,18 +18,20 @@ import java.util.List;
  */
 @Path("/api/trends")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Trends")
 public class TrendResource {
 
     @Inject
     TrendService trendService;
 
     @GET
+    @Operation(summary = "Get performance trend", description = "Returns time-series metrics with baseline comparison")
     public Response getTrend(
-            @QueryParam("type") String typeStr,
-            @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
-            @QueryParam("days") @DefaultValue("30") int days,
-            @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow,
-            @QueryParam("phase") String phase) {
+            @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
+            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days,
+            @Parameter(description = "Number of runs for baseline average") @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow,
+            @Parameter(description = "Phase name filter") @QueryParam("phase") String phase) {
 
         TestType type = parseType(typeStr);
         if (type == null) {
@@ -45,9 +50,10 @@ public class TrendResource {
 
     @GET
     @Path("/phases")
+    @Operation(summary = "Discover test phases", description = "Lists distinct phase names observed in recent runs")
     public Response getPhases(
-            @QueryParam("type") String typeStr,
-            @QueryParam("days") @DefaultValue("30") int days) {
+            @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
+            @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days) {
 
         TestType type = parseType(typeStr);
         if (type == null) {
@@ -65,11 +71,12 @@ public class TrendResource {
 
     @GET
     @Path("/breakdown")
+    @Operation(summary = "Phase-level trend breakdown", description = "Returns per-phase metric trends")
     public Response getBreakdown(
-            @QueryParam("type") String typeStr,
-            @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
-            @QueryParam("days") @DefaultValue("30") int days,
-            @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
+            @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
+            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days,
+            @Parameter(description = "Number of runs for baseline average") @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
 
         TestType type = parseType(typeStr);
         if (type == null) {
@@ -87,12 +94,13 @@ public class TrendResource {
 
     @GET
     @Path("/broker")
+    @Operation(summary = "Broker-level performance trend")
     public Response getBrokerTrend(
-            @QueryParam("type") String typeStr,
-            @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
-            @QueryParam("brokerId") @DefaultValue("0") int brokerId,
-            @QueryParam("days") @DefaultValue("30") int days,
-            @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
+            @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
+            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @Parameter(description = "Target broker ID") @QueryParam("brokerId") @DefaultValue("0") int brokerId,
+            @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days,
+            @Parameter(description = "Number of runs for baseline average") @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
 
         TestType type = parseType(typeStr);
         if (type == null) {

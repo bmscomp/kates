@@ -13,6 +13,11 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
 /**
  * REST endpoints for Kubernetes-aware disruption testing
  * with Kafka intelligence, safety guardrails, SLA grading, and persistent storage.
@@ -20,6 +25,7 @@ import java.util.logging.Logger;
 @Path("/api/disruptions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Disruptions")
 public class DisruptionResource {
 
     private static final Logger LOG = Logger.getLogger(DisruptionResource.class.getName());
@@ -37,9 +43,12 @@ public class DisruptionResource {
     ObjectMapper objectMapper;
 
     @POST
+    @Operation(summary = "Execute a disruption", description = "Runs a disruption plan against the Kafka cluster with safety guardrails")
+    @APIResponse(responseCode = "200", description = "Disruption report")
+    @APIResponse(responseCode = "422", description = "Disruption rejected by safety guard")
     public Response executeDisruption(
             DisruptionPlan plan,
-            @QueryParam("dryRun") @DefaultValue("false") boolean dryRun) {
+            @Parameter(description = "If true, validates the plan without executing") @QueryParam("dryRun") @DefaultValue("false") boolean dryRun) {
 
         if (plan.getSteps() == null || plan.getSteps().isEmpty()) {
             return Response.status(400)
@@ -72,9 +81,10 @@ public class DisruptionResource {
     }
 
     @GET
+    @Operation(summary = "List disruption reports", description = "Returns recent disruption reports, optionally filtered by plan name")
     public Response listReports(
-            @QueryParam("limit") @DefaultValue("20") int limit,
-            @QueryParam("planName") String planName) {
+            @Parameter(description = "Max results") @QueryParam("limit") @DefaultValue("20") int limit,
+            @Parameter(description = "Filter by plan name") @QueryParam("planName") String planName) {
 
         List<DisruptionReportEntity> entities;
         if (planName != null && !planName.isBlank()) {
@@ -97,7 +107,10 @@ public class DisruptionResource {
 
     @GET
     @Path("/{id}")
-    public Response getReport(@PathParam("id") String id) {
+    @Operation(summary = "Get a disruption report")
+    @APIResponse(responseCode = "200", description = "Disruption report")
+    @APIResponse(responseCode = "404", description = "Report not found")
+    public Response getReport(@Parameter(description = "Report ID") @PathParam("id") String id) {
         DisruptionReport report = loadReport(id);
         if (report == null) {
             return Response.status(404)
@@ -109,7 +122,10 @@ public class DisruptionResource {
 
     @GET
     @Path("/{id}/timeline")
-    public Response getTimeline(@PathParam("id") String id) {
+    @Operation(summary = "Get disruption timeline", description = "Returns pod-level events and recovery times per step")
+    @APIResponse(responseCode = "200", description = "Timeline events")
+    @APIResponse(responseCode = "404", description = "Report not found")
+    public Response getTimeline(@Parameter(description = "Report ID") @PathParam("id") String id) {
         DisruptionReport report = loadReport(id);
         if (report == null) {
             return Response.status(404)
@@ -133,7 +149,10 @@ public class DisruptionResource {
 
     @GET
     @Path("/{id}/kafka-metrics")
-    public Response getKafkaMetrics(@PathParam("id") String id) {
+    @Operation(summary = "Get Kafka metrics for a disruption", description = "Returns ISR, lag, and broker metrics captured during disruption")
+    @APIResponse(responseCode = "200", description = "Kafka metrics per step")
+    @APIResponse(responseCode = "404", description = "Report not found")
+    public Response getKafkaMetrics(@Parameter(description = "Report ID") @PathParam("id") String id) {
         DisruptionReport report = loadReport(id);
         if (report == null) {
             return Response.status(404)
@@ -186,9 +205,12 @@ public class DisruptionResource {
 
     @GET
     @Path("/{id}/compare")
+    @Operation(summary = "Compare disruption reports", description = "Compares current report against a baseline for regression detection")
+    @APIResponse(responseCode = "200", description = "Comparison results")
+    @APIResponse(responseCode = "404", description = "One or both reports not found")
     public Response compareReports(
-            @PathParam("id") String id,
-            @QueryParam("baselineId") String baselineId) {
+            @Parameter(description = "Current report ID") @PathParam("id") String id,
+            @Parameter(description = "Baseline report ID for comparison", required = true) @QueryParam("baselineId") String baselineId) {
 
         if (baselineId == null || baselineId.isBlank()) {
             return Response.status(400)
@@ -244,6 +266,7 @@ public class DisruptionResource {
 
     @GET
     @Path("/types")
+    @Operation(summary = "List disruption types", description = "Returns all available disruption types with descriptions")
     public Response listTypes() {
         var types = Arrays.stream(DisruptionType.values())
                 .map(t -> Map.of("name", t.name(), "description", describeType(t)))
@@ -309,6 +332,7 @@ public class DisruptionResource {
 
     @GET
     @Path("/playbooks")
+    @Operation(summary = "List disruption playbooks", description = "Returns pre-defined disruption scenarios")
     public Response listPlaybooks() {
         var entries = playbookCatalog.listAll().stream()
                 .map(p -> Map.of(
@@ -322,7 +346,10 @@ public class DisruptionResource {
 
     @POST
     @Path("/playbooks/{name}")
-    public Response runPlaybook(@PathParam("name") String name) {
+    @Operation(summary = "Run a playbook", description = "Executes a pre-defined disruption playbook by name")
+    @APIResponse(responseCode = "200", description = "Disruption report from playbook execution")
+    @APIResponse(responseCode = "404", description = "Playbook not found")
+    public Response runPlaybook(@Parameter(description = "Playbook name") @PathParam("name") String name) {
         return playbookCatalog.findByName(name)
                 .map(entry -> {
                     DisruptionPlan plan = playbookCatalog.toPlan(entry);
@@ -338,6 +365,7 @@ public class DisruptionResource {
 
     @GET
     @Path("/schedules")
+    @Operation(summary = "List disruption schedules")
     public Response listSchedules() {
         List<DisruptionScheduleEntity> schedules = em.createQuery(
                 "SELECT s FROM DisruptionScheduleEntity s ORDER BY s.createdAt DESC",
@@ -360,6 +388,8 @@ public class DisruptionResource {
     @POST
     @Path("/schedules")
     @jakarta.transaction.Transactional
+    @Operation(summary = "Create a disruption schedule", description = "Creates a recurring disruption schedule from a playbook or plan")
+    @APIResponse(responseCode = "201", description = "Schedule created")
     public Response createSchedule(CreateDisruptionScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
@@ -397,7 +427,10 @@ public class DisruptionResource {
     @PUT
     @Path("/schedules/{id}")
     @jakarta.transaction.Transactional
-    public Response updateSchedule(@PathParam("id") String id, CreateDisruptionScheduleRequest request) {
+    @Operation(summary = "Update a disruption schedule")
+    @APIResponse(responseCode = "200", description = "Schedule updated")
+    @APIResponse(responseCode = "404", description = "Schedule not found")
+    public Response updateSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id, CreateDisruptionScheduleRequest request) {
         @org.jspecify.annotations.Nullable
         DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
         if (entity == null) {
@@ -424,7 +457,10 @@ public class DisruptionResource {
     @DELETE
     @Path("/schedules/{id}")
     @jakarta.transaction.Transactional
-    public Response deleteSchedule(@PathParam("id") String id) {
+    @Operation(summary = "Delete a disruption schedule")
+    @APIResponse(responseCode = "204", description = "Schedule deleted")
+    @APIResponse(responseCode = "404", description = "Schedule not found")
+    public Response deleteSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id) {
         @org.jspecify.annotations.Nullable
         DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
         if (entity == null) {

@@ -18,6 +18,10 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,6 +34,7 @@ import java.util.Map;
  */
 @Path("/api")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Reports")
 public class ReportResource {
 
     private final ReportGenerator generator;
@@ -53,7 +58,9 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report")
-    public Response getReport(@PathParam("id") String id) {
+    @Operation(summary = "Generate a full test report")
+    @APIResponse(responseCode = "200", description = "Complete test report with summary, phases, and SLA verdict")
+    public Response getReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -63,7 +70,8 @@ public class ReportResource {
     @GET
     @Path("/tests/{id}/report/markdown")
     @Produces("text/markdown")
-    public Response getMarkdownReport(@PathParam("id") String id) {
+    @Operation(summary = "Export report as Markdown")
+    public Response getMarkdownReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -73,7 +81,8 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report/summary")
-    public Response getReportSummary(@PathParam("id") String id) {
+    @Operation(summary = "Get report summary only")
+    public Response getReportSummary(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -83,7 +92,8 @@ public class ReportResource {
     @GET
     @Path("/tests/{id}/report/csv")
     @Produces("text/csv")
-    public Response getCsvReport(@PathParam("id") String id) {
+    @Operation(summary = "Export report as CSV")
+    public Response getCsvReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -96,7 +106,8 @@ public class ReportResource {
     @GET
     @Path("/tests/{id}/report/junit")
     @Produces("application/xml")
-    public Response getJunitReport(@PathParam("id") String id) {
+    @Operation(summary = "Export report as JUnit XML", description = "Returns test results in JUnit XML format for CI integration")
+    public Response getJunitReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -108,8 +119,9 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report/heatmap")
-    public Response getHeatmapReport(@PathParam("id") String id,
-                                     @QueryParam("format") @DefaultValue("json") String format) {
+    @Operation(summary = "Get latency heatmap", description = "Returns latency distribution data as JSON or CSV")
+    public Response getHeatmapReport(@Parameter(description = "Test run ID") @PathParam("id") String id,
+                                     @Parameter(description = "Output format: json or csv") @QueryParam("format") @DefaultValue("json") String format) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
 
@@ -141,7 +153,8 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report/brokers")
-    public Response getBrokerMetrics(@PathParam("id") String id) {
+    @Operation(summary = "Get per-broker metrics")
+    public Response getBrokerMetrics(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -154,7 +167,8 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report/snapshot")
-    public Response getClusterSnapshot(@PathParam("id") String id) {
+    @Operation(summary = "Get cluster snapshot at test time")
+    public Response getClusterSnapshot(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
@@ -168,7 +182,8 @@ public class ReportResource {
 
     @GET
     @Path("/reports/compare")
-    public Response compare(@QueryParam("ids") String ids) {
+    @Operation(summary = "Compare test runs", description = "Side-by-side comparison of 2+ runs with percentage deltas")
+    public Response compare(@Parameter(description = "Comma-separated run IDs (min 2)", required = true) @QueryParam("ids") String ids) {
         if (ids == null || ids.isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity("Query param 'ids' is required").build();
         }

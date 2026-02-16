@@ -9,12 +9,15 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Path("/api/health")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Health")
 public class HealthResource {
 
     private final KafkaAdminService kafkaAdmin;
@@ -38,6 +41,7 @@ public class HealthResource {
     }
 
     @GET
+    @Operation(summary = "Application health", description = "Returns engine status, Kafka connectivity, and test type configurations")
     public Map<String, Object> health() {
         boolean kafkaReachable = kafkaAdmin.isReachable();
 

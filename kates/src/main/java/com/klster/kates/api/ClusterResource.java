@@ -12,8 +12,14 @@ import jakarta.ws.rs.core.Response;
 import java.util.Map;
 import java.util.Set;
 
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
 @Path("/api/cluster")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "Cluster")
 public class ClusterResource {
 
     private final KafkaAdminService kafkaAdmin;
@@ -25,6 +31,8 @@ public class ClusterResource {
 
     @GET
     @Path("/info")
+    @Operation(summary = "Get cluster info", description = "Returns cluster ID, broker count, and controller details")
+    @APIResponse(responseCode = "200", description = "Cluster information")
     public Response getClusterInfo() {
         try {
             Map<String, Object> info = kafkaAdmin.describeCluster();
@@ -38,6 +46,8 @@ public class ClusterResource {
 
     @GET
     @Path("/topics")
+    @Operation(summary = "List all topics")
+    @APIResponse(responseCode = "200", description = "Set of topic names")
     public Response getTopics() {
         try {
             Set<String> topics = kafkaAdmin.listTopics();
@@ -51,7 +61,10 @@ public class ClusterResource {
 
     @GET
     @Path("/topics/{name}")
-    public Response getTopicDetail(@PathParam("name") String name) {
+    @Operation(summary = "Describe a topic", description = "Returns partition details, replication, and ISR info")
+    @APIResponse(responseCode = "200", description = "Topic details")
+    @APIResponse(responseCode = "404", description = "Topic not found")
+    public Response getTopicDetail(@Parameter(description = "Topic name") @PathParam("name") String name) {
         try {
             Map<String, Object> detail = kafkaAdmin.describeTopicDetail(name);
             return Response.ok(detail).build();
@@ -69,6 +82,8 @@ public class ClusterResource {
 
     @GET
     @Path("/groups")
+    @Operation(summary = "List consumer groups")
+    @APIResponse(responseCode = "200", description = "List of consumer group summaries")
     public Response getConsumerGroups() {
         try {
             return Response.ok(kafkaAdmin.listConsumerGroups()).build();
@@ -81,7 +96,10 @@ public class ClusterResource {
 
     @GET
     @Path("/groups/{id}")
-    public Response getConsumerGroupDetail(@PathParam("id") String id) {
+    @Operation(summary = "Describe a consumer group", description = "Returns members, partitions, offsets, and lag")
+    @APIResponse(responseCode = "200", description = "Consumer group details")
+    @APIResponse(responseCode = "404", description = "Consumer group not found")
+    public Response getConsumerGroupDetail(@Parameter(description = "Group ID") @PathParam("id") String id) {
         try {
             Map<String, Object> detail = kafkaAdmin.describeConsumerGroup(id);
             return Response.ok(detail).build();
@@ -99,7 +117,9 @@ public class ClusterResource {
 
     @GET
     @Path("/brokers/{id}/configs")
-    public Response getBrokerConfigs(@PathParam("id") int id) {
+    @Operation(summary = "Get broker configuration", description = "Returns configuration entries for a specific broker")
+    @APIResponse(responseCode = "200", description = "Broker configuration")
+    public Response getBrokerConfigs(@Parameter(description = "Broker ID") @PathParam("id") int id) {
         try {
             return Response.ok(kafkaAdmin.describeBrokerConfigs(id)).build();
         } catch (Exception e) {

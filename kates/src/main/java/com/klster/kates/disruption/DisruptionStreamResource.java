@@ -13,11 +13,16 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
 /**
  * SSE endpoint for streaming real-time disruption test progress.
  * Clients connect and receive events as disruption steps execute.
  */
 @Path("/api/disruptions")
+@Tag(name = "Disruptions")
 public class DisruptionStreamResource {
 
     private static final Logger LOG = Logger.getLogger(DisruptionStreamResource.class.getName());
@@ -31,8 +36,9 @@ public class DisruptionStreamResource {
     @GET
     @Path("/{id}/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
+    @Operation(summary = "Stream disruption events", description = "SSE endpoint for real-time disruption test progress")
     public void stream(
-            @PathParam("id") String disruptionId,
+            @Parameter(description = "Disruption ID") @PathParam("id") String disruptionId,
             @Context SseEventSink sink,
             @Context Sse sse) {
 
