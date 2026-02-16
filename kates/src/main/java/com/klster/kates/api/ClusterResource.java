@@ -31,7 +31,7 @@ public class ClusterResource {
             return Response.ok(info).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(Map.of("error", "Failed to connect to Kafka cluster: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Failed to connect to Kafka cluster: " + e.getMessage()))
                     .build();
         }
     }
@@ -44,7 +44,7 @@ public class ClusterResource {
             return Response.ok(topics).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(Map.of("error", "Failed to list topics: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Failed to list topics: " + e.getMessage()))
                     .build();
         }
     }
@@ -58,11 +58,11 @@ public class ClusterResource {
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
                 return Response.status(404)
-                        .entity(Map.of("error", "Topic not found: " + name))
+                        .entity(ApiError.of(404, "Not Found", "Topic not found: " + name))
                         .build();
             }
             return Response.serverError()
-                    .entity(Map.of("error", "Failed to describe topic: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Failed to describe topic: " + e.getMessage()))
                     .build();
         }
     }
@@ -74,7 +74,7 @@ public class ClusterResource {
             return Response.ok(kafkaAdmin.listConsumerGroups()).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(Map.of("error", "Failed to list consumer groups: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Failed to list consumer groups: " + e.getMessage()))
                     .build();
         }
     }
@@ -88,11 +88,11 @@ public class ClusterResource {
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
                 return Response.status(404)
-                        .entity(Map.of("error", "Consumer group not found: " + id))
+                        .entity(ApiError.of(404, "Not Found", "Consumer group not found: " + id))
                         .build();
             }
             return Response.serverError()
-                    .entity(Map.of("error", "Failed to describe consumer group: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Failed to describe consumer group: " + e.getMessage()))
                     .build();
         }
     }
@@ -104,7 +104,7 @@ public class ClusterResource {
             return Response.ok(kafkaAdmin.describeBrokerConfigs(id)).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(Map.of("error", "Failed to describe broker configs: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Failed to describe broker configs: " + e.getMessage()))
                     .build();
         }
     }
@@ -116,7 +116,7 @@ public class ClusterResource {
             return Response.ok(kafkaAdmin.clusterHealthCheck()).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(Map.of("error", "Cluster health check failed: " + e.getMessage()))
+                    .entity(ApiError.of(500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))
                     .build();
         }
     }

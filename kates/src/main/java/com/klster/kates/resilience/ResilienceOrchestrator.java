@@ -51,9 +51,10 @@ public class ResilienceOrchestrator {
             LOG.info("Resilience test: starting benchmark");
             TestRun run = testOrchestrator.executeTest(request.getTestRequest());
 
-            // 2. Wait for steady state
+            // 2. Wait for steady state (non-blocking delay for virtual threads)
             LOG.info("Resilience test: waiting " + request.getSteadyStateSec() + "s for steady state");
-            Thread.sleep(request.getSteadyStateSec() * 1000L);
+            CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(
+                    request.getSteadyStateSec(), TimeUnit.SECONDS)).join();
 
             // 3. Snapshot pre-chaos results
             testOrchestrator.refreshStatus(run.getId());
@@ -69,8 +70,9 @@ public class ResilienceOrchestrator {
                     request.getChaosSpec().chaosDurationSec() + 60, TimeUnit.SECONDS);
             report.setChaosOutcome(outcome);
 
-            // 6. Let the system recover briefly, then snapshot post-chaos results
-            Thread.sleep(10_000);
+            // 6. Let the system recover briefly (non-blocking delay)
+            CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(
+                    10, TimeUnit.SECONDS)).join();
             testOrchestrator.refreshStatus(run.getId());
 
             // 7. Generate final report

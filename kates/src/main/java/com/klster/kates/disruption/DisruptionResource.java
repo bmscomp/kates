@@ -398,6 +398,7 @@ public class DisruptionResource {
     @Path("/schedules/{id}")
     @jakarta.transaction.Transactional
     public Response updateSchedule(@PathParam("id") String id, CreateDisruptionScheduleRequest request) {
+        @org.jspecify.annotations.Nullable
         DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
         if (entity == null) {
             return Response.status(404)
@@ -424,10 +425,13 @@ public class DisruptionResource {
     @Path("/schedules/{id}")
     @jakarta.transaction.Transactional
     public Response deleteSchedule(@PathParam("id") String id) {
+        @org.jspecify.annotations.Nullable
         DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
         if (entity == null) {
-            return Response.status(404)
-                    .entity(ApiError.of(404, "Not Found", "Schedule not found: " + id)).build();
+            return Response
+                .status(404)
+            .entity(ApiError.of(404, "Not Found", "Schedule not found: " + id))
+            .build();
         }
         em.remove(entity);
         return Response.noContent().build();

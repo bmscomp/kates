@@ -43,7 +43,8 @@ class ClusterResourceTest {
                 .when().get("/api/cluster/info")
                 .then()
                 .statusCode(500)
-                .body("error", containsString("Failed to connect"));
+                .body("error", is("Internal Server Error"))
+                .body("message", containsString("Failed to connect"));
     }
 
     @Test
@@ -66,6 +67,7 @@ class ClusterResourceTest {
                 .when().get("/api/cluster/topics")
                 .then()
                 .statusCode(500)
-                .body("error", containsString("Failed to list topics"));
+                .body("error", is("Internal Server Error"))
+                .body("message", containsString("Failed to list topics"));
     }
 }

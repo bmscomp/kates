@@ -21,17 +21,11 @@ public class TestRunRepository {
 
     @Transactional
     public void save(TestRun run) {
-        TestRunEntity existing = em.find(TestRunEntity.class, run.getId());
-        if (existing != null) {
-            EntityMapper.updateEntity(existing, run);
-            em.merge(existing);
-        } else {
-            em.persist(EntityMapper.toEntity(run));
-        }
+        em.merge(EntityMapper.toEntity(run));
     }
 
     public Optional<TestRun> findById(String id) {
-        TestRunEntity entity = em.find(TestRunEntity.class, id);
+        var entity = em.find(TestRunEntity.class, id);
         return entity != null ? Optional.of(EntityMapper.toDomain(entity)) : Optional.empty();
     }
 
@@ -56,7 +50,7 @@ public class TestRunRepository {
 
     @Transactional
     public void delete(String id) {
-        TestRunEntity entity = em.find(TestRunEntity.class, id);
+        var entity = em.find(TestRunEntity.class, id);
         if (entity != null) {
             em.remove(entity);
         }
@@ -74,14 +68,15 @@ public class TestRunRepository {
     }
 
     public Optional<TestRun> findLatestByType(TestType type) {
-        List<TestRunEntity> results = em.createQuery(
+        return em.createQuery(
                         "SELECT r FROM TestRunEntity r WHERE r.testType = :type ORDER BY r.createdAt DESC",
                         TestRunEntity.class)
                 .setParameter("type", type)
                 .setMaxResults(1)
-                .getResultList();
-
-        return results.isEmpty() ? Optional.empty() : Optional.of(EntityMapper.toDomain(results.get(0)));
+                .getResultList()
+                .stream()
+                .map(EntityMapper::toDomain)
+                .findFirst();
     }
 
     public List<TestRun> findAllPaged(int page, int size) {
