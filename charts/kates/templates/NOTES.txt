@@ -1,0 +1,40 @@
+
+Kates has been deployed!
+
+{{- if .Values.ingress.enabled }}
+
+  Access the API at:
+  {{- range .Values.ingress.hosts }}
+    http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+  {{- end }}
+
+{{- else if contains "NodePort" .Values.service.type }}
+
+  Access the API at:
+    export NODE_PORT=$(kubectl get svc {{ include "kates.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.ports[0].nodePort}')
+    export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
+    echo "http://$NODE_IP:$NODE_PORT"
+
+{{- else if contains "LoadBalancer" .Values.service.type }}
+
+  Access the API at:
+    export LB_IP=$(kubectl get svc {{ include "kates.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+    echo "http://$LB_IP:{{ .Values.service.port }}"
+
+{{- else }}
+
+  Access the API via port-forward:
+    kubectl port-forward svc/{{ include "kates.fullname" . }} 8080:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+    echo "http://localhost:8080"
+
+{{- end }}
+
+  Configure the CLI:
+    kates ctx set {{ .Release.Name }} --url <API_URL>
+    kates ctx use {{ .Release.Name }}
+    kates health
+
+  Run your first test:
+    kates test scaffold --type LOAD > load-test.yaml
+    kates test apply -f load-test.yaml
+    kates test list

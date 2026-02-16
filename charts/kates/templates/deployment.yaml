@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "kates.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "kates.selectorLabels" . | nindent 6 }}
@@ -15,7 +17,15 @@ spec:
         {{- include "kates.selectorLabels" . | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "kates.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if .Values.postgresql.enabled }}
       initContainers:
       - name: wait-for-postgres
@@ -33,17 +43,23 @@ spec:
         envFrom:
         - configMapRef:
             name: {{ include "kates.fullname" . }}-config
-        {{- if .Values.postgresql.enabled }}
+        {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
         - secretRef:
             name: {{ include "kates.fullname" . }}-db
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
+        startupProbe:
+          httpGet:
+            path: /q/health/started
+            port: 8080
+          failureThreshold: 30
+          periodSeconds: 2
         readinessProbe:
           httpGet:
             path: /api/health
             port: 8080
-          initialDelaySeconds: 10
+          initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
@@ -51,3 +67,15 @@ spec:
             port: 8080
           initialDelaySeconds: 15
           periodSeconds: 30
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

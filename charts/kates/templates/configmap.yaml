@@ -9,7 +9,7 @@ data:
   KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
   KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}
 
-  {{- if .Values.postgresql.enabled }}
+  {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
   QUARKUS_DATASOURCE_DB_KIND: "postgresql"
   QUARKUS_DATASOURCE_JDBC_URL: {{ include "kates.postgresql.jdbcUrl" . | quote }}
   QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: "none"

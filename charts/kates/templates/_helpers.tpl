@@ -29,10 +29,22 @@ app.kubernetes.io/name: {{ include "kates.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
+{{- define "kates.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "kates.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
 {{- define "kates.postgresql.fullname" -}}
 {{ include "kates.fullname" . }}-postgresql
 {{- end }}
 
 {{- define "kates.postgresql.jdbcUrl" -}}
+{{- if .Values.postgresql.enabled -}}
 jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc:5432/{{ .Values.postgresql.auth.database }}
+{{- else -}}
+jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}
+{{- end -}}
 {{- end }}

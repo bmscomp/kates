@@ -3,14 +3,36 @@ replicaCount: 1
 image:
   repository: kates
   tag: latest
-  pullPolicy: Never
+  pullPolicy: IfNotPresent
 
+imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: true
+
+podAnnotations: {}
 
 service:
   type: ClusterIP
   port: 8080
+  nodePort: ""
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kates.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
 
 resources:
   requests:
@@ -20,6 +42,22 @@ resources:
     memory: "512Mi"
     cpu: "500m"
 
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: ""
+  maxUnavailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
 kafka:
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
 
@@ -28,6 +66,14 @@ trogdor:
 
 engine:
   defaultBackend: "native"
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: "30s"
+    scrapeTimeout: ""
+    labels: {}
 
 postgresql:
   enabled: true
@@ -48,6 +94,14 @@ postgresql:
     limits:
       memory: "256Mi"
       cpu: "250m"
+
+externalDatabase:
+  enabled: false
+  host: ""
+  port: 5432
+  database: kates
+  username: kates
+  password: ""
 
 defaults:
   replicationFactor: "3"
