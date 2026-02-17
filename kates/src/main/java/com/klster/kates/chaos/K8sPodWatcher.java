@@ -14,8 +14,7 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Watches Kafka broker pods during a disruption and records a timeline
@@ -159,7 +158,7 @@ public class K8sPodWatcher {
                     @Override
                     public void onClose(WatcherException cause) {
                         if (cause != null) {
-                            LOG.log(Level.WARNING, "Pod watch closed with error", cause);
+                            LOG.warn("Pod watch closed with error", cause);
                         }
                     }
                 });

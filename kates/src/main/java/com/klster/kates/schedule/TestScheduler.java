@@ -10,8 +10,7 @@ import jakarta.inject.Inject;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Evaluates all enabled schedules every 60 seconds.
@@ -20,7 +19,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class TestScheduler {
 
-    private static final Logger LOG = Logger.getLogger(TestScheduler.class.getName());
+    private static final Logger LOG = Logger.getLogger(TestScheduler.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Inject
@@ -37,7 +36,7 @@ public class TestScheduler {
         }
 
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-        LOG.fine(() -> "Evaluating " + schedules.size() + " schedules at " + now);
+        LOG.debugf("Evaluating %d schedules at %s", schedules.size(), now);
 
         for (ScheduledTestRun schedule : schedules) {
             try {
@@ -46,7 +45,7 @@ public class TestScheduler {
                     executeSchedule(schedule);
                 }
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Failed to evaluate schedule '" + schedule.getName() + "'", e);
+                LOG.warn("Failed to evaluate schedule '" + schedule.getName() + "'", e);
             }
         }
     }
@@ -58,7 +57,7 @@ public class TestScheduler {
             repository.updateLastRun(schedule.getId(), run.getId());
             LOG.info("Schedule '" + schedule.getName() + "' started run " + run.getId());
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Failed to execute schedule '" + schedule.getName() + "'", e);
+            LOG.error("Failed to execute schedule '" + schedule.getName() + "'", e);
         }
     }
 
@@ -69,7 +68,7 @@ public class TestScheduler {
     static boolean matchesCron(String cronExpr, ZonedDateTime now) {
         String[] parts = cronExpr.trim().split("\\s+");
         if (parts.length < 5) {
-            LOG.warning("Invalid cron expression (need 5 fields): " + cronExpr);
+            LOG.warn("Invalid cron expression (need 5 fields): " + cronExpr);
             return false;
         }
 

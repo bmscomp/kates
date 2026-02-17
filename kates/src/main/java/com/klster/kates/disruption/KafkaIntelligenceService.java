@@ -16,8 +16,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Kafka intelligence layer for disruption tests.
@@ -30,7 +29,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class KafkaIntelligenceService {
 
-    private static final Logger LOG = Logger.getLogger(KafkaIntelligenceService.class.getName());
+    private static final Logger LOG = Logger.getLogger(KafkaIntelligenceService.class);
     private static final int TIMEOUT_SECONDS = 15;
 
     @ConfigProperty(name = "kates.kafka.bootstrap-servers")
@@ -64,7 +63,7 @@ public class KafkaIntelligenceService {
                     .get(topic);
 
             if (desc == null) {
-                LOG.warning("Topic not found: " + topic);
+                LOG.warn("Topic not found: " + topic);
                 return -1;
             }
 
@@ -79,10 +78,10 @@ public class KafkaIntelligenceService {
                 }
             }
 
-            LOG.warning("Partition " + partition + " not found in topic " + topic);
+            LOG.warn("Partition " + partition + " not found in topic " + topic);
             return -1;
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to resolve partition leader", e);
+            LOG.warn("Failed to resolve partition leader", e);
             return -1;
         }
     }
@@ -143,7 +142,7 @@ public class KafkaIntelligenceService {
                             pi.replicas().size()));
                 }
             } catch (Exception e) {
-                LOG.log(Level.FINE, "ISR poll failed", e);
+                LOG.debug("ISR poll failed", e);
             }
         }
 
@@ -272,7 +271,7 @@ public class KafkaIntelligenceService {
                         Instant.now(), groupId, totalLag, perTopicLag));
 
             } catch (Exception e) {
-                LOG.log(Level.FINE, "Lag poll failed", e);
+                LOG.debug("Lag poll failed", e);
             }
         }
 

@@ -10,8 +10,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
@@ -28,7 +27,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @Tag(name = "Disruptions")
 public class DisruptionResource {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionResource.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionResource.class);
 
     @Inject
     DisruptionOrchestrator orchestrator;
@@ -287,7 +286,7 @@ public class DisruptionResource {
             repository.save(entity);
             LOG.info("Persisted disruption report: " + id);
         } catch (JsonProcessingException e) {
-            LOG.log(Level.WARNING, "Failed to serialize report for persistence", e);
+            LOG.warn("Failed to serialize report for persistence", e);
         }
     }
 
@@ -298,7 +297,7 @@ public class DisruptionResource {
         try {
             return objectMapper.readValue(entity.getReportJson(), DisruptionReport.class);
         } catch (JsonProcessingException e) {
-            LOG.log(Level.WARNING, "Failed to deserialize report: " + id, e);
+            LOG.warn("Failed to deserialize report: " + id, e);
             return null;
         }
     }

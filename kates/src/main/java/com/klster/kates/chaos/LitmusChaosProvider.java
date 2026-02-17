@@ -11,8 +11,7 @@ import jakarta.inject.Named;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Chaos provider that creates Litmus ChaosEngine CRs to trigger experiments.
@@ -23,7 +22,7 @@ import java.util.logging.Logger;
 @Named("litmus-crd")
 public class LitmusChaosProvider implements ChaosProvider {
 
-    private static final Logger LOG = Logger.getLogger(LitmusChaosProvider.class.getName());
+    private static final Logger LOG = Logger.getLogger(LitmusChaosProvider.class);
 
     private static final CustomResourceDefinitionContext CHAOS_ENGINE_CTX =
             new CustomResourceDefinitionContext.Builder()
@@ -101,7 +100,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                 }
 
             } catch (Exception e) {
-                LOG.log(Level.SEVERE, "Litmus fault injection failed", e);
+                LOG.error("Litmus fault injection failed", e);
                 return ChaosOutcome.failure(engineName, spec.experimentName(),
                         start, Instant.now(), startNanos, e.getMessage());
             }
@@ -139,7 +138,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                     }
                 }
             } catch (Exception e) {
-                LOG.log(Level.FINE, "Error polling ChaosResult", e);
+                LOG.debug("Error polling ChaosResult", e);
             }
             Thread.sleep(5000);
         }
@@ -226,7 +225,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                     .delete();
             LOG.info("Cleaned up Kates-managed ChaosEngines");
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "ChaosEngine cleanup failed", e);
+            LOG.warn("ChaosEngine cleanup failed", e);
         }
     }
 

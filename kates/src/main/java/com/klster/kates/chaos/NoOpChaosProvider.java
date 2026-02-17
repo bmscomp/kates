@@ -3,7 +3,7 @@ package com.klster.kates.chaos;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Named;
 import java.util.concurrent.CompletableFuture;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * No-op chaos provider for environments without a chaos backend.
@@ -14,7 +14,7 @@ import java.util.logging.Logger;
 @Named("noop")
 public class NoOpChaosProvider implements ChaosProvider {
 
-    private static final Logger LOG = Logger.getLogger(NoOpChaosProvider.class.getName());
+    private static final Logger LOG = Logger.getLogger(NoOpChaosProvider.class);
 
     @Override
     public String name() {

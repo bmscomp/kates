@@ -15,8 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Orchestrates a combined performance + chaos resilience test.
@@ -31,7 +30,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class ResilienceOrchestrator {
 
-    private static final Logger LOG = Logger.getLogger(ResilienceOrchestrator.class.getName());
+    private static final Logger LOG = Logger.getLogger(ResilienceOrchestrator.class);
 
     @Inject
     TestOrchestrator testOrchestrator;
@@ -103,10 +102,10 @@ public class ResilienceOrchestrator {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             report.setStatus("INTERRUPTED");
-            LOG.log(Level.WARNING, "Resilience test interrupted", e);
+            LOG.warn("Resilience test interrupted", e);
         } catch (Exception e) {
             report.setStatus("ERROR");
-            LOG.log(Level.SEVERE, "Resilience test failed", e);
+            LOG.error("Resilience test failed", e);
         }
 
         return report;

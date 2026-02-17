@@ -9,8 +9,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Backend that delegates benchmark execution to the Trogdor Coordinator.
@@ -20,7 +19,7 @@ import java.util.logging.Logger;
 @Named("trogdor")
 public class TrogdorBackend implements BenchmarkBackend {
 
-    private static final Logger LOG = Logger.getLogger(TrogdorBackend.class.getName());
+    private static final Logger LOG = Logger.getLogger(TrogdorBackend.class);
 
     private final TrogdorClient trogdorClient;
 
@@ -45,7 +44,7 @@ public class TrogdorBackend implements BenchmarkBackend {
             LOG.info("Submitted Trogdor task: " + task.getTaskId());
             return new BenchmarkHandle(name(), task.getTaskId());
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to submit Trogdor task: " + task.getTaskId(), e);
+            LOG.warn("Failed to submit Trogdor task: " + task.getTaskId(), e);
             throw new BenchmarkException("Trogdor submission failed: " + e.getMessage(), e);
         }
     }
@@ -56,7 +55,7 @@ public class TrogdorBackend implements BenchmarkBackend {
             JsonNode taskStatus = trogdorClient.getTask(handle.taskId());
             return fromTrogdorStatus(taskStatus);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to poll Trogdor task: " + handle.taskId(), e);
+            LOG.warn("Failed to poll Trogdor task: " + handle.taskId(), e);
             return BenchmarkStatus.builder(TaskStatus.RUNNING).build();
         }
     }
@@ -66,7 +65,7 @@ public class TrogdorBackend implements BenchmarkBackend {
         try {
             trogdorClient.stopTask(handle.taskId());
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to stop Trogdor task: " + handle.taskId(), e);
+            LOG.warn("Failed to stop Trogdor task: " + handle.taskId(), e);
         }
     }
 

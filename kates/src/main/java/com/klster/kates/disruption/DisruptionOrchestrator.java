@@ -11,8 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Orchestrates multi-step disruption plans with:
@@ -24,7 +23,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class DisruptionOrchestrator {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionOrchestrator.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionOrchestrator.class);
 
     @Inject
     ChaosCoordinator chaosCoordinator;
@@ -76,11 +75,11 @@ public class DisruptionOrchestrator {
         DisruptionSafetyGuard.ValidationResult validation = safetyGuard.validatePlan(plan);
         if (!validation.warnings().isEmpty()) {
             report.setValidationWarnings(validation.warnings());
-            validation.warnings().forEach(w -> LOG.warning("Safety warning: " + w));
+            validation.warnings().forEach(w -> LOG.warn("Safety warning: " + w));
         }
 
         if (!validation.safe()) {
-            LOG.severe("Plan REJECTED by safety guard: " + validation.errors());
+            LOG.error("Plan REJECTED by safety guard: " + validation.errors());
             report.setStatus("REJECTED");
             List<String> combined = new ArrayList<>(validation.warnings());
             combined.addAll(validation.errors().stream().map(e -> "ERROR: " + e).toList());
@@ -90,7 +89,7 @@ public class DisruptionOrchestrator {
 
         boolean prometheusAvailable = prometheusCapture.isAvailable();
         if (!prometheusAvailable) {
-            LOG.warning("Prometheus not available — metrics capture disabled");
+            LOG.warn("Prometheus not available — metrics capture disabled");
         }
 
         List<DisruptionReport.StepReport> stepReports = new ArrayList<>();
@@ -164,7 +163,7 @@ public class DisruptionOrchestrator {
                     "Plan completed: " + report.getStatus());
 
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Disruption plan failed", e);
+            LOG.error("Disruption plan failed", e);
             report.setStepReports(stepReports);
             report.setStatus("FAILED");
             katesMetrics.recordDisruptionCompleted(plan.getName(), "failed");
@@ -283,7 +282,7 @@ public class DisruptionOrchestrator {
                 boolean recovered = session.awaitFirstReady(recoveryTimeoutSec, TimeUnit.SECONDS);
 
                 if (!recovered && plan.isAutoRollback()) {
-                    LOG.warning("  Recovery timeout — triggering auto-rollback for " + step.name());
+                    LOG.warn("  Recovery timeout — triggering auto-rollback for " + step.name());
                     safetyGuard.rollback(spec, outcome.engineName());
                     eventBus.emit(plan.getName(), DisruptionEventBus.EventType.ROLLBACK,
                             step.name(), "Auto-rollback triggered for " + step.name());
@@ -315,16 +314,16 @@ public class DisruptionOrchestrator {
             Thread.currentThread().interrupt();
             return failedStep(step, "Interrupted", rolledBack, rollbackReason);
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Step '" + step.name() + "' failed", e);
+            LOG.error("Step '" + step.name() + "' failed", e);
 
             if (plan.isAutoRollback()) {
                 try {
-                    LOG.warning("  Auto-rollback on exception for step " + step.name());
+                    LOG.warn("  Auto-rollback on exception for step " + step.name());
                     safetyGuard.rollback(step.faultSpec(), "");
                     rolledBack = true;
                     rollbackReason = "Exception: " + e.getMessage();
                 } catch (Exception re) {
-                    LOG.log(Level.SEVERE, "Rollback also failed", re);
+                    LOG.error("Rollback also failed", re);
                 }
             }
 

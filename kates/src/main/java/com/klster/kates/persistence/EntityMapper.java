@@ -10,8 +10,7 @@ import com.klster.kates.domain.TestSpec;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -20,7 +19,7 @@ import java.util.stream.Collectors;
  */
 public final class EntityMapper {
 
-    private static final Logger LOG = Logger.getLogger(EntityMapper.class.getName());
+    private static final Logger LOG = Logger.getLogger(EntityMapper.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private EntityMapper() {
@@ -131,7 +130,7 @@ public final class EntityMapper {
         try {
             return JSON.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
-            LOG.log(Level.WARNING, "Failed to serialize to JSON", e);
+            LOG.warn("Failed to serialize to JSON", e);
             return null;
         }
     }
@@ -141,7 +140,7 @@ public final class EntityMapper {
         try {
             return JSON.readValue(json, type);
         } catch (JsonProcessingException e) {
-            LOG.log(Level.WARNING, "Failed to deserialize JSON", e);
+            LOG.warn("Failed to deserialize JSON", e);
             return null;
         }
     }
@@ -151,7 +150,7 @@ public final class EntityMapper {
         try {
             return JSON.readValue(json, typeRef);
         } catch (JsonProcessingException e) {
-            LOG.log(Level.WARNING, "Failed to deserialize JSON", e);
+            LOG.warn("Failed to deserialize JSON", e);
             return null;
         }
     }

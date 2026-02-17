@@ -34,15 +34,14 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 import com.klster.kates.report.ClusterSnapshot;
 
 @ApplicationScoped
 public class KafkaAdminService {
 
-    private static final Logger LOG = Logger.getLogger(KafkaAdminService.class.getName());
+    private static final Logger LOG = Logger.getLogger(KafkaAdminService.class);
     private static final int TIMEOUT_SECONDS = 30;
 
     private final String bootstrapServers;
@@ -89,7 +88,7 @@ public class KafkaAdminService {
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Deleted topic: " + name);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to delete topic: " + name, e);
+            LOG.warn("Failed to delete topic: " + name, e);
         }
     }
 
@@ -369,7 +368,7 @@ public class KafkaAdminService {
             return new ClusterSnapshot(
                     clusterId, nodes.size(), controller.id(), brokers, leaders);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to capture cluster snapshot", e);
+            LOG.warn("Failed to capture cluster snapshot", e);
             return null;
         }
     }

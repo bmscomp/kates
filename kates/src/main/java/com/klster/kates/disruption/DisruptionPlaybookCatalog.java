@@ -10,8 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Loads pre-built disruption playbooks from YAML resource files.
@@ -20,7 +19,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class DisruptionPlaybookCatalog {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionPlaybookCatalog.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionPlaybookCatalog.class);
     private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
 
     private static final String[] PLAYBOOK_NAMES = {
@@ -36,14 +35,14 @@ public class DisruptionPlaybookCatalog {
             String path = "playbooks/" + name + ".yaml";
             try (InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream(path)) {
                 if (is == null) {
-                    LOG.warning("Playbook resource not found: " + path);
+                    LOG.warn("Playbook resource not found: " + path);
                     continue;
                 }
                 PlaybookEntry entry = YAML.readValue(is, PlaybookEntry.class);
                 catalog.put(entry.name, entry);
                 LOG.info("Loaded playbook: " + entry.name + " (" + entry.category + ")");
             } catch (IOException e) {
-                LOG.log(Level.WARNING, "Failed to load playbook: " + path, e);
+                LOG.warn("Failed to load playbook: " + path, e);
             }
         }
         LOG.info("Playbook catalog loaded: " + catalog.size() + " playbooks");

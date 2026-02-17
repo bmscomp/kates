@@ -22,8 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Orchestrator that routes benchmark execution to pluggable backends.
@@ -32,7 +31,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class TestOrchestrator {
 
-    private static final Logger LOG = Logger.getLogger(TestOrchestrator.class.getName());
+    private static final Logger LOG = Logger.getLogger(TestOrchestrator.class);
 
     private final KafkaAdminService kafkaAdmin;
     private final TestRunRepository repository;
@@ -101,7 +100,7 @@ public class TestOrchestrator {
                     run.addResult(result);
                     LOG.info("Submitted task via " + backendName + ": " + task.getTaskId());
                 } catch (Exception e) {
-                    LOG.log(Level.WARNING, "Failed to submit task: " + task.getTaskId(), e);
+                    LOG.warn("Failed to submit task: " + task.getTaskId(), e);
                     TestResult failedResult = new TestResult();
                     failedResult.setTaskId(task.getTaskId());
                     failedResult.setTestType(type);
@@ -122,7 +121,7 @@ public class TestOrchestrator {
             }
 
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Test execution failed for run: " + run.getId(), e);
+            LOG.error("Test execution failed for run: " + run.getId(), e);
             run.setStatus(TestResult.TaskStatus.FAILED);
         }
 
@@ -182,7 +181,7 @@ public class TestOrchestrator {
                         run.addResult(result);
                         LOG.info("Scenario phase [" + phaseName + "] submitted: " + task.getTaskId());
                     } catch (Exception e) {
-                        LOG.log(Level.WARNING, "Phase [" + phaseName + "] failed to submit: " + task.getTaskId(), e);
+                        LOG.warn("Phase [" + phaseName + "] failed to submit: " + task.getTaskId(), e);
                         TestResult failedResult = new TestResult();
                         failedResult.setTaskId(task.getTaskId());
                         failedResult.setTestType(type);
@@ -205,7 +204,7 @@ public class TestOrchestrator {
             }
 
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Scenario execution failed for run: " + run.getId(), e);
+            LOG.error("Scenario execution failed for run: " + run.getId(), e);
             run.setStatus(TestResult.TaskStatus.FAILED);
         }
 
@@ -249,7 +248,7 @@ public class TestOrchestrator {
                                         status.getHeatmapBuckets()));
                     }
                     } catch (Exception e) {
-                        LOG.log(Level.WARNING, "Failed to poll task: " + result.getTaskId(), e);
+                        LOG.warn("Failed to poll task: " + result.getTaskId(), e);
                     }
                 }
             }
@@ -304,7 +303,7 @@ public class TestOrchestrator {
             try {
                 backend.stop(handle);
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Failed to stop task: " + handle.taskId(), e);
+                LOG.warn("Failed to stop task: " + handle.taskId(), e);
             }
         }
 

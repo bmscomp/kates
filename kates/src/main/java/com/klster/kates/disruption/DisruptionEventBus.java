@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * In-memory event bus for broadcasting disruption progress events.
@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class DisruptionEventBus {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionEventBus.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionEventBus.class);
 
     private final List<Consumer<DisruptionEvent>> subscribers = new CopyOnWriteArrayList<>();
 
@@ -28,12 +28,12 @@ public class DisruptionEventBus {
     }
 
     public void emit(DisruptionEvent event) {
-        LOG.fine(() -> "Event: " + event.type() + " — " + event.message());
+        LOG.debugf("Event: %s — %s", event.type(), event.message());
         for (Consumer<DisruptionEvent> sub : subscribers) {
             try {
                 sub.accept(event);
             } catch (Exception e) {
-                LOG.warning("Subscriber error: " + e.getMessage());
+                LOG.warn("Subscriber error: " + e.getMessage());
             }
         }
     }

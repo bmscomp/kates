@@ -7,8 +7,7 @@ import jakarta.ws.rs.ext.Provider;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Global safety net for any exception that leaks past endpoint-level try/catch.
@@ -18,7 +17,7 @@ import java.util.logging.Logger;
 @Provider
 public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
 
-    private static final Logger LOG = Logger.getLogger(GlobalExceptionMapper.class.getName());
+    private static final Logger LOG = Logger.getLogger(GlobalExceptionMapper.class);
 
     @Override
     public Response toResponse(Exception exception) {
@@ -29,7 +28,7 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
         }
 
         if (root instanceof TimeoutException) {
-            LOG.log(Level.WARNING, "Request timed out", exception);
+            LOG.warn("Request timed out", exception);
             return error(504, "Gateway Timeout", root.getMessage());
         }
 
@@ -37,7 +36,7 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
             return error(404, "Not Found", root.getMessage());
         }
 
-        LOG.log(Level.SEVERE, "Unhandled exception in REST endpoint", exception);
+        LOG.error("Unhandled exception in REST endpoint", exception);
         return error(500, "Internal Server Error",
                 root.getMessage() != null ? root.getMessage() : exception.getClass().getSimpleName());
     }

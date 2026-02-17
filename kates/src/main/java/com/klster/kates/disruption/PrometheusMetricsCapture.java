@@ -14,8 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,7 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @ApplicationScoped
 public class PrometheusMetricsCapture {
 
-    private static final Logger LOG = Logger.getLogger(PrometheusMetricsCapture.class.getName());
+    private static final Logger LOG = Logger.getLogger(PrometheusMetricsCapture.class);
 
     @ConfigProperty(name = "kates.prometheus.url", defaultValue = "http://prometheus.monitoring.svc:9090")
     String prometheusUrl;
@@ -94,7 +93,7 @@ public class PrometheusMetricsCapture {
                 double value = queryInstant(entry.getValue(), end);
                 values.put(entry.getKey(), value);
             } catch (Exception e) {
-                LOG.log(Level.FINE, "Failed to query " + entry.getKey(), e);
+                LOG.debug("Failed to query " + entry.getKey(), e);
                 values.put(entry.getKey(), 0.0);
             }
         }
@@ -158,7 +157,7 @@ public class PrometheusMetricsCapture {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200;
         } catch (Exception e) {
-            LOG.log(Level.FINE, "Prometheus not available", e);
+            LOG.debug("Prometheus not available", e);
             return false;
         }
     }

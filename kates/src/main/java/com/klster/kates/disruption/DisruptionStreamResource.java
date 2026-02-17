@@ -10,8 +10,7 @@ import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 
 import java.util.function.Consumer;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
@@ -25,7 +24,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @Tag(name = "Disruptions")
 public class DisruptionStreamResource {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionStreamResource.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionStreamResource.class);
 
     @Inject
     DisruptionEventBus eventBus;
@@ -60,7 +59,7 @@ public class DisruptionStreamResource {
                     sink.close();
                 }
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Failed to send SSE event", e);
+                LOG.warn("Failed to send SSE event", e);
             }
         };
 

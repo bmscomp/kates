@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Post-benchmark verifier that reconciles produced records against consumed records
@@ -30,7 +30,7 @@ import java.util.logging.Logger;
  */
 public class DataIntegrityVerifier {
 
-    private static final Logger LOG = Logger.getLogger(DataIntegrityVerifier.class.getName());
+    private static final Logger LOG = Logger.getLogger(DataIntegrityVerifier.class);
 
     private final AckTracker ackTracker;
     private final BitSet consumedSet = new BitSet();

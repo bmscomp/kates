@@ -6,7 +6,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * CDI coordinator that delegates to the configured {@link ChaosProvider}.
@@ -17,7 +17,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class ChaosCoordinator {
 
-    private static final Logger LOG = Logger.getLogger(ChaosCoordinator.class.getName());
+    private static final Logger LOG = Logger.getLogger(ChaosCoordinator.class);
 
     private final ChaosProvider activeProvider;
 
@@ -44,7 +44,7 @@ public class ChaosCoordinator {
         } else {
             this.activeProvider = fallback != null ? fallback : new NoOpChaosProvider();
             if (selected != null) {
-                LOG.warning("Configured chaos provider '" + providerName +
+                LOG.warn("Configured chaos provider '" + providerName +
                         "' is not available, falling back to noop");
             } else {
                 LOG.info("Chaos provider: noop (default)");

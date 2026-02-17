@@ -7,7 +7,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Auto-detecting hybrid chaos provider. At startup, checks whether
@@ -23,7 +23,7 @@ import java.util.logging.Logger;
 @Named("hybrid")
 public class HybridChaosProvider implements ChaosProvider {
 
-    private static final Logger LOG = Logger.getLogger(HybridChaosProvider.class.getName());
+    private static final Logger LOG = Logger.getLogger(HybridChaosProvider.class);
 
     private final ChaosProvider delegate;
     private final String delegateName;

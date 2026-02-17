@@ -11,8 +11,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Monitors the Strimzi {@code Kafka} Custom Resource status to determine
@@ -21,7 +20,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class StrimziStateTracker {
 
-    private static final Logger LOG = Logger.getLogger(StrimziStateTracker.class.getName());
+    private static final Logger LOG = Logger.getLogger(StrimziStateTracker.class);
 
     private static final CustomResourceDefinitionContext KAFKA_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("kafka.strimzi.io")
@@ -63,7 +62,7 @@ public class StrimziStateTracker {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
-                LOG.log(Level.FINE, "Error polling Kafka CR status", e);
+                LOG.debug("Error polling Kafka CR status", e);
                 try { Thread.sleep(5000); } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     break;
@@ -72,7 +71,7 @@ public class StrimziStateTracker {
         }
 
         Duration elapsed = Duration.between(disruptionStart, Instant.now());
-        LOG.warning("Kafka CR '" + kafkaCluster + "' did not recover within timeout ("
+        LOG.warn("Kafka CR '" + kafkaCluster + "' did not recover within timeout ("
                 + timeout.toSeconds() + "s), elapsed: " + elapsed.toSeconds() + "s");
         return elapsed;
     }
@@ -101,7 +100,7 @@ public class StrimziStateTracker {
                     .filter(c -> "Ready".equals(c.get("type")))
                     .anyMatch(c -> "True".equals(c.get("status")));
         } catch (Exception e) {
-            LOG.log(Level.FINE, "Failed to read Kafka CR status", e);
+            LOG.debug("Failed to read Kafka CR status", e);
             return false;
         }
     }

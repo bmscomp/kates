@@ -6,7 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Evaluates disruption test results against SLA thresholds.
@@ -15,7 +15,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class SlaGrader {
 
-    private static final Logger LOG = Logger.getLogger(SlaGrader.class.getName());
+    private static final Logger LOG = Logger.getLogger(SlaGrader.class);
 
     public record SlaViolation(
             String metricName,

@@ -12,8 +12,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Cron-based scheduler for recurring disruption tests.
@@ -23,7 +22,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class DisruptionScheduler {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionScheduler.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionScheduler.class);
 
     @Inject
     EntityManager em;
@@ -49,7 +48,7 @@ public class DisruptionScheduler {
         if (schedules.isEmpty()) return;
 
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-        LOG.fine(() -> "Evaluating " + schedules.size() + " disruption schedules at " + now);
+        LOG.debugf("Evaluating %d disruption schedules at %s", schedules.size(), now);
 
         for (DisruptionScheduleEntity schedule : schedules) {
             try {
@@ -58,7 +57,7 @@ public class DisruptionScheduler {
                     executeSchedule(schedule);
                 }
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Failed to evaluate disruption schedule '" + schedule.getName() + "'", e);
+                LOG.warn("Failed to evaluate disruption schedule '" + schedule.getName() + "'", e);
             }
         }
     }
@@ -75,7 +74,7 @@ public class DisruptionScheduler {
             } else if (schedule.getPlanJson() != null) {
                 plan = objectMapper.readValue(schedule.getPlanJson(), DisruptionPlan.class);
             } else {
-                LOG.warning("Schedule '" + schedule.getName() + "' has no playbook or plan");
+                LOG.warn("Schedule '" + schedule.getName() + "' has no playbook or plan");
                 return;
             }
 
@@ -91,7 +90,7 @@ public class DisruptionScheduler {
             updateLastRun(schedule.getId(), runId);
             LOG.info("Disruption schedule '" + schedule.getName() + "' completed: " + runId);
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Failed to execute disruption schedule '" + schedule.getName() + "'", e);
+            LOG.error("Failed to execute disruption schedule '" + schedule.getName() + "'", e);
         }
     }
 
@@ -108,7 +107,7 @@ public class DisruptionScheduler {
     static boolean matchesCron(String cronExpr, ZonedDateTime now) {
         String[] parts = cronExpr.trim().split("\\s+");
         if (parts.length < 5) {
-            LOG.warning("Invalid cron expression (need 5 fields): " + cronExpr);
+            LOG.warn("Invalid cron expression (need 5 fields): " + cronExpr);
             return false;
         }
         return matchesField(parts[0], now.getMinute())

@@ -9,8 +9,7 @@ import jakarta.inject.Named;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Chaos provider using direct Kubernetes API calls.
@@ -21,7 +20,7 @@ import java.util.logging.Logger;
 @Named("kubernetes")
 public class KubernetesChaosProvider implements ChaosProvider {
 
-    private static final Logger LOG = Logger.getLogger(KubernetesChaosProvider.class.getName());
+    private static final Logger LOG = Logger.getLogger(KubernetesChaosProvider.class);
 
     @Inject
     KubernetesClient client;
@@ -75,7 +74,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 return ChaosOutcome.failure(engineName, spec.experimentName(),
                         start, Instant.now(), startNanos, "Interrupted");
             } catch (Exception e) {
-                LOG.log(Level.SEVERE, "Fault injection failed", e);
+                LOG.error("Fault injection failed", e);
                 return ChaosOutcome.failure(engineName, spec.experimentName(),
                         start, Instant.now(), startNanos, e.getMessage());
             }
@@ -227,7 +226,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     .delete();
             LOG.info("Cleaned up Kates-managed NetworkPolicies");
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Cleanup failed", e);
+            LOG.warn("Cleanup failed", e);
         }
     }
 

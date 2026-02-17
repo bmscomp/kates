@@ -17,13 +17,12 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class TestExecutionService {
 
-    private static final Logger LOG = Logger.getLogger(TestExecutionService.class.getName());
+    private static final Logger LOG = Logger.getLogger(TestExecutionService.class);
 
     private final SpecFactory specFactory;
     private final KafkaAdminService kafkaAdmin;
@@ -72,7 +71,7 @@ public class TestExecutionService {
                     run.addResult(result);
                     LOG.info("Submitted Trogdor task: " + taskId);
                 } catch (Exception e) {
-                    LOG.log(Level.WARNING, "Failed to submit Trogdor task: " + taskId, e);
+                    LOG.warn("Failed to submit Trogdor task: " + taskId, e);
                     TestResult failedResult = new TestResult();
                     failedResult.setTaskId(taskId);
                     failedResult.setTestType(type);
@@ -91,7 +90,7 @@ public class TestExecutionService {
             }
 
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Test execution failed for run: " + run.getId(), e);
+            LOG.error("Test execution failed for run: " + run.getId(), e);
             run.setStatus(TestResult.TaskStatus.FAILED);
         }
 
@@ -113,7 +112,7 @@ public class TestExecutionService {
                     JsonNode taskStatus = trogdorClient.getTask(result.getTaskId());
                     updateResultFromTrogdor(result, taskStatus);
                 } catch (Exception e) {
-                    LOG.log(Level.WARNING, "Failed to fetch status for task: " + result.getTaskId(), e);
+                    LOG.warn("Failed to fetch status for task: " + result.getTaskId(), e);
                 }
             }
 
@@ -144,7 +143,7 @@ public class TestExecutionService {
                     trogdorClient.stopTask(result.getTaskId());
                     result.setStatus(TestResult.TaskStatus.STOPPING);
                 } catch (Exception e) {
-                    LOG.log(Level.WARNING, "Failed to stop task: " + result.getTaskId(), e);
+                    LOG.warn("Failed to stop task: " + result.getTaskId(), e);
                 }
             }
         }

@@ -9,8 +9,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.*;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * Safety layer for disruption tests. Validates blast radius, performs dry-run
@@ -19,7 +18,7 @@ import java.util.logging.Logger;
 @ApplicationScoped
 public class DisruptionSafetyGuard {
 
-    private static final Logger LOG = Logger.getLogger(DisruptionSafetyGuard.class.getName());
+    private static final Logger LOG = Logger.getLogger(DisruptionSafetyGuard.class);
 
     @Inject
     KubernetesClient kubeClient;
@@ -211,7 +210,7 @@ public class DisruptionSafetyGuard {
                         + spec.disruptionType() + " — StatefulSet controller handles recovery");
             }
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Rollback failed for " + spec.disruptionType(), e);
+            LOG.error("Rollback failed for " + spec.disruptionType(), e);
         }
     }
 
@@ -253,7 +252,7 @@ public class DisruptionSafetyGuard {
                     .list()
                     .getItems();
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to list broker pods", e);
+            LOG.warn("Failed to list broker pods", e);
             return List.of();
         }
     }
@@ -319,7 +318,7 @@ public class DisruptionSafetyGuard {
                 default -> true;
             };
         } catch (Exception e) {
-            LOG.log(Level.FINE, "RBAC check failed, assuming permitted", e);
+            LOG.debug("RBAC check failed, assuming permitted", e);
             return true;
         }
     }

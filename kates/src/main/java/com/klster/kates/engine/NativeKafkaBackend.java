@@ -23,8 +23,7 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jboss.logging.Logger;
 
 /**
  * In-process benchmark backend using Kafka client API and virtual threads.
@@ -34,7 +33,7 @@ import java.util.logging.Logger;
 @Named("native")
 public class NativeKafkaBackend implements BenchmarkBackend {
 
-    private static final Logger LOG = Logger.getLogger(NativeKafkaBackend.class.getName());
+    private static final Logger LOG = Logger.getLogger(NativeKafkaBackend.class);
 
     private final String bootstrapServers;
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
@@ -94,7 +93,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             }
             state.status = TaskStatus.DONE;
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Native benchmark failed: " + task.getTaskId(), e);
+            LOG.warn("Native benchmark failed: " + task.getTaskId(), e);
             state.error = e.getMessage();
             state.status = TaskStatus.FAILED;
         } finally {
@@ -285,7 +284,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                                 payload.getSequence(), crcOk, record.partition());
                         consumed++;
                     } catch (Exception e) {
-                        LOG.fine("Skipping malformed record at offset " + record.offset());
+                        LOG.debug("Skipping malformed record at offset " + record.offset());
                     }
                 }
             }
