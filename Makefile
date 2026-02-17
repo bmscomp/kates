@@ -50,6 +50,9 @@ all: check-prerequisites
 	kubectl apply -f kates/k8s/service.yaml
 	@kubectl rollout status deployment/kates -n kates --timeout=120s
 	@echo ""
+	@echo "Step 13: Exposing service ports..."
+	./scripts/port-forward.sh
+	@echo ""
 	@echo "✅ Complete setup finished!"
 	@echo ""
 	@echo "📊 Services deployed:"
@@ -61,10 +64,12 @@ all: check-prerequisites
 	@echo "  ✓ Kates"
 	@echo ""
 	@echo "🔗 Access points:"
-	@echo "  - Grafana: http://localhost:30080 (admin/admin)"
-	@echo "  - Kafka UI: http://localhost:30081"
-	@echo "  - Kates: http://localhost:30083"
-	@echo "  - Litmus UI: make chaos-ui then http://localhost:9091 (admin/litmus)"
+	@echo "  - Grafana:          http://localhost:30080 (admin/admin)"
+	@echo "  - Kafka UI:         http://localhost:30081"
+	@echo "  - Apicurio Registry:http://localhost:30082"
+	@echo "  - Kates:            http://localhost:30083"
+	@echo "  - Prometheus:       http://localhost:30090"
+	@echo "  - Litmus UI:        http://localhost:9091  (admin/litmus)"
 	@echo ""
 
 # Check prerequisites
