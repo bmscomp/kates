@@ -1,10 +1,14 @@
 # Testing Guide
 
-This document describes how the Kates test suite is organized, how to run specific tests, how the tests use mock injection to avoid external dependencies, and how to write new tests that follow the established patterns.
+Testing a tool that tests other systems is a recursive challenge. Kates orchestrates Kafka performance benchmarks and chaos experiments — but how do you test the orchestrator itself without a running Kafka cluster, a Trogdor coordinator, and a set of Litmus CRDs? You use mocks. Carefully designed, behavior-accurate mocks that simulate what the real systems do, so you can verify that the orchestration logic is correct without requiring an entire distributed infrastructure in your CI pipeline.
+
+This is not a compromise — it is the right approach. The question "does the Kafka cluster sustain 50,000 messages per second?" is answered by running an actual performance test against an actual cluster. The question "does the TestOrchestrator correctly split 50,000 messages/sec across 5 producers?" is answered by a unit test that verifies the math, the task construction, and the lifecycle management. Conflating these two questions leads to slow, flaky tests that are expensive to run and difficult to debug.
+
+This chapter describes how the Kates test suite is organized, the testing philosophy behind each layer, how mock injection works with Quarkus CDI, and how to write new tests that follow the established patterns.
 
 ## Test Architecture
 
-Kates uses a layered testing strategy that mirrors the application's architecture. Tests are organized into three categories based on what they exercise and what they depend on:
+Kates uses a layered testing strategy that mirrors the application's architecture. Tests are organized into three categories based on what they exercise and what they depend on. This layering is deliberate — each layer catches a different class of bug, and together they provide high confidence without requiring a running Kafka cluster.
 
 ### Unit Tests
 

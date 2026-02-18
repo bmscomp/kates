@@ -1,10 +1,22 @@
 # Architecture
 
-This document describes the internal architecture of Kates in depth, covering the package structure, the role and responsibility of every major class, the test execution lifecycle, the disruption orchestration pipeline, and the key design decisions that shaped the codebase.
+Software architecture is the set of decisions that are hardest to change later. The structure of the codebase, the boundaries between subsystems, the interfaces through which components communicate — these choices compound over time. A system with clear boundaries grows gracefully; a system with tangled dependencies becomes a nightmare. Kates was designed with this principle in mind.
+
+This chapter describes the internal architecture of Kates: the package structure, the role and responsibility of every major class, the test execution lifecycle, the disruption orchestration pipeline, and — most importantly — the *why* behind each design decision. Understanding the architecture is essential for anyone who wants to extend Kates, debug test failures, or contribute new backends.
+
+## Design Philosophy
+
+Three core principles shaped the architecture:
+
+**Pluggability through SPIs.** Kates uses the Service Provider Interface pattern to make every external integration swappable. The `BenchmarkBackend` SPI abstracts how benchmarks are executed (in-process or via Trogdor). The `ChaosProvider` SPI abstracts how faults are injected (Litmus CRDs, Kubernetes API, or no-op). This means you can add a new benchmark engine or a new chaos tool without touching the orchestration logic.
+
+**Separation of concerns.** The codebase separates what happens (domain model) from how it happens (engine/chaos/disruption) from how you ask for it (API). A `TestRun` does not know whether it was submitted via REST or a scheduler. A `FaultSpec` does not know whether it will be executed by Litmus or Kubernetes. This separation makes the system testable — you can unit-test the grading algorithm without a running Kafka cluster.
+
+**Fail-safe defaults.** Every configuration has a sensible default. Every disruption has a safety guard. Every timeout has a fallback. The system is designed so that forgetting to set a parameter results in conservative behavior, not accidental damage. This is especially critical for the chaos engineering subsystem, where a misconfiguration could take down a production-like cluster.
 
 ## Package Structure
 
-The codebase is organized into packages that correspond directly to the major subsystems of the application. Each package has a clear boundary and a well-defined set of responsibilities.
+The codebase is organized into packages that correspond directly to the major subsystems of the application. Each package has a clear boundary and a well-defined set of responsibilities. This is not an accident — the package structure is the architecture, made visible in the file system.
 
 ```
 com.klster.kates

@@ -1,324 +1,369 @@
 # Playbook Catalog
 
-This document is a reference for the 6 pre-built disruption playbooks that ship with Kates. Each playbook is a curated, multi-step disruption scenario stored as a YAML file in `src/main/resources/playbooks/`. Playbooks are loaded at startup by the `DisruptionPlaybookCatalog` and can be executed with a single API call.
+When you first start with chaos engineering, the hardest part is not running the experiment — it is designing one. What should you test? What failure scenarios matter? How do you set the parameters so the experiment is meaningful without being reckless?
 
-## Executing a Playbook
+Kates solves this cold-start problem with a catalog of six built-in playbooks. Each playbook encodes a well-tested disruption scenario based on real-world Kafka failure patterns. They are not toy examples — they represent the failure modes that have taken down production Kafka clusters at organizations around the world.
 
-```bash
-curl -X POST http://localhost:8080/api/disruptions/playbooks/az-failure
+This chapter walks through each playbook in detail: the theory behind the failure it simulates, the YAML source that defines it, what you should observe when you run it, and what the results tell you about your cluster.
 
-curl -X POST http://localhost:8080/api/disruptions/playbooks/leader-cascade?dryRun=true
-```
+## How Playbooks Work
 
-No JSON body is required — the playbook defines all steps, fault specifications, and safety limits.
+A playbook is a YAML file stored in `src/main/resources/playbooks/`. At startup, the `DisruptionPlaybookCatalog` scans this directory, parses each YAML file into a `DisruptionPlan`, and registers it in an in-memory catalog. You can list and execute playbooks through the REST API.
 
-## Listing Available Playbooks
+### Listing Available Playbooks
 
 ```bash
-curl http://localhost:8080/api/disruptions/playbooks
-curl http://localhost:8080/api/disruptions/playbooks?category=network
+curl -s http://localhost:8080/api/disruptions/playbooks | jq '.[].name'
 ```
+
+Returns: `az-failure`, `leader-cascade`, `split-brain`, `storage-pressure`, `rolling-restart`, `consumer-isolation`.
+
+### Executing a Playbook
+
+```bash
+curl -X POST http://localhost:8080/api/disruptions/playbooks/az-failure | jq
+```
+
+This submits the playbook as a `DisruptionPlan` to the `DisruptionOrchestrator`, which executes it through the same 13-step pipeline described in the [Disruption Guide](disruption-guide.md). You get back a full `DisruptionReport` with ISR tracking, SLA grading, and impact analysis.
 
 ---
 
-## az-failure
+## az-failure — Availability Zone Failure
 
-**Category:** `infrastructure`
-**Description:** Simulate an availability zone failure by killing all brokers in one rack.
+### The Theory
 
-This playbook targets all Kafka broker pods in a specific availability zone (Kubernetes topology zone). It simulates the worst-case scenario of an entire AZ going down — a common failure mode in cloud environments.
+Cloud providers organize their infrastructure into availability zones (AZs) — physically separated data centers within a region that share a metropolitan fiber network but have independent power, cooling, and networking. The promise of multi-AZ deployment is that losing an entire AZ should not cause an outage.
 
-**What it tests:**
+For Kafka, this promise depends critically on how your brokers are distributed across AZs and how your topic partitions are replicated. If you have 3 brokers spread across 3 AZs with `replication.factor=3`, then each partition has one replica per AZ. Losing an AZ kills one broker, which means one replica per partition is lost. With `min.insync.replicas=2`, you still have 2 replicas in sync, so writes continue. With `min.insync.replicas=3`, you would lose write availability — a setting that is sometimes used for maximum durability but is incompatible with AZ failure tolerance.
 
-- Can the cluster serve reads and writes with an entire AZ offline?
-- Do partition leaders fail over to brokers in other AZs?
-- How long does it take for ISR sets to recover after the AZ comes back?
-- Does the producer `acks=all` configuration still work with reduced ISR?
+The subtlety is in the recovery. When the AZ comes back online and the broker restarts, it needs to catch up on all the messages it missed while it was down. For a high-throughput topic, this can mean replicating gigabytes of data, which puts additional load on the surviving brokers. If the catch-up process is slow, the cluster operates in a degraded state for an extended period — one more failure during this window would be catastrophic.
 
-**YAML source:**
+### The Playbook
 
 ```yaml
 name: az-failure
-description: "Simulate availability zone failure by killing all brokers in one rack"
+description: Simulate availability zone failure by killing all brokers in a zone
 category: infrastructure
-maxAffectedBrokers: 3
-autoRollback: true
 steps:
-  - name: kill-rack-0-brokers
+  - name: kill-zone-brokers
     faultSpec:
-      experimentName: az-failure-rack-0
+      experimentName: az-failure-sim
       disruptionType: POD_KILL
-      targetLabel: "strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a"
-      chaosDurationSec: 30
+      targetLabel: "topology.kubernetes.io/zone=zone-a"
+      targetNamespace: kafka
       gracePeriodSec: 0
     steadyStateSec: 30
-    observationWindowSec: 120
+    observationWindowSec: 300
     requireRecovery: true
+sla:
+  maxP99LatencyMs: 500.0
+  minThroughputRecPerSec: 5000.0
+  maxRtoMs: 120000
+maxAffectedBrokers: 3
+autoRollback: true
 ```
 
-**Key observations:**
+### What to Look For
 
-- `maxAffectedBrokers: 3` — allows the playbook to kill up to 3 brokers (all brokers in one AZ)
-- `gracePeriodSec: 0` — SIGKILL, simulating a sudden power-off (no graceful shutdown)
-- `observationWindowSec: 120` — 2 minutes for the cluster to recover and all ISR sets to be full again
-- The compound label selector (`strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a`) ensures only brokers in zone-a are killed
+When you run this playbook, pay attention to these indicators:
 
-**Expected result in a healthy 3-AZ cluster:** ISR shrinks immediately, new leaders elected within seconds, ISR fully recovered within 30-60 seconds after pods restart.
+**ISR behavior.** You should see ISR shrink for all partitions that had replicas on the killed brokers. The shrink should happen within `replica.lag.time.max.ms` (typically 10-30 seconds). Watch whether the ISR shrinks to 2 replicas (acceptable) or to 1 (dangerous — one more failure means data loss).
+
+**Write availability.** If `min.insync.replicas=2` and the ISR shrinks to 2, writes continue. If it shrinks to 1, writes are rejected. This is the critical moment: does your cluster maintain write availability during an AZ failure?
+
+**Recovery time.** The 300-second observation window gives the brokers time to restart and catch up. Look at how long it takes for the ISR to fully recover. For a lightly loaded cluster, this might take 30-60 seconds. For a cluster handling 100,000+ messages/second, it could take several minutes as the restarting brokers replicate missed data.
+
+**The SLA grade** captures all of this into a single letter. An A means the cluster handled the AZ failure without noticeable impact. A B or C means there was degradation but within acceptable bounds. An F means the cluster's AZ resilience is fundamentally broken and needs architectural changes.
 
 ---
 
-## leader-cascade
+## leader-cascade — Cascading Leader Elections
 
-**Category:** `kafka`
-**Description:** Kill partition leaders sequentially to test cascading election recovery.
+### The Theory
 
-This playbook kills the leaders of two different partitions of `__consumer_offsets` in sequence. It tests whether the cluster can handle rapid successive leader elections without causing a cascading failure.
+Leader election is Kafka's mechanism for maintaining availability when brokers fail. When a partition's leader goes down, the controller elects a new leader from the ISR. This process typically takes a few seconds and, ideally, is invisible to well-configured clients.
 
-**What it tests:**
+A cascading leader election scenario tests what happens when leader failures chain together. You kill the leader of partition 0, a new leader is elected, then you kill that new leader. This tests whether the cluster can sustain multiple rapid leadership transitions without falling into an unstable state where leadership bounces between brokers faster than clients can update their metadata.
 
-- Can the cluster handle multiple leader elections in rapid succession?
-- Does leader election for one partition interfere with another?
-- How does the consumer offset commit mechanism behave during controller instability?
+This scenario is more realistic than it sounds. During a rolling deployment, brokers restart one at a time. If each restart triggers leader elections, and the restart interval is shorter than the time it takes for clients to stabilize after an election, you get a cascade of elections that degrades overall throughput even though no single failure is severe.
 
-**YAML source:**
+### The Playbook
 
 ```yaml
 name: leader-cascade
-description: "Kill partition leaders sequentially to test cascading election recovery"
-category: kafka
-maxAffectedBrokers: 2
-autoRollback: true
-isrTrackingTopic: __consumer_offsets
+description: Test cascading leader elections by killing partition leaders sequentially
+category: kafka-specific
 steps:
-  - name: kill-leader-partition-0
+  - name: kill-leader-p0
     faultSpec:
       experimentName: leader-cascade-p0
       disruptionType: POD_KILL
-      targetTopic: __consumer_offsets
+      targetTopic: test-topic
       targetPartition: 0
-      chaosDurationSec: 10
+      targetNamespace: kafka
       gracePeriodSec: 0
-    steadyStateSec: 30
+    steadyStateSec: 10
     observationWindowSec: 60
     requireRecovery: true
-  - name: kill-leader-partition-1
+  - name: kill-leader-p1
     faultSpec:
       experimentName: leader-cascade-p1
       disruptionType: POD_KILL
-      targetTopic: __consumer_offsets
+      targetTopic: test-topic
       targetPartition: 1
-      chaosDurationSec: 10
+      targetNamespace: kafka
       gracePeriodSec: 0
-    steadyStateSec: 15
+    steadyStateSec: 10
     observationWindowSec: 60
     requireRecovery: true
+  - name: kill-leader-p2
+    faultSpec:
+      experimentName: leader-cascade-p2
+      disruptionType: POD_KILL
+      targetTopic: test-topic
+      targetPartition: 2
+      targetNamespace: kafka
+      gracePeriodSec: 0
+    steadyStateSec: 10
+    observationWindowSec: 60
+    requireRecovery: true
+sla:
+  maxP99LatencyMs: 200.0
+  minThroughputRecPerSec: 10000.0
+  maxRtoMs: 30000
+maxAffectedBrokers: 1
+autoRollback: true
 ```
 
-**Key observations:**
+### What to Look For
 
-- `isrTrackingTopic: __consumer_offsets` — ISR tracking is enabled for the consumer offsets topic, which is critical for consumer group coordination
-- The second step has a shorter `steadyStateSec: 15` — less time between faults, increasing pressure on the cluster
-- Both steps use `targetTopic` and `targetPartition` — Kates resolves the leader broker at execution time
+The key observation here is whether each successive election is faster, slower, or about the same as the previous one. If the cluster is healthy and well-configured, each election should take roughly the same amount of time (typically 5-15 seconds). If elections get progressively slower, it may indicate that the controller is becoming overloaded with metadata operations.
+
+Also watch the `steadyStateSec: 10` between steps. This deliberately short interval means the next kill happens only 10 seconds after the previous step completes. If the killed broker has not fully recovered by then, you are testing recovery under compounding stress — which is exactly the point.
 
 ---
 
-## split-brain
+## split-brain — Network Partition of the Controller
 
-**Category:** `network`
-**Description:** Network-partition the controller/leader broker from all followers.
+### The Theory
 
-This playbook isolates the controller broker by dropping all network traffic to and from it. This simulates a network split where the controller thinks it's still alive but cannot communicate with the rest of the cluster.
+In Kafka, the controller is the broker (in KRaft mode) or ZooKeeper leader that manages cluster metadata: partition assignments, leader elections, topic creation, and configuration changes. A network partition that isolates the controller from the rest of the cluster is one of the most serious failures possible.
 
-**What it tests:**
+When the controller is partitioned:
+- No new leader elections can occur, so any broker failure during the partition causes indefinite unavailability for affected partitions
+- No topic or partition changes can be committed to the metadata log
+- No configuration changes can propagate
+- Existing reads and writes continue on established leaders (the data plane is independent of the control plane), but the cluster cannot adapt to any changes
 
-- Does a new controller get elected when the current one is unreachable?
-- How do clients handle the metadata refresh when the controller changes?
-- Is there any data loss during the partition window?
-- How long does it take for the cluster to fully recover after the partition heals?
+The danger of a split-brain is not immediate catastrophe — it is that the cluster appears to be working while losing its ability to react to problems. If a broker fails while the controller is partitioned, you get a compounding failure that no automated process can resolve until the partition heals.
 
-**YAML source:**
+### The Playbook
 
 ```yaml
 name: split-brain
-description: "Network-partition the controller/leader broker from all followers"
+description: Simulate network partition isolating the controller broker
 category: network
-maxAffectedBrokers: 1
-autoRollback: true
 steps:
   - name: isolate-controller
     faultSpec:
-      experimentName: split-brain-partition
+      experimentName: split-brain-sim
       disruptionType: NETWORK_PARTITION
-      targetLabel: "strimzi.io/component-type=kafka"
-      targetBrokerId: 0
+      targetLabel: "strimzi.io/controller=true"
+      targetNamespace: kafka
       chaosDurationSec: 60
-    steadyStateSec: 30
-    observationWindowSec: 90
-    requireRecovery: true
-```
-
-**Key observations:**
-
-- `NETWORK_PARTITION` — this typically requires Litmus ChaosEngine CRDs (the `LitmusChaosProvider` creates a `pod-network-partition` experiment)
-- `targetBrokerId: 0` — targets broker 0 specifically. Combined with the label selector, Kates resolves this to the exact pod
-- `chaosDurationSec: 60` — the network partition lasts 60 seconds
-- `autoRollback: true` — after the chaos duration, the network partition is actively removed
-
----
-
-## storage-pressure
-
-**Category:** `storage`
-**Description:** Fill broker log directories to 90% to simulate storage exhaustion.
-
-This playbook fills the broker's persistent volume to 90% capacity, simulating what happens when a broker runs out of disk space. Kafka brokers handle disk pressure by rejecting produce requests and triggering log segment cleanup.
-
-**What it tests:**
-
-- Does the broker correctly reject writes when disk is near-full?
-- Does log segment retention kick in to free space?
-- Do producers fail gracefully with retriable errors?
-- How long does it take to recover after disk space is freed?
-
-**YAML source:**
-
-```yaml
-name: storage-pressure
-description: "Fill broker log directories to 90% to simulate storage exhaustion"
-category: storage
-maxAffectedBrokers: 1
-autoRollback: true
-steps:
-  - name: fill-broker-disk
-    faultSpec:
-      experimentName: storage-pressure-fill
-      disruptionType: DISK_FILL
-      targetLabel: "strimzi.io/component-type=kafka"
-      targetBrokerId: 0
-      fillPercentage: 90
-      chaosDurationSec: 120
-    steadyStateSec: 30
-    observationWindowSec: 120
-    requireRecovery: true
-```
-
-**Key observations:**
-
-- `fillPercentage: 90` — fills the disk to 90%, not 100%. This tests the broker's behavior at near-full capacity without risking a complete filesystem freeze
-- `chaosDurationSec: 120` — the disk stays filled for 2 minutes, giving enough time to observe the broker's response
-- `autoRollback: true` — critically important for disk fill tests. On rollback, the filled temporary files are removed
-
----
-
-## rolling-restart
-
-**Category:** `operations`
-**Description:** Trigger a graceful rolling restart of the Kafka StatefulSet.
-
-This playbook simulates a routine operational procedure — a rolling restart of all Kafka brokers. This is the most common disruption in production environments (config changes, Kafka version upgrades, certificate rotation).
-
-**What it tests:**
-
-- Is the rolling restart truly zero-downtime?
-- How long does each broker take to rejoin the ISR?
-- Do producers and consumers experience any errors during the restart?
-- Is the total restart time within operational SLA?
-
-**YAML source:**
-
-```yaml
-name: rolling-restart
-description: "Trigger a graceful rolling restart of the Kafka StatefulSet"
-category: operations
-maxAffectedBrokers: 1
-autoRollback: false
-steps:
-  - name: rolling-restart-brokers
-    faultSpec:
-      experimentName: rolling-restart-sts
-      disruptionType: ROLLING_RESTART
-      targetLabel: "strimzi.io/component-type=kafka"
-      chaosDurationSec: 300
-      gracePeriodSec: 30
     steadyStateSec: 30
     observationWindowSec: 180
     requireRecovery: true
+sla:
+  maxP99LatencyMs: 500.0
+  minThroughputRecPerSec: 5000.0
+  maxRtoMs: 60000
+maxAffectedBrokers: 1
+autoRollback: true
 ```
 
-**Key observations:**
+### What to Look For
 
-- `autoRollback: false` — a rolling restart cannot be "rolled back". This is an intentional design choice — the restart must complete naturally
-- `ROLLING_RESTART` — the `KubernetesChaosProvider` implements this by annotating the StatefulSet's pod template to trigger a rollout
-- `chaosDurationSec: 300` — the total restart can take up to 5 minutes for a 3-broker cluster
-- `gracePeriodSec: 30` — each pod gets 30 seconds to perform a graceful shutdown (flush logs, transfer leadership)
-- `observationWindowSec: 180` — 3 minutes after the restart completes to verify full ISR recovery
+During the 60-second partition window, existing producers and consumers should continue working normally — the data plane is separate from the control plane. The real test is what happens when the partition heals. The controller needs to reconcile its state with the rest of the cluster, which may involve metadata log catchup and potentially re-electing leaders.
+
+Watch the Strimzi state tracker output — it records transitions in the Kafka custom resource's `Ready` condition, which can reveal whether the Strimzi operator detected the partition and took any corrective action.
 
 ---
 
-## consumer-isolation
+## storage-pressure — Disk Exhaustion
 
-**Category:** `network`
-**Description:** Network-partition consumer pods from Kafka brokers to test consumer resilience.
+### The Theory
 
-This playbook isolates consumer application pods from the Kafka cluster, simulating a network outage between consumers and brokers. This tests consumer reconnection logic, rebalance behavior, and offset commit handling.
+Kafka brokers store messages in log segments on disk. When a disk fills up, the broker can no longer accept new messages. The behavior depends on the broker's configuration: with `log.retention.hours` and `log.segment.bytes`, the broker periodically deletes old segments to free space. But if the incoming data rate exceeds the retention-based deletion rate, disk usage climbs until the broker runs out of space.
 
-**What it tests:**
+Storage pressure tests are particularly important because disk usage issues are slow-building — they do not cause immediate failures, they cause gradual degradation that eventually crosses a cliff. By the time your monitoring alerts fire, you may already be in a critical state. Running this playbook lets you see exactly where that cliff is and how your cluster behaves when it hits it.
 
-- Do consumers reconnect after the network partition heals?
-- Does the consumer group rebalance correctly?
-- Are committed offsets preserved across the partition?
-- How much lag accumulates during the outage and how quickly is it recovered?
+### The Playbook
 
-**YAML source:**
+```yaml
+name: storage-pressure
+description: Simulate storage exhaustion by filling broker log directories
+category: resource
+steps:
+  - name: fill-disk
+    faultSpec:
+      experimentName: storage-pressure-sim
+      disruptionType: DISK_FILL
+      targetLabel: "strimzi.io/component-type=kafka"
+      targetNamespace: kafka
+      fillPercentage: 90
+      chaosDurationSec: 120
+    steadyStateSec: 30
+    observationWindowSec: 180
+    requireRecovery: true
+sla:
+  maxP99LatencyMs: 1000.0
+  minThroughputRecPerSec: 1000.0
+  maxErrorPercent: 5.0
+maxAffectedBrokers: 3
+autoRollback: true
+```
+
+### What to Look For
+
+Watch the transition from normal operation to degraded behavior. At 85-90% disk usage, you may see increased latency as the broker's log segment management becomes more aggressive. At 95%+, the broker may start refusing writes. The observation window shows whether log retention cleanup frees enough space to restore write availability.
+
+The `maxAffectedBrokers: 3` setting acknowledges that this playbook fills disks on all brokers simultaneously — this tests the worst-case scenario where the entire cluster is under storage pressure.
+
+---
+
+## rolling-restart — Zero-Downtime Maintenance
+
+### The Theory
+
+Rolling restarts are the most common operational event in a Kafka cluster's life. Broker upgrades, configuration changes, JVM flag updates, certificate rotations — all require restarting brokers one at a time. In theory, a rolling restart should be invisible to clients. In practice, it depends on several factors:
+
+- **Controlled shutdown duration.** Each broker needs time to transfer leadership before shutting down. If the shutdown timeout is too short, leadership transfer is incomplete and clients see errors.
+- **Readiness probe timing.** The next broker should not restart until the previous one is fully ready. If readiness probes are too lenient, two brokers may be down simultaneously.
+- **Replication catch-up.** After a broker restarts, it needs to catch up on messages it missed. During this window, the ISR is short by one member.
+
+This playbook validates that your StatefulSet rolling restart strategy, combined with your Strimzi operator configuration, actually achieves zero-downtime.
+
+### The Playbook
+
+```yaml
+name: rolling-restart
+description: Trigger a graceful rolling restart of the Kafka StatefulSet
+category: operational
+steps:
+  - name: restart-statefulset
+    faultSpec:
+      experimentName: rolling-restart-sim
+      disruptionType: ROLLING_RESTART
+      targetLabel: "strimzi.io/component-type=kafka"
+      targetNamespace: kafka
+      chaosDurationSec: 300
+      gracePeriodSec: 60
+    steadyStateSec: 30
+    observationWindowSec: 300
+    requireRecovery: true
+sla:
+  maxP99LatencyMs: 200.0
+  minThroughputRecPerSec: 8000.0
+  maxErrorPercent: 0.0
+maxAffectedBrokers: 1
+autoRollback: false
+```
+
+### What to Look For
+
+The critical question is: does `maxErrorPercent: 0.0` pass? If it does, your rolling restart is truly zero-downtime — no client-visible errors at any point during the restart. If it fails, you need to investigate your controlled shutdown settings, readiness probe configuration, or producer retry policies.
+
+The `autoRollback: false` setting is deliberate — you do not want to undo a rolling restart midway through, as that would leave the cluster in a partially updated state.
+
+---
+
+## consumer-isolation — Consumer Network Partition
+
+### The Theory
+
+Most chaos experiments focus on broker failures. But in many architectures, the consumer applications are just as critical as the brokers. If your consumers lose connectivity to the Kafka brokers — due to a network issue, a misconfigured NetworkPolicy, or a cloud networking change — they stop processing messages. Unlike broker failures, which Kafka handles internally through replication and leader election, consumer failures are entirely in your application's domain.
+
+When a consumer is network-partitioned from the brokers, several things happen. The consumer's heartbeat to the group coordinator times out, triggering a consumer group rebalance. The partitioned consumer's assigned partitions are reassigned to surviving consumers (if any). The partitioned consumer may attempt to reconnect, and when connectivity is restored, it rejoins the group and triggers another rebalance.
+
+This playbook tests whether your consumer application handles this gracefully: Does it buffer partial results? Does it commit offsets correctly on reconnection? Does the rebalance complete within an acceptable time?
+
+### The Playbook
 
 ```yaml
 name: consumer-isolation
-description: "Network-partition consumer pods from Kafka brokers to test consumer resilience"
+description: Network-partition consumer pods from Kafka brokers
 category: network
-maxAffectedBrokers: -1
-autoRollback: true
 steps:
-  - name: partition-consumers
+  - name: isolate-consumers
     faultSpec:
-      experimentName: consumer-isolation-net
+      experimentName: consumer-isolation-sim
       disruptionType: NETWORK_PARTITION
-      targetLabel: "app=kafka-consumer"
-      targetNamespace: kates
+      targetLabel: "app=my-consumer"
+      targetNamespace: default
       chaosDurationSec: 60
     steadyStateSec: 30
-    observationWindowSec: 90
+    observationWindowSec: 120
     requireRecovery: true
+sla:
+  maxP99LatencyMs: 500.0
+  maxConsumerLagRecords: 100000
+  maxRtoMs: 90000
+maxAffectedBrokers: 0
+autoRollback: true
 ```
 
-**Key observations:**
+### What to Look For
 
-- `maxAffectedBrokers: -1` — this playbook targets consumers, not brokers. The value `-1` disables the broker blast radius check
-- `targetLabel: "app=kafka-consumer"` — targets consumer pods, not Kafka broker pods
-- `targetNamespace: kates` — consumer pods are in the kates namespace, not the kafka namespace
-- This playbook is best combined with `lagTrackingGroupId` to monitor the consumer group's lag during and after the partition
+The `maxAffectedBrokers: 0` indicates that this playbook does not target any Kafka brokers — it targets consumer pods. The key metric here is `maxConsumerLagRecords: 100000`. During the 60-second partition, lag will accumulate. The observation window then tracks how quickly the consumers catch up after connectivity is restored.
 
-## Writing Custom Playbooks
+Also watch the lag recovery pattern. Healthy consumers should show a rapid, monotonically decreasing lag after reconnection. If the lag decreases then increases again (oscillates), it may indicate a rebalance storm where consumers keep joining and leaving the group.
 
-To add a new playbook, create a YAML file in `src/main/resources/playbooks/` following this format:
+---
+
+## Writing Your Own Playbooks
+
+The built-in playbooks cover the most common failure scenarios, but your system may have unique failure modes that require custom playbooks. Writing a custom playbook is straightforward: create a YAML file in the `src/main/resources/playbooks/` directory following the same schema as the built-in playbooks.
+
+### Design Principles
+
+When designing a custom playbook, think like a scientist:
+
+1. **Start with a hypothesis.** "Our order processing pipeline can survive a 60-second network partition without losing any messages." This hypothesis defines what you are testing and how you will evaluate the results.
+
+2. **Choose the right disruption type.** Match the disruption to the failure mode you are testing. If you are worried about broker crashes, use `POD_KILL`. If you are worried about network issues, use `NETWORK_PARTITION`. Do not use `POD_KILL` to test network resilience — the recovery path is completely different.
+
+3. **Set realistic SLA thresholds.** Your SLA should reflect your actual business requirements, not aspirational targets. If your application can tolerate 500ms P99 latency during failures, set `maxP99LatencyMs: 500.0`. If your SLA is too tight, every experiment will get an F, which makes the grade meaningless.
+
+4. **Use appropriate observation windows.** The observation window must be long enough for recovery to complete. A good rule of thumb: set it to at least 3× your expected recovery time. If you expect ISR to recover in 30 seconds, use `observationWindowSec: 120`.
+
+5. **Iterate.** Run the playbook, review the results, adjust the parameters, and run again. Chaos engineering is an iterative practice, not a one-time event.
+
+### Custom Playbook Template
 
 ```yaml
 name: my-custom-playbook
-description: "Description of what this playbook tests"
+description: Describe what failure mode this tests
 category: custom
+steps:
+  - name: describe-the-fault
+    faultSpec:
+      experimentName: my-experiment
+      disruptionType: POD_KILL
+      targetTopic: my-topic
+      targetPartition: 0
+      targetNamespace: kafka
+      gracePeriodSec: 0
+    steadyStateSec: 30
+    observationWindowSec: 120
+    requireRecovery: true
+sla:
+  maxP99LatencyMs: 200.0
+  minThroughputRecPerSec: 5000.0
+  maxRtoMs: 60000
+  maxDataLossPercent: 0.0
 maxAffectedBrokers: 1
 autoRollback: true
-isrTrackingTopic: my-topic
-lagTrackingGroupId: my-consumer-group
-steps:
-  - name: step-name
-    faultSpec:
-      experimentName: unique-experiment-name
-      disruptionType: POD_KILL
-      targetLabel: "strimzi.io/component-type=kafka"
-      chaosDurationSec: 30
-    steadyStateSec: 30
-    observationWindowSec: 60
-    requireRecovery: true
 ```
 
-The playbook is automatically loaded by `DisruptionPlaybookCatalog` on application startup and becomes available via `GET /api/disruptions/playbooks` and `POST /api/disruptions/playbooks/{name}`.
+Save this file to `src/main/resources/playbooks/my-custom-playbook.yaml` and restart Kates. The playbook will be automatically discovered and available through the API.

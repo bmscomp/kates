@@ -1,8 +1,10 @@
 # Kates — Kafka Advanced Testing & Engineering Suite
 
-Kates is a purpose-built backend service for orchestrating Kafka performance tests and chaos engineering experiments. It is built on top of Quarkus, a cloud-native Java framework, and provides a uniform REST API for running, monitoring, and analyzing benchmarks against a Strimzi-managed Kafka cluster deployed on Kubernetes.
+Every engineering team that runs Apache Kafka in production will eventually face the same question: "How do we know this cluster will hold up?" Not just under normal conditions — under the conditions that actually cause outages. Under load spikes, broker failures, network partitions, disk exhaustion, and rolling restarts. The only honest answer is: you do not know, unless you test.
 
-Unlike ad-hoc scripting or one-off benchmarking tools, Kates is designed from the ground up as a long-lived platform service. It persists test runs in a PostgreSQL database, emits structured telemetry via Micrometer and OpenTelemetry, and integrates directly with the Kubernetes control plane to orchestrate not only performance tests but full-spectrum disruption and resilience validation.
+Kates exists to make that testing rigorous, repeatable, and automated. It is a purpose-built backend service for orchestrating Kafka performance tests and chaos engineering experiments. Built on Quarkus — a cloud-native Java framework designed for Kubernetes — Kates provides a uniform REST API for running, monitoring, and analyzing benchmarks against a Strimzi-managed Kafka cluster.
+
+But Kates is not just a wrapper around `kafka-producer-perf-test.sh`. Unlike ad-hoc scripting or one-off benchmarking tools, it is designed from the ground up as a long-lived platform service. It persists test runs in a PostgreSQL database, emits structured telemetry via Micrometer and OpenTelemetry, and integrates directly with the Kubernetes control plane to orchestrate not only performance tests but full-spectrum disruption and resilience validation. It is the difference between checking your car's tire pressure and running it through a crash test lab.
 
 ## Why Kates?
 

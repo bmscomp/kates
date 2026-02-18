@@ -1,6 +1,8 @@
 # Deployment Guide
 
-This document explains how to deploy Kates in both local development and Kubernetes production environments. It covers every configuration option, the Kubernetes manifests, Trogdor agent setup, and the complete ConfigMap reference.
+Deploying a distributed systems testing tool introduces a subtle chicken-and-egg problem: the tool that tests your Kafka cluster needs to be deployed on the same infrastructure as the cluster it tests. If the tool's own deployment is fragile, unreliable, or poorly understood, you cannot trust the test results it produces. That is why this chapter goes beyond listing commands — it explains the deployment architecture, the reasoning behind each decision, and the tradeoffs you will encounter.
+
+Kates supports three deployment modes, each designed for a different stage of the development lifecycle. Dev mode provides instant feedback with hot reload and automatic database provisioning. The JVM build works everywhere Java runs and is the easiest to debug. The native executable starts in milliseconds and is the right choice for production Kubernetes deployments where fast startup, low memory, and high density matter.
 
 ## Local Development
 

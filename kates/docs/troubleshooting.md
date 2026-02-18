@@ -1,220 +1,277 @@
 # Troubleshooting
 
-This document covers common issues, their root causes, and how to resolve them when running Kates.
+Debugging distributed systems is hard. When a Kates test fails or produces unexpected results, the cause could be anywhere: Kafka configuration, Kubernetes networking, Kates settings, resource limits, or timing. This chapter is organized around the symptoms you observe, not the subsystem that is broken, because when something goes wrong, you usually know what happened but not why.
 
-## Kafka Connectivity
+For each issue, you will find the symptom (what you see), the root cause (why it happens), the fix (how to resolve it), and — where relevant — the theory behind the problem, so you understand it well enough to prevent it next time.
+
+## Kafka Connectivity Issues
 
 ### "Kafka cluster is not reachable"
 
-**Symptom:** `GET /api/health` returns `status: DOWN` and `message: "Kafka cluster is not reachable"`.
+**Symptom:** `GET /api/health` returns `status: DOWN` and `message: Kafka cluster is not reachable`, or test submissions fail with connection errors.
 
-**Root cause:** The `KafkaAdminService` cannot connect to the bootstrap servers. This is typically one of:
+**Root cause:** Kates connects to Kafka using the `kafka.bootstrap.servers` address. If this address is wrong, if the Kafka cluster is not running, or if DNS resolution fails within the Kubernetes cluster, Kates cannot establish a connection.
 
-1. **Wrong bootstrap address** — verify `KATES_KAFKA_BOOTSTRAP_SERVERS` in the ConfigMap matches the actual Kafka service name.
-2. **DNS resolution failure** — the Kafka service may not be reachable from the Kates namespace. Try `kubectl exec -it deployment/kates -n kates -- nslookup krafter-kafka-bootstrap.kafka.svc`.
-3. **Network policy blocking traffic** — check if a NetworkPolicy is restricting traffic between the kates and kafka namespaces.
-4. **Kafka not ready** — if Kafka was just deployed, the brokers may not have finished their startup sequence. Wait 30-60 seconds and retry.
+This is the most common issue on initial setup. The bootstrap server address must be the Kubernetes service name that resolves to the Kafka broker pods. In a Strimzi deployment, this is typically `{cluster-name}-kafka-bootstrap.{namespace}.svc:9092`.
 
-**Fix:**
+**Fix:** Verify the bootstrap server is reachable from the Kates pod:
 
 ```bash
-kubectl get svc -n kafka
-kubectl exec -it deployment/kates -n kates -- \
-  curl -v telnet://krafter-kafka-bootstrap.kafka.svc:9092
+kubectl exec -it deploy/kates -- nslookup krafter-kafka-bootstrap.kafka.svc
+kubectl exec -it deploy/kates -- nc -zv krafter-kafka-bootstrap.kafka.svc 9092
 ```
 
----
-
-### "UnknownHostException: postgres.kates.svc"
-
-**Symptom:** Kates pod enters `CrashLoopBackOff` with a database connection error.
-
-**Root cause:** The PostgreSQL service is not available in the expected namespace, or the JDBC URL is misconfigured.
-
-**Fix:**
+If DNS resolution fails, check that the Kafka namespace exists and the Kafka cluster is deployed. If TCP connection fails (DNS works but port 9092 is unreachable), check whether a NetworkPolicy is blocking cross-namespace traffic:
 
 ```bash
-kubectl get svc -n kates | grep postgres
-kubectl get pods -n kates | grep postgres
+kubectl get networkpolicy -n kafka
 ```
 
-Verify that the `QUARKUS_DATASOURCE_JDBC_URL` environment variable matches the actual PostgreSQL service address. The default is `jdbc:postgresql://postgres.kates.svc:5432/kates`.
+If NetworkPolicies are in place, you need to allow ingress from the Kates namespace to port 9092 on the Kafka pods.
 
----
+**Configuration:** Set the correct bootstrap address:
 
-## Performance Tests
+```properties
+kafka.bootstrap.servers=krafter-kafka-bootstrap.kafka.svc:9092
+```
 
-### "Topic creation failed"
+### Intermittent Connection Timeouts
 
-**Symptom:** `POST /api/tests` returns `500 Internal Server Error` with `"error": "Topic creation failed"`.
+**Symptom:** Tests occasionally fail with `TimeoutException: Failed to update metadata` or `NetworkException: The server disconnected`. The health endpoint shows `status: UP` most of the time.
 
-**Root cause:** The Kafka AdminClient could not create the test topic. Common reasons:
+**Root cause:** This is almost always a resource exhaustion issue. If the Kafka brokers are under heavy load (from Kates tests or other workloads), they may be slow to respond to metadata requests. Alternatively, the Kates pod's CPU or memory limits may be too tight, causing the JVM to pause for garbage collection during critical timeout windows.
 
-1. **Insufficient replication factor** — you requested `replicationFactor: 3` but only 2 brokers are available.
-2. **Topic already exists with different config** — the topic exists but has a different partition count or replication factor.
-3. **ACL restrictions** — if Kafka has authorization enabled, the Kates service account may not have `CREATE` permission on topics.
+The Kafka client library uses aggressive timeout defaults (30 seconds for `request.timeout.ms`, 60 seconds for `max.block.ms`). If a metadata update takes longer than these timeouts — due to broker overload, GC pause, or network congestion — the client throws a timeout exception.
 
-**Fix:** Check the effective replication factor against your broker count:
+**Fix:** First, check whether the issue is on the Kates side or the Kafka side:
 
 ```bash
-kubectl exec -it krafter-kafka-0 -n kafka -- \
-  kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic <topic-name>
+kubectl top pod -n kates
+kubectl top pod -n kafka
 ```
 
----
+If Kafka brokers are using 90%+ CPU, they are overloaded — reduce the throughput in your test or add brokers. If the Kates pod is memory-constrained, increase its memory limit:
 
-### "Backend not available: trogdor"
+```yaml
+resources:
+  limits:
+    memory: "1Gi"
+  requests:
+    memory: "512Mi"
+```
 
-**Symptom:** `POST /api/tests` with `"backend": "trogdor"` returns an error about the backend not being available.
+## Performance Test Issues
 
-**Root cause:** The Trogdor Coordinator is not reachable at the configured URL.
+### Tests Stuck in RUNNING State
 
-**Fix:**
+**Symptom:** A test was submitted and shows `status: RUNNING`, but it never transitions to `DONE`. The test has been running far longer than expected.
+
+**Root cause:** This typically indicates one of three problems:
+
+1. **The topic cannot be created.** If the test topic already exists with different settings (different partition count or replication factor), topic creation fails silently and the test hangs waiting for data that never arrives. This is a common issue when re-running tests with different configurations.
+
+2. **Producer throughput is unlimited and the cluster cannot keep up.** If `throughput: -1` (unlimited), the producer sends as fast as possible. If the cluster's write capacity is lower than the producer's send rate, the producer's internal buffer fills up, triggering backpressure. This can cause the producer to stall indefinitely.
+
+3. **Consumer cannot consume from the topic.** If partitions are not assigned to consumers (perhaps because the consumer group already has active members from a previous test run), the consumer waits indefinitely for partition assignment.
+
+**Fix:** Check the test run status for error details:
 
 ```bash
-kubectl get pods -n kates | grep trogdor
-kubectl logs deployment/trogdor-coordinator -n kates
-kubectl exec -it deployment/kates -n kates -- \
-  curl -s http://trogdor-coordinator.kates.svc:8889/coordinator/status
+curl -s http://localhost:8080/api/tests/{runId} | jq '.results[].error'
 ```
 
-If Trogdor is not deployed, use the `native` backend instead. The native backend uses in-process virtual threads and does not require any external components.
+If the issue is a pre-existing topic, either delete the topic and re-run, or configure the test to use a unique topic name:
 
----
+```bash
+kubectl exec -it krafter-kafka-0 -n kafka -- kafka-topics.sh \
+  --bootstrap-server localhost:9092 --delete --topic test-topic
+```
 
-### Test stuck in "RUNNING" status
+### Throughput is Much Lower Than Expected
 
-**Symptom:** `GET /api/tests/{id}` continues to show `status: RUNNING` even after the expected duration has elapsed.
+**Symptom:** You configured `throughput: 50000` but the results show only 20,000-30,000 rec/s.
 
-**Root cause:** The test may have completed but the status refresh failed, or the test hit an internal error that prevented completion.
+**Root cause:** The configured throughput is a *target*, not a guarantee. Actual throughput depends on many factors:
 
-**Fix:**
+- **Network bandwidth** between the Kates pod and the Kafka brokers. In a Kubernetes cluster, this is typically 1-10 Gbps, shared with other workloads. A 1024-byte record at 50,000 rec/s requires ~50 MB/s sustained network bandwidth.
+- **Broker disk I/O.** Each message must be written to the leader's log segment and then replicated to followers. If the brokers' disks are slow (spinning disks, throttled cloud volumes), write latency limits throughput.
+- **`acks` setting.** With `acks=all`, the producer waits for all ISR members to acknowledge the write before considering it complete. This adds replication latency to every produce call. With `acks=1`, throughput is higher but durability is weaker.
+- **`batch.size` and `linger.ms`.** These control how the producer batches messages. Small batches or zero `linger.ms` mean more network round-trips and lower throughput. Larger batches are more efficient but add latency.
 
-1. Check the Kates logs: `kubectl logs deployment/kates -n kates | grep <test-id>`
-2. For Trogdor backend: check the coordinator logs: `kubectl logs deployment/trogdor-coordinator -n kates`
-3. Force-stop and clean up: `curl -X DELETE http://localhost:8080/api/tests/<test-id>`
+**Fix:** This is usually not a bug — it is the cluster's actual capacity. To increase throughput:
+- Increase `batch.size` (default 16KB, try 64KB or 128KB)
+- Set `linger.ms` to 5-10 (batch for a few milliseconds before sending)
+- Use `compression.type=lz4` to reduce network bandwidth usage
+- Add more partitions to parallelize writes across more brokers
+- Use `acks=1` if you can tolerate some durability risk
 
----
+## Disruption Test Issues
 
-## Disruption Tests
+### "Would affect N brokers, limit is M"
 
-### "Safety guard rejected the plan"
+**Symptom:** Disruption test is rejected with a safety guard error about exceeding the broker limit.
 
-**Symptom:** `POST /api/disruptions` returns `422 Unprocessable Entity` with a message from the `DisruptionSafetyGuard`.
+**Root cause:** The `maxAffectedBrokers` in your disruption plan is too low for the number of pods that match your label selector. This is a safety feature — the guard is preventing you from accidentally taking down more brokers than intended.
 
-**Common reasons:**
+This often happens when using a broad label selector like `strimzi.io/component-type=kafka` (which matches all Kafka brokers) with `maxAffectedBrokers: 1`. The label selector matches all brokers, triggering the safety check.
 
-1. **Blast radius exceeded** — the plan's `maxAffectedBrokers` is lower than the number of pods matched by the label selector. Either increase `maxAffectedBrokers` or narrow the label selector.
+**Fix:** Either increase `maxAffectedBrokers` to the number of brokers you actually intend to disrupt, or narrow your label selector to target a specific broker:
 
-2. **RBAC permission missing** — Kates' service account doesn't have the required Kubernetes permissions. The error message will specify which permission is needed:
+```json
+{
+  "targetPod": "krafter-kafka-0"
+}
+```
 
-   ```
-   "Missing permission: pods/delete in namespace kafka"
-   "Missing permission: chaosengines/create in namespace kafka"
-   ```
+Or use leader-aware targeting, which always resolves to exactly one pod:
 
-   Fix by updating the ClusterRole (see [Deployment Guide](deployment.md)).
+```json
+{
+  "targetTopic": "my-topic",
+  "targetPartition": 0
+}
+```
 
-3. **Target pods not found** — no pods match the label selector in the target namespace. Verify the labels: `kubectl get pods -n kafka --show-labels`.
+### Disruption Test Hangs During Fault Injection
 
----
+**Symptom:** The disruption test starts but never completes. The orchestrator appears to be waiting for the chaos provider.
 
-### "Prometheus not available"
+**Root cause:** This typically indicates a problem with the chaos provider backend:
 
-**Symptom:** Disruption report has no `prometheusBaseline` or `prometheusImpact` sections.
+1. **Litmus is not installed.** If the `HybridChaosProvider` selected the Litmus path for a complex fault (network partition, CPU stress), but Litmus CRDs are not installed in the cluster, the CRD creation fails and the provider hangs waiting for a response.
 
-**Root cause:** `PrometheusMetricsCapture.isAvailable()` returned `false`. The disruption test continues without Prometheus snapshots — this is not a failure, just reduced observability.
+2. **RBAC permissions are missing.** Even though the safety guard checks permissions, there are edge cases where the permission check passes but the actual operation fails (e.g., cluster-scoped vs. namespace-scoped permissions).
 
-**Fix:**
+3. **The target pod does not exist.** If leader-aware targeting resolved to a broker ID that maps to a pod name that does not exist (e.g., the cluster has 3 brokers but the naming convention produces `krafter-kafka-5`), the chaos provider waits for a response from a nonexistent pod.
 
-1. Verify Prometheus is running: `kubectl get pods -n monitoring | grep prometheus`
-2. Verify the URL: `kates.prometheus.url` should point to the Prometheus server service
-3. Test connectivity: `kubectl exec -it deployment/kates -n kates -- curl -s http://prometheus.monitoring.svc:9090/-/healthy`
+**Fix:** Check the Kates logs for the chaos provider output:
 
----
+```bash
+kubectl logs deploy/kates | grep -i chaos
+```
 
-### Litmus experiments not working
+If Litmus is not installed, either install it or explicitly set the backend:
 
-**Symptom:** Disruption tests with `NETWORK_PARTITION`, `CPU_STRESS`, or `DISK_FILL` fail with a `ChaosProvider` error.
+```properties
+kates.chaos.backend=kubernetes
+```
 
-**Root cause:** These disruption types require Litmus ChaosEngine CRDs, which are only available if Litmus is installed.
+This forces all faults to use the `KubernetesChaosProvider`, which does not require Litmus. Note that this limits you to simple fault types (pod kill, pod delete, scale down, rolling restart).
 
-**Fix:**
+### Auto-Rollback Did Not Work
 
-1. Check if Litmus is installed: `kubectl get crd | grep litmuschaos`
-2. If not installed, switch to disruption types that work with the Kubernetes backend: `POD_KILL`, `POD_DELETE`, `SCALE_DOWN`, `ROLLING_RESTART`.
-3. If Litmus is installed, check that the Litmus operator is running: `kubectl get pods -n litmus`
+**Symptom:** A disruption test failed, but the fault is still active — the network partition is still in place, or the CPU stress is still running.
 
----
+**Root cause:** Auto-rollback works by calling `ChaosProvider.cleanup()` when a step fails. For `LitmusChaosProvider`, this deletes the `ChaosEngine` CRD. If the CRD deletion fails (RBAC permissions, API server timeout), the fault persists.
+
+For `KubernetesChaosProvider` with `POD_KILL` or `POD_DELETE`, rollback is a no-op — Kubernetes automatically restarts the pod. But for `NETWORK_PARTITION` or `CPU_STRESS`, rollback requires active cleanup.
+
+**Fix:** Manually clean up the fault:
+
+```bash
+kubectl delete chaosengine --all -n kafka
+kubectl delete pod -l "app.kubernetes.io/managed-by=litmus" -n kafka
+```
+
+If `CPU_STRESS` was injected via `stress-ng`, the cleanup pod should have killed the process. If it did not, restart the affected broker pod:
+
+```bash
+kubectl delete pod krafter-kafka-0 -n kafka
+```
 
 ## Configuration Issues
 
-### ConfigMap changes not taking effect
+### Test Type Defaults Not Taking Effect
 
-**Symptom:** You updated `kates-config` ConfigMap but `GET /api/health` shows old values.
+**Symptom:** You configured custom defaults in `application.properties` (e.g., `kates.test-defaults.load.partitions=12`) but tests still use the old defaults.
 
-**Root cause:** ConfigMap changes require a pod restart. Kates reads environment variables at JVM startup; changes to the ConfigMap are not picked up automatically.
+**Root cause:** The `TestTypeDefaults` class has a specific merge order: explicit values in the request override configured defaults, which override hardcoded defaults. If your request includes a value for the field you are trying to default, the configured default is overridden.
 
-**Fix:**
-
-```bash
-kubectl rollout restart deployment/kates -n kates
-kubectl rollout status deployment/kates -n kates
-curl -s http://localhost:8080/api/health | jq '.tests.stress'
-```
-
----
-
-### Which backend should I use?
-
-| Scenario | Best Backend | Reason |
-|----------|-------------|--------|
-| Quick local tests | `native` | No external dependencies required |
-| Distributed load generation | `trogdor` | Multiple agents can generate load from different nodes |
-| CI/CD automated tests | `native` | Simpler deployment, fewer moving parts |
-| Production-scale testing | `trogdor` | Agents distributed across the cluster for realistic load distribution |
-| Maximum throughput testing | `trogdor` | Agents can be scaled independently from Kates |
-| Low-latency measurement | `native` | No REST overhead between Kates and the Kafka clients |
-
----
-
-## Debugging Tips
-
-### View effective configuration
+**Fix:** Check which values your request is actually sending:
 
 ```bash
 curl -s http://localhost:8080/api/health | jq '.tests'
 ```
 
-Shows the fully resolved per-type test configuration, reflecting all three tiers (ConfigMap, `application.properties`, Java defaults).
+This shows the resolved defaults for each test type. If the values match your configuration, the defaults are correct — the request is overriding them. Remove the field from your request body to use the configured default.
 
-### View available playbooks
+### "Backend 'trogdor' is not available"
 
-```bash
-curl -s http://localhost:8080/api/disruptions/playbooks | jq '.[].name'
+**Symptom:** Tests submitted with `"backend": "trogdor"` fail with "Backend 'trogdor' is not available."
+
+**Root cause:** The Trogdor backend requires a running Trogdor coordinator service. If the Trogdor coordinator is not deployed or its URL is misconfigured, the backend probe fails.
+
+**Fix:** Either deploy Trogdor or switch to the native backend:
+
+```json
+{
+  "type": "LOAD",
+  "backend": "native",
+  "spec": { "..." }
+}
 ```
 
-### Dry-run a disruption before executing
+The native backend runs benchmarks in-process using the Kafka client library directly. It supports all the same test types as Trogdor, and for most use cases, it is the better choice — no additional infrastructure required.
+
+## General Debugging Methodology
+
+When something goes wrong and the symptoms do not match any of the issues above, here is a systematic approach:
+
+### 1. Check the Health Endpoint
 
 ```bash
-curl -X POST http://localhost:8080/api/disruptions?dryRun=true \
+curl -s http://localhost:8080/api/health | jq
+```
+
+This tells you whether Kates can reach Kafka, which backends are available, and what defaults are configured. If `kafka.status` is `DOWN`, start there — nothing else will work until Kafka connectivity is restored.
+
+### 2. Check the Logs
+
+```bash
+kubectl logs deploy/kates --tail=200
+```
+
+Kates uses structured logging with log levels. Look for `ERROR` and `WARN` entries first. The most informative log messages come from `TestOrchestrator`, `DisruptionOrchestrator`, and the chaos providers.
+
+### 3. Check Kafka Cluster State
+
+```bash
+kubectl exec -it krafter-kafka-0 -n kafka -- kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic test-topic
+
+kubectl exec -it krafter-kafka-0 -n kafka -- kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group test-group
+```
+
+These commands show the partition layout, ISR state, and consumer group status — the most common sources of test issues.
+
+### 4. Check Kubernetes Resources
+
+```bash
+kubectl get pods -n kafka
+kubectl get pods -n kates
+kubectl describe pod krafter-kafka-0 -n kafka
+```
+
+Look for pods in `CrashLoopBackOff`, `OOMKilled`, or `Pending` state. These indicate infrastructure problems that affect test results.
+
+### 5. Check Resource Consumption
+
+```bash
+kubectl top pod -n kafka
+kubectl top pod -n kates
+```
+
+High CPU or memory usage can cause timeouts, GC pauses, and degraded performance that masquerade as test failures.
+
+### 6. Still Stuck?
+
+If none of the above reveals the problem, try running the simplest possible test to isolate the issue:
+
+```bash
+curl -X POST http://localhost:8080/api/tests \
   -H 'Content-Type: application/json' \
-  -d @disruption-plan.json | jq
+  -d '{"type":"LOAD","spec":{"numRecords":100,"throughput":10}}'
 ```
 
-Shows which pods would be affected, which broker is the leader, and whether RBAC permissions are sufficient — without injecting any faults.
-
-### Watch disruption events in real-time
-
-```bash
-curl -N http://localhost:8080/api/disruptions/stream
-```
-
-Streams Server-Sent Events showing step progress, fault injection, ISR changes, and SLA grading results.
-
-### Check Kafka cluster health
-
-```bash
-curl -s http://localhost:8080/api/cluster/info | jq
-curl -s http://localhost:8080/api/cluster/topics | jq
-```
+If this tiny test works, the problem is likely in your test configuration or cluster capacity. If it fails, the problem is in Kates' connectivity or deployment.
