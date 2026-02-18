@@ -1,12 +1,13 @@
 package com.klster.kates.util;
 
-import com.klster.kates.domain.TestResult;
-import com.klster.kates.report.ReportSummary;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+
+import com.klster.kates.domain.TestResult;
+import com.klster.kates.report.ReportSummary;
 
 class MetricUtilsTest {
 

@@ -1,5 +1,18 @@
 package com.klster.kates.engine;
 
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Any;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
 import com.klster.kates.config.TestTypeDefaults;
 import com.klster.kates.domain.CreateTestRequest;
 import com.klster.kates.domain.ScenarioPhase;
@@ -11,18 +24,6 @@ import com.klster.kates.domain.TestType;
 import com.klster.kates.export.LatencyHeatmapData;
 import com.klster.kates.service.KafkaAdminService;
 import com.klster.kates.service.TestRunRepository;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Any;
-import jakarta.enterprise.inject.Instance;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import org.jboss.logging.Logger;
 
 /**
  * Orchestrator that routes benchmark execution to pluggable backends.
@@ -114,8 +115,7 @@ public class TestOrchestrator {
 
             activeHandles.put(run.getId(), handles);
 
-            boolean allFailed = run.getResults().stream()
-                    .allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
+            boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
                 run.setStatus(TestResult.TaskStatus.FAILED);
             }
@@ -197,8 +197,7 @@ public class TestOrchestrator {
 
             activeHandles.put(run.getId(), allHandles);
 
-            boolean allFailed = run.getResults().stream()
-                    .allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
+            boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
                 run.setStatus(TestResult.TaskStatus.FAILED);
             }
@@ -216,7 +215,8 @@ public class TestOrchestrator {
     }
 
     public TestRun refreshStatus(String runId) {
-        TestRun run = repository.findById(runId)
+        TestRun run = repository
+                .findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
@@ -237,16 +237,17 @@ public class TestOrchestrator {
                 BenchmarkHandle handle = handleMap.get(result.getTaskId());
                 if (handle != null) {
                     try {
-                    BenchmarkStatus status = backend.poll(handle);
-                    applyStatus(result, status);
+                        BenchmarkStatus status = backend.poll(handle);
+                        applyStatus(result, status);
 
-                    if (status.getHeatmapBuckets() != null) {
-                        heatmapRows.computeIfAbsent(runId, k -> new java.util.ArrayList<>())
-                                .add(new LatencyHeatmapData.HeatmapRow(
-                                        System.currentTimeMillis(),
-                                        result.getPhaseName(),
-                                        status.getHeatmapBuckets()));
-                    }
+                        if (status.getHeatmapBuckets() != null) {
+                            heatmapRows
+                                    .computeIfAbsent(runId, k -> new java.util.ArrayList<>())
+                                    .add(new LatencyHeatmapData.HeatmapRow(
+                                            System.currentTimeMillis(),
+                                            result.getPhaseName(),
+                                            status.getHeatmapBuckets()));
+                        }
                     } catch (Exception e) {
                         LOG.warn("Failed to poll task: " + result.getTaskId(), e);
                     }
@@ -263,36 +264,40 @@ public class TestOrchestrator {
         }
 
         if (allDone) {
-        run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
-        activeHandles.remove(runId);
+            run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
+            activeHandles.remove(runId);
 
-        String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
-        String outcome = anyFailed ? "failed" : "done";
-        katesMetrics.recordTestCompleted(typeName, outcome);
+            String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
+            String outcome = anyFailed ? "failed" : "done";
+            katesMetrics.recordTestCompleted(typeName, outcome);
 
-        if (run.getCreatedAt() != null) {
-            try {
-                var start = java.time.Instant.parse(run.getCreatedAt());
-                katesMetrics.recordTestDuration(typeName, java.time.Duration.between(start, java.time.Instant.now()));
-            } catch (Exception ignored) {}
-        }
-
-        for (TestResult r : run.getResults()) {
-            if (r.getThroughputRecordsPerSec() > 0) {
-                katesMetrics.recordFinalThroughput(typeName, r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
+            if (run.getCreatedAt() != null) {
+                try {
+                    var start = java.time.Instant.parse(run.getCreatedAt());
+                    katesMetrics.recordTestDuration(
+                            typeName, java.time.Duration.between(start, java.time.Instant.now()));
+                } catch (Exception ignored) {
+                }
             }
-            if (r.getRecordsSent() > 0) {
-                katesMetrics.recordRecordsProcessed(typeName, r.getRecordsSent());
+
+            for (TestResult r : run.getResults()) {
+                if (r.getThroughputRecordsPerSec() > 0) {
+                    katesMetrics.recordFinalThroughput(
+                            typeName, r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
+                }
+                if (r.getRecordsSent() > 0) {
+                    katesMetrics.recordRecordsProcessed(typeName, r.getRecordsSent());
+                }
             }
         }
-    }
 
         repository.save(run);
         return run;
     }
 
     public void stopTest(String runId) {
-        TestRun run = repository.findById(runId)
+        TestRun run = repository
+                .findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
@@ -312,10 +317,7 @@ public class TestOrchestrator {
     }
 
     public List<String> availableBackends() {
-        return backends.stream()
-                .map(BenchmarkBackend::name)
-                .sorted()
-                .toList();
+        return backends.stream().map(BenchmarkBackend::name).sorted().toList();
     }
 
     public List<LatencyHeatmapData.HeatmapRow> getHeatmapRows(String runId) {
@@ -368,8 +370,8 @@ public class TestOrchestrator {
         return backends.stream()
                 .filter(b -> b.name().equals(name))
                 .findFirst()
-                .orElseThrow(() -> new BenchmarkException(
-                        "Backend not found: '" + name + "'. Available: " + availableBackends()));
+                .orElseThrow(() ->
+                        new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends()));
     }
 
     private List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
@@ -380,14 +382,13 @@ public class TestOrchestrator {
                 "acks", spec.getAcks(),
                 "batch.size", String.valueOf(spec.getBatchSize()),
                 "linger.ms", String.valueOf(spec.getLingerMs()),
-                "compression.type", spec.getCompressionType()
-        );
+                "compression.type", spec.getCompressionType());
 
         return switch (type) {
-            case LOAD -> List.of(
-                    produceTask(runId + "-produce-0", topic, spec, producerConfig),
-                    consumeTask(runId + "-consume-0", topic, spec)
-            );
+            case LOAD ->
+                List.of(
+                        produceTask(runId + "-produce-0", topic, spec, producerConfig),
+                        consumeTask(runId + "-consume-0", topic, spec));
             case STRESS -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 for (int i = 0; i < spec.getNumProducers(); i++) {
@@ -395,24 +396,21 @@ public class TestOrchestrator {
                 }
                 yield tasks;
             }
-            case SPIKE -> List.of(
-                    BenchmarkTask.builder(runId + "-spike-burst", BenchmarkTask.WorkloadType.PRODUCE)
-                            .topic(topic)
-                            .partitions(spec.getPartitions())
-                            .targetMessagesPerSec(-1)
-                            .maxMessages(spec.getNumRecords())
-                            .durationMs(spec.getDurationMs())
-                            .recordSize(spec.getRecordSize())
-                            .producerConfig(producerConfig)
-                            .build()
-            );
-            case ENDURANCE -> List.of(
-                    produceTask(runId + "-endurance-produce", topic, spec, producerConfig),
-                    consumeTask(runId + "-endurance-consume", topic, spec)
-            );
-            case VOLUME -> List.of(
-                    produceTask(runId + "-volume-0", topic, spec, producerConfig)
-            );
+            case SPIKE ->
+                List.of(BenchmarkTask.builder(runId + "-spike-burst", BenchmarkTask.WorkloadType.PRODUCE)
+                        .topic(topic)
+                        .partitions(spec.getPartitions())
+                        .targetMessagesPerSec(-1)
+                        .maxMessages(spec.getNumRecords())
+                        .durationMs(spec.getDurationMs())
+                        .recordSize(spec.getRecordSize())
+                        .producerConfig(producerConfig)
+                        .build());
+            case ENDURANCE ->
+                List.of(
+                        produceTask(runId + "-endurance-produce", topic, spec, producerConfig),
+                        consumeTask(runId + "-endurance-consume", topic, spec));
+            case VOLUME -> List.of(produceTask(runId + "-volume-0", topic, spec, producerConfig));
             case CAPACITY -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 for (int i = 0; i < spec.getNumProducers(); i++) {
@@ -428,37 +426,35 @@ public class TestOrchestrator {
                 }
                 yield tasks;
             }
-            case ROUND_TRIP -> List.of(
-                    BenchmarkTask.builder(runId + "-roundtrip-0", BenchmarkTask.WorkloadType.ROUND_TRIP)
-                            .topic(topic)
-                            .partitions(spec.getPartitions())
-                            .targetMessagesPerSec(spec.getThroughput())
-                            .maxMessages(spec.getNumRecords())
-                            .durationMs(spec.getDurationMs())
-                            .recordSize(spec.getRecordSize())
-                            .producerConfig(producerConfig)
-                            .build()
-            );
-            case INTEGRITY -> List.of(
-                    BenchmarkTask.builder(runId + "-integrity-0", BenchmarkTask.WorkloadType.INTEGRITY)
-                            .topic(topic)
-                            .partitions(spec.getPartitions())
-                            .targetMessagesPerSec(spec.getThroughput())
-                            .maxMessages(spec.getNumRecords())
-                            .durationMs(spec.getDurationMs())
-                            .recordSize(spec.getRecordSize())
-                            .consumerGroup(spec.getConsumerGroup() != null ? spec.getConsumerGroup() : "integrity-cg")
-                            .producerConfig(producerConfig)
-                            .enableIdempotence(spec.isEnableIdempotence())
-                            .enableTransactions(spec.isEnableTransactions())
-                            .enableCrc(spec.isEnableCrc())
-                            .build()
-            );
+            case ROUND_TRIP ->
+                List.of(BenchmarkTask.builder(runId + "-roundtrip-0", BenchmarkTask.WorkloadType.ROUND_TRIP)
+                        .topic(topic)
+                        .partitions(spec.getPartitions())
+                        .targetMessagesPerSec(spec.getThroughput())
+                        .maxMessages(spec.getNumRecords())
+                        .durationMs(spec.getDurationMs())
+                        .recordSize(spec.getRecordSize())
+                        .producerConfig(producerConfig)
+                        .build());
+            case INTEGRITY ->
+                List.of(BenchmarkTask.builder(runId + "-integrity-0", BenchmarkTask.WorkloadType.INTEGRITY)
+                        .topic(topic)
+                        .partitions(spec.getPartitions())
+                        .targetMessagesPerSec(spec.getThroughput())
+                        .maxMessages(spec.getNumRecords())
+                        .durationMs(spec.getDurationMs())
+                        .recordSize(spec.getRecordSize())
+                        .consumerGroup(spec.getConsumerGroup() != null ? spec.getConsumerGroup() : "integrity-cg")
+                        .producerConfig(producerConfig)
+                        .enableIdempotence(spec.isEnableIdempotence())
+                        .enableTransactions(spec.isEnableTransactions())
+                        .enableCrc(spec.isEnableCrc())
+                        .build());
         };
     }
 
-    private List<BenchmarkTask> buildPhaseTask(ScenarioPhase phase, TestSpec spec, TestType type,
-                                                String runId, String phaseName) {
+    private List<BenchmarkTask> buildPhaseTask(
+            ScenarioPhase phase, TestSpec spec, TestType type, String runId, String phaseName) {
         String topic = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
         Map<String, String> producerConfig = new HashMap<>();
         producerConfig.put("acks", spec.getAcks());
@@ -469,9 +465,7 @@ public class TestOrchestrator {
         String taskId = runId + "-" + phaseName;
 
         return switch (phase.getPhaseType()) {
-            case WARMUP, STEADY, COOLDOWN -> List.of(
-                    produceTask(taskId + "-produce", topic, spec, producerConfig)
-            );
+            case WARMUP, STEADY, COOLDOWN -> List.of(produceTask(taskId + "-produce", topic, spec, producerConfig));
             case RAMP -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 int steps = Math.max(1, phase.getRampSteps());
@@ -489,17 +483,16 @@ public class TestOrchestrator {
                 }
                 yield tasks;
             }
-            case SPIKE -> List.of(
-                    BenchmarkTask.builder(taskId + "-spike", BenchmarkTask.WorkloadType.PRODUCE)
-                            .topic(topic)
-                            .partitions(spec.getPartitions())
-                            .targetMessagesPerSec(-1)
-                            .maxMessages(spec.getNumRecords())
-                            .durationMs(spec.getDurationMs())
-                            .recordSize(spec.getRecordSize())
-                            .producerConfig(producerConfig)
-                            .build()
-            );
+            case SPIKE ->
+                List.of(BenchmarkTask.builder(taskId + "-spike", BenchmarkTask.WorkloadType.PRODUCE)
+                        .topic(topic)
+                        .partitions(spec.getPartitions())
+                        .targetMessagesPerSec(-1)
+                        .maxMessages(spec.getNumRecords())
+                        .durationMs(spec.getDurationMs())
+                        .recordSize(spec.getRecordSize())
+                        .producerConfig(producerConfig)
+                        .build());
         };
     }
 
@@ -526,7 +519,8 @@ public class TestOrchestrator {
     }
 
     private void createTestTopic(TestSpec spec, TestType type) {
-        String topicName = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
+        String topicName =
+                spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
         Map<String, String> topicConfig = new HashMap<>();
         topicConfig.put("min.insync.replicas", String.valueOf(spec.getMinInsyncReplicas()));
 

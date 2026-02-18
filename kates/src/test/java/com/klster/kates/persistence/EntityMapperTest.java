@@ -1,16 +1,17 @@
 package com.klster.kates.persistence;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
 import com.klster.kates.domain.SlaDefinition;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
-import org.junit.jupiter.api.Test;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class EntityMapperTest {
 

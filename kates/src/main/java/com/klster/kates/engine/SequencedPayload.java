@@ -33,10 +33,21 @@ public final class SequencedPayload {
         this.crcValid = crcValid;
     }
 
-    public long getSequence() { return sequence; }
-    public long getTimestampNanos() { return timestampNanos; }
-    public long getRunIdHash() { return runIdHash; }
-    public boolean isCrcValid() { return crcValid; }
+    public long getSequence() {
+        return sequence;
+    }
+
+    public long getTimestampNanos() {
+        return timestampNanos;
+    }
+
+    public long getRunIdHash() {
+        return runIdHash;
+    }
+
+    public boolean isCrcValid() {
+        return crcValid;
+    }
 
     /**
      * Encodes the payload into a byte array of the given total size.
@@ -64,8 +75,7 @@ public final class SequencedPayload {
     public static SequencedPayload decode(byte[] data) {
         if (data == null || data.length < HEADER_SIZE) {
             throw new IllegalArgumentException(
-                    "Payload must be at least " + HEADER_SIZE + " bytes, got " +
-                            (data == null ? 0 : data.length));
+                    "Payload must be at least " + HEADER_SIZE + " bytes, got " + (data == null ? 0 : data.length));
         }
         ByteBuffer buf = ByteBuffer.wrap(data);
         long seq = buf.getLong();

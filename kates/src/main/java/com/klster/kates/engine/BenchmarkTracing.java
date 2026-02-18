@@ -1,17 +1,17 @@
 package com.klster.kates.engine;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
+import jakarta.enterprise.context.ApplicationScoped;
+
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
-import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
 
 /**
  * Creates OpenTelemetry spans for benchmark execution lifecycle.
@@ -30,9 +30,7 @@ public class BenchmarkTracing {
     public BenchmarkTracing(
             @ConfigProperty(name = "quarkus.otel.enabled", defaultValue = "false") boolean otelEnabled) {
         this.enabled = otelEnabled;
-        this.tracer = otelEnabled
-                ? GlobalOpenTelemetry.getTracer("kates", "1.0.0")
-                : null;
+        this.tracer = otelEnabled ? GlobalOpenTelemetry.getTracer("kates", "1.0.0") : null;
     }
 
     public void startRunSpan(String runId, String testType, String backend) {

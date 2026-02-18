@@ -1,19 +1,20 @@
 package com.klster.kates.api;
 
-import com.klster.kates.config.TestTypeDefaults;
-import com.klster.kates.engine.TestOrchestrator;
-import com.klster.kates.service.KafkaAdminService;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import com.klster.kates.config.TestTypeDefaults;
+import com.klster.kates.engine.TestOrchestrator;
+import com.klster.kates.service.KafkaAdminService;
 
 @Path("/api/health")
 @Produces(MediaType.APPLICATION_JSON)
@@ -41,25 +42,25 @@ public class HealthResource {
     }
 
     @GET
-    @Operation(summary = "Application health", description = "Returns engine status, Kafka connectivity, and test type configurations")
+    @Operation(
+            summary = "Application health",
+            description = "Returns engine status, Kafka connectivity, and test type configurations")
     public Map<String, Object> health() {
         boolean kafkaReachable = kafkaAdmin.isReachable();
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", kafkaReachable ? "UP" : "DEGRADED");
 
-        response.put("engine", Map.of(
-                "activeBackend", defaultBackend,
-                "availableBackends", orchestrator.availableBackends()
-        ));
+        response.put(
+                "engine",
+                Map.of("activeBackend", defaultBackend, "availableBackends", orchestrator.availableBackends()));
 
-        response.put("kafka", Map.of(
-                "status", kafkaReachable ? "UP" : "DOWN",
-                "bootstrapServers", bootstrapServers,
-                "message", kafkaReachable
-                        ? "Kafka cluster is reachable"
-                        : "Cannot connect to Kafka cluster"
-        ));
+        response.put(
+                "kafka",
+                Map.of(
+                        "status", kafkaReachable ? "UP" : "DOWN",
+                        "bootstrapServers", bootstrapServers,
+                        "message", kafkaReachable ? "Kafka cluster is reachable" : "Cannot connect to Kafka cluster"));
 
         Map<String, Object> testConfigs = new LinkedHashMap<>();
         typeDefaults.allConfigs().forEach((name, cfg) -> testConfigs.put(name, cfg.toMap()));

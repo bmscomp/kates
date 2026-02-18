@@ -1,14 +1,14 @@
 package com.klster.kates.chaos;
 
-import io.fabric8.kubernetes.api.model.networking.v1.*;
-import io.fabric8.kubernetes.client.KubernetesClient;
+import java.time.Instant;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import io.fabric8.kubernetes.api.model.networking.v1.*;
+import io.fabric8.kubernetes.client.KubernetesClient;
 import org.jboss.logging.Logger;
 
 /**
@@ -55,28 +55,25 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     case LEADER_ELECTION -> executePodKill(spec);
                     default -> {
                         return ChaosOutcome.skipped(
-                                "DisruptionType " + spec.disruptionType()
-                                        + " not supported by kubernetes provider");
+                                "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
                     }
                 }
 
-                if (spec.chaosDurationSec() > 0
-                        && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
+                if (spec.chaosDurationSec() > 0 && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
                     Thread.sleep(spec.chaosDurationSec() * 1000L);
                     cleanup(engineName);
                 }
 
-                return ChaosOutcome.success(engineName, spec.experimentName(),
-                        start, Instant.now(), startNanos);
+                return ChaosOutcome.success(engineName, spec.experimentName(), start, Instant.now(), startNanos);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return ChaosOutcome.failure(engineName, spec.experimentName(),
-                        start, Instant.now(), startNanos, "Interrupted");
+                return ChaosOutcome.failure(
+                        engineName, spec.experimentName(), start, Instant.now(), startNanos, "Interrupted");
             } catch (Exception e) {
                 LOG.error("Fault injection failed", e);
-                return ChaosOutcome.failure(engineName, spec.experimentName(),
-                        start, Instant.now(), startNanos, e.getMessage());
+                return ChaosOutcome.failure(
+                        engineName, spec.experimentName(), start, Instant.now(), startNanos, e.getMessage());
             }
         });
     }
@@ -119,19 +116,20 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
         NetworkPolicy policy = new NetworkPolicyBuilder()
                 .withNewMetadata()
-                    .withName(policyName)
-                    .withNamespace(spec.targetNamespace())
-                    .addToLabels("managed-by", "kates")
+                .withName(policyName)
+                .withNamespace(spec.targetNamespace())
+                .addToLabels("managed-by", "kates")
                 .endMetadata()
                 .withNewSpec()
-                    .withNewPodSelector()
-                        .addToMatchLabels(podLabels)
-                    .endPodSelector()
-                    .withPolicyTypes("Ingress", "Egress")
+                .withNewPodSelector()
+                .addToMatchLabels(podLabels)
+                .endPodSelector()
+                .withPolicyTypes("Ingress", "Egress")
                 .endSpec()
                 .build();
 
-        client.network().networkPolicies()
+        client.network()
+                .networkPolicies()
                 .inNamespace(spec.targetNamespace())
                 .resource(policy)
                 .create();
@@ -144,14 +142,16 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
         LOG.info("ROLLING_RESTART: restarting StatefulSets with label " + spec.targetLabel());
 
-        client.apps().statefulSets()
+        client.apps()
+                .statefulSets()
                 .inNamespace(spec.targetNamespace())
                 .withLabel(labelKey, labelValue)
                 .list()
                 .getItems()
                 .forEach(ss -> {
                     LOG.info("Rolling restart: " + ss.getMetadata().getName());
-                    client.apps().statefulSets()
+                    client.apps()
+                            .statefulSets()
                             .inNamespace(spec.targetNamespace())
                             .withName(ss.getMetadata().getName())
                             .rolling()
@@ -164,7 +164,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
         String labelKey = parts[0];
         String labelValue = parts.length > 1 ? parts[1] : "";
 
-        client.apps().statefulSets()
+        client.apps()
+                .statefulSets()
                 .inNamespace(spec.targetNamespace())
                 .withLabel(labelKey, labelValue)
                 .list()
@@ -172,9 +173,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .forEach(ss -> {
                     int current = ss.getSpec().getReplicas();
                     int target = Math.max(1, current - 1);
-                    LOG.info("SCALE_DOWN: " + ss.getMetadata().getName()
-                            + " from " + current + " → " + target);
-                    client.apps().statefulSets()
+                    LOG.info("SCALE_DOWN: " + ss.getMetadata().getName() + " from " + current + " → " + target);
+                    client.apps()
+                            .statefulSets()
                             .inNamespace(spec.targetNamespace())
                             .withName(ss.getMetadata().getName())
                             .scale(target);
@@ -205,7 +206,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     .filter(p -> p.getMetadata().getName().endsWith("-" + spec.targetBrokerId()))
                     .findFirst()
                     .orElse(pods.getFirst())
-                    .getMetadata().getName();
+                    .getMetadata()
+                    .getName();
         }
 
         int index = (int) (Math.random() * pods.size());
@@ -220,7 +222,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
     @Override
     public void cleanup(String engineName) {
         try {
-            client.network().networkPolicies()
+            client.network()
+                    .networkPolicies()
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .delete();

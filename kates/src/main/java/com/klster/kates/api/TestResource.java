@@ -1,11 +1,6 @@
 package com.klster.kates.api;
 
-import com.klster.kates.domain.CreateTestRequest;
-import com.klster.kates.domain.TestResult;
-import com.klster.kates.domain.TestRun;
-import com.klster.kates.domain.TestType;
-import com.klster.kates.engine.TestOrchestrator;
-import com.klster.kates.service.TestRunRepository;
+import java.util.List;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
@@ -19,12 +14,18 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import java.util.List;
+import com.klster.kates.domain.CreateTestRequest;
+import com.klster.kates.domain.TestResult;
+import com.klster.kates.domain.TestRun;
+import com.klster.kates.domain.TestType;
+import com.klster.kates.engine.TestOrchestrator;
+import com.klster.kates.service.TestRunRepository;
 
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
@@ -42,7 +43,9 @@ public class TestResource {
     }
 
     @POST
-    @Operation(summary = "Create and execute a test", description = "Submits a new performance test run for asynchronous execution")
+    @Operation(
+            summary = "Create and execute a test",
+            description = "Submits a new performance test run for asynchronous execution")
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
     public Response createTest(@Valid CreateTestRequest request) {
         TestRun run = orchestrator.executeTest(request);
@@ -50,7 +53,9 @@ public class TestResource {
     }
 
     @GET
-    @Operation(summary = "List test runs", description = "Returns paginated test runs, optionally filtered by type or status")
+    @Operation(
+            summary = "List test runs",
+            description = "Returns paginated test runs, optionally filtered by type or status")
     @APIResponse(responseCode = "200", description = "Paginated list of test runs")
     public Response listTests(
             @Parameter(description = "Filter by test type") @QueryParam("type") String type,
@@ -66,7 +71,8 @@ public class TestResource {
                 TestType testType = TestType.valueOf(type.toUpperCase());
                 List<TestRun> content = repository.findByTypePaged(testType, safePage, safeSize);
                 long total = repository.countByType(testType);
-                return Response.ok(new PagedResponse<>(content, safePage, safeSize, total)).build();
+                return Response.ok(new PagedResponse<>(content, safePage, safeSize, total))
+                        .build();
             } catch (IllegalArgumentException e) {
                 return Response.status(Response.Status.BAD_REQUEST)
                         .entity(new ApiError(400, "Bad Request", "Invalid test type: " + type))
@@ -78,7 +84,8 @@ public class TestResource {
             try {
                 TestResult.TaskStatus taskStatus = TestResult.TaskStatus.valueOf(status.toUpperCase());
                 List<TestRun> content = repository.findByStatus(taskStatus);
-                return Response.ok(new PagedResponse<>(content, 0, content.size(), content.size())).build();
+                return Response.ok(new PagedResponse<>(content, 0, content.size(), content.size()))
+                        .build();
             } catch (IllegalArgumentException e) {
                 return Response.status(Response.Status.BAD_REQUEST)
                         .entity(new ApiError(400, "Bad Request", "Invalid status: " + status))
@@ -88,7 +95,8 @@ public class TestResource {
 
         List<TestRun> content = repository.findAllPaged(safePage, safeSize);
         long total = repository.countAll();
-        return Response.ok(new PagedResponse<>(content, safePage, safeSize, total)).build();
+        return Response.ok(new PagedResponse<>(content, safePage, safeSize, total))
+                .build();
     }
 
     @GET
@@ -97,7 +105,8 @@ public class TestResource {
     @APIResponse(responseCode = "200", description = "Test run details")
     @APIResponse(responseCode = "404", description = "Test run not found")
     public Response getTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        return repository.findById(id)
+        return repository
+                .findById(id)
                 .map(run -> {
                     orchestrator.refreshStatus(id);
                     return Response.ok(run).build();
@@ -113,7 +122,8 @@ public class TestResource {
     @APIResponse(responseCode = "204", description = "Test run deleted")
     @APIResponse(responseCode = "404", description = "Test run not found")
     public Response deleteTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        return repository.findById(id)
+        return repository
+                .findById(id)
                 .map(run -> {
                     orchestrator.stopTest(id);
                     repository.delete(id);

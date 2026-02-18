@@ -1,5 +1,12 @@
 package com.klster.kates.trend;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
+import java.util.function.Function;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.report.PhaseReport;
@@ -7,13 +14,6 @@ import com.klster.kates.report.ReportGenerator;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
 import com.klster.kates.service.TestRunRepository;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.*;
-import java.util.function.Function;
 
 /**
  * Computes historical metric trends from completed test runs.
@@ -55,9 +55,7 @@ public class TrendService {
         List<TrendResponse.DataPoint> dataPoints = new ArrayList<>();
         for (TestRun run : runs) {
             TestReport report = reportGenerator.generate(run);
-            ReportSummary summary = phase != null
-                    ? findPhaseSummary(report, phase)
-                    : report.getSummary();
+            ReportSummary summary = phase != null ? findPhaseSummary(report, phase) : report.getSummary();
 
             if (summary != null) {
                 double value = extractor.apply(summary);
@@ -103,8 +101,7 @@ public class TrendService {
         for (Map.Entry<String, List<TrendResponse.DataPoint>> entry : byPhase.entrySet()) {
             double baseline = computeBaseline(entry.getValue(), baselineWindow);
             List<TrendResponse.Regression> regressions = detectRegressions(entry.getValue(), baseline, metric);
-            phaseTrends.add(new PhaseTrendResponse.PhaseTrend(
-                    entry.getKey(), entry.getValue(), baseline, regressions));
+            phaseTrends.add(new PhaseTrendResponse.PhaseTrend(entry.getKey(), entry.getValue(), baseline, regressions));
         }
 
         return new PhaseTrendResponse(type.name(), metric, phaseTrends);
@@ -158,8 +155,7 @@ public class TrendService {
                     .findFirst()
                     .ifPresent(bm -> {
                         double value = extractor.apply(bm.metrics());
-                        dataPoints.add(new TrendResponse.DataPoint(
-                                run.getCreatedAt(), run.getId(), value));
+                        dataPoints.add(new TrendResponse.DataPoint(run.getCreatedAt(), run.getId(), value));
                     });
         }
 
@@ -214,8 +210,7 @@ public class TrendService {
 
             if (isRegression) {
                 regressions.add(new TrendResponse.Regression(
-                        point.runId(), point.timestamp(), point.value(),
-                        baseline, deviation * 100));
+                        point.runId(), point.timestamp(), point.value(), baseline, deviation * 100));
             }
         }
         return regressions;

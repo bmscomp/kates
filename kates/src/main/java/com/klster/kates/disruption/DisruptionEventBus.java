@@ -1,11 +1,11 @@
 package com.klster.kates.disruption;
 
-import jakarta.enterprise.context.ApplicationScoped;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import jakarta.enterprise.context.ApplicationScoped;
+
 import org.jboss.logging.Logger;
 
 /**
@@ -39,11 +39,13 @@ public class DisruptionEventBus {
     }
 
     public void emit(String disruptionId, EventType type, String stepName, String message) {
-        emit(new DisruptionEvent(disruptionId, type, stepName, message, Instant.now().toString(), null));
+        emit(new DisruptionEvent(
+                disruptionId, type, stepName, message, Instant.now().toString(), null));
     }
 
     public void emit(String disruptionId, EventType type, String stepName, String message, Object data) {
-        emit(new DisruptionEvent(disruptionId, type, stepName, message, Instant.now().toString(), data));
+        emit(new DisruptionEvent(
+                disruptionId, type, stepName, message, Instant.now().toString(), data));
     }
 
     public enum EventType {
@@ -61,11 +63,5 @@ public class DisruptionEventBus {
     }
 
     public record DisruptionEvent(
-            String disruptionId,
-            EventType type,
-            String stepName,
-            String message,
-            String timestamp,
-            Object data
-    ) {}
+            String disruptionId, EventType type, String stepName, String message, String timestamp, Object data) {}
 }

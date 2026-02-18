@@ -1,17 +1,17 @@
 package com.klster.kates.engine;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.DoubleAccumulator;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.DoubleAccumulator;
 
 /**
  * Bridges internal benchmark metrics to Micrometer for Prometheus export.
@@ -102,8 +102,8 @@ public class BenchmarkMetrics {
         }
 
         DistributionSummary latencySummary(String phase) {
-            return latencySummaries.computeIfAbsent(phase, p ->
-                    DistributionSummary.builder("kates.benchmark.latency.ms")
+            return latencySummaries.computeIfAbsent(
+                    phase, p -> DistributionSummary.builder("kates.benchmark.latency.ms")
                             .tags("run_id", runId, "test_type", testType, "phase", p)
                             .description("Request latency distribution")
                             .publishPercentiles(0.5, 0.95, 0.99, 0.999)
@@ -111,19 +111,17 @@ public class BenchmarkMetrics {
         }
 
         Counter recordCount(String phase) {
-            return recordCounters.computeIfAbsent(phase, p ->
-                    Counter.builder("kates.benchmark.records.total")
-                            .tags("run_id", runId, "test_type", testType, "phase", p)
-                            .description("Total records processed")
-                            .register(registry));
+            return recordCounters.computeIfAbsent(phase, p -> Counter.builder("kates.benchmark.records.total")
+                    .tags("run_id", runId, "test_type", testType, "phase", p)
+                    .description("Total records processed")
+                    .register(registry));
         }
 
         Counter errorCount(String phase) {
-            return errorCounters.computeIfAbsent(phase, p ->
-                    Counter.builder("kates.benchmark.errors.total")
-                            .tags("run_id", runId, "test_type", testType, "phase", p)
-                            .description("Total errors")
-                            .register(registry));
+            return errorCounters.computeIfAbsent(phase, p -> Counter.builder("kates.benchmark.errors.total")
+                    .tags("run_id", runId, "test_type", testType, "phase", p)
+                    .description("Total errors")
+                    .register(registry));
         }
     }
 }

@@ -1,10 +1,16 @@
 package com.klster.kates.engine;
 
-import com.klster.kates.domain.IntegrityResult;
-import com.klster.kates.domain.TestResult.TaskStatus;
+import java.time.Duration;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -15,15 +21,10 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import java.time.Duration;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.domain.IntegrityResult;
+import com.klster.kates.domain.TestResult.TaskStatus;
 
 /**
  * In-process benchmark backend using Kafka client API and virtual threads.
@@ -39,8 +40,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
 
     @Inject
-    public NativeKafkaBackend(
-            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+    public NativeKafkaBackend(@ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.bootstrapServers = bootstrapServers;
     }
 
@@ -54,9 +54,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         WorkerState state = new WorkerState(task);
         activeWorkers.put(task.getTaskId(), state);
 
-        Thread worker = Thread.ofVirtual()
-                .name("kates-" + task.getTaskId())
-                .start(() -> executeTask(task, state));
+        Thread worker = Thread.ofVirtual().name("kates-" + task.getTaskId()).start(() -> executeTask(task, state));
 
         state.thread = worker;
         LOG.info("Started native benchmark: " + task.getTaskId());
@@ -105,8 +103,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         LOG.info("Integrity: starting produce phase for " + task.getTaskId());
         runProducer(task, state);
 
-        LOG.info("Integrity: produce complete (" + state.recordsProcessed.get() +
-                " records). Starting consume phase...");
+        LOG.info("Integrity: produce complete (" + state.recordsProcessed.get()
+                + " records). Starting consume phase...");
 
         state.verifier = new DataIntegrityVerifier(state.ackTracker);
         runIntegrityConsumer(task, state);
@@ -114,12 +112,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         LOG.info("Integrity: consume complete. Running reconciliation...");
 
         state.integrityResult = state.verifier.verify(
-                -1,
-                task.isEnableCrc(),
-                true,
-                task.isEnableIdempotence(),
-                task.isEnableTransactions()
-        );
+                -1, task.isEnableCrc(), true, task.isEnableIdempotence(), task.isEnableTransactions());
     }
 
     private void runProducer(BenchmarkTask task, WorkerState state) {
@@ -141,9 +134,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         task.getProducerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
-        long targetNanosPerMsg = task.getTargetMessagesPerSec() > 0
-                ? 1_000_000_000L / task.getTargetMessagesPerSec()
-                : 0;
+        long targetNanosPerMsg =
+                task.getTargetMessagesPerSec() > 0 ? 1_000_000_000L / task.getTargetMessagesPerSec() : 0;
 
         try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(props)) {
             if (task.isEnableTransactions()) {
@@ -174,21 +166,18 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
                 long seq = sent;
                 long tsNanos = System.nanoTime();
-                byte[] payload = SequencedPayload.encode(
-                        seq, tsNanos, state.runIdHash, task.getRecordSize());
+                byte[] payload = SequencedPayload.encode(seq, tsNanos, state.runIdHash, task.getRecordSize());
                 state.ackTracker.recordSent(seq, tsNanos);
 
                 long sendStart = System.nanoTime();
-                producer.send(
-                        new ProducerRecord<>(task.getTopic(), payload),
-                        (metadata, exception) -> {
-                            if (exception != null) {
-                                state.errors.incrementAndGet();
-                                state.ackTracker.recordFailed(seq);
-                            } else {
-                                state.ackTracker.recordAcked(seq);
-                            }
-                        });
+                producer.send(new ProducerRecord<>(task.getTopic(), payload), (metadata, exception) -> {
+                    if (exception != null) {
+                        state.errors.incrementAndGet();
+                        state.ackTracker.recordFailed(seq);
+                    } else {
+                        state.ackTracker.recordAcked(seq);
+                    }
+                });
                 long latencyNs = System.nanoTime() - sendStart;
                 double latencyMs = latencyNs / 1_000_000.0;
 
@@ -258,8 +247,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             consumer.subscribe(Collections.singletonList(task.getTopic()));
 
             long consumed = 0;
-            while (!state.stopRequested.get()
-                    && System.currentTimeMillis() < deadline) {
+            while (!state.stopRequested.get() && System.currentTimeMillis() < deadline) {
 
                 ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(1000));
                 if (records.isEmpty()) {
@@ -280,8 +268,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                         }
 
                         boolean crcOk = !task.isEnableCrc() || payload.isCrcValid();
-                        state.verifier.recordConsumed(
-                                payload.getSequence(), crcOk, record.partition());
+                        state.verifier.recordConsumed(payload.getSequence(), crcOk, record.partition());
                         consumed++;
                     } catch (Exception e) {
                         LOG.debug("Skipping malformed record at offset " + record.offset());
@@ -334,7 +321,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     .p999LatencyMs(histogram.getPercentile(99.9))
                     .maxLatencyMs(histogram.getMax())
                     .latencyHistogram(histogram.snapshot())
-            .heatmapBuckets(histogram.exportBuckets());
+                    .heatmapBuckets(histogram.exportBuckets());
 
             if (error != null) {
                 builder.error(error);

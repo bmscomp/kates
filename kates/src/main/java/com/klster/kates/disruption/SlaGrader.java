@@ -1,12 +1,14 @@
 package com.klster.kates.disruption;
 
-import com.klster.kates.domain.SlaDefinition;
-import com.klster.kates.report.ReportSummary;
-import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import jakarta.enterprise.context.ApplicationScoped;
+
 import org.jboss.logging.Logger;
+
+import com.klster.kates.domain.SlaDefinition;
+import com.klster.kates.report.ReportSummary;
 
 /**
  * Evaluates disruption test results against SLA thresholds.
@@ -18,20 +20,10 @@ public class SlaGrader {
     private static final Logger LOG = Logger.getLogger(SlaGrader.class);
 
     public record SlaViolation(
-            String metricName,
-            String constraint,
-            double threshold,
-            double actual,
-            String severity
-    ) {}
+            String metricName, String constraint, double threshold, double actual, String severity) {}
 
     public record SlaVerdict(
-            String grade,
-            boolean violated,
-            List<SlaViolation> violations,
-            int totalChecks,
-            int passedChecks
-    ) {
+            String grade, boolean violated, List<SlaViolation> violations, int totalChecks, int passedChecks) {
         public static SlaVerdict pass(int totalChecks) {
             return new SlaVerdict("A", false, List.of(), totalChecks, totalChecks);
         }
@@ -56,8 +48,10 @@ public class SlaGrader {
                 totalChecks++;
                 if (post.p99LatencyMs() > sla.getMaxP99LatencyMs()) {
                     violations.add(new SlaViolation(
-                            "p99LatencyMs", "max",
-                            sla.getMaxP99LatencyMs(), post.p99LatencyMs(),
+                            "p99LatencyMs",
+                            "max",
+                            sla.getMaxP99LatencyMs(),
+                            post.p99LatencyMs(),
                             post.p99LatencyMs() > sla.getMaxP99LatencyMs() * 2 ? "CRITICAL" : "WARNING"));
                 }
             }
@@ -66,9 +60,7 @@ public class SlaGrader {
                 totalChecks++;
                 if (post.p999LatencyMs() > sla.getMaxP999LatencyMs()) {
                     violations.add(new SlaViolation(
-                            "p999LatencyMs", "max",
-                            sla.getMaxP999LatencyMs(), post.p999LatencyMs(),
-                            "WARNING"));
+                            "p999LatencyMs", "max", sla.getMaxP999LatencyMs(), post.p999LatencyMs(), "WARNING"));
                 }
             }
 
@@ -76,9 +68,7 @@ public class SlaGrader {
                 totalChecks++;
                 if (post.avgLatencyMs() > sla.getMaxAvgLatencyMs()) {
                     violations.add(new SlaViolation(
-                            "avgLatencyMs", "max",
-                            sla.getMaxAvgLatencyMs(), post.avgLatencyMs(),
-                            "WARNING"));
+                            "avgLatencyMs", "max", sla.getMaxAvgLatencyMs(), post.avgLatencyMs(), "WARNING"));
                 }
             }
 
@@ -86,10 +76,13 @@ public class SlaGrader {
                 totalChecks++;
                 if (post.avgThroughputRecPerSec() < sla.getMinThroughputRecPerSec()) {
                     violations.add(new SlaViolation(
-                            "throughputRecPerSec", "min",
-                            sla.getMinThroughputRecPerSec(), post.avgThroughputRecPerSec(),
+                            "throughputRecPerSec",
+                            "min",
+                            sla.getMinThroughputRecPerSec(),
+                            post.avgThroughputRecPerSec(),
                             post.avgThroughputRecPerSec() < sla.getMinThroughputRecPerSec() * 0.5
-                                    ? "CRITICAL" : "WARNING"));
+                                    ? "CRITICAL"
+                                    : "WARNING"));
                 }
             }
 
@@ -97,8 +90,10 @@ public class SlaGrader {
                 totalChecks++;
                 if (post.errorRate() > sla.getMaxErrorRate()) {
                     violations.add(new SlaViolation(
-                            "errorRate", "max",
-                            sla.getMaxErrorRate(), post.errorRate(),
+                            "errorRate",
+                            "max",
+                            sla.getMaxErrorRate(),
+                            post.errorRate(),
                             post.errorRate() > sla.getMaxErrorRate() * 5 ? "CRITICAL" : "WARNING"));
                 }
             }
@@ -108,8 +103,10 @@ public class SlaGrader {
                 long rtoMs = step.timeToAllReady().toMillis();
                 if (rtoMs > sla.getMaxRtoMs()) {
                     violations.add(new SlaViolation(
-                            "rtoMs", "max",
-                            sla.getMaxRtoMs().doubleValue(), rtoMs,
+                            "rtoMs",
+                            "max",
+                            sla.getMaxRtoMs().doubleValue(),
+                            rtoMs,
                             rtoMs > sla.getMaxRtoMs() * 2 ? "CRITICAL" : "WARNING"));
                 }
             }
@@ -120,18 +117,16 @@ public class SlaGrader {
             totalChecks++;
             double actual = deltas.get("dataLossPercent");
             if (actual > sla.getMaxDataLossPercent()) {
-                violations.add(new SlaViolation(
-                        "dataLossPercent", "max",
-                        sla.getMaxDataLossPercent(), actual,
-                        "CRITICAL"));
+                violations.add(
+                        new SlaViolation("dataLossPercent", "max", sla.getMaxDataLossPercent(), actual, "CRITICAL"));
             }
         }
 
         int passedChecks = totalChecks - violations.size();
         String grade = computeGrade(totalChecks, violations);
 
-        LOG.info("SLA verdict: " + grade + " (" + passedChecks + "/" + totalChecks
-                + " passed, " + violations.size() + " violations)");
+        LOG.info("SLA verdict: " + grade + " (" + passedChecks + "/" + totalChecks + " passed, " + violations.size()
+                + " violations)");
 
         return new SlaVerdict(grade, !violations.isEmpty(), violations, totalChecks, passedChecks);
     }
@@ -152,8 +147,8 @@ public class SlaGrader {
     private String computeGrade(int totalChecks, List<SlaViolation> violations) {
         if (violations.isEmpty()) return "A";
 
-        long criticalCount = violations.stream()
-                .filter(v -> "CRITICAL".equals(v.severity())).count();
+        long criticalCount =
+                violations.stream().filter(v -> "CRITICAL".equals(v.severity())).count();
 
         if (criticalCount > 0) return "F";
 
@@ -167,8 +162,7 @@ public class SlaGrader {
         Map<String, Double> worst = new java.util.LinkedHashMap<>();
         for (DisruptionReport.StepReport step : report.getStepReports()) {
             if (step.impactDeltas() != null) {
-                step.impactDeltas().forEach((k, v) ->
-                        worst.merge(k, v, (a, b) -> Math.abs(a) > Math.abs(b) ? a : b));
+                step.impactDeltas().forEach((k, v) -> worst.merge(k, v, (a, b) -> Math.abs(a) > Math.abs(b) ? a : b));
             }
         }
         return worst;

@@ -27,8 +27,7 @@ public class TestSpec {
     private boolean enableTransactions = false;
     private boolean enableCrc = true;
 
-    public TestSpec() {
-    }
+    public TestSpec() {}
 
     public String getTopic() {
         return topic;

@@ -1,8 +1,9 @@
 package com.klster.kates.chaos;
 
+import java.util.concurrent.CompletableFuture;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Named;
-import java.util.concurrent.CompletableFuture;
+
 import org.jboss.logging.Logger;
 
 /**

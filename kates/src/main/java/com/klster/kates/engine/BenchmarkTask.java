@@ -9,7 +9,10 @@ import java.util.Map;
 public class BenchmarkTask {
 
     public enum WorkloadType {
-        PRODUCE, CONSUME, ROUND_TRIP, INTEGRITY
+        PRODUCE,
+        CONSUME,
+        ROUND_TRIP,
+        INTEGRITY
     }
 
     private final String taskId;
@@ -46,21 +49,65 @@ public class BenchmarkTask {
         this.enableCrc = builder.enableCrc;
     }
 
-    public String getTaskId() { return taskId; }
-    public WorkloadType getWorkloadType() { return workloadType; }
-    public String getTopic() { return topic; }
-    public int getPartitions() { return partitions; }
-    public int getTargetMessagesPerSec() { return targetMessagesPerSec; }
-    public long getMaxMessages() { return maxMessages; }
-    public long getDurationMs() { return durationMs; }
-    public int getRecordSize() { return recordSize; }
-    public int getConcurrency() { return concurrency; }
-    public String getConsumerGroup() { return consumerGroup; }
-    public Map<String, String> getProducerConfig() { return producerConfig; }
-    public Map<String, String> getConsumerConfig() { return consumerConfig; }
-    public boolean isEnableIdempotence() { return enableIdempotence; }
-    public boolean isEnableTransactions() { return enableTransactions; }
-    public boolean isEnableCrc() { return enableCrc; }
+    public String getTaskId() {
+        return taskId;
+    }
+
+    public WorkloadType getWorkloadType() {
+        return workloadType;
+    }
+
+    public String getTopic() {
+        return topic;
+    }
+
+    public int getPartitions() {
+        return partitions;
+    }
+
+    public int getTargetMessagesPerSec() {
+        return targetMessagesPerSec;
+    }
+
+    public long getMaxMessages() {
+        return maxMessages;
+    }
+
+    public long getDurationMs() {
+        return durationMs;
+    }
+
+    public int getRecordSize() {
+        return recordSize;
+    }
+
+    public int getConcurrency() {
+        return concurrency;
+    }
+
+    public String getConsumerGroup() {
+        return consumerGroup;
+    }
+
+    public Map<String, String> getProducerConfig() {
+        return producerConfig;
+    }
+
+    public Map<String, String> getConsumerConfig() {
+        return consumerConfig;
+    }
+
+    public boolean isEnableIdempotence() {
+        return enableIdempotence;
+    }
+
+    public boolean isEnableTransactions() {
+        return enableTransactions;
+    }
+
+    public boolean isEnableCrc() {
+        return enableCrc;
+    }
 
     public static Builder builder(String taskId, WorkloadType type) {
         return new Builder(taskId, type);
@@ -88,19 +135,70 @@ public class BenchmarkTask {
             this.workloadType = workloadType;
         }
 
-        public Builder topic(String topic) { this.topic = topic; return this; }
-        public Builder partitions(int p) { this.partitions = p; return this; }
-        public Builder targetMessagesPerSec(int t) { this.targetMessagesPerSec = t; return this; }
-        public Builder maxMessages(long m) { this.maxMessages = m; return this; }
-        public Builder durationMs(long d) { this.durationMs = d; return this; }
-        public Builder recordSize(int s) { this.recordSize = s; return this; }
-        public Builder concurrency(int c) { this.concurrency = c; return this; }
-        public Builder consumerGroup(String g) { this.consumerGroup = g; return this; }
-        public Builder producerConfig(Map<String, String> c) { this.producerConfig = c; return this; }
-        public Builder consumerConfig(Map<String, String> c) { this.consumerConfig = c; return this; }
-        public Builder enableIdempotence(boolean b) { this.enableIdempotence = b; return this; }
-        public Builder enableTransactions(boolean b) { this.enableTransactions = b; return this; }
-        public Builder enableCrc(boolean b) { this.enableCrc = b; return this; }
+        public Builder topic(String topic) {
+            this.topic = topic;
+            return this;
+        }
+
+        public Builder partitions(int p) {
+            this.partitions = p;
+            return this;
+        }
+
+        public Builder targetMessagesPerSec(int t) {
+            this.targetMessagesPerSec = t;
+            return this;
+        }
+
+        public Builder maxMessages(long m) {
+            this.maxMessages = m;
+            return this;
+        }
+
+        public Builder durationMs(long d) {
+            this.durationMs = d;
+            return this;
+        }
+
+        public Builder recordSize(int s) {
+            this.recordSize = s;
+            return this;
+        }
+
+        public Builder concurrency(int c) {
+            this.concurrency = c;
+            return this;
+        }
+
+        public Builder consumerGroup(String g) {
+            this.consumerGroup = g;
+            return this;
+        }
+
+        public Builder producerConfig(Map<String, String> c) {
+            this.producerConfig = c;
+            return this;
+        }
+
+        public Builder consumerConfig(Map<String, String> c) {
+            this.consumerConfig = c;
+            return this;
+        }
+
+        public Builder enableIdempotence(boolean b) {
+            this.enableIdempotence = b;
+            return this;
+        }
+
+        public Builder enableTransactions(boolean b) {
+            this.enableTransactions = b;
+            return this;
+        }
+
+        public Builder enableCrc(boolean b) {
+            this.enableCrc = b;
+            return this;
+        }
 
         public BenchmarkTask build() {
             return new BenchmarkTask(this);

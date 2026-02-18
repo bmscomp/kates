@@ -1,7 +1,7 @@
 package com.klster.kates.disruption;
 
-import jakarta.persistence.*;
 import java.time.Instant;
+import jakarta.persistence.*;
 
 /**
  * JPA entity for a scheduled/recurring disruption test.
@@ -43,30 +43,75 @@ public class DisruptionScheduleEntity {
         this.createdAt = Instant.now();
     }
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public String getId() {
+        return id;
+    }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public void setId(String id) {
+        this.id = id;
+    }
 
-    public String getCronExpression() { return cronExpression; }
-    public void setCronExpression(String cronExpression) { this.cronExpression = cronExpression; }
+    public String getName() {
+        return name;
+    }
 
-    public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public void setName(String name) {
+        this.name = name;
+    }
 
-    public String getPlaybookName() { return playbookName; }
-    public void setPlaybookName(String playbookName) { this.playbookName = playbookName; }
+    public String getCronExpression() {
+        return cronExpression;
+    }
 
-    public String getPlanJson() { return planJson; }
-    public void setPlanJson(String planJson) { this.planJson = planJson; }
+    public void setCronExpression(String cronExpression) {
+        this.cronExpression = cronExpression;
+    }
 
-    public String getLastRunId() { return lastRunId; }
-    public void setLastRunId(String lastRunId) { this.lastRunId = lastRunId; }
+    public boolean isEnabled() {
+        return enabled;
+    }
 
-    public Instant getLastRunAt() { return lastRunAt; }
-    public void setLastRunAt(Instant lastRunAt) { this.lastRunAt = lastRunAt; }
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
 
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public String getPlaybookName() {
+        return playbookName;
+    }
+
+    public void setPlaybookName(String playbookName) {
+        this.playbookName = playbookName;
+    }
+
+    public String getPlanJson() {
+        return planJson;
+    }
+
+    public void setPlanJson(String planJson) {
+        this.planJson = planJson;
+    }
+
+    public String getLastRunId() {
+        return lastRunId;
+    }
+
+    public void setLastRunId(String lastRunId) {
+        this.lastRunId = lastRunId;
+    }
+
+    public Instant getLastRunAt() {
+        return lastRunAt;
+    }
+
+    public void setLastRunAt(Instant lastRunAt) {
+        this.lastRunAt = lastRunAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
 }

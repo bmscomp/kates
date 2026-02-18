@@ -1,6 +1,7 @@
 package com.klster.kates.api;
 
-import com.klster.kates.service.KafkaAdminService;
+import java.util.Map;
+import java.util.Set;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -9,13 +10,12 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.util.Map;
-import java.util.Set;
-
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
+import com.klster.kates.service.KafkaAdminService;
 
 @Path("/api/cluster")
 @Produces(MediaType.APPLICATION_JSON)
@@ -39,7 +39,8 @@ public class ClusterResource {
             return Response.ok(info).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(ApiError.of(500, "Internal Server Error", "Failed to connect to Kafka cluster: " + e.getMessage()))
+                    .entity(ApiError.of(
+                            500, "Internal Server Error", "Failed to connect to Kafka cluster: " + e.getMessage()))
                     .build();
         }
     }
@@ -89,7 +90,8 @@ public class ClusterResource {
             return Response.ok(kafkaAdmin.listConsumerGroups()).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(ApiError.of(500, "Internal Server Error", "Failed to list consumer groups: " + e.getMessage()))
+                    .entity(ApiError.of(
+                            500, "Internal Server Error", "Failed to list consumer groups: " + e.getMessage()))
                     .build();
         }
     }
@@ -110,21 +112,25 @@ public class ClusterResource {
                         .build();
             }
             return Response.serverError()
-                    .entity(ApiError.of(500, "Internal Server Error", "Failed to describe consumer group: " + e.getMessage()))
+                    .entity(ApiError.of(
+                            500, "Internal Server Error", "Failed to describe consumer group: " + e.getMessage()))
                     .build();
         }
     }
 
     @GET
     @Path("/brokers/{id}/configs")
-    @Operation(summary = "Get broker configuration", description = "Returns configuration entries for a specific broker")
+    @Operation(
+            summary = "Get broker configuration",
+            description = "Returns configuration entries for a specific broker")
     @APIResponse(responseCode = "200", description = "Broker configuration")
     public Response getBrokerConfigs(@Parameter(description = "Broker ID") @PathParam("id") int id) {
         try {
             return Response.ok(kafkaAdmin.describeBrokerConfigs(id)).build();
         } catch (Exception e) {
             return Response.serverError()
-                    .entity(ApiError.of(500, "Internal Server Error", "Failed to describe broker configs: " + e.getMessage()))
+                    .entity(ApiError.of(
+                            500, "Internal Server Error", "Failed to describe broker configs: " + e.getMessage()))
                     .build();
         }
     }

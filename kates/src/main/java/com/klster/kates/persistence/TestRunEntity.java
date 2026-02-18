@@ -1,7 +1,8 @@
 package com.klster.kates.persistence;
 
-import com.klster.kates.domain.TestResult;
-import com.klster.kates.domain.TestType;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -13,9 +14,8 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import com.klster.kates.domain.TestResult;
+import com.klster.kates.domain.TestType;
 
 @Entity
 @Table(name = "test_runs")
@@ -55,38 +55,87 @@ public class TestRunEntity {
     @OrderBy("id ASC")
     private List<TestResultEntity> results = new ArrayList<>();
 
-    public TestRunEntity() {
+    public TestRunEntity() {}
+
+    public String getId() {
+        return id;
     }
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public void setId(String id) {
+        this.id = id;
+    }
 
-    public TestType getTestType() { return testType; }
-    public void setTestType(TestType testType) { this.testType = testType; }
+    public TestType getTestType() {
+        return testType;
+    }
 
-    public TestResult.TaskStatus getStatus() { return status; }
-    public void setStatus(TestResult.TaskStatus status) { this.status = status; }
+    public void setTestType(TestType testType) {
+        this.testType = testType;
+    }
 
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public TestResult.TaskStatus getStatus() {
+        return status;
+    }
 
-    public String getBackend() { return backend; }
-    public void setBackend(String backend) { this.backend = backend; }
+    public void setStatus(TestResult.TaskStatus status) {
+        this.status = status;
+    }
 
-    public String getScenarioName() { return scenarioName; }
-    public void setScenarioName(String scenarioName) { this.scenarioName = scenarioName; }
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
 
-    public String getSpecJson() { return specJson; }
-    public void setSpecJson(String specJson) { this.specJson = specJson; }
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
 
-    public String getSlaJson() { return slaJson; }
-    public void setSlaJson(String slaJson) { this.slaJson = slaJson; }
+    public String getBackend() {
+        return backend;
+    }
 
-    public String getLabelsJson() { return labelsJson; }
-    public void setLabelsJson(String labelsJson) { this.labelsJson = labelsJson; }
+    public void setBackend(String backend) {
+        this.backend = backend;
+    }
 
-    public List<TestResultEntity> getResults() { return results; }
-    public void setResults(List<TestResultEntity> results) { this.results = results; }
+    public String getScenarioName() {
+        return scenarioName;
+    }
+
+    public void setScenarioName(String scenarioName) {
+        this.scenarioName = scenarioName;
+    }
+
+    public String getSpecJson() {
+        return specJson;
+    }
+
+    public void setSpecJson(String specJson) {
+        this.specJson = specJson;
+    }
+
+    public String getSlaJson() {
+        return slaJson;
+    }
+
+    public void setSlaJson(String slaJson) {
+        this.slaJson = slaJson;
+    }
+
+    public String getLabelsJson() {
+        return labelsJson;
+    }
+
+    public void setLabelsJson(String labelsJson) {
+        this.labelsJson = labelsJson;
+    }
+
+    public List<TestResultEntity> getResults() {
+        return results;
+    }
+
+    public void setResults(List<TestResultEntity> results) {
+        this.results = results;
+    }
 
     public void addResult(TestResultEntity result) {
         results.add(result);

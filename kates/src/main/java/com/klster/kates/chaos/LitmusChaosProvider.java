@@ -1,16 +1,16 @@
 package com.klster.kates.chaos;
 
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
-import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
-import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.jboss.logging.Logger;
 
 /**
@@ -46,8 +46,7 @@ public class LitmusChaosProvider implements ChaosProvider {
             DisruptionType.CPU_STRESS, "pod-cpu-hog",
             DisruptionType.DISK_FILL, "disk-fill",
             DisruptionType.NETWORK_PARTITION, "pod-network-partition",
-            DisruptionType.NETWORK_LATENCY, "pod-network-latency"
-    );
+            DisruptionType.NETWORK_LATENCY, "pod-network-latency");
 
     @Inject
     KubernetesClient client;
@@ -73,9 +72,9 @@ public class LitmusChaosProvider implements ChaosProvider {
                         .withApiVersion("litmuschaos.io/v1alpha1")
                         .withKind("ChaosEngine")
                         .withNewMetadata()
-                            .withName(engineName)
-                            .withNamespace(spec.targetNamespace())
-                            .addToLabels("managed-by", "kates")
+                        .withName(engineName)
+                        .withNamespace(spec.targetNamespace())
+                        .addToLabels("managed-by", "kates")
                         .endMetadata()
                         .build();
                 engine.setAdditionalProperties(Map.of("spec", engineSpec));
@@ -91,25 +90,27 @@ public class LitmusChaosProvider implements ChaosProvider {
                 String verdict = pollForVerdict(spec.targetNamespace(), engineName, timeoutSec);
 
                 if ("Pass".equalsIgnoreCase(verdict)) {
-                    return ChaosOutcome.success(engineName, experimentName,
-                            start, Instant.now(), startNanos);
+                    return ChaosOutcome.success(engineName, experimentName, start, Instant.now(), startNanos);
                 } else {
-                    return ChaosOutcome.failure(engineName, experimentName,
-                            start, Instant.now(), startNanos,
+                    return ChaosOutcome.failure(
+                            engineName,
+                            experimentName,
+                            start,
+                            Instant.now(),
+                            startNanos,
                             "ChaosResult verdict: " + verdict);
                 }
 
             } catch (Exception e) {
                 LOG.error("Litmus fault injection failed", e);
-                return ChaosOutcome.failure(engineName, spec.experimentName(),
-                        start, Instant.now(), startNanos, e.getMessage());
+                return ChaosOutcome.failure(
+                        engineName, spec.experimentName(), start, Instant.now(), startNanos, e.getMessage());
             }
         });
     }
 
     @SuppressWarnings("unchecked")
-    private String pollForVerdict(String namespace, String engineName, int timeoutSec)
-            throws InterruptedException {
+    private String pollForVerdict(String namespace, String engineName, int timeoutSec) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutSec * 1000L;
 
         while (System.currentTimeMillis() < deadline) {
@@ -126,8 +127,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                         Map<String, Object> status = (Map<String, Object>)
                                 result.getAdditionalProperties().get("status");
                         if (status != null) {
-                            Map<String, Object> expStatus = (Map<String, Object>)
-                                    status.get("experimentStatus");
+                            Map<String, Object> expStatus = (Map<String, Object>) status.get("experimentStatus");
                             if (expStatus != null) {
                                 String verdict = (String) expStatus.get("verdict");
                                 if (verdict != null && !verdict.equalsIgnoreCase("Awaited")) {
@@ -189,11 +189,13 @@ public class LitmusChaosProvider implements ChaosProvider {
     @Override
     public ChaosStatus pollStatus(String engineName) {
         try {
-            GenericKubernetesResource engine = client.genericKubernetesResources(CHAOS_ENGINE_CTX)
+            GenericKubernetesResource engine = client
+                    .genericKubernetesResources(CHAOS_ENGINE_CTX)
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .list()
-                    .getItems().stream()
+                    .getItems()
+                    .stream()
                     .filter(e -> e.getMetadata().getName().equals(engineName))
                     .findFirst()
                     .orElse(null);
@@ -201,8 +203,8 @@ public class LitmusChaosProvider implements ChaosProvider {
             if (engine == null) return ChaosStatus.NOT_FOUND;
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> status = (Map<String, Object>)
-                    engine.getAdditionalProperties().get("status");
+            Map<String, Object> status =
+                    (Map<String, Object>) engine.getAdditionalProperties().get("status");
             if (status == null) return ChaosStatus.PENDING;
 
             String engineStatus = (String) status.getOrDefault("engineStatus", "");
@@ -232,9 +234,7 @@ public class LitmusChaosProvider implements ChaosProvider {
     @Override
     public boolean isAvailable() {
         try {
-            client.genericKubernetesResources(CHAOS_ENGINE_CTX)
-                    .inAnyNamespace()
-                    .list();
+            client.genericKubernetesResources(CHAOS_ENGINE_CTX).inAnyNamespace().list();
             return true;
         } catch (Exception e) {
             return false;

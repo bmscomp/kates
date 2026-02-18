@@ -1,15 +1,16 @@
 package com.klster.kates.engine;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.klster.kates.domain.TestResult.TaskStatus;
-import com.klster.kates.trogdor.TrogdorClient;
-import com.klster.kates.trogdor.spec.TrogdorSpec;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
-import org.eclipse.microprofile.rest.client.inject.RestClient;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.domain.TestResult.TaskStatus;
+import com.klster.kates.trogdor.TrogdorClient;
+import com.klster.kates.trogdor.spec.TrogdorSpec;
 
 /**
  * Backend that delegates benchmark execution to the Trogdor Coordinator.
@@ -36,8 +37,7 @@ public class TrogdorBackend implements BenchmarkBackend {
     @Override
     public BenchmarkHandle submit(BenchmarkTask task) {
         TrogdorSpec spec = toTrogdorSpec(task);
-        TrogdorClient.CreateTaskRequest request =
-                new TrogdorClient.CreateTaskRequest(task.getTaskId(), spec);
+        TrogdorClient.CreateTaskRequest request = new TrogdorClient.CreateTaskRequest(task.getTaskId(), spec);
 
         try {
             trogdorClient.createTask(request);
@@ -71,23 +71,36 @@ public class TrogdorBackend implements BenchmarkBackend {
 
     private TrogdorSpec toTrogdorSpec(BenchmarkTask task) {
         return switch (task.getWorkloadType()) {
-            case PRODUCE -> com.klster.kates.trogdor.spec.ProduceBenchSpec.create(
-                    resolveBootstrapServers(task),
-                    task.getTopic(), task.getPartitions(),
-                    task.getTargetMessagesPerSec(), task.getMaxMessages(),
-                    task.getDurationMs(), task.getRecordSize());
-            case CONSUME -> com.klster.kates.trogdor.spec.ConsumeBenchSpec.create(
-                    resolveBootstrapServers(task),
-                    task.getTopic(), task.getPartitions(),
-                    task.getMaxMessages(), task.getDurationMs(),
-                    task.getConsumerGroup());
-            case ROUND_TRIP -> com.klster.kates.trogdor.spec.RoundTripWorkloadSpec.create(
-                    resolveBootstrapServers(task),
-                    task.getTopic(), task.getPartitions(),
-                    task.getTargetMessagesPerSec(), task.getMaxMessages(),
-                    task.getDurationMs(), task.getRecordSize());
-            case INTEGRITY -> throw new BenchmarkException(
-                    "INTEGRITY tests require the native backend (per-record sequencing not supported by Trogdor)", null);
+            case PRODUCE ->
+                com.klster.kates.trogdor.spec.ProduceBenchSpec.create(
+                        resolveBootstrapServers(task),
+                        task.getTopic(),
+                        task.getPartitions(),
+                        task.getTargetMessagesPerSec(),
+                        task.getMaxMessages(),
+                        task.getDurationMs(),
+                        task.getRecordSize());
+            case CONSUME ->
+                com.klster.kates.trogdor.spec.ConsumeBenchSpec.create(
+                        resolveBootstrapServers(task),
+                        task.getTopic(),
+                        task.getPartitions(),
+                        task.getMaxMessages(),
+                        task.getDurationMs(),
+                        task.getConsumerGroup());
+            case ROUND_TRIP ->
+                com.klster.kates.trogdor.spec.RoundTripWorkloadSpec.create(
+                        resolveBootstrapServers(task),
+                        task.getTopic(),
+                        task.getPartitions(),
+                        task.getTargetMessagesPerSec(),
+                        task.getMaxMessages(),
+                        task.getDurationMs(),
+                        task.getRecordSize());
+            case INTEGRITY ->
+                throw new BenchmarkException(
+                        "INTEGRITY tests require the native backend (per-record sequencing not supported by Trogdor)",
+                        null);
         };
     }
 
@@ -102,13 +115,14 @@ public class TrogdorBackend implements BenchmarkBackend {
         }
 
         String state = taskStatus.path("state").asText("");
-        TaskStatus status = switch (state) {
-            case "PENDING" -> TaskStatus.PENDING;
-            case "RUNNING" -> TaskStatus.RUNNING;
-            case "STOPPING" -> TaskStatus.STOPPING;
-            case "DONE" -> TaskStatus.DONE;
-            default -> TaskStatus.RUNNING;
-        };
+        TaskStatus status =
+                switch (state) {
+                    case "PENDING" -> TaskStatus.PENDING;
+                    case "RUNNING" -> TaskStatus.RUNNING;
+                    case "STOPPING" -> TaskStatus.STOPPING;
+                    case "DONE" -> TaskStatus.DONE;
+                    default -> TaskStatus.RUNNING;
+                };
 
         JsonNode metrics = taskStatus.path("status");
         BenchmarkStatus.Builder builder = BenchmarkStatus.builder(status);
@@ -118,12 +132,12 @@ public class TrogdorBackend implements BenchmarkBackend {
             long totalSent = metrics.path("totalSent").asLong(0);
 
             builder.recordsProcessed(totalSent)
-                   .throughputRecordsPerSec(totalSent / elapsedSec)
-                   .avgLatencyMs(metrics.path("averageLatencyMs").asDouble(0))
-                   .p50LatencyMs(metrics.path("p50LatencyMs").asDouble(0))
-                   .p95LatencyMs(metrics.path("p95LatencyMs").asDouble(0))
-                   .p99LatencyMs(metrics.path("p99LatencyMs").asDouble(0))
-                   .maxLatencyMs(metrics.path("maxLatencyMs").asDouble(0));
+                    .throughputRecordsPerSec(totalSent / elapsedSec)
+                    .avgLatencyMs(metrics.path("averageLatencyMs").asDouble(0))
+                    .p50LatencyMs(metrics.path("p50LatencyMs").asDouble(0))
+                    .p95LatencyMs(metrics.path("p95LatencyMs").asDouble(0))
+                    .p99LatencyMs(metrics.path("p99LatencyMs").asDouble(0))
+                    .maxLatencyMs(metrics.path("maxLatencyMs").asDouble(0));
 
             String error = metrics.path("error").asText(null);
             if (error != null && !error.isEmpty()) {

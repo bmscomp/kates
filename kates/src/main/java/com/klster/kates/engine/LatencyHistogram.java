@@ -111,8 +111,8 @@ public class LatencyHistogram {
      * Covers 0 → 10,000 ms with increasing granularity at lower latencies.
      */
     public static final double[] HEATMAP_BOUNDARIES = {
-        0, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100,
-        150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000
+        0, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500,
+        10000
     };
 
     /**

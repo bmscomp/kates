@@ -1,17 +1,17 @@
 package com.klster.kates.disruption;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.scheduler.Scheduled;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.persistence.EntityManager;
-import jakarta.transaction.Transactional;
-
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
+import jakarta.transaction.Transactional;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.scheduler.Scheduled;
 import org.jboss.logging.Logger;
 
 /**
@@ -42,8 +42,9 @@ public class DisruptionScheduler {
     @Scheduled(every = "60s", identity = "kates-disruption-schedule-evaluator")
     void evaluateSchedules() {
         List<DisruptionScheduleEntity> schedules = em.createQuery(
-                "SELECT s FROM DisruptionScheduleEntity s WHERE s.enabled = true",
-                DisruptionScheduleEntity.class).getResultList();
+                        "SELECT s FROM DisruptionScheduleEntity s WHERE s.enabled = true",
+                        DisruptionScheduleEntity.class)
+                .getResultList();
 
         if (schedules.isEmpty()) return;
 
@@ -66,11 +67,13 @@ public class DisruptionScheduler {
         try {
             DisruptionPlan plan;
 
-            if (schedule.getPlaybookName() != null && !schedule.getPlaybookName().isBlank()) {
-                plan = playbookCatalog.findByName(schedule.getPlaybookName())
+            if (schedule.getPlaybookName() != null
+                    && !schedule.getPlaybookName().isBlank()) {
+                plan = playbookCatalog
+                        .findByName(schedule.getPlaybookName())
                         .map(playbookCatalog::toPlan)
-                        .orElseThrow(() -> new IllegalStateException(
-                                "Playbook not found: " + schedule.getPlaybookName()));
+                        .orElseThrow(
+                                () -> new IllegalStateException("Playbook not found: " + schedule.getPlaybookName()));
             } else if (schedule.getPlanJson() != null) {
                 plan = objectMapper.readValue(schedule.getPlanJson(), DisruptionPlan.class);
             } else {
@@ -81,10 +84,15 @@ public class DisruptionScheduler {
             DisruptionReport report = orchestrator.execute(plan);
             String runId = UUID.randomUUID().toString().substring(0, 8);
 
-            String grade = report.getSlaVerdict() != null ? report.getSlaVerdict().grade() : null;
+            String grade =
+                    report.getSlaVerdict() != null ? report.getSlaVerdict().grade() : null;
             DisruptionReportEntity entity = new DisruptionReportEntity(
-                    runId, report.getPlanName(), report.getStatus(),
-                    grade, objectMapper.writeValueAsString(report), null);
+                    runId,
+                    report.getPlanName(),
+                    report.getStatus(),
+                    grade,
+                    objectMapper.writeValueAsString(report),
+                    null);
             reportRepository.save(entity);
 
             updateLastRun(schedule.getId(), runId);
@@ -123,24 +131,32 @@ public class DisruptionScheduler {
             try {
                 int step = Integer.parseInt(field.substring(2));
                 return step > 0 && value % step == 0;
-            } catch (NumberFormatException e) { return false; }
+            } catch (NumberFormatException e) {
+                return false;
+            }
         }
         if (field.contains(",")) {
             for (String part : field.split(",")) {
                 try {
                     if (Integer.parseInt(part.trim()) == value) return true;
-                } catch (NumberFormatException e) { /* skip */ }
+                } catch (NumberFormatException e) {
+                    /* skip */
+                }
             }
             return false;
         }
         if (field.contains("-")) {
             String[] range = field.split("-");
             try {
-                return value >= Integer.parseInt(range[0].trim())
-                        && value <= Integer.parseInt(range[1].trim());
-            } catch (Exception e) { return false; }
+                return value >= Integer.parseInt(range[0].trim()) && value <= Integer.parseInt(range[1].trim());
+            } catch (Exception e) {
+                return false;
+            }
         }
-        try { return Integer.parseInt(field) == value; }
-        catch (NumberFormatException e) { return false; }
+        try {
+            return Integer.parseInt(field) == value;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 }

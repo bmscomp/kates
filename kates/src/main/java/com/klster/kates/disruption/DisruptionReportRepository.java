@@ -1,11 +1,10 @@
 package com.klster.kates.disruption;
 
+import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
-
-import java.util.List;
 
 /**
  * Repository for persisting and querying disruption reports using JPA EntityManager.
@@ -26,25 +25,23 @@ public class DisruptionReportRepository {
     }
 
     public List<DisruptionReportEntity> listRecent(int limit) {
-        return em.createQuery(
-                "FROM DisruptionReportEntity ORDER BY createdAt DESC",
-                DisruptionReportEntity.class)
+        return em.createQuery("FROM DisruptionReportEntity ORDER BY createdAt DESC", DisruptionReportEntity.class)
                 .setMaxResults(limit)
                 .getResultList();
     }
 
     public List<DisruptionReportEntity> findByPlanName(String planName) {
         return em.createQuery(
-                "FROM DisruptionReportEntity WHERE planName = :name ORDER BY createdAt DESC",
-                DisruptionReportEntity.class)
+                        "FROM DisruptionReportEntity WHERE planName = :name ORDER BY createdAt DESC",
+                        DisruptionReportEntity.class)
                 .setParameter("name", planName)
                 .getResultList();
     }
 
     public List<DisruptionReportEntity> findByStatus(String status) {
         return em.createQuery(
-                "FROM DisruptionReportEntity WHERE status = :status ORDER BY createdAt DESC",
-                DisruptionReportEntity.class)
+                        "FROM DisruptionReportEntity WHERE status = :status ORDER BY createdAt DESC",
+                        DisruptionReportEntity.class)
                 .setParameter("status", status)
                 .getResultList();
     }

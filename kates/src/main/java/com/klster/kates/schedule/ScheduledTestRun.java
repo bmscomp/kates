@@ -1,10 +1,10 @@
 package com.klster.kates.schedule;
 
+import java.time.Instant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import java.time.Instant;
 
 /**
  * JPA entity for a scheduled/recurring test configuration.
@@ -43,27 +43,67 @@ public class ScheduledTestRun {
         this.createdAt = Instant.now();
     }
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public String getId() {
+        return id;
+    }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public void setId(String id) {
+        this.id = id;
+    }
 
-    public String getCronExpression() { return cronExpression; }
-    public void setCronExpression(String cronExpression) { this.cronExpression = cronExpression; }
+    public String getName() {
+        return name;
+    }
 
-    public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public void setName(String name) {
+        this.name = name;
+    }
 
-    public String getRequestJson() { return requestJson; }
-    public void setRequestJson(String requestJson) { this.requestJson = requestJson; }
+    public String getCronExpression() {
+        return cronExpression;
+    }
 
-    public String getLastRunId() { return lastRunId; }
-    public void setLastRunId(String lastRunId) { this.lastRunId = lastRunId; }
+    public void setCronExpression(String cronExpression) {
+        this.cronExpression = cronExpression;
+    }
 
-    public Instant getLastRunAt() { return lastRunAt; }
-    public void setLastRunAt(Instant lastRunAt) { this.lastRunAt = lastRunAt; }
+    public boolean isEnabled() {
+        return enabled;
+    }
 
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public String getRequestJson() {
+        return requestJson;
+    }
+
+    public void setRequestJson(String requestJson) {
+        this.requestJson = requestJson;
+    }
+
+    public String getLastRunId() {
+        return lastRunId;
+    }
+
+    public void setLastRunId(String lastRunId) {
+        this.lastRunId = lastRunId;
+    }
+
+    public Instant getLastRunAt() {
+        return lastRunAt;
+    }
+
+    public void setLastRunAt(Instant lastRunAt) {
+        this.lastRunAt = lastRunAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
 }

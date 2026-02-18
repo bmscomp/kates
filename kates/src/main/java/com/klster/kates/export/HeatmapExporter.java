@@ -1,8 +1,9 @@
 package com.klster.kates.export;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Exports {@link LatencyHeatmapData} in JSON or CSV format for heatmap visualization.

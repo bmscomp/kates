@@ -19,5 +19,4 @@ public record ReportSummary(
         double maxLatencyMs,
         long totalErrors,
         double errorRate,
-        long durationMs
-) {}
+        long durationMs) {}

@@ -1,7 +1,7 @@
 package com.klster.kates.disruption;
 
-import jakarta.persistence.*;
 import java.time.Instant;
+import jakarta.persistence.*;
 
 /**
  * JPA entity for persisting disruption test reports.
@@ -35,8 +35,8 @@ public class DisruptionReportEntity {
 
     public DisruptionReportEntity() {}
 
-    public DisruptionReportEntity(String id, String planName, String status,
-                                   String slaGrade, String reportJson, String summaryJson) {
+    public DisruptionReportEntity(
+            String id, String planName, String status, String slaGrade, String reportJson, String summaryJson) {
         this.id = id;
         this.planName = planName;
         this.status = status;
@@ -46,24 +46,59 @@ public class DisruptionReportEntity {
         this.summaryJson = summaryJson;
     }
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public String getId() {
+        return id;
+    }
 
-    public String getPlanName() { return planName; }
-    public void setPlanName(String planName) { this.planName = planName; }
+    public void setId(String id) {
+        this.id = id;
+    }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public String getPlanName() {
+        return planName;
+    }
 
-    public String getSlaGrade() { return slaGrade; }
-    public void setSlaGrade(String slaGrade) { this.slaGrade = slaGrade; }
+    public void setPlanName(String planName) {
+        this.planName = planName;
+    }
 
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public String getStatus() {
+        return status;
+    }
 
-    public String getReportJson() { return reportJson; }
-    public void setReportJson(String reportJson) { this.reportJson = reportJson; }
+    public void setStatus(String status) {
+        this.status = status;
+    }
 
-    public String getSummaryJson() { return summaryJson; }
-    public void setSummaryJson(String summaryJson) { this.summaryJson = summaryJson; }
+    public String getSlaGrade() {
+        return slaGrade;
+    }
+
+    public void setSlaGrade(String slaGrade) {
+        this.slaGrade = slaGrade;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public String getReportJson() {
+        return reportJson;
+    }
+
+    public void setReportJson(String reportJson) {
+        this.reportJson = reportJson;
+    }
+
+    public String getSummaryJson() {
+        return summaryJson;
+    }
+
+    public void setSummaryJson(String summaryJson) {
+        this.summaryJson = summaryJson;
+    }
 }

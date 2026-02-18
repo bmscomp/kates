@@ -1,16 +1,17 @@
 package com.klster.kates.disruption;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
+
 import com.klster.kates.chaos.ChaosOutcome;
 import com.klster.kates.chaos.DisruptionType;
 import com.klster.kates.chaos.K8sPodWatcher;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.resilience.ResilienceReport;
-
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Unified report for a multi-step disruption test.
@@ -43,8 +44,7 @@ public class DisruptionReport {
             IsrSnapshot.Metrics isrMetrics,
             LagSnapshot.Metrics lagMetrics,
             boolean rolledBack,
-            String rollbackReason
-    ) {}
+            String rollbackReason) {}
 
     public record DisruptionSummary(
             int totalSteps,
@@ -54,27 +54,61 @@ public class DisruptionReport {
             double maxP99LatencySpike,
             boolean slaViolated,
             Duration worstIsrRecovery,
-            long peakConsumerLag
-    ) {}
+            long peakConsumerLag) {}
 
-    public String getPlanName() { return planName; }
-    public void setPlanName(String planName) { this.planName = planName; }
+    public String getPlanName() {
+        return planName;
+    }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public void setPlanName(String planName) {
+        this.planName = planName;
+    }
 
-    public List<StepReport> getStepReports() { return stepReports; }
-    public void setStepReports(List<StepReport> stepReports) { this.stepReports = stepReports; }
+    public String getStatus() {
+        return status;
+    }
 
-    public DisruptionSummary getSummary() { return summary; }
-    public void setSummary(DisruptionSummary summary) { this.summary = summary; }
+    public void setStatus(String status) {
+        this.status = status;
+    }
 
-    public ResilienceReport getResilienceReport() { return resilienceReport; }
-    public void setResilienceReport(ResilienceReport resilienceReport) { this.resilienceReport = resilienceReport; }
+    public List<StepReport> getStepReports() {
+        return stepReports;
+    }
 
-    public List<String> getValidationWarnings() { return validationWarnings; }
-    public void setValidationWarnings(List<String> validationWarnings) { this.validationWarnings = validationWarnings; }
+    public void setStepReports(List<StepReport> stepReports) {
+        this.stepReports = stepReports;
+    }
 
-    public SlaGrader.SlaVerdict getSlaVerdict() { return slaVerdict; }
-    public void setSlaVerdict(SlaGrader.SlaVerdict slaVerdict) { this.slaVerdict = slaVerdict; }
+    public DisruptionSummary getSummary() {
+        return summary;
+    }
+
+    public void setSummary(DisruptionSummary summary) {
+        this.summary = summary;
+    }
+
+    public ResilienceReport getResilienceReport() {
+        return resilienceReport;
+    }
+
+    public void setResilienceReport(ResilienceReport resilienceReport) {
+        this.resilienceReport = resilienceReport;
+    }
+
+    public List<String> getValidationWarnings() {
+        return validationWarnings;
+    }
+
+    public void setValidationWarnings(List<String> validationWarnings) {
+        this.validationWarnings = validationWarnings;
+    }
+
+    public SlaGrader.SlaVerdict getSlaVerdict() {
+        return slaVerdict;
+    }
+
+    public void setSlaVerdict(SlaGrader.SlaVerdict slaVerdict) {
+        this.slaVerdict = slaVerdict;
+    }
 }

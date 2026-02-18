@@ -1,17 +1,18 @@
 package com.klster.kates.persistence;
 
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.jboss.logging.Logger;
+
 import com.klster.kates.domain.SlaDefinition;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestSpec;
-
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import org.jboss.logging.Logger;
-import java.util.stream.Collectors;
 
 /**
  * Converts between domain objects ({@link TestRun}, {@link TestResult})
@@ -22,8 +23,7 @@ public final class EntityMapper {
     private static final Logger LOG = Logger.getLogger(EntityMapper.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private EntityMapper() {
-    }
+    private EntityMapper() {}
 
     public static TestRunEntity toEntity(TestRun run) {
         TestRunEntity entity = new TestRunEntity();
@@ -56,8 +56,7 @@ public final class EntityMapper {
         run.setScenarioName(entity.getScenarioName());
         run.setSpec(fromJson(entity.getSpecJson(), TestSpec.class));
         run.setSla(fromJson(entity.getSlaJson(), SlaDefinition.class));
-        run.setLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {
-        }));
+        run.setLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}));
 
         if (entity.getResults() != null) {
             run.setResults(entity.getResults().stream()

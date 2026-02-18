@@ -1,10 +1,5 @@
 package com.klster.kates.disruption;
 
-import com.klster.kates.report.ReportSummary;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -14,10 +9,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import org.jboss.logging.Logger;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
+import com.klster.kates.report.ReportSummary;
 
 /**
  * Captures Kafka broker metrics from a Prometheus server during disruption windows.
@@ -34,47 +34,32 @@ public class PrometheusMetricsCapture {
     @Inject
     ObjectMapper objectMapper;
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
+    private final HttpClient httpClient =
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     private static final Map<String, String> METRIC_QUERIES = Map.of(
             "throughputRecPerSec",
             "sum(rate(kafka_server_brokertopicmetrics_messagesin_total[1m]))",
-
             "avgLatencyMs",
             "avg(kafka_network_requestmetrics_totaltimems{request=\"Produce\"}) / 1000",
-
             "p99LatencyMs",
             "histogram_quantile(0.99, sum(rate(kafka_network_requestmetrics_totaltimems_bucket{request=\"Produce\"}[1m])) by (le)) / 1000",
-
             "underReplicatedPartitions",
             "sum(kafka_server_replicamanager_underreplicatedpartitions)",
-
             "activeControllerCount",
             "sum(kafka_controller_kafkacontroller_activecontrollercount)",
-
             "bytesInPerSec",
             "sum(rate(kafka_server_brokertopicmetrics_bytesin_total[1m]))",
-
             "bytesOutPerSec",
             "sum(rate(kafka_server_brokertopicmetrics_bytesout_total[1m]))",
-
             "produceRequestsPerSec",
             "sum(rate(kafka_server_brokertopicmetrics_totalproducerequests_total[1m]))",
-
             "fetchRequestsPerSec",
             "sum(rate(kafka_server_brokertopicmetrics_totalfetchrequests_total[1m]))",
-
             "isrShrinkPerSec",
-            "sum(rate(kafka_server_replicamanager_isrshrinks_total[1m]))"
-    );
+            "sum(rate(kafka_server_replicamanager_isrshrinks_total[1m]))");
 
-    public record MetricsSnapshot(
-            Instant capturedAt,
-            Duration window,
-            Map<String, Double> values
-    ) {
+    public record MetricsSnapshot(Instant capturedAt, Duration window, Map<String, Double> values) {
         public double get(String metric) {
             return values.getOrDefault(metric, 0.0);
         }
@@ -140,8 +125,7 @@ public class PrometheusMetricsCapture {
                 0.0,
                 0L,
                 0.0,
-                observationDuration.toMillis()
-        );
+                observationDuration.toMillis());
     }
 
     /**
@@ -164,8 +148,7 @@ public class PrometheusMetricsCapture {
 
     private double queryInstant(String promql, Instant time) throws Exception {
         String encoded = URLEncoder.encode(promql, StandardCharsets.UTF_8);
-        String url = prometheusUrl + "/api/v1/query?query=" + encoded
-                + "&time=" + time.getEpochSecond();
+        String url = prometheusUrl + "/api/v1/query?query=" + encoded + "&time=" + time.getEpochSecond();
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))

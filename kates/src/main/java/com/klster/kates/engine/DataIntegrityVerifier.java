@@ -1,9 +1,5 @@
 package com.klster.kates.engine;
 
-import com.klster.kates.domain.IntegrityEvent;
-import com.klster.kates.domain.IntegrityResult;
-import com.klster.kates.domain.LostRange;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -13,7 +9,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+
 import org.jboss.logging.Logger;
+
+import com.klster.kates.domain.IntegrityEvent;
+import com.klster.kates.domain.IntegrityResult;
+import com.klster.kates.domain.LostRange;
 
 /**
  * Post-benchmark verifier that reconciles produced records against consumed records
@@ -108,11 +109,12 @@ public class DataIntegrityVerifier {
      * @param idempotenceEnabled whether idempotent producer was used
      * @param transactionsEnabled whether transactional producer was used
      */
-    public IntegrityResult verify(long chaosStartNanos,
-                                   boolean crcVerified,
-                                   boolean orderingVerified,
-                                   boolean idempotenceEnabled,
-                                   boolean transactionsEnabled) {
+    public IntegrityResult verify(
+            long chaosStartNanos,
+            boolean crcVerified,
+            boolean orderingVerified,
+            boolean idempotenceEnabled,
+            boolean transactionsEnabled) {
         BitSet ackedSet = ackTracker.getAckedSet();
 
         // lost = acked but not consumed
@@ -176,17 +178,25 @@ public class DataIntegrityVerifier {
                 crcVerified,
                 idempotenceEnabled,
                 transactionsEnabled,
-                buildTimeline(lostRanges, lostCount, duplicates)
-        );
+                buildTimeline(lostRanges, lostCount, duplicates));
 
         LOG.info(String.format(
-                "Integrity: sent=%d acked=%d consumed=%d lost=%d dupes=%d " +
-                        "ooo=%d crc_fail=%d producerRTO=%s consumerRTO=%s rpo=%s " +
-                        "loss=%.4f%% windows=%d verdict=%s",
-                totalSent, ackTracker.getTotalAcked(), totalConsumed.get(),
-                lostCount, duplicates, outOfOrderCount.get(), crcFailures.get(),
-                producerRto, consumerRto, rpo,
-                lossPercent, failureWindows.size(), result.verdict()));
+                "Integrity: sent=%d acked=%d consumed=%d lost=%d dupes=%d "
+                        + "ooo=%d crc_fail=%d producerRTO=%s consumerRTO=%s rpo=%s "
+                        + "loss=%.4f%% windows=%d verdict=%s",
+                totalSent,
+                ackTracker.getTotalAcked(),
+                totalConsumed.get(),
+                lostCount,
+                duplicates,
+                outOfOrderCount.get(),
+                crcFailures.get(),
+                producerRto,
+                consumerRto,
+                rpo,
+                lossPercent,
+                failureWindows.size(),
+                result.verdict()));
 
         return result;
     }
@@ -220,10 +230,13 @@ public class DataIntegrityVerifier {
                 result.add(IntegrityEvent.lostRange(lr.fromSeq(), lr.toSeq(), lr.count()));
             }
         }
-        String verdict = lostCount > 0 ? "DATA_LOSS" :
-                crcFailures.get() > 0 ? "CORRUPTION" :
-                outOfOrderCount.get() > 0 ? "ORDERING_VIOLATION" :
-                duplicates > 0 ? "DUPLICATES_DETECTED" : "PASS";
+        String verdict = lostCount > 0
+                ? "DATA_LOSS"
+                : crcFailures.get() > 0
+                        ? "CORRUPTION"
+                        : outOfOrderCount.get() > 0
+                                ? "ORDERING_VIOLATION"
+                                : duplicates > 0 ? "DUPLICATES_DETECTED" : "PASS";
         result.add(IntegrityEvent.summary(verdict, lostCount, duplicates));
         return List.copyOf(result);
     }

@@ -15,13 +15,7 @@ public final class IsrSnapshot {
      * A single point-in-time ISR observation for one partition.
      */
     public record Entry(
-            Instant timestamp,
-            String topic,
-            int partition,
-            int leaderId,
-            List<Integer> isr,
-            int replicationFactor
-    ) {
+            Instant timestamp, String topic, int partition, int leaderId, List<Integer> isr, int replicationFactor) {
         public boolean isFullyReplicated() {
             return isr != null && isr.size() >= replicationFactor;
         }
@@ -39,8 +33,7 @@ public final class IsrSnapshot {
             int minIsrDepth,
             int underReplicatedPeakCount,
             int totalPartitions,
-            List<Entry> timeline
-    ) {
+            List<Entry> timeline) {
         public boolean recoveredFully() {
             return timeToFullIsr != null;
         }

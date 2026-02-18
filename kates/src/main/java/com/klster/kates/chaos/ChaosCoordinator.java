@@ -1,11 +1,11 @@
 package com.klster.kates.chaos;
 
+import java.util.concurrent.CompletableFuture;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import java.util.concurrent.CompletableFuture;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
@@ -44,8 +44,7 @@ public class ChaosCoordinator {
         } else {
             this.activeProvider = fallback != null ? fallback : new NoOpChaosProvider();
             if (selected != null) {
-                LOG.warn("Configured chaos provider '" + providerName +
-                        "' is not available, falling back to noop");
+                LOG.warn("Configured chaos provider '" + providerName + "' is not available, falling back to noop");
             } else {
                 LOG.info("Chaos provider: noop (default)");
             }

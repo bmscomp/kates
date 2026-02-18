@@ -20,35 +20,79 @@ public class SlaDefinition {
     private Long maxRtoMs;
     private Long maxRpoMs;
 
-    public SlaDefinition() {
+    public SlaDefinition() {}
+
+    public Double getMaxP99LatencyMs() {
+        return maxP99LatencyMs;
     }
 
-    public Double getMaxP99LatencyMs() { return maxP99LatencyMs; }
-    public void setMaxP99LatencyMs(Double maxP99LatencyMs) { this.maxP99LatencyMs = maxP99LatencyMs; }
+    public void setMaxP99LatencyMs(Double maxP99LatencyMs) {
+        this.maxP99LatencyMs = maxP99LatencyMs;
+    }
 
-    public Double getMaxP999LatencyMs() { return maxP999LatencyMs; }
-    public void setMaxP999LatencyMs(Double maxP999LatencyMs) { this.maxP999LatencyMs = maxP999LatencyMs; }
+    public Double getMaxP999LatencyMs() {
+        return maxP999LatencyMs;
+    }
 
-    public Double getMaxAvgLatencyMs() { return maxAvgLatencyMs; }
-    public void setMaxAvgLatencyMs(Double maxAvgLatencyMs) { this.maxAvgLatencyMs = maxAvgLatencyMs; }
+    public void setMaxP999LatencyMs(Double maxP999LatencyMs) {
+        this.maxP999LatencyMs = maxP999LatencyMs;
+    }
 
-    public Double getMinThroughputRecPerSec() { return minThroughputRecPerSec; }
-    public void setMinThroughputRecPerSec(Double minThroughputRecPerSec) { this.minThroughputRecPerSec = minThroughputRecPerSec; }
+    public Double getMaxAvgLatencyMs() {
+        return maxAvgLatencyMs;
+    }
 
-    public Double getMaxErrorRate() { return maxErrorRate; }
-    public void setMaxErrorRate(Double maxErrorRate) { this.maxErrorRate = maxErrorRate; }
+    public void setMaxAvgLatencyMs(Double maxAvgLatencyMs) {
+        this.maxAvgLatencyMs = maxAvgLatencyMs;
+    }
 
-    public Long getMinRecordsProcessed() { return minRecordsProcessed; }
-    public void setMinRecordsProcessed(Long minRecordsProcessed) { this.minRecordsProcessed = minRecordsProcessed; }
+    public Double getMinThroughputRecPerSec() {
+        return minThroughputRecPerSec;
+    }
 
-    public Double getMaxDataLossPercent() { return maxDataLossPercent; }
-    public void setMaxDataLossPercent(Double maxDataLossPercent) { this.maxDataLossPercent = maxDataLossPercent; }
+    public void setMinThroughputRecPerSec(Double minThroughputRecPerSec) {
+        this.minThroughputRecPerSec = minThroughputRecPerSec;
+    }
 
-    public Long getMaxRtoMs() { return maxRtoMs; }
-    public void setMaxRtoMs(Long maxRtoMs) { this.maxRtoMs = maxRtoMs; }
+    public Double getMaxErrorRate() {
+        return maxErrorRate;
+    }
 
-    public Long getMaxRpoMs() { return maxRpoMs; }
-    public void setMaxRpoMs(Long maxRpoMs) { this.maxRpoMs = maxRpoMs; }
+    public void setMaxErrorRate(Double maxErrorRate) {
+        this.maxErrorRate = maxErrorRate;
+    }
+
+    public Long getMinRecordsProcessed() {
+        return minRecordsProcessed;
+    }
+
+    public void setMinRecordsProcessed(Long minRecordsProcessed) {
+        this.minRecordsProcessed = minRecordsProcessed;
+    }
+
+    public Double getMaxDataLossPercent() {
+        return maxDataLossPercent;
+    }
+
+    public void setMaxDataLossPercent(Double maxDataLossPercent) {
+        this.maxDataLossPercent = maxDataLossPercent;
+    }
+
+    public Long getMaxRtoMs() {
+        return maxRtoMs;
+    }
+
+    public void setMaxRtoMs(Long maxRtoMs) {
+        this.maxRtoMs = maxRtoMs;
+    }
+
+    public Long getMaxRpoMs() {
+        return maxRpoMs;
+    }
+
+    public void setMaxRpoMs(Long maxRpoMs) {
+        this.maxRpoMs = maxRpoMs;
+    }
 
     /**
      * Returns true if any threshold is defined.

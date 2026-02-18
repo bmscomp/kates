@@ -23,11 +23,14 @@ public class TestResult {
     private IntegrityResult integrity;
 
     public enum TaskStatus {
-        PENDING, RUNNING, STOPPING, DONE, FAILED
+        PENDING,
+        RUNNING,
+        STOPPING,
+        DONE,
+        FAILED
     }
 
-    public TestResult() {
-    }
+    public TestResult() {}
 
     public String getTaskId() {
         return taskId;
@@ -141,9 +144,19 @@ public class TestResult {
         this.error = error;
     }
 
-    public String getPhaseName() { return phaseName; }
-    public void setPhaseName(String phaseName) { this.phaseName = phaseName; }
+    public String getPhaseName() {
+        return phaseName;
+    }
 
-    public IntegrityResult getIntegrity() { return integrity; }
-    public void setIntegrity(IntegrityResult integrity) { this.integrity = integrity; }
+    public void setPhaseName(String phaseName) {
+        this.phaseName = phaseName;
+    }
+
+    public IntegrityResult getIntegrity() {
+        return integrity;
+    }
+
+    public void setIntegrity(IntegrityResult integrity) {
+        this.integrity = integrity;
+    }
 }

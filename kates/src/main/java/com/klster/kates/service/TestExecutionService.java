@@ -1,6 +1,16 @@
 package com.klster.kates.service;
 
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import com.fasterxml.jackson.databind.JsonNode;
+import org.eclipse.microprofile.rest.client.inject.RestClient;
+import org.jboss.logging.Logger;
+
 import com.klster.kates.domain.CreateTestRequest;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
@@ -9,15 +19,6 @@ import com.klster.kates.domain.TestType;
 import com.klster.kates.trogdor.SpecFactory;
 import com.klster.kates.trogdor.TrogdorClient;
 import com.klster.kates.trogdor.spec.TrogdorSpec;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.rest.client.inject.RestClient;
-
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class TestExecutionService {
@@ -58,8 +59,7 @@ public class TestExecutionService {
                 String taskId = run.getId() + "-" + type.name().toLowerCase() + "-" + i;
                 TrogdorSpec trogdorSpec = trogdorSpecs.get(i);
 
-                TrogdorClient.CreateTaskRequest taskReq =
-                        new TrogdorClient.CreateTaskRequest(taskId, trogdorSpec);
+                TrogdorClient.CreateTaskRequest taskReq = new TrogdorClient.CreateTaskRequest(taskId, trogdorSpec);
 
                 try {
                     trogdorClient.createTask(taskReq);
@@ -83,8 +83,7 @@ public class TestExecutionService {
                 }
             }
 
-            boolean allFailed = run.getResults().stream()
-                    .allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
+            boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
                 run.setStatus(TestResult.TaskStatus.FAILED);
             }
@@ -99,7 +98,8 @@ public class TestExecutionService {
     }
 
     public TestRun refreshStatus(String runId) {
-        TestRun run = repository.findById(runId)
+        TestRun run = repository
+                .findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
         boolean allDone = true;
@@ -134,7 +134,8 @@ public class TestExecutionService {
     }
 
     public void stopTest(String runId) {
-        TestRun run = repository.findById(runId)
+        TestRun run = repository
+                .findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
         for (TestResult result : run.getResults()) {
@@ -153,7 +154,8 @@ public class TestExecutionService {
     }
 
     private void createTestTopic(TestSpec spec, TestType type) {
-        String topicName = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
+        String topicName =
+                spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
         Map<String, String> topicConfig = new HashMap<>();
         topicConfig.put("min.insync.replicas", String.valueOf(spec.getMinInsyncReplicas()));
 
@@ -165,10 +167,10 @@ public class TestExecutionService {
         kafkaAdmin.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
 
         if (type == TestType.VOLUME) {
-            kafkaAdmin.createTopic(topicName + "-large", spec.getPartitions(),
-                    spec.getReplicationFactor(), topicConfig);
-            kafkaAdmin.createTopic(topicName + "-count", spec.getPartitions(),
-                    spec.getReplicationFactor(), topicConfig);
+            kafkaAdmin.createTopic(
+                    topicName + "-large", spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
+            kafkaAdmin.createTopic(
+                    topicName + "-count", spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
         }
     }
 
@@ -176,13 +178,14 @@ public class TestExecutionService {
         if (taskStatus == null) return;
 
         String state = taskStatus.path("state").asText("");
-        result.setStatus(switch (state) {
-            case "PENDING" -> TestResult.TaskStatus.PENDING;
-            case "RUNNING" -> TestResult.TaskStatus.RUNNING;
-            case "STOPPING" -> TestResult.TaskStatus.STOPPING;
-            case "DONE" -> TestResult.TaskStatus.DONE;
-            default -> result.getStatus();
-        });
+        result.setStatus(
+                switch (state) {
+                    case "PENDING" -> TestResult.TaskStatus.PENDING;
+                    case "RUNNING" -> TestResult.TaskStatus.RUNNING;
+                    case "STOPPING" -> TestResult.TaskStatus.STOPPING;
+                    case "DONE" -> TestResult.TaskStatus.DONE;
+                    default -> result.getStatus();
+                });
 
         JsonNode status = taskStatus.path("status");
         if (!status.isMissingNode()) {

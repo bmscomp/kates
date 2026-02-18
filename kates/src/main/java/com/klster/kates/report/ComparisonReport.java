@@ -1,9 +1,9 @@
 package com.klster.kates.report;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-
 import java.util.List;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Side-by-side comparison of multiple test runs.
@@ -16,23 +16,32 @@ public class ComparisonReport {
     private List<ComparisonEntry> runs;
     private Map<String, Double> deltas;
 
-    public ComparisonReport() {
+    public ComparisonReport() {}
+
+    public String getBaselineRunId() {
+        return baselineRunId;
     }
 
-    public String getBaselineRunId() { return baselineRunId; }
-    public void setBaselineRunId(String baselineRunId) { this.baselineRunId = baselineRunId; }
+    public void setBaselineRunId(String baselineRunId) {
+        this.baselineRunId = baselineRunId;
+    }
 
-    public List<ComparisonEntry> getRuns() { return runs; }
-    public void setRuns(List<ComparisonEntry> runs) { this.runs = runs; }
+    public List<ComparisonEntry> getRuns() {
+        return runs;
+    }
 
-    public Map<String, Double> getDeltas() { return deltas; }
-    public void setDeltas(Map<String, Double> deltas) { this.deltas = deltas; }
+    public void setRuns(List<ComparisonEntry> runs) {
+        this.runs = runs;
+    }
+
+    public Map<String, Double> getDeltas() {
+        return deltas;
+    }
+
+    public void setDeltas(Map<String, Double> deltas) {
+        this.deltas = deltas;
+    }
 
     public record ComparisonEntry(
-            String runId,
-            String scenarioName,
-            String testType,
-            String backend,
-            ReportSummary summary
-    ) {}
+            String runId, String scenarioName, String testType, String backend, ReportSummary summary) {}
 }

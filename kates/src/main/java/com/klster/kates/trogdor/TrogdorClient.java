@@ -1,6 +1,5 @@
 package com.klster.kates.trogdor;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -11,6 +10,8 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
+
+import com.fasterxml.jackson.databind.JsonNode;
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 
 @Path("/coordinator")
@@ -29,9 +30,7 @@ public interface TrogdorClient {
 
     @GET
     @Path("/tasks")
-    JsonNode getTasks(
-            @QueryParam("firstTaskId") String firstTaskId,
-            @QueryParam("maxTasks") int maxTasks);
+    JsonNode getTasks(@QueryParam("firstTaskId") String firstTaskId, @QueryParam("maxTasks") int maxTasks);
 
     @PUT
     @Path("/task/{taskId}/stop")
@@ -45,8 +44,7 @@ public interface TrogdorClient {
         private String id;
         private Object spec;
 
-        public CreateTaskRequest() {
-        }
+        public CreateTaskRequest() {}
 
         public CreateTaskRequest(String id, Object spec) {
             this.id = id;

@@ -1,11 +1,11 @@
 package com.klster.kates.domain;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Top-level scenario envelope for multi-phase test definitions.
@@ -28,32 +28,71 @@ public class TestScenario {
     private SlaDefinition sla;
     private Map<String, String> labels = new LinkedHashMap<>();
 
-    public TestScenario() {
+    public TestScenario() {}
+
+    public String getName() {
+        return name;
     }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public void setName(String name) {
+        this.name = name;
+    }
 
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
+    public String getDescription() {
+        return description;
+    }
 
-    public TestType getType() { return type; }
-    public void setType(TestType type) { this.type = type; }
+    public void setDescription(String description) {
+        this.description = description;
+    }
 
-    public String getBackend() { return backend; }
-    public void setBackend(String backend) { this.backend = backend; }
+    public TestType getType() {
+        return type;
+    }
 
-    public TestSpec getBaseSpec() { return baseSpec; }
-    public void setBaseSpec(TestSpec baseSpec) { this.baseSpec = baseSpec; }
+    public void setType(TestType type) {
+        this.type = type;
+    }
 
-    public List<ScenarioPhase> getPhases() { return phases; }
-    public void setPhases(List<ScenarioPhase> phases) { this.phases = phases; }
+    public String getBackend() {
+        return backend;
+    }
 
-    public SlaDefinition getSla() { return sla; }
-    public void setSla(SlaDefinition sla) { this.sla = sla; }
+    public void setBackend(String backend) {
+        this.backend = backend;
+    }
 
-    public Map<String, String> getLabels() { return labels; }
-    public void setLabels(Map<String, String> labels) { this.labels = labels; }
+    public TestSpec getBaseSpec() {
+        return baseSpec;
+    }
+
+    public void setBaseSpec(TestSpec baseSpec) {
+        this.baseSpec = baseSpec;
+    }
+
+    public List<ScenarioPhase> getPhases() {
+        return phases;
+    }
+
+    public void setPhases(List<ScenarioPhase> phases) {
+        this.phases = phases;
+    }
+
+    public SlaDefinition getSla() {
+        return sla;
+    }
+
+    public void setSla(SlaDefinition sla) {
+        this.sla = sla;
+    }
+
+    public Map<String, String> getLabels() {
+        return labels;
+    }
+
+    public void setLabels(Map<String, String> labels) {
+        this.labels = labels;
+    }
 
     /**
      * Resolves the effective spec for a given phase by merging

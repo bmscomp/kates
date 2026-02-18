@@ -1,24 +1,26 @@
 package com.klster.kates.service;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
+import org.eclipse.microprofile.rest.client.inject.RestClient;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
 import com.klster.kates.domain.CreateTestRequest;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.trogdor.TrogdorClient;
-import io.quarkus.test.InjectMock;
-import io.quarkus.test.junit.QuarkusTest;
-import jakarta.inject.Inject;
-import jakarta.persistence.EntityManager;
-import org.eclipse.microprofile.rest.client.inject.RestClient;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 @QuarkusTest
 class TestExecutionServiceTest {
@@ -84,14 +86,12 @@ class TestExecutionServiceTest {
 
     @Test
     void executeTestSetsFailedWhenAllTasksFail() {
-        when(trogdorClient.createTask(any()))
-                .thenThrow(new RuntimeException("Connection refused"));
+        when(trogdorClient.createTask(any())).thenThrow(new RuntimeException("Connection refused"));
 
         TestRun run = executionService.executeTest(createRequest(TestType.ROUND_TRIP));
 
         assertEquals(TestResult.TaskStatus.FAILED, run.getStatus());
-        assertTrue(run.getResults().stream()
-                .allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED));
+        assertTrue(run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED));
     }
 
     @Test
@@ -157,8 +157,7 @@ class TestExecutionServiceTest {
 
     @Test
     void refreshStatusForUnknownRunThrows() {
-        assertThrows(IllegalArgumentException.class,
-                () -> executionService.refreshStatus("nonexistent"));
+        assertThrows(IllegalArgumentException.class, () -> executionService.refreshStatus("nonexistent"));
     }
 
     @Test
@@ -177,8 +176,7 @@ class TestExecutionServiceTest {
 
     @Test
     void stopTestForUnknownRunThrows() {
-        assertThrows(IllegalArgumentException.class,
-                () -> executionService.stopTest("nonexistent"));
+        assertThrows(IllegalArgumentException.class, () -> executionService.stopTest("nonexistent"));
     }
 
     @Test

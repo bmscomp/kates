@@ -1,17 +1,18 @@
 package com.klster.kates.disruption;
 
-import com.klster.kates.engine.KatesMetrics;
-import com.klster.kates.chaos.*;
-import com.klster.kates.report.ReportSummary;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.chaos.*;
+import com.klster.kates.engine.KatesMetrics;
+import com.klster.kates.report.ReportSummary;
 
 /**
  * Orchestrates multi-step disruption plans with:
@@ -69,7 +70,10 @@ public class DisruptionOrchestrator {
         String disruptionId = plan.getName();
         DisruptionReport report = new DisruptionReport();
         report.setPlanName(plan.getName());
-        eventBus.emit(disruptionId, DisruptionEventBus.EventType.STARTED, null,
+        eventBus.emit(
+                disruptionId,
+                DisruptionEventBus.EventType.STARTED,
+                null,
                 "Disruption plan '" + plan.getName() + "' started");
 
         DisruptionSafetyGuard.ValidationResult validation = safetyGuard.validatePlan(plan);
@@ -103,24 +107,32 @@ public class DisruptionOrchestrator {
         try {
             for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
                 LOG.info("Executing disruption step: " + step.name());
-                eventBus.emit(disruptionId, DisruptionEventBus.EventType.STEP_STARTED,
-                        step.name(), "Step started: " + step.name());
+                eventBus.emit(
+                        disruptionId,
+                        DisruptionEventBus.EventType.STEP_STARTED,
+                        step.name(),
+                        "Step started: " + step.name());
 
                 DisruptionReport.StepReport stepReport = executeStep(step, plan, prometheusAvailable);
                 stepReports.add(stepReport);
 
-                if (stepReport.chaosOutcome() != null && stepReport.chaosOutcome().isPass()) {
+                if (stepReport.chaosOutcome() != null
+                        && stepReport.chaosOutcome().isPass()) {
                     passedSteps++;
                 }
-                eventBus.emit(disruptionId, DisruptionEventBus.EventType.STEP_COMPLETED,
-                        step.name(), "Step completed: " + step.name());
+                eventBus.emit(
+                        disruptionId,
+                        DisruptionEventBus.EventType.STEP_COMPLETED,
+                        step.name(),
+                        "Step completed: " + step.name());
 
                 if (stepReport.timeToAllReady() != null
                         && stepReport.timeToAllReady().compareTo(worstRecovery) > 0) {
                     worstRecovery = stepReport.timeToAllReady();
                 }
 
-                if (stepReport.isrMetrics() != null && stepReport.isrMetrics().timeToFullIsr() != null
+                if (stepReport.isrMetrics() != null
+                        && stepReport.isrMetrics().timeToFullIsr() != null
                         && stepReport.isrMetrics().timeToFullIsr().compareTo(worstIsrRecovery) > 0) {
                     worstIsrRecovery = stepReport.isrMetrics().timeToFullIsr();
                 }
@@ -147,19 +159,32 @@ public class DisruptionOrchestrator {
                 SlaGrader.SlaVerdict verdict = slaGrader.grade(report, plan.getSla());
                 report.setSlaVerdict(verdict);
                 slaViolated = verdict.violated();
-                eventBus.emit(disruptionId, DisruptionEventBus.EventType.SLA_GRADED, null,
-                        "SLA grade: " + verdict.grade(), verdict);
+                eventBus.emit(
+                        disruptionId,
+                        DisruptionEventBus.EventType.SLA_GRADED,
+                        null,
+                        "SLA grade: " + verdict.grade(),
+                        verdict);
             }
 
             report.setSummary(new DisruptionReport.DisruptionSummary(
-                    totalSteps, passedSteps, worstRecovery,
-                    avgThroughputDeg, maxP99Spike, slaViolated,
-                    worstIsrRecovery, peakConsumerLag));
+                    totalSteps,
+                    passedSteps,
+                    worstRecovery,
+                    avgThroughputDeg,
+                    maxP99Spike,
+                    slaViolated,
+                    worstIsrRecovery,
+                    peakConsumerLag));
             report.setStatus(passedSteps == totalSteps ? "COMPLETED" : "PARTIAL");
-            katesMetrics.recordDisruptionCompleted(plan.getName(), report.getStatus().toLowerCase());
-            katesMetrics.recordDisruptionDuration(plan.getName(),
-                    java.time.Duration.ofMillis(System.currentTimeMillis() - startMs));
-            eventBus.emit(disruptionId, DisruptionEventBus.EventType.COMPLETED, null,
+            katesMetrics.recordDisruptionCompleted(
+                    plan.getName(), report.getStatus().toLowerCase());
+            katesMetrics.recordDisruptionDuration(
+                    plan.getName(), java.time.Duration.ofMillis(System.currentTimeMillis() - startMs));
+            eventBus.emit(
+                    disruptionId,
+                    DisruptionEventBus.EventType.COMPLETED,
+                    null,
                     "Plan completed: " + report.getStatus());
 
         } catch (Exception e) {
@@ -167,10 +192,9 @@ public class DisruptionOrchestrator {
             report.setStepReports(stepReports);
             report.setStatus("FAILED");
             katesMetrics.recordDisruptionCompleted(plan.getName(), "failed");
-            katesMetrics.recordDisruptionDuration(plan.getName(),
-                    java.time.Duration.ofMillis(System.currentTimeMillis() - startMs));
-            eventBus.emit(disruptionId, DisruptionEventBus.EventType.FAILED, null,
-                    "Plan failed: " + e.getMessage());
+            katesMetrics.recordDisruptionDuration(
+                    plan.getName(), java.time.Duration.ofMillis(System.currentTimeMillis() - startMs));
+            eventBus.emit(disruptionId, DisruptionEventBus.EventType.FAILED, null, "Plan failed: " + e.getMessage());
         }
 
         return report;
@@ -190,12 +214,11 @@ public class DisruptionOrchestrator {
             Integer targetedLeader = null;
 
             if (spec.targetTopic() != null && !spec.targetTopic().isEmpty()) {
-                int leaderId = intelligence.resolveLeaderBrokerId(
-                        spec.targetTopic(), spec.targetPartition());
+                int leaderId = intelligence.resolveLeaderBrokerId(spec.targetTopic(), spec.targetPartition());
                 if (leaderId >= 0) {
                     targetedLeader = leaderId;
-                    LOG.info("  Auto-targeting leader broker " + leaderId
-                            + " for " + spec.targetTopic() + "-" + spec.targetPartition());
+                    LOG.info("  Auto-targeting leader broker " + leaderId + " for " + spec.targetTopic() + "-"
+                            + spec.targetPartition());
                     spec = FaultSpec.builder(spec.experimentName())
                             .targetNamespace(spec.targetNamespace())
                             .targetLabel(spec.targetLabel())
@@ -215,13 +238,13 @@ public class DisruptionOrchestrator {
                 }
             }
 
-            if (plan.getIsrTrackingTopic() != null && !plan.getIsrTrackingTopic().isEmpty()) {
-                isrTracker = intelligence.startIsrTracking(
-                        plan.getIsrTrackingTopic(), plan.getIsrPollIntervalMs());
+            if (plan.getIsrTrackingTopic() != null
+                    && !plan.getIsrTrackingTopic().isEmpty()) {
+                isrTracker = intelligence.startIsrTracking(plan.getIsrTrackingTopic(), plan.getIsrPollIntervalMs());
             }
-            if (plan.getLagTrackingGroupId() != null && !plan.getLagTrackingGroupId().isEmpty()) {
-                lagTracker = intelligence.startLagTracking(
-                        plan.getLagTrackingGroupId(), plan.getLagPollIntervalMs());
+            if (plan.getLagTrackingGroupId() != null
+                    && !plan.getLagTrackingGroupId().isEmpty()) {
+                lagTracker = intelligence.startLagTracking(plan.getLagTrackingGroupId(), plan.getLagPollIntervalMs());
             }
 
             session = podWatcher.startWatching(kafkaNamespace, kafkaLabel);
@@ -235,11 +258,13 @@ public class DisruptionOrchestrator {
             PrometheusMetricsCapture.MetricsSnapshot baseline = null;
             if (prometheusAvailable && step.steadyStateSec() > 0) {
                 baseline = prometheusCapture.capture(Duration.ofSeconds(step.steadyStateSec()));
-                preMetrics = prometheusCapture.toReportSummary(baseline,
-                        Duration.ofSeconds(step.steadyStateSec()));
+                preMetrics = prometheusCapture.toReportSummary(baseline, Duration.ofSeconds(step.steadyStateSec()));
                 LOG.info("  Captured baseline Prometheus snapshot");
-                eventBus.emit(plan.getName(), DisruptionEventBus.EventType.METRICS_BASELINE,
-                        step.name(), "Baseline metrics captured");
+                eventBus.emit(
+                        plan.getName(),
+                        DisruptionEventBus.EventType.METRICS_BASELINE,
+                        step.name(),
+                        "Baseline metrics captured");
             }
 
             session.markDisruptionStart();
@@ -248,10 +273,13 @@ public class DisruptionOrchestrator {
             Instant disruptionStart = Instant.now();
 
             LOG.info("  Injecting fault: " + spec.experimentName());
-            eventBus.emit(plan.getName(), DisruptionEventBus.EventType.FAULT_INJECTED,
-                    step.name(), "Fault injected: " + spec.experimentName());
-            ChaosOutcome outcome = chaosCoordinator.triggerFault(spec)
-                    .get(spec.chaosDurationSec() + 120, TimeUnit.SECONDS);
+            eventBus.emit(
+                    plan.getName(),
+                    DisruptionEventBus.EventType.FAULT_INJECTED,
+                    step.name(),
+                    "Fault injected: " + spec.experimentName());
+            ChaosOutcome outcome =
+                    chaosCoordinator.triggerFault(spec).get(spec.chaosDurationSec() + 120, TimeUnit.SECONDS);
 
             if (step.observationWindowSec() > 0) {
                 LOG.info("  Observing for " + step.observationWindowSec() + "s");
@@ -263,29 +291,38 @@ public class DisruptionOrchestrator {
             if (prometheusAvailable && step.observationWindowSec() > 0) {
                 PrometheusMetricsCapture.MetricsSnapshot impact =
                         prometheusCapture.capture(Duration.ofSeconds(step.observationWindowSec()));
-                postMetrics = prometheusCapture.toReportSummary(impact,
-                        Duration.ofSeconds(step.observationWindowSec()));
+                postMetrics =
+                        prometheusCapture.toReportSummary(impact, Duration.ofSeconds(step.observationWindowSec()));
                 if (baseline != null) {
                     deltas = prometheusCapture.computeDeltas(baseline, impact);
                 }
                 LOG.info("  Captured post-disruption Prometheus snapshot");
-                eventBus.emit(plan.getName(), DisruptionEventBus.EventType.METRICS_CAPTURED,
-                        step.name(), "Post-disruption metrics captured");
+                eventBus.emit(
+                        plan.getName(),
+                        DisruptionEventBus.EventType.METRICS_CAPTURED,
+                        step.name(),
+                        "Post-disruption metrics captured");
             }
 
             Duration tfr = null;
             Duration tar = null;
             if (step.requireRecovery()) {
                 LOG.info("  Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
-                eventBus.emit(plan.getName(), DisruptionEventBus.EventType.RECOVERY_WAITING,
-                        step.name(), "Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
+                eventBus.emit(
+                        plan.getName(),
+                        DisruptionEventBus.EventType.RECOVERY_WAITING,
+                        step.name(),
+                        "Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
                 boolean recovered = session.awaitFirstReady(recoveryTimeoutSec, TimeUnit.SECONDS);
 
                 if (!recovered && plan.isAutoRollback()) {
                     LOG.warn("  Recovery timeout — triggering auto-rollback for " + step.name());
                     safetyGuard.rollback(spec, outcome.engineName());
-                    eventBus.emit(plan.getName(), DisruptionEventBus.EventType.ROLLBACK,
-                            step.name(), "Auto-rollback triggered for " + step.name());
+                    eventBus.emit(
+                            plan.getName(),
+                            DisruptionEventBus.EventType.ROLLBACK,
+                            step.name(),
+                            "Auto-rollback triggered for " + step.name());
                     rolledBack = true;
                     rollbackReason = "Recovery timeout exceeded " + recoveryTimeoutSec + "s";
                     session.awaitFirstReady(60, TimeUnit.SECONDS);
@@ -297,18 +334,27 @@ public class DisruptionOrchestrator {
             }
 
             Duration strimziRecovery = strimziTracker.measureRecoveryTime(
-                    kafkaNamespace, kafkaCluster, disruptionStart,
-                    Duration.ofSeconds(recoveryTimeoutSec));
+                    kafkaNamespace, kafkaCluster, disruptionStart, Duration.ofSeconds(recoveryTimeoutSec));
 
             IsrSnapshot.Metrics isrMetrics = isrTracker != null ? isrTracker.stop() : null;
             LagSnapshot.Metrics lagMetrics = lagTracker != null ? lagTracker.stop() : null;
 
             return new DisruptionReport.StepReport(
-                    step.name(), spec.disruptionType(), outcome,
-                    session.getEvents(), tfr, tar, strimziRecovery,
-                    preMetrics, postMetrics, deltas,
-                    targetedLeader, isrMetrics, lagMetrics,
-                    rolledBack, rollbackReason);
+                    step.name(),
+                    spec.disruptionType(),
+                    outcome,
+                    session.getEvents(),
+                    tfr,
+                    tar,
+                    strimziRecovery,
+                    preMetrics,
+                    postMetrics,
+                    deltas,
+                    targetedLeader,
+                    isrMetrics,
+                    lagMetrics,
+                    rolledBack,
+                    rollbackReason);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -336,16 +382,23 @@ public class DisruptionOrchestrator {
     }
 
     private DisruptionReport.StepReport failedStep(
-            DisruptionPlan.DisruptionStep step, String reason,
-            boolean rolledBack, String rollbackReason) {
+            DisruptionPlan.DisruptionStep step, String reason, boolean rolledBack, String rollbackReason) {
         Instant now = Instant.now();
         return new DisruptionReport.StepReport(
                 step.name(),
                 step.faultSpec().disruptionType(),
-                ChaosOutcome.failure("none", step.faultSpec().experimentName(),
-                        now, now, System.nanoTime(), reason),
-                List.of(), null, null, null, null, null, Map.of(),
-                null, null, null,
-                rolledBack, rollbackReason);
+                ChaosOutcome.failure("none", step.faultSpec().experimentName(), now, now, System.nanoTime(), reason),
+                List.of(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                Map.of(),
+                null,
+                null,
+                null,
+                rolledBack,
+                rollbackReason);
     }
 }

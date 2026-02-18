@@ -1,12 +1,12 @@
 package com.klster.kates.export;
 
-import com.klster.kates.domain.TestResult;
-import com.klster.kates.domain.SlaViolation;
-import com.klster.kates.report.TestReport;
-import jakarta.enterprise.context.ApplicationScoped;
-
 import java.time.Instant;
 import java.util.List;
+import jakarta.enterprise.context.ApplicationScoped;
+
+import com.klster.kates.domain.SlaViolation;
+import com.klster.kates.domain.TestResult;
+import com.klster.kates.report.TestReport;
 
 /**
  * Exports a {@link TestReport} as JUnit XML format.
@@ -20,28 +20,37 @@ public class JunitXmlExporter {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
 
-        String suiteName = report.getMetadata() != null
-                ? report.getMetadata().getOrDefault("testType", "kates") : "kates";
+        String suiteName =
+                report.getMetadata() != null ? report.getMetadata().getOrDefault("testType", "kates") : "kates";
         List<TestResult> results = report.getRun() != null ? report.getRun().getResults() : List.of();
-        int failures = report.getOverallSlaVerdict() != null && !report.getOverallSlaVerdict().passed()
-                ? report.getOverallSlaVerdict().violations().size() : 0;
+        int failures = report.getOverallSlaVerdict() != null
+                        && !report.getOverallSlaVerdict().passed()
+                ? report.getOverallSlaVerdict().violations().size()
+                : 0;
 
-        sb.append("<testsuite name=\"").append(xmlEscape(suiteName))
-                .append("\" tests=\"").append(results != null ? results.size() : 0)
-                .append("\" failures=\"").append(failures)
+        sb.append("<testsuite name=\"")
+                .append(xmlEscape(suiteName))
+                .append("\" tests=\"")
+                .append(results != null ? results.size() : 0)
+                .append("\" failures=\"")
+                .append(failures)
                 .append("\" errors=\"0\">\n");
 
         if (results != null) {
             for (TestResult r : results) {
                 String caseName = r.getPhaseName() != null ? r.getPhaseName() : r.getTaskId();
-                sb.append("  <testcase name=\"").append(xmlEscape(caseName))
-                        .append("\" classname=\"kates.").append(xmlEscape(suiteName))
-                        .append("\" time=\"").append(String.format("%.3f", computeDurationSec(r)))
+                sb.append("  <testcase name=\"")
+                        .append(xmlEscape(caseName))
+                        .append("\" classname=\"kates.")
+                        .append(xmlEscape(suiteName))
+                        .append("\" time=\"")
+                        .append(String.format("%.3f", computeDurationSec(r)))
                         .append("\"");
 
                 if (r.getError() != null) {
                     sb.append(">\n");
-                    sb.append("    <failure message=\"").append(xmlEscape(r.getError()))
+                    sb.append("    <failure message=\"")
+                            .append(xmlEscape(r.getError()))
                             .append("\" type=\"Error\"/>\n");
                     sb.append("  </testcase>\n");
                 } else {
@@ -51,13 +60,18 @@ public class JunitXmlExporter {
         }
 
         // Emit SLA violations as system-level failures
-        if (report.getOverallSlaVerdict() != null && !report.getOverallSlaVerdict().violations().isEmpty()) {
+        if (report.getOverallSlaVerdict() != null
+                && !report.getOverallSlaVerdict().violations().isEmpty()) {
             for (SlaViolation v : report.getOverallSlaVerdict().violations()) {
-                sb.append("  <testcase name=\"SLA-").append(xmlEscape(v.metric()))
+                sb.append("  <testcase name=\"SLA-")
+                        .append(xmlEscape(v.metric()))
                         .append("\" classname=\"kates.sla\">\n");
-                sb.append("    <failure message=\"").append(xmlEscape(v.metric()))
-                        .append(" threshold=").append(String.format("%.2f", v.threshold()))
-                        .append(" actual=").append(String.format("%.2f", v.actual()))
+                sb.append("    <failure message=\"")
+                        .append(xmlEscape(v.metric()))
+                        .append(" threshold=")
+                        .append(String.format("%.2f", v.threshold()))
+                        .append(" actual=")
+                        .append(String.format("%.2f", v.actual()))
                         .append("\" type=\"SlaViolation\"/>\n");
                 sb.append("  </testcase>\n");
             }

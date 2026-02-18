@@ -1,11 +1,12 @@
 package com.klster.kates.report;
 
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
+
 import com.klster.kates.domain.MetricsSample;
 import com.klster.kates.domain.ScenarioPhase;
 import com.klster.kates.domain.SlaVerdict;
-
-import java.util.List;
 
 /**
  * Per-phase report within a {@link TestReport}.
@@ -20,29 +21,53 @@ public class PhaseReport {
     private SlaVerdict slaVerdict;
     private List<MetricsSample> timeSeries;
 
-    public PhaseReport() {
-    }
+    public PhaseReport() {}
 
-    public PhaseReport(String phaseName, ScenarioPhase.PhaseType phaseType,
-                       ReportSummary metrics, SlaVerdict slaVerdict) {
+    public PhaseReport(
+            String phaseName, ScenarioPhase.PhaseType phaseType, ReportSummary metrics, SlaVerdict slaVerdict) {
         this.phaseName = phaseName;
         this.phaseType = phaseType;
         this.metrics = metrics;
         this.slaVerdict = slaVerdict;
     }
 
-    public String getPhaseName() { return phaseName; }
-    public void setPhaseName(String phaseName) { this.phaseName = phaseName; }
+    public String getPhaseName() {
+        return phaseName;
+    }
 
-    public ScenarioPhase.PhaseType getPhaseType() { return phaseType; }
-    public void setPhaseType(ScenarioPhase.PhaseType phaseType) { this.phaseType = phaseType; }
+    public void setPhaseName(String phaseName) {
+        this.phaseName = phaseName;
+    }
 
-    public ReportSummary getMetrics() { return metrics; }
-    public void setMetrics(ReportSummary metrics) { this.metrics = metrics; }
+    public ScenarioPhase.PhaseType getPhaseType() {
+        return phaseType;
+    }
 
-    public SlaVerdict getSlaVerdict() { return slaVerdict; }
-    public void setSlaVerdict(SlaVerdict slaVerdict) { this.slaVerdict = slaVerdict; }
+    public void setPhaseType(ScenarioPhase.PhaseType phaseType) {
+        this.phaseType = phaseType;
+    }
 
-    public List<MetricsSample> getTimeSeries() { return timeSeries; }
-    public void setTimeSeries(List<MetricsSample> timeSeries) { this.timeSeries = timeSeries; }
+    public ReportSummary getMetrics() {
+        return metrics;
+    }
+
+    public void setMetrics(ReportSummary metrics) {
+        this.metrics = metrics;
+    }
+
+    public SlaVerdict getSlaVerdict() {
+        return slaVerdict;
+    }
+
+    public void setSlaVerdict(SlaVerdict slaVerdict) {
+        this.slaVerdict = slaVerdict;
+    }
+
+    public List<MetricsSample> getTimeSeries() {
+        return timeSeries;
+    }
+
+    public void setTimeSeries(List<MetricsSample> timeSeries) {
+        this.timeSeries = timeSeries;
+    }
 }

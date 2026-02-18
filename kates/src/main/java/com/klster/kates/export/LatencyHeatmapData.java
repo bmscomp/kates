@@ -1,8 +1,8 @@
 package com.klster.kates.export;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Time-bucketed latency distribution data for heatmap visualization.
@@ -14,13 +14,8 @@ public record LatencyHeatmapData(
         String testType,
         List<String> bucketLabels,
         List<double[]> bucketBoundaries,
-        List<HeatmapRow> rows
-) {
-    public record HeatmapRow(
-            long timestampMs,
-            String phase,
-            long[] counts
-    ) {}
+        List<HeatmapRow> rows) {
+    public record HeatmapRow(long timestampMs, String phase, long[] counts) {}
 
     /**
      * Creates heatmap bucket labels from boundary values.
@@ -39,7 +34,7 @@ public record LatencyHeatmapData(
     public static List<double[]> buildBoundaries(double[] boundaries) {
         List<double[]> pairs = new java.util.ArrayList<>(boundaries.length - 1);
         for (int i = 0; i < boundaries.length - 1; i++) {
-            pairs.add(new double[]{boundaries[i], boundaries[i + 1]});
+            pairs.add(new double[] {boundaries[i], boundaries[i + 1]});
         }
         return pairs;
     }

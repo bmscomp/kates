@@ -1,14 +1,14 @@
 package com.klster.kates.trogdor.spec;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.HashMap;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class RoundTripWorkloadSpec extends TrogdorSpec {
 
-    private static final String CLASS_NAME =
-            "org.apache.kafka.trogdor.workload.RoundTripWorkloadSpec";
+    private static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.RoundTripWorkloadSpec";
 
     private String bootstrapServers;
     private int targetMessagesPerSec;

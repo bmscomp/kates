@@ -1,6 +1,12 @@
 package com.klster.kates.disruption;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import jakarta.enterprise.context.ApplicationScoped;
+
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
@@ -10,12 +16,6 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import java.time.Duration;
-import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.jboss.logging.Logger;
 
 /**
@@ -35,12 +35,11 @@ public class KafkaIntelligenceService {
     @ConfigProperty(name = "kates.kafka.bootstrap-servers")
     String bootstrapServers;
 
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2,
-            r -> {
-                Thread t = new Thread(r, "kafka-intelligence");
-                t.setDaemon(true);
-                return t;
-            });
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
+        Thread t = new Thread(r, "kafka-intelligence");
+        t.setDaemon(true);
+        return t;
+    });
 
     private AdminClient createClient() {
         Properties props = new Properties();
@@ -71,8 +70,7 @@ public class KafkaIntelligenceService {
                 if (pi.partition() == partition) {
                     Node leader = pi.leader();
                     if (leader != null) {
-                        LOG.info("Resolved leader for " + topic + "-" + partition
-                                + " → broker " + leader.id());
+                        LOG.info("Resolved leader for " + topic + "-" + partition + " → broker " + leader.id());
                         return leader.id();
                     }
                 }
@@ -114,8 +112,7 @@ public class KafkaIntelligenceService {
 
         IsrTracker(String topic, int pollIntervalMs) {
             this.topic = topic;
-            this.future = scheduler.scheduleAtFixedRate(
-                    this::poll, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
+            this.future = scheduler.scheduleAtFixedRate(this::poll, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
         }
 
         public void markDisruptionStart() {
@@ -136,7 +133,9 @@ public class KafkaIntelligenceService {
                 Instant now = Instant.now();
                 for (TopicPartitionInfo pi : desc.partitions()) {
                     timeline.add(new IsrSnapshot.Entry(
-                            now, topic, pi.partition(),
+                            now,
+                            topic,
+                            pi.partition(),
                             pi.leader() != null ? pi.leader().id() : -1,
                             pi.isr().stream().map(Node::id).toList(),
                             pi.replicas().size()));
@@ -185,8 +184,7 @@ public class KafkaIntelligenceService {
             Duration timeToFullIsr = computeTimeToFullIsr();
 
             return new IsrSnapshot.Metrics(
-                    timeToFullIsr, minDepth, peakUnderReplicated,
-                    totalPartitions, List.copyOf(timeline));
+                    timeToFullIsr, minDepth, peakUnderReplicated, totalPartitions, List.copyOf(timeline));
         }
 
         private Duration computeTimeToFullIsr() {
@@ -224,8 +222,7 @@ public class KafkaIntelligenceService {
 
         LagTracker(String groupId, int pollIntervalMs) {
             this.groupId = groupId;
-            this.future = scheduler.scheduleAtFixedRate(
-                    this::poll, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
+            this.future = scheduler.scheduleAtFixedRate(this::poll, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
         }
 
         public void markDisruptionStart() {
@@ -239,8 +236,7 @@ public class KafkaIntelligenceService {
             if (!running.get()) return;
 
             try (AdminClient client = createClient()) {
-                Map<TopicPartition, OffsetAndMetadata> offsets = client
-                        .listConsumerGroupOffsets(groupId)
+                Map<TopicPartition, OffsetAndMetadata> offsets = client.listConsumerGroupOffsets(groupId)
                         .partitionsToOffsetAndMetadata()
                         .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
@@ -250,9 +246,7 @@ public class KafkaIntelligenceService {
                 offsets.keySet().forEach(tp -> latestRequest.put(tp, OffsetSpec.latest()));
 
                 Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> endOffsets =
-                        client.listOffsets(latestRequest)
-                                .all()
-                                .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                        client.listOffsets(latestRequest).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
                 Map<String, Long> perTopicLag = new LinkedHashMap<>();
                 long totalLag = 0;
@@ -260,15 +254,13 @@ public class KafkaIntelligenceService {
                 for (var entry : offsets.entrySet()) {
                     TopicPartition tp = entry.getKey();
                     long current = entry.getValue().offset();
-                    long end = endOffsets.containsKey(tp)
-                            ? endOffsets.get(tp).offset() : current;
+                    long end = endOffsets.containsKey(tp) ? endOffsets.get(tp).offset() : current;
                     long lag = Math.max(0, end - current);
                     totalLag += lag;
                     perTopicLag.merge(tp.topic(), lag, Long::sum);
                 }
 
-                timeline.add(new LagSnapshot.Entry(
-                        Instant.now(), groupId, totalLag, perTopicLag));
+                timeline.add(new LagSnapshot.Entry(Instant.now(), groupId, totalLag, perTopicLag));
 
             } catch (Exception e) {
                 LOG.debug("Lag poll failed", e);

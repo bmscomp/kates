@@ -1,19 +1,19 @@
 package com.klster.kates.chaos;
 
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.Watch;
-import io.fabric8.kubernetes.client.Watcher;
-import io.fabric8.kubernetes.client.WatcherException;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.kubernetes.client.Watcher;
+import io.fabric8.kubernetes.client.WatcherException;
 import org.jboss.logging.Logger;
 
 /**
@@ -30,20 +30,10 @@ public class K8sPodWatcher {
     KubernetesClient client;
 
     public record PodEvent(
-            Instant timestamp,
-            String podName,
-            String eventType,
-            String phase,
-            String reason,
-            String message
-    ) {}
+            Instant timestamp, String podName, String eventType, String phase, String reason, String message) {}
 
     public record RecoveryMetrics(
-            Duration timeToFirstReady,
-            Duration timeToAllReady,
-            int totalPods,
-            int recoveredPods
-    ) {}
+            Duration timeToFirstReady, Duration timeToAllReady, int totalPods, int recoveredPods) {}
 
     public static class WatchSession {
         private final List<PodEvent> events = new CopyOnWriteArrayList<>();
@@ -128,8 +118,7 @@ public class K8sPodWatcher {
             }
         }
 
-        LOG.info("Starting pod watch: namespace=" + namespace + " label=" + labelSelector
-                + " pods=" + expectedPods);
+        LOG.info("Starting pod watch: namespace=" + namespace + " label=" + labelSelector + " pods=" + expectedPods);
 
         Watch watch = client.pods()
                 .inNamespace(namespace)
@@ -142,8 +131,7 @@ public class K8sPodWatcher {
 
                         session.allPods.add(podName);
 
-                        PodEvent event = new PodEvent(
-                                Instant.now(), podName, action.name(), phase, "", "");
+                        PodEvent event = new PodEvent(Instant.now(), podName, action.name(), phase, "", "");
                         session.addEvent(event);
 
                         if (action == Action.DELETED) {

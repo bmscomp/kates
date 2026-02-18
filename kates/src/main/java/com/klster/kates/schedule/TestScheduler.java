@@ -1,16 +1,17 @@
 package com.klster.kates.schedule;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.klster.kates.domain.CreateTestRequest;
-import com.klster.kates.engine.TestOrchestrator;
-import io.quarkus.scheduler.Scheduled;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.scheduler.Scheduled;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.domain.CreateTestRequest;
+import com.klster.kates.engine.TestOrchestrator;
 
 /**
  * Evaluates all enabled schedules every 60 seconds.

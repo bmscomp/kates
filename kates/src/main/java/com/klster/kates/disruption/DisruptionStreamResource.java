@@ -1,6 +1,6 @@
 package com.klster.kates.disruption;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.function.Consumer;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -9,12 +9,11 @@ import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 
-import java.util.function.Consumer;
-import org.jboss.logging.Logger;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.Logger;
 
 /**
  * SSE endpoint for streaming real-time disruption test progress.
@@ -35,7 +34,9 @@ public class DisruptionStreamResource {
     @GET
     @Path("/{id}/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @Operation(summary = "Stream disruption events", description = "SSE endpoint for real-time disruption test progress")
+    @Operation(
+            summary = "Stream disruption events",
+            description = "SSE endpoint for real-time disruption test progress")
     public void stream(
             @Parameter(description = "Disruption ID") @PathParam("id") String disruptionId,
             @Context SseEventSink sink,

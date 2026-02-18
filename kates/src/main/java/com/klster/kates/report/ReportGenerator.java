@@ -1,5 +1,14 @@
 package com.klster.kates.report;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import com.klster.kates.domain.IntegrityEvent;
 import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.domain.SlaVerdict;
@@ -9,15 +18,6 @@ import com.klster.kates.domain.TestRun;
 import com.klster.kates.engine.KatesMetrics;
 import com.klster.kates.service.KafkaAdminService;
 import com.klster.kates.util.MetricUtils;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Builds structured {@link TestReport} instances from completed {@link TestRun}s.
@@ -79,8 +79,7 @@ public class ReportGenerator {
                 ClusterSnapshot snapshot = kafkaAdminService.captureSnapshot(topic);
                 if (snapshot != null) {
                     report.setClusterSnapshot(snapshot);
-                    report.setBrokerMetrics(
-                            computeBrokerMetrics(snapshot, report.getSummary()));
+                    report.setBrokerMetrics(computeBrokerMetrics(snapshot, report.getSummary()));
                 }
             } catch (Exception ignored) {
             }
@@ -99,8 +98,7 @@ public class ReportGenerator {
      * leadership ratio as weight. Detects skew when a broker deviates >20%
      * from the mean throughput.
      */
-    public List<BrokerMetrics> computeBrokerMetrics(
-            ClusterSnapshot snapshot, ReportSummary overall) {
+    public List<BrokerMetrics> computeBrokerMetrics(ClusterSnapshot snapshot, ReportSummary overall) {
         if (snapshot == null || overall == null || snapshot.brokers() == null) {
             return List.of();
         }
@@ -129,34 +127,50 @@ public class ReportGenerator {
                     overall.maxLatencyMs(),
                     Math.round(overall.totalErrors() * share),
                     overall.errorRate(),
-                    overall.durationMs()
-            );
+                    overall.durationMs());
 
             brokers.add(new BrokerMetrics(
-                    broker.id(), broker.host(), broker.rack(),
+                    broker.id(),
+                    broker.host(),
+                    broker.rack(),
                     broker.id() == snapshot.controllerId(),
-                    leaderCount, replicaCount, isrCount, underReplicated,
+                    leaderCount,
+                    replicaCount,
+                    isrCount,
+                    underReplicated,
                     totalPartitions,
                     Math.round(share * 10000.0) / 100.0,
-                    0.0, false, projected
-            ));
+                    0.0,
+                    false,
+                    projected));
         }
 
         double avgThroughput = brokers.stream()
                 .mapToDouble(b -> b.metrics().avgThroughputRecPerSec())
-                .average().orElse(0);
+                .average()
+                .orElse(0);
 
         if (avgThroughput > 0) {
-            brokers = brokers.stream().map(b -> {
-                double deviation = (b.metrics().avgThroughputRecPerSec() - avgThroughput) / avgThroughput;
-                double deviationPct = Math.round(deviation * 10000.0) / 100.0;
-                return new BrokerMetrics(
-                        b.brokerId(), b.host(), b.rack(), b.isController(),
-                        b.leaderPartitions(), b.replicaPartitions(),
-                        b.isrPartitions(), b.underReplicatedPartitions(),
-                        b.totalPartitions(), b.leaderSharePercent(),
-                        deviationPct, Math.abs(deviation) > 0.20, b.metrics());
-            }).toList();
+            brokers = brokers.stream()
+                    .map(b -> {
+                        double deviation = (b.metrics().avgThroughputRecPerSec() - avgThroughput) / avgThroughput;
+                        double deviationPct = Math.round(deviation * 10000.0) / 100.0;
+                        return new BrokerMetrics(
+                                b.brokerId(),
+                                b.host(),
+                                b.rack(),
+                                b.isController(),
+                                b.leaderPartitions(),
+                                b.replicaPartitions(),
+                                b.isrPartitions(),
+                                b.underReplicatedPartitions(),
+                                b.totalPartitions(),
+                                b.leaderSharePercent(),
+                                deviationPct,
+                                Math.abs(deviation) > 0.20,
+                                b.metrics());
+                    })
+                    .toList();
         }
 
         return brokers;
@@ -170,7 +184,9 @@ public class ReportGenerator {
         if (report.getMetadata() != null) {
             sb.append("## Metadata\n\n");
             sb.append("| Key | Value |\n|---|---|\n");
-            report.getMetadata().forEach((k, v) -> sb.append("| ").append(k).append(" | ").append(v).append(" |\n"));
+            report.getMetadata()
+                    .forEach((k, v) ->
+                            sb.append("| ").append(k).append(" | ").append(v).append(" |\n"));
             sb.append("\n");
         }
 
@@ -179,16 +195,36 @@ public class ReportGenerator {
             sb.append("## Summary\n\n");
             sb.append("| Metric | Value |\n|---|---|\n");
             sb.append("| Total Records | ").append(s.totalRecords()).append(" |\n");
-            sb.append("| Avg Throughput (rec/s) | ").append(String.format("%.2f", s.avgThroughputRecPerSec())).append(" |\n");
-            sb.append("| Peak Throughput (rec/s) | ").append(String.format("%.2f", s.peakThroughputRecPerSec())).append(" |\n");
-            sb.append("| Avg Throughput (MB/s) | ").append(String.format("%.2f", s.avgThroughputMBPerSec())).append(" |\n");
-            sb.append("| Avg Latency (ms) | ").append(String.format("%.2f", s.avgLatencyMs())).append(" |\n");
-            sb.append("| p50 Latency (ms) | ").append(String.format("%.2f", s.p50LatencyMs())).append(" |\n");
-            sb.append("| p95 Latency (ms) | ").append(String.format("%.2f", s.p95LatencyMs())).append(" |\n");
-            sb.append("| p99 Latency (ms) | ").append(String.format("%.2f", s.p99LatencyMs())).append(" |\n");
-            sb.append("| p99.9 Latency (ms) | ").append(String.format("%.2f", s.p999LatencyMs())).append(" |\n");
-            sb.append("| Max Latency (ms) | ").append(String.format("%.2f", s.maxLatencyMs())).append(" |\n");
-            sb.append("| Error Rate | ").append(String.format("%.4f", s.errorRate())).append(" |\n");
+            sb.append("| Avg Throughput (rec/s) | ")
+                    .append(String.format("%.2f", s.avgThroughputRecPerSec()))
+                    .append(" |\n");
+            sb.append("| Peak Throughput (rec/s) | ")
+                    .append(String.format("%.2f", s.peakThroughputRecPerSec()))
+                    .append(" |\n");
+            sb.append("| Avg Throughput (MB/s) | ")
+                    .append(String.format("%.2f", s.avgThroughputMBPerSec()))
+                    .append(" |\n");
+            sb.append("| Avg Latency (ms) | ")
+                    .append(String.format("%.2f", s.avgLatencyMs()))
+                    .append(" |\n");
+            sb.append("| p50 Latency (ms) | ")
+                    .append(String.format("%.2f", s.p50LatencyMs()))
+                    .append(" |\n");
+            sb.append("| p95 Latency (ms) | ")
+                    .append(String.format("%.2f", s.p95LatencyMs()))
+                    .append(" |\n");
+            sb.append("| p99 Latency (ms) | ")
+                    .append(String.format("%.2f", s.p99LatencyMs()))
+                    .append(" |\n");
+            sb.append("| p99.9 Latency (ms) | ")
+                    .append(String.format("%.2f", s.p999LatencyMs()))
+                    .append(" |\n");
+            sb.append("| Max Latency (ms) | ")
+                    .append(String.format("%.2f", s.maxLatencyMs()))
+                    .append(" |\n");
+            sb.append("| Error Rate | ")
+                    .append(String.format("%.4f", s.errorRate()))
+                    .append(" |\n");
             sb.append("| Duration (ms) | ").append(s.durationMs()).append(" |\n");
             sb.append("\n");
         }
@@ -201,9 +237,15 @@ public class ReportGenerator {
                 if (ps != null) {
                     sb.append("| Metric | Value |\n|---|---|\n");
                     sb.append("| Records | ").append(ps.totalRecords()).append(" |\n");
-                    sb.append("| Throughput (rec/s) | ").append(String.format("%.2f", ps.avgThroughputRecPerSec())).append(" |\n");
-                    sb.append("| Avg Latency (ms) | ").append(String.format("%.2f", ps.avgLatencyMs())).append(" |\n");
-                    sb.append("| p99 Latency (ms) | ").append(String.format("%.2f", ps.p99LatencyMs())).append(" |\n");
+                    sb.append("| Throughput (rec/s) | ")
+                            .append(String.format("%.2f", ps.avgThroughputRecPerSec()))
+                            .append(" |\n");
+                    sb.append("| Avg Latency (ms) | ")
+                            .append(String.format("%.2f", ps.avgLatencyMs()))
+                            .append(" |\n");
+                    sb.append("| p99 Latency (ms) | ")
+                            .append(String.format("%.2f", ps.p99LatencyMs()))
+                            .append(" |\n");
                     sb.append("\n");
                 }
             }
@@ -212,14 +254,20 @@ public class ReportGenerator {
         SlaVerdict verdict = report.getOverallSlaVerdict();
         if (verdict != null) {
             sb.append("## SLA Verdict\n\n");
-            sb.append("**Status**: ").append(verdict.passed() ? "✅ PASSED" : "❌ FAILED").append("\n\n");
+            sb.append("**Status**: ")
+                    .append(verdict.passed() ? "✅ PASSED" : "❌ FAILED")
+                    .append("\n\n");
             if (!verdict.violations().isEmpty()) {
                 sb.append("| Metric | Threshold | Actual | Severity |\n|---|---|---|---|\n");
                 for (SlaViolation v : verdict.violations()) {
-                    sb.append("| ").append(v.metric())
-                            .append(" | ").append(String.format("%.2f", v.threshold()))
-                            .append(" | ").append(String.format("%.2f", v.actual()))
-                            .append(" | ").append(v.severity())
+                    sb.append("| ")
+                            .append(v.metric())
+                            .append(" | ")
+                            .append(String.format("%.2f", v.threshold()))
+                            .append(" | ")
+                            .append(String.format("%.2f", v.actual()))
+                            .append(" | ")
+                            .append(v.severity())
                             .append(" |\n");
                 }
             }
@@ -238,17 +286,35 @@ public class ReportGenerator {
                         sb.append("| Acked | ").append(ir.totalAcked()).append(" |\n");
                         sb.append("| Consumed | ").append(ir.totalConsumed()).append(" |\n");
                         sb.append("| Lost | ").append(ir.lostRecords()).append(" |\n");
-                        sb.append("| Duplicates | ").append(ir.duplicateRecords()).append(" |\n");
-                        sb.append("| Data Loss (%) | ").append(String.format("%.4f", ir.dataLossPercent())).append(" |\n");
-                        sb.append("| Producer RTO (ms) | ").append(String.format("%.0f", ir.producerRtoMs())).append(" |\n");
-                        sb.append("| Consumer RTO (ms) | ").append(String.format("%.0f", ir.consumerRtoMs())).append(" |\n");
-                        sb.append("| RPO (ms) | ").append(String.format("%.0f", ir.rpoMs())).append(" |\n");
+                        sb.append("| Duplicates | ")
+                                .append(ir.duplicateRecords())
+                                .append(" |\n");
+                        sb.append("| Data Loss (%) | ")
+                                .append(String.format("%.4f", ir.dataLossPercent()))
+                                .append(" |\n");
+                        sb.append("| Producer RTO (ms) | ")
+                                .append(String.format("%.0f", ir.producerRtoMs()))
+                                .append(" |\n");
+                        sb.append("| Consumer RTO (ms) | ")
+                                .append(String.format("%.0f", ir.consumerRtoMs()))
+                                .append(" |\n");
+                        sb.append("| RPO (ms) | ")
+                                .append(String.format("%.0f", ir.rpoMs()))
+                                .append(" |\n");
                         sb.append("| CRC Verified | ").append(ir.crcVerified()).append(" |\n");
                         sb.append("| CRC Failures | ").append(ir.crcFailures()).append(" |\n");
-                        sb.append("| Ordering Verified | ").append(ir.orderingVerified()).append(" |\n");
-                        sb.append("| Out of Order | ").append(ir.outOfOrderCount()).append(" |\n");
-                        sb.append("| Idempotence | ").append(ir.idempotenceEnabled()).append(" |\n");
-                        sb.append("| Transactions | ").append(ir.transactionsEnabled()).append(" |\n");
+                        sb.append("| Ordering Verified | ")
+                                .append(ir.orderingVerified())
+                                .append(" |\n");
+                        sb.append("| Out of Order | ")
+                                .append(ir.outOfOrderCount())
+                                .append(" |\n");
+                        sb.append("| Idempotence | ")
+                                .append(ir.idempotenceEnabled())
+                                .append(" |\n");
+                        sb.append("| Transactions | ")
+                                .append(ir.transactionsEnabled())
+                                .append(" |\n");
                         sb.append("| **Verdict** | **").append(ir.verdict()).append("** |\n\n");
                         if (ir.timeline() != null && !ir.timeline().isEmpty()) {
                             sb.append("### Timeline\n\n");
@@ -257,9 +323,12 @@ public class ReportGenerator {
                             int start = ir.timeline().size() - max;
                             for (int i = start; i < ir.timeline().size(); i++) {
                                 IntegrityEvent ev = ir.timeline().get(i);
-                                sb.append("| ").append(ev.timestampMs())
-                                        .append(" | ").append(ev.type())
-                                        .append(" | ").append(ev.detail())
+                                sb.append("| ")
+                                        .append(ev.timestampMs())
+                                        .append(" | ")
+                                        .append(ev.type())
+                                        .append(" | ")
+                                        .append(ev.detail())
                                         .append(" |\n");
                             }
                             sb.append("\n");
@@ -269,5 +338,4 @@ public class ReportGenerator {
 
         return sb.toString();
     }
-
 }

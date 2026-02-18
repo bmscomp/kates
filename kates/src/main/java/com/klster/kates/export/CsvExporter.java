@@ -1,9 +1,10 @@
 package com.klster.kates.export;
 
+import jakarta.enterprise.context.ApplicationScoped;
+
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
-import jakarta.enterprise.context.ApplicationScoped;
 
 /**
  * Exports a {@link TestReport} as CSV.
@@ -13,8 +14,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 public class CsvExporter {
 
     private static final String HEADER =
-            "runId,testType,backend,phase,recordsSent,throughputRecPerSec,throughputMBPerSec," +
-            "avgLatencyMs,p50LatencyMs,p95LatencyMs,p99LatencyMs,maxLatencyMs,error";
+            "runId,testType,backend,phase,recordsSent,throughputRecPerSec,throughputMBPerSec,"
+                    + "avgLatencyMs,p50LatencyMs,p95LatencyMs,p99LatencyMs,maxLatencyMs,error";
 
     public String export(TestReport report) {
         StringBuilder sb = new StringBuilder();
@@ -29,7 +30,8 @@ public class CsvExporter {
                 sb.append(csvEscape(runId)).append(",");
                 sb.append(csvEscape(type)).append(",");
                 sb.append(csvEscape(backend)).append(",");
-                sb.append(csvEscape(r.getPhaseName() != null ? r.getPhaseName() : "")).append(",");
+                sb.append(csvEscape(r.getPhaseName() != null ? r.getPhaseName() : ""))
+                        .append(",");
                 sb.append(r.getRecordsSent()).append(",");
                 sb.append(fmt(r.getThroughputRecordsPerSec())).append(",");
                 sb.append(fmt(r.getThroughputMBPerSec())).append(",");
@@ -48,8 +50,12 @@ public class CsvExporter {
         if (s != null) {
             sb.append("\n# Summary\n");
             sb.append("totalRecords,").append(s.totalRecords()).append("\n");
-            sb.append("avgThroughputRecPerSec,").append(fmt(s.avgThroughputRecPerSec())).append("\n");
-            sb.append("peakThroughputRecPerSec,").append(fmt(s.peakThroughputRecPerSec())).append("\n");
+            sb.append("avgThroughputRecPerSec,")
+                    .append(fmt(s.avgThroughputRecPerSec()))
+                    .append("\n");
+            sb.append("peakThroughputRecPerSec,")
+                    .append(fmt(s.peakThroughputRecPerSec()))
+                    .append("\n");
             sb.append("avgLatencyMs,").append(fmt(s.avgLatencyMs())).append("\n");
             sb.append("p99LatencyMs,").append(fmt(s.p99LatencyMs())).append("\n");
             sb.append("errorRate,").append(fmt(s.errorRate())).append("\n");

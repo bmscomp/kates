@@ -1,27 +1,5 @@
 package com.klster.kates.service;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.Config;
-import org.apache.kafka.clients.admin.ConfigEntry;
-import org.apache.kafka.clients.admin.ConsumerGroupDescription;
-import org.apache.kafka.clients.admin.GroupListing;
-import org.apache.kafka.clients.admin.ListGroupsOptions;
-import org.apache.kafka.clients.admin.DescribeClusterResult;
-import org.apache.kafka.clients.admin.ListOffsetsResult;
-import org.apache.kafka.clients.admin.ListTopicsResult;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.admin.OffsetSpec;
-import org.apache.kafka.clients.admin.TopicDescription;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.Node;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.TopicPartitionInfo;
-import org.apache.kafka.common.config.ConfigResource;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -34,6 +12,28 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.ConsumerGroupDescription;
+import org.apache.kafka.clients.admin.DescribeClusterResult;
+import org.apache.kafka.clients.admin.GroupListing;
+import org.apache.kafka.clients.admin.ListGroupsOptions;
+import org.apache.kafka.clients.admin.ListOffsetsResult;
+import org.apache.kafka.clients.admin.ListTopicsResult;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.config.ConfigResource;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import com.klster.kates.report.ClusterSnapshot;
@@ -47,8 +47,7 @@ public class KafkaAdminService {
     private final String bootstrapServers;
 
     @Inject
-    public KafkaAdminService(
-            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+    public KafkaAdminService(@ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.bootstrapServers = bootstrapServers;
     }
 
@@ -66,9 +65,7 @@ public class KafkaAdminService {
             if (configs != null && !configs.isEmpty()) {
                 newTopic.configs(configs);
             }
-            client.createTopics(Collections.singleton(newTopic))
-                    .all()
-                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            client.createTopics(Collections.singleton(newTopic)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Created topic: " + name);
         } catch (ExecutionException e) {
             if (e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException) {
@@ -83,9 +80,7 @@ public class KafkaAdminService {
 
     public void deleteTopic(String name) {
         try (AdminClient client = createClient()) {
-            client.deleteTopics(Collections.singleton(name))
-                    .all()
-                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            client.deleteTopics(Collections.singleton(name)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Deleted topic: " + name);
         } catch (Exception e) {
             LOG.warn("Failed to delete topic: " + name, e);
@@ -103,9 +98,7 @@ public class KafkaAdminService {
 
     public Map<String, TopicDescription> describeTopics(Collection<String> topicNames) {
         try (AdminClient client = createClient()) {
-            return client.describeTopics(topicNames)
-                    .allTopicNames()
-                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return client.describeTopics(topicNames).allTopicNames().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new RuntimeException("Failed to describe topics", e);
         }
@@ -192,10 +185,14 @@ public class KafkaAdminService {
                 if (entry.source() == ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG
                         || entry.source() == ConfigEntry.ConfigSource.DEFAULT_CONFIG) {
                     switch (entry.name()) {
-                        case "cleanup.policy", "retention.ms", "retention.bytes",
-                             "min.insync.replicas", "compression.type", "segment.bytes",
-                             "max.message.bytes", "message.timestamp.type" ->
-                                configs.put(entry.name(), entry.value());
+                        case "cleanup.policy",
+                                "retention.ms",
+                                "retention.bytes",
+                                "min.insync.replicas",
+                                "compression.type",
+                                "segment.bytes",
+                                "max.message.bytes",
+                                "message.timestamp.type" -> configs.put(entry.name(), entry.value());
                     }
                 }
             }
@@ -213,15 +210,11 @@ public class KafkaAdminService {
                     .all()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            List<String> groupIds = groups.stream()
-                    .map(GroupListing::groupId)
-                    .toList();
+            List<String> groupIds = groups.stream().map(GroupListing::groupId).toList();
 
             Map<String, ConsumerGroupDescription> descriptions = groupIds.isEmpty()
                     ? Map.of()
-                    : client.describeConsumerGroups(groupIds)
-                            .all()
-                            .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    : client.describeConsumerGroups(groupIds).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<Map<String, Object>> result = new ArrayList<>();
             for (GroupListing listing : groups) {
@@ -254,20 +247,16 @@ public class KafkaAdminService {
             result.put("state", desc.groupState().toString());
             result.put("members", desc.members().size());
 
-            Map<TopicPartition, OffsetAndMetadata> offsets = client
-                    .listConsumerGroupOffsets(groupId)
+            Map<TopicPartition, OffsetAndMetadata> offsets = client.listConsumerGroupOffsets(groupId)
                     .partitionsToOffsetAndMetadata()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             Map<TopicPartition, OffsetSpec> latestRequest = new HashMap<>();
             offsets.keySet().forEach(tp -> latestRequest.put(tp, OffsetSpec.latest()));
 
-            Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> endOffsets =
-                    latestRequest.isEmpty()
-                            ? Map.of()
-                            : client.listOffsets(latestRequest)
-                                    .all()
-                                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> endOffsets = latestRequest.isEmpty()
+                    ? Map.of()
+                    : client.listOffsets(latestRequest).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<Map<String, Object>> offsetList = new ArrayList<>();
             long totalLag = 0;
@@ -275,9 +264,7 @@ public class KafkaAdminService {
             for (var entry : offsets.entrySet()) {
                 TopicPartition tp = entry.getKey();
                 long current = entry.getValue().offset();
-                long end = endOffsets.containsKey(tp)
-                        ? endOffsets.get(tp).offset()
-                        : current;
+                long end = endOffsets.containsKey(tp) ? endOffsets.get(tp).offset() : current;
                 long lag = Math.max(0, end - current);
                 totalLag += lag;
 
@@ -328,8 +315,6 @@ public class KafkaAdminService {
         }
     }
 
-
-
     /**
      * Capture a point-in-time cluster topology snapshot for a specific topic.
      * Records broker membership and partition leadership for correlation with test metrics.
@@ -359,14 +344,12 @@ public class KafkaAdminService {
                                 pi.partition(),
                                 pi.leader() != null ? pi.leader().id() : -1,
                                 pi.replicas().stream().map(Node::id).toList(),
-                                pi.isr().stream().map(Node::id).toList()
-                        ));
+                                pi.isr().stream().map(Node::id).toList()));
                     }
                 }
             }
 
-            return new ClusterSnapshot(
-                    clusterId, nodes.size(), controller.id(), brokers, leaders);
+            return new ClusterSnapshot(clusterId, nodes.size(), controller.id(), brokers, leaders);
         } catch (Exception e) {
             LOG.warn("Failed to capture cluster snapshot", e);
             return null;
@@ -429,7 +412,8 @@ public class KafkaAdminService {
             report.put("partitionHealth", partitionHealth);
 
             Collection<GroupListing> groups = client.listGroups(ListGroupsOptions.forConsumerGroups())
-                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    .all()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             report.put("consumerGroups", groups.size());
 
             String status = "HEALTHY";

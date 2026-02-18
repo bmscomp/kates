@@ -7,14 +7,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * its threshold, the actual observed value, and severity.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record SlaViolation(
-        String metric,
-        double threshold,
-        double actual,
-        Severity severity
-) {
+public record SlaViolation(String metric, double threshold, double actual, Severity severity) {
     public enum Severity {
-        WARNING, CRITICAL
+        WARNING,
+        CRITICAL
     }
 
     public static SlaViolation warning(String metric, double threshold, double actual) {

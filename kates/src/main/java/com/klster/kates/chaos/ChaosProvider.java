@@ -43,6 +43,10 @@ public interface ChaosProvider {
     boolean isAvailable();
 
     enum ChaosStatus {
-        NOT_FOUND, PENDING, RUNNING, COMPLETED, FAILED
+        NOT_FOUND,
+        PENDING,
+        RUNNING,
+        COMPLETED,
+        FAILED
     }
 }

@@ -1,11 +1,11 @@
 package com.klster.kates.engine;
 
+import java.util.List;
+import java.util.Map;
+
 import com.klster.kates.domain.IntegrityResult;
 import com.klster.kates.domain.MetricsSample;
 import com.klster.kates.domain.TestResult.TaskStatus;
-
-import java.util.List;
-import java.util.Map;
 
 /**
  * Unified status snapshot returned by {@link BenchmarkBackend#poll}.
@@ -47,21 +47,65 @@ public class BenchmarkStatus {
         this.heatmapBuckets = builder.heatmapBuckets;
     }
 
-    public TaskStatus getState() { return state; }
-    public long getRecordsProcessed() { return recordsProcessed; }
-    public double getThroughputRecordsPerSec() { return throughputRecordsPerSec; }
-    public double getThroughputMBPerSec() { return throughputMBPerSec; }
-    public double getAvgLatencyMs() { return avgLatencyMs; }
-    public double getP50LatencyMs() { return p50LatencyMs; }
-    public double getP95LatencyMs() { return p95LatencyMs; }
-    public double getP99LatencyMs() { return p99LatencyMs; }
-    public double getP999LatencyMs() { return p999LatencyMs; }
-    public double getMaxLatencyMs() { return maxLatencyMs; }
-    public String getError() { return error; }
-    public IntegrityResult getIntegrityResult() { return integrityResult; }
-    public List<MetricsSample> getTimeSeries() { return timeSeries; }
-    public Map<String, Double> getLatencyHistogram() { return latencyHistogram; }
-    public long[] getHeatmapBuckets() { return heatmapBuckets; }
+    public TaskStatus getState() {
+        return state;
+    }
+
+    public long getRecordsProcessed() {
+        return recordsProcessed;
+    }
+
+    public double getThroughputRecordsPerSec() {
+        return throughputRecordsPerSec;
+    }
+
+    public double getThroughputMBPerSec() {
+        return throughputMBPerSec;
+    }
+
+    public double getAvgLatencyMs() {
+        return avgLatencyMs;
+    }
+
+    public double getP50LatencyMs() {
+        return p50LatencyMs;
+    }
+
+    public double getP95LatencyMs() {
+        return p95LatencyMs;
+    }
+
+    public double getP99LatencyMs() {
+        return p99LatencyMs;
+    }
+
+    public double getP999LatencyMs() {
+        return p999LatencyMs;
+    }
+
+    public double getMaxLatencyMs() {
+        return maxLatencyMs;
+    }
+
+    public String getError() {
+        return error;
+    }
+
+    public IntegrityResult getIntegrityResult() {
+        return integrityResult;
+    }
+
+    public List<MetricsSample> getTimeSeries() {
+        return timeSeries;
+    }
+
+    public Map<String, Double> getLatencyHistogram() {
+        return latencyHistogram;
+    }
+
+    public long[] getHeatmapBuckets() {
+        return heatmapBuckets;
+    }
 
     public boolean isTerminal() {
         return state == TaskStatus.DONE || state == TaskStatus.FAILED;
@@ -92,20 +136,75 @@ public class BenchmarkStatus {
             this.state = state;
         }
 
-        public Builder recordsProcessed(long r) { this.recordsProcessed = r; return this; }
-        public Builder throughputRecordsPerSec(double t) { this.throughputRecordsPerSec = t; return this; }
-        public Builder throughputMBPerSec(double t) { this.throughputMBPerSec = t; return this; }
-        public Builder avgLatencyMs(double l) { this.avgLatencyMs = l; return this; }
-        public Builder p50LatencyMs(double l) { this.p50LatencyMs = l; return this; }
-        public Builder p95LatencyMs(double l) { this.p95LatencyMs = l; return this; }
-        public Builder p99LatencyMs(double l) { this.p99LatencyMs = l; return this; }
-        public Builder p999LatencyMs(double l) { this.p999LatencyMs = l; return this; }
-        public Builder maxLatencyMs(double l) { this.maxLatencyMs = l; return this; }
-        public Builder error(String e) { this.error = e; return this; }
-        public Builder integrityResult(IntegrityResult ir) { this.integrityResult = ir; return this; }
-        public Builder timeSeries(List<MetricsSample> ts) { this.timeSeries = ts; return this; }
-        public Builder latencyHistogram(Map<String, Double> h) { this.latencyHistogram = h; return this; }
-        public Builder heatmapBuckets(long[] b) { this.heatmapBuckets = b; return this; }
+        public Builder recordsProcessed(long r) {
+            this.recordsProcessed = r;
+            return this;
+        }
+
+        public Builder throughputRecordsPerSec(double t) {
+            this.throughputRecordsPerSec = t;
+            return this;
+        }
+
+        public Builder throughputMBPerSec(double t) {
+            this.throughputMBPerSec = t;
+            return this;
+        }
+
+        public Builder avgLatencyMs(double l) {
+            this.avgLatencyMs = l;
+            return this;
+        }
+
+        public Builder p50LatencyMs(double l) {
+            this.p50LatencyMs = l;
+            return this;
+        }
+
+        public Builder p95LatencyMs(double l) {
+            this.p95LatencyMs = l;
+            return this;
+        }
+
+        public Builder p99LatencyMs(double l) {
+            this.p99LatencyMs = l;
+            return this;
+        }
+
+        public Builder p999LatencyMs(double l) {
+            this.p999LatencyMs = l;
+            return this;
+        }
+
+        public Builder maxLatencyMs(double l) {
+            this.maxLatencyMs = l;
+            return this;
+        }
+
+        public Builder error(String e) {
+            this.error = e;
+            return this;
+        }
+
+        public Builder integrityResult(IntegrityResult ir) {
+            this.integrityResult = ir;
+            return this;
+        }
+
+        public Builder timeSeries(List<MetricsSample> ts) {
+            this.timeSeries = ts;
+            return this;
+        }
+
+        public Builder latencyHistogram(Map<String, Double> h) {
+            this.latencyHistogram = h;
+            return this;
+        }
+
+        public Builder heatmapBuckets(long[] b) {
+            this.heatmapBuckets = b;
+            return this;
+        }
 
         public BenchmarkStatus build() {
             return new BenchmarkStatus(this);

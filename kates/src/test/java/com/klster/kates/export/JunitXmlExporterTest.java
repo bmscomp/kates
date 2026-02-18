@@ -1,16 +1,17 @@
 package com.klster.kates.export;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
 import com.klster.kates.domain.SlaVerdict;
 import com.klster.kates.domain.SlaViolation;
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.report.TestReport;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class JunitXmlExporterTest {
 
@@ -38,9 +39,8 @@ class JunitXmlExporterTest {
         report.setMetadata(Map.of("testType", "LOAD"));
 
         String xml = exporter.export(report);
-        long testcaseCount = xml.lines()
-                .filter(l -> l.trim().startsWith("<testcase name="))
-                .count();
+        long testcaseCount =
+                xml.lines().filter(l -> l.trim().startsWith("<testcase name=")).count();
         assertEquals(2, testcaseCount);
     }
 

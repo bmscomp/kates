@@ -1,12 +1,11 @@
 package com.klster.kates.schedule;
 
+import java.util.List;
+import java.util.Optional;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
-
-import java.util.List;
-import java.util.Optional;
 
 /**
  * JPA repository for {@link ScheduledTestRun} persistence.
@@ -39,14 +38,15 @@ public class ScheduledTestRunRepository {
     }
 
     public List<ScheduledTestRun> findAll() {
-        return em.createQuery("SELECT s FROM ScheduledTestRun s ORDER BY s.createdAt DESC",
-                ScheduledTestRun.class).getResultList();
+        return em.createQuery("SELECT s FROM ScheduledTestRun s ORDER BY s.createdAt DESC", ScheduledTestRun.class)
+                .getResultList();
     }
 
     public List<ScheduledTestRun> findAllEnabled() {
         return em.createQuery(
-                "SELECT s FROM ScheduledTestRun s WHERE s.enabled = true ORDER BY s.createdAt DESC",
-                ScheduledTestRun.class).getResultList();
+                        "SELECT s FROM ScheduledTestRun s WHERE s.enabled = true ORDER BY s.createdAt DESC",
+                        ScheduledTestRun.class)
+                .getResultList();
     }
 
     @Transactional

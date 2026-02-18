@@ -1,12 +1,13 @@
 package com.klster.kates.engine;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.Test;
+
 import com.klster.kates.domain.SlaDefinition;
 import com.klster.kates.domain.SlaVerdict;
 import com.klster.kates.domain.SlaViolation;
 import com.klster.kates.domain.TestResult.TaskStatus;
-import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class SlaEvaluatorTest {
 
@@ -23,8 +24,8 @@ class SlaEvaluatorTest {
     @Test
     void emptySlaReturnsPass() {
         SlaDefinition sla = new SlaDefinition();
-        BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.DONE)
-                .p99LatencyMs(100).build();
+        BenchmarkStatus status =
+                BenchmarkStatus.builder(TaskStatus.DONE).p99LatencyMs(100).build();
         SlaVerdict verdict = evaluator.evaluate(sla, status);
         assertTrue(verdict.passed());
     }
@@ -54,8 +55,8 @@ class SlaEvaluatorTest {
         SlaDefinition sla = new SlaDefinition();
         sla.setMaxP99LatencyMs(50.0);
 
-        BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.DONE)
-                .p99LatencyMs(75).build();
+        BenchmarkStatus status =
+                BenchmarkStatus.builder(TaskStatus.DONE).p99LatencyMs(75).build();
 
         SlaVerdict verdict = evaluator.evaluate(sla, status);
         assertFalse(verdict.passed());
@@ -73,8 +74,8 @@ class SlaEvaluatorTest {
         SlaDefinition sla = new SlaDefinition();
         sla.setMaxP999LatencyMs(100.0);
 
-        BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.DONE)
-                .p999LatencyMs(150).build();
+        BenchmarkStatus status =
+                BenchmarkStatus.builder(TaskStatus.DONE).p999LatencyMs(150).build();
 
         SlaVerdict verdict = evaluator.evaluate(sla, status);
         assertFalse(verdict.passed());
@@ -87,8 +88,8 @@ class SlaEvaluatorTest {
         SlaDefinition sla = new SlaDefinition();
         sla.setMaxAvgLatencyMs(10.0);
 
-        BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.DONE)
-                .avgLatencyMs(15).build();
+        BenchmarkStatus status =
+                BenchmarkStatus.builder(TaskStatus.DONE).avgLatencyMs(15).build();
 
         SlaVerdict verdict = evaluator.evaluate(sla, status);
         assertFalse(verdict.passed());
@@ -101,7 +102,8 @@ class SlaEvaluatorTest {
         sla.setMinThroughputRecPerSec(10000.0);
 
         BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.DONE)
-                .throughputRecordsPerSec(5000).build();
+                .throughputRecordsPerSec(5000)
+                .build();
 
         SlaVerdict verdict = evaluator.evaluate(sla, status);
         assertFalse(verdict.passed());
@@ -114,8 +116,8 @@ class SlaEvaluatorTest {
         SlaDefinition sla = new SlaDefinition();
         sla.setMinRecordsProcessed(1000L);
 
-        BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.DONE)
-                .recordsProcessed(500).build();
+        BenchmarkStatus status =
+                BenchmarkStatus.builder(TaskStatus.DONE).recordsProcessed(500).build();
 
         SlaVerdict verdict = evaluator.evaluate(sla, status);
         assertFalse(verdict.passed());

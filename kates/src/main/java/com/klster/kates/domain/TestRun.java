@@ -1,12 +1,13 @@
 package com.klster.kates.domain;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class TestRun {
@@ -95,12 +96,27 @@ public class TestRun {
         this.backend = backend;
     }
 
-    public String getScenarioName() { return scenarioName; }
-    public void setScenarioName(String scenarioName) { this.scenarioName = scenarioName; }
+    public String getScenarioName() {
+        return scenarioName;
+    }
 
-    public Map<String, String> getLabels() { return labels; }
-    public void setLabels(Map<String, String> labels) { this.labels = labels; }
+    public void setScenarioName(String scenarioName) {
+        this.scenarioName = scenarioName;
+    }
 
-    public SlaDefinition getSla() { return sla; }
-    public void setSla(SlaDefinition sla) { this.sla = sla; }
+    public Map<String, String> getLabels() {
+        return labels;
+    }
+
+    public void setLabels(Map<String, String> labels) {
+        this.labels = labels;
+    }
+
+    public SlaDefinition getSla() {
+        return sla;
+    }
+
+    public void setSla(SlaDefinition sla) {
+        this.sla = sla;
+    }
 }

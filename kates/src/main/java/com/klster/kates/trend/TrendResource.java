@@ -1,16 +1,17 @@
 package com.klster.kates.trend;
 
-import com.klster.kates.api.ApiError;
-import com.klster.kates.domain.TestType;
+import java.util.List;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import java.util.List;
+import com.klster.kates.api.ApiError;
+import com.klster.kates.domain.TestType;
 
 /**
  * REST endpoint for querying historical performance trends.
@@ -28,16 +29,21 @@ public class TrendResource {
     @Operation(summary = "Get performance trend", description = "Returns time-series metrics with baseline comparison")
     public Response getTrend(
             @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
-            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec")
+                    String metric,
             @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days,
-            @Parameter(description = "Number of runs for baseline average") @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow,
+            @Parameter(description = "Number of runs for baseline average")
+                    @QueryParam("baselineWindow")
+                    @DefaultValue("5")
+                    int baselineWindow,
             @Parameter(description = "Phase name filter") @QueryParam("phase") String phase) {
 
         TestType type = parseType(typeStr);
         if (type == null) {
-            return badRequest(typeStr == null || typeStr.isBlank()
-                    ? "Query param 'type' is required"
-                    : "Unknown test type: " + typeStr);
+            return badRequest(
+                    typeStr == null || typeStr.isBlank()
+                            ? "Query param 'type' is required"
+                            : "Unknown test type: " + typeStr);
         }
 
         Response validation = validateDays(days);
@@ -57,9 +63,10 @@ public class TrendResource {
 
         TestType type = parseType(typeStr);
         if (type == null) {
-            return badRequest(typeStr == null || typeStr.isBlank()
-                    ? "Query param 'type' is required"
-                    : "Unknown test type: " + typeStr);
+            return badRequest(
+                    typeStr == null || typeStr.isBlank()
+                            ? "Query param 'type' is required"
+                            : "Unknown test type: " + typeStr);
         }
 
         Response validation = validateDays(days);
@@ -74,15 +81,20 @@ public class TrendResource {
     @Operation(summary = "Phase-level trend breakdown", description = "Returns per-phase metric trends")
     public Response getBreakdown(
             @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
-            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec")
+                    String metric,
             @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days,
-            @Parameter(description = "Number of runs for baseline average") @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
+            @Parameter(description = "Number of runs for baseline average")
+                    @QueryParam("baselineWindow")
+                    @DefaultValue("5")
+                    int baselineWindow) {
 
         TestType type = parseType(typeStr);
         if (type == null) {
-            return badRequest(typeStr == null || typeStr.isBlank()
-                    ? "Query param 'type' is required"
-                    : "Unknown test type: " + typeStr);
+            return badRequest(
+                    typeStr == null || typeStr.isBlank()
+                            ? "Query param 'type' is required"
+                            : "Unknown test type: " + typeStr);
         }
 
         Response validation = validateDays(days);
@@ -97,23 +109,27 @@ public class TrendResource {
     @Operation(summary = "Broker-level performance trend")
     public Response getBrokerTrend(
             @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
-            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec") String metric,
+            @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec")
+                    String metric,
             @Parameter(description = "Target broker ID") @QueryParam("brokerId") @DefaultValue("0") int brokerId,
             @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days,
-            @Parameter(description = "Number of runs for baseline average") @QueryParam("baselineWindow") @DefaultValue("5") int baselineWindow) {
+            @Parameter(description = "Number of runs for baseline average")
+                    @QueryParam("baselineWindow")
+                    @DefaultValue("5")
+                    int baselineWindow) {
 
         TestType type = parseType(typeStr);
         if (type == null) {
-            return badRequest(typeStr == null || typeStr.isBlank()
-                    ? "Query param 'type' is required"
-                    : "Unknown test type: " + typeStr);
+            return badRequest(
+                    typeStr == null || typeStr.isBlank()
+                            ? "Query param 'type' is required"
+                            : "Unknown test type: " + typeStr);
         }
 
         Response validation = validateDays(days);
         if (validation != null) return validation;
 
-        BrokerTrendResponse trend = trendService.computeBrokerTrend(
-                type, metric, brokerId, days, baselineWindow);
+        BrokerTrendResponse trend = trendService.computeBrokerTrend(type, metric, brokerId, days, baselineWindow);
         return Response.ok(trend).build();
     }
 
@@ -135,6 +151,7 @@ public class TrendResource {
 
     private Response badRequest(String message) {
         return Response.status(400)
-                .entity(ApiError.of(400, "Bad Request", message)).build();
+                .entity(ApiError.of(400, "Bad Request", message))
+                .build();
     }
 }

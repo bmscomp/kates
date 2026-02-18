@@ -1,12 +1,12 @@
 package com.klster.kates.api;
 
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
 
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import org.jboss.logging.Logger;
 
 /**
@@ -37,8 +37,12 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
         }
 
         LOG.error("Unhandled exception in REST endpoint", exception);
-        return error(500, "Internal Server Error",
-                root.getMessage() != null ? root.getMessage() : exception.getClass().getSimpleName());
+        return error(
+                500,
+                "Internal Server Error",
+                root.getMessage() != null
+                        ? root.getMessage()
+                        : exception.getClass().getSimpleName());
     }
 
     private static Response error(int status, String label, String message) {
@@ -56,7 +60,6 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
     }
 
     private static boolean isKafkaNotFound(Throwable t) {
-        return t.getClass().getName().equals(
-                "org.apache.kafka.common.errors.UnknownTopicOrPartitionException");
+        return t.getClass().getName().equals("org.apache.kafka.common.errors.UnknownTopicOrPartitionException");
     }
 }

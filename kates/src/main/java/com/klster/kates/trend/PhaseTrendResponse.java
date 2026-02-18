@@ -1,7 +1,8 @@
 package com.klster.kates.trend;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Response DTO for phase-level trend breakdown.
@@ -9,15 +10,10 @@ import java.util.List;
  * allowing side-by-side comparison of phase behaviour over time.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record PhaseTrendResponse(
-        String testType,
-        String metric,
-        List<PhaseTrend> phases
-) {
+public record PhaseTrendResponse(String testType, String metric, List<PhaseTrend> phases) {
     public record PhaseTrend(
             String phase,
             List<TrendResponse.DataPoint> dataPoints,
             double baseline,
-            List<TrendResponse.Regression> regressions
-    ) {}
+            List<TrendResponse.Regression> regressions) {}
 }

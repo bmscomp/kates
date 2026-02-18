@@ -1,16 +1,17 @@
 package com.klster.kates.api;
 
-import com.klster.kates.engine.TestOrchestrator;
-import com.klster.kates.service.KafkaAdminService;
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.*;
+import static org.mockito.Mockito.*;
+
+import java.util.List;
+
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.*;
-import static org.mockito.Mockito.*;
+import com.klster.kates.engine.TestOrchestrator;
+import com.klster.kates.service.KafkaAdminService;
 
 @QuarkusTest
 class HealthResourceTest {
@@ -26,8 +27,8 @@ class HealthResourceTest {
         when(kafkaAdmin.isReachable()).thenReturn(true);
         when(orchestrator.availableBackends()).thenReturn(List.of("native", "trogdor"));
 
-        given()
-                .when().get("/api/health")
+        given().when()
+                .get("/api/health")
                 .then()
                 .statusCode(200)
                 .body("status", is("UP"))
@@ -56,8 +57,8 @@ class HealthResourceTest {
         when(kafkaAdmin.isReachable()).thenReturn(false);
         when(orchestrator.availableBackends()).thenReturn(List.of("native"));
 
-        given()
-                .when().get("/api/health")
+        given().when()
+                .get("/api/health")
                 .then()
                 .statusCode(200)
                 .body("status", is("DEGRADED"))

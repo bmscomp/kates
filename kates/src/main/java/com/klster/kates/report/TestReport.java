@@ -1,13 +1,13 @@
 package com.klster.kates.report;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.klster.kates.domain.SlaVerdict;
-import com.klster.kates.domain.TestRun;
-
-import com.klster.kates.export.LatencyHeatmapData;
-
 import java.util.List;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import com.klster.kates.domain.SlaVerdict;
+import com.klster.kates.domain.TestRun;
+import com.klster.kates.export.LatencyHeatmapData;
 
 /**
  * Complete structured report for a finished test run.
@@ -26,33 +26,77 @@ public class TestReport {
     private String generatedAt;
     private LatencyHeatmapData heatmapData;
 
-    public TestReport() {
+    public TestReport() {}
+
+    public TestRun getRun() {
+        return run;
     }
 
-    public TestRun getRun() { return run; }
-    public void setRun(TestRun run) { this.run = run; }
+    public void setRun(TestRun run) {
+        this.run = run;
+    }
 
-    public ReportSummary getSummary() { return summary; }
-    public void setSummary(ReportSummary summary) { this.summary = summary; }
+    public ReportSummary getSummary() {
+        return summary;
+    }
 
-    public List<PhaseReport> getPhases() { return phases; }
-    public void setPhases(List<PhaseReport> phases) { this.phases = phases; }
+    public void setSummary(ReportSummary summary) {
+        this.summary = summary;
+    }
 
-    public ClusterSnapshot getClusterSnapshot() { return clusterSnapshot; }
-    public void setClusterSnapshot(ClusterSnapshot clusterSnapshot) { this.clusterSnapshot = clusterSnapshot; }
+    public List<PhaseReport> getPhases() {
+        return phases;
+    }
 
-    public List<BrokerMetrics> getBrokerMetrics() { return brokerMetrics; }
-    public void setBrokerMetrics(List<BrokerMetrics> brokerMetrics) { this.brokerMetrics = brokerMetrics; }
+    public void setPhases(List<PhaseReport> phases) {
+        this.phases = phases;
+    }
 
-    public SlaVerdict getOverallSlaVerdict() { return overallSlaVerdict; }
-    public void setOverallSlaVerdict(SlaVerdict overallSlaVerdict) { this.overallSlaVerdict = overallSlaVerdict; }
+    public ClusterSnapshot getClusterSnapshot() {
+        return clusterSnapshot;
+    }
 
-    public Map<String, String> getMetadata() { return metadata; }
-    public void setMetadata(Map<String, String> metadata) { this.metadata = metadata; }
+    public void setClusterSnapshot(ClusterSnapshot clusterSnapshot) {
+        this.clusterSnapshot = clusterSnapshot;
+    }
 
-    public String getGeneratedAt() { return generatedAt; }
-    public void setGeneratedAt(String generatedAt) { this.generatedAt = generatedAt; }
+    public List<BrokerMetrics> getBrokerMetrics() {
+        return brokerMetrics;
+    }
 
-    public LatencyHeatmapData getHeatmapData() { return heatmapData; }
-    public void setHeatmapData(LatencyHeatmapData heatmapData) { this.heatmapData = heatmapData; }
+    public void setBrokerMetrics(List<BrokerMetrics> brokerMetrics) {
+        this.brokerMetrics = brokerMetrics;
+    }
+
+    public SlaVerdict getOverallSlaVerdict() {
+        return overallSlaVerdict;
+    }
+
+    public void setOverallSlaVerdict(SlaVerdict overallSlaVerdict) {
+        this.overallSlaVerdict = overallSlaVerdict;
+    }
+
+    public Map<String, String> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, String> metadata) {
+        this.metadata = metadata;
+    }
+
+    public String getGeneratedAt() {
+        return generatedAt;
+    }
+
+    public void setGeneratedAt(String generatedAt) {
+        this.generatedAt = generatedAt;
+    }
+
+    public LatencyHeatmapData getHeatmapData() {
+        return heatmapData;
+    }
+
+    public void setHeatmapData(LatencyHeatmapData heatmapData) {
+        this.heatmapData = heatmapData;
+    }
 }

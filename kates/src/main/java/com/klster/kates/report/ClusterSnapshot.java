@@ -1,7 +1,8 @@
 package com.klster.kates.report;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Snapshot of cluster topology captured at test execution time.
@@ -13,17 +14,11 @@ public record ClusterSnapshot(
         int brokerCount,
         int controllerId,
         List<BrokerInfo> brokers,
-        List<PartitionAssignment> leaders
-) {
+        List<PartitionAssignment> leaders) {
     public record BrokerInfo(int id, String host, int port, String rack) {}
 
     public record PartitionAssignment(
-            String topic,
-            int partition,
-            int leaderId,
-            List<Integer> replicas,
-            List<Integer> isr
-    ) {}
+            String topic, int partition, int leaderId, List<Integer> replicas, List<Integer> isr) {}
 
     public int leaderCountForBroker(int brokerId) {
         if (leaders == null) return 0;

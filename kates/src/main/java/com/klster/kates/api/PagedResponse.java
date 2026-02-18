@@ -15,8 +15,7 @@ public class PagedResponse<T> {
     private long totalElements;
     private int totalPages;
 
-    public PagedResponse() {
-    }
+    public PagedResponse() {}
 
     public PagedResponse(List<T> content, int page, int size, long totalElements) {
         this.content = content;
@@ -26,18 +25,43 @@ public class PagedResponse<T> {
         this.totalPages = size > 0 ? (int) Math.ceil((double) totalElements / size) : 0;
     }
 
-    public List<T> getContent() { return content; }
-    public void setContent(List<T> content) { this.content = content; }
+    public List<T> getContent() {
+        return content;
+    }
 
-    public int getPage() { return page; }
-    public void setPage(int page) { this.page = page; }
+    public void setContent(List<T> content) {
+        this.content = content;
+    }
 
-    public int getSize() { return size; }
-    public void setSize(int size) { this.size = size; }
+    public int getPage() {
+        return page;
+    }
 
-    public long getTotalElements() { return totalElements; }
-    public void setTotalElements(long totalElements) { this.totalElements = totalElements; }
+    public void setPage(int page) {
+        this.page = page;
+    }
 
-    public int getTotalPages() { return totalPages; }
-    public void setTotalPages(int totalPages) { this.totalPages = totalPages; }
+    public int getSize() {
+        return size;
+    }
+
+    public void setSize(int size) {
+        this.size = size;
+    }
+
+    public long getTotalElements() {
+        return totalElements;
+    }
+
+    public void setTotalElements(long totalElements) {
+        this.totalElements = totalElements;
+    }
+
+    public int getTotalPages() {
+        return totalPages;
+    }
+
+    public void setTotalPages(int totalPages) {
+        this.totalPages = totalPages;
+    }
 }

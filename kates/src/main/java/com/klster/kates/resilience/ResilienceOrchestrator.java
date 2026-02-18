@@ -1,5 +1,14 @@
 package com.klster.kates.resilience;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import org.jboss.logging.Logger;
+
 import com.klster.kates.chaos.ChaosCoordinator;
 import com.klster.kates.chaos.ChaosOutcome;
 import com.klster.kates.domain.TestRun;
@@ -8,14 +17,6 @@ import com.klster.kates.report.ReportGenerator;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
 import com.klster.kates.util.MetricUtils;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import org.jboss.logging.Logger;
 
 /**
  * Orchestrates a combined performance + chaos resilience test.
@@ -51,8 +52,9 @@ public class ResilienceOrchestrator {
 
             // 2. Wait for steady state (non-blocking delay for virtual threads)
             LOG.info("Resilience test: waiting " + request.getSteadyStateSec() + "s for steady state");
-            CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(
-                    request.getSteadyStateSec(), TimeUnit.SECONDS)).join();
+            CompletableFuture.runAsync(
+                            () -> {}, CompletableFuture.delayedExecutor(request.getSteadyStateSec(), TimeUnit.SECONDS))
+                    .join();
 
             // 3. Snapshot pre-chaos results
             testOrchestrator.refreshStatus(run.getId());
@@ -60,17 +62,17 @@ public class ResilienceOrchestrator {
             report.setPreChaosSummary(preChaos);
 
             // 4. Inject fault
-            LOG.info("Resilience test: injecting fault '" + request.getChaosSpec().experimentName() + "'");
+            LOG.info("Resilience test: injecting fault '"
+                    + request.getChaosSpec().experimentName() + "'");
             CompletableFuture<ChaosOutcome> chaosFuture = chaosCoordinator.triggerFault(request.getChaosSpec());
 
             // 5. Wait for chaos to complete (with timeout)
-            ChaosOutcome outcome = chaosFuture.get(
-                    request.getChaosSpec().chaosDurationSec() + 60, TimeUnit.SECONDS);
+            ChaosOutcome outcome = chaosFuture.get(request.getChaosSpec().chaosDurationSec() + 60, TimeUnit.SECONDS);
             report.setChaosOutcome(outcome);
 
             // 6. Let the system recover briefly (non-blocking delay)
-            CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(
-                    10, TimeUnit.SECONDS)).join();
+            CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS))
+                    .join();
             testOrchestrator.refreshStatus(run.getId());
 
             // 7. Generate final report
@@ -83,7 +85,9 @@ public class ResilienceOrchestrator {
             // 8. Compute impact deltas
             if (preChaos != null && postChaos != null) {
                 Map<String, Double> deltas = new LinkedHashMap<>();
-                deltas.put("throughputRecPerSec", MetricUtils.pctChange(preChaos.avgThroughputRecPerSec(), postChaos.avgThroughputRecPerSec()));
+                deltas.put(
+                        "throughputRecPerSec",
+                        MetricUtils.pctChange(preChaos.avgThroughputRecPerSec(), postChaos.avgThroughputRecPerSec()));
                 deltas.put("avgLatencyMs", MetricUtils.pctChange(preChaos.avgLatencyMs(), postChaos.avgLatencyMs()));
                 deltas.put("p99LatencyMs", MetricUtils.pctChange(preChaos.p99LatencyMs(), postChaos.p99LatencyMs()));
                 deltas.put("maxLatencyMs", MetricUtils.pctChange(preChaos.maxLatencyMs(), postChaos.maxLatencyMs()));
@@ -110,5 +114,4 @@ public class ResilienceOrchestrator {
 
         return report;
     }
-
 }

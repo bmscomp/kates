@@ -1,14 +1,14 @@
 package com.klster.kates.trogdor.spec;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.HashMap;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ConsumeBenchSpec extends TrogdorSpec {
 
-    private static final String CLASS_NAME =
-            "org.apache.kafka.trogdor.workload.ConsumeBenchSpec";
+    private static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.ConsumeBenchSpec";
 
     private String bootstrapServers;
     private long maxMessages;

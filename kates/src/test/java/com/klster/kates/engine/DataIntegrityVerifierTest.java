@@ -1,9 +1,10 @@
 package com.klster.kates.engine;
 
-import com.klster.kates.domain.IntegrityResult;
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import com.klster.kates.domain.IntegrityResult;
 
 class DataIntegrityVerifierTest {
 

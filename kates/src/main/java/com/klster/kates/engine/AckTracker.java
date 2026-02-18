@@ -18,7 +18,11 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class AckTracker {
 
-    private enum AckState { SENT, ACKED, FAILED }
+    private enum AckState {
+        SENT,
+        ACKED,
+        FAILED
+    }
 
     /**
      * A single continuous failure window with start/end nano timestamps.
@@ -85,13 +89,24 @@ public class AckTracker {
         states.put(sequence, AckState.FAILED);
         totalFailed.incrementAndGet();
 
-        activeWindow.compareAndSet(null, new long[]{System.nanoTime()});
+        activeWindow.compareAndSet(null, new long[] {System.nanoTime()});
     }
 
-    public long getTotalSent() { return totalSent.get(); }
-    public long getTotalAcked() { return totalAcked.get(); }
-    public long getTotalFailed() { return totalFailed.get(); }
-    public long getLastAckedSendNanos() { return lastAckedSendNanos; }
+    public long getTotalSent() {
+        return totalSent.get();
+    }
+
+    public long getTotalAcked() {
+        return totalAcked.get();
+    }
+
+    public long getTotalFailed() {
+        return totalFailed.get();
+    }
+
+    public long getLastAckedSendNanos() {
+        return lastAckedSendNanos;
+    }
 
     /**
      * Returns all completed failure windows (failure → recovery transitions).

@@ -1,15 +1,16 @@
 package com.klster.kates.disruption;
 
-import com.klster.kates.chaos.DisruptionType;
-import com.klster.kates.chaos.FaultSpec;
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.client.KubernetesClient;
+import java.util.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import java.util.*;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.chaos.DisruptionType;
+import com.klster.kates.chaos.FaultSpec;
 
 /**
  * Safety layer for disruption tests. Validates blast radius, performs dry-run
@@ -48,16 +49,14 @@ public class DisruptionSafetyGuard {
             String targetPod,
             Integer resolvedLeaderId,
             List<String> affectedPods,
-            List<String> warnings
-    ) {}
+            List<String> warnings) {}
 
     public record DryRunResult(
             boolean wouldSucceed,
             int totalBrokers,
             List<StepPreview> steps,
             List<String> warnings,
-            List<String> errors
-    ) {}
+            List<String> errors) {}
 
     /**
      * Validates a disruption plan against safety constraints before execution.
@@ -70,8 +69,8 @@ public class DisruptionSafetyGuard {
         int totalBrokers = brokerPods.size();
 
         if (totalBrokers == 0) {
-            errors.add("No broker pods found matching label '" + kafkaLabel
-                    + "' in namespace '" + kafkaNamespace + "'");
+            errors.add(
+                    "No broker pods found matching label '" + kafkaLabel + "' in namespace '" + kafkaNamespace + "'");
             return ValidationResult.rejected(warnings, errors);
         }
 
@@ -90,23 +89,20 @@ public class DisruptionSafetyGuard {
                         + "': SCALE_DOWN reduces StatefulSet replicas — autoRollback recommended");
             }
 
-            if (spec.disruptionType() == DisruptionType.NETWORK_PARTITION
-                    && spec.chaosDurationSec() <= 0) {
+            if (spec.disruptionType() == DisruptionType.NETWORK_PARTITION && spec.chaosDurationSec() <= 0) {
                 warnings.add("Step '" + step.name()
                         + "': NETWORK_PARTITION without duration — NetworkPolicy will persist until cleanup");
             }
         }
 
-        if (plan.getMaxAffectedBrokers() > 0
-                && affectedBrokers.size() > plan.getMaxAffectedBrokers()) {
-            errors.add("Plan would affect " + affectedBrokers.size()
-                    + " brokers but maxAffectedBrokers=" + plan.getMaxAffectedBrokers());
+        if (plan.getMaxAffectedBrokers() > 0 && affectedBrokers.size() > plan.getMaxAffectedBrokers()) {
+            errors.add("Plan would affect " + affectedBrokers.size() + " brokers but maxAffectedBrokers="
+                    + plan.getMaxAffectedBrokers());
         }
 
         int remainingBrokers = totalBrokers - affectedBrokers.size();
         if (remainingBrokers < 1) {
-            errors.add("Plan would affect ALL " + totalBrokers
-                    + " brokers — cluster would lose availability");
+            errors.add("Plan would affect ALL " + totalBrokers + " brokers — cluster would lose availability");
         } else if (remainingBrokers == 1) {
             warnings.add("Only 1 broker would remain after disruption — high risk of data loss");
         }
@@ -145,13 +141,12 @@ public class DisruptionSafetyGuard {
             Integer resolvedLeader = null;
 
             if (spec.targetTopic() != null && !spec.targetTopic().isEmpty()) {
-                int leaderId = intelligence.resolveLeaderBrokerId(
-                        spec.targetTopic(), spec.targetPartition());
+                int leaderId = intelligence.resolveLeaderBrokerId(spec.targetTopic(), spec.targetPartition());
                 if (leaderId >= 0) {
                     resolvedLeader = leaderId;
                 } else {
-                    stepWarnings.add("Could not resolve leader for "
-                            + spec.targetTopic() + "-" + spec.targetPartition());
+                    stepWarnings.add(
+                            "Could not resolve leader for " + spec.targetTopic() + "-" + spec.targetPartition());
                 }
             }
 
@@ -179,12 +174,7 @@ public class DisruptionSafetyGuard {
                     stepWarnings));
         }
 
-        return new DryRunResult(
-                errors.isEmpty(),
-                totalBrokers,
-                stepPreviews,
-                warnings,
-                errors);
+        return new DryRunResult(errors.isEmpty(), totalBrokers, stepPreviews, warnings, errors);
     }
 
     /**
@@ -197,7 +187,9 @@ public class DisruptionSafetyGuard {
             switch (spec.disruptionType()) {
                 case NETWORK_PARTITION -> {
                     LOG.info("ROLLBACK: removing Kates-managed NetworkPolicies");
-                    kubeClient.network().networkPolicies()
+                    kubeClient
+                            .network()
+                            .networkPolicies()
                             .inNamespace(spec.targetNamespace())
                             .withLabel("managed-by", "kates")
                             .delete();
@@ -206,8 +198,9 @@ public class DisruptionSafetyGuard {
                     LOG.info("ROLLBACK: restoring StatefulSet replica count");
                     restoreReplicaCount(spec);
                 }
-                default -> LOG.info("ROLLBACK: no explicit rollback needed for "
-                        + spec.disruptionType() + " — StatefulSet controller handles recovery");
+                default ->
+                    LOG.info("ROLLBACK: no explicit rollback needed for " + spec.disruptionType()
+                            + " — StatefulSet controller handles recovery");
             }
         } catch (Exception e) {
             LOG.error("Rollback failed for " + spec.disruptionType(), e);
@@ -219,7 +212,9 @@ public class DisruptionSafetyGuard {
         String labelKey = parts[0];
         String labelValue = parts.length > 1 ? parts[1] : "";
 
-        kubeClient.apps().statefulSets()
+        kubeClient
+                .apps()
+                .statefulSets()
                 .inNamespace(spec.targetNamespace())
                 .withLabel(labelKey, labelValue)
                 .list()
@@ -230,9 +225,10 @@ public class DisruptionSafetyGuard {
                             : ss.getSpec().getReplicas();
                     int current = ss.getSpec().getReplicas();
                     if (current < desired) {
-                        LOG.info("Restoring " + ss.getMetadata().getName()
-                                + " from " + current + " → " + desired);
-                        kubeClient.apps().statefulSets()
+                        LOG.info("Restoring " + ss.getMetadata().getName() + " from " + current + " → " + desired);
+                        kubeClient
+                                .apps()
+                                .statefulSets()
                                 .inNamespace(spec.targetNamespace())
                                 .withName(ss.getMetadata().getName())
                                 .scale(desired);
@@ -246,7 +242,8 @@ public class DisruptionSafetyGuard {
             String labelKey = parts[0];
             String labelValue = parts.length > 1 ? parts[1] : "";
 
-            return kubeClient.pods()
+            return kubeClient
+                    .pods()
                     .inNamespace(kafkaNamespace)
                     .withLabel(labelKey, labelValue)
                     .list()
@@ -280,41 +277,59 @@ public class DisruptionSafetyGuard {
         try {
             return switch (spec.disruptionType()) {
                 case POD_KILL, POD_DELETE, LEADER_ELECTION ->
-                        kubeClient.authorization().v1().selfSubjectAccessReview()
-                                .create(new io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder()
-                                        .withNewSpec()
-                                        .withNewResourceAttributes()
-                                        .withNamespace(spec.targetNamespace())
-                                        .withVerb("delete")
-                                        .withResource("pods")
-                                        .endResourceAttributes()
-                                        .endSpec()
-                                        .build())
-                                .getStatus().getAllowed();
+                    kubeClient
+                            .authorization()
+                            .v1()
+                            .selfSubjectAccessReview()
+                            .create(
+                                    new io.fabric8.kubernetes.api.model.authorization.v1
+                                                    .SelfSubjectAccessReviewBuilder()
+                                            .withNewSpec()
+                                            .withNewResourceAttributes()
+                                            .withNamespace(spec.targetNamespace())
+                                            .withVerb("delete")
+                                            .withResource("pods")
+                                            .endResourceAttributes()
+                                            .endSpec()
+                                            .build())
+                            .getStatus()
+                            .getAllowed();
                 case NETWORK_PARTITION, NETWORK_LATENCY ->
-                        kubeClient.authorization().v1().selfSubjectAccessReview()
-                                .create(new io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder()
-                                        .withNewSpec()
-                                        .withNewResourceAttributes()
-                                        .withNamespace(spec.targetNamespace())
-                                        .withVerb("create")
-                                        .withResource("networkpolicies")
-                                        .endResourceAttributes()
-                                        .endSpec()
-                                        .build())
-                                .getStatus().getAllowed();
+                    kubeClient
+                            .authorization()
+                            .v1()
+                            .selfSubjectAccessReview()
+                            .create(
+                                    new io.fabric8.kubernetes.api.model.authorization.v1
+                                                    .SelfSubjectAccessReviewBuilder()
+                                            .withNewSpec()
+                                            .withNewResourceAttributes()
+                                            .withNamespace(spec.targetNamespace())
+                                            .withVerb("create")
+                                            .withResource("networkpolicies")
+                                            .endResourceAttributes()
+                                            .endSpec()
+                                            .build())
+                            .getStatus()
+                            .getAllowed();
                 case SCALE_DOWN, ROLLING_RESTART ->
-                        kubeClient.authorization().v1().selfSubjectAccessReview()
-                                .create(new io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder()
-                                        .withNewSpec()
-                                        .withNewResourceAttributes()
-                                        .withNamespace(spec.targetNamespace())
-                                        .withVerb("update")
-                                        .withResource("statefulsets")
-                                        .endResourceAttributes()
-                                        .endSpec()
-                                        .build())
-                                .getStatus().getAllowed();
+                    kubeClient
+                            .authorization()
+                            .v1()
+                            .selfSubjectAccessReview()
+                            .create(
+                                    new io.fabric8.kubernetes.api.model.authorization.v1
+                                                    .SelfSubjectAccessReviewBuilder()
+                                            .withNewSpec()
+                                            .withNewResourceAttributes()
+                                            .withNamespace(spec.targetNamespace())
+                                            .withVerb("update")
+                                            .withResource("statefulsets")
+                                            .endResourceAttributes()
+                                            .endSpec()
+                                            .build())
+                            .getStatus()
+                            .getAllowed();
                 default -> true;
             };
         } catch (Exception e) {

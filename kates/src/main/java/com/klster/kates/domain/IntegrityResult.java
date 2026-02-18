@@ -1,9 +1,9 @@
 package com.klster.kates.domain;
 
-import com.klster.kates.engine.AckTracker;
-
 import java.time.Duration;
 import java.util.List;
+
+import com.klster.kates.engine.AckTracker;
 
 /**
  * Result of a data integrity verification: how many records were lost,
@@ -31,12 +31,22 @@ public record IntegrityResult(
         boolean crcVerified,
         boolean idempotenceEnabled,
         boolean transactionsEnabled,
-        List<IntegrityEvent> timeline
-) {
-    public double producerRtoMs() { return producerRto != null ? producerRto.toNanos() / 1_000_000.0 : 0; }
-    public double consumerRtoMs() { return consumerRto != null ? consumerRto.toNanos() / 1_000_000.0 : 0; }
-    public double maxRtoMs() { return maxRto != null ? maxRto.toNanos() / 1_000_000.0 : 0; }
-    public double rpoMs() { return rpo != null ? rpo.toNanos() / 1_000_000.0 : 0; }
+        List<IntegrityEvent> timeline) {
+    public double producerRtoMs() {
+        return producerRto != null ? producerRto.toNanos() / 1_000_000.0 : 0;
+    }
+
+    public double consumerRtoMs() {
+        return consumerRto != null ? consumerRto.toNanos() / 1_000_000.0 : 0;
+    }
+
+    public double maxRtoMs() {
+        return maxRto != null ? maxRto.toNanos() / 1_000_000.0 : 0;
+    }
+
+    public double rpoMs() {
+        return rpo != null ? rpo.toNanos() / 1_000_000.0 : 0;
+    }
 
     public String verdict() {
         if (lostRecords > 0) return "DATA_LOSS";

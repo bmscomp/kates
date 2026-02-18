@@ -1,18 +1,19 @@
 package com.klster.kates.trogdor;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+import jakarta.inject.Inject;
+
+import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.Test;
+
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.trogdor.spec.ConsumeBenchSpec;
 import com.klster.kates.trogdor.spec.ProduceBenchSpec;
 import com.klster.kates.trogdor.spec.RoundTripWorkloadSpec;
 import com.klster.kates.trogdor.spec.TrogdorSpec;
-import io.quarkus.test.junit.QuarkusTest;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 @QuarkusTest
 class SpecFactoryTest {
@@ -31,8 +32,10 @@ class SpecFactoryTest {
         List<TrogdorSpec> specs = specFactory.buildSpecs(TestType.LOAD, spec, "test-run");
 
         assertEquals(5, specs.size(), "3 producers + 2 consumers");
-        long producerCount = specs.stream().filter(s -> s instanceof ProduceBenchSpec).count();
-        long consumerCount = specs.stream().filter(s -> s instanceof ConsumeBenchSpec).count();
+        long producerCount =
+                specs.stream().filter(s -> s instanceof ProduceBenchSpec).count();
+        long consumerCount =
+                specs.stream().filter(s -> s instanceof ConsumeBenchSpec).count();
         assertEquals(3, producerCount);
         assertEquals(2, consumerCount);
     }
@@ -92,8 +95,8 @@ class SpecFactoryTest {
         int[] expected = {10_000, 25_000, 50_000, 100_000, -1};
         for (int i = 0; i < specs.size(); i++) {
             ProduceBenchSpec p = (ProduceBenchSpec) specs.get(i);
-            assertEquals(expected[i], p.getTargetMessagesPerSec(),
-                    "Step " + i + " should have throughput " + expected[i]);
+            assertEquals(
+                    expected[i], p.getTargetMessagesPerSec(), "Step " + i + " should have throughput " + expected[i]);
         }
     }
 
@@ -133,8 +136,7 @@ class SpecFactoryTest {
 
         for (int i = 1; i <= 3; i++) {
             ProduceBenchSpec burst = (ProduceBenchSpec) specs.get(i);
-            assertEquals(-1, burst.getTargetMessagesPerSec(),
-                    "Burst producer " + i + " should be unlimited");
+            assertEquals(-1, burst.getTargetMessagesPerSec(), "Burst producer " + i + " should be unlimited");
         }
     }
 
@@ -164,8 +166,7 @@ class SpecFactoryTest {
         spec.setDurationMs(60_000);
         List<TrogdorSpec> specs = specFactory.buildSpecs(TestType.ENDURANCE, spec, "min-dur");
 
-        assertEquals(3_600_000, specs.get(0).getDurationMs(),
-                "Duration should be at least 1 hour");
+        assertEquals(3_600_000, specs.get(0).getDurationMs(), "Duration should be at least 1 hour");
     }
 
     @Test
@@ -225,7 +226,9 @@ class SpecFactoryTest {
         int[] expected = {5_000, 10_000, 20_000, 40_000, 80_000, -1};
         for (int i = 0; i < specs.size(); i++) {
             ProduceBenchSpec p = (ProduceBenchSpec) specs.get(i);
-            assertEquals(expected[i], p.getTargetMessagesPerSec(),
+            assertEquals(
+                    expected[i],
+                    p.getTargetMessagesPerSec(),
                     "Probe step " + i + " should have throughput " + expected[i]);
         }
     }

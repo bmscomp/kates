@@ -1,18 +1,15 @@
 package com.klster.kates.domain;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Result of evaluating an {@link SlaDefinition} against observed metrics.
  * Contains the overall pass/fail verdict and a list of individual violations.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record SlaVerdict(
-        boolean passed,
-        List<SlaViolation> violations
-) {
+public record SlaVerdict(boolean passed, List<SlaViolation> violations) {
     public static SlaVerdict pass() {
         return new SlaVerdict(true, List.of());
     }

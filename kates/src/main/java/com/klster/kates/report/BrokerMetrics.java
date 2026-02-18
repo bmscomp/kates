@@ -22,5 +22,4 @@ public record BrokerMetrics(
         double leaderSharePercent,
         double skewPercent,
         boolean skewed,
-        ReportSummary metrics
-) {}
+        ReportSummary metrics) {}

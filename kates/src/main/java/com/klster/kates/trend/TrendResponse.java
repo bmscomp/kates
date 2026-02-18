@@ -1,7 +1,8 @@
 package com.klster.kates.trend;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Response DTO for historical trend queries.
@@ -16,17 +17,10 @@ public record TrendResponse(
         String phase,
         List<DataPoint> dataPoints,
         double baseline,
-        List<Regression> regressions
-) {
+        List<Regression> regressions) {
     public record DataPoint(String timestamp, String runId, double value) {}
 
-    public record Regression(
-            String runId,
-            String timestamp,
-            double value,
-            double baseline,
-            double deviationPercent
-    ) {}
+    public record Regression(String runId, String timestamp, double value, double baseline, double deviationPercent) {}
 
     public static TrendResponse empty(String testType, String metric) {
         return new TrendResponse(testType, metric, null, List.of(), 0, List.of());

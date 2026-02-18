@@ -1,19 +1,20 @@
 package com.klster.kates.domain;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.constraints.NotNull;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class CreateTestRequest {
 
     @NotNull(message = "Test type is required")
     private TestType type;
+
     private TestSpec spec;
     private String backend;
     private TestScenario scenario;
 
-    public CreateTestRequest() {
-    }
+    public CreateTestRequest() {}
 
     public TestType getType() {
         return type;
@@ -48,6 +49,8 @@ public class CreateTestRequest {
     }
 
     public boolean isScenario() {
-        return scenario != null && scenario.getPhases() != null && !scenario.getPhases().isEmpty();
+        return scenario != null
+                && scenario.getPhases() != null
+                && !scenario.getPhases().isEmpty();
     }
 }

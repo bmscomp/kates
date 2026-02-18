@@ -13,12 +13,27 @@ public class ResilienceTestRequest {
     private FaultSpec chaosSpec;
     private int steadyStateSec = 30;
 
-    public CreateTestRequest getTestRequest() { return testRequest; }
-    public void setTestRequest(CreateTestRequest testRequest) { this.testRequest = testRequest; }
+    public CreateTestRequest getTestRequest() {
+        return testRequest;
+    }
 
-    public FaultSpec getChaosSpec() { return chaosSpec; }
-    public void setChaosSpec(FaultSpec chaosSpec) { this.chaosSpec = chaosSpec; }
+    public void setTestRequest(CreateTestRequest testRequest) {
+        this.testRequest = testRequest;
+    }
 
-    public int getSteadyStateSec() { return steadyStateSec; }
-    public void setSteadyStateSec(int steadyStateSec) { this.steadyStateSec = steadyStateSec; }
+    public FaultSpec getChaosSpec() {
+        return chaosSpec;
+    }
+
+    public void setChaosSpec(FaultSpec chaosSpec) {
+        this.chaosSpec = chaosSpec;
+    }
+
+    public int getSteadyStateSec() {
+        return steadyStateSec;
+    }
+
+    public void setSteadyStateSec(int steadyStateSec) {
+        this.steadyStateSec = steadyStateSec;
+    }
 }

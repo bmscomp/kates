@@ -1,14 +1,10 @@
 package com.klster.kates.report;
 
-import com.klster.kates.domain.TestRun;
-import com.klster.kates.engine.LatencyHistogram;
-import com.klster.kates.engine.TestOrchestrator;
-import com.klster.kates.export.CsvExporter;
-import com.klster.kates.export.HeatmapExporter;
-import com.klster.kates.export.JunitXmlExporter;
-import com.klster.kates.export.LatencyHeatmapData;
-import com.klster.kates.service.TestRunRepository;
-import com.klster.kates.util.MetricUtils;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -18,16 +14,21 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import com.klster.kates.domain.TestRun;
+import com.klster.kates.engine.LatencyHistogram;
+import com.klster.kates.engine.TestOrchestrator;
+import com.klster.kates.export.CsvExporter;
+import com.klster.kates.export.HeatmapExporter;
+import com.klster.kates.export.JunitXmlExporter;
+import com.klster.kates.export.LatencyHeatmapData;
+import com.klster.kates.service.TestRunRepository;
+import com.klster.kates.util.MetricUtils;
 
 /**
  * REST endpoints for test report generation, export, and comparison.
@@ -45,9 +46,13 @@ public class ReportResource {
     private final TestOrchestrator orchestrator;
 
     @Inject
-    public ReportResource(ReportGenerator generator, TestRunRepository repository,
-                          CsvExporter csvExporter, JunitXmlExporter junitXmlExporter,
-                          HeatmapExporter heatmapExporter, TestOrchestrator orchestrator) {
+    public ReportResource(
+            ReportGenerator generator,
+            TestRunRepository repository,
+            CsvExporter csvExporter,
+            JunitXmlExporter junitXmlExporter,
+            HeatmapExporter heatmapExporter,
+            TestOrchestrator orchestrator) {
         this.generator = generator;
         this.repository = repository;
         this.csvExporter = csvExporter;
@@ -61,8 +66,8 @@ public class ReportResource {
     @Operation(summary = "Generate a full test report")
     @APIResponse(responseCode = "200", description = "Complete test report with summary, phases, and SLA verdict")
     public Response getReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         return Response.ok(report).build();
     }
@@ -72,8 +77,8 @@ public class ReportResource {
     @Produces("text/markdown")
     @Operation(summary = "Export report as Markdown")
     public Response getMarkdownReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         String markdown = generator.toMarkdown(report);
         return Response.ok(markdown).build();
@@ -83,8 +88,8 @@ public class ReportResource {
     @Path("/tests/{id}/report/summary")
     @Operation(summary = "Get report summary only")
     public Response getReportSummary(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         return Response.ok(report.getSummary()).build();
     }
@@ -94,8 +99,8 @@ public class ReportResource {
     @Produces("text/csv")
     @Operation(summary = "Export report as CSV")
     public Response getCsvReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         String csv = csvExporter.export(report);
         return Response.ok(csv)
@@ -106,10 +111,12 @@ public class ReportResource {
     @GET
     @Path("/tests/{id}/report/junit")
     @Produces("application/xml")
-    @Operation(summary = "Export report as JUnit XML", description = "Returns test results in JUnit XML format for CI integration")
+    @Operation(
+            summary = "Export report as JUnit XML",
+            description = "Returns test results in JUnit XML format for CI integration")
     public Response getJunitReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         String xml = junitXmlExporter.export(report);
         return Response.ok(xml)
@@ -120,15 +127,18 @@ public class ReportResource {
     @GET
     @Path("/tests/{id}/report/heatmap")
     @Operation(summary = "Get latency heatmap", description = "Returns latency distribution data as JSON or CSV")
-    public Response getHeatmapReport(@Parameter(description = "Test run ID") @PathParam("id") String id,
-                                     @Parameter(description = "Output format: json or csv") @QueryParam("format") @DefaultValue("json") String format) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+    public Response getHeatmapReport(
+            @Parameter(description = "Test run ID") @PathParam("id") String id,
+            @Parameter(description = "Output format: json or csv") @QueryParam("format") @DefaultValue("json")
+                    String format) {
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
 
         java.util.List<LatencyHeatmapData.HeatmapRow> rows = orchestrator.getHeatmapRows(id);
         if (rows.isEmpty()) {
             return Response.status(Response.Status.NOT_FOUND)
-                    .entity("No heatmap data available for run: " + id).build();
+                    .entity("No heatmap data available for run: " + id)
+                    .build();
         }
 
         double[] boundaries = LatencyHistogram.HEATMAP_BOUNDARIES;
@@ -142,8 +152,7 @@ public class ReportResource {
         if ("csv".equalsIgnoreCase(format)) {
             String csv = heatmapExporter.exportCsv(data);
             return Response.ok(csv, "text/csv")
-                    .header("Content-Disposition",
-                            "attachment; filename=\"kates-heatmap-" + id + ".csv\"")
+                    .header("Content-Disposition", "attachment; filename=\"kates-heatmap-" + id + ".csv\"")
                     .build();
         }
 
@@ -155,8 +164,8 @@ public class ReportResource {
     @Path("/tests/{id}/report/brokers")
     @Operation(summary = "Get per-broker metrics")
     public Response getBrokerMetrics(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         List<BrokerMetrics> metrics = report.getBrokerMetrics();
         if (metrics == null || metrics.isEmpty()) {
@@ -169,13 +178,14 @@ public class ReportResource {
     @Path("/tests/{id}/report/snapshot")
     @Operation(summary = "Get cluster snapshot at test time")
     public Response getClusterSnapshot(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TestRun run = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        TestRun run =
+                repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
         TestReport report = generator.generate(run);
         ClusterSnapshot snapshot = report.getClusterSnapshot();
         if (snapshot == null) {
             return Response.status(Response.Status.NOT_FOUND)
-                    .entity("No cluster snapshot available for run: " + id).build();
+                    .entity("No cluster snapshot available for run: " + id)
+                    .build();
         }
         return Response.ok(snapshot).build();
     }
@@ -183,9 +193,13 @@ public class ReportResource {
     @GET
     @Path("/reports/compare")
     @Operation(summary = "Compare test runs", description = "Side-by-side comparison of 2+ runs with percentage deltas")
-    public Response compare(@Parameter(description = "Comma-separated run IDs (min 2)", required = true) @QueryParam("ids") String ids) {
+    public Response compare(
+            @Parameter(description = "Comma-separated run IDs (min 2)", required = true) @QueryParam("ids")
+                    String ids) {
         if (ids == null || ids.isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity("Query param 'ids' is required").build();
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Query param 'ids' is required")
+                    .build();
         }
 
         List<String> runIds = Arrays.stream(ids.split(","))
@@ -194,12 +208,15 @@ public class ReportResource {
                 .toList();
 
         if (runIds.size() < 2) {
-            return Response.status(Response.Status.BAD_REQUEST).entity("At least 2 run IDs required").build();
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("At least 2 run IDs required")
+                    .build();
         }
 
         List<ComparisonReport.ComparisonEntry> entries = new ArrayList<>();
         for (String runId : runIds) {
-            TestRun run = repository.findById(runId)
+            TestRun run = repository
+                    .findById(runId)
                     .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
             TestReport report = generator.generate(run);
             entries.add(new ComparisonReport.ComparisonEntry(
@@ -207,8 +224,7 @@ public class ReportResource {
                     run.getScenarioName(),
                     run.getTestType() != null ? run.getTestType().name() : null,
                     run.getBackend(),
-                    report.getSummary()
-            ));
+                    report.getSummary()));
         }
 
         ComparisonReport comparison = new ComparisonReport();
@@ -224,7 +240,9 @@ public class ReportResource {
 
     private Map<String, Double> computeDeltas(ReportSummary baseline, ReportSummary latest) {
         Map<String, Double> deltas = new LinkedHashMap<>();
-        deltas.put("throughputRecPerSec", MetricUtils.pctChange(baseline.avgThroughputRecPerSec(), latest.avgThroughputRecPerSec()));
+        deltas.put(
+                "throughputRecPerSec",
+                MetricUtils.pctChange(baseline.avgThroughputRecPerSec(), latest.avgThroughputRecPerSec()));
         deltas.put("avgLatencyMs", MetricUtils.pctChange(baseline.avgLatencyMs(), latest.avgLatencyMs()));
         deltas.put("p99LatencyMs", MetricUtils.pctChange(baseline.p99LatencyMs(), latest.p99LatencyMs()));
         deltas.put("maxLatencyMs", MetricUtils.pctChange(baseline.maxLatencyMs(), latest.maxLatencyMs()));

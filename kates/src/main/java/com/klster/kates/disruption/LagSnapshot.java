@@ -15,22 +15,12 @@ public final class LagSnapshot {
     /**
      * A single point-in-time lag observation for a consumer group.
      */
-    public record Entry(
-            Instant timestamp,
-            String groupId,
-            long totalLag,
-            Map<String, Long> perTopicLag
-    ) {}
+    public record Entry(Instant timestamp, String groupId, long totalLag, Map<String, Long> perTopicLag) {}
 
     /**
      * Aggregated consumer lag metrics computed after a disruption step.
      */
-    public record Metrics(
-            long baselineLag,
-            long peakLag,
-            Duration timeToLagRecovery,
-            List<Entry> timeline
-    ) {
+    public record Metrics(long baselineLag, long peakLag, Duration timeToLagRecovery, List<Entry> timeline) {
         public boolean recoveredFully() {
             return timeToLagRecovery != null;
         }

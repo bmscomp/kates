@@ -1,14 +1,15 @@
 package com.klster.kates.export;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.report.ReportSummary;
 import com.klster.kates.report.TestReport;
-import org.junit.jupiter.api.Test;
-
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class CsvExporterTest {
 
@@ -41,7 +42,9 @@ class CsvExporterTest {
         report.setMetadata(Map.of("testType", "LOAD", "backend", "native"));
 
         String csv = exporter.export(report);
-        long dataLines = csv.lines().filter(l -> !l.startsWith("#") && !l.isBlank() && !l.startsWith("runId")).count();
+        long dataLines = csv.lines()
+                .filter(l -> !l.startsWith("#") && !l.isBlank() && !l.startsWith("runId"))
+                .count();
         assertEquals(1, dataLines);
         assertTrue(csv.contains("1000"));
     }
@@ -50,10 +53,7 @@ class CsvExporterTest {
     void summaryAppended() {
         TestReport report = new TestReport();
         report.setRun(new TestRun());
-        report.setSummary(new ReportSummary(
-                1000, 500.0, 600.0, 5.0,
-                3.0, 2.0, 8.0, 15.0,
-                0, 50.0, 0, 0.0, 0));
+        report.setSummary(new ReportSummary(1000, 500.0, 600.0, 5.0, 3.0, 2.0, 8.0, 15.0, 0, 50.0, 0, 0.0, 0));
 
         String csv = exporter.export(report);
         assertTrue(csv.contains("# Summary"));
@@ -81,7 +81,8 @@ class CsvExporterTest {
         report.setMetadata(Map.of("testType", "LOAD", "backend", "native"));
 
         String csv = exporter.export(report);
-        assertTrue(csv.contains("\"Connection failed, retrying \"\"now\"\"\""),
+        assertTrue(
+                csv.contains("\"Connection failed, retrying \"\"now\"\"\""),
                 "Commas and quotes in error field should be escaped");
     }
 

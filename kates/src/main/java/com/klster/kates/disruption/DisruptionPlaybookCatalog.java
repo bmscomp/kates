@@ -1,16 +1,17 @@
 package com.klster.kates.disruption;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.klster.kates.chaos.DisruptionType;
-import com.klster.kates.chaos.FaultSpec;
-import jakarta.annotation.PostConstruct;
-import jakarta.enterprise.context.ApplicationScoped;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.chaos.DisruptionType;
+import com.klster.kates.chaos.FaultSpec;
 
 /**
  * Loads pre-built disruption playbooks from YAML resource files.
@@ -23,8 +24,8 @@ public class DisruptionPlaybookCatalog {
     private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
 
     private static final String[] PLAYBOOK_NAMES = {
-            "az-failure", "split-brain", "storage-pressure",
-            "rolling-restart", "leader-cascade", "consumer-isolation"
+        "az-failure", "split-brain", "storage-pressure",
+        "rolling-restart", "leader-cascade", "consumer-isolation"
     };
 
     private final Map<String, PlaybookEntry> catalog = new LinkedHashMap<>();
@@ -108,9 +109,7 @@ public class DisruptionPlaybookCatalog {
                 }
 
                 steps.add(new DisruptionPlan.DisruptionStep(
-                        ps.name, faultSpec,
-                        ps.steadyStateSec, ps.observationWindowSec,
-                        ps.requireRecovery));
+                        ps.name, faultSpec, ps.steadyStateSec, ps.observationWindowSec, ps.requireRecovery));
             }
         }
         plan.setSteps(steps);

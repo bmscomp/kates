@@ -1,18 +1,19 @@
 package com.klster.kates.trogdor;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
 import com.klster.kates.domain.TestSpec;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.trogdor.spec.ConsumeBenchSpec;
 import com.klster.kates.trogdor.spec.ProduceBenchSpec;
 import com.klster.kates.trogdor.spec.RoundTripWorkloadSpec;
 import com.klster.kates.trogdor.spec.TrogdorSpec;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 @ApplicationScoped
 public class SpecFactory {
@@ -20,8 +21,7 @@ public class SpecFactory {
     private final String bootstrapServers;
 
     @Inject
-    public SpecFactory(
-            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+    public SpecFactory(@ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.bootstrapServers = bootstrapServers;
     }
 
@@ -43,15 +43,17 @@ public class SpecFactory {
         String topic = topicName(spec, "load-test");
         int effectiveThroughput = effectiveThroughput(spec);
         int perProducerRecords = spec.getNumRecords() / spec.getNumProducers();
-        int perProducerThroughput = effectiveThroughput > 0
-                ? effectiveThroughput / spec.getNumProducers()
-                : -1;
+        int perProducerThroughput = effectiveThroughput > 0 ? effectiveThroughput / spec.getNumProducers() : -1;
 
         for (int i = 0; i < spec.getNumProducers(); i++) {
             ProduceBenchSpec produce = ProduceBenchSpec.create(
-                    bootstrapServers, topic, spec.getPartitions(),
-                    perProducerThroughput, perProducerRecords,
-                    spec.getDurationMs(), spec.getRecordSize());
+                    bootstrapServers,
+                    topic,
+                    spec.getPartitions(),
+                    perProducerThroughput,
+                    perProducerRecords,
+                    spec.getDurationMs(),
+                    spec.getRecordSize());
             applyProducerConf(produce, spec);
             specs.add(produce);
         }
@@ -59,8 +61,7 @@ public class SpecFactory {
         String group = consumerGroupName(spec, "load-group-" + runId);
         for (int i = 0; i < spec.getNumConsumers(); i++) {
             ConsumeBenchSpec consume = ConsumeBenchSpec.create(
-                    bootstrapServers, topic, spec.getPartitions(),
-                    perProducerRecords, spec.getDurationMs(), group);
+                    bootstrapServers, topic, spec.getPartitions(), perProducerRecords, spec.getDurationMs(), group);
             applyConsumerConf(consume, spec);
             specs.add(consume);
         }
@@ -75,8 +76,11 @@ public class SpecFactory {
 
         for (int step : rampSteps) {
             ProduceBenchSpec produce = ProduceBenchSpec.create(
-                    bootstrapServers, topic, spec.getPartitions(),
-                    step, 500_000,
+                    bootstrapServers,
+                    topic,
+                    spec.getPartitions(),
+                    step,
+                    500_000,
                     spec.getDurationMs() / rampSteps.length,
                     spec.getRecordSize());
             applyProducerConf(produce, spec);
@@ -94,16 +98,14 @@ public class SpecFactory {
 
         // Phase 1: baseline (60s at 1K msg/sec)
         ProduceBenchSpec baseline = ProduceBenchSpec.create(
-                bootstrapServers, topic, spec.getPartitions(),
-                1_000, 60_000, 60_000, spec.getRecordSize());
+                bootstrapServers, topic, spec.getPartitions(), 1_000, 60_000, 60_000, spec.getRecordSize());
         applyProducerConf(baseline, spec);
         specs.add(baseline);
 
         // Phase 2: spike (120s at unlimited, 3 concurrent producers)
         for (int i = 0; i < 3; i++) {
             ProduceBenchSpec burst = ProduceBenchSpec.create(
-                    bootstrapServers, topic, spec.getPartitions(),
-                    -1, 500_000, 120_000, spec.getRecordSize());
+                    bootstrapServers, topic, spec.getPartitions(), -1, 500_000, 120_000, spec.getRecordSize());
             applyProducerConf(burst, spec);
             burst.getProducerConf().put("batch.size", "131072");
             burst.getProducerConf().put("linger.ms", "10");
@@ -112,8 +114,7 @@ public class SpecFactory {
 
         // Phase 3: recovery baseline (60s at 1K msg/sec)
         ProduceBenchSpec recovery = ProduceBenchSpec.create(
-                bootstrapServers, topic, spec.getPartitions(),
-                1_000, 60_000, 60_000, spec.getRecordSize());
+                bootstrapServers, topic, spec.getPartitions(), 1_000, 60_000, 60_000, spec.getRecordSize());
         applyProducerConf(recovery, spec);
         specs.add(recovery);
 
@@ -129,15 +130,13 @@ public class SpecFactory {
         long maxMessages = throughput * (duration / 1000);
 
         ProduceBenchSpec produce = ProduceBenchSpec.create(
-                bootstrapServers, topic, spec.getPartitions(),
-                throughput, maxMessages, duration, spec.getRecordSize());
+                bootstrapServers, topic, spec.getPartitions(), throughput, maxMessages, duration, spec.getRecordSize());
         applyProducerConf(produce, spec);
         specs.add(produce);
 
         String group = consumerGroupName(spec, "endurance-group-" + runId);
-        ConsumeBenchSpec consume = ConsumeBenchSpec.create(
-                bootstrapServers, topic, spec.getPartitions(),
-                maxMessages, duration, group);
+        ConsumeBenchSpec consume =
+                ConsumeBenchSpec.create(bootstrapServers, topic, spec.getPartitions(), maxMessages, duration, group);
         applyConsumerConf(consume, spec);
         specs.add(consume);
 
@@ -150,8 +149,7 @@ public class SpecFactory {
 
         // Large messages: 50K × 100KB
         ProduceBenchSpec largeMsg = ProduceBenchSpec.create(
-                bootstrapServers, topic + "-large", spec.getPartitions(),
-                -1, 50_000, spec.getDurationMs(), 102_400);
+                bootstrapServers, topic + "-large", spec.getPartitions(), -1, 50_000, spec.getDurationMs(), 102_400);
         applyProducerConf(largeMsg, spec);
         largeMsg.getProducerConf().put("max.request.size", "1048576");
         largeMsg.getProducerConf().put("batch.size", "131072");
@@ -159,8 +157,7 @@ public class SpecFactory {
 
         // High count: 5M × 1KB
         ProduceBenchSpec highCount = ProduceBenchSpec.create(
-                bootstrapServers, topic + "-count", spec.getPartitions(),
-                -1, 5_000_000, spec.getDurationMs(), 1024);
+                bootstrapServers, topic + "-count", spec.getPartitions(), -1, 5_000_000, spec.getDurationMs(), 1024);
         applyProducerConf(highCount, spec);
         highCount.getProducerConf().put("batch.size", "131072");
         highCount.getProducerConf().put("linger.ms", "10");
@@ -176,8 +173,11 @@ public class SpecFactory {
 
         for (int step : probeSteps) {
             ProduceBenchSpec produce = ProduceBenchSpec.create(
-                    bootstrapServers, topic, spec.getPartitions(),
-                    step, 200_000,
+                    bootstrapServers,
+                    topic,
+                    spec.getPartitions(),
+                    step,
+                    200_000,
                     spec.getDurationMs() / probeSteps.length,
                     spec.getRecordSize());
             applyProducerConf(produce, spec);
@@ -194,8 +194,12 @@ public class SpecFactory {
         int throughput = effectiveThroughput(spec) > 0 ? effectiveThroughput(spec) : 1_000;
 
         RoundTripWorkloadSpec rt = RoundTripWorkloadSpec.create(
-                bootstrapServers, topic, spec.getPartitions(),
-                throughput, spec.getNumRecords(), spec.getDurationMs(),
+                bootstrapServers,
+                topic,
+                spec.getPartitions(),
+                throughput,
+                spec.getNumRecords(),
+                spec.getDurationMs(),
                 spec.getRecordSize());
         rt.getProducerConf().put("acks", spec.getAcks());
         specs.add(rt);
