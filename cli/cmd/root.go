@@ -90,6 +90,11 @@ Analysis:
   trend        Historical performance trends with sparkline charts
   resilience   Chaos-performance correlation testing
   schedule     Automated recurring test schedules
+  benchmark    Run full test battery with letter-grade scorecard
+
+Toolbox:
+  doctor       Pre-flight cluster readiness checklist
+  replay       Re-run a previous test with the same parameters
 
 Observability:
   dashboard    Full-screen monitoring dashboard (alias: dash)
@@ -112,7 +117,8 @@ Examples:
   $ kates test apply -f scenario.yaml --wait
   $ kates report diff <id1> <id2>
   $ kates trend --type LOAD --metric p99LatencyMs --days 30
-  $ kates dashboard
+  $ kates doctor
+  $ kates benchmark --records 50000
 
 Docs & more:  kates <command> --help
 `

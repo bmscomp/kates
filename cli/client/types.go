@@ -50,6 +50,7 @@ type TestRun struct {
 	Backend      string        `json:"backend"`
 	ScenarioName string        `json:"scenarioName"`
 	CreatedAt    string        `json:"createdAt"`
+	Spec         *TestSpec     `json:"spec,omitempty"`
 	Results      []PhaseResult `json:"results,omitempty"`
 }
 
@@ -58,8 +59,12 @@ type PhaseResult struct {
 	Status                  string           `json:"status"`
 	RecordsSent             float64          `json:"recordsSent"`
 	ThroughputRecordsPerSec float64          `json:"throughputRecordsPerSec"`
+	ThroughputMBPerSec      float64          `json:"throughputMBPerSec"`
 	AvgLatencyMs            float64          `json:"avgLatencyMs"`
+	P50LatencyMs            float64          `json:"p50LatencyMs"`
+	P95LatencyMs            float64          `json:"p95LatencyMs"`
 	P99LatencyMs            float64          `json:"p99LatencyMs"`
+	MaxLatencyMs            float64          `json:"maxLatencyMs"`
 	Error                   string           `json:"error,omitempty"`
 	Integrity               *IntegrityResult `json:"integrity,omitempty"`
 }

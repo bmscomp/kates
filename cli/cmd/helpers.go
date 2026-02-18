@@ -140,3 +140,31 @@ func describeType(t string) string {
 		return ""
 	}
 }
+
+var hintPatterns = []struct {
+	pattern string
+	hint    string
+}{
+	{"LZ4Factory", "Missing lz4-java dependency — add it to pom.xml"},
+	{"NoClassDefFoundError", "A required class is missing at runtime — check Maven dependencies"},
+	{"Connection refused", "Kafka broker unreachable — verify bootstrap servers and network"},
+	{"TimeoutException", "Operation timed out — increase timeout or check broker health"},
+	{"TopicAuthorizationException", "ACL permission denied — check Kafka ACL configuration"},
+	{"UnknownTopicOrPartition", "Topic does not exist — create it or check topic name"},
+	{"RecordTooLargeException", "Message exceeds max.message.bytes — reduce record size or increase broker limit"},
+	{"NotLeaderOrFollower", "Partition leader changed — this is often transient, retry the test"},
+	{"OutOfMemoryError", "JVM ran out of memory — increase -Xmx in deployment config"},
+	{"NetworkException", "Network error communicating with broker — check cluster connectivity"},
+	{"UNKNOWN_TOPIC_OR_PARTITION", "Topic does not exist — create it or check topic name"},
+}
+
+func matchHints(errMsg string) []string {
+	var hints []string
+	lower := strings.ToLower(errMsg)
+	for _, p := range hintPatterns {
+		if strings.Contains(lower, strings.ToLower(p.pattern)) {
+			hints = append(hints, p.hint)
+		}
+	}
+	return hints
+}

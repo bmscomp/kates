@@ -129,7 +129,22 @@ var testGetCmd = &cobra.Command{
 						phase = "main"
 					}
 					output.Error(fmt.Sprintf("[%s] %s", phase, r.Error))
+
+					for _, hint := range matchHints(r.Error) {
+						output.Hint("  💡 " + hint)
+					}
 				}
+			}
+
+			var maxThroughput float64
+			for _, r := range result.Results {
+				if r.ThroughputRecordsPerSec > maxThroughput {
+					maxThroughput = r.ThroughputRecordsPerSec
+				}
+			}
+			if maxThroughput > 0 {
+				fmt.Println()
+				output.MetricBar("Throughput", maxThroughput, 100000)
 			}
 
 			for _, r := range result.Results {
