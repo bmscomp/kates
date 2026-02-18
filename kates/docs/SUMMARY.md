@@ -38,3 +38,23 @@ Welcome to the KATES (Kafka Advanced Testing & Engineering Suite) documentation.
 |---------|-------------|
 | [API Reference](api-reference.md) | Complete REST API documentation — every endpoint, request/response schema, and example curl commands |
 | [Testing Guide](testing.md) | Test suite architecture, mock injection patterns, and how to write new tests |
+
+## Deep Theory
+
+| Chapter | Description |
+|---------|-------------|
+| [Kafka Internals](book/kafka-internals.md) | The write pipeline (batching, leader selection, acks), ISR mechanics (eviction, rejoin, min.insync.replicas), leader election (KRaft, unclean), consumer group rebalancing, and disk I/O patterns |
+| [Chaos Engineering Theory](book/chaos-engineering-theory.md) | The 5 Principles of Chaos Engineering applied to Kafka, experiment design methodology, blast radius analysis, and steady state hypothesis formulation |
+| [Performance Engineering](book/performance-engineering.md) | Queueing theory, Little's Law, tail latency amplification, batching theory, back-pressure mechanics, and reading saturation curves |
+| [SLA Grading](book/sla-grading.md) | The grading algorithm, threshold design philosophy, per-fault customization, CI/CD quality gate patterns, and trend tracking |
+| [Extending Kates](book/extending-kates.md) | Writing custom BenchmarkBackends, ChaosProviders, and ExportStrategies with worked implementation examples |
+
+## Tutorials
+
+| Tutorial | Description |
+|----------|-------------|
+| [Your First Performance Test](tutorials/first-performance-test.md) | From zero to LOAD test results in under 10 minutes — health check, test submission, result interpretation |
+| [Stress Test Saturation Curve](tutorials/stress-test-saturation-curve.md) | Finding your cluster's breaking point — running a STRESS test, plotting the curve, reading the four regions |
+| [Your First Disruption Test](tutorials/first-disruption-test.md) | Killing a broker leader and interpreting ISR recovery — report anatomy, timeline reading, troubleshooting |
+| [CI/CD Quality Gate](tutorials/ci-cd-quality-gate.md) | Blocking deploys on Kafka SLA violations — GitHub Actions workflow, JUnit XML integration, threshold tuning |
+| [Custom Playbook](tutorials/custom-playbook.md) | Designing a multi-step disruption scenario — risk identification, step design, per-step SLA customization |
