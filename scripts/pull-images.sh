@@ -1,36 +1,16 @@
 #!/bin/bash
 # No set -e: continue past individual pull failures and report at the end
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m'
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../images.env"
 
-REGISTRY="localhost:5001"
+MAX_PARALLEL="${PULL_PARALLEL:-4}"
 
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-    echo -e "${BLUE}Apple Silicon detected — using linux/arm64${NC}"
-    PLATFORM="--platform linux/arm64"
-else
-    PLATFORM="--platform linux/amd64"
-fi
+require_registry
 
-unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
-
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Pulling Images to Local Registry${NC}"
-echo -e "${GREEN}========================================${NC}"
+bold "Pulling Images to Local Registry"
 echo ""
-
-if ! curl -s http://${REGISTRY}/v2/_catalog > /dev/null 2>&1; then
-    echo -e "${RED}Local registry is not running. Please run ./setup-registry.sh first${NC}"
-    exit 1
-fi
 
 TOTAL=0
 SKIPPED=0
@@ -42,10 +22,10 @@ push_to_local_registry() {
     local local_image="${REGISTRY}/${image}"
     TOTAL=$((TOTAL + 1))
 
-    echo -e "${BLUE}[${TOTAL}] ${image}${NC}"
+    step "[${TOTAL}] ${image}"
 
     if curl -s "http://${REGISTRY}/v2/${image%:*}/tags/list" | grep -q "\"${image##*:}\""; then
-        echo -e "  ${YELLOW}already in registry, skipping${NC}"
+        warn "  already in registry, skipping"
         SKIPPED=$((SKIPPED + 1))
         return 0
     fi
@@ -53,10 +33,10 @@ push_to_local_registry() {
     if docker pull ${PLATFORM} "${image}"; then
         docker tag "${image}" "${local_image}"
         docker push "${local_image}"
-        echo -e "  ${GREEN}✓ pushed${NC}"
+        info "  ✓ pushed"
         PULLED=$((PULLED + 1))
     else
-        echo -e "  ${RED}✗ failed to pull${NC}"
+        error "  ✗ failed to pull"
         FAILED=$((FAILED + 1))
         return 1
     fi
@@ -69,10 +49,10 @@ push_scarf_image() {
     local local_image="${REGISTRY}/${canonical}"
     TOTAL=$((TOTAL + 1))
 
-    echo -e "${BLUE}[${TOTAL}] ${scarf_src} → ${canonical}${NC}"
+    step "[${TOTAL}] ${scarf_src} → ${canonical}"
 
     if curl -s "http://${REGISTRY}/v2/${canonical%:*}/tags/list" | grep -q "\"${canonical##*:}\""; then
-        echo -e "  ${YELLOW}already in registry, skipping${NC}"
+        warn "  already in registry, skipping"
         SKIPPED=$((SKIPPED + 1))
         return 0
     fi
@@ -80,30 +60,52 @@ push_scarf_image() {
     if docker pull ${PLATFORM} "${scarf_src}"; then
         docker tag "${scarf_src}" "${local_image}"
         docker push "${local_image}"
-        echo -e "  ${GREEN}✓ pushed as ${canonical}${NC}"
+        info "  ✓ pushed as ${canonical}"
         PULLED=$((PULLED + 1))
     else
-        echo -e "  ${RED}✗ failed to pull${NC}"
+        error "  ✗ failed to pull"
         FAILED=$((FAILED + 1))
         return 1
     fi
 }
 
-echo -e "${GREEN}--- Standard Images ---${NC}"
-for img in "${ALL_STANDARD_IMAGES[@]}"; do
-    push_to_local_registry "${img}" || true
-done
+# Pull standard images with parallelism for images not yet in registry
+pull_single() {
+    local image=$1
+    local local_image="${REGISTRY}/${image}"
+    if curl -s "http://${REGISTRY}/v2/${image%:*}/tags/list" | grep -q "\"${image##*:}\"" 2>/dev/null; then
+        echo "SKIP ${image}"
+        return 0
+    fi
+    if docker pull ${PLATFORM} "${image}" >/dev/null 2>&1; then
+        docker tag "${image}" "${local_image}" 2>/dev/null
+        docker push "${local_image}" >/dev/null 2>&1
+        echo "OK   ${image}"
+    else
+        echo "FAIL ${image}"
+        return 1
+    fi
+}
+export -f pull_single
+export REGISTRY PLATFORM
+
+info "--- Standard Images (up to ${MAX_PARALLEL} in parallel) ---"
+TMPFILE=$(mktemp)
+printf '%s\n' "${ALL_STANDARD_IMAGES[@]}" | xargs -P "${MAX_PARALLEL}" -I{} bash -c 'pull_single "$@"' _ {} 2>&1 | tee "${TMPFILE}"
+PULLED=$(grep -c "^OK " "${TMPFILE}" 2>/dev/null || echo 0)
+SKIPPED=$(grep -c "^SKIP " "${TMPFILE}" 2>/dev/null || echo 0)
+FAILED=$(grep -c "^FAIL " "${TMPFILE}" 2>/dev/null || echo 0)
+TOTAL=$((PULLED + SKIPPED + FAILED))
+rm -f "${TMPFILE}"
 
 echo ""
-echo -e "${GREEN}--- LitmusChaos Portal Images (scarf.sh) ---${NC}"
+info "--- LitmusChaos Portal Images (scarf.sh) ---"
 for entry in "${LITMUS_SCARF_IMAGES[@]}"; do
     push_scarf_image "${entry}" || true
 done
 
 echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Pull Complete!${NC}"
-echo -e "${GREEN}========================================${NC}"
+bold "Pull Complete!"
 echo ""
 echo "Total: ${TOTAL}  Pulled: ${PULLED}  Skipped: ${SKIPPED}  Failed: ${FAILED}"
 echo ""
@@ -111,6 +113,6 @@ echo "Registry contents:"
 curl -s http://${REGISTRY}/v2/_catalog | jq '.repositories | length' 2>/dev/null || echo "(jq not installed)"
 
 if [ "${FAILED}" -gt 0 ]; then
-    echo -e "${YELLOW}Re-run this script to retry the ${FAILED} failed image(s).${NC}"
+    warn "Re-run this script to retry the ${FAILED} failed image(s)."
     exit 1
 fi

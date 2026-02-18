@@ -1,30 +1,27 @@
 #!/bin/bash
 set -e
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 
-CHARTS_DIR="./charts"
 LITMUS_CHART_DIR="${CHARTS_DIR}/litmus"
 
-echo -e "${GREEN}Deploying LitmusChaos from local chart...${NC}"
+info "Deploying LitmusChaos..."
 
-# Check if local chart exists
-if [ ! -d "${LITMUS_CHART_DIR}" ]; then
-    echo -e "${YELLOW}Error: Litmus chart not found at ${LITMUS_CHART_DIR}${NC}"
-    echo "Please run ./download-litmus-charts.sh first to download the charts"
-    exit 1
+require_chart "${LITMUS_CHART_DIR}" "litmus"
+
+# Skip if already running
+if deployment_exists chaos-litmus-server litmus; then
+    if kubectl rollout status deployment/chaos-litmus-server -n litmus --timeout=5s &>/dev/null; then
+        warn "LitmusChaos portal is already deployed and running — skipping"
+        exit 0
+    fi
 fi
 
-# Apple Silicon fix logic removed - handled by fix-litmus-images.sh and load-images-to-kind.sh
-
-# Create namespace
-kubectl create namespace litmus --dry-run=client -o yaml | kubectl apply -f -
+ensure_namespace litmus
 
 # Step 1: Deploy MongoDB first (disable other components)
-echo -e "${GREEN}Step 1: Deploying MongoDB first...${NC}"
+step "Step 1: Deploying MongoDB first..."
 helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --namespace litmus \
   --values config/litmus-values.yaml \
@@ -34,36 +31,34 @@ helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --timeout 10m \
   --wait
 
-# Wait for MongoDB to be fully ready (handles both StatefulSet and Deployment)
-echo -e "${GREEN}Waiting for MongoDB to be ready (this may take a few minutes)...${NC}"
+# Wait for MongoDB to be fully ready
+info "Waiting for MongoDB to be ready (this may take a few minutes)..."
 if kubectl get statefulset chaos-mongodb -n litmus &>/dev/null; then
     kubectl rollout status statefulset/chaos-mongodb -n litmus --timeout=600s
 elif kubectl get deployment chaos-mongodb -n litmus &>/dev/null; then
     kubectl rollout status deployment/chaos-mongodb -n litmus --timeout=600s
 else
-    echo -e "${YELLOW}Waiting for MongoDB pods to be ready...${NC}"
+    warn "Waiting for MongoDB pods to be ready..."
     kubectl wait --for=condition=Ready pod -l app.kubernetes.io/component=mongodb -n litmus --timeout=600s
 fi
 
-# Additional wait to ensure MongoDB is accepting connections
-echo -e "${GREEN}Waiting additional 15s for MongoDB to stabilize...${NC}"
+info "Waiting additional 15s for MongoDB to stabilize..."
 sleep 15
 
 # Step 2: Deploy remaining Litmus components
-echo -e "${GREEN}Step 2: Deploying Litmus portal components...${NC}"
+step "Step 2: Deploying Litmus portal components..."
 helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --namespace litmus \
   --values config/litmus-values.yaml \
   --timeout 10m \
   --wait
 
-# Wait for Litmus portal to be ready
-echo -e "${GREEN}Waiting for LitmusChaos portal to be ready...${NC}"
+info "Waiting for LitmusChaos portal to be ready..."
 kubectl wait --for=condition=available --timeout=300s \
   deployment/chaos-litmus-server -n litmus
 
 # Create ServiceMonitor for Prometheus integration
-echo -e "${GREEN}Creating ServiceMonitor for Prometheus integration...${NC}"
+info "Creating ServiceMonitor for Prometheus integration..."
 cat <<EOF | kubectl apply -f -
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -87,23 +82,8 @@ spec:
 EOF
 
 echo ""
-echo -e "${GREEN}LitmusChaos deployment complete!${NC}"
-echo ""
-echo "LitmusChaos chaos engineering platform is now installed."
+info "✅ LitmusChaos deployment complete!"
 echo ""
 echo "Next steps:"
-echo "  1. Deploy sample experiments: kubectl apply -f config/litmus-experiments/"
-echo "  2. View chaos metrics in Grafana"
-echo "  3. Check operator logs: kubectl logs -n litmus -l app.kubernetes.io/component=operator"
-echo ""
-echo "=== Accessing LitmusChaos UI ==="
-echo "The UI is enabled. To access it:"
-echo "  1. Run port-forward: make chaos-ui"
-echo "  2. Open browser: http://localhost:9091"
-echo "  3. Default credentials:"
-echo "     Username: admin"
-echo "     Password: litmus"
-echo ""
-echo "To run a quick test:"
-echo "  kubectl apply -f config/litmus-experiments/pod-delete.yaml"
-
+echo "  1. Deploy experiments: kubectl apply -f config/litmus-experiments/"
+echo "  2. Access UI: make chaos-ui → http://localhost:9091 (admin/litmus)"

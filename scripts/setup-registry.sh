@@ -1,34 +1,32 @@
 #!/bin/bash
 set -e
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 
 REGISTRY_NAME="kind-registry"
 REGISTRY_PORT="5001"
 
-echo -e "${GREEN}Setting up local Docker registry...${NC}"
+info "Setting up local Docker registry..."
 
 # Check if registry is already running
 if [ "$(docker ps -q -f name=${REGISTRY_NAME})" ]; then
-    echo -e "${YELLOW}Registry '${REGISTRY_NAME}' is already running${NC}"
+    warn "Registry '${REGISTRY_NAME}' is already running"
     echo "Registry available at: localhost:${REGISTRY_PORT}"
     exit 0
 fi
 
 # Check if registry container exists but is stopped
 if [ "$(docker ps -aq -f name=${REGISTRY_NAME})" ]; then
-    echo -e "${YELLOW}Starting existing registry container...${NC}"
+    warn "Starting existing registry container..."
     docker start ${REGISTRY_NAME}
-    echo -e "${GREEN}Registry started successfully${NC}"
+    info "Registry started successfully"
     echo "Registry available at: localhost:${REGISTRY_PORT}"
     exit 0
 fi
 
 # Create registry container
-echo -e "${GREEN}Creating new registry container...${NC}"
+info "Creating new registry container..."
 docker run -d \
   --name ${REGISTRY_NAME} \
   --restart=always \
@@ -36,7 +34,7 @@ docker run -d \
   -v kind-registry-data:/var/lib/registry \
   registry:2
 
-echo -e "${GREEN}Registry created and started successfully${NC}"
+info "Registry created and started successfully"
 echo "Registry available at: localhost:${REGISTRY_PORT}"
 echo ""
 echo "To verify registry is working:"

@@ -1,41 +1,40 @@
 #!/bin/bash
 set -e
 
-# Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 
 NAMESPACE="velero"
-CHARTS_DIR="./charts"
 
-echo -e "${BLUE}Deploying MinIO and Velero...${NC}"
+info "Deploying MinIO and Velero..."
 
-# Create namespace
-kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+# Skip if already running
+if deployment_exists velero velero; then
+    if kubectl rollout status deployment/velero -n velero --timeout=5s &>/dev/null; then
+        warn "Velero is already deployed and running — skipping"
+        exit 0
+    fi
+fi
 
-# Deploy MinIO
-echo -e "${GREEN}Installing MinIO...${NC}"
+ensure_namespace ${NAMESPACE}
+
+info "Installing MinIO..."
 helm upgrade --install minio "${CHARTS_DIR}/minio" \
   --namespace ${NAMESPACE} \
   --values config/minio-values-offline.yaml \
   --wait \
   --timeout 5m
 
-echo -e "${GREEN}MinIO deployed successfully.${NC}"
+info "MinIO deployed successfully."
 
-# Deploy Velero
-echo -e "${GREEN}Installing Velero...${NC}"
+info "Installing Velero..."
 helm upgrade --install velero "${CHARTS_DIR}/velero" \
   --namespace ${NAMESPACE} \
   --values config/velero-values-offline.yaml \
   --wait \
   --timeout 5m
 
-echo -e "${GREEN}Velero deployment complete!${NC}"
+info "✅ Velero deployment complete!"
 echo ""
-echo "Verify status:"
-echo "  kubectl get pods -n ${NAMESPACE}"
-echo ""
-echo "Trigger backup:"
-echo "  velero backup create kafka-backup-manual --include-namespaces kafka --wait"
+echo "Verify:  kubectl get pods -n ${NAMESPACE}"
+echo "Backup:  velero backup create kafka-backup-manual --include-namespaces kafka --wait"

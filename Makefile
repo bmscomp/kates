@@ -1,6 +1,8 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs
 
 # Default target: Launch complete cluster setup with all services
+TIMER := $(shell date +%s)
+
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
@@ -53,7 +55,7 @@ all: check-prerequisites
 	@echo "Step 13: Exposing service ports..."
 	./scripts/port-forward.sh
 	@echo ""
-	@echo "✅ Complete setup finished!"
+	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
 	@echo ""
 	@echo "📊 Services deployed:"
 	@echo "  ✓ Prometheus & Grafana (Monitoring)"
@@ -310,10 +312,9 @@ status:
 	@echo "=== Not Ready Pods ==="
 	@kubectl get pods -A | grep -v Running | grep -v Completed || echo "All pods are running!"
 
-# Destroy Cluster
+# Destroy Cluster (FORCE=1 skips confirmation prompt)
 destroy:
-	@echo "💥 Destroying Cluster..."
-	./scripts/destroy.sh
+	FORCE=$(FORCE) ./scripts/destroy.sh
 
 # Alias for destroy
 clean: destroy
@@ -358,8 +359,18 @@ help:
 	@echo ""
 	@echo "  Operations"
 	@echo "  ports            - Start port forwarding"
+	@echo "  logs             - Stream logs from all services"
 	@echo "  status           - Check cluster status"
 	@echo "  chaos-ui         - Port-forward Litmus UI"
 	@echo "  chaos-experiments- Apply chaos experiments"
-	@echo "  destroy          - Destroy cluster"
+	@echo "  destroy          - Destroy cluster (FORCE=1 to skip prompt)"
 	@echo "  help             - Show this help"
+
+logs:
+	@echo "📋 Streaming logs from all services (Ctrl+C to stop)..."
+	@echo ""
+	@kubectl logs -f -l app=kates -n kates --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l strimzi.io/cluster=krafter -n kafka --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l app.kubernetes.io/name=grafana -n monitoring --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l app=kafka-ui -n kafka --prefix --tail=20 2>/dev/null &
+	@wait

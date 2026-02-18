@@ -1,38 +1,43 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+
 echo "🔌 Starting Port Forwarding..."
 
-# Kill existing port-forwards if any
-pkill -f "kubectl port-forward" || true
+# Kill existing port-forwards
+pkill -f "kubectl port-forward" 2>/dev/null || true
+sleep 1
 
-# Grafana (30080 -> 80)
-echo "📊 Forwarding Grafana: http://localhost:30080"
-kubectl port-forward svc/monitoring-grafana 30080:80 -n monitoring > /dev/null 2>&1 &
+FORWARDED=0
+SKIPPED=0
 
-# Kafka UI (30081 -> 8080)
-echo "🖥️  Forwarding Kafka UI: http://localhost:30081"
-kubectl port-forward svc/kafka-ui 30081:8080 -n kafka > /dev/null 2>&1 &
+forward() {
+    local label=$1
+    local emoji=$2
+    local svc=$3
+    local local_port=$4
+    local remote_port=$5
+    local ns=$6
 
-# Prometheus (30090 -> 9090)
-echo "🔥 Forwarding Prometheus: http://localhost:30090"
-kubectl port-forward svc/monitoring-kube-prometheus-prometheus 30090:9090 -n monitoring > /dev/null 2>&1 &
+    if svc_exists "$svc" "$ns"; then
+        echo "${emoji} Forwarding ${label}: http://localhost:${local_port}"
+        kubectl port-forward "svc/${svc}" "${local_port}:${remote_port}" -n "${ns}" > /dev/null 2>&1 &
+        FORWARDED=$((FORWARDED + 1))
+    else
+        warn "  ⏭️  ${label} not deployed in namespace '${ns}' — skipping"
+        SKIPPED=$((SKIPPED + 1))
+    fi
+}
 
-# LitmusChaos Frontend (9091 -> 9091)
-echo "⚡ Forwarding Litmus UI: http://localhost:9091"
-kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus > /dev/null 2>&1 &
+forward "Grafana"           "📊" monitoring-grafana                          30080 80   monitoring
+forward "Kafka UI"          "🖥️ " kafka-ui                                   30081 8080 kafka
+forward "Apicurio Registry" "📚" apicurio-registry                          30082 8080 apicurio
+forward "Kates API"         "🧪" kates                                      30083 8080 kates
+forward "Prometheus"        "🔥" monitoring-kube-prometheus-prometheus       30090 9090 monitoring
+forward "Litmus UI"         "⚡" chaos-litmus-frontend-service              9091  9091 litmus
 
-# Apicurio Registry (30082 -> 8080)
-echo "📚 Forwarding Apicurio Registry: http://localhost:30082"
-kubectl port-forward svc/apicurio-registry 30082:8080 -n apicurio > /dev/null 2>&1 &
-
-# Kates API (30083 -> 8080)
-if kubectl get svc kates -n kates > /dev/null 2>&1; then
-    echo "🧪 Forwarding Kates API: http://localhost:30083"
-    kubectl port-forward svc/kates 30083:8080 -n kates > /dev/null 2>&1 &
-else
-    echo "⏭️  Kates not deployed, skipping (run 'make kates' to deploy)"
-fi
-
-echo "✅ Port forwarding started in background!"
-echo "Press Ctrl+C to stop (this script exits but forwards keep running)"
+echo ""
+info "✅ Port forwarding: ${FORWARDED} active, ${SKIPPED} skipped"
+echo "Forwards run in background — use 'pkill -f kubectl.port-forward' to stop."

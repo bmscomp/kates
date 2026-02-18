@@ -1,37 +1,28 @@
 #!/bin/bash
 set -e
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
 
-CHARTS_DIR="./charts"
 MONITORING_CHART_DIR="${CHARTS_DIR}/kube-prometheus-stack"
 
-echo -e "${GREEN}Deploying Monitoring Stack (Prometheus & Grafana) from local chart...${NC}"
+info "Deploying Monitoring Stack (Prometheus & Grafana)..."
 
-# Check if local chart exists
-if [ ! -d "${MONITORING_CHART_DIR}" ]; then
-    echo -e "${YELLOW}Error: kube-prometheus-stack chart not found at ${MONITORING_CHART_DIR}${NC}"
-    echo "Please run ./download-charts.sh first to download the charts"
-    exit 1
-fi
+require_chart "${MONITORING_CHART_DIR}" "kube-prometheus-stack"
 
-# Create namespace
-kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+ensure_namespace monitoring
 
-echo -e "${GREEN}Installing Prometheus and Grafana from local chart...${NC}"
+info "Installing Prometheus and Grafana from local chart..."
 helm upgrade --install monitoring "${MONITORING_CHART_DIR}" \
   --namespace monitoring \
   --values config/monitoring.yaml \
   --timeout 10m \
   --wait
 
-echo -e "${GREEN}Applying custom dashboards...${NC}"
+info "Applying custom dashboards..."
 kubectl apply -f config/custom-dashboard.yaml
 
-echo -e "${GREEN}Deploying KATES benchmark dashboards...${NC}"
+info "Deploying KATES benchmark dashboards..."
 kubectl create configmap kates-grafana-dashboards \
   --from-file=config/monitoring/kates-benchmark-dashboard.json \
   --from-file=config/monitoring/kates-phase-dashboard.json \
@@ -44,4 +35,4 @@ kubectl label configmap kates-grafana-dashboards \
   grafana_dashboard="1" \
   --overwrite
 
-echo -e "${GREEN}Monitoring deployment complete!${NC}"
+info "✅ Monitoring deployment complete!"
