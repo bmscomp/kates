@@ -117,6 +117,21 @@ var testGetCmd = &cobra.Command{
 				rows,
 			)
 
+			hasErrors := false
+			for _, r := range result.Results {
+				if r.Error != "" {
+					if !hasErrors {
+						output.SubHeader("Failure Details")
+						hasErrors = true
+					}
+					phase := r.PhaseName
+					if phase == "" {
+						phase = "main"
+					}
+					output.Error(fmt.Sprintf("[%s] %s", phase, r.Error))
+				}
+			}
+
 			for _, r := range result.Results {
 				if r.Integrity != nil {
 					ir := r.Integrity
@@ -245,7 +260,7 @@ var testCreateCmd = &cobra.Command{
 				Records:           createRecords,
 				ParallelProducers: createProducers,
 				RecordSizeBytes:   createRecordSize,
-				DurationSeconds:   createDuration,
+				DurationSeconds:   createDuration * 1000,
 				Topic:             createTopic,
 				Acks:              createAcks,
 				BatchSize:         createBatchSize,

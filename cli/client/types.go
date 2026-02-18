@@ -60,6 +60,7 @@ type PhaseResult struct {
 	ThroughputRecordsPerSec float64          `json:"throughputRecordsPerSec"`
 	AvgLatencyMs            float64          `json:"avgLatencyMs"`
 	P99LatencyMs            float64          `json:"p99LatencyMs"`
+	Error                   string           `json:"error,omitempty"`
 	Integrity               *IntegrityResult `json:"integrity,omitempty"`
 }
 
@@ -282,16 +283,16 @@ type ChaosOutcome struct {
 
 // CreateTestRequest for POST /api/tests
 type CreateTestRequest struct {
-	TestType string    `json:"testType"`
+	TestType string    `json:"type"`
 	Backend  string    `json:"backend,omitempty"`
 	Spec     *TestSpec `json:"spec,omitempty"`
 }
 
 type TestSpec struct {
-	Records            int    `json:"records,omitempty"`
-	ParallelProducers  int    `json:"parallelProducers,omitempty"`
-	RecordSizeBytes    int    `json:"recordSizeBytes,omitempty"`
-	DurationSeconds    int    `json:"durationSeconds,omitempty"`
+	Records            int    `json:"numRecords,omitempty"`
+	ParallelProducers  int    `json:"numProducers,omitempty"`
+	RecordSizeBytes    int    `json:"recordSize,omitempty"`
+	DurationSeconds    int    `json:"durationMs,omitempty"`
 	Topic              string `json:"topic,omitempty"`
 	Acks               string `json:"acks,omitempty"`
 	BatchSize          int    `json:"batchSize,omitempty"`

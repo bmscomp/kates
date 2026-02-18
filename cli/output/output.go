@@ -185,30 +185,28 @@ func Table(headers []string, rows [][]string) {
 			}
 			pure := stripAnsi(cell)
 			upper := strings.ToUpper(pure)
-			extraLen := len(cell) - len(pure)
+			padded := padRight(pure, widths[i])
 
+			var rendered string
 			switch upper {
 			case "UP", "DONE", "PASS", "ENABLED":
-				line += "  " + padRight(SuccessStyle.Bold(true).Render(pure), widths[i]+extraLen+len(SuccessStyle.Bold(true).Render(pure))-len(pure))
+				rendered = SuccessStyle.Bold(true).Render(pure) + padded[len(pure):]
 			case "RUNNING", "PENDING":
-				line += "  " + padRight(AccentStyle.Bold(true).Render(pure), widths[i]+extraLen+len(AccentStyle.Bold(true).Render(pure))-len(pure))
+				rendered = AccentStyle.Bold(true).Render(pure) + padded[len(pure):]
 			case "FAILED", "ERROR", "DOWN", "DISABLED":
-				line += "  " + padRight(ErrorStyle.Render(pure), widths[i]+extraLen+len(ErrorStyle.Render(pure))-len(pure))
+				rendered = ErrorStyle.Render(pure) + padded[len(pure):]
 			case "DEGRADED", "STOPPING":
-				line += "  " + padRight(WarningStyle.Render(pure), widths[i]+extraLen+len(WarningStyle.Render(pure))-len(pure))
+				rendered = WarningStyle.Render(pure) + padded[len(pure):]
 			case "▲":
-				line += "  " + padRight(ErrorStyle.Render("▲"), widths[i]+extraLen+len(ErrorStyle.Render("▲"))-len("▲"))
+				rendered = ErrorStyle.Render("▲") + padded[len("▲"):]
 			case "▼":
-				line += "  " + padRight(SuccessStyle.Render("▼"), widths[i]+extraLen+len(SuccessStyle.Render("▼"))-len("▼"))
+				rendered = SuccessStyle.Render("▼") + padded[len("▼"):]
 			case "→":
-				line += "  " + padRight(SuccessStyle.Bold(true).Render("→"), widths[i]+extraLen+len(SuccessStyle.Bold(true).Render("→"))-len("→"))
+				rendered = SuccessStyle.Bold(true).Render("→") + padded[len("→"):]
 			default:
-				if extraLen > 0 {
-					line += "  " + padRight(cell, widths[i]+extraLen)
-				} else {
-					line += "  " + cellFg.Render(padRight(cell, widths[i]))
-				}
+				rendered = cellFg.Render(padded)
 			}
+			line += "  " + rendered
 		}
 		fmt.Println(line)
 	}
