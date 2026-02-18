@@ -77,10 +77,7 @@ all: check-prerequisites
 # Check prerequisites
 check-prerequisites:
 	@echo "🔍 Checking prerequisites..."
-	@command -v docker >/dev/null 2>&1 || { echo "❌ Docker not found"; exit 1; }
-	@command -v kind >/dev/null 2>&1 || { echo "❌ Kind not found"; exit 1; }
-	@command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
-	@command -v helm >/dev/null 2>&1 || { echo "❌ Helm not found"; exit 1; }
+	@bash -c 'source scripts/common.sh && require_cmd docker && require_cmd kind && require_cmd kubectl && require_cmd helm'
 	@echo "✅ All prerequisites met"
 
 # Start Kind cluster only
@@ -109,10 +106,16 @@ monitoring:
 	@echo "📊 Deploying monitoring stack..."
 	./scripts/deploy-monitoring.sh
 
-# Deploy full stack (monitoring, Kafka, UI, Litmus)
+# Deploy full stack (monitoring, Kafka, UI, Litmus) — without cluster/images
 deploy-all:
 	@echo "🚀 Deploying full stack..."
-	./scripts/deploy-all-from-kind.sh
+	./scripts/deploy-monitoring.sh
+	./scripts/deploy-kafka.sh
+	./scripts/deploy-kafka-ui.sh
+	./scripts/deploy-apicurio.sh
+	./scripts/deploy-litmuschaos.sh
+	./scripts/port-forward.sh
+	@echo "✅ Full stack deployed!"
 
 # Deploy Kafka only (from local chart)
 kafka:
