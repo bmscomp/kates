@@ -37,6 +37,7 @@ Welcome to the KATES (Kafka Advanced Testing & Engineering Suite) documentation.
 | Chapter | Description |
 |---------|-------------|
 | [API Reference](api-reference.md) | Complete REST API documentation — every endpoint, request/response schema, and example curl commands |
+| [CLI Reference](cli-reference.md) | Every CLI command with usage examples — core, analysis, toolbox, and observability |
 | [Testing Guide](testing.md) | Test suite architecture, mock injection patterns, and how to write new tests |
 
 ## Deep Theory
