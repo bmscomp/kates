@@ -1,112 +1,124 @@
 # Deployment Guide
 
-## Prerequisites
+This document explains how to deploy Kates in both local development and Kubernetes production environments. It covers every configuration option, the Kubernetes manifests, Trogdor agent setup, and the complete ConfigMap reference.
 
-Kates runs as a Quarkus application and requires:
-
-1. **Kafka Cluster** — a running Kafka cluster accessible via bootstrap servers
-2. **Execution Backend** (choose one):
-   - **Native** (default) — no external dependencies, runs workloads in-process using virtual threads
-   - **Trogdor** — Apache Trogdor Coordinator + Agent(s) for distributed load generation
-
-## Running Locally
+## Local Development
 
 ### Dev Mode
 
+The fastest way to run Kates is Quarkus dev mode, which provides hot reload, Swagger UI, and automatic Dev Services (PostgreSQL provisioned automatically):
+
 ```bash
 cd kates
-mvn quarkus:dev
+./mvnw quarkus:dev
 ```
 
-This starts Kates on port 8080 with hot reload, Swagger UI at `/q/swagger-ui`, and live coding.
+This starts Kates on `http://localhost:8080` with:
 
-Override the default cluster connection in `application.properties` or via environment variables:
+- **Hot reload** — edit any Java file and the changes take effect on the next HTTP request, without restarting the JVM
+- **Swagger UI** — interactive API explorer at `/q/swagger-ui`
+- **Dev Services** — Quarkus automatically starts a PostgreSQL container for test run persistence. No external database required.
+- **Continuous testing** — press `r` in the terminal to run the test suite. Press `s` to toggle live test execution on every file change.
+
+In dev mode, Kates connects to whatever Kafka bootstrap servers are configured. If no Kafka cluster is available, the native backend will fail at test execution time (not at startup), so you can still explore the API, health endpoints, and configuration without a running cluster.
+
+### Build a JAR
 
 ```bash
-mvn quarkus:dev \
-  -Dkates.kafka.bootstrap-servers=localhost:9092 \
-  -Dkates.engine.default-backend=native
-```
-
-### Building a JAR
-
-```bash
-mvn clean package -DskipTests
+./mvnw clean package -DskipTests
 java -jar target/quarkus-app/quarkus-run.jar
 ```
 
+This builds a Quarkus fast-jar (not an uber-jar). The application code is in `target/quarkus-app/quarkus-run.jar`, with dependencies in `target/quarkus-app/lib/`. To run the JAR, you must have a PostgreSQL instance available (configure via `QUARKUS_DATASOURCE_JDBC_URL` environment variable).
+
+### Build a Native Executable
+
+```bash
+./mvnw clean package -Dnative -DskipTests
+./target/kates-1.0.0-SNAPSHOT-runner
+```
+
+The native executable starts in milliseconds and uses a fraction of the memory compared to the JVM. This is recommended for production Kubernetes deployments where fast startup and low memory footprint matter.
+
 ## Kubernetes Deployment
 
-Kates ships with ready-to-use manifests in `kates/k8s/`. The deploy script applies them in order:
+### Namespace
+
+All Kates components should be deployed in a dedicated namespace:
 
 ```bash
-make kates-deploy
-# or manually:
-kubectl apply -f kates/k8s/namespace.yaml
-kubectl apply -f kates/k8s/configmap.yaml
-kubectl apply -f kates/k8s/deployment.yaml
-kubectl apply -f kates/k8s/service.yaml
+kubectl create namespace kates
 ```
 
-### ConfigMap — `kates-config`
+### ConfigMap
 
-The ConfigMap is the primary way to configure Kates in Kubernetes. It contains environment variables that MicroProfile Config maps to application properties automatically (`KATES_TESTS_STRESS_PARTITIONS` → `kates.tests.stress.partitions`).
-
-**To change test defaults at runtime:**
-
-```bash
-kubectl edit configmap kates-config -n kates
-# Change e.g. KATES_TESTS_STRESS_PARTITIONS: "12"
-kubectl rollout restart deployment/kates -n kates
-```
-
-The ConfigMap includes three sections:
-
-#### Core Settings
+The `kates-config` ConfigMap is the primary configuration mechanism for Kubernetes deployments. Every Kates configuration property can be set as an environment variable in this ConfigMap.
 
 ```yaml
-KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
-KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
-KATES_ENGINE_DEFAULT_BACKEND: "native"
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kates-config
+  namespace: kates
+data:
+  KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
+  KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kates.svc:8889"
+  KATES_ENGINE_DEFAULT_BACKEND: "native"
+  KATES_CHAOS_PROVIDER: "hybrid"
+
+  KATES_TESTS_LOAD_PARTITIONS: "3"
+  KATES_TESTS_LOAD_REPLICATION_FACTOR: "3"
+  KATES_TESTS_LOAD_MIN_INSYNC_REPLICAS: "2"
+  KATES_TESTS_LOAD_ACKS: "all"
+  KATES_TESTS_LOAD_BATCH_SIZE: "65536"
+  KATES_TESTS_LOAD_LINGER_MS: "5"
+  KATES_TESTS_LOAD_COMPRESSION_TYPE: "lz4"
+  KATES_TESTS_LOAD_RECORD_SIZE: "1024"
+  KATES_TESTS_LOAD_NUM_RECORDS: "1000000"
+  KATES_TESTS_LOAD_THROUGHPUT: "-1"
+  KATES_TESTS_LOAD_DURATION_MS: "600000"
+  KATES_TESTS_LOAD_NUM_PRODUCERS: "1"
+  KATES_TESTS_LOAD_NUM_CONSUMERS: "1"
+
+  KATES_TESTS_STRESS_PARTITIONS: "6"
+  KATES_TESTS_STRESS_BATCH_SIZE: "131072"
+  KATES_TESTS_STRESS_LINGER_MS: "10"
+  KATES_TESTS_STRESS_NUM_PRODUCERS: "3"
+  KATES_TESTS_STRESS_DURATION_MS: "900000"
+
+  KATES_TESTS_SPIKE_ACKS: "1"
+  KATES_TESTS_SPIKE_COMPRESSION_TYPE: "none"
+  KATES_TESTS_SPIKE_LINGER_MS: "0"
+  KATES_TESTS_SPIKE_DURATION_MS: "300000"
+
+  KATES_TESTS_ENDURANCE_THROUGHPUT: "5000"
+  KATES_TESTS_ENDURANCE_DURATION_MS: "3600000"
+
+  KATES_TESTS_VOLUME_PARTITIONS: "6"
+  KATES_TESTS_VOLUME_BATCH_SIZE: "262144"
+  KATES_TESTS_VOLUME_LINGER_MS: "50"
+  KATES_TESTS_VOLUME_RECORD_SIZE: "10240"
+
+  KATES_TESTS_CAPACITY_PARTITIONS: "12"
+  KATES_TESTS_CAPACITY_NUM_PRODUCERS: "5"
+  KATES_TESTS_CAPACITY_DURATION_MS: "1200000"
+
+  KATES_TESTS_ROUNDTRIP_BATCH_SIZE: "16384"
+  KATES_TESTS_ROUNDTRIP_LINGER_MS: "0"
+  KATES_TESTS_ROUNDTRIP_COMPRESSION_TYPE: "none"
+  KATES_TESTS_ROUNDTRIP_THROUGHPUT: "10000"
 ```
 
-#### Global Defaults (fallback for all test types)
+**Configuration resolution order** — when Kates resolves a configuration value, it checks these sources in order and uses the first match:
 
-```yaml
-KATES_DEFAULTS_REPLICATION_FACTOR: "3"
-KATES_DEFAULTS_PARTITIONS: "3"
-KATES_DEFAULTS_MIN_INSYNC_REPLICAS: "2"
-KATES_DEFAULTS_ACKS: "all"
-KATES_DEFAULTS_BATCH_SIZE: "65536"
-KATES_DEFAULTS_LINGER_MS: "5"
-KATES_DEFAULTS_COMPRESSION_TYPE: "lz4"
-KATES_DEFAULTS_RECORD_SIZE: "1024"
-KATES_DEFAULTS_NUM_RECORDS: "1000000"
-KATES_DEFAULTS_THROUGHPUT: "-1"
-KATES_DEFAULTS_DURATION_MS: "600000"
-KATES_DEFAULTS_NUM_PRODUCERS: "1"
-KATES_DEFAULTS_NUM_CONSUMERS: "1"
-```
+1. **System properties** — `-Dkates.tests.stress.partitions=12` (highest priority)
+2. **Environment variables** — `KATES_TESTS_STRESS_PARTITIONS=12` (ConfigMap maps to this)
+3. **application.properties** — `kates.tests.stress.partitions=6`
+4. **@ConfigProperty default** — built-in Java default (lowest priority)
 
-#### Per-Test-Type Overrides
-
-Each test type has its own set of tuned environment variables. Only the values that differ from global defaults need to be set:
-
-| Test Type | Key Env Vars |
-|-----------|-------------|
-| LOAD | All global defaults |
-| STRESS | `KATES_TESTS_STRESS_PARTITIONS=6`, `BATCH_SIZE=131072`, `NUM_PRODUCERS=3` |
-| SPIKE | `KATES_TESTS_SPIKE_ACKS=1`, `COMPRESSION_TYPE=none`, `LINGER_MS=0` |
-| ENDURANCE | `KATES_TESTS_ENDURANCE_THROUGHPUT=5000`, `DURATION_MS=3600000` |
-| VOLUME | `KATES_TESTS_VOLUME_RECORD_SIZE=10240`, `BATCH_SIZE=262144`, `LINGER_MS=50` |
-| CAPACITY | `KATES_TESTS_CAPACITY_PARTITIONS=12`, `NUM_PRODUCERS=5`, `DURATION_MS=1200000` |
-| ROUNDTRIP | `KATES_TESTS_ROUNDTRIP_BATCH_SIZE=16384`, `COMPRESSION_TYPE=none`, `THROUGHPUT=10000` |
-
-The full list of env vars is in `kates/k8s/configmap.yaml`.
+API request values always override all four sources. This means you can set conservative defaults in the ConfigMap and allow users to request more aggressive parameters per test run.
 
 ### Kates Deployment
-
-The deployment uses `envFrom` to inject all ConfigMap values as environment variables:
 
 ```yaml
 apiVersion: apps/v1
@@ -114,6 +126,8 @@ kind: Deployment
 metadata:
   name: kates
   namespace: kates
+  labels:
+    app: kates
 spec:
   replicas: 1
   selector:
@@ -124,37 +138,150 @@ spec:
       labels:
         app: kates
     spec:
+      serviceAccountName: kates-sa
       containers:
-      - name: kates
-        image: kates:latest
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 8080
-        envFrom:
-        - configMapRef:
-            name: kates-config
-        readinessProbe:
-          httpGet:
-            path: /api/health
-            port: 8080
-          initialDelaySeconds: 5
-        livenessProbe:
-          httpGet:
-            path: /q/health/live
-            port: 8080
-          initialDelaySeconds: 10
+        - name: kates
+          image: your-registry/kates:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: kates-config
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: "jdbc:postgresql://postgres.kates.svc:5432/kates"
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kates-db-secret
+                  key: username
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kates-db-secret
+                  key: password
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
 ```
 
-### Trogdor Coordinator (optional)
+Key things to note:
 
-Only required when using the `trogdor` backend. The Trogdor Coordinator and Agent processes are part of the Apache Kafka distribution:
+- **serviceAccountName** — Kates needs a service account with permissions to interact with the Kafka cluster (for AdminClient operations) and the Kubernetes API (for pod watching, deployment scaling, and RBAC checks during disruption tests). See the RBAC section below.
+- **envFrom** — loads all ConfigMap entries as environment variables
+- **Database credentials** — stored in a Kubernetes Secret, not the ConfigMap
+- **Health probes** — use the Quarkus built-in health endpoints. The readiness probe checks Kafka connectivity via `KafkaAdminService`.
+- **Resource limits** — Kates is lightweight for API operations, but the native backend spawns virtual threads for test execution. Set CPU/memory limits based on the maximum expected concurrency.
+
+### Kates Service
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kates
+  namespace: kates
+spec:
+  selector:
+    app: kates
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  type: ClusterIP
+```
+
+### RBAC for Disruption Testing
+
+If you plan to use disruption testing, the Kates service account needs additional Kubernetes RBAC permissions. The `DisruptionSafetyGuard` checks these permissions before executing any disruption plan and rejects plans that require permissions not granted to the service account.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kates-sa
+  namespace: kates
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kates-disruption-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosengines", "chaosresults", "chaosexperiments"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kates-disruption-binding
+subjects:
+  - kind: ServiceAccount
+    name: kates-sa
+    namespace: kates
+roleRef:
+  kind: ClusterRole
+  name: kates-disruption-role
+  apiGroup: rbac.authorization.k8s.io
+```
+
+The permissions break down as follows:
+
+| Permission | Used By | Purpose |
+|-----------|---------|---------|
+| `pods/get,list,watch,delete` | `K8sPodWatcher`, `KubernetesChaosProvider` | Watch pod events during disruptions, kill pods for `POD_KILL`/`POD_DELETE` |
+| `pods/log` | `DisruptionOrchestrator` | Capture pod logs for post-mortem analysis |
+| `deployments,statefulsets/get,list,patch` | `KubernetesChaosProvider` | Scale deployments for `SCALE_DOWN`, restart for `ROLLING_RESTART` |
+| `deployments/scale,statefulsets/scale` | `DisruptionSafetyGuard` | Read current replica count for auto-rollback |
+| `chaosengines,chaosresults,chaosexperiments` | `LitmusChaosProvider` | Create and manage Litmus chaos experiments |
+| `events/get,list,watch` | `DisruptionEventBus` | Watch Kubernetes events for disruption correlation |
+
+If you are only using performance testing (not disruption testing), you do not need these RBAC permissions. A minimal service account with no cluster-level permissions is sufficient.
+
+### Trogdor Coordinator Deployment
+
+The Trogdor backend requires a running Trogdor Coordinator and at least one Trogdor Agent. These are components of the Apache Kafka project that run as separate JVM processes.
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trogdor-coordinator
-  namespace: kafka
+  namespace: kates
 spec:
   replicas: 1
   selector:
@@ -166,27 +293,44 @@ spec:
         app: trogdor-coordinator
     spec:
       containers:
-      - name: coordinator
-        image: apache/kafka:4.1.1
-        command:
-        - /opt/kafka/bin/trogdor.sh
-        - coordinator
-        - --node-name coordinator
-        - --coordinator.config /opt/kafka/config/trogdor-coordinator.conf
-        ports:
-        - containerPort: 8889
+        - name: coordinator
+          image: apache/kafka:4.2.0
+          command: ["/opt/kafka/bin/trogdor.sh", "coordinator"]
+          args: ["--node.name", "coordinator", "--config", "/etc/trogdor/trogdor.conf"]
+          ports:
+            - containerPort: 8889
+          volumeMounts:
+            - name: trogdor-config
+              mountPath: /etc/trogdor
+      volumes:
+        - name: trogdor-config
+          configMap:
+            name: trogdor-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trogdor-coordinator
+  namespace: kates
+spec:
+  selector:
+    app: trogdor-coordinator
+  ports:
+    - port: 8889
+      targetPort: 8889
 ```
 
-### Trogdor Agent (optional)
+### Trogdor Agent Deployment
 
-Each Trogdor Agent runs the actual workloads. Deploy one or more:
+Trogdor Agents are the workers that execute the actual Kafka workloads. You need at least one agent, but for distributed load generation, deploy multiple agents:
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trogdor-agent
-  namespace: kafka
+  namespace: kates
 spec:
   replicas: 3
   selector:
@@ -198,38 +342,132 @@ spec:
         app: trogdor-agent
     spec:
       containers:
-      - name: agent
-        image: apache/kafka:4.1.1
-        command:
-        - /opt/kafka/bin/trogdor.sh
-        - agent
-        - --node-name agent
-        - --agent.config /opt/kafka/config/trogdor-agent.conf
-        ports:
-        - containerPort: 8888
+        - name: agent
+          image: apache/kafka:4.2.0
+          command: ["/opt/kafka/bin/trogdor.sh", "agent"]
+          args: ["--node.name", "agent", "--config", "/etc/trogdor/trogdor.conf"]
+          ports:
+            - containerPort: 8888
+          volumeMounts:
+            - name: trogdor-config
+              mountPath: /etc/trogdor
+      volumes:
+        - name: trogdor-config
+          configMap:
+            name: trogdor-config
 ```
 
-## Configuration Resolution Order
+### Trogdor Configuration
 
-MicroProfile Config resolves properties in this priority order:
+The `trogdor.conf` file configures the coordinator and agents:
 
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 (highest) | System properties | `-Dkates.tests.stress.partitions=12` |
-| 2 | Environment variables / ConfigMap | `KATES_TESTS_STRESS_PARTITIONS=12` |
-| 3 | `application.properties` | `kates.tests.stress.partitions=6` |
-| 4 (lowest) | `@ConfigProperty defaultValue` | Built-in `"6"` in Java code |
+```json
+{
+  "platform": "org.apache.kafka.trogdor.basic.BasicPlatform",
+  "nodes": {
+    "coordinator": {
+      "hostname": "trogdor-coordinator.kates.svc",
+      "tpiPort": 8889,
+      "agentPort": 8888
+    },
+    "agent0": {
+      "hostname": "trogdor-agent-0.kates.svc",
+      "tpiPort": 8889,
+      "agentPort": 8888
+    },
+    "agent1": {
+      "hostname": "trogdor-agent-1.kates.svc",
+      "tpiPort": 8889,
+      "agentPort": 8888
+    },
+    "agent2": {
+      "hostname": "trogdor-agent-2.kates.svc",
+      "tpiPort": 8889,
+      "agentPort": 8888
+    }
+  }
+}
+```
 
-This means ConfigMap values override `application.properties` defaults, and system properties override everything.
+### PostgreSQL
 
-## Environment Variable Reference
+Kates requires a PostgreSQL instance for persisting test runs and disruption reports. Flyway handles schema migrations automatically on startup.
 
-| Property | Environment Variable | Description |
-|----------|---------------------|-------------|
-| `kates.kafka.bootstrap-servers` | `KATES_KAFKA_BOOTSTRAP_SERVERS` | Kafka bootstrap servers |
-| `kates.trogdor.coordinator-url` | `KATES_TROGDOR_COORDINATOR_URL` | Trogdor Coordinator endpoint |
-| `kates.engine.default-backend` | `KATES_ENGINE_DEFAULT_BACKEND` | Default backend (`native` or `trogdor`) |
-| `kates.tests.{type}.partitions` | `KATES_TESTS_{TYPE}_PARTITIONS` | Per-type partition count |
-| `kates.tests.{type}.batch-size` | `KATES_TESTS_{TYPE}_BATCH_SIZE` | Per-type producer batch size |
-| `kates.tests.{type}.num-producers` | `KATES_TESTS_{TYPE}_NUM_PRODUCERS` | Per-type producer count |
-| ... | ... | All 13 parameters × 7 test types |
+For production, use a managed PostgreSQL service (Amazon RDS, Google Cloud SQL, Azure Database for PostgreSQL) or the Bitnami PostgreSQL Helm chart:
+
+```bash
+helm install postgres bitnami/postgresql \
+  --namespace kates \
+  --set auth.username=kates \
+  --set auth.password=kates \
+  --set auth.database=kates
+```
+
+For development, Quarkus Dev Services automatically starts a PostgreSQL container — no manual setup needed.
+
+### Architecture Diagram for Kubernetes
+
+```mermaid
+graph TD
+    subgraph ns["kates namespace"]
+        Kates["Kates (Quarkus)<br/>port: 8080"] -- REST --> Coord["Trogdor Coordinator<br/>port: 8889"]
+        Coord -- REST --> Agents["Trogdor Agents ×3<br/>port: 8888"]
+        Kates -- AdminClient --> Kafka["Kafka Cluster<br/>krafter-kafka-bootstrap:9092<br/>(Strimzi-managed, kafka namespace)"]
+        Agents -- Produce/Consume --> Kafka
+        Kates -- JDBC --> PG["PostgreSQL<br/>port: 5432"]
+    end
+```
+
+## Updating Configuration at Runtime
+
+To change test defaults or Kates configuration while the service is running:
+
+```bash
+kubectl edit configmap kates-config -n kates
+kubectl rollout restart deployment/kates -n kates
+```
+
+The ConfigMap change takes effect after the pod restarts. Verify the new configuration via the health endpoint:
+
+```bash
+kubectl exec -it deployment/kates -n kates -- \
+  curl -s localhost:8080/api/health | jq '.tests.stress'
+```
+
+This shows the effective per-type configuration for stress tests, reflecting any changes from the ConfigMap.
+
+## Building the Container Image
+
+### JVM Image
+
+```dockerfile
+FROM registry.access.redhat.com/ubi8/openjdk-25:latest
+ENV LANGUAGE='en_US:en'
+COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
+COPY --chown=185 target/quarkus-app/*.jar /deployments/
+COPY --chown=185 target/quarkus-app/app/ /deployments/app/
+COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
+EXPOSE 8080
+ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
+ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+```
+
+### Native Image
+
+```dockerfile
+FROM quay.io/quarkus/quarkus-micro-image:2.0
+WORKDIR /work/
+COPY target/*-runner /work/application
+RUN chmod 775 /work/application
+EXPOSE 8080
+CMD ["./application", "-Dquarkus.http.host=0.0.0.0"]
+```
+
+Build and push:
+
+```bash
+./mvnw clean package -DskipTests
+docker build -f src/main/docker/Dockerfile.jvm -t your-registry/kates:latest .
+docker push your-registry/kates:latest
+```
