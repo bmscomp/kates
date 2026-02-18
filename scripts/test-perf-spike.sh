@@ -2,7 +2,6 @@
 set -e
 
 # Spike Testing — simulates sudden large increases and decreases in load
-# Runs baseline → burst (concurrent Jobs) → baseline to measure stability
 #
 # Environment variables:
 #   BASELINE_RATE      Baseline msg/sec (default: 1000)
@@ -11,23 +10,18 @@ set -e
 #   BURST_RECORDS      Records per burst producer (default: 500000)
 #   TOPIC              Topic name (default: spike-test)
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/../versions.env"
+source "${SCRIPT_DIR}/test-common.sh"
 
 BASELINE_RATE="${BASELINE_RATE:-1000}"
 BASELINE_DURATION="${BASELINE_DURATION:-60000}"
 BURST_PRODUCERS="${BURST_PRODUCERS:-3}"
 BURST_RECORDS="${BURST_RECORDS:-500000}"
 TOPIC="${TOPIC:-spike-test}"
-NAMESPACE="kafka"
-IMAGE="quay.io/strimzi/kafka:0.49.0-kafka-4.1.1"
-BOOTSTRAP="krafter-kafka-bootstrap.kafka.svc:9092"
 
-echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║        SPIKE TESTING                   ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+bold "SPIKE TESTING"
 echo ""
 echo "Configuration:"
 echo "  Baseline rate:    $BASELINE_RATE msg/sec"
@@ -37,7 +31,8 @@ echo "  Burst records:    $BURST_RECORDS per producer"
 echo "  Topic:            $TOPIC"
 echo ""
 
-# Create topic
+cleanup_previous_jobs "spike"
+
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bin/kafka-topics.sh --create --if-not-exists \
     --bootstrap-server localhost:9092 \
@@ -45,7 +40,7 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
     --config min.insync.replicas=2 2>/dev/null
 
 # Phase 1: Baseline
-echo -e "${GREEN}Phase 1: Baseline ($BASELINE_RATE msg/sec)${NC}"
+info "Phase 1: Baseline ($BASELINE_RATE msg/sec)"
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bin/kafka-producer-perf-test.sh \
     --topic $TOPIC \
@@ -61,7 +56,7 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
 echo ""
 
 # Phase 2: Spike
-echo -e "${RED}Phase 2: SPIKE ($BURST_PRODUCERS concurrent producers, unlimited)${NC}"
+error "Phase 2: SPIKE ($BURST_PRODUCERS concurrent producers, unlimited)"
 for i in $(seq 1 "$BURST_PRODUCERS"); do
 cat <<EOF | kubectl apply -f -
 apiVersion: batch/v1
@@ -97,21 +92,13 @@ spec:
 EOF
 done
 
-echo -e "${YELLOW}Waiting for burst producers to complete...${NC}"
-for i in $(seq 1 "$BURST_PRODUCERS"); do
-  kubectl wait --for=condition=complete --timeout=300s "job/spike-burst-$i" -n $NAMESPACE 2>/dev/null || true
-done
-
-echo -e "${GREEN}Burst Results:${NC}"
-for i in $(seq 1 "$BURST_PRODUCERS"); do
-  echo -e "${YELLOW}--- Burst Producer $i ---${NC}"
-  kubectl logs -n $NAMESPACE "job/spike-burst-$i" | tail -3
-done
+wait_for_jobs "spike" "burst" "$BURST_PRODUCERS" 300
+print_job_results "spike" "burst" "$BURST_PRODUCERS"
 
 echo ""
 
 # Phase 3: Recovery baseline
-echo -e "${GREEN}Phase 3: Recovery baseline ($BASELINE_RATE msg/sec)${NC}"
+info "Phase 3: Recovery baseline ($BASELINE_RATE msg/sec)"
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bin/kafka-producer-perf-test.sh \
     --topic $TOPIC \
@@ -123,9 +110,7 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
       acks=all
 
 echo ""
-echo -e "${GREEN}Spike test completed!${NC}"
+info "✅ Spike test completed!"
 echo "Compare Phase 1 and Phase 3 latency to measure recovery."
-echo ""
-echo "Cleanup:"
-echo "  kubectl delete jobs -n $NAMESPACE -l perf-test=spike"
-echo "  kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- bin/kafka-topics.sh --delete --bootstrap-server localhost:9092 --topic $TOPIC"
+
+show_cleanup_hint "spike" "$TOPIC"

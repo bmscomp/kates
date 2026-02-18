@@ -1,38 +1,34 @@
 #!/bin/bash
 set -e
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/../versions.env"
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Setting up Kafka Chaos Testing Environment${NC}"
-echo -e "${GREEN}========================================${NC}"
+bold "Setting up Kafka Chaos Testing Environment"
 echo ""
 
 # Step 1: Verify prerequisites
-echo -e "${BLUE}Step 1: Verifying cluster state...${NC}"
+step "Step 1: Verifying cluster state..."
 if ! kubectl get kafka krafter -n kafka &>/dev/null; then
-    echo -e "${RED}Error: Kafka cluster 'krafter' not found in namespace 'kafka'${NC}"
+    error "Kafka cluster 'krafter' not found in namespace 'kafka'"
     echo "Please deploy Kafka first: make kafka"
     exit 1
 fi
 if ! kubectl get pods -n litmus -l app.kubernetes.io/component=litmus-server --field-selector=status.phase=Running &>/dev/null; then
-    echo -e "${RED}Error: LitmusChaos portal not running${NC}"
+    error "LitmusChaos portal not running"
     echo "Please deploy LitmusChaos first: make litmus"
     exit 1
 fi
-echo -e "${GREEN}✓ Kafka cluster and Litmus portal are running${NC}"
+info "✓ Kafka cluster and Litmus portal are running"
 
 # Step 2: Register chaos infrastructure
 echo ""
-echo -e "${BLUE}Step 2: Registering chaos infrastructure...${NC}"
+step "Step 2: Registering chaos infrastructure..."
 
 INFRA_MANIFEST="config/litmus/chaos-litmus-chaos-enable.yml"
 if [ ! -f "${INFRA_MANIFEST}" ]; then
-    echo -e "${RED}Error: Infrastructure manifest not found at ${INFRA_MANIFEST}${NC}"
+    error "Infrastructure manifest not found at ${INFRA_MANIFEST}"
     echo ""
     echo "To generate it:"
     echo "  1. Run: make chaos-ui"
@@ -43,34 +39,32 @@ if [ ! -f "${INFRA_MANIFEST}" ]; then
     exit 1
 fi
 
-# Fix imagePullPolicy, versions, and image names for offline Kind
-echo -e "  Patching manifest for offline deployment..."
+info "Patching manifest for offline deployment (Litmus v${LITMUS_VERSION})..."
 PATCHED_MANIFEST=$(mktemp)
 sed -e 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Never/g' \
-    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0|litmuschaos/chaos-operator:3.24.0|g' \
-    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/chaos-runner:3.23.0|litmuschaos/chaos-runner:3.24.0|g' \
-    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0|litmuschaos/chaos-exporter:3.24.0|g' \
-    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:3.24.0|g' \
-    -e 's|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0|litmuschaos/litmusportal-event-tracker:3.24.0|g' \
-    -e 's|litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:3.24.0|g' \
-    -e 's|litmuschaos/litmusportal-event-tracker:3.23.0|litmuschaos/litmusportal-event-tracker:3.24.0|g' \
+    -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0|litmuschaos/chaos-operator:${LITMUS_VERSION}|g" \
+    -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-runner:3.23.0|litmuschaos/chaos-runner:${LITMUS_VERSION}|g" \
+    -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0|litmuschaos/chaos-exporter:${LITMUS_VERSION}|g" \
+    -e "s|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:${LITMUS_VERSION}|g" \
+    -e "s|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.23.0|litmuschaos/litmusportal-event-tracker:${LITMUS_VERSION}|g" \
+    -e "s|litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:${LITMUS_VERSION}|g" \
+    -e "s|litmuschaos/litmusportal-event-tracker:3.23.0|litmuschaos/litmusportal-event-tracker:${LITMUS_VERSION}|g" \
     "${INFRA_MANIFEST}" > "${PATCHED_MANIFEST}"
 
-echo -e "  Applying infrastructure manifest..."
+info "Applying infrastructure manifest..."
 kubectl apply -f "${PATCHED_MANIFEST}" 2>&1 | grep -v "^Warning:" || true
 rm -f "${PATCHED_MANIFEST}"
 
-echo -e "  Waiting for chaos infrastructure to be ready..."
+info "Waiting for chaos infrastructure to be ready..."
 kubectl wait --for=condition=available deployment/chaos-operator-ce -n litmus --timeout=120s 2>/dev/null || true
 kubectl wait --for=condition=available deployment/workflow-controller -n litmus --timeout=120s 2>/dev/null || true
 kubectl wait --for=condition=available deployment/subscriber -n litmus --timeout=120s 2>/dev/null || true
-echo -e "${GREEN}✓ Chaos infrastructure registered${NC}"
+info "✓ Chaos infrastructure registered"
 
 # Step 3: Install ChaosExperiments for Kafka
 echo ""
-echo -e "${BLUE}Step 3: Installing chaos experiment CRDs...${NC}"
+step "Step 3: Installing chaos experiment CRDs..."
 
-# Install pod-delete experiment (the most common one for Kafka)
 cat <<EOF | kubectl apply -f -
 apiVersion: litmuschaos.io/v1alpha1
 kind: ChaosExperiment
@@ -96,7 +90,7 @@ spec:
       - apiGroups: ["litmuschaos.io"]
         resources: ["chaosengines","chaosexperiments","chaosresults"]
         verbs: ["create","list","get","patch","update","delete"]
-    image: "litmuschaos/go-runner:3.24.0"
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
     imagePullPolicy: Never
     args:
       - -name
@@ -117,7 +111,6 @@ spec:
       app.kubernetes.io/part-of: litmus
 EOF
 
-# Install pod-network-partition experiment
 cat <<EOF | kubectl apply -f -
 apiVersion: litmuschaos.io/v1alpha1
 kind: ChaosExperiment
@@ -146,7 +139,7 @@ spec:
       - apiGroups: ["networking.k8s.io"]
         resources: ["networkpolicies"]
         verbs: ["create","delete","list","get"]
-    image: "litmuschaos/go-runner:3.24.0"
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
     imagePullPolicy: Never
     args:
       - -name
@@ -163,7 +156,6 @@ spec:
       app.kubernetes.io/part-of: litmus
 EOF
 
-# Install pod-cpu-hog experiment
 cat <<EOF | kubectl apply -f -
 apiVersion: litmuschaos.io/v1alpha1
 kind: ChaosExperiment
@@ -189,7 +181,7 @@ spec:
       - apiGroups: ["litmuschaos.io"]
         resources: ["chaosengines","chaosexperiments","chaosresults"]
         verbs: ["create","list","get","patch","update","delete"]
-    image: "litmuschaos/go-runner:3.24.0"
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
     imagePullPolicy: Never
     args:
       - -name
@@ -206,11 +198,11 @@ spec:
       app.kubernetes.io/part-of: litmus
 EOF
 
-echo -e "${GREEN}✓ Chaos experiments installed: pod-delete, pod-network-partition, pod-cpu-hog${NC}"
+info "✓ Chaos experiments installed: pod-delete, pod-network-partition, pod-cpu-hog"
 
 # Step 4: Create RBAC for chaos in kafka namespace
 echo ""
-echo -e "${BLUE}Step 4: Setting up RBAC for kafka namespace...${NC}"
+step "Step 4: Setting up RBAC for kafka namespace..."
 
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -259,29 +251,15 @@ subjects:
     namespace: kafka
 EOF
 
-echo -e "${GREEN}✓ RBAC configured for kafka namespace${NC}"
+info "✓ RBAC configured for kafka namespace"
 
 echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}✅ Kafka Chaos Environment Ready!${NC}"
-echo -e "${GREEN}========================================${NC}"
+info "✅ Kafka Chaos Environment Ready!"
 echo ""
 echo "Run chaos experiments:"
-echo ""
-echo "  # Delete a Kafka broker pod (33% of brokers)"
 echo "  make chaos-kafka-pod-delete"
-echo ""
-echo "  # Network partition a Kafka broker"
 echo "  make chaos-kafka-network-partition"
-echo ""
-echo "  # CPU stress on a Kafka broker"
 echo "  make chaos-kafka-cpu-stress"
-echo ""
-echo "  # Run all Kafka chaos experiments"
 echo "  make chaos-kafka-all"
 echo ""
-echo "Monitor results:"
-echo "  kubectl get chaosengines -n kafka"
-echo "  kubectl get chaosresults -n kafka"
-echo "  kubectl describe chaosresult -n kafka"
-echo ""
+echo "Monitor: kubectl get chaosresults -n kafka"

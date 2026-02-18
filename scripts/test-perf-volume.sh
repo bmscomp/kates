@@ -2,7 +2,6 @@
 set -e
 
 # Volume Testing — tests performance with large amounts of data
-# Runs two sub-tests: large messages (100KB) and high record count (5M × 1KB)
 #
 # Environment variables:
 #   LARGE_MSG_RECORDS  Number of large-message records (default: 50000)
@@ -10,25 +9,22 @@ set -e
 #   HIGH_COUNT_RECORDS Number of small records (default: 5000000)
 #   SMALL_MSG_SIZE     Small message size in bytes (default: 1024)
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/../versions.env"
+source "${SCRIPT_DIR}/test-common.sh"
 
 LARGE_MSG_RECORDS="${LARGE_MSG_RECORDS:-50000}"
 LARGE_MSG_SIZE="${LARGE_MSG_SIZE:-102400}"
 HIGH_COUNT_RECORDS="${HIGH_COUNT_RECORDS:-5000000}"
 SMALL_MSG_SIZE="${SMALL_MSG_SIZE:-1024}"
-NAMESPACE="kafka"
 
-echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║        VOLUME TESTING                  ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+bold "VOLUME TESTING"
 echo ""
 echo "Sub-test 1: $LARGE_MSG_RECORDS × ${LARGE_MSG_SIZE}B = ~$((LARGE_MSG_RECORDS * LARGE_MSG_SIZE / 1024 / 1024)) MB"
 echo "Sub-test 2: $HIGH_COUNT_RECORDS × ${SMALL_MSG_SIZE}B = ~$((HIGH_COUNT_RECORDS * SMALL_MSG_SIZE / 1024 / 1024)) MB"
 echo ""
 
-# Create topics with short retention
 for TOPIC in volume-test volume-test-count; do
   kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
     bin/kafka-topics.sh --create --if-not-exists \
@@ -39,8 +35,7 @@ for TOPIC in volume-test volume-test-count; do
       --config max.message.bytes=1048576 2>/dev/null
 done
 
-# Sub-test 1: Large messages
-echo -e "${GREEN}=== Sub-test 1: Large Messages ($LARGE_MSG_RECORDS × ${LARGE_MSG_SIZE}B) ===${NC}"
+info "=== Sub-test 1: Large Messages ($LARGE_MSG_RECORDS × ${LARGE_MSG_SIZE}B) ==="
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bin/kafka-producer-perf-test.sh \
     --topic volume-test \
@@ -55,8 +50,7 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
 
 echo ""
 
-# Sub-test 2: High record count
-echo -e "${GREEN}=== Sub-test 2: High Count ($HIGH_COUNT_RECORDS × ${SMALL_MSG_SIZE}B) ===${NC}"
+info "=== Sub-test 2: High Count ($HIGH_COUNT_RECORDS × ${SMALL_MSG_SIZE}B) ==="
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bin/kafka-producer-perf-test.sh \
     --topic volume-test-count \
@@ -72,15 +66,14 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
 
 echo ""
 
-# Check disk usage
-echo -e "${YELLOW}Broker disk usage after volume test:${NC}"
+warn "Broker disk usage after volume test:"
 for BROKER in krafter-pool-alpha-0 krafter-pool-sigma-0 krafter-pool-gamma-0; do
   SIZE=$(kubectl exec -n $NAMESPACE "$BROKER" -- du -sh /var/lib/kafka/data 2>/dev/null | awk '{print $1}') || SIZE="unknown"
   echo "  $BROKER: $SIZE"
 done
 
 echo ""
-echo -e "${GREEN}Volume test completed!${NC}"
+info "✅ Volume test completed!"
 echo ""
 echo "Cleanup:"
 echo "  kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- bin/kafka-topics.sh --delete --bootstrap-server localhost:9092 --topic volume-test"

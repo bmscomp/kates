@@ -2,7 +2,6 @@
 set -e
 
 # Stress Testing — ramps throughput beyond normal limits to find the breaking point
-# Runs the same workload at increasing throughput targets, then validates recovery
 #
 # Environment variables:
 #   RECORDS_PER_STEP   Records per throughput step (default: 500000)
@@ -10,26 +9,23 @@ set -e
 #   THROUGHPUT_STEPS   Space-separated throughput targets (default: "10000 25000 50000 100000 -1")
 #   COOLDOWN           Seconds between steps (default: 30)
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/../versions.env"
+source "${SCRIPT_DIR}/test-common.sh"
 
 RECORDS_PER_STEP="${RECORDS_PER_STEP:-500000}"
 RECORD_SIZE="${RECORD_SIZE:-1024}"
 THROUGHPUT_STEPS="${THROUGHPUT_STEPS:-10000 25000 50000 100000 -1}"
 COOLDOWN="${COOLDOWN:-30}"
-NAMESPACE="kafka"
 
-echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║        STRESS TESTING                  ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+bold "STRESS TESTING"
 echo ""
 echo "Configuration:"
-echo "  Records/step:   $RECORDS_PER_STEP"
-echo "  Record size:    $RECORD_SIZE bytes"
+echo "  Records/step:     $RECORDS_PER_STEP"
+echo "  Record size:      $RECORD_SIZE bytes"
 echo "  Throughput steps: $THROUGHPUT_STEPS"
-echo "  Cooldown:       ${COOLDOWN}s between steps"
+echo "  Cooldown:         ${COOLDOWN}s between steps"
 echo ""
 
 for THROUGHPUT in $THROUGHPUT_STEPS; do
@@ -41,9 +37,9 @@ for THROUGHPUT in $THROUGHPUT_STEPS; do
       --topic "$TOPIC" --partitions 3 --replication-factor 3 2>/dev/null
 
   if [ "$THROUGHPUT" = "-1" ]; then
-    echo -e "${RED}=== Throughput target: UNLIMITED (max) ===${NC}"
+    error "=== Throughput target: UNLIMITED (max) ==="
   else
-    echo -e "${YELLOW}=== Throughput target: $THROUGHPUT msg/sec ===${NC}"
+    warn "=== Throughput target: $THROUGHPUT msg/sec ==="
   fi
 
   kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
@@ -59,12 +55,11 @@ for THROUGHPUT in $THROUGHPUT_STEPS; do
         linger.ms=10
 
   echo ""
-  echo -e "${YELLOW}--- Cooling down ${COOLDOWN}s ---${NC}"
+  warn "--- Cooling down ${COOLDOWN}s ---"
   sleep "$COOLDOWN"
 done
 
-# Recovery validation
-echo -e "${GREEN}=== Recovery Validation ===${NC}"
+info "=== Recovery Validation ==="
 echo "Running 100K messages at 10,000 msg/sec to verify cluster baseline..."
 
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
@@ -83,7 +78,7 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
       acks=all
 
 echo ""
-echo -e "${GREEN}Stress test completed!${NC}"
+info "✅ Stress test completed!"
 echo ""
 echo "Cleanup:"
 echo "  for t in $THROUGHPUT_STEPS recovery; do kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- bin/kafka-topics.sh --delete --bootstrap-server localhost:9092 --topic stress-\$t 2>/dev/null; done"

@@ -10,21 +10,18 @@ set -e
 #   RECORD_SIZE        Record size in bytes (default: 1024)
 #   TOPIC              Topic name (default: endurance-test)
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/../versions.env"
+source "${SCRIPT_DIR}/test-common.sh"
 
 DURATION_MINUTES="${DURATION_MINUTES:-60}"
 THROUGHPUT="${THROUGHPUT:-5000}"
 RECORD_SIZE="${RECORD_SIZE:-1024}"
 TOPIC="${TOPIC:-endurance-test}"
-NAMESPACE="kafka"
-
 NUM_RECORDS=$((THROUGHPUT * DURATION_MINUTES * 60))
 
-echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║        ENDURANCE (SOAK) TESTING        ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+bold "ENDURANCE (SOAK) TESTING"
 echo ""
 echo "Configuration:"
 echo "  Duration:       $DURATION_MINUTES minutes"
@@ -35,7 +32,6 @@ echo "  Data volume:    ~$((NUM_RECORDS * RECORD_SIZE / 1024 / 1024)) MB"
 echo "  Topic:          $TOPIC"
 echo ""
 
-# Create topic with retention matching test duration
 RETENTION_MS=$(((DURATION_MINUTES + 30) * 60 * 1000))
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bin/kafka-topics.sh --create --if-not-exists \
@@ -44,14 +40,13 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
     --config min.insync.replicas=2 \
     --config retention.ms=$RETENTION_MS 2>/dev/null
 
-# Capture pre-test JVM snapshot
-echo -e "${YELLOW}Pre-test JVM snapshot:${NC}"
+warn "Pre-test JVM snapshot:"
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bash -c 'echo "Heap:"; cat /proc/$(pgrep -f kafka.Kafka)/status 2>/dev/null | grep -E "VmRSS|VmSize" || echo "  (unable to read)"; echo "Threads: $(ls /proc/$(pgrep -f kafka.Kafka)/task 2>/dev/null | wc -l || echo unknown)"' 2>/dev/null || true
 
 echo ""
-echo -e "${GREEN}Starting ${DURATION_MINUTES}-minute sustained load at $THROUGHPUT msg/sec...${NC}"
-echo -e "${YELLOW}Monitor Grafana JVM dashboard at http://localhost:30080 for degradation trends.${NC}"
+info "Starting ${DURATION_MINUTES}-minute sustained load at $THROUGHPUT msg/sec..."
+warn "Monitor Grafana JVM dashboard at http://localhost:30080 for degradation trends."
 echo ""
 
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
@@ -69,13 +64,12 @@ kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
 
 echo ""
 
-# Capture post-test JVM snapshot
-echo -e "${YELLOW}Post-test JVM snapshot:${NC}"
+warn "Post-test JVM snapshot:"
 kubectl exec -n $NAMESPACE krafter-pool-alpha-0 -- \
   bash -c 'echo "Heap:"; cat /proc/$(pgrep -f kafka.Kafka)/status 2>/dev/null | grep -E "VmRSS|VmSize" || echo "  (unable to read)"; echo "Threads: $(ls /proc/$(pgrep -f kafka.Kafka)/task 2>/dev/null | wc -l || echo unknown)"' 2>/dev/null || true
 
 echo ""
-echo -e "${GREEN}Endurance test completed!${NC}"
+info "✅ Endurance test completed!"
 echo "Compare pre-test and post-test JVM snapshots for drift."
 echo ""
 echo "Cleanup:"
