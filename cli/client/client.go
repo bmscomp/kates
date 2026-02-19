@@ -544,3 +544,68 @@ func (c *Client) RegisterWebhook(ctx context.Context, name, url string) error {
 func (c *Client) DeleteWebhook(ctx context.Context, name string) error {
 	return c.delete(ctx, "/api/webhooks/"+name)
 }
+
+func (c *Client) KafkaBrokers(ctx context.Context) (*ClusterInfo, error) {
+	data, err := c.get(ctx, "/api/kafka/brokers")
+	if err != nil {
+		return nil, err
+	}
+	var result ClusterInfo
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaTopics(ctx context.Context) ([]KafkaTopic, error) {
+	data, err := c.get(ctx, "/api/kafka/topics")
+	if err != nil {
+		return nil, err
+	}
+	var result []KafkaTopic
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaTopicDetail(ctx context.Context, name string) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/kafka/topics/"+name)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaGroups(ctx context.Context) ([]map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/kafka/groups")
+	if err != nil {
+		return nil, err
+	}
+	var result []map[string]interface{}
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaGroupDetail(ctx context.Context, id string) (map[string]interface{}, error) {
+	data, err := c.get(ctx, "/api/kafka/groups/"+id)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaConsume(ctx context.Context, topic string, offset string, limit int) ([]KafkaRecord, error) {
+	path := fmt.Sprintf("/api/kafka/consume/%s?offset=%s&limit=%d", topic, offset, limit)
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []KafkaRecord
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaProduce(ctx context.Context, topic, key, value string) (*ProduceMeta, error) {
+	payload := map[string]string{"key": key, "value": value}
+	data, err := c.postJSON(ctx, "/api/kafka/produce/"+topic, payload)
+	if err != nil {
+		return nil, err
+	}
+	var result ProduceMeta
+	return &result, json.Unmarshal(data, &result)
+}

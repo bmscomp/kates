@@ -429,4 +429,67 @@ public class KafkaAdminService {
             throw new RuntimeException("Failed to perform cluster health check", e);
         }
     }
+
+    public Map<String, Object> produceRecord(String topic, String key, String value) {
+        Properties props = new Properties();
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+                "org.apache.kafka.common.serialization.StringSerializer");
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+                "org.apache.kafka.common.serialization.StringSerializer");
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.ACKS_CONFIG, "all");
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "15000");
+
+        try (var producer = new org.apache.kafka.clients.producer.KafkaProducer<String, String>(props)) {
+            var record = new org.apache.kafka.clients.producer.ProducerRecord<>(topic, key, value);
+            var meta = producer.send(record).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("topic", meta.topic());
+            result.put("partition", meta.partition());
+            result.put("offset", meta.offset());
+            result.put("timestamp", meta.timestamp());
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to produce record to topic " + topic + ": " + e.getMessage(), e);
+        }
+    }
+
+    public List<Map<String, Object>> fetchRecords(String topic, String offsetReset, int limit) {
+        Properties props = new Properties();
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG,
+                "kates-fetch-" + System.currentTimeMillis());
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                "earliest".equals(offsetReset) ? "earliest" : "latest");
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit);
+
+        List<Map<String, Object>> records = new ArrayList<>();
+        try (var consumer = new org.apache.kafka.clients.consumer.KafkaConsumer<String, String>(props)) {
+            consumer.subscribe(Collections.singleton(topic));
+            int waited = 0;
+            while (records.size() < limit && waited < 5000) {
+                var polled = consumer.poll(java.time.Duration.ofMillis(500));
+                waited += 500;
+                for (var rec : polled) {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("offset", rec.offset());
+                    item.put("partition", rec.partition());
+                    item.put("timestamp", rec.timestamp());
+                    item.put("key", rec.key());
+                    item.put("value", rec.value());
+                    records.add(item);
+                    if (records.size() >= limit) break;
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to consume from topic " + topic + ": " + e.getMessage(), e);
+        }
+        return records;
+    }
 }
+

@@ -545,3 +545,37 @@ type WebhookRegistration struct {
 	URL    string `json:"url"`
 	Events string `json:"events"`
 }
+
+// KafkaTopic from GET /api/kafka/topics
+type KafkaTopic struct {
+	Name              string      `json:"name"`
+	Internal          bool        `json:"internal"`
+	Partitions        int         `json:"partitions"`
+	ReplicationFactor int         `json:"replicationFactor"`
+	UnderReplicated   interface{} `json:"underReplicated"`
+}
+
+// KafkaBrokerDetail is embedded in the cluster describe response
+type KafkaBrokerDetail struct {
+	ID   interface{} `json:"id"`
+	Host string      `json:"host"`
+	Port interface{} `json:"port"`
+	Rack interface{} `json:"rack"`
+}
+
+// KafkaRecord from GET /api/kafka/consume/:topic
+type KafkaRecord struct {
+	Offset    interface{} `json:"offset"`
+	Partition interface{} `json:"partition"`
+	Timestamp interface{} `json:"timestamp"`
+	Key       interface{} `json:"key"`
+	Value     interface{} `json:"value"`
+}
+
+// ProduceMeta from POST /api/kafka/produce/:topic
+type ProduceMeta struct {
+	Topic     string      `json:"topic"`
+	Partition interface{} `json:"partition"`
+	Offset    interface{} `json:"offset"`
+	Timestamp interface{} `json:"timestamp"`
+}

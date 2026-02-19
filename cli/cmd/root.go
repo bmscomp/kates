@@ -113,6 +113,9 @@ Observability:
   version      CLI, API, and runtime version info
   webhook      Manage test-completion webhook notifications
 
+Kafka Client:
+  kafka        Interactive Kafka client — brokers, topics, groups, produce, consume
+
 Configuration:
   ctx          Manage server contexts (like kubectl contexts)
   completion   Shell auto-completion (bash, zsh, fish, powershell)
@@ -136,7 +139,7 @@ Docs & more:  kates <command> --help
 
 var rootCmd = &cobra.Command{
 	Use:   "kates",
-	Short: "KATES — Kafka Advanced Testing & Engineering Suite CLI",
+	Short: "Kates — Kafka Advanced Testing & Engineering Suite CLI",
 	Long:  helpTemplate,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cfg := loadConfig()
