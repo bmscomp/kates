@@ -19,6 +19,7 @@ var testWatchCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
 		tick := 0
+		var throughputHistory []float64
 
 		for {
 			result, err := apiClient.GetTest(context.Background(), id)
@@ -27,6 +28,14 @@ var testWatchCmd = &cobra.Command{
 			}
 
 			status := strings.ToUpper(result.Status)
+
+			var currentThroughput float64
+			for _, r := range result.Results {
+				if r.ThroughputRecordsPerSec > currentThroughput {
+					currentThroughput = r.ThroughputRecordsPerSec
+				}
+			}
+			throughputHistory = append(throughputHistory, currentThroughput)
 
 			fmt.Print("\033[2J\033[H")
 
@@ -60,6 +69,12 @@ var testWatchCmd = &cobra.Command{
 					[]string{"Phase", "Status", "Records", "Throughput", "Avg Lat.", "P99 Lat."},
 					rows,
 				)
+			}
+
+			if len(throughputHistory) > 1 {
+				fmt.Println()
+				sparkline := output.Sparkline(throughputHistory)
+				output.KeyValue("Throughput Trend", sparkline+" "+fmtNum(currentThroughput)+" rec/s")
 			}
 
 			switch status {

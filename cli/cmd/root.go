@@ -91,10 +91,20 @@ Analysis:
   resilience   Chaos-performance correlation testing
   schedule     Automated recurring test schedules
   benchmark    Run full test battery with letter-grade scorecard
+  gate         CI quality gate — exit non-zero if grade is below threshold
 
 Toolbox:
   doctor       Pre-flight cluster readiness checklist
   replay       Re-run a previous test with the same parameters
+  explain      Plain-English test narrative with verdict
+  scenario-diff  Compare scenario YAML against a test run
+
+Test Subcommands:
+  test cleanup   Delete orphaned RUNNING tests
+  test export    Export results to CSV or JSON file
+  test compare   Side-by-side metric diff of two runs
+  test summary   Aggregate stats across all tests
+  test flame     ASCII latency histogram
 
 Observability:
   dashboard    Full-screen monitoring dashboard (alias: dash)
@@ -115,10 +125,10 @@ Flags:
 Examples:
   $ kates test create --type LOAD --records 100000
   $ kates test apply -f scenario.yaml --wait
-  $ kates report diff <id1> <id2>
-  $ kates trend --type LOAD --metric p99LatencyMs --days 30
-  $ kates doctor
   $ kates benchmark --records 50000
+  $ kates gate --min-grade B --type STRESS
+  $ kates explain 69acdf31
+  $ kates test cleanup --dry-run
 
 Docs & more:  kates <command> --help
 `
