@@ -58,7 +58,7 @@ kates test delete <id>
 | `test create` | Start a new performance test |
 | `test list` | List tests with optional type/status filters |
 | `test get` | Detailed view with phase results, smart hints on failures, and throughput bar |
-| `test watch` | Live-watch a running test until completion |
+| `test watch` | Live-watch a running test with throughput sparkline |
 | `test delete` | Stop and delete a test |
 | `test types` | List available test types with descriptions |
 | `test backends` | List available benchmark backends |
@@ -167,6 +167,26 @@ kates benchmark --backend native
 
 The scorecard evaluates average throughput and worst P99 latency across all three phases and assigns a grade from A to F.
 
+### gate
+
+CI quality gate — run a test and exit non-zero if the grade falls below a threshold:
+
+```bash
+kates gate                              # default: min-grade C, type LOAD
+kates gate --min-grade B --type STRESS
+kates gate --min-grade A --records 100000 --timeout 300
+```
+
+Designed for CI/CD pipelines. Runs a complete test, computes a letter grade using the same algorithm as `benchmark`, then exits with code 0 (pass) or 1 (fail) based on the `--min-grade` threshold.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--min-grade` | `C` | Minimum passing grade (A, B, C, D, F) |
+| `--type` | `LOAD` | Test type to run |
+| `--records` | `50000` | Number of records |
+| `--backend` | _(auto)_ | Benchmark backend |
+| `--timeout` | `180` | Timeout in seconds |
+
 ## Toolbox
 
 ### doctor
@@ -210,16 +230,37 @@ Generates a human-readable explanation including:
 - Root cause analysis for failures (with smart hints)
 - A verdict: ✓ HEALTHY, ⚠ DEGRADED, or ✖ POOR
 
+### scenario-diff
+
+Compare a scenario YAML file against a completed test run to detect configuration drift:
+
+```bash
+kates scenario-diff scenario.yaml 69acdf31
+```
+
+Checks the YAML fields (type, backend, spec parameters) against the actual values used in the test run and reports any differences. Useful for auditing whether a test was run with the intended configuration.
+
 ## Observability
 
 ### dashboard
 
-Full-screen terminal monitoring dashboard:
+Full-screen terminal monitoring dashboard with four panel rows:
 
 ```bash
 kates dashboard
 kates dash
+kates dashboard --interval 5
 ```
+
+Panels:
+- **System Health** — API status, Kafka connectivity, engine backend, loaded configs
+- **Test Summary** — running/pending/done/failed counts with total
+- **Active Tests** — live details of running tests with throughput and latency
+- **Recent Completed** — last 5 finished tests with status badges
+- **Throughput ↗** — sparkline trend of aggregate throughput over time
+- **P99 Latency ↘** — sparkline trend of tail latency over time
+- **Cluster Detail** — broker count, topic count, ISR health, controller ID
+- **Quick Commands** — common CLI commands for quick reference
 
 ### top
 
@@ -243,6 +284,29 @@ CLI, API, and runtime version information:
 
 ```bash
 kates version
+```
+
+### webhook
+
+Manage webhook notifications for test completion events. When a test finishes (DONE or FAILED), the backend sends an HTTP POST to all registered URLs with a JSON payload.
+
+```bash
+kates webhook list
+kates webhook add slack https://hooks.slack.com/services/T.../B.../xxx
+kates webhook add teams https://outlook.office.com/webhook/...
+kates webhook remove slack
+```
+
+The webhook payload contains:
+
+```json
+{
+  "event": "test.completed",
+  "testId": "69acdf31",
+  "testType": "LOAD",
+  "status": "DONE",
+  "timestamp": "2026-02-19T01:00:00Z"
+}
 ```
 
 ## Configuration
