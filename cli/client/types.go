@@ -539,3 +539,9 @@ type DisruptionSSEEvent struct {
 	Message      string `json:"message"`
 	Timestamp    string `json:"timestamp"`
 }
+
+type WebhookRegistration struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Events string `json:"events"`
+}

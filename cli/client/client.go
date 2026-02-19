@@ -525,3 +525,22 @@ func (c *Client) DisruptionScheduleDelete(ctx context.Context, id string) error 
 	path := fmt.Sprintf("/api/disruptions/schedules/%s", id)
 	return c.delete(ctx, path)
 }
+
+func (c *Client) ListWebhooks(ctx context.Context) ([]WebhookRegistration, error) {
+	data, err := c.get(ctx, "/api/webhooks")
+	if err != nil {
+		return nil, err
+	}
+	var result []WebhookRegistration
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) RegisterWebhook(ctx context.Context, name, url string) error {
+	payload := map[string]string{"name": name, "url": url, "events": "test.completed"}
+	_, err := c.postJSON(ctx, "/api/webhooks", payload)
+	return err
+}
+
+func (c *Client) DeleteWebhook(ctx context.Context, name string) error {
+	return c.delete(ctx, "/api/webhooks/"+name)
+}

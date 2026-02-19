@@ -25,6 +25,7 @@ import com.klster.kates.domain.TestType;
 import com.klster.kates.export.LatencyHeatmapData;
 import com.klster.kates.service.KafkaAdminService;
 import com.klster.kates.service.TestRunRepository;
+import com.klster.kates.webhook.WebhookService;
 
 /**
  * Orchestrator that routes benchmark execution to pluggable backends.
@@ -41,6 +42,7 @@ public class TestOrchestrator {
     private final TestTypeDefaults typeDefaults;
     private final BenchmarkMetrics benchmarkMetrics;
     private final KatesMetrics katesMetrics;
+    private final WebhookService webhookService;
     private final String defaultBackend;
     private final String bootstrapServers;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
@@ -54,6 +56,7 @@ public class TestOrchestrator {
             TestTypeDefaults typeDefaults,
             BenchmarkMetrics benchmarkMetrics,
             KatesMetrics katesMetrics,
+            WebhookService webhookService,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.kafkaAdmin = kafkaAdmin;
@@ -62,6 +65,7 @@ public class TestOrchestrator {
         this.typeDefaults = typeDefaults;
         this.benchmarkMetrics = benchmarkMetrics;
         this.katesMetrics = katesMetrics;
+        this.webhookService = webhookService;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
     }
@@ -291,6 +295,7 @@ public class TestOrchestrator {
             String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
             String outcome = anyFailed ? "failed" : "done";
             katesMetrics.recordTestCompleted(typeName, outcome);
+            webhookService.fireTestCompleted(run);
 
             if (run.getCreatedAt() != null) {
                 try {

@@ -214,6 +214,42 @@ var dashboardCmd = &cobra.Command{
 				fmt.Println()
 			}
 
+			clusterContent := &strings.Builder{}
+			check, checkErr := apiClient.ClusterCheck(context.Background())
+			if checkErr == nil && check != nil {
+				clusterContent.WriteString(fmt.Sprintf("  %-16s %s\n",
+					output.DimStyle.Render("Brokers"),
+					output.LightStyle.Render(fmt.Sprintf("%d", check.Brokers))))
+				clusterContent.WriteString(fmt.Sprintf("  %-16s %s\n",
+					output.DimStyle.Render("Topics"),
+					output.LightStyle.Render(fmt.Sprintf("%d", check.Topics))))
+				isrIcon := output.SuccessStyle.Render("✓")
+				if check.PartitionHealth.UnderReplicated > 0 {
+					isrIcon = output.ErrorStyle.Render("✖")
+				}
+				clusterContent.WriteString(fmt.Sprintf("  %-16s %s %s\n",
+					output.DimStyle.Render("ISR Health"),
+					isrIcon,
+					output.DimStyle.Render(fmt.Sprintf("%d under-replicated", check.PartitionHealth.UnderReplicated))))
+				clusterContent.WriteString(fmt.Sprintf("  %-16s %s",
+					output.DimStyle.Render("Controller"),
+					output.AccentStyle.Render(fmt.Sprintf("broker-%d", check.ControllerID))))
+			} else {
+				clusterContent.WriteString(output.DimStyle.Render("  Cluster data unavailable"))
+			}
+
+			quickContent := &strings.Builder{}
+			quickContent.WriteString(fmt.Sprintf("  %s  kates test create --type LOAD\n", output.DimStyle.Render("▸")))
+			quickContent.WriteString(fmt.Sprintf("  %s  kates benchmark\n", output.DimStyle.Render("▸")))
+			quickContent.WriteString(fmt.Sprintf("  %s  kates gate --min-grade B\n", output.DimStyle.Render("▸")))
+			quickContent.WriteString(fmt.Sprintf("  %s  kates test cleanup", output.DimStyle.Render("▸")))
+
+			cp := output.Panel("Cluster Detail", clusterContent.String(), panelW)
+			qp := output.Panel("Quick Commands", quickContent.String(), panelW)
+			row4 := lipgloss.JoinHorizontal(lipgloss.Top, cp, "  ", qp)
+			fmt.Println(row4)
+			fmt.Println()
+
 			fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",
 				spinnerFrame(tick),
 				dashInterval,

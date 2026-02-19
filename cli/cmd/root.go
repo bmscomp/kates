@@ -111,6 +111,7 @@ Observability:
   top          Live view of running tests (like kubectl top)
   status       Quick one-line system status
   version      CLI, API, and runtime version info
+  webhook      Manage test-completion webhook notifications
 
 Configuration:
   ctx          Manage server contexts (like kubectl contexts)
