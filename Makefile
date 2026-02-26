@@ -1,56 +1,83 @@
 .PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs
 
-# Default target: Launch complete cluster setup with all services
+.DEFAULT_GOAL := help
+
 TIMER := $(shell date +%s)
 
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
-	@echo "Step 1: Starting Kind cluster + registry..."
-	./scripts/start-cluster.sh
+	@if kind get clusters 2>/dev/null | grep -q '^panda$$' && kubectl cluster-info --context kind-panda >/dev/null 2>&1; then \
+		echo "✅ Kind cluster 'panda' already running — skipping creation"; \
+	else \
+		echo "Step 1: Starting Kind cluster + registry..."; \
+		./scripts/start-cluster.sh; \
+	fi
 	@echo ""
-	@echo "Step 2: Pulling images to local registry..."
+	@echo "Step 2: Pulling missing images to local registry..."
 	./scripts/pull-images.sh
 	@echo ""
-	@echo "Step 3: Loading images into Kind cluster..."
+	@echo "Step 3: Loading missing images into Kind cluster..."
 	./scripts/load-images-to-kind.sh
 	@echo ""
-	@echo "Step 4: Deploying Monitoring (Prometheus & Grafana)..."
-	./scripts/deploy-monitoring.sh
+	@if kubectl get pods -n monitoring -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ Monitoring already deployed — skipping"; \
+	else \
+		echo "Step 4: Deploying Monitoring (Prometheus & Grafana)..."; \
+		./scripts/deploy-monitoring.sh; \
+		echo "Step 5: Waiting for monitoring to be ready..."; \
+		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true; \
+	fi
 	@echo ""
-	@echo "Step 5: Waiting for monitoring to be ready..."
-	@kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true
+	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ Kafka already deployed — skipping"; \
+	else \
+		echo "Step 6: Deploying Kafka (Strimzi)..."; \
+		./scripts/deploy-kafka.sh; \
+		echo "Step 7: Waiting for Kafka to be ready..."; \
+		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
+	fi
 	@echo ""
-	@echo "Step 6: Deploying Kafka (Strimzi)..."
-	./scripts/deploy-kafka.sh
+	@if kubectl get pods -n kafka -l app=kafka-ui --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ Kafka UI already deployed — skipping"; \
+	else \
+		echo "Step 8: Deploying Kafka UI..."; \
+		./scripts/deploy-kafka-ui.sh; \
+	fi
 	@echo ""
-	@echo "Step 7: Waiting for Kafka to be ready..."
-	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true
+	@if kubectl get pods -n kafka -l app=apicurio-registry --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ Apicurio Registry already deployed — skipping"; \
+	else \
+		echo "Step 9: Deploying Apicurio Registry..."; \
+		./scripts/deploy-apicurio.sh; \
+	fi
 	@echo ""
-	@echo "Step 8: Deploying Kafka UI..."
-	./scripts/deploy-kafka-ui.sh
-	@echo ""
-	@echo "Step 9: Deploying Apicurio Registry..."
-	./scripts/deploy-apicurio.sh
-	@echo ""
-	@echo "Step 10: Deploying LitmusChaos..."
-	./scripts/deploy-litmuschaos.sh
+	@if kubectl get pods -n litmus -l app.kubernetes.io/component=litmus --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ LitmusChaos already deployed — skipping"; \
+	else \
+		echo "Step 10: Deploying LitmusChaos..."; \
+		./scripts/deploy-litmuschaos.sh; \
+	fi
 	@echo ""
 	@echo "Step 11: Enabling chaos environment..."
 	kubectl apply -f config/litmus/
 	@echo ""
-	@echo "Step 12: Building and deploying Kates..."
-	cd kates && ./mvnw package -DskipTests -B
-	docker build -f kates/Dockerfile -t kates:latest .
-	kind load docker-image kates:latest --name panda
-	kubectl apply -f kates/k8s/namespace.yaml
-	kubectl apply -f kates/k8s/configmap.yaml
-	kubectl apply -f kates/k8s/postgres.yaml
-	@echo "Waiting for PostgreSQL to be ready..."
-	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
-	kubectl apply -f kates/k8s/deployment.yaml
-	kubectl apply -f kates/k8s/service.yaml
-	@kubectl rollout status deployment/kates -n kates --timeout=120s
+	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ Kates already deployed — skipping build"; \
+	else \
+		echo "Step 12: Building and deploying Kates..."; \
+		cd kates && ./mvnw package -DskipTests -B; \
+		docker build -f kates/Dockerfile -t kates:latest .; \
+		kind load docker-image kates:latest --name panda; \
+		kubectl apply -f kates/k8s/namespace.yaml; \
+		kubectl apply -f kates/k8s/configmap.yaml; \
+		kubectl apply -f kates/k8s/postgres.yaml; \
+		echo "Waiting for PostgreSQL to be ready..."; \
+		kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s; \
+		kubectl apply -f kates/k8s/deployment.yaml; \
+		kubectl apply -f kates/k8s/service.yaml; \
+		kubectl rollout status deployment/kates -n kates --timeout=120s; \
+	fi
 	@echo ""
 	@echo "Step 13: Exposing service ports..."
 	./scripts/port-forward.sh

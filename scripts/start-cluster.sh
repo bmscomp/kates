@@ -26,10 +26,18 @@ info "Connecting registry to kind network..."
 docker network create kind 2>/dev/null || true
 docker network connect kind kind-registry 2>/dev/null || true
 
-# Create Cluster
-info "Creating Kind cluster..."
-kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
-kind create cluster --config "${SCRIPT_DIR}/../config/cluster.yaml" --name "${KIND_CLUSTER_NAME}"
+# Create cluster only if it doesn't exist; recover kubeconfig if stale
+if kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"; then
+    if kubectl cluster-info --context "kind-${KIND_CLUSTER_NAME}" >/dev/null 2>&1; then
+        info "Cluster '${KIND_CLUSTER_NAME}' already running — skipping creation"
+    else
+        warn "Cluster '${KIND_CLUSTER_NAME}' exists but API unreachable — refreshing kubeconfig"
+        kind export kubeconfig --name "${KIND_CLUSTER_NAME}"
+    fi
+else
+    info "Creating Kind cluster..."
+    kind create cluster --config "${SCRIPT_DIR}/../config/cluster.yaml" --name "${KIND_CLUSTER_NAME}"
+fi
 
 # Document the local registry in the cluster
 info "Configuring cluster to use local registry..."

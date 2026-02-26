@@ -23,6 +23,11 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
     public Response toResponse(Exception exception) {
         Throwable root = unwrap(exception);
 
+        if (root instanceof jakarta.ws.rs.WebApplicationException wae) {
+            int status = wae.getResponse().getStatus();
+            return error(status, Response.Status.fromStatusCode(status).getReasonPhrase(), root.getMessage());
+        }
+
         if (root instanceof IllegalArgumentException) {
             return error(400, "Bad Request", root.getMessage());
         }

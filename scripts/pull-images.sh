@@ -92,9 +92,9 @@ export REGISTRY PLATFORM
 info "--- Standard Images (up to ${MAX_PARALLEL} in parallel) ---"
 TMPFILE=$(mktemp)
 printf '%s\n' "${ALL_STANDARD_IMAGES[@]}" | xargs -P "${MAX_PARALLEL}" -I{} bash -c 'pull_single "$@"' _ {} 2>&1 | tee "${TMPFILE}"
-PULLED=$(grep -c "^OK " "${TMPFILE}" 2>/dev/null || echo 0)
-SKIPPED=$(grep -c "^SKIP " "${TMPFILE}" 2>/dev/null || echo 0)
-FAILED=$(grep -c "^FAIL " "${TMPFILE}" 2>/dev/null || echo 0)
+PULLED=$(grep -c "^OK " "${TMPFILE}" || true)
+SKIPPED=$(grep -c "^SKIP " "${TMPFILE}" || true)
+FAILED=$(grep -c "^FAIL " "${TMPFILE}" || true)
 TOTAL=$((PULLED + SKIPPED + FAILED))
 rm -f "${TMPFILE}"
 
