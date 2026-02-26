@@ -1,0 +1,172 @@
+name: Release Kates CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.25"
+  MODULE: "github.com/klster/kates-cli/cmd"
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: cli/go.sum
+
+      - name: Build binary
+        working-directory: cli
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          go build -trimpath \
+            -ldflags="-s -w \
+              -X ${MODULE}.Version=${VERSION} \
+              -X ${MODULE}.Commit=${COMMIT} \
+              -X ${MODULE}.BuildDate=${BUILD_DATE}" \
+            -o kates .
+
+      - name: Package tarball
+        working-directory: cli
+        run: |
+          ARCHIVE="kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
+          tar -czf "${ARCHIVE}" kates
+          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kates-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            cli/kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+            cli/kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Aggregate checksums
+        run: cat dist/*.sha256 > dist/checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/kates-*.tar.gz
+            dist/checksums.txt
+
+  homebrew:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download darwin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Compute SHAs and update formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          SHA_DARWIN_ARM64=$(shasum -a 256 dist/kates-darwin-arm64.tar.gz | cut -d' ' -f1)
+          SHA_DARWIN_AMD64=$(shasum -a 256 dist/kates-darwin-amd64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_AMD64=$(shasum -a 256 dist/kates-linux-amd64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_ARM64=$(shasum -a 256 dist/kates-linux-arm64.tar.gz | cut -d' ' -f1)
+          VERSION="${TAG#v}"
+          REPO="bmscomp/klster"
+
+          cat > kates.rb <<'EOF'
+          class Kates < Formula
+            desc "CLI for Kafka Advanced Testing & Engineering Suite"
+            homepage "https://github.com/__REPO__"
+            version "__VERSION__"
+            license "Apache-2.0"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/__REPO__/releases/download/__TAG__/kates-darwin-arm64.tar.gz"
+                sha256 "__SHA_DARWIN_ARM64__"
+              else
+                url "https://github.com/__REPO__/releases/download/__TAG__/kates-darwin-amd64.tar.gz"
+                sha256 "__SHA_DARWIN_AMD64__"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/__REPO__/releases/download/__TAG__/kates-linux-arm64.tar.gz"
+                sha256 "__SHA_LINUX_ARM64__"
+              else
+                url "https://github.com/__REPO__/releases/download/__TAG__/kates-linux-amd64.tar.gz"
+                sha256 "__SHA_LINUX_AMD64__"
+              end
+            end
+
+            def install
+              bin.install "kates"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/kates version")
+            end
+          end
+          EOF
+
+          sed -i 's/^          //' kates.rb
+          sed -i "s|__REPO__|${REPO}|g"                     kates.rb
+          sed -i "s|__VERSION__|${VERSION}|g"                kates.rb
+          sed -i "s|__TAG__|${TAG}|g"                        kates.rb
+          sed -i "s|__SHA_DARWIN_ARM64__|${SHA_DARWIN_ARM64}|g" kates.rb
+          sed -i "s|__SHA_DARWIN_AMD64__|${SHA_DARWIN_AMD64}|g" kates.rb
+          sed -i "s|__SHA_LINUX_ARM64__|${SHA_LINUX_ARM64}|g"  kates.rb
+          sed -i "s|__SHA_LINUX_AMD64__|${SHA_LINUX_AMD64}|g"  kates.rb
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/bmscomp/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp kates.rb tap/Formula/kates.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/kates.rb
+          git commit -m "kates ${TAG}"
+          git push

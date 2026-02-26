@@ -187,8 +187,7 @@ kates-build:
 
 kates-native:
 	@echo "🔨 Building Kates (native)..."
-	cd kates && ./mvnw package -Dnative -DskipTests -B
-	cd kates && docker build -f Dockerfile.native -t kates:latest .
+	docker build -f kates/Dockerfile.native -t kates:latest .
 	kind load docker-image kates:latest --name panda
 	@echo "✅ Kates native image loaded into Kind"
 

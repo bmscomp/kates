@@ -1,26 +1,51 @@
-# Native image build
-FROM ghcr.io/graalvm/jdk-community:25 AS builder
+# Stage 1: Build the KATES CLI (Go)
+FROM golang:1.24-alpine AS cli-builder
+ENV GOTOOLCHAIN=auto
+WORKDIR /cli
+COPY cli/go.mod cli/go.sum ./
+RUN go mod download
+COPY cli/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build \
+  -trimpath \
+  -ldflags="-s -w \
+  -X github.com/klster/kates-cli/cmd.Version=1.0.0 \
+  -X github.com/klster/kates-cli/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o /kates-cli .
+
+# Stage 2: Build the native executable (Mandrel)
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25 AS builder
+USER root
 WORKDIR /build
 
-COPY pom.xml .
-COPY .mvn .mvn
-COPY mvnw .
+COPY kates/pom.xml .
+COPY kates/.mvn .mvn
+COPY kates/mvnw .
 RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
-COPY src src
+COPY kates/src src
 RUN ./mvnw package -Dnative -DskipTests -B
 
-# Minimal runtime
+# Stage 3: Minimal runtime
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 WORKDIR /app
 
 COPY --from=builder /build/target/*-runner ./kates
+COPY --from=cli-builder /kates-cli /usr/local/bin/kates
 
-RUN chmod +x kates
+RUN chmod +x kates \
+  && microdnf install -y shadow-utils \
+  && groupadd -r kates && useradd -r -g kates -d /home/kates kates \
+  && mkdir -p /home/kates \
+  && printf 'current-context: local\ncontexts:\n  local:\n    url: http://localhost:8080\n    output: table\n' > /home/kates/.kates.yaml \
+  && chown -R kates:kates /home/kates \
+  && microdnf clean all
+
+USER kates
+ENV HOME=/home/kates
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-    CMD curl -sf http://localhost:8080/api/health || exit 1
+  CMD curl -sf http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["./kates"]
