@@ -64,6 +64,15 @@ var resilienceRunCmd = &cobra.Command{
 			output.KeyValue("Experiment", chaos.ExperimentName)
 			output.KeyValue("Verdict", output.StatusBadge(chaos.Verdict))
 			output.KeyValue("Duration", chaos.ChaosDuration)
+			if chaos.Phase != "" {
+				output.KeyValue("Phase", chaos.Phase)
+			}
+			if chaos.FailStep != "" {
+				output.KeyValue("Fail Step", chaos.FailStep)
+			}
+			if chaos.ProbeSuccess != "" {
+				output.KeyValue("Probe Success", renderProbeGauge(chaos.ProbeSuccess))
+			}
 			if chaos.FailureReason != "" {
 				output.KeyValue("Failure Reason", chaos.FailureReason)
 			}

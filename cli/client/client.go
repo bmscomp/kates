@@ -609,3 +609,97 @@ func (c *Client) KafkaProduce(ctx context.Context, topic, key, value string) (*P
 	var result ProduceMeta
 	return &result, json.Unmarshal(data, &result)
 }
+
+func (c *Client) patch(ctx context.Context, path string, payload interface{}) ([]byte, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.BaseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.doRequest(req, false)
+}
+
+func (c *Client) KafkaCreateTopic(ctx context.Context, request *CreateTopicRequest) (map[string]interface{}, error) {
+	data, err := c.postJSON(ctx, "/api/kafka/topics", request)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaAlterTopic(ctx context.Context, name string, request *AlterTopicRequest) (map[string]interface{}, error) {
+	data, err := c.patch(ctx, "/api/kafka/topics/"+name, request)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) KafkaDeleteTopic(ctx context.Context, name string) error {
+	return c.delete(ctx, "/api/kafka/topics/"+name)
+}
+
+func (c *Client) BaselineSet(ctx context.Context, testType, runID string) (*BaselineEntry, error) {
+	req := SetBaselineRequest{RunID: runID}
+	data, err := c.put(ctx, "/api/tests/baselines/"+testType, req)
+	if err != nil {
+		return nil, err
+	}
+	var result BaselineEntry
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) BaselineUnset(ctx context.Context, testType string) error {
+	return c.delete(ctx, "/api/tests/baselines/"+testType)
+}
+
+func (c *Client) BaselineGet(ctx context.Context, testType string) (*BaselineEntry, error) {
+	data, err := c.get(ctx, "/api/tests/baselines/"+testType)
+	if err != nil {
+		return nil, err
+	}
+	var result BaselineEntry
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) BaselineList(ctx context.Context) ([]BaselineEntry, error) {
+	data, err := c.get(ctx, "/api/tests/baselines")
+	if err != nil {
+		return nil, err
+	}
+	var result []BaselineEntry
+	return result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) ReportRegression(ctx context.Context, runID string) (*RegressionReport, error) {
+	data, err := c.get(ctx, "/api/tests/"+runID+"/report/regression")
+	if err != nil {
+		return nil, err
+	}
+	var result RegressionReport
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) ReportTuning(ctx context.Context, runID string) (*TuningReport, error) {
+	data, err := c.get(ctx, "/api/tests/"+runID+"/report/tuning")
+	if err != nil {
+		return nil, err
+	}
+	var result TuningReport
+	return &result, json.Unmarshal(data, &result)
+}
+
+func (c *Client) TuningTypes(ctx context.Context) ([]TuningTypeInfo, error) {
+	data, err := c.get(ctx, "/api/tuning/types")
+	if err != nil {
+		return nil, err
+	}
+	var result []TuningTypeInfo
+	return result, json.Unmarshal(data, &result)
+}

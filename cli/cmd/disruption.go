@@ -423,6 +423,15 @@ func renderStepReport(step client.StepReport) {
 
 	if step.ChaosOutcome != nil {
 		output.KeyValue("Verdict", output.StatusBadge(step.ChaosOutcome.Verdict))
+		if step.ChaosOutcome.Phase != "" {
+			output.KeyValue("Phase", step.ChaosOutcome.Phase)
+		}
+		if step.ChaosOutcome.FailStep != "" {
+			output.KeyValue("Fail Step", step.ChaosOutcome.FailStep)
+		}
+		if step.ChaosOutcome.ProbeSuccess != "" {
+			output.KeyValue("Probe Success", renderProbeGauge(step.ChaosOutcome.ProbeSuccess))
+		}
 		if step.ChaosOutcome.FailureReason != "" {
 			output.KeyValue("Failure", step.ChaosOutcome.FailureReason)
 		}

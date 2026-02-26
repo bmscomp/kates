@@ -923,3 +923,245 @@ func TestReport_WithViolations(t *testing.T) {
 		t.Errorf("Violations = %d", len(resp.OverallSlaVerdict.Violations))
 	}
 }
+
+func TestKafkaCreateTopic(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/kafka/topics" {
+			t.Errorf("path = %s, want /api/kafka/topics", r.URL.Path)
+		}
+		var req CreateTopicRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Name != "my-new-topic" {
+			t.Errorf("Name = %q", req.Name)
+		}
+		if req.Partitions != 6 {
+			t.Errorf("Partitions = %d", req.Partitions)
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name": "my-new-topic", "partitions": 6, "replicationFactor": 3,
+		})
+	})
+	result, err := c.KafkaCreateTopic(context.Background(), &CreateTopicRequest{
+		Name: "my-new-topic", Partitions: 6, ReplicationFactor: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["name"] != "my-new-topic" {
+		t.Errorf("name = %v", result["name"])
+	}
+}
+
+func TestKafkaAlterTopic(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("method = %s, want PATCH", r.Method)
+		}
+		if r.URL.Path != "/api/kafka/topics/my-topic" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		var req AlterTopicRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Configs["retention.ms"] != "172800000" {
+			t.Errorf("retention.ms = %q", req.Configs["retention.ms"])
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name": "my-topic", "partitions": 3,
+		})
+	})
+	result, err := c.KafkaAlterTopic(context.Background(), "my-topic", &AlterTopicRequest{
+		Configs: map[string]string{"retention.ms": "172800000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["name"] != "my-topic" {
+		t.Errorf("name = %v", result["name"])
+	}
+}
+
+func TestKafkaDeleteTopic(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		if r.URL.Path != "/api/kafka/topics/old-topic" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	err := c.KafkaDeleteTopic(context.Background(), "old-topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBaselineSet(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PUT" {
+			t.Errorf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/api/tests/baselines/LOAD" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(BaselineEntry{
+			TestType: "LOAD", RunID: "abc123", SetAt: "2025-01-01T00:00:00Z",
+		})
+	})
+	entry, err := c.BaselineSet(context.Background(), "LOAD", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.TestType != "LOAD" {
+		t.Errorf("TestType = %s", entry.TestType)
+	}
+	if entry.RunID != "abc123" {
+		t.Errorf("RunID = %s", entry.RunID)
+	}
+}
+
+func TestBaselineGet(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tests/baselines/STRESS" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(BaselineEntry{
+			TestType: "STRESS", RunID: "def456", SetAt: "2025-02-01T00:00:00Z",
+		})
+	})
+	entry, err := c.BaselineGet(context.Background(), "STRESS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.RunID != "def456" {
+		t.Errorf("RunID = %s", entry.RunID)
+	}
+}
+
+func TestBaselineList(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tests/baselines" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]BaselineEntry{
+			{TestType: "LOAD", RunID: "r1"},
+			{TestType: "STRESS", RunID: "r2"},
+		})
+	})
+	entries, err := c.BaselineList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("len = %d", len(entries))
+	}
+}
+
+func TestBaselineUnset(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		if r.URL.Path != "/api/tests/baselines/LOAD" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	err := c.BaselineUnset(context.Background(), "LOAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReportRegression(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tests/abc123/report/regression" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		delta := 15.5
+		json.NewEncoder(w).Encode(RegressionReport{
+			RunID:              "abc123",
+			BaselineID:         "base1",
+			TestType:           "LOAD",
+			RegressionDetected: true,
+			Deltas: map[string]MetricDelta{
+				"avgThroughputRecPerSec": {Baseline: 50000, Current: 42000, Delta: &delta},
+			},
+			Warnings: []string{"Throughput dropped > 10%"},
+		})
+	})
+	report, err := c.ReportRegression(context.Background(), "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.RegressionDetected {
+		t.Error("expected regression detected")
+	}
+	if report.BaselineID != "base1" {
+		t.Errorf("BaselineID = %s", report.BaselineID)
+	}
+	if len(report.Warnings) != 1 {
+		t.Errorf("Warnings = %v", report.Warnings)
+	}
+}
+
+func TestReportTuning(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tests/run1/report/tuning" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(TuningReport{
+			TestType:       "TUNE_COMPRESSION",
+			ParameterName:  "compression.type",
+			BestStepIndex:  2,
+			Recommendation: "lz4 provides the best throughput",
+			Steps: []TuningStep{
+				{StepIndex: 0, Label: "none"},
+				{StepIndex: 1, Label: "snappy"},
+				{StepIndex: 2, Label: "lz4"},
+			},
+		})
+	})
+	report, err := c.ReportTuning(context.Background(), "run1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.TestType != "TUNE_COMPRESSION" {
+		t.Errorf("TestType = %s", report.TestType)
+	}
+	if report.BestStepIndex != 2 {
+		t.Errorf("BestStepIndex = %d", report.BestStepIndex)
+	}
+	if len(report.Steps) != 3 {
+		t.Errorf("Steps = %d", len(report.Steps))
+	}
+}
+
+func TestTuningTypes(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tuning/types" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]TuningTypeInfo{
+			{Type: "TUNE_COMPRESSION", Parameter: "compression.type", Steps: 5, Description: "Benchmarks codecs"},
+			{Type: "TUNE_BATCHING", Parameter: "batch.size × linger.ms", Steps: 6, Description: "Sweeps batching"},
+		})
+	})
+	types, err := c.TuningTypes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(types) != 2 {
+		t.Errorf("len = %d", len(types))
+	}
+	if types[0].Type != "TUNE_COMPRESSION" {
+		t.Errorf("Type = %s", types[0].Type)
+	}
+	if types[1].Steps != 6 {
+		t.Errorf("Steps = %d", types[1].Steps)
+	}
+}

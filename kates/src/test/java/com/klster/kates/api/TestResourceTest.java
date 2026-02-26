@@ -69,7 +69,7 @@ class TestResourceTest {
                 .get("/api/tests/types")
                 .then()
                 .statusCode(200)
-                .body("$", hasSize(8))
+                .body("$", hasSize(com.klster.kates.domain.TestType.values().length))
                 .body(
                         "$",
                         hasItems(
@@ -80,7 +80,12 @@ class TestResourceTest {
                                 "VOLUME",
                                 "CAPACITY",
                                 "ROUND_TRIP",
-                                "INTEGRITY"));
+                                "INTEGRITY",
+                                "TUNE_REPLICATION",
+                                "TUNE_ACKS",
+                                "TUNE_BATCHING",
+                                "TUNE_COMPRESSION",
+                                "TUNE_PARTITIONS"));
     }
 
     @Test

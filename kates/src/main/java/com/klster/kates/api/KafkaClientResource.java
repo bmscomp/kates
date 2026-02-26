@@ -5,8 +5,10 @@ import java.util.Map;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -173,4 +175,70 @@ public class KafkaClientResource {
     }
 
     public record ProduceRequest(String key, String value) {}
+
+    @POST
+    @Path("/topics")
+    @Operation(summary = "Create a new topic")
+    public Response createTopic(CreateTopicRequest request) {
+        try {
+            if (request == null || request.name() == null || request.name().isBlank()) {
+                return Response.status(400)
+                        .entity(ApiError.of(400, "Bad Request", "'name' is required"))
+                        .build();
+            }
+            int partitions = request.partitions() > 0 ? request.partitions() : 1;
+            int rf = request.replicationFactor() > 0 ? request.replicationFactor() : 1;
+            kafkaAdmin.createTopic(request.name(), partitions, rf, request.configs());
+            var detail = kafkaAdmin.describeTopicDetail(request.name());
+            return Response.status(201).entity(detail).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Kafka Error", e.getMessage()))
+                    .build();
+        }
+    }
+
+    @PATCH
+    @Path("/topics/{name}")
+    @Operation(summary = "Alter topic configuration entries")
+    public Response alterTopic(
+            @Parameter(description = "Topic name") @PathParam("name") String name,
+            AlterTopicRequest request) {
+        try {
+            if (request == null || request.configs() == null || request.configs().isEmpty()) {
+                return Response.status(400)
+                        .entity(ApiError.of(400, "Bad Request", "'configs' map is required"))
+                        .build();
+            }
+            kafkaAdmin.alterTopicConfig(name, request.configs());
+            var detail = kafkaAdmin.describeTopicDetail(name);
+            return Response.ok(detail).build();
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().contains("not found")) {
+                return Response.status(404)
+                        .entity(ApiError.of(404, "Not Found", "Topic not found: " + name))
+                        .build();
+            }
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Kafka Error", e.getMessage()))
+                    .build();
+        }
+    }
+
+    @DELETE
+    @Path("/topics/{name}")
+    @Operation(summary = "Delete a topic")
+    public Response deleteTopic(@Parameter(description = "Topic name") @PathParam("name") String name) {
+        try {
+            kafkaAdmin.deleteTopic(name);
+            return Response.noContent().build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Kafka Error", e.getMessage()))
+                    .build();
+        }
+    }
+
+    public record CreateTopicRequest(String name, int partitions, int replicationFactor, java.util.Map<String, String> configs) {}
+    public record AlterTopicRequest(java.util.Map<String, String> configs) {}
 }

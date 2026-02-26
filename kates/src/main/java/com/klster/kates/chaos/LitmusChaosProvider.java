@@ -7,38 +7,22 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
+import com.klster.kates.chaos.litmus.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
+import io.fabric8.kubernetes.client.Watcher;
+import io.fabric8.kubernetes.client.WatcherException;
+import io.fabric8.kubernetes.client.Watch;
 import org.jboss.logging.Logger;
 
 /**
  * Chaos provider that creates Litmus ChaosEngine CRs to trigger experiments.
- * Requires the LitmusChaos operator to be deployed in the cluster and the
- * corresponding ChaosExperiment templates to exist in the target namespace.
+ * Uses Fabric8 Watchers for asynchronous, event-driven polling of results.
  */
 @ApplicationScoped
 @Named("litmus-crd")
 public class LitmusChaosProvider implements ChaosProvider {
 
     private static final Logger LOG = Logger.getLogger(LitmusChaosProvider.class);
-
-    private static final CustomResourceDefinitionContext CHAOS_ENGINE_CTX =
-            new CustomResourceDefinitionContext.Builder()
-                    .withGroup("litmuschaos.io")
-                    .withVersion("v1alpha1")
-                    .withPlural("chaosengines")
-                    .withScope("Namespaced")
-                    .build();
-
-    private static final CustomResourceDefinitionContext CHAOS_RESULT_CTX =
-            new CustomResourceDefinitionContext.Builder()
-                    .withGroup("litmuschaos.io")
-                    .withVersion("v1alpha1")
-                    .withPlural("chaosresults")
-                    .withScope("Namespaced")
-                    .build();
 
     private static final Map<DisruptionType, String> EXPERIMENT_MAP = Map.of(
             DisruptionType.POD_KILL, "pod-delete",
@@ -58,156 +42,223 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
-        return CompletableFuture.supplyAsync(() -> {
-            Instant start = Instant.now();
-            long startNanos = System.nanoTime();
-            String engineName = "kates-" + spec.experimentName() + "-" + System.currentTimeMillis();
+        Instant start = Instant.now();
+        long startNanos = System.nanoTime();
+        String engineName = "kates-" + spec.experimentName() + "-" + System.currentTimeMillis();
 
-            try {
-                String experimentName = resolveExperiment(spec);
+        CompletableFuture<ChaosOutcome> future = new CompletableFuture<>();
 
-                Map<String, Object> engineSpec = buildChaosEngineSpec(spec, experimentName);
+        try {
+            String experimentName = resolveExperiment(spec);
 
-                GenericKubernetesResource engine = new GenericKubernetesResourceBuilder()
-                        .withApiVersion("litmuschaos.io/v1alpha1")
-                        .withKind("ChaosEngine")
-                        .withNewMetadata()
-                        .withName(engineName)
-                        .withNamespace(spec.targetNamespace())
-                        .addToLabels("managed-by", "kates")
-                        .endMetadata()
-                        .build();
-                engine.setAdditionalProperties(Map.of("spec", engineSpec));
+            ChaosEngine engine = buildChaosEngine(spec, engineName, experimentName);
 
-                client.genericKubernetesResources(CHAOS_ENGINE_CTX)
-                        .inNamespace(spec.targetNamespace())
-                        .resource(engine)
-                        .create();
+            // Create engine using strongly typed POJO
+            client.resources(ChaosEngine.class)
+                    .inNamespace(spec.targetNamespace())
+                    .resource(engine)
+                    .create();
 
-                LOG.info("Created ChaosEngine: " + engineName);
+            LOG.info("Created ChaosEngine: " + engineName);
 
-                int timeoutSec = spec.chaosDurationSec() + 120;
-                String verdict = pollForVerdict(spec.targetNamespace(), engineName, timeoutSec);
+            String resultName = engineName + "-" + experimentName;
 
-                if ("Pass".equalsIgnoreCase(verdict)) {
-                    return ChaosOutcome.success(engineName, experimentName, start, Instant.now(), startNanos);
-                } else {
-                    return ChaosOutcome.failure(
+            Watch watch = client.resources(ChaosResult.class)
+                    .inNamespace(spec.targetNamespace())
+                    .withName(resultName)
+                    .watch(new Watcher<>() {
+                        @Override
+                        @SuppressWarnings("null")
+                        public void eventReceived(Action action, ChaosResult result) {
+                            if (result == null || result.getStatus() == null || result.getStatus().experimentStatus == null) {
+                                return;
+                            }
+
+                            ChaosResultStatus.ExperimentStatus status = result.getStatus().experimentStatus;
+                            String verdict = status.verdict;
+
+                            if (verdict != null && !verdict.equalsIgnoreCase("Awaited")) {
+                                String failStep = status.failStep;
+                                String probSuccess = status.probeSuccessPercentage;
+
+                                String details = "";
+                                if (failStep != null && !failStep.isEmpty()) details += "FailStep: " + failStep;
+                                if (probSuccess != null && !probSuccess.isEmpty()) {
+                                    details += (details.isEmpty() ? "" : ", ") + "ProbeSuccess: " + probSuccess + "%";
+                                }
+
+                                if ("Pass".equalsIgnoreCase(verdict)) {
+                                    future.complete(ChaosOutcome.success(
+                                            engineName, experimentName, start, Instant.now(), startNanos,
+                                            probSuccess, failStep, status.phase));
+                                } else {
+                                    future.complete(ChaosOutcome.failure(
+                                            engineName,
+                                            experimentName,
+                                            start,
+                                            Instant.now(),
+                                            startNanos,
+                                            "ChaosResult verdict: " + verdict + (details.isEmpty() ? "" : " (" + details + ")"),
+                                            probSuccess, failStep, status.phase));
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void onClose(WatcherException cause) {
+                            if (!future.isDone()) {
+                                if (cause != null) {
+                                    LOG.warn("Watcher closed with error", cause);
+                                }
+                                future.completeExceptionally(cause != null ? cause : new RuntimeException("Watcher closed unexpectedly without providing a verdict"));
+                            }
+                        }
+                    });
+
+            // Clean up the watcher when the future completes (success, failure, or timeout)
+            future.whenComplete((res, err) -> watch.close());
+
+            // Fallback timeout execution since we removed Thread.sleep
+            CompletableFuture.delayedExecutor(spec.chaosDurationSec() + 120, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
+                if (!future.isDone()) {
+                    future.complete(ChaosOutcome.failure(
                             engineName,
                             experimentName,
                             start,
                             Instant.now(),
                             startNanos,
-                            "ChaosResult verdict: " + verdict);
+                            "Timeout polling for ChaosResult via Watcher",
+                            null, null, null));
                 }
+            });
 
-            } catch (Exception e) {
-                LOG.error("Litmus fault injection failed", e);
-                return ChaosOutcome.failure(
-                        engineName, spec.experimentName(), start, Instant.now(), startNanos, e.getMessage());
-            }
-        });
+        } catch (Exception e) {
+            LOG.error("Litmus fault injection failed", e);
+            future.complete(ChaosOutcome.failure(
+                    engineName, spec.experimentName(), start, Instant.now(), startNanos, e.getMessage(),
+                    null, null, null));
+        }
+
+        return future;
     }
 
-    @SuppressWarnings("unchecked")
-    private String pollForVerdict(String namespace, String engineName, int timeoutSec) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + timeoutSec * 1000L;
-
-        while (System.currentTimeMillis() < deadline) {
+    private String resolveExperiment(FaultSpec spec) {
+        if (spec.disruptionType() != null) {
+            String mapped = EXPERIMENT_MAP.get(spec.disruptionType());
+            
+            // Try to dynamically discover installed ChaosExperiments
             try {
-                var results = client.genericKubernetesResources(CHAOS_RESULT_CTX)
-                        .inNamespace(namespace)
-                        .withLabel("chaosUID")
-                        .list()
-                        .getItems();
+                if (mapped != null) {
+                    List<ChaosExperiment> exps = client.resources(ChaosExperiment.class)
+                            .inNamespace(spec.targetNamespace())
+                            .list()
+                            .getItems();
 
-                for (var result : results) {
-                    String name = result.getMetadata().getName();
-                    if (name.contains(engineName)) {
-                        Map<String, Object> status = (Map<String, Object>)
-                                result.getAdditionalProperties().get("status");
-                        if (status != null) {
-                            Map<String, Object> expStatus = (Map<String, Object>) status.get("experimentStatus");
-                            if (expStatus != null) {
-                                String verdict = (String) expStatus.get("verdict");
-                                if (verdict != null && !verdict.equalsIgnoreCase("Awaited")) {
-                                    return verdict;
-                                }
-                            }
+                    for (ChaosExperiment exp : exps) {
+                        if (exp.getMetadata().getName().equals(mapped)) {
+                            return mapped;
                         }
                     }
                 }
             } catch (Exception e) {
-                LOG.debug("Error polling ChaosResult", e);
+                LOG.debug("Failed to list ChaosExperiments dynamically", e);
             }
-            Thread.sleep(5000);
-        }
-        return "Timeout";
-    }
 
-    private String resolveExperiment(FaultSpec spec) {
-        if (spec.disruptionType() != null && EXPERIMENT_MAP.containsKey(spec.disruptionType())) {
-            return EXPERIMENT_MAP.get(spec.disruptionType());
+            if (mapped != null) {
+                return mapped;
+            }
         }
         return spec.experimentName();
     }
 
-    private Map<String, Object> buildChaosEngineSpec(FaultSpec spec, String experimentName) {
-        Map<String, Object> engineSpec = new LinkedHashMap<>();
-        engineSpec.put("engineState", "active");
-        engineSpec.put("chaosServiceAccount", "litmus-admin");
-        engineSpec.put("annotationCheck", "false");
+    private ChaosEngine buildChaosEngine(FaultSpec spec, String engineName, String experimentName) {
+        ChaosEngine engine = new ChaosEngine();
+        engine.getMetadata().setName(engineName);
+        engine.getMetadata().setNamespace(spec.targetNamespace());
+        engine.getMetadata().setLabels(Map.of("managed-by", "kates"));
 
-        Map<String, Object> appinfo = new LinkedHashMap<>();
-        appinfo.put("appns", spec.targetNamespace());
-        appinfo.put("applabel", spec.targetLabel());
-        appinfo.put("appkind", "statefulset");
-        engineSpec.put("appinfo", appinfo);
+        ChaosEngineSpec engineSpec = new ChaosEngineSpec();
+        engineSpec.engineState = "active";
+        engineSpec.chaosServiceAccount = "litmus-admin";
+        engineSpec.annotationCheck = "false";
 
-        Map<String, Object> experiment = new LinkedHashMap<>();
-        experiment.put("name", experimentName);
+        ChaosEngineSpec.AppInfo appinfo = new ChaosEngineSpec.AppInfo();
+        appinfo.appns = spec.targetNamespace();
+        appinfo.applabel = spec.targetLabel();
+        appinfo.appkind = "statefulset";
+        engineSpec.appinfo = appinfo;
 
-        Map<String, Object> component = new LinkedHashMap<>();
-        List<Map<String, String>> envVars = new ArrayList<>();
-        envVars.add(Map.of("name", "TOTAL_CHAOS_DURATION", "value", String.valueOf(spec.chaosDurationSec())));
+        ChaosEngineSpec.Experiment experiment = new ChaosEngineSpec.Experiment();
+        experiment.name = experimentName;
+
+        ChaosEngineSpec.Components components = new ChaosEngineSpec.Components();
+        List<ChaosEngineSpec.EnvVar> envVars = new ArrayList<>();
+        envVars.add(new ChaosEngineSpec.EnvVar("TOTAL_CHAOS_DURATION", String.valueOf(spec.chaosDurationSec())));
 
         if (!spec.targetPod().isEmpty()) {
-            envVars.add(Map.of("name", "TARGET_PODS", "value", spec.targetPod()));
+            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", spec.targetPod()));
         }
 
         for (Map.Entry<String, String> e : spec.envOverrides().entrySet()) {
-            envVars.add(Map.of("name", e.getKey(), "value", e.getValue()));
+            envVars.add(new ChaosEngineSpec.EnvVar(e.getKey(), e.getValue()));
         }
 
-        component.put("env", envVars);
-        experiment.put("spec", Map.of("components", component));
+        components.env = envVars;
+        ChaosEngineSpec.ExperimentSpec expSpec = new ChaosEngineSpec.ExperimentSpec();
+        expSpec.components = components;
 
-        engineSpec.put("experiments", List.of(experiment));
-        return engineSpec;
+        if (spec.probes() != null && !spec.probes().isEmpty()) {
+            List<ChaosEngineSpec.Probe> litmusProbes = new ArrayList<>();
+            for (ProbeSpec p : spec.probes()) {
+                ChaosEngineSpec.Probe lp = new ChaosEngineSpec.Probe();
+                lp.name = p.name();
+                lp.type = p.type();
+
+                if ("cmdProbe".equals(p.type()) && p.command() != null) {
+                    ChaosEngineSpec.CmdProbe cmd = new ChaosEngineSpec.CmdProbe();
+                    cmd.inputs = new ChaosEngineSpec.CmdProbeInputs();
+                    cmd.inputs.command = p.command();
+                    cmd.inputs.comparator = new ChaosEngineSpec.Comparator();
+                    if (p.expectedOutput() != null) {
+                        cmd.inputs.comparator.value = p.expectedOutput();
+                    }
+                    lp.cmdProbe = cmd;
+                }
+
+                lp.runProperties = new ChaosEngineSpec.RunProperties();
+                litmusProbes.add(lp);
+            }
+            expSpec.probe = litmusProbes;
+        }
+
+        experiment.spec = expSpec;
+
+        engineSpec.experiments = List.of(experiment);
+        engine.setSpec(engineSpec);
+
+        return engine;
     }
 
     @Override
+    @SuppressWarnings("null")
     public ChaosStatus pollStatus(String engineName) {
         try {
-            GenericKubernetesResource engine = client
-                    .genericKubernetesResources(CHAOS_ENGINE_CTX)
+            var engineOpt = client.resources(ChaosEngine.class)
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .list()
                     .getItems()
                     .stream()
                     .filter(e -> e.getMetadata().getName().equals(engineName))
-                    .findFirst()
-                    .orElse(null);
+                    .findFirst();
 
-            if (engine == null) return ChaosStatus.NOT_FOUND;
+            if (engineOpt.isEmpty()) return ChaosStatus.NOT_FOUND;
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> status =
-                    (Map<String, Object>) engine.getAdditionalProperties().get("status");
+            ChaosEngine engine = engineOpt.get();
+            ChaosEngineStatus status = engine.getStatus();
             if (status == null) return ChaosStatus.PENDING;
 
-            String engineStatus = (String) status.getOrDefault("engineStatus", "");
+            String engineStatus = status.engineStatus != null ? status.engineStatus : "";
             return switch (engineStatus.toLowerCase()) {
                 case "completed" -> ChaosStatus.COMPLETED;
                 case "stopped" -> ChaosStatus.COMPLETED;
@@ -221,7 +272,7 @@ public class LitmusChaosProvider implements ChaosProvider {
     @Override
     public void cleanup(String engineName) {
         try {
-            client.genericKubernetesResources(CHAOS_ENGINE_CTX)
+            client.resources(ChaosEngine.class)
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .delete();
@@ -234,9 +285,10 @@ public class LitmusChaosProvider implements ChaosProvider {
     @Override
     public boolean isAvailable() {
         try {
-            client.genericKubernetesResources(CHAOS_ENGINE_CTX).inAnyNamespace().list();
+            client.resources(ChaosEngine.class).inAnyNamespace().list();
             return true;
         } catch (Exception e) {
+            LOG.warn("Litmus availability check failed", e);
             return false;
         }
     }

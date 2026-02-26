@@ -83,7 +83,23 @@ public class KafkaAdminService {
             client.deleteTopics(Collections.singleton(name)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Deleted topic: " + name);
         } catch (Exception e) {
-            LOG.warn("Failed to delete topic: " + name, e);
+            throw new RuntimeException("Failed to delete topic: " + name, e);
+        }
+    }
+
+    public void alterTopicConfig(String name, Map<String, String> configs) {
+        try (AdminClient client = createClient()) {
+            ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, name);
+            List<org.apache.kafka.clients.admin.AlterConfigOp> ops = configs.entrySet().stream()
+                    .map(e -> new org.apache.kafka.clients.admin.AlterConfigOp(
+                            new ConfigEntry(e.getKey(), e.getValue()),
+                            org.apache.kafka.clients.admin.AlterConfigOp.OpType.SET))
+                    .toList();
+            client.incrementalAlterConfigs(Map.of(resource, ops))
+                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            LOG.info("Altered config for topic: " + name);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to alter config for topic: " + name, e);
         }
     }
 

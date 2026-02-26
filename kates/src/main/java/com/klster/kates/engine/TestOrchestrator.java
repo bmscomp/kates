@@ -490,6 +490,9 @@ public class TestOrchestrator {
                         .enableTransactions(spec.isEnableTransactions())
                         .enableCrc(spec.isEnableCrc())
                         .build());
+            case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING,
+                 TUNE_COMPRESSION, TUNE_PARTITIONS ->
+                List.of(produceTask(runId + "-tune-0", topic, spec, producerConfig));
         };
     }
 

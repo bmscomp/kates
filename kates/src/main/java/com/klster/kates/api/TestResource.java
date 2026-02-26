@@ -8,6 +8,7 @@ import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -25,6 +26,8 @@ import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.engine.TestOrchestrator;
+import com.klster.kates.persistence.BaselineEntity;
+import com.klster.kates.service.BaselineService;
 import com.klster.kates.service.TestRunRepository;
 
 @Path("/api/tests")
@@ -35,6 +38,9 @@ public class TestResource {
 
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
+
+    @Inject
+    BaselineService baselineService;
 
     @Inject
     public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
@@ -147,4 +153,102 @@ public class TestResource {
     public List<String> getBackends() {
         return orchestrator.availableBackends();
     }
+
+    @GET
+    @Path("/baselines")
+    @Operation(summary = "List all baselines", description = "Returns the baseline run for each test type")
+    @Tag(name = "Baselines")
+    public Response listBaselines() {
+        List<java.util.Map<String, Object>> result = baselineService.listAll().stream()
+                .map(this::baselineToMap)
+                .collect(java.util.stream.Collectors.toList());
+        return Response.ok(result).build();
+    }
+
+    @GET
+    @Path("/baselines/{type}")
+    @Operation(summary = "Get baseline for a test type")
+    @Tag(name = "Baselines")
+    public Response getBaseline(
+            @Parameter(description = "Test type") @PathParam("type") String typeStr) {
+        TestType type = parseBaselineType(typeStr);
+        if (type == null) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "Invalid test type: " + typeStr))
+                    .build();
+        }
+        return baselineService.get(type)
+                .map(b -> Response.ok(baselineToMap(b)).build())
+                .orElse(Response.status(404)
+                        .entity(ApiError.of(404, "Not Found", "No baseline set for type: " + typeStr))
+                        .build());
+    }
+
+    @PUT
+    @Path("/baselines/{type}")
+    @Operation(summary = "Set baseline for a test type",
+            description = "Marks a test run as the baseline for the given type")
+    @Tag(name = "Baselines")
+    public Response setBaseline(
+            @Parameter(description = "Test type") @PathParam("type") String typeStr,
+            java.util.Map<String, String> body) {
+        TestType type = parseBaselineType(typeStr);
+        if (type == null) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "Invalid test type: " + typeStr))
+                    .build();
+        }
+        String runId = body != null ? body.get("runId") : null;
+        if (runId == null || runId.isBlank()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "runId is required in request body"))
+                    .build();
+        }
+        if (repository.findById(runId).isEmpty()) {
+            return Response.status(404)
+                    .entity(ApiError.of(404, "Not Found", "Test run not found: " + runId))
+                    .build();
+        }
+        BaselineEntity baseline = baselineService.set(type, runId);
+        return Response.ok(baselineToMap(baseline)).build();
+    }
+
+    @DELETE
+    @Path("/baselines/{type}")
+    @Operation(summary = "Remove baseline for a test type")
+    @Tag(name = "Baselines")
+    public Response unsetBaseline(
+            @Parameter(description = "Test type") @PathParam("type") String typeStr) {
+        TestType type = parseBaselineType(typeStr);
+        if (type == null) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "Invalid test type: " + typeStr))
+                    .build();
+        }
+        boolean removed = baselineService.unset(type);
+        if (removed) {
+            return Response.noContent().build();
+        }
+        return Response.status(404)
+                .entity(ApiError.of(404, "Not Found", "No baseline set for type: " + typeStr))
+                .build();
+    }
+
+    private java.util.Map<String, Object> baselineToMap(BaselineEntity b) {
+        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("testType", b.getTestType().name());
+        m.put("runId", b.getRunId());
+        m.put("setAt", b.getSetAt().toString());
+        return m;
+    }
+
+    private TestType parseBaselineType(String typeStr) {
+        if (typeStr == null || typeStr.isBlank()) return null;
+        try {
+            return TestType.valueOf(typeStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
 }
+

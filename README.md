@@ -8,6 +8,8 @@ A terminal-first platform for **performance testing**, **chaos engineering**, an
 - **Chaos engineering** — 6 built-in playbooks with LitmusChaos, SLA grading, and safety guardrails
 - **Scenario files** — Declarative YAML test definitions with SLA gates for CI/CD
 - **CLI** — Full-featured terminal client with dashboards, sparklines, trend analysis, and export
+- **Kafka client** — Interactive Kafka CLI with topic CRUD, produce, consume, and consumer group inspection
+- **Interactive TUI** — Full-screen Kafka explorer with tab-based navigation, search, and consumer tail
 - **Backend API** — Quarkus REST API with PostgreSQL persistence and native image support
 - **Offline-first infrastructure** — all images pulled once, loaded into Kind, deployed with `imagePullPolicy: Never`
 - **One-command setup** — `make all` brings up the entire stack
@@ -247,6 +249,23 @@ kates cluster broker configs <id>  # Non-default broker config (grouped by sourc
 kates cluster check                # Comprehensive cluster health check
 kates cluster groups               # List consumer groups with state and members
 kates cluster groups describe <g>  # Consumer group offsets and per-partition lag
+```
+
+#### Kafka Client
+
+```bash
+kates kafka brokers                                    # Broker list with rack/AZ and roles
+kates kafka topics                                     # List topics with ISR health
+kates kafka topic <name>                               # Describe topic partitions and config
+kates kafka create-topic <name> --partitions 3 --replication-factor 3  # Create a topic
+kates kafka alter-topic <name> --config retention.ms=172800000         # Alter topic config
+kates kafka delete-topic <name> --yes                  # Delete a topic
+kates kafka groups                                     # List consumer groups
+kates kafka group <id>                                 # Consumer group lag detail
+kates kafka consume <topic> --offset earliest          # Fetch records from a topic
+kates kafka consume <topic> -f                         # Tail a topic (like tail -f)
+kates kafka produce <topic> --key k --value v          # Produce a record
+kates kafka tui                                        # Launch interactive full-screen explorer
 ```
 
 #### Test Execution

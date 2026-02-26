@@ -85,6 +85,7 @@ Core:
   cluster      Kafka cluster metadata and topic listing
   test         Create, list, inspect, and delete test runs
   report       View reports, export CSV/JUnit, compare runs
+  docs         Man-style documentation for all commands
 
 Analysis:
   trend        Historical performance trends with sparkline charts
@@ -172,4 +173,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&apiURL, "url", "", "Override API URL for this call")
 	rootCmd.PersistentFlags().StringVarP(&outputMode, "output", "o", "", "Output format: table or json")
 	rootCmd.PersistentFlags().StringVar(&contextFlag, "context", "", "Use a specific context instead of current")
+	rootCmd.AddCommand(docsCmd)
 }

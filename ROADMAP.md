@@ -32,10 +32,16 @@
 
 ### Cluster Inspection
 - **Cluster Metadata** — Brokers, controller info, rack/AZ distribution
-- **Topic Management** — List, describe topics with partition health details
+- **Topic Management** — List, describe, create, alter config, and delete topics
 - **Consumer Groups** — Group listing with state, members, per-partition lag
 - **Broker Configuration** — Non-default config inspection grouped by source
 - **Health Check** — Comprehensive cluster health assessment
+
+### Kafka Client
+- **Interactive CLI** — `kates kafka` command suite with colour-coded output
+- **Produce & Consume** — Produce records and tail topics like a log viewer
+- **Topic CRUD** — Create, alter config, and delete topics from the terminal
+- **Interactive TUI** — Full-screen Kafka explorer with Bubble Tea (tabs, search, consumer tail)
 
 ### Scheduling
 - **Recurring Tests** — Cron-based test scheduling with CRUD management

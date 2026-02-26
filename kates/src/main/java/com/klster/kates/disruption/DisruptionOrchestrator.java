@@ -387,7 +387,8 @@ public class DisruptionOrchestrator {
         return new DisruptionReport.StepReport(
                 step.name(),
                 step.faultSpec().disruptionType(),
-                ChaosOutcome.failure("none", step.faultSpec().experimentName(), now, now, System.nanoTime(), reason),
+                ChaosOutcome.failure("none", step.faultSpec().experimentName(), now, now, System.nanoTime(), reason,
+                        null, null, null),
                 List.of(),
                 null,
                 null,

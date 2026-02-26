@@ -25,7 +25,8 @@ public record FaultSpec(
         int cpuCores,
         int gracePeriodSec,
         String targetTopic,
-        int targetPartition) {
+        int targetPartition,
+        java.util.List<ProbeSpec> probes) {
     public static Builder builder(String experimentName) {
         return new Builder(experimentName);
     }
@@ -46,6 +47,7 @@ public record FaultSpec(
         private int gracePeriodSec = 30;
         private String targetTopic = "";
         private int targetPartition = 0;
+        private java.util.List<ProbeSpec> probes = java.util.List.of();
 
         private Builder(String experimentName) {
             this.experimentName = experimentName;
@@ -121,6 +123,11 @@ public record FaultSpec(
             return this;
         }
 
+        public Builder probes(java.util.List<ProbeSpec> v) {
+            this.probes = v;
+            return this;
+        }
+
         public FaultSpec build() {
             return new FaultSpec(
                     experimentName,
@@ -137,7 +144,8 @@ public record FaultSpec(
                     cpuCores,
                     gracePeriodSec,
                     targetTopic,
-                    targetPartition);
+                    targetPartition,
+                    java.util.List.copyOf(probes));
         }
     }
 }

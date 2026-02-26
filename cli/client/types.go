@@ -284,6 +284,9 @@ type ChaosOutcome struct {
 	Verdict        string `json:"verdict"`
 	ChaosDuration  string `json:"chaosDuration"`
 	FailureReason  string `json:"failureReason"`
+	ProbeSuccess   string `json:"probeSuccessPercentage,omitempty"`
+	FailStep       string `json:"failStep,omitempty"`
+	Phase          string `json:"phase,omitempty"`
 }
 
 // CreateTestRequest for POST /api/tests
@@ -578,4 +581,63 @@ type ProduceMeta struct {
 	Partition interface{} `json:"partition"`
 	Offset    interface{} `json:"offset"`
 	Timestamp interface{} `json:"timestamp"`
+}
+
+type CreateTopicRequest struct {
+	Name              string            `json:"name"`
+	Partitions        int               `json:"partitions"`
+	ReplicationFactor int               `json:"replicationFactor"`
+	Configs           map[string]string `json:"configs,omitempty"`
+}
+
+type AlterTopicRequest struct {
+	Configs map[string]string `json:"configs"`
+}
+
+type SetBaselineRequest struct {
+	RunID string `json:"runId"`
+}
+
+type BaselineEntry struct {
+	TestType string `json:"testType"`
+	RunID    string `json:"runId"`
+	SetAt    string `json:"setAt"`
+}
+
+type RegressionReport struct {
+	RunID              string                 `json:"runId"`
+	BaselineID         string                 `json:"baselineId"`
+	TestType           string                 `json:"testType"`
+	RegressionDetected bool                   `json:"regressionDetected"`
+	Deltas             map[string]MetricDelta `json:"deltas"`
+	Warnings           []string               `json:"warnings,omitempty"`
+}
+
+type MetricDelta struct {
+	Baseline float64  `json:"baseline"`
+	Current  float64  `json:"current"`
+	Delta    *float64 `json:"delta,omitempty"`
+}
+
+type TuningReport struct {
+	TestType       string       `json:"testType"`
+	ParameterName  string       `json:"parameterName"`
+	Steps          []TuningStep `json:"steps"`
+	BestStepIndex  int          `json:"bestStepIndex"`
+	Recommendation string       `json:"recommendation"`
+}
+
+type TuningStep struct {
+	StepIndex      int                `json:"stepIndex"`
+	Label          string             `json:"label"`
+	Config         map[string]any     `json:"config"`
+	Metrics        map[string]float64 `json:"metrics,omitempty"`
+	TopicCleanupMs int64              `json:"topicCleanupMs"`
+}
+
+type TuningTypeInfo struct {
+	Type        string `json:"type"`
+	Parameter   string `json:"parameter"`
+	Steps       int    `json:"steps"`
+	Description string `json:"description"`
 }

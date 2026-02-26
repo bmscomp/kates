@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
+	"github.com/klster/kates-cli/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -411,6 +414,126 @@ var kafkaProduceCmd = &cobra.Command{
 	},
 }
 
+var (
+	topicPartitions int
+	topicRF         int
+	createConfigs   []string
+)
+
+var kafkaCreateTopicCmd = &cobra.Command{
+	Use:   "create-topic <name>",
+	Short: "Create a new topic with partition, replication, and config options",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		cfg := parseConfigFlags(createConfigs)
+
+		req := &client.CreateTopicRequest{
+			Name:              name,
+			Partitions:        topicPartitions,
+			ReplicationFactor: topicRF,
+			Configs:           cfg,
+		}
+
+		result, err := apiClient.KafkaCreateTopic(context.Background(), req)
+		if err != nil {
+			return cmdErr("Failed to create topic: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		partitions := fmt.Sprintf("%v", result["partitions"])
+		rf := fmt.Sprintf("%v", result["replicationFactor"])
+		output.Success(fmt.Sprintf(
+			"Created topic %s — partitions: %s, replication-factor: %s",
+			leaderStyle.Render(name), partitions, rf,
+		))
+		return nil
+	},
+}
+
+var alterConfigs []string
+
+var kafkaAlterTopicCmd = &cobra.Command{
+	Use:   "alter-topic <name>",
+	Short: "Alter topic configuration entries (e.g. retention.ms, cleanup.policy)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		cfg := parseConfigFlags(alterConfigs)
+
+		if len(cfg) == 0 {
+			return cmdErr("At least one --config key=value is required.")
+		}
+
+		req := &client.AlterTopicRequest{Configs: cfg}
+		result, err := apiClient.KafkaAlterTopic(context.Background(), name, req)
+		if err != nil {
+			return cmdErr("Failed to alter topic: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		output.Success(fmt.Sprintf(
+			"Updated %s config(s) on topic %s",
+			strconv.Itoa(len(cfg)), leaderStyle.Render(name),
+		))
+
+		rows := make([][]string, 0, len(cfg))
+		for k, v := range cfg {
+			rows = append(rows, []string{k, v})
+		}
+		output.Table([]string{"Config", "New Value"}, rows)
+		return nil
+	},
+}
+
+var deleteTopicYes bool
+
+var kafkaDeleteTopicCmd = &cobra.Command{
+	Use:   "delete-topic <name>",
+	Short: "Delete a topic (with confirmation prompt)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		if !deleteTopicYes {
+			fmt.Printf("%s Delete topic %s? This cannot be undone. [y/N] ",
+				errorBadge("⚠"), leaderStyle.Render(name))
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+				if answer != "y" && answer != "yes" {
+					output.Hint("Cancelled.")
+					return nil
+				}
+			}
+		}
+
+		err := apiClient.KafkaDeleteTopic(context.Background(), name)
+		if err != nil {
+			return cmdErr("Failed to delete topic: " + err.Error())
+		}
+
+		output.Success(fmt.Sprintf("Deleted topic %s", leaderStyle.Render(name)))
+		return nil
+	},
+}
+
+var kafkaTuiCmd = &cobra.Command{
+	Use:   "tui",
+	Short: "Launch interactive Kafka explorer (full-screen TUI)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return tui.Run(apiClient)
+	},
+}
+
 func consumeTail(topic string) error {
 	output.SubHeader(fmt.Sprintf("Tailing %s  (Ctrl+C to stop)", topic))
 	fmt.Println()
@@ -469,6 +592,17 @@ func formatMs(ts interface{}) string {
 	return ms
 }
 
+func parseConfigFlags(flags []string) map[string]string {
+	cfg := make(map[string]string)
+	for _, f := range flags {
+		parts := strings.SplitN(f, "=", 2)
+		if len(parts) == 2 {
+			cfg[parts[0]] = parts[1]
+		}
+	}
+	return cfg
+}
+
 func init() {
 	kafkaTopicsCmd.Flags().String("filter", "", "Filter topics by substring match")
 
@@ -479,6 +613,14 @@ func init() {
 	kafkaProduceCmd.Flags().StringVar(&produceKey, "key", "", "Record key (optional)")
 	kafkaProduceCmd.Flags().StringVarP(&produceValue, "value", "v", "", "Record value to produce")
 
+	kafkaCreateTopicCmd.Flags().IntVar(&topicPartitions, "partitions", 1, "Number of partitions")
+	kafkaCreateTopicCmd.Flags().IntVar(&topicRF, "replication-factor", 1, "Replication factor")
+	kafkaCreateTopicCmd.Flags().StringArrayVar(&createConfigs, "config", nil, "Topic config entry (key=value, repeatable)")
+
+	kafkaAlterTopicCmd.Flags().StringArrayVar(&alterConfigs, "config", nil, "Config entry to set (key=value, repeatable)")
+
+	kafkaDeleteTopicCmd.Flags().BoolVar(&deleteTopicYes, "yes", false, "Skip confirmation prompt")
+
 	kafkaCmd.AddCommand(kafkaBrokersCmd)
 	kafkaCmd.AddCommand(kafkaTopicsCmd)
 	kafkaCmd.AddCommand(kafkaTopicCmd)
@@ -486,5 +628,9 @@ func init() {
 	kafkaCmd.AddCommand(kafkaGroupCmd)
 	kafkaCmd.AddCommand(kafkaConsumeCmd)
 	kafkaCmd.AddCommand(kafkaProduceCmd)
+	kafkaCmd.AddCommand(kafkaCreateTopicCmd)
+	kafkaCmd.AddCommand(kafkaAlterTopicCmd)
+	kafkaCmd.AddCommand(kafkaDeleteTopicCmd)
+	kafkaCmd.AddCommand(kafkaTuiCmd)
 	rootCmd.AddCommand(kafkaCmd)
 }
