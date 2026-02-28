@@ -298,14 +298,14 @@ func (m LabModel) viewResults(width int) string {
 
 	b.WriteString(detailTitleStyle.Render("Iteration History") + "\n\n")
 
-	header := fmt.Sprintf("  %-4s %-12s %-10s %-10s %-8s",
-		dimStyle.Render("#"),
-		dimStyle.Render("Throughput"),
-		dimStyle.Render("P99"),
-		dimStyle.Render("Err Rate"),
-		dimStyle.Render("Delta"))
-	b.WriteString(header + "\n")
-	b.WriteString(dimStyle.Render("  "+strings.Repeat("─", width-6)) + "\n")
+	b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
+		dimStyle.Render(padRight("#", 6)),
+		dimStyle.Render(padRight("Throughput", 18)),
+		dimStyle.Render(padRight("P99", 14)),
+		dimStyle.Render(padRight("Err Rate", 14)),
+		dimStyle.Render(padRight("Delta", 10)),
+	))
+	b.WriteString(dimStyle.Render("  "+strings.Repeat("─", 60)) + "\n\n")
 
 	start := 0
 	if len(m.iterations) > 12 {
@@ -317,11 +317,17 @@ func (m LabModel) viewResults(width int) string {
 		if delta == "" {
 			delta = dimStyle.Render("—")
 		}
-		b.WriteString(fmt.Sprintf("  %-4d %-12s %-10s %-10s %s\n",
-			iter.Number,
-			healthyStyle.Render(fmtLabNum(iter.Throughput)+" rec/s"),
-			warnStyle.Render(fmtLabFloat(iter.P99Ms)+"ms"),
-			dimStyle.Render(fmtLabFloat(iter.ErrorRate)),
+
+		numStr := padRight(fmt.Sprintf("%d", iter.Number), 6)
+		thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", 18)
+		p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", 14)
+		errStr := padRight(fmtLabFloat(iter.ErrorRate), 14)
+
+		b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
+			numStr,
+			healthyStyle.Render(thrStr),
+			warnStyle.Render(p99Str),
+			dimStyle.Render(errStr),
 			delta,
 		))
 	}
@@ -496,6 +502,13 @@ func truncID(id string) string {
 		return id[:12]
 	}
 	return id
+}
+
+func padRight(s string, w int) string {
+	for len(s) < w {
+		s += " "
+	}
+	return s
 }
 
 func labParseInt(s string) int {
