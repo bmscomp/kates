@@ -80,46 +80,71 @@ Quick Start:
   $ kates ctx use local
   $ kates health
 
-Core:
-  health       System health, Kafka connectivity, engine status
-  cluster      Kafka cluster metadata and topic listing
-  test         Create, list, inspect, and delete test runs
-  report       View reports, export CSV/JUnit, compare runs
-  docs         Man-style documentation for all commands
+Health & Status:
+  health         System health, Kafka connectivity, engine status
+  status         Quick one-line system status
+  doctor         Pre-flight cluster readiness checklist
+  version        CLI, API, and runtime version info
+  cluster        Kafka cluster metadata and topic listing
+  test list      List test runs with optional filters
+  test get       Show details of a specific test run
 
-Analysis:
-  trend        Historical performance trends with sparkline charts
-  resilience   Chaos-performance correlation testing
-  schedule     Automated recurring test schedules
-  benchmark    Run full test battery with letter-grade scorecard
-  gate         CI quality gate — exit non-zero if grade is below threshold
-
-Toolbox:
-  doctor       Pre-flight cluster readiness checklist
-  replay       Re-run a previous test with the same parameters
-  explain      Plain-English test narrative with verdict
-  scenario-diff  Compare scenario YAML against a test run
-
-Test Subcommands:
+Testing:
+  test create    Start a new performance test
+  test apply     Apply a YAML test scenario definition
+  test delete    Delete a test run
   test cleanup   Delete orphaned RUNNING tests
-  test export    Export results to CSV or JSON file
   test compare   Side-by-side metric diff of two runs
   test summary   Aggregate stats across all tests
+  test export    Export results to CSV or JSON file
   test flame     ASCII latency histogram
 
-Observability:
-  dashboard    Full-screen monitoring dashboard (alias: dash)
-  top          Live view of running tests (like kubectl top)
-  status       Quick one-line system status
-  version      CLI, API, and runtime version info
-  webhook      Manage test-completion webhook notifications
+Tuning:
+  lab            Interactive performance tuning laboratory
+  advisor        Analyze test results & recommend config improvements
+  profile        Save, compare, and assert performance profiles
+  flow           Declarative multi-step pipeline orchestrator
+  benchmark      Run full test battery with letter-grade scorecard
+
+Analysis:
+  report         View reports, export CSV/JUnit/Markdown/HTML
+  trend          Historical performance trends with sparkline charts
+  diff           Side-by-side comparison of two test run reports
+  explain        Plain-English test narrative with verdict
+  replay         Re-run a previous test with the same parameters
+  scenario-diff  Compare scenario YAML against a test run
+  gate           CI quality gate — exit non-zero if grade < threshold
 
 Kafka Client:
-  kafka        Interactive Kafka client — brokers, topics, groups, produce, consume
+  kafka          Interactive Kafka — brokers, topics, groups, produce, consume
+
+Observability:
+  dashboard      Full-screen monitoring dashboard (alias: dash)
+  top            Live view of running tests (like kubectl top)
+  watch          Live event stream of all KATES activity
+  audit          Audit log of all mutating operations
+  webhook        Manage test-completion webhook notifications
+  cost           Estimate cloud costs for test configurations
+  snapshot       Capture, compare, and diff cluster state
+  changelog      Generate changelog from audit events
+  badge          Generate status badges for README files
+
+Toolbox:
+  init           Initialize workspace with config, scenarios, and CI gate
+  test scaffold  Browse and export built-in scenario templates
+  plugin         Discover and run external plugin commands
+  tldr           Quick command reference cheatsheet
+  docs           Man-style documentation for all commands
+  theme          Manage CLI color themes
 
 Configuration:
-  ctx          Manage server contexts (like kubectl contexts)
-  completion   Shell auto-completion (bash, zsh, fish, powershell)
+  ctx            Manage server contexts (like kubectl contexts)
+  completion     Shell auto-completion (bash, zsh, fish, powershell)
+
+Disruption & Chaos:
+  disruption     Run, list, and monitor disruption experiments
+  resilience     Combined performance + chaos resilience testing
+  schedule       Automated recurring test schedules
 
 Flags:
   -o, --output     Output format: table or json
@@ -133,12 +158,15 @@ Environment Variables:
   KATES_CONTEXT    Override context (lower priority than --context)
 
 Examples:
+  $ kates health
   $ kates test create --type LOAD --records 100000
   $ kates test apply -f scenario.yaml --wait
+  $ kates lab
+  $ kates advisor abc123
+  $ kates flow run -f release-qual.yaml
   $ kates benchmark --records 50000
   $ kates gate --min-grade B --type STRESS
-  $ kates explain 69acdf31
-  $ kates test cleanup --dry-run
+  $ kates cost estimate --records 1M --cloud aws
 
 Docs & more:  kates <command> --help
 `
