@@ -424,7 +424,21 @@ func (m LabModel) runTest() tea.Cmd {
 			return labTestDoneMsg{err: err}
 		}
 
-		for i := 0; i < 180; i++ {
+		maxWait := 6 * time.Minute
+		records := spec.Records
+		testType := strings.ToUpper(m.paramVal("type"))
+
+		switch {
+		case testType == "ENDURANCE":
+			maxWait = 20 * time.Minute
+		case records >= 1_000_000:
+			maxWait = 15 * time.Minute
+		case records >= 500_000:
+			maxWait = 10 * time.Minute
+		}
+
+		deadline := time.Now().Add(maxWait)
+		for time.Now().Before(deadline) {
 			time.Sleep(2 * time.Second)
 			updated, err := m.client.GetTest(context.Background(), run.ID)
 			if err != nil {
@@ -435,7 +449,7 @@ func (m LabModel) runTest() tea.Cmd {
 				return labTestDoneMsg{run: updated}
 			}
 		}
-		return labTestDoneMsg{err: fmt.Errorf("test timed out after 6 minutes")}
+		return labTestDoneMsg{err: fmt.Errorf("test timed out after %s", maxWait.Truncate(time.Minute))}
 	}
 }
 
