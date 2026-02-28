@@ -194,9 +194,12 @@ cli-build:
 	@echo "🔨 Cross-compiling Kates CLI for all platforms..."
 	cd cli && bash build.sh
 
-cli-install: cli-build
-	@echo "📦 Installing Kates CLI locally..."
-	bash scripts/install-kates.sh
+cli-install:
+	@echo "🔨 Building Kates CLI from source..."
+	cd cli && go build -ldflags="-s -w" -o dist/kates .
+	@echo "📦 Installing to /usr/local/bin/kates..."
+	sudo cp cli/dist/kates /usr/local/bin/kates
+	@echo "✅ Installed: $$(kates version 2>/dev/null || echo '/usr/local/bin/kates')"
 
 cli-clean:
 	@echo "🧹 Removing CLI build artifacts..."
