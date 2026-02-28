@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/client"
@@ -59,12 +60,29 @@ linger timing, record sizing, and consumer/producer balance.`,
 
 		run, err := apiClient.GetTest(context.Background(), id)
 		if err != nil {
-			return err
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "Not Found") {
+				fmt.Println()
+				fmt.Println(advHighStyle.Render("  ✖ Test run not found: " + id))
+				fmt.Println()
+				fmt.Println(advDimStyle.Render("  Suggestions:"))
+				fmt.Println(advDimStyle.Render("    • Verify the run ID — use 'kates test list' to see available runs"))
+				fmt.Println(advDimStyle.Render("    • Run IDs are UUID format, e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6"))
+				fmt.Println()
+				return nil
+			}
+			return fmt.Errorf("failed to fetch test run: %w", err)
 		}
 
 		report, err := apiClient.Report(context.Background(), id)
 		if err != nil {
-			return err
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+				fmt.Println()
+				fmt.Println(advMedStyle.Render("  ⏳ Report not available yet for run: " + truncAdvisorID(id)))
+				fmt.Println(advDimStyle.Render("    The test may still be running. Wait for completion and try again."))
+				fmt.Println()
+				return nil
+			}
+			return fmt.Errorf("failed to fetch report: %w", err)
 		}
 
 		rules := analyzeRun(run, report)
