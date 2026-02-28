@@ -17,6 +17,7 @@ spec:
       labels:
         app: kates
     spec:
+      serviceAccountName: kates
       containers:
       - name: kates
         image: kates:latest

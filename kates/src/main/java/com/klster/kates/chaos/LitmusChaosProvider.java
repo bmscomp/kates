@@ -195,7 +195,7 @@ public class LitmusChaosProvider implements ChaosProvider {
         List<ChaosEngineSpec.EnvVar> envVars = new ArrayList<>();
         envVars.add(new ChaosEngineSpec.EnvVar("TOTAL_CHAOS_DURATION", String.valueOf(spec.chaosDurationSec())));
 
-        if (!spec.targetPod().isEmpty()) {
+        if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
             envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", spec.targetPod()));
         }
 

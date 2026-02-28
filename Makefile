@@ -70,6 +70,7 @@ all: check-prerequisites
 		docker build -f kates/Dockerfile -t kates:latest .; \
 		kind load docker-image kates:latest --name panda; \
 		kubectl apply -f kates/k8s/namespace.yaml; \
+		kubectl apply -f kates/k8s/rbac.yaml; \
 		kubectl apply -f kates/k8s/configmap.yaml; \
 		kubectl apply -f kates/k8s/postgres.yaml; \
 		echo "Waiting for PostgreSQL to be ready..."; \
@@ -221,6 +222,7 @@ kates-native:
 kates-deploy:
 	@echo "🚀 Deploying Kates to Kubernetes..."
 	kubectl apply -f kates/k8s/namespace.yaml
+	kubectl apply -f kates/k8s/rbac.yaml
 	kubectl apply -f kates/k8s/configmap.yaml
 	kubectl apply -f kates/k8s/postgres.yaml
 	@echo "Waiting for PostgreSQL to be ready..."

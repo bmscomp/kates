@@ -27,6 +27,7 @@ import com.klster.kates.domain.TestRun;
 import com.klster.kates.domain.TestType;
 import com.klster.kates.engine.TestOrchestrator;
 import com.klster.kates.persistence.BaselineEntity;
+import com.klster.kates.service.AuditService;
 import com.klster.kates.service.BaselineService;
 import com.klster.kates.service.TestRunRepository;
 
@@ -43,6 +44,9 @@ public class TestResource {
     BaselineService baselineService;
 
     @Inject
+    AuditService auditService;
+
+    @Inject
     public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
         this.orchestrator = orchestrator;
         this.repository = repository;
@@ -55,6 +59,7 @@ public class TestResource {
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
     public Response createTest(@Valid CreateTestRequest request) {
         TestRun run = orchestrator.executeTest(request);
+        auditService.record("CREATE", "test", run.getId(), request.getType() + " test");
         return Response.accepted(run).build();
     }
 
@@ -114,8 +119,8 @@ public class TestResource {
         return repository
                 .findById(id)
                 .map(run -> {
-                    orchestrator.refreshStatus(id);
-                    return Response.ok(run).build();
+                    TestRun refreshed = orchestrator.refreshStatus(id);
+                    return Response.ok(refreshed).build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)
                         .entity(new ApiError(404, "Not Found", "Test run not found: " + id))
@@ -133,6 +138,7 @@ public class TestResource {
                 .map(run -> {
                     orchestrator.stopTest(id);
                     repository.delete(id);
+                    auditService.record("DELETE", "test", id, "Test deleted");
                     return Response.noContent().build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)
