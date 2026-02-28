@@ -418,6 +418,7 @@ var (
 	topicPartitions int
 	topicRF         int
 	createConfigs   []string
+	kafkaDryRun     bool
 )
 
 var kafkaCreateTopicCmd = &cobra.Command{
@@ -433,6 +434,11 @@ var kafkaCreateTopicCmd = &cobra.Command{
 			Partitions:        topicPartitions,
 			ReplicationFactor: topicRF,
 			Configs:           cfg,
+		}
+
+		if kafkaDryRun {
+			printDryRun("Would create topic", req)
+			return nil
 		}
 
 		result, err := apiClient.KafkaCreateTopic(context.Background(), req)
@@ -470,6 +476,11 @@ var kafkaAlterTopicCmd = &cobra.Command{
 		}
 
 		req := &client.AlterTopicRequest{Configs: cfg}
+
+		if kafkaDryRun {
+			printDryRun(fmt.Sprintf("Would alter topic %s", name), req)
+			return nil
+		}
 		result, err := apiClient.KafkaAlterTopic(context.Background(), name, req)
 		if err != nil {
 			return cmdErr("Failed to alter topic: " + err.Error())
@@ -514,6 +525,11 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 					return nil
 				}
 			}
+		}
+
+		if kafkaDryRun {
+			printDryRun("Would delete topic", map[string]string{"topic": name})
+			return nil
 		}
 
 		err := apiClient.KafkaDeleteTopic(context.Background(), name)
@@ -621,6 +637,10 @@ func init() {
 
 	kafkaDeleteTopicCmd.Flags().BoolVar(&deleteTopicYes, "yes", false, "Skip confirmation prompt")
 
+	kafkaCreateTopicCmd.Flags().BoolVar(&kafkaDryRun, "dry-run", false, "Print request JSON without executing")
+	kafkaAlterTopicCmd.Flags().BoolVar(&kafkaDryRun, "dry-run", false, "Print request JSON without executing")
+	kafkaDeleteTopicCmd.Flags().BoolVar(&kafkaDryRun, "dry-run", false, "Print request JSON without executing")
+
 	kafkaCmd.AddCommand(kafkaBrokersCmd)
 	kafkaCmd.AddCommand(kafkaTopicsCmd)
 	kafkaCmd.AddCommand(kafkaTopicCmd)
@@ -633,4 +653,6 @@ func init() {
 	kafkaCmd.AddCommand(kafkaDeleteTopicCmd)
 	kafkaCmd.AddCommand(kafkaTuiCmd)
 	rootCmd.AddCommand(kafkaCmd)
+
+	registerKafkaCompletions()
 }

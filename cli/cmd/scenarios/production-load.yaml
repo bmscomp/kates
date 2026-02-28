@@ -1,0 +1,18 @@
+scenarios:
+  - name: "Production Load Simulation"
+    type: LOAD
+    spec:
+      records: 1000000
+      parallelProducers: 8
+      recordSizeBytes: 2048
+      durationSeconds: 300
+      acks: "all"
+      compressionType: "lz4"
+      replicationFactor: 3
+      partitions: 12
+      minInsyncReplicas: 2
+    validate:
+      maxP99LatencyMs: 50
+      maxAvgLatencyMs: 10
+      minThroughputRecPerSec: 50000
+      maxErrorRate: 0.001

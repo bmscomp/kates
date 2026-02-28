@@ -15,6 +15,7 @@ var (
 	testStatusFlag string
 	testPageFlag   int
 	testSizeFlag   int
+	testDryRun     bool
 )
 
 var testCmd = &cobra.Command{
@@ -292,6 +293,11 @@ var testCreateCmd = &cobra.Command{
 			}
 		}
 
+		if testDryRun {
+			printDryRun("Would create test", req)
+			return nil
+		}
+
 		result, err := apiClient.CreateTest(context.Background(), req)
 		if err != nil {
 			return cmdErr("Failed to create test: " + err.Error())
@@ -411,6 +417,7 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createThroughput, "throughput", 0, "Target throughput in messages/sec (-1 = unlimited)")
 	testCreateCmd.Flags().IntVar(&createFetchMinBytes, "fetch-min-bytes", 0, "Consumer fetch.min.bytes (default: 1)")
 	testCreateCmd.Flags().IntVar(&createFetchMaxWaitMs, "fetch-max-wait-ms", 0, "Consumer fetch.max.wait.ms (default: 500)")
+	testCreateCmd.Flags().BoolVar(&testDryRun, "dry-run", false, "Print request JSON without executing")
 
 	testCmd.AddCommand(testListCmd)
 	testCmd.AddCommand(testGetCmd)
@@ -419,4 +426,6 @@ func init() {
 	testCmd.AddCommand(testTypesCmd)
 	testCmd.AddCommand(testBackendsCmd)
 	rootCmd.AddCommand(testCmd)
+
+	registerTestCompletions()
 }

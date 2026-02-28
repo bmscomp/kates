@@ -1,5 +1,7 @@
 package client
 
+import "encoding/json"
+
 // HealthResponse from GET /api/health
 type HealthResponse struct {
 	Status string                `json:"status"`
@@ -130,6 +132,16 @@ type ReportSummary struct {
 type Report struct {
 	Summary           *ReportSummary `json:"summary,omitempty"`
 	OverallSlaVerdict *SlaVerdict    `json:"overallSlaVerdict,omitempty"`
+	Phases            []ReportPhase  `json:"phases,omitempty"`
+}
+
+type ReportPhase struct {
+	Name                string  `json:"name"`
+	Status              string  `json:"status"`
+	RecordsSent         float64 `json:"recordsSent"`
+	ThroughputRecPerSec float64 `json:"throughputRecordsPerSec"`
+	P99LatencyMs        float64 `json:"p99LatencyMs"`
+	ErrorRate           float64 `json:"errorRate"`
 }
 
 type SlaVerdict struct {
@@ -279,14 +291,14 @@ type ResilienceResult struct {
 }
 
 type ChaosOutcome struct {
-	EngineName     string `json:"engineName"`
-	ExperimentName string `json:"experimentName"`
-	Verdict        string `json:"verdict"`
-	ChaosDuration  string `json:"chaosDuration"`
-	FailureReason  string `json:"failureReason"`
-	ProbeSuccess   string `json:"probeSuccessPercentage,omitempty"`
-	FailStep       string `json:"failStep,omitempty"`
-	Phase          string `json:"phase,omitempty"`
+	EngineName     string      `json:"engineName"`
+	ExperimentName string      `json:"experimentName"`
+	Verdict        string      `json:"verdict"`
+	ChaosDuration  json.Number `json:"chaosDuration"`
+	FailureReason  string      `json:"failureReason"`
+	ProbeSuccess   string      `json:"probeSuccessPercentage,omitempty"`
+	FailStep       string      `json:"failStep,omitempty"`
+	Phase          string      `json:"phase,omitempty"`
 }
 
 // CreateTestRequest for POST /api/tests
@@ -640,4 +652,13 @@ type TuningTypeInfo struct {
 	Parameter   string `json:"parameter"`
 	Steps       int    `json:"steps"`
 	Description string `json:"description"`
+}
+
+type AuditEntry struct {
+	ID        int    `json:"id"`
+	Action    string `json:"action"`
+	EventType string `json:"eventType"`
+	Target    string `json:"target"`
+	Details   string `json:"details"`
+	Timestamp string `json:"timestamp"`
 }

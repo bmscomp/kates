@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sort"
 
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var ctxCmd = &cobra.Command{
@@ -160,14 +163,96 @@ var ctxCurrentCmd = &cobra.Command{
 	},
 }
 
+var ctxExportFlag string
+
+var ctxExportCmd = &cobra.Command{
+	Use:   "export",
+	Short: "Export contexts as YAML (for sharing with teammates)",
+	Example: `  kates ctx export
+  kates ctx export > team-contexts.yaml
+  kates ctx export --name staging`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cfg := loadConfig()
+		exportCfg := cfg
+		if ctxExportFlag != "" {
+			if ctx, ok := cfg.Contexts[ctxExportFlag]; ok {
+				exportCfg = Config{
+					CurrentContext: ctxExportFlag,
+					Contexts:       map[string]Context{ctxExportFlag: ctx},
+				}
+			} else {
+				output.Error(fmt.Sprintf("Context '%s' not found", ctxExportFlag))
+				return
+			}
+		}
+		data, err := yaml.Marshal(exportCfg)
+		if err != nil {
+			output.Error("Failed to marshal config: " + err.Error())
+			return
+		}
+		fmt.Print(string(data))
+	},
+}
+
+var ctxImportFile string
+
+var ctxImportCmd = &cobra.Command{
+	Use:   "import",
+	Short: "Import contexts from a YAML file (merges with existing)",
+	Example: `  kates ctx import --file team-contexts.yaml
+  cat contexts.yaml | kates ctx import`,
+	Run: func(cmd *cobra.Command, args []string) {
+		var data []byte
+		var err error
+		if ctxImportFile != "" {
+			data, err = os.ReadFile(ctxImportFile)
+		} else {
+			data, err = io.ReadAll(os.Stdin)
+		}
+		if err != nil {
+			output.Error("Failed to read input: " + err.Error())
+			return
+		}
+
+		var incoming Config
+		if err := yaml.Unmarshal(data, &incoming); err != nil {
+			output.Error("Invalid YAML: " + err.Error())
+			return
+		}
+
+		cfg := loadConfig()
+		imported := 0
+		for name, ctx := range incoming.Contexts {
+			cfg.Contexts[name] = ctx
+			imported++
+		}
+
+		if err := saveConfig(cfg); err != nil {
+			output.Error("Failed to save: " + err.Error())
+			return
+		}
+		output.Success(fmt.Sprintf("Imported %d context(s)", imported))
+		for name := range incoming.Contexts {
+			output.Hint(fmt.Sprintf("  • %s", name))
+		}
+	},
+}
+
 func init() {
 	ctxSetCmd.Flags().StringVar(&ctxSetURL, "url", "", "KATES API base URL (required)")
 	ctxSetCmd.Flags().StringVar(&ctxSetOutput, "output", "", "Default output format for this context")
+
+	ctxExportCmd.Flags().StringVar(&ctxExportFlag, "name", "", "Export only a specific context")
+	ctxImportCmd.Flags().StringVar(&ctxImportFile, "file", "", "YAML file to import (reads stdin if omitted)")
 
 	ctxCmd.AddCommand(ctxShowCmd)
 	ctxCmd.AddCommand(ctxSetCmd)
 	ctxCmd.AddCommand(ctxUseCmd)
 	ctxCmd.AddCommand(ctxDeleteCmd)
 	ctxCmd.AddCommand(ctxCurrentCmd)
+	ctxCmd.AddCommand(ctxExportCmd)
+	ctxCmd.AddCommand(ctxImportCmd)
 	rootCmd.AddCommand(ctxCmd)
+
+	registerCtxCompletions()
 }

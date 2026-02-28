@@ -127,6 +127,11 @@ Flags:
       --context    Use a named context for a single call
   -h, --help       Show this help
 
+Environment Variables:
+  KATES_URL        Override API URL (lower priority than --url)
+  KATES_OUTPUT     Override output format (lower priority than -o)
+  KATES_CONTEXT    Override context (lower priority than --context)
+
 Examples:
   $ kates test create --type LOAD --records 100000
   $ kates test apply -f scenario.yaml --wait
@@ -143,13 +148,26 @@ var rootCmd = &cobra.Command{
 	Short: "Kates — Kafka Advanced Testing & Engineering Suite CLI",
 	Long:  helpTemplate,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if contextFlag == "" {
+			if envCtx := os.Getenv("KATES_CONTEXT"); envCtx != "" {
+				contextFlag = envCtx
+			}
+		}
 		cfg := loadConfig()
 		ctx := activeContext(cfg)
 		if apiURL == "" {
-			apiURL = ctx.URL
+			if envURL := os.Getenv("KATES_URL"); envURL != "" {
+				apiURL = envURL
+			} else {
+				apiURL = ctx.URL
+			}
 		}
 		if outputMode == "" {
-			outputMode = ctx.Output
+			if envOut := os.Getenv("KATES_OUTPUT"); envOut != "" {
+				outputMode = envOut
+			} else {
+				outputMode = ctx.Output
+			}
 		}
 		if outputMode == "" {
 			outputMode = "table"

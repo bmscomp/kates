@@ -1,405 +1,200 @@
 package cmd
 
 import (
+	"embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
-var (
-	scaffoldType   string
-	scaffoldOutput string
-)
+//go:embed scenarios/*.yaml
+var scenarioFS embed.FS
+
+type scenarioMeta struct {
+	filename    string
+	name        string
+	testType    string
+	description string
+}
+
+var builtinScenarios = []scenarioMeta{
+	{filename: "quick-load.yaml", name: "quick-load", testType: "LOAD", description: "Quick smoke test — 50k records, 2 producers, p99 < 100ms gate"},
+	{filename: "production-load.yaml", name: "production-load", testType: "LOAD", description: "Production-grade — 1M records, 8 producers, acks=all, lz4, strict SLA"},
+	{filename: "stress-test.yaml", name: "stress-test", testType: "STRESS", description: "High-throughput stress — 5M records, 16 producers, find breaking points"},
+	{filename: "endurance-soak.yaml", name: "endurance-soak", testType: "ENDURANCE", description: "1-hour soak at 5k msg/s — detect GC pauses and log compaction issues"},
+	{filename: "exactly-once.yaml", name: "exactly-once", testType: "ROUND_TRIP", description: "E2E integrity — idempotent + transactional, zero-loss, CRC verification"},
+	{filename: "spike-test.yaml", name: "spike-test", testType: "SPIKE", description: "Burst traffic — 32 producers for 60s, test backpressure handling"},
+	{filename: "ci-gate.yaml", name: "ci-gate", testType: "LOAD", description: "CI pipeline gate — fast 10k-record validation with strict zero-error SLA"},
+}
 
 var testScaffoldCmd = &cobra.Command{
 	Use:   "scaffold",
-	Short: "Generate a ready-to-edit YAML scenario template",
-	Example: `  kates test scaffold --type LOAD
-  kates test scaffold --type STRESS -o stress-test.yaml
-  kates test scaffold --type SPIKE
-  kates test scaffold --type ENDURANCE`,
+	Short: "Browse and export built-in test scenario templates",
+	Long: `Browse the curated scenario library with 'list', preview with 'show',
+and export ready-to-use YAML files with 'export'.
+
+Without subcommands, lists all available templates.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		showScenarioList()
+	},
+}
+
+var scaffoldListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all available built-in scenario templates",
+	Run: func(cmd *cobra.Command, args []string) {
+		showScenarioList()
+	},
+}
+
+func showScenarioList() {
+	output.Banner("Scenario Library", fmt.Sprintf("%d templates", len(builtinScenarios)))
+
+	rows := make([][]string, 0, len(builtinScenarios))
+	for _, s := range builtinScenarios {
+		rows = append(rows, []string{s.name, s.testType, s.description})
+	}
+	output.Table([]string{"Name", "Type", "Description"}, rows)
+	fmt.Println()
+	output.Hint("Use: kates test scaffold show <name>     — preview a template")
+	output.Hint("Use: kates test scaffold export <name>   — write to current directory")
+	output.Hint("Use: kates test scaffold export --all     — export all templates")
+}
+
+var scaffoldShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Preview a built-in scenario template with syntax highlighting",
+	Args:  cobra.ExactArgs(1),
+	Example: `  kates test scaffold show quick-load
+  kates test scaffold show production-load`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		t := strings.ToUpper(scaffoldType)
-		tmpl, ok := scaffoldTemplates[t]
-		if !ok {
-			return cmdErr(fmt.Sprintf("Unknown test type: %s. Use 'kates test types' to list available types.", scaffoldType))
+		meta := findScenario(args[0])
+		if meta == nil {
+			return cmdErr(fmt.Sprintf("Unknown scenario '%s'. Use 'kates test scaffold list' to see available templates.", args[0]))
 		}
 
-		content := tmpl()
+		data, err := scenarioFS.ReadFile("scenarios/" + meta.filename)
+		if err != nil {
+			return cmdErr("Failed to read template: " + err.Error())
+		}
 
-		if scaffoldOutput != "" {
-			if err := os.WriteFile(scaffoldOutput, []byte(content), 0644); err != nil {
-				return cmdErr("Failed to write file: " + err.Error())
+		output.Banner(meta.name, meta.description)
+		fmt.Println()
+
+		var parsed interface{}
+		if yaml.Unmarshal(data, &parsed) == nil {
+			pretty, _ := yaml.Marshal(parsed)
+			for _, line := range strings.Split(string(pretty), "\n") {
+				if strings.Contains(line, ":") {
+					parts := strings.SplitN(line, ":", 2)
+					fmt.Printf("  %s:%s\n",
+						output.AccentStyle.Render(parts[0]),
+						parts[1],
+					)
+				} else if line != "" {
+					fmt.Printf("  %s\n", line)
+				}
 			}
-			output.Success(fmt.Sprintf("Scaffold written to %s", scaffoldOutput))
-			output.Hint("Edit the file, then run: kates test apply -f " + scaffoldOutput)
-			return nil
+		} else {
+			fmt.Println(string(data))
 		}
 
-		fmt.Println(content)
+		fmt.Println()
+		output.Hint(fmt.Sprintf("Export: kates test scaffold export %s", meta.name))
+		output.Hint(fmt.Sprintf("Run:    kates test apply -f %s --wait", meta.filename))
 		return nil
 	},
 }
 
-var scaffoldTemplates = map[string]func() string{
-	"LOAD":            scaffoldLoad,
-	"STRESS":          scaffoldStress,
-	"SPIKE":           scaffoldSpike,
-	"ENDURANCE":       scaffoldEndurance,
-	"VOLUME":          scaffoldVolume,
-	"CAPACITY":        scaffoldCapacity,
-	"ROUND_TRIP":      scaffoldRoundTrip,
-	"INTEGRITY":       scaffoldIntegrity,
-	"INTEGRITY_CHAOS": scaffoldIntegrityChaos,
+var (
+	scaffoldExportAll bool
+	scaffoldExportDir string
+)
+
+var scaffoldExportCmd = &cobra.Command{
+	Use:   "export [name]",
+	Short: "Export scenario template(s) to the current directory",
+	Example: `  kates test scaffold export quick-load
+  kates test scaffold export --all
+  kates test scaffold export production-load --dir ./scenarios/`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := scaffoldExportDir
+		if dir == "" {
+			dir = "."
+		}
+
+		if scaffoldExportAll {
+			count := 0
+			for _, s := range builtinScenarios {
+				if err := exportScenario(s, dir); err != nil {
+					output.Warn(fmt.Sprintf("Failed to export %s: %s", s.name, err))
+				} else {
+					count++
+				}
+			}
+			output.Success(fmt.Sprintf("Exported %d scenario templates to %s", count, dir))
+			return nil
+		}
+
+		if len(args) == 0 {
+			return cmdErr("Provide a scenario name or use --all. See 'kates test scaffold list'.")
+		}
+
+		meta := findScenario(args[0])
+		if meta == nil {
+			return cmdErr(fmt.Sprintf("Unknown scenario '%s'. Use 'kates test scaffold list'.", args[0]))
+		}
+
+		return exportScenario(*meta, dir)
+	},
 }
 
-func scaffoldLoad() string {
-	return `# LOAD TEST — Steady-state throughput with producers and consumers
-# Measures baseline performance under a constant, controlled load.
-#
-# Usage: kates test apply -f load-test.yaml --wait
+func exportScenario(s scenarioMeta, dir string) error {
+	data, err := scenarioFS.ReadFile("scenarios/" + s.filename)
+	if err != nil {
+		return err
+	}
 
-scenarios:
-  - name: "Baseline Load Test"
-    type: LOAD
-    spec:
-      records: 1000000
-      parallelProducers: 2
-      numConsumers: 2
-      recordSizeBytes: 1024
-      durationSeconds: 300
-      topic: "load-benchmark"
-      # Producer tuning
-      acks: "all"
-      batchSize: 65536
-      lingerMs: 5
-      compressionType: "lz4"
-      # Consumer tuning
-      consumerGroup: "load-cg"
-      fetchMinBytes: 1
-      fetchMaxWaitMs: 500
-      # Topic settings
-      partitions: 6
-      replicationFactor: 3
-      minInsyncReplicas: 2
-    validate:
-      maxP99LatencyMs: 50
-      minThroughputRecPerSec: 10000
-`
+	outPath := filepath.Join(dir, s.filename)
+	if _, err := os.Stat(outPath); err == nil {
+		output.Warn(fmt.Sprintf("Skipping %s (already exists)", outPath))
+		return nil
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(outPath, data, 0644); err != nil {
+		return err
+	}
+
+	output.Success(fmt.Sprintf("Exported %s → %s", s.name, outPath))
+	output.Hint(fmt.Sprintf("  Run: kates test apply -f %s --wait", outPath))
+	return nil
 }
 
-func scaffoldStress() string {
-	return `# STRESS TEST — Graduated ramp to find the breaking point
-# Increases throughput in steps until the cluster saturates.
-#
-# Usage: kates test apply -f stress-test.yaml --wait
-
-scenarios:
-  - name: "Throughput Ramp – 10K"
-    type: STRESS
-    spec:
-      records: 500000
-      recordSizeBytes: 1024
-      targetThroughput: 10000
-      durationSeconds: 60
-      topic: "stress-benchmark"
-      acks: "1"
-      batchSize: 131072
-      lingerMs: 10
-      compressionType: "lz4"
-      partitions: 6
-
-  - name: "Throughput Ramp – 50K"
-    type: STRESS
-    spec:
-      records: 500000
-      recordSizeBytes: 1024
-      targetThroughput: 50000
-      durationSeconds: 60
-      topic: "stress-benchmark"
-      acks: "1"
-      batchSize: 131072
-      lingerMs: 10
-      partitions: 6
-    validate:
-      maxP99LatencyMs: 100
-
-  - name: "Throughput Ramp – Unlimited"
-    type: STRESS
-    spec:
-      records: 1000000
-      recordSizeBytes: 1024
-      durationSeconds: 60
-      topic: "stress-benchmark"
-      acks: "1"
-      batchSize: 131072
-      lingerMs: 10
-      partitions: 6
-`
-}
-
-func scaffoldSpike() string {
-	return `# SPIKE TEST — Baseline → burst → recovery
-# Validates cluster behavior under sudden traffic spikes.
-#
-# Usage: kates test apply -f spike-test.yaml --wait
-
-scenarios:
-  - name: "Spike – Baseline Phase"
-    type: LOAD
-    spec:
-      records: 60000
-      targetThroughput: 1000
-      durationSeconds: 60
-      topic: "spike-benchmark"
-      partitions: 6
-    validate:
-      maxP99LatencyMs: 20
-
-  - name: "Spike – Burst Phase"
-    type: STRESS
-    spec:
-      records: 1500000
-      parallelProducers: 3
-      durationSeconds: 120
-      topic: "spike-benchmark"
-      acks: "1"
-      batchSize: 131072
-      lingerMs: 10
-      partitions: 6
-
-  - name: "Spike – Recovery Phase"
-    type: LOAD
-    spec:
-      records: 60000
-      targetThroughput: 1000
-      durationSeconds: 60
-      topic: "spike-benchmark"
-      partitions: 6
-    validate:
-      maxP99LatencyMs: 30
-`
-}
-
-func scaffoldEndurance() string {
-	return `# ENDURANCE TEST — Long-running soak test
-# Detects memory leaks, GC pressure, and log segment issues over time.
-#
-# Usage: kates test apply -f endurance-test.yaml --wait
-
-scenarios:
-  - name: "1-Hour Endurance Run"
-    type: ENDURANCE
-    spec:
-      targetThroughput: 5000
-      recordSizeBytes: 1024
-      durationSeconds: 3600
-      topic: "endurance-benchmark"
-      parallelProducers: 2
-      numConsumers: 2
-      consumerGroup: "endurance-cg"
-      acks: "all"
-      compressionType: "lz4"
-      partitions: 6
-      replicationFactor: 3
-      minInsyncReplicas: 2
-    validate:
-      maxP99LatencyMs: 100
-      minThroughputRecPerSec: 4000
-`
-}
-
-func scaffoldVolume() string {
-	return `# VOLUME TEST — Large message and high count workloads
-# Tests both large message handling and high message count throughput.
-#
-# Usage: kates test apply -f volume-test.yaml --wait
-
-scenarios:
-  - name: "Volume – Large Messages (100KB)"
-    type: VOLUME
-    spec:
-      records: 50000
-      recordSizeBytes: 102400
-      durationSeconds: 300
-      topic: "volume-large"
-      acks: "all"
-      batchSize: 131072
-      partitions: 6
-
-  - name: "Volume – High Count (5M × 1KB)"
-    type: VOLUME
-    spec:
-      records: 5000000
-      recordSizeBytes: 1024
-      durationSeconds: 300
-      topic: "volume-count"
-      acks: "1"
-      batchSize: 131072
-      lingerMs: 10
-      compressionType: "zstd"
-      partitions: 6
-`
-}
-
-func scaffoldCapacity() string {
-	return `# CAPACITY TEST — Step-probe to find maximum throughput
-# Increases load in steps to identify the cluster's saturation point.
-#
-# Usage: kates test apply -f capacity-test.yaml --wait
-
-scenarios:
-  - name: "Capacity Probe – 5K msg/s"
-    type: CAPACITY
-    spec:
-      records: 200000
-      targetThroughput: 5000
-      recordSizeBytes: 1024
-      durationSeconds: 60
-      topic: "capacity-benchmark"
-      partitions: 6
-    validate:
-      maxP99LatencyMs: 20
-
-  - name: "Capacity Probe – 20K msg/s"
-    type: CAPACITY
-    spec:
-      records: 200000
-      targetThroughput: 20000
-      recordSizeBytes: 1024
-      durationSeconds: 60
-      topic: "capacity-benchmark"
-      partitions: 6
-    validate:
-      maxP99LatencyMs: 50
-
-  - name: "Capacity Probe – 80K msg/s"
-    type: CAPACITY
-    spec:
-      records: 200000
-      targetThroughput: 80000
-      recordSizeBytes: 1024
-      durationSeconds: 60
-      topic: "capacity-benchmark"
-      partitions: 6
-
-  - name: "Capacity Probe – Unlimited"
-    type: CAPACITY
-    spec:
-      records: 500000
-      recordSizeBytes: 1024
-      durationSeconds: 60
-      topic: "capacity-benchmark"
-      partitions: 6
-`
-}
-
-func scaffoldRoundTrip() string {
-	return `# ROUND TRIP TEST — End-to-end produce-then-consume latency
-# Measures the full path from producer send to consumer receive.
-#
-# Usage: kates test apply -f roundtrip-test.yaml --wait
-
-scenarios:
-  - name: "Round Trip Latency Test"
-    type: ROUND_TRIP
-    spec:
-      records: 100000
-      targetThroughput: 1000
-      recordSizeBytes: 1024
-      durationSeconds: 120
-      topic: "roundtrip-benchmark"
-      acks: "all"
-      partitions: 6
-      replicationFactor: 3
-    validate:
-      maxP99LatencyMs: 30
-      maxAvgLatencyMs: 10
-`
-}
-
-func scaffoldIntegrity() string {
-	return `# INTEGRITY TEST — Data loss, corruption, and ordering verification
-# Produces CRC-protected sequenced records, consumes them back, and
-# reconciles to detect lost, duplicated, corrupted, or out-of-order records.
-#
-# Usage: kates test apply -f integrity-test.yaml --wait
-
-scenarios:
-  - name: "Data Integrity Verification"
-    type: INTEGRITY
-    spec:
-      records: 500000
-      parallelProducers: 1
-      numConsumers: 1
-      recordSizeBytes: 512
-      durationSeconds: 300
-      topic: "integrity-benchmark"
-      acks: "all"
-      batchSize: 65536
-      lingerMs: 5
-      compressionType: "lz4"
-      consumerGroup: "integrity-cg"
-      partitions: 6
-      replicationFactor: 3
-      minInsyncReplicas: 2
-      enableCrc: true
-      enableIdempotence: true
-    validate:
-      maxDataLossPercent: 0
-      maxRtoMs: 5000
-      maxRpoMs: 1000
-      maxOutOfOrder: 0
-      maxCrcFailures: 0
-`
-}
-
-func scaffoldIntegrityChaos() string {
-	return `# INTEGRITY_CHAOS TEST — Data integrity under fault injection
-# Runs an integrity test while injecting a chaos fault mid-way.
-# Measures data loss, corruption, and ordering under failure conditions.
-#
-# Usage: kates test apply -f integrity-chaos.yaml --wait
-
-scenarios:
-  - name: "Integrity Under Chaos"
-    type: INTEGRITY
-    backend: native
-    spec:
-      records: 500000
-      parallelProducers: 1
-      numConsumers: 1
-      recordSizeBytes: 512
-      durationSeconds: 600
-      topic: "integrity-chaos-test"
-      acks: "all"
-      batchSize: 65536
-      lingerMs: 5
-      compressionType: "lz4"
-      consumerGroup: "integrity-chaos-cg"
-      partitions: 6
-      replicationFactor: 3
-      minInsyncReplicas: 2
-      enableCrc: true
-      enableIdempotence: true
-    chaos:
-      experimentName: "kafka-broker-kill"
-      chaosDurationSec: 30
-      steadyStateSec: 60
-    validate:
-      maxDataLossPercent: 0
-      maxRtoMs: 10000
-      maxRpoMs: 5000
-      maxOutOfOrder: 0
-      maxCrcFailures: 0
-`
+func findScenario(name string) *scenarioMeta {
+	name = strings.TrimSuffix(name, ".yaml")
+	for _, s := range builtinScenarios {
+		if s.name == name || s.filename == name {
+			return &s
+		}
+	}
+	return nil
 }
 
 func init() {
-	testScaffoldCmd.Flags().StringVar(&scaffoldType, "type", "LOAD", "Test type (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, INTEGRITY_CHAOS)")
-	testScaffoldCmd.Flags().StringVarP(&scaffoldOutput, "output", "o", "", "Write scaffold to file instead of stdout")
+	scaffoldExportCmd.Flags().StringVarP(&scaffoldExportDir, "dir", "d", "", "Output directory (default: current)")
+	scaffoldExportCmd.Flags().BoolVar(&scaffoldExportAll, "all", false, "Export all templates")
+
+	testScaffoldCmd.AddCommand(scaffoldListCmd)
+	testScaffoldCmd.AddCommand(scaffoldShowCmd)
+	testScaffoldCmd.AddCommand(scaffoldExportCmd)
 	testCmd.AddCommand(testScaffoldCmd)
 }

@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -146,44 +149,262 @@ var testListWatchCmd = &cobra.Command{
 
 var createWait bool
 
-func pollUntilDone(id string) {
-	tick := 0
-	for {
-		result, err := apiClient.GetTest(context.Background(), id)
-		if err != nil {
-			output.Error("Polling failed: " + err.Error())
-			return
+type pollTickMsg time.Time
+
+type pollResultMsg struct {
+	test *client.TestRun
+	err  error
+}
+
+type pollDoneMsg struct {
+	summary *client.ReportSummary
+}
+
+type pollModel struct {
+	id             string
+	progress       progress.Model
+	elapsed        time.Duration
+	startTime      time.Time
+	throughputHist []float64
+	lastStatus     string
+	totalRecords   float64
+	recordsSent    float64
+	phases         []client.PhaseResult
+	done           bool
+	failed         bool
+	summary        *client.ReportSummary
+	err            error
+}
+
+func newPollModel(id string) pollModel {
+	p := progress.New(
+		progress.WithDefaultGradient(),
+		progress.WithWidth(40),
+	)
+	return pollModel{
+		id:        id,
+		progress:  p,
+		startTime: time.Now(),
+	}
+}
+
+func (m pollModel) Init() tea.Cmd {
+	return tea.Batch(
+		m.fetchTest(),
+		m.tickCmd(),
+	)
+}
+
+func (m pollModel) tickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return pollTickMsg(t)
+	})
+}
+
+func (m pollModel) fetchTest() tea.Cmd {
+	return func() tea.Msg {
+		result, err := apiClient.GetTest(context.Background(), m.id)
+		return pollResultMsg{test: result, err: err}
+	}
+}
+
+func (m pollModel) fetchSummary() tea.Cmd {
+	return func() tea.Msg {
+		summary, _ := apiClient.ReportSummary(context.Background(), m.id)
+		return pollDoneMsg{summary: summary}
+	}
+}
+
+func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
 		}
-		status := strings.ToUpper(result.Status)
-		switch status {
-		case "DONE", "COMPLETED":
-			fmt.Printf("\r  %s Test completed                              \n",
-				output.SuccessStyle.Render("✓"),
-			)
-			summary, err := apiClient.ReportSummary(context.Background(), id)
-			if err == nil {
-				output.SubHeader("Results")
-				output.KeyValue("Throughput", fmt.Sprintf("%s rec/s", fmtNum(summary.AvgThroughputRecPerSec)))
-				output.KeyValue("P99 Latency", fmt.Sprintf("%s ms", fmtFloat(summary.P99LatencyMs, 2)))
-				output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", summary.ErrorRate*100))
+
+	case pollTickMsg:
+		m.elapsed = time.Since(m.startTime)
+		if m.done || m.failed {
+			return m, nil
+		}
+		return m, tea.Batch(m.fetchTest(), m.tickCmd())
+
+	case pollResultMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		test := msg.test
+		m.lastStatus = strings.ToUpper(test.Status)
+		m.phases = test.Results
+
+		var totalSent float64
+		var maxThroughput float64
+		for _, r := range test.Results {
+			totalSent += r.RecordsSent
+			if r.ThroughputRecordsPerSec > maxThroughput {
+				maxThroughput = r.ThroughputRecordsPerSec
 			}
-			output.Hint(fmt.Sprintf("Full report: kates report show %s", id))
-			return
-		case "FAILED", "ERROR":
-			fmt.Printf("\r  %s Test failed                                 \n",
-				output.ErrorStyle.Render("✖"),
-			)
-			return
-		default:
-			elapsed := time.Duration(tick*2) * time.Second
-			fmt.Printf("\r  %s Waiting... %s [%s]   ",
-				spinnerFrame(tick),
-				output.DimStyle.Render(elapsed.String()),
-				output.AccentStyle.Render(status),
-			)
-			tick++
-			time.Sleep(2 * time.Second)
 		}
+		m.recordsSent = totalSent
+		m.throughputHist = append(m.throughputHist, maxThroughput)
+
+		if test.Spec != nil && test.Spec.Records > 0 {
+			m.totalRecords = float64(test.Spec.Records)
+		}
+
+		switch m.lastStatus {
+		case "DONE", "COMPLETED":
+			m.done = true
+			return m, m.fetchSummary()
+		case "FAILED", "ERROR":
+			m.failed = true
+			return m, tea.Quit
+		}
+
+	case pollDoneMsg:
+		m.summary = msg.summary
+		return m, tea.Quit
+
+	case progress.FrameMsg:
+		progressModel, cmd := m.progress.Update(msg)
+		m.progress = progressModel.(progress.Model)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m pollModel) View() string {
+	if m.err != nil {
+		return output.ErrorStyle.Render("  ✖ Polling failed: "+m.err.Error()) + "\n"
+	}
+
+	var b strings.Builder
+
+	b.WriteString("\n")
+
+	statusBadge := output.AccentStyle.Render(m.lastStatus)
+	if m.done {
+		statusBadge = output.SuccessStyle.Render("✓ COMPLETED")
+	} else if m.failed {
+		statusBadge = output.ErrorStyle.Render("✖ FAILED")
+	}
+
+	b.WriteString(fmt.Sprintf("  %s  %s  %s\n\n",
+		output.AccentStyle.Render("Test"),
+		output.DimStyle.Render(truncID(m.id)),
+		statusBadge,
+	))
+
+	pct := m.progressPercent()
+	bar := m.progress.ViewAs(pct)
+	b.WriteString(fmt.Sprintf("  %s  %s\n",
+		bar,
+		output.DimStyle.Render(fmt.Sprintf("%.0f%%", pct*100)),
+	))
+
+	elapsedStr := m.elapsed.Truncate(time.Second).String()
+	recordsStr := fmtNum(m.recordsSent)
+	b.WriteString(fmt.Sprintf("  %s %s  %s %s",
+		output.DimStyle.Render("Elapsed:"),
+		elapsedStr,
+		output.DimStyle.Render("Records:"),
+		recordsStr,
+	))
+	if m.totalRecords > 0 {
+		b.WriteString(fmt.Sprintf(" / %s", fmtNum(m.totalRecords)))
+	}
+	b.WriteString("\n")
+
+	if len(m.throughputHist) > 1 {
+		spark := output.Sparkline(m.throughputHist)
+		latest := m.throughputHist[len(m.throughputHist)-1]
+		b.WriteString(fmt.Sprintf("  %s %s %s\n",
+			output.DimStyle.Render("Throughput:"),
+			spark,
+			fmtNum(latest)+" rec/s",
+		))
+	}
+
+	if len(m.phases) > 0 {
+		b.WriteString("\n")
+		for _, r := range m.phases {
+			phase := r.PhaseName
+			if phase == "" {
+				phase = "main"
+			}
+			phaseStatus := output.DimStyle.Render(r.Status)
+			if strings.EqualFold(r.Status, "DONE") || strings.EqualFold(r.Status, "COMPLETED") {
+				phaseStatus = output.SuccessStyle.Render("✓ " + r.Status)
+			} else if strings.EqualFold(r.Status, "RUNNING") {
+				phaseStatus = output.AccentStyle.Render("● " + r.Status)
+			}
+			b.WriteString(fmt.Sprintf("  %-12s %s  %s rec/s  p99=%sms\n",
+				phase,
+				phaseStatus,
+				fmtFloat(r.ThroughputRecordsPerSec, 1),
+				fmtFloat(r.P99LatencyMs, 2),
+			))
+		}
+	}
+
+	if m.done && m.summary != nil {
+		s := m.summary
+		b.WriteString(fmt.Sprintf("\n  %s\n", output.SuccessStyle.Render("Test completed successfully")))
+		b.WriteString(fmt.Sprintf("  Throughput: %s rec/s  │  P99: %s ms  │  Errors: %.4f%%\n",
+			fmtNum(s.AvgThroughputRecPerSec),
+			fmtFloat(s.P99LatencyMs, 2),
+			s.ErrorRate*100,
+		))
+		b.WriteString(fmt.Sprintf("  %s\n",
+			output.DimStyle.Render(fmt.Sprintf("Full report: kates report show %s", m.id)),
+		))
+	}
+
+	if m.failed {
+		b.WriteString(fmt.Sprintf("\n  %s\n", output.ErrorStyle.Render("Test failed")))
+	}
+
+	if !m.done && !m.failed {
+		b.WriteString(fmt.Sprintf("\n  %s\n",
+			output.DimStyle.Render("Polling every 2s · q to detach"),
+		))
+	}
+
+	return b.String()
+}
+
+func (m pollModel) progressPercent() float64 {
+	if m.done {
+		return 1.0
+	}
+	if m.failed {
+		return 0.0
+	}
+	if m.totalRecords > 0 && m.recordsSent > 0 {
+		pct := m.recordsSent / m.totalRecords
+		if pct > 0.99 {
+			pct = 0.99
+		}
+		return pct
+	}
+	elapsed := m.elapsed.Seconds()
+	if elapsed < 5 {
+		return 0.05
+	}
+	pct := elapsed / (elapsed + 30)
+	if pct > 0.95 {
+		pct = 0.95
+	}
+	return pct
+}
+
+func pollUntilDone(id string) {
+	m := newPollModel(id)
+	p := tea.NewProgram(m)
+	if _, err := p.Run(); err != nil {
+		output.Error("Watch error: " + err.Error())
 	}
 }
 

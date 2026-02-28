@@ -12,6 +12,7 @@ import (
 )
 
 var resilienceFile string
+var resilienceDryRun bool
 
 var resilienceCmd = &cobra.Command{
 	Use:   "resilience",
@@ -44,6 +45,11 @@ var resilienceRunCmd = &cobra.Command{
 			return cmdErr("Invalid JSON: " + err.Error())
 		}
 
+		if resilienceDryRun {
+			printDryRun("Would run resilience test", req)
+			return nil
+		}
+
 		fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
 
 		result, err := apiClient.Resilience(context.Background(), req)
@@ -63,7 +69,7 @@ var resilienceRunCmd = &cobra.Command{
 			output.SubHeader("Chaos Outcome")
 			output.KeyValue("Experiment", chaos.ExperimentName)
 			output.KeyValue("Verdict", output.StatusBadge(chaos.Verdict))
-			output.KeyValue("Duration", chaos.ChaosDuration)
+			output.KeyValue("Duration", chaos.ChaosDuration.String()+"s")
 			if chaos.Phase != "" {
 				output.KeyValue("Phase", chaos.Phase)
 			}
@@ -110,6 +116,7 @@ var resilienceRunCmd = &cobra.Command{
 
 func init() {
 	resilienceRunCmd.Flags().StringVar(&resilienceFile, "config", "", "Path to resilience test JSON config (required)")
+	resilienceRunCmd.Flags().BoolVar(&resilienceDryRun, "dry-run", false, "Print parsed config without executing")
 
 	resilienceCmd.AddCommand(resilienceRunCmd)
 	rootCmd.AddCommand(resilienceCmd)

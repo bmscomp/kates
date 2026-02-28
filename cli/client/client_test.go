@@ -794,7 +794,7 @@ func TestResilience(t *testing.T) {
 		json.NewEncoder(w).Encode(ResilienceResult{
 			Status: "COMPLETED",
 			ChaosOutcome: &ChaosOutcome{
-				ExperimentName: "pod-kill", Verdict: "Pass", ChaosDuration: "60s",
+				ExperimentName: "pod-kill", Verdict: "Pass", ChaosDuration: json.Number("60"),
 			},
 			ImpactDeltas: map[string]float64{"p99LatencyMs": 3.5},
 		})

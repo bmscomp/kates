@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -15,7 +16,10 @@ const (
 	tabBrokers tab = iota
 	tabTopics
 	tabGroups
+	tabProduce
 )
+
+type autoRefreshMsg struct{}
 
 type Model struct {
 	tabs      []string
@@ -23,6 +27,7 @@ type Model struct {
 	brokers   brokersModel
 	topics    topicsModel
 	groups    groupsModel
+	produce   produceModel
 	width     int
 	height    int
 	filtering bool
@@ -32,11 +37,12 @@ type Model struct {
 
 func New(c *client.Client) Model {
 	return Model{
-		tabs:    []string{"Brokers", "Topics", "Groups"},
+		tabs:    []string{"Brokers", "Topics", "Groups", "Produce"},
 		active:  tabTopics,
 		brokers: newBrokersModel(c),
 		topics:  newTopicsModel(c),
 		groups:  newGroupsModel(c),
+		produce: newProduceModel(c),
 	}
 }
 
@@ -47,11 +53,19 @@ func Run(c *client.Client) error {
 	return err
 }
 
+func scheduleAutoRefresh() tea.Cmd {
+	return tea.Tick(10*time.Second, func(time.Time) tea.Msg {
+		return autoRefreshMsg{}
+	})
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.brokers.Init(),
 		m.topics.Init(),
 		m.groups.Init(),
+		m.produce.Init(),
+		scheduleAutoRefresh(),
 	)
 }
 
@@ -66,11 +80,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.topics.height = msg.Height
 		m.groups.width = msg.Width
 		m.groups.height = msg.Height
+		m.produce.width = msg.Width
+		m.produce.height = msg.Height
 		return m, nil
+
+	case autoRefreshMsg:
+		var cmds []tea.Cmd
+		cmds = append(cmds, m.brokers.loadBrokers())
+		cmds = append(cmds, m.topics.loadTopics())
+		cmds = append(cmds, m.groups.loadGroups())
+		cmds = append(cmds, scheduleAutoRefresh())
+		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		if m.filtering {
 			return m.handleFilter(msg)
+		}
+
+		if m.active == tabProduce && m.produce.view == produceInput {
+			var cmd tea.Cmd
+			m.produce, cmd = m.produce.Update(msg)
+			return m, cmd
 		}
 
 		switch msg.String() {
@@ -91,6 +121,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "3":
 			m.active = tabGroups
+			return m, nil
+		case "4":
+			m.active = tabProduce
 			return m, nil
 		case "/":
 			if m.active == tabTopics && m.topics.view == topicsList {
@@ -113,6 +146,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.topics, cmd = m.topics.Update(msg)
 		case tabGroups:
 			m.groups, cmd = m.groups.Update(msg)
+		case tabProduce:
+			m.produce, cmd = m.produce.Update(msg)
 		}
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -127,6 +162,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		m.groups, cmd = m.groups.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.produce, cmd = m.produce.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -178,6 +217,9 @@ func (m Model) View() string {
 	case tabGroups:
 		body = m.groups.View()
 		hctx = m.groups.helpCtx()
+	case tabProduce:
+		body = m.produce.View()
+		hctx = m.produce.helpCtx()
 	}
 
 	if m.filtering {

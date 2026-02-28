@@ -1,0 +1,10 @@
+scenarios:
+  - name: "Quick Load Test"
+    type: LOAD
+    spec:
+      records: 50000
+      parallelProducers: 2
+      recordSizeBytes: 1024
+    validate:
+      maxP99LatencyMs: 100
+      minThroughputRecPerSec: 5000

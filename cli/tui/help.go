@@ -9,6 +9,7 @@ const (
 	helpDetail
 	helpConsumer
 	helpFilter
+	helpProduce
 )
 
 func renderHelp(ctx helpContext) string {
@@ -28,8 +29,12 @@ func renderHelp(ctx helpContext) string {
 	case helpConsumer:
 		keys = style.Render("Esc: stop tailing") + sep +
 			style.Render("q: quit")
+	case helpProduce:
+		keys = style.Render("Tab: switch field") + sep +
+			style.Render("Enter: send") + sep +
+			style.Render("Esc: back to topic list")
 	default:
-		keys = style.Render("Tab/1-3: switch tab") + sep +
+		keys = style.Render("Tab/1-4: switch tab") + sep +
 			style.Render("↑/↓ j/k: navigate") + sep +
 			style.Render("Enter: detail") + sep +
 			style.Render("/: filter") + sep +

@@ -550,13 +550,19 @@ var docEntries = []DocEntry{
 		Name:     "report export",
 		Category: "Report",
 		Synopsis: "kates report export <id> [flags]",
-		Short:    "Export report as CSV, JUnit XML, or Heatmap",
+		Short:    "Export report as CSV, JUnit XML, Heatmap, Markdown, or HTML",
+		Description: "Exports a test report in the specified format. CSV and JUnit\n" +
+			"are ideal for CI integration. Markdown embeds well in GitHub PRs.\n" +
+			"HTML generates a self-contained dark-mode dashboard with\n" +
+			"throughput grids, latency bars, SLA badges, and phase breakdowns.",
 		Flags: []DocFlag{
-			{Name: "--format", Type: "string", Default: "csv", Desc: "Export format: csv, junit, or heatmap"},
+			{Name: "--format", Type: "string", Default: "csv", Desc: "Export format: csv, junit, heatmap, heatmap-csv, md, or html"},
 		},
 		Examples: []string{
 			"kates report export abc123",
 			"kates report export abc123 --format junit",
+			"kates report export abc123 --format md",
+			"kates report export abc123 --format html",
 			"kates report export abc123 --format heatmap",
 		},
 		SeeAlso: []string{"report show"},
@@ -955,21 +961,168 @@ var docEntries = []DocEntry{
 		SeeAlso:  []string{"webhook list"},
 	},
 	{
-		Name:     "scaffold",
+		Name:     "test scaffold",
 		Category: "Toolbox",
-		Synopsis: "kates scaffold [flags]",
-		Short:    "Generate a ready-to-edit YAML scenario template",
-		Description: "Generates a complete YAML scenario file for the specified\n" +
-			"test type, pre-populated with sensible defaults and comments\n" +
-			"explaining each field.",
+		Synopsis: "kates test scaffold [subcommand]",
+		Short:    "Browse and export built-in test scenario templates",
+		Description: "The scenario library ships 7 curated YAML templates embedded\n" +
+			"in the CLI binary via embed.FS. Use 'list' to browse, 'show'\n" +
+			"for a syntax-highlighted preview, and 'export' to write to disk.",
+		Examples: []string{
+			"kates test scaffold list",
+			"kates test scaffold show quick-load",
+			"kates test scaffold export ci-gate",
+			"kates test scaffold export --all",
+		},
+		SeeAlso: []string{"test apply", "init"},
+	},
+	{
+		Name:     "test scaffold list",
+		Category: "Toolbox",
+		Synopsis: "kates test scaffold list",
+		Short:    "List all 7 built-in scenario templates",
+		Description: "Displays a table of all embedded scenario templates with\n" +
+			"name, test type, and description. Templates cover quick-load,\n" +
+			"production-load, stress-test, endurance-soak, exactly-once,\n" +
+			"spike-test, and ci-gate scenarios.",
+		Examples: []string{"kates test scaffold list"},
+		SeeAlso:  []string{"test scaffold show", "test scaffold export"},
+	},
+	{
+		Name:     "test scaffold show",
+		Category: "Toolbox",
+		Synopsis: "kates test scaffold show <name>",
+		Short:    "Preview a scenario template with syntax highlighting",
+		Description: "Renders the YAML content of a built-in scenario template\n" +
+			"with syntax-highlighted keys. Shows export and run hints.",
+		Examples: []string{
+			"kates test scaffold show quick-load",
+			"kates test scaffold show production-load",
+		},
+		SeeAlso: []string{"test scaffold list", "test scaffold export"},
+	},
+	{
+		Name:     "test scaffold export",
+		Category: "Toolbox",
+		Synopsis: "kates test scaffold export [name] [flags]",
+		Short:    "Export scenario template(s) to the file system",
+		Description: "Writes one or all scenario templates from the embedded\n" +
+			"library to the current directory (or --dir). Skips files\n" +
+			"that already exist.",
 		Flags: []DocFlag{
-			{Name: "--type", Type: "string", Default: "LOAD", Desc: "Test type for the template"},
+			{Name: "--all", Type: "bool", Desc: "Export all 7 templates"},
+			{Name: "--dir", Short: "-d", Type: "string", Desc: "Output directory (default: current)"},
 		},
 		Examples: []string{
-			"kates scaffold --type LOAD > load-test.yaml",
-			"kates scaffold --type SPIKE > spike-test.yaml",
-			"kates scaffold --type ENDURANCE",
+			"kates test scaffold export quick-load",
+			"kates test scaffold export --all",
+			"kates test scaffold export production-load --dir ./scenarios/",
 		},
-		SeeAlso: []string{"test apply", "test create"},
+		SeeAlso: []string{"test scaffold list", "test apply"},
+	},
+	{
+		Name:     "init",
+		Category: "Toolbox",
+		Synopsis: "kates init [flags]",
+		Short:    "Initialize a new Kates workspace with config, scenarios, and CI gate",
+		Description: "Sets up a complete Kates project in the current directory:\n" +
+			"1) Creates ~/.kates.yaml with a named context.\n" +
+			"2) Exports all 7 built-in scenario templates to scenarios/.\n" +
+			"3) Generates kates-ci.sh — a CI pipeline gate script with\n" +
+			"   KATES_URL env var support and exit code propagation.",
+		Flags: []DocFlag{
+			{Name: "--name", Type: "string", Default: "default", Desc: "Context name"},
+			{Name: "--url", Type: "string", Default: "http://localhost:8080", Desc: "KATES API URL"},
+			{Name: "--dir", Type: "string", Default: ".", Desc: "Project directory to scaffold into"},
+			{Name: "--no-scenarios", Type: "bool", Desc: "Skip scenario template export"},
+			{Name: "--no-ci", Type: "bool", Desc: "Skip CI gate script generation"},
+		},
+		Examples: []string{
+			"kates init",
+			"kates init --url http://kates.internal:8080 --name production",
+			"kates init --no-scenarios --no-ci",
+		},
+		SeeAlso: []string{"test scaffold list", "ctx set"},
+	},
+	{
+		Name:     "audit",
+		Category: "Observability",
+		Synopsis: "kates audit [flags]",
+		Short:    "Show audit log of all mutating operations",
+		Description: "Displays a chronological log of all mutations (test creates/deletes,\n" +
+			"topic changes, disruption runs) with timestamps, action types,\n" +
+			"and details. Supports filtering by event type and time range.\n" +
+			"Action badges: green \"+ CREATE\", red \"- DELETE\", cyan \"~ UPDATE\".",
+		Flags: []DocFlag{
+			{Name: "--limit", Type: "int", Default: "50", Desc: "Maximum number of events to show"},
+			{Name: "--type", Type: "string", Desc: "Filter by event type (test, topic, disruption, resilience)"},
+			{Name: "--since", Type: "string", Desc: "Show events after this ISO-8601 timestamp"},
+		},
+		Examples: []string{
+			"kates audit",
+			"kates audit --limit 20 --type test",
+			"kates audit --type topic --since 2024-01-01T00:00:00Z",
+			"kates audit -o json",
+		},
+		SeeAlso: []string{"test list", "dashboard"},
+	},
+	{
+		Name:     "cluster diff",
+		Category: "Analysis",
+		Synopsis: "kates cluster diff --from <ctx> --to <ctx>",
+		Short:    "Compare Kafka cluster state between two contexts",
+		Description: "Compares topics, consumer groups, and configurations between\n" +
+			"two named contexts. Shows added, removed, and changed resources\n" +
+			"in a colour-coded diff table.",
+		Flags: []DocFlag{
+			{Name: "--from", Type: "string", Desc: "Source context name (required)"},
+			{Name: "--to", Type: "string", Desc: "Target context name (required)"},
+		},
+		Examples: []string{
+			"kates cluster diff --from local --to staging",
+			"kates cluster diff --from dev --to production",
+		},
+		SeeAlso: []string{"ctx show", "cluster info"},
+	},
+	{
+		Name:     "ctx export",
+		Category: "Config",
+		Synopsis: "kates ctx export [name]",
+		Short:    "Export context(s) as YAML for team sharing",
+		Description: "Marshals the specified context (or all contexts if no name given)\n" +
+			"to YAML on stdout. Compatible with 'kates ctx import'.",
+		Examples: []string{
+			"kates ctx export staging > kates-staging.yaml",
+			"kates ctx export > all-contexts.yaml",
+		},
+		SeeAlso: []string{"ctx import", "ctx show"},
+	},
+	{
+		Name:     "ctx import",
+		Category: "Config",
+		Synopsis: "kates ctx import [flags]",
+		Short:    "Import contexts from YAML file or stdin",
+		Description: "Reads context definitions from a YAML file (or stdin) and\n" +
+			"merges them into ~/.kates.yaml. Existing contexts with the\n" +
+			"same name are overwritten.",
+		Flags: []DocFlag{
+			{Name: "--file", Short: "-f", Type: "string", Desc: "Path to YAML file (default: stdin)"},
+		},
+		Examples: []string{
+			"kates ctx import -f kates-staging.yaml",
+			"cat contexts.yaml | kates ctx import",
+		},
+		SeeAlso: []string{"ctx export", "ctx show"},
+	},
+	{
+		Name:     "plugin list",
+		Category: "Toolbox",
+		Synopsis: "kates plugin list",
+		Short:    "List discovered plugin commands",
+		Description: "Scans ~/.kates/plugins/ and $PATH for executables prefixed\n" +
+			"with 'kates-' and displays them with their full paths.\n" +
+			"Plugins are invoked as 'kates <name>' (e.g., kates-hello → kates hello).",
+		Examples: []string{"kates plugin list"},
+		SeeAlso:  []string{"init"},
 	},
 }

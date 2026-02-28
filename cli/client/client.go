@@ -703,3 +703,19 @@ func (c *Client) TuningTypes(ctx context.Context) ([]TuningTypeInfo, error) {
 	var result []TuningTypeInfo
 	return result, json.Unmarshal(data, &result)
 }
+
+func (c *Client) Audit(ctx context.Context, limit int, eventType, since string) ([]AuditEntry, error) {
+	path := fmt.Sprintf("/api/audit?limit=%d", limit)
+	if eventType != "" {
+		path += "&type=" + eventType
+	}
+	if since != "" {
+		path += "&since=" + since
+	}
+	data, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	var result []AuditEntry
+	return result, json.Unmarshal(data, &result)
+}

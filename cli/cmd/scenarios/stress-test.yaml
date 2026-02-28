@@ -1,0 +1,16 @@
+scenarios:
+  - name: "Stress Test — High Throughput"
+    type: STRESS
+    spec:
+      records: 5000000
+      parallelProducers: 16
+      recordSizeBytes: 512
+      acks: "1"
+      batchSize: 65536
+      lingerMs: 5
+      compressionType: "snappy"
+      partitions: 24
+      replicationFactor: 3
+    validate:
+      maxP99LatencyMs: 200
+      minThroughputRecPerSec: 100000

@@ -133,12 +133,13 @@ var exportFormat string
 
 var reportExportCmd = &cobra.Command{
 	Use:   "export <id>",
-	Short: "Export report as CSV, JUnit XML, or Heatmap",
+	Short: "Export report as CSV, JUnit XML, Heatmap, Markdown, or HTML",
 	Args:  cobra.ExactArgs(1),
 	Example: `  kates report export abc123 --format csv
   kates report export abc123 --format junit
+  kates report export abc123 --format md
+  kates report export abc123 --format html
   kates report export abc123 --format heatmap
-  kates report export abc123 --format heatmap-csv
   kates report export abc123 --format csv > report.csv`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
@@ -204,8 +205,37 @@ var reportExportCmd = &cobra.Command{
 				fmt.Print(heatmapCsv)
 			}
 
+		case "md":
+			report, err := apiClient.Report(context.Background(), id)
+			if err != nil {
+				return cmdErr("Export failed: " + err.Error())
+			}
+			md := renderMarkdownReport(id, report)
+			if isTerminal() {
+				file := "kates-report-" + id + ".md"
+				if err := os.WriteFile(file, []byte(md), 0644); err != nil {
+					return cmdErr("Write failed: " + err.Error())
+				}
+				output.Success("Exported to " + file)
+			} else {
+				fmt.Print(md)
+			}
+
+		case "html":
+			report, err := apiClient.Report(context.Background(), id)
+			if err != nil {
+				return cmdErr("Export failed: " + err.Error())
+			}
+			html := renderHTMLReport(id, report)
+			file := "kates-report-" + id + ".html"
+			if err := os.WriteFile(file, []byte(html), 0644); err != nil {
+				return cmdErr("Write failed: " + err.Error())
+			}
+			output.Success("Exported to " + file)
+			output.Hint("  Open: open " + file)
+
 		default:
-			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv', 'junit', 'heatmap', or 'heatmap-csv'.")
+			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv', 'junit', 'heatmap', 'heatmap-csv', 'md', or 'html'.")
 		}
 		return nil
 	},
