@@ -203,19 +203,25 @@ func (m LabModel) View() string {
 		w = 80
 	}
 
-	header := labHeaderStyle.Width(w - 4).Render("  KATES LAB  ·  Interactive Performance Tuning")
+	header := labHeaderStyle.Width(w - 2).Render("  KATES LAB  ·  Interactive Performance Tuning")
 
-	leftW := 36
-	rightW := w - leftW - 8
+	halfW := (w - 4) / 2
+	leftW := halfW
+	rightW := halfW
 
-	left := m.viewParams(leftW)
-	right := m.viewResults(rightW)
+	leftContent := m.viewParams(leftW)
+	rightContent := m.viewResults(rightW - 6)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(leftW).Render(left),
-		lipgloss.NewStyle().Width(2).Render(""),
-		detailBorderStyle.Width(rightW).Render(right),
-	)
+	leftPane := lipgloss.NewStyle().
+		Width(leftW).
+		Padding(1, 2).
+		Render(leftContent)
+
+	rightPane := detailBorderStyle.
+		Width(rightW).
+		Render(rightContent)
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 
 	statusBar := "\n  " + m.status
 	if m.running {
@@ -223,38 +229,50 @@ func (m LabModel) View() string {
 	}
 
 	helpKeys := []string{"↑↓ navigate", "←→ change value", "Enter run", "d diff", "q quit"}
-	help := "\n  " + dimStyle.Render(strings.Join(helpKeys, " · "))
+	help := "\n  " + dimStyle.Render(strings.Join(helpKeys, "  ·  "))
 
 	return header + "\n\n" + body + statusBar + help
 }
 
 func (m LabModel) viewParams(width int) string {
+	const labelCol = 16
+
 	var b strings.Builder
 
 	for i, p := range m.params {
-		label := dimStyle.Render(fmt.Sprintf("  %-14s", p.Label))
+		prefix := "  "
 		if i == m.cursor {
-			label = filterActiveStyle.Render(fmt.Sprintf("▸ %-14s", p.Label))
+			prefix = "▸ "
 		}
 
-		valStr := ""
-		for vi, v := range p.Values {
-			if vi == p.Current {
-				if i == m.cursor {
-					valStr += selectedValueStyle.Render(" " + v + " ")
+		paddedLabel := p.Label
+		for len(paddedLabel) < labelCol {
+			paddedLabel += " "
+		}
+
+		if i == m.cursor {
+			b.WriteString(filterActiveStyle.Render(prefix + paddedLabel))
+		} else {
+			b.WriteString(dimStyle.Render(prefix + paddedLabel))
+		}
+
+		if i == m.cursor {
+			for vi, v := range p.Values {
+				padded := fmt.Sprintf(" %-8s", v)
+				if vi == p.Current {
+					b.WriteString(selectedValueStyle.Render(padded))
 				} else {
-					valStr += activeValueStyle.Render("[" + v + "]")
+					b.WriteString(dimStyle.Render(padded))
 				}
-			} else if i == m.cursor {
-				valStr += dimStyle.Render(" " + v + " ")
 			}
+		} else {
+			b.WriteString(activeValueStyle.Render("[" + p.Values[p.Current] + "]"))
 		}
 
-		if i != m.cursor {
-			valStr = activeValueStyle.Render("[" + p.Values[p.Current] + "]")
+		b.WriteString("\n")
+		if i == m.cursor {
+			b.WriteString("\n")
 		}
-
-		b.WriteString(label + " " + valStr + "\n")
 	}
 
 	return b.String()
