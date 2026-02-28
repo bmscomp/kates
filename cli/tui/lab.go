@@ -37,6 +37,7 @@ const (
 
 type LabModel struct {
 	client     *client.Client
+	apiURL     string
 	params     []labParam
 	cursor     int
 	iterations []labIteration
@@ -56,9 +57,10 @@ type labTestDoneMsg struct {
 
 type labTickMsg struct{}
 
-func NewLab(c *client.Client) LabModel {
+func NewLab(c *client.Client, url string) LabModel {
 	return LabModel{
 		client: c,
+		apiURL: url,
 		params: []labParam{
 			{Label: "Test Type", Key: "type", Values: []string{"LOAD", "STRESS", "SPIKE", "ENDURANCE"}, Current: 0},
 			{Label: "Producers", Key: "producers", Values: []string{"1", "2", "4", "8", "16", "32"}, Current: 2},
@@ -75,8 +77,8 @@ func NewLab(c *client.Client) LabModel {
 	}
 }
 
-func RunLab(c *client.Client) error {
-	m := NewLab(c)
+func RunLab(c *client.Client, url string) error {
+	m := NewLab(c, url)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
@@ -203,7 +205,11 @@ func (m LabModel) View() string {
 		w = 80
 	}
 
-	header := labHeaderStyle.Width(w - 2).Render("  KATES LAB  ·  Interactive Performance Tuning")
+	headerText := "  Kates Lab  ·  Interactive Performance Tuning"
+	if m.apiURL != "" {
+		headerText += "  →  " + m.apiURL
+	}
+	header := labHeaderStyle.Width(w - 2).Render(headerText)
 
 	halfW := (w - 4) / 2
 	leftW := halfW

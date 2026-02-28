@@ -17,7 +17,7 @@ Each iteration creates a real test run and records the results.
 Use ←/→ to change values, Enter to run, and d to diff results.`,
 	Example: `  kates lab`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return tui.RunLab(apiClient)
+		return tui.RunLab(apiClient, apiURL)
 	},
 }
 
