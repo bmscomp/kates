@@ -40,19 +40,33 @@ var healthCmd = &cobra.Command{
 		}
 
 		if len(result.Tests) > 0 {
-			output.SubHeader("Test Configurations")
-			rows := make([][]string, 0, len(result.Tests))
+			var perfRows, tuneRows [][]string
+			headers := []string{"Test", "Records", "Partitions", "Producers", "Acks", "Compress"}
+
 			for name, cfg := range result.Tests {
-				rows = append(rows, []string{
+				row := []string{
 					name,
 					fmt.Sprintf("%d", cfg.NumRecords),
 					fmt.Sprintf("%d", cfg.Partitions),
 					fmt.Sprintf("%d", cfg.NumProducers),
 					cfg.Acks,
 					cfg.CompressionType,
-				})
+				}
+				if len(name) > 5 && name[:5] == "tune_" {
+					tuneRows = append(tuneRows, row)
+				} else {
+					perfRows = append(perfRows, row)
+				}
 			}
-			output.Table([]string{"Test", "Records", "Partitions", "Producers", "Acks", "Compress"}, rows)
+
+			if len(perfRows) > 0 {
+				output.SubHeader("Performance Tests")
+				output.Table(headers, perfRows)
+			}
+			if len(tuneRows) > 0 {
+				output.SubHeader("Tuning Tests")
+				output.Table(headers, tuneRows)
+			}
 		}
 
 		return nil
