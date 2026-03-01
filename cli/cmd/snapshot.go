@@ -288,4 +288,5 @@ func loadAllSnapshots() ([]ClusterSnapshot, error) {
 func init() {
 	snapshotCmd.AddCommand(snapshotCreateCmd, snapshotListCmd, snapshotDiffCmd)
 	rootCmd.AddCommand(snapshotCmd)
+	registerSnapshotCompletions()
 }

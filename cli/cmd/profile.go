@@ -332,4 +332,5 @@ func init() {
 	profileAssertCmd.Flags().Float64Var(&profileMaxRegression, "max-regression", 10, "Max throughput regression percentage")
 	profileCmd.AddCommand(profileSaveCmd, profileListCmd, profileCompareCmd, profileAssertCmd)
 	rootCmd.AddCommand(profileCmd)
+	registerProfileCompletions()
 }

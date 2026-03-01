@@ -260,6 +260,7 @@ func fmtAdvisorNum(v float64) string {
 func init() {
 	advisorCmd.Flags().BoolVar(&advisorApply, "apply", false, "Generate a tuned scenario YAML from recommendations")
 	rootCmd.AddCommand(advisorCmd)
+	registerAnalysisCompletions()
 }
 
 func analyzeResults(results []client.PhaseResult) (avgThroughput, avgP99 float64) {

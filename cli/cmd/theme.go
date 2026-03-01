@@ -138,4 +138,5 @@ var themePreviewCmd = &cobra.Command{
 func init() {
 	themeCmd.AddCommand(themeListCmd, themePreviewCmd)
 	rootCmd.AddCommand(themeCmd)
+	registerThemeCompletions()
 }

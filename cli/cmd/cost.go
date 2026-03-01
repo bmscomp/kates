@@ -121,4 +121,5 @@ func init() {
 	costEstimateCmd.Flags().IntVar(&costReplicas, "replicas", 3, "Replication factor")
 	costCmd.AddCommand(costEstimateCmd)
 	rootCmd.AddCommand(costCmd)
+	registerCostCompletions()
 }
