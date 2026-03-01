@@ -23,6 +23,8 @@ public record FaultSpec(
         int networkLatencyMs,
         int fillPercentage,
         int cpuCores,
+        int memoryMb,
+        int ioWorkers,
         int gracePeriodSec,
         String targetTopic,
         int targetPartition,
@@ -44,6 +46,8 @@ public record FaultSpec(
         private int networkLatencyMs = 100;
         private int fillPercentage = 80;
         private int cpuCores = 1;
+        private int memoryMb = 500;
+        private int ioWorkers = 2;
         private int gracePeriodSec = 30;
         private String targetTopic = "";
         private int targetPartition = 0;
@@ -108,6 +112,16 @@ public record FaultSpec(
             return this;
         }
 
+        public Builder memoryMb(int v) {
+            this.memoryMb = v;
+            return this;
+        }
+
+        public Builder ioWorkers(int v) {
+            this.ioWorkers = v;
+            return this;
+        }
+
         public Builder gracePeriodSec(int v) {
             this.gracePeriodSec = v;
             return this;
@@ -142,6 +156,8 @@ public record FaultSpec(
                     networkLatencyMs,
                     fillPercentage,
                     cpuCores,
+                    memoryMb,
+                    ioWorkers,
                     gracePeriodSec,
                     targetTopic,
                     targetPartition,

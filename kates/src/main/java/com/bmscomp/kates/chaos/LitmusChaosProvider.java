@@ -25,13 +25,17 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     private static final Logger LOG = Logger.getLogger(LitmusChaosProvider.class);
 
-    private static final Map<DisruptionType, String> EXPERIMENT_MAP = Map.of(
-            DisruptionType.POD_KILL, "pod-delete",
-            DisruptionType.POD_DELETE, "pod-delete",
-            DisruptionType.CPU_STRESS, "pod-cpu-hog",
-            DisruptionType.DISK_FILL, "disk-fill",
-            DisruptionType.NETWORK_PARTITION, "pod-network-partition",
-            DisruptionType.NETWORK_LATENCY, "pod-network-latency");
+    private static final Map<DisruptionType, String> EXPERIMENT_MAP = Map.ofEntries(
+            Map.entry(DisruptionType.POD_KILL, "pod-delete"),
+            Map.entry(DisruptionType.POD_DELETE, "pod-delete"),
+            Map.entry(DisruptionType.CPU_STRESS, "pod-cpu-hog"),
+            Map.entry(DisruptionType.MEMORY_STRESS, "pod-memory-hog"),
+            Map.entry(DisruptionType.IO_STRESS, "pod-io-stress"),
+            Map.entry(DisruptionType.DNS_ERROR, "pod-dns-error"),
+            Map.entry(DisruptionType.DISK_FILL, "disk-fill"),
+            Map.entry(DisruptionType.NETWORK_PARTITION, "pod-network-partition"),
+            Map.entry(DisruptionType.NETWORK_LATENCY, "pod-network-latency"),
+            Map.entry(DisruptionType.NODE_DRAIN, "node-drain"));
 
     @Inject
     KubernetesClient client;
@@ -227,6 +231,28 @@ public class LitmusChaosProvider implements ChaosProvider {
 
         for (Map.Entry<String, String> e : spec.envOverrides().entrySet()) {
             envVars.add(new ChaosEngineSpec.EnvVar(e.getKey(), e.getValue()));
+        }
+
+        if (spec.disruptionType() != null) {
+            switch (spec.disruptionType()) {
+                case CPU_STRESS -> envVars.add(new ChaosEngineSpec.EnvVar("CPU_CORES", String.valueOf(spec.cpuCores())));
+                case MEMORY_STRESS -> {
+                    envVars.add(new ChaosEngineSpec.EnvVar("MEMORY_CONSUMPTION", String.valueOf(spec.memoryMb())));
+                    envVars.add(new ChaosEngineSpec.EnvVar("NUMBER_OF_WORKERS", "1"));
+                }
+                case IO_STRESS -> {
+                    envVars.add(new ChaosEngineSpec.EnvVar("FILESYSTEM_UTILIZATION_PERCENTAGE", String.valueOf(spec.fillPercentage())));
+                    envVars.add(new ChaosEngineSpec.EnvVar("NUMBER_OF_WORKERS", String.valueOf(spec.ioWorkers())));
+                }
+                case DNS_ERROR -> {
+                    if (spec.targetTopic() != null && !spec.targetTopic().isEmpty()) {
+                        envVars.add(new ChaosEngineSpec.EnvVar("TARGET_HOSTNAMES", spec.targetTopic()));
+                    }
+                }
+                case NETWORK_LATENCY -> envVars.add(new ChaosEngineSpec.EnvVar("NETWORK_LATENCY", String.valueOf(spec.networkLatencyMs())));
+                case DISK_FILL -> envVars.add(new ChaosEngineSpec.EnvVar("FILL_PERCENTAGE", String.valueOf(spec.fillPercentage())));
+                default -> { }
+            }
         }
 
         components.env = envVars;

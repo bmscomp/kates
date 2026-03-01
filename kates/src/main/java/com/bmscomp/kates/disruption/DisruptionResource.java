@@ -378,6 +378,9 @@ public class DisruptionResource {
             case NETWORK_PARTITION -> "Isolate a broker from peers via NetworkPolicy";
             case NETWORK_LATENCY -> "Inject network latency on broker interfaces";
             case CPU_STRESS -> "Exhaust CPU on broker container";
+            case MEMORY_STRESS -> "Consume memory on broker container to simulate OOM pressure";
+            case IO_STRESS -> "Inject disk I/O pressure on broker storage";
+            case DNS_ERROR -> "Inject DNS resolution failures on broker pods";
             case DISK_FILL -> "Fill broker log directory to simulate storage pressure";
             case ROLLING_RESTART -> "Trigger StatefulSet rolling restart";
             case LEADER_ELECTION -> "Kill the controller broker to force leader election";
