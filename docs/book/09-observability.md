@@ -37,7 +37,7 @@ graph TB
 
 ## Grafana Dashboards
 
-Kates deploys 7 Grafana dashboards, each focused on a specific monitoring dimension.
+Kates deploys 4 Grafana dashboards, each focused on a specific monitoring dimension. See [docs/monitoring.md](../monitoring.md) for the full dashboard and metrics reference.
 
 ### Kafka Cluster Health
 
