@@ -28,8 +28,8 @@ patches:
   # Override by creating an overlay with a different BROKER_POD_0 value.
   #
   # Usage:
-  #   kustomize build config/litmus-experiments/ | kubectl apply -f -
-  #   kustomize build config/litmus-experiments/overlays/pool-beta/ | kubectl apply -f -
+  #   kustomize build config/litmus/experiments/ | kubectl apply -f -
+  #   kustomize build config/litmus/experiments/overlays/pool-beta/ | kubectl apply -f -
 
   - target:
       kind: ChaosEngine

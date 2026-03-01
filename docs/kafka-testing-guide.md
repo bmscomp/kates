@@ -137,7 +137,7 @@ The experiment targets `krafter-pool-alpha-0` (the control-plane node broker) an
 
 **Expected behavior:** Strimzi recreates the pod. The remaining 2 brokers (σ, γ) continue serving reads and writes because `min.insync.replicas` = 2. Leader election for partitions whose leader was on α should complete in under 10 seconds. Consumer groups rebalance automatically.
 
-**Config file:** `config/litmus-experiments/kafka-pod-delete.yaml`
+**Config file:** `config/litmus/experiments/kafka-pod-delete.yaml`
 
 ---
 
@@ -157,7 +157,7 @@ The experiment isolates `krafter-pool-alpha-0` from both `pool-gamma-0` and `poo
 
 **Expected behavior:** The partitioned broker falls out of the ISR for all partitions it was replicating. The KRaft quorum (2 of 3 controllers still connected) maintains the metadata log. When the partition heals, the broker catches up from the ISR leader's log and rejoins.
 
-**Config file:** `config/litmus-experiments/kafka-network-partition.yaml`
+**Config file:** `config/litmus/experiments/kafka-network-partition.yaml`
 
 ---
 
@@ -177,7 +177,7 @@ Targets `krafter-pool-gamma-0` for 60 seconds. Two probes:
 
 **Expected behavior:** Producer latency should increase (possibly 2–5×) but messages should not be lost. GC pauses may increase, visible in the Kafka JVM Grafana dashboard. The broker should remain in the ISR if it can keep up with replication within the configured `replica.lag.time.max.ms`.
 
-**Config file:** `config/litmus-experiments/kafka-cpu-stress.yaml`
+**Config file:** `config/litmus/experiments/kafka-cpu-stress.yaml`
 
 ---
 
@@ -191,7 +191,7 @@ The experiment targets `krafter-pool-sigma-0` for 120 seconds and runs probes ch
 
 **Expected behavior:** Kafka should start rejecting produce requests once the log directory is full. The remaining 2 brokers should still accept writes for partitions whose leader can be moved. Topic data on the stressed broker should not become corrupt — it should be truncated or the broker should shut down cleanly.
 
-**Config file:** `config/litmus-experiments/kafka-disk-fill.yaml`
+**Config file:** `config/litmus/experiments/kafka-disk-fill.yaml`
 
 ---
 
@@ -203,7 +203,7 @@ The experiment targets `krafter-pool-sigma-0` for 120 seconds and runs probes ch
 
 **Expected behavior:** The affected broker should eventually be removed from the ISR. Producers with `acks=all` will experience timeouts proportional to the injected latency. Consumers connected to this broker may time out and trigger a rebalance.
 
-**Config file:** `config/litmus-experiments/kafka-network-latency.yaml`
+**Config file:** `config/litmus/experiments/kafka-network-latency.yaml`
 
 ---
 
@@ -215,7 +215,7 @@ The experiment targets `krafter-pool-sigma-0` for 120 seconds and runs probes ch
 
 **Note:** This experiment requires consumer application pods to be deployed (target label: `app=kafka-consumer`). Modify `APP_LABEL` in the config to match your actual consumers.
 
-**Config file:** `config/litmus-experiments/kafka-consumer-chaos.yaml`
+**Config file:** `config/litmus/experiments/kafka-consumer-chaos.yaml`
 
 ### Advanced: Probes
 
@@ -228,19 +228,19 @@ Monitors In-Sync Replica counts during chaos. Checks both under-replicated parti
 - Threshold: fewer than 50 under-replicated partitions (expected during single-broker failure)
 - Fail condition: more than 5 unavailable partitions
 
-**Config file:** `config/litmus-experiments/isr-health-probe.yaml`
+**Config file:** `config/litmus/experiments/isr-health-probe.yaml`
 
 #### Producer Throughput Probe
 
 Runs a quick 100-message perf-test to verify the cluster can still accept writes. Fails if throughput drops below 10 records/sec.
 
-**Config file:** `config/litmus-experiments/producer-throughput-probe.yaml`
+**Config file:** `config/litmus/experiments/producer-throughput-probe.yaml`
 
 #### Consumer Latency Probe
 
 Measures end-to-end latency (produce → consume round-trip). Injects 500ms of network latency and checks whether total E2E latency stays below 10 seconds.
 
-**Config file:** `config/litmus-experiments/consumer-latency-probe.yaml`
+**Config file:** `config/litmus/experiments/consumer-latency-probe.yaml`
 
 ### Orchestrated Chaos: The GameDay Workflow
 
@@ -270,7 +270,7 @@ Generate Report
 
 Run it with:
 ```bash
-kubectl apply -f config/litmus-experiments/kafka-gameday-workflow.yaml
+kubectl apply -f config/litmus/experiments/kafka-gameday-workflow.yaml
 kubectl get workflows -n kafka -w
 ```
 
@@ -569,7 +569,7 @@ These simulate realistic production incidents where multiple things go wrong sim
 #### 3.1 GameDay: Cascading Failures
 
 ```bash
-kubectl apply -f config/litmus-experiments/kafka-gameday-workflow.yaml
+kubectl apply -f config/litmus/experiments/kafka-gameday-workflow.yaml
 ```
 
 This runs network latency → recovery → CPU stress → recovery → pod delete → final health check. The goal is to verify the cluster can survive a sequence of different failures without cumulative degradation.
@@ -772,5 +772,5 @@ Lost records in a contiguous range during chaos suggests they were acked but the
 | `setup-kafka-chaos.sh` | CLI chaos environment setup |
 | `test-kafka-performance.sh` | 1M-message perf test |
 | `config/kafka.yaml` | Kafka cluster definition |
-| `config/litmus-experiments/*.yaml` | All chaos experiment definitions |
+| `config/litmus/experiments/*.yaml` | All chaos experiment definitions |
 | `config/litmus/chaos-litmus-chaos-enable.yml` | Infrastructure registration manifest |
