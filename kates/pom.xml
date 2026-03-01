@@ -15,9 +15,14 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.31.3</quarkus.platform.version>
+        <quarkus.platform.version>3.32.1</quarkus.platform.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
         <kafka.version>4.2.0</kafka.version>
+        <lz4.version>1.8.1</lz4.version>
+        <snappy.version>1.1.10.8</snappy.version>
+        <zstd.version>1.5.7-7</zstd.version>
+        <spotless.version>3.2.1</spotless.version>
+        <palantir-format.version>2.89.0</palantir-format.version>
     </properties>
 
     <dependencyManagement>
@@ -96,17 +101,17 @@
         <dependency>
             <groupId>org.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.8.0</version>
+            <version>${lz4.version}</version>
         </dependency>
         <dependency>
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
-            <version>1.1.10.7</version>
+            <version>${snappy.version}</version>
         </dependency>
         <dependency>
             <groupId>com.github.luben</groupId>
             <artifactId>zstd-jni</artifactId>
-            <version>1.5.6-9</version>
+            <version>${zstd.version}</version>
         </dependency>
 
         <!-- Persistence: Hibernate ORM + PostgreSQL + Flyway -->
@@ -195,11 +200,11 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>3.2.1</version>
+                <version>${spotless.version}</version>
                 <configuration>
                     <java>
                         <palantirJavaFormat>
-                            <version>2.87.0</version>
+                            <version>${palantir-format.version}</version>
                         </palantirJavaFormat>
                         <removeUnusedImports/>
                         <importOrder>

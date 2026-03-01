@@ -1,6 +1,7 @@
 package com.klster.kates.disruption;
 
 import java.util.*;
+import jakarta.annotation.Nullable;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -509,8 +510,7 @@ public class DisruptionResource {
     public Response updateSchedule(
             @Parameter(description = "Schedule ID") @PathParam("id") String id,
             CreateDisruptionScheduleRequest request) {
-        @org.jspecify.annotations.Nullable
-        DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
+        @Nullable DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
         if (entity == null) {
             return Response.status(404)
                     .entity(ApiError.of(404, "Not Found", "Schedule not found: " + id))
@@ -541,7 +541,7 @@ public class DisruptionResource {
     @APIResponse(responseCode = "204", description = "Schedule deleted")
     @APIResponse(responseCode = "404", description = "Schedule not found")
     public Response deleteSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id) {
-        DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
+        @Nullable DisruptionScheduleEntity entity = em.find(DisruptionScheduleEntity.class, id);
         if (entity == null) {
             return Response.status(404)
                     .entity(ApiError.of(404, "Not Found", "Schedule not found: " + id))
