@@ -61,13 +61,13 @@ var (
 	WarningStyle = lipgloss.NewStyle().Foreground(Amber)
 	DimStyle     = lipgloss.NewStyle().Foreground(Gray)
 	AccentStyle  = lipgloss.NewStyle().Foreground(Cyan)
-	LightStyle   = lipgloss.NewStyle().Foreground(Light)
+	LightStyle   = lipgloss.NewStyle()
 
 	KeyStyle = lipgloss.NewStyle().
 			Foreground(KeyColor).
 			Width(24)
 
-	ValueStyle = lipgloss.NewStyle().Foreground(Light)
+	ValueStyle = lipgloss.NewStyle()
 
 	BoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -184,7 +184,7 @@ func Table(headers []string, rows [][]string) {
 
 	headerFg := lipgloss.NewStyle().Bold(true).Foreground(KeyColor)
 	sepFg := lipgloss.NewStyle().Foreground(SeparatorColor)
-	cellFg := lipgloss.NewStyle().Foreground(Light)
+	cellFg := lipgloss.NewStyle()
 
 	var headerLine, sepLine string
 	for i, h := range headers {

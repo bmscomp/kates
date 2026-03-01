@@ -5,10 +5,13 @@ metadata:
   name: {{ include "kates.fullname" . }}
   labels:
     {{- include "kates.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- if and .Values.ingress.certManager.enabled .Values.ingress.certManager.issuerName }}
+    cert-manager.io/{{ lower .Values.ingress.certManager.issuerKind | default "cluster-issuer" }}: {{ .Values.ingress.certManager.issuerName | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
@@ -22,6 +25,13 @@ spec:
         {{- end }}
       secretName: {{ .secretName }}
     {{- end }}
+  {{- else if and .Values.ingress.certManager.enabled .Values.ingress.certManager.issuerName }}
+  tls:
+    - hosts:
+        {{- range .Values.ingress.hosts }}
+        - {{ .host | quote }}
+        {{- end }}
+      secretName: {{ include "kates.fullname" . }}-tls
   {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}

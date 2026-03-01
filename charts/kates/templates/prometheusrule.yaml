@@ -1,0 +1,44 @@
+{{- if and .Values.metrics.prometheusRule.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kates.fullname" . }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.metrics.prometheusRule.namespace }}
+  namespace: {{ .Values.metrics.prometheusRule.namespace }}
+  {{- end }}
+spec:
+  groups:
+    - name: {{ include "kates.fullname" . }}
+      rules:
+        - alert: KatesDown
+          expr: up{job="{{ include "kates.fullname" . }}"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "KATES instance is down"
+            description: "KATES pod {{`{{ $labels.pod }}`}} has been down for more than 5 minutes."
+        - alert: KatesHighErrorRate
+          expr: |
+            rate(http_server_requests_seconds_count{job="{{ include "kates.fullname" . }}", status=~"5.."}[5m])
+            / rate(http_server_requests_seconds_count{job="{{ include "kates.fullname" . }}"}[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KATES high error rate"
+            description: "KATES is returning more than 10% server error responses."
+        - alert: KatesPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{container="{{ include "kates.name" . }}"}[1h]) > 3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KATES pod restarting frequently"
+            description: "KATES container has restarted more than 3 times in the last hour."
+{{- end }}

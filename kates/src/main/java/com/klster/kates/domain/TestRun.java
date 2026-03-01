@@ -12,111 +12,135 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class TestRun {
 
-    private String id;
-    private TestType testType;
-    private TestSpec spec;
-    private TestResult.TaskStatus status;
-    private List<TestResult> results;
-    private String createdAt;
-    private String backend;
-    private String scenarioName;
-    private Map<String, String> labels = new LinkedHashMap<>();
-    private SlaDefinition sla;
+    private final String id;
+    private final TestType testType;
+    private final TestSpec spec;
+    private final TestResult.TaskStatus status;
+    private final List<TestResult> results;
+    private final String createdAt;
+    private final String backend;
+    private final String scenarioName;
+    private final Map<String, String> labels;
+    private final SlaDefinition sla;
 
     public TestRun() {
-        this.id = UUID.randomUUID().toString().substring(0, 8);
-        this.status = TestResult.TaskStatus.PENDING;
-        this.results = new ArrayList<>();
-        this.createdAt = Instant.now().toString();
+        this(UUID.randomUUID().toString().substring(0, 8), null, null, TestResult.TaskStatus.PENDING, new ArrayList<>(), Instant.now().toString(), null, null, new LinkedHashMap<>(), null);
     }
 
     public TestRun(TestType testType, TestSpec spec) {
-        this();
-        this.testType = testType;
-        this.spec = spec;
+        this(UUID.randomUUID().toString().substring(0, 8), testType, spec, TestResult.TaskStatus.PENDING, new ArrayList<>(), Instant.now().toString(), null, null, new LinkedHashMap<>(), null);
     }
 
-    public void addResult(TestResult result) {
-        this.results.add(result);
+    private TestRun(String id, TestType testType, TestSpec spec, TestResult.TaskStatus status, List<TestResult> results, String createdAt, String backend, String scenarioName, Map<String, String> labels, SlaDefinition sla) {
+        this.id = id;
+        this.testType = testType;
+        this.spec = spec;
+        this.status = status;
+        this.results = new ArrayList<>(results != null ? results : List.of());
+        this.createdAt = createdAt;
+        this.backend = backend;
+        this.scenarioName = scenarioName;
+        this.labels = new LinkedHashMap<>(labels != null ? labels : Map.of());
+        this.sla = sla;
+    }
+
+    public TestRun withResult(TestResult result) {
+        List<TestResult> newResults = new ArrayList<>(this.results);
+        newResults.add(result);
+        return new TestRun(id, testType, spec, status, newResults, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withId(String id) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withTestType(TestType testType) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withSpec(TestSpec spec) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withStatus(TestResult.TaskStatus status) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withResults(List<TestResult> results) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withCreatedAt(String createdAt) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withBackend(String backend) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withScenarioName(String scenarioName) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withLabels(Map<String, String> labels) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withSla(SlaDefinition sla) {
+        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withAddedResult(TestResult result) {
+        List<TestResult> newResults = new java.util.ArrayList<>(this.results != null ? this.results : java.util.Collections.emptyList());
+        newResults.add(result);
+        return new TestRun(id, testType, spec, status, newResults, createdAt, backend, scenarioName, labels, sla);
+    }
+
+    public TestRun withUpdatedResult(TestResult updatedResult) {
+        if (this.results == null) return this;
+        List<TestResult> newResults = this.results.stream()
+            .map(r -> r.getTaskId().equals(updatedResult.getTaskId()) ? updatedResult : r)
+            .collect(java.util.stream.Collectors.toList());
+        return new TestRun(id, testType, spec, status, newResults, createdAt, backend, scenarioName, labels, sla);
     }
 
     public String getId() {
         return id;
     }
 
-    public void setId(String id) {
-        this.id = id;
-    }
-
     public TestType getTestType() {
         return testType;
-    }
-
-    public void setTestType(TestType testType) {
-        this.testType = testType;
     }
 
     public TestSpec getSpec() {
         return spec;
     }
 
-    public void setSpec(TestSpec spec) {
-        this.spec = spec;
-    }
-
     public TestResult.TaskStatus getStatus() {
         return status;
-    }
-
-    public void setStatus(TestResult.TaskStatus status) {
-        this.status = status;
     }
 
     public List<TestResult> getResults() {
         return results;
     }
 
-    public void setResults(List<TestResult> results) {
-        this.results = results;
-    }
-
     public String getCreatedAt() {
         return createdAt;
-    }
-
-    public void setCreatedAt(String createdAt) {
-        this.createdAt = createdAt;
     }
 
     public String getBackend() {
         return backend;
     }
 
-    public void setBackend(String backend) {
-        this.backend = backend;
-    }
-
     public String getScenarioName() {
         return scenarioName;
-    }
-
-    public void setScenarioName(String scenarioName) {
-        this.scenarioName = scenarioName;
     }
 
     public Map<String, String> getLabels() {
         return labels;
     }
 
-    public void setLabels(Map<String, String> labels) {
-        this.labels = labels;
-    }
-
     public SlaDefinition getSla() {
         return sla;
-    }
-
-    public void setSla(SlaDefinition sla) {
-        this.sla = sla;
     }
 }

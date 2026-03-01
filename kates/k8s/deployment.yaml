@@ -21,7 +21,7 @@ spec:
       containers:
       - name: kates
         image: kates:latest
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
           name: http

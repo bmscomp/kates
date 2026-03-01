@@ -1,0 +1,67 @@
+{{- if and .Values.backup.enabled .Values.postgresql.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kates.fullname" . }}-backup
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.retention }}
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "kates.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+          - name: pg-backup
+            image: {{ .Values.backup.image | quote }}
+            command:
+              - sh
+              - -c
+              - |
+                TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                FILENAME="/backups/kates-${TIMESTAMP}.sql.gz"
+                echo "Starting backup to ${FILENAME}..."
+                pg_dump -h {{ include "kates.postgresql.fullname" . }} \
+                  -U "${PGUSER}" \
+                  -d "${PGDATABASE}" \
+                  --no-password \
+                  | gzip > "${FILENAME}"
+                echo "Backup complete: $(du -sh ${FILENAME})"
+                echo "Pruning backups older than {{ .Values.backup.retention }} days..."
+                find /backups -name "kates-*.sql.gz" -mtime +{{ .Values.backup.retention }} -delete
+                echo "Done."
+            env:
+              - name: PGUSER
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ include "kates.dbSecretName" . }}
+                    key: QUARKUS_DATASOURCE_USERNAME
+              - name: PGPASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ include "kates.dbSecretName" . }}
+                    key: QUARKUS_DATASOURCE_PASSWORD
+              - name: PGDATABASE
+                value: {{ .Values.postgresql.auth.database | quote }}
+            volumeMounts:
+              - name: backup-storage
+                mountPath: /backups
+            resources:
+              {{- toYaml .Values.backup.resources | nindent 14 }}
+          volumes:
+            - name: backup-storage
+              emptyDir: {}
+{{- end }}

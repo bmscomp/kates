@@ -16,9 +16,17 @@ helm install kates ./charts/kates \
 helm uninstall kates -n kates
 ```
 
+## Validate
+
+```bash
+helm test kates -n kates
+```
+
 ## Configuration
 
 All configuration is in [values.yaml](values.yaml). Key sections:
+
+### Core
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -28,16 +36,87 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `replicaCount` | `1` | Number of Kates pods |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
-| `service.type` | `ClusterIP` | Service type (`ClusterIP`, `NodePort`, `LoadBalancer`) |
+
+### Networking
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `service.type` | `ClusterIP` | Service type |
 | `service.port` | `8080` | Service port |
+| `service.appProtocol` | `http` | Protocol hint for service mesh (Istio/Linkerd) |
 | `service.nodePort` | `""` | NodePort (when type is `NodePort`) |
 | `ingress.enabled` | `false` | Enable Ingress |
-| `postgresql.enabled` | `true` | Deploy bundled PostgreSQL |
-| `externalDatabase.enabled` | `false` | Use an external PostgreSQL |
+| `ingress.certManager.enabled` | `false` | Auto-create TLS via cert-manager |
+| `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
+| `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
+| `networkPolicy.enabled` | `false` | Enable NetworkPolicy |
+
+### Security
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `securityContext.runAsNonRoot` | `true` | Run pod as non-root |
+| `securityContext.runAsUser` | `1000` | Pod UID |
+| `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
+| `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
+
+### Scaling & Availability
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `autoscaling.enabled` | `false` | Enable HPA |
+| `autoscaling.behavior.scaleDown.stabilizationWindowSeconds` | `300` | Scale-down cooldown |
+| `autoscaling.customMetrics` | `[]` | Custom HPA metrics (e.g., `kates_active_runs`) |
 | `podDisruptionBudget.enabled` | `false` | Enable PDB |
+| `podDisruptionBudget.unhealthyPodEvictionPolicy` | `IfHealthy` | Eviction policy (K8s 1.27+) |
+| `strategy.type` | `RollingUpdate` | Deployment strategy |
+| `strategy.rollingUpdate.maxSurge` | `1` | Max pods over desired during update |
+| `strategy.rollingUpdate.maxUnavailable` | `0` | Zero-downtime updates |
+| `terminationGracePeriodSeconds` | `60` | Graceful shutdown window |
+| `topologySpreadConstraints` | `[]` | Pod spread across zones/nodes |
+
+### Database
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `postgresql.enabled` | `true` | Deploy bundled PostgreSQL |
+| `postgresql.auth.existingSecret` | `""` | Use pre-created secret for DB credentials |
+| `externalDatabase.enabled` | `false` | Use an external PostgreSQL |
+| `externalDatabase.existingSecret` | `""` | Use pre-created secret for external DB |
+
+### Monitoring
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `metrics.serviceMonitor.enabled` | `false` | Enable Prometheus ServiceMonitor |
+| `metrics.serviceMonitor.metricRelabelings` | `[]` | Metric relabeling rules |
+| `metrics.serviceMonitor.relabelings` | `[]` | Target relabeling rules |
+| `metrics.prometheusRule.enabled` | `false` | Enable alerting rules |
+| `metrics.grafanaDashboard.enabled` | `false` | Auto-provision Grafana dashboard |
+
+### Operations
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `backup.enabled` | `false` | Enable PostgreSQL backup CronJob |
+| `backup.schedule` | `0 2 * * *` | Backup cron schedule |
+| `backup.retention` | `7` | Days to keep backups |
+| `migration.enabled` | `false` | Enable pre-upgrade migration Job |
+| `cleanup.enabled` | `false` | Enable test run cleanup CronJob |
+| `cleanup.schedule` | `0 4 * * 0` | Cleanup cron schedule |
+| `cleanup.retentionDays` | `30` | Days to keep completed tests |
+
+### Extensibility
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `extraEnv` | `[]` | Extra environment variables |
+| `extraVolumes` | `[]` | Extra volumes |
+| `extraVolumeMounts` | `[]` | Extra volume mounts |
+| `podLabels` | `{}` | Extra pod labels |
+| `podAnnotations` | `{}` | Extra pod annotations |
+| `initContainers.waitForPostgres.image` | `busybox:1.36` | Init container image |
 
 ## Example: Local Kind Cluster
 
@@ -59,15 +138,21 @@ helm install kates ./charts/kates \
   --set kafka.bootstrapServers=my-kafka:9092 \
   --set postgresql.enabled=false \
   --set externalDatabase.enabled=true \
-  --set externalDatabase.host=my-rds.amazonaws.com \
-  --set externalDatabase.password=secret \
+  --set externalDatabase.existingSecret=my-db-secret \
   --set ingress.enabled=true \
   --set ingress.className=nginx \
+  --set ingress.certManager.enabled=true \
+  --set ingress.certManager.issuerName=letsencrypt-prod \
   --set ingress.hosts[0].host=kates.example.com \
   --set ingress.hosts[0].paths[0].path=/ \
   --set autoscaling.enabled=true \
   --set podDisruptionBudget.enabled=true \
-  --set metrics.serviceMonitor.enabled=true
+  --set networkPolicy.enabled=true \
+  --set metrics.serviceMonitor.enabled=true \
+  --set metrics.prometheusRule.enabled=true \
+  --set metrics.grafanaDashboard.enabled=true \
+  --set backup.enabled=true \
+  --set cleanup.enabled=true
 ```
 
 ## Example: EKS with ALB Ingress

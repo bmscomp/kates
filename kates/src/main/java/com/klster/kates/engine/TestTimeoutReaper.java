@@ -44,15 +44,18 @@ public class TestTimeoutReaper {
                 Instant created = Instant.parse(run.getCreatedAt());
                 if (created.isBefore(cutoff)) {
                     LOG.warnf("Test %s exceeded max duration (%dms) — marking as FAILED", run.getId(), maxDurationMs);
-                    run.setStatus(TestResult.TaskStatus.FAILED);
+                    run = run.withStatus(TestResult.TaskStatus.FAILED);
+                    List<TestResult> newResults = new java.util.ArrayList<>();
                     for (TestResult result : run.getResults()) {
                         if (result.getStatus() == TestResult.TaskStatus.RUNNING
                                 || result.getStatus() == TestResult.TaskStatus.PENDING) {
-                            result.setStatus(TestResult.TaskStatus.FAILED);
-                            result.setError("Timeout: exceeded max duration of " + maxDurationMs + "ms");
-                            result.setEndTime(Instant.now().toString());
+                            result = result.withStatus(TestResult.TaskStatus.FAILED)
+                                           .withError("Timeout: exceeded max duration of " + maxDurationMs + "ms")
+                                           .withEndTime(Instant.now().toString());
                         }
+                        newResults.add(result);
                     }
+                    run = run.withResults(newResults);
                     repository.save(run);
                 }
             } catch (Exception e) {

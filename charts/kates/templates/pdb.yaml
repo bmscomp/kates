@@ -11,6 +11,9 @@ spec:
   {{- else }}
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable | default 1 }}
   {{- end }}
+  {{- if .Values.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ .Values.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "kates.selectorLabels" . | nindent 6 }}

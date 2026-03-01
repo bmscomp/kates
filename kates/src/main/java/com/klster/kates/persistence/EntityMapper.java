@@ -47,19 +47,19 @@ public final class EntityMapper {
     }
 
     public static TestRun toDomain(TestRunEntity entity) {
-        TestRun run = new TestRun();
-        run.setId(entity.getId());
-        run.setTestType(entity.getTestType());
-        run.setStatus(entity.getStatus());
-        run.setCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null);
-        run.setBackend(entity.getBackend());
-        run.setScenarioName(entity.getScenarioName());
-        run.setSpec(fromJson(entity.getSpecJson(), TestSpec.class));
-        run.setSla(fromJson(entity.getSlaJson(), SlaDefinition.class));
-        run.setLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}));
+        TestRun run = new TestRun()
+            .withId(entity.getId())
+            .withTestType(entity.getTestType())
+            .withStatus(entity.getStatus())
+            .withCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
+            .withBackend(entity.getBackend())
+            .withScenarioName(entity.getScenarioName())
+            .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
+            .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
+            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}));
 
         if (entity.getResults() != null) {
-            run.setResults(entity.getResults().stream()
+            run = run.withResults(entity.getResults().stream()
                     .map(EntityMapper::toResultDomain)
                     .collect(Collectors.toList()));
         }
@@ -105,23 +105,22 @@ public final class EntityMapper {
     }
 
     private static TestResult toResultDomain(TestResultEntity entity) {
-        TestResult result = new TestResult();
-        result.setTaskId(entity.getTaskId());
-        result.setTestType(entity.getTestType());
-        result.setStatus(entity.getStatus());
-        result.setRecordsSent(entity.getRecordsSent());
-        result.setThroughputRecordsPerSec(entity.getThroughputRecordsPerSec());
-        result.setThroughputMBPerSec(entity.getThroughputMBPerSec());
-        result.setAvgLatencyMs(entity.getAvgLatencyMs());
-        result.setP50LatencyMs(entity.getP50LatencyMs());
-        result.setP95LatencyMs(entity.getP95LatencyMs());
-        result.setP99LatencyMs(entity.getP99LatencyMs());
-        result.setMaxLatencyMs(entity.getMaxLatencyMs());
-        result.setStartTime(entity.getStartTime());
-        result.setEndTime(entity.getEndTime());
-        result.setError(entity.getError());
-        result.setPhaseName(entity.getPhaseName());
-        return result;
+        return new TestResult()
+            .withTaskId(entity.getTaskId())
+            .withTestType(entity.getTestType())
+            .withStatus(entity.getStatus())
+            .withRecordsSent(entity.getRecordsSent())
+            .withThroughputRecordsPerSec(entity.getThroughputRecordsPerSec())
+            .withThroughputMBPerSec(entity.getThroughputMBPerSec())
+            .withAvgLatencyMs(entity.getAvgLatencyMs())
+            .withP50LatencyMs(entity.getP50LatencyMs())
+            .withP95LatencyMs(entity.getP95LatencyMs())
+            .withP99LatencyMs(entity.getP99LatencyMs())
+            .withMaxLatencyMs(entity.getMaxLatencyMs())
+            .withStartTime(entity.getStartTime())
+            .withEndTime(entity.getEndTime())
+            .withError(entity.getError())
+            .withPhaseName(entity.getPhaseName());
     }
 
     private static String toJson(Object obj) {

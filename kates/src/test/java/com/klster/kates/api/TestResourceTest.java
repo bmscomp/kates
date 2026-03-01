@@ -121,6 +121,6 @@ class TestResourceTest {
                 .statusCode(202)
                 .body("testType", is("ROUND_TRIP"))
                 .body("id", notNullValue())
-                .body("status", anyOf(is("RUNNING"), is("FAILED")));
+                .body("status", is("PENDING"));
     }
 }

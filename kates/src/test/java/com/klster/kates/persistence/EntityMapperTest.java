@@ -62,9 +62,8 @@ class EntityMapperTest {
 
     @Test
     void nullSpecHandled() {
-        TestRun run = new TestRun();
-        run.setTestType(TestType.LOAD);
-        run.setStatus(TestResult.TaskStatus.PENDING);
+        TestRun run = new TestRun(TestType.LOAD, null)
+            .withStatus(TestResult.TaskStatus.PENDING);
 
         TestRunEntity entity = EntityMapper.toEntity(run);
         assertNull(entity.getSpecJson());
@@ -79,15 +78,13 @@ class EntityMapperTest {
         TestRunEntity entity = EntityMapper.toEntity(run);
         assertEquals(1, entity.getResults().size());
 
-        TestResult r2 = new TestResult();
-        r2.setTaskId("task-2");
-        r2.setRecordsSent(2000);
-        TestResult r3 = new TestResult();
-        r3.setTaskId("task-3");
-        r3.setRecordsSent(3000);
-        run.getResults().clear();
-        run.addResult(r2);
-        run.addResult(r3);
+        TestResult r2 = new TestResult()
+            .withTaskId("task-2")
+            .withRecordsSent(2000);
+        TestResult r3 = new TestResult()
+            .withTaskId("task-3")
+            .withRecordsSent(3000);
+        run = run.withResults(java.util.List.of(r2, r3));
 
         EntityMapper.updateEntity(entity, run);
 
@@ -105,24 +102,24 @@ class EntityMapperTest {
         SlaDefinition sla = new SlaDefinition();
         sla.setMaxP99LatencyMs(50.0);
 
-        TestResult result = new TestResult();
-        result.setTaskId("task-1");
-        result.setRecordsSent(1000);
-        result.setThroughputRecordsPerSec(500.0);
-        result.setAvgLatencyMs(5.0);
-        result.setP50LatencyMs(3.0);
-        result.setP95LatencyMs(10.0);
-        result.setP99LatencyMs(20.0);
-        result.setMaxLatencyMs(50.0);
-        result.setStatus(TestResult.TaskStatus.DONE);
+        TestResult result = new TestResult()
+            .withTaskId("task-1")
+            .withRecordsSent(1000)
+            .withThroughputRecordsPerSec(500.0)
+            .withAvgLatencyMs(5.0)
+            .withP50LatencyMs(3.0)
+            .withP95LatencyMs(10.0)
+            .withP99LatencyMs(20.0)
+            .withMaxLatencyMs(50.0)
+            .withStatus(TestResult.TaskStatus.DONE);
 
-        TestRun run = new TestRun(TestType.LOAD, spec);
-        run.setStatus(TestResult.TaskStatus.RUNNING);
-        run.setBackend("native");
-        run.setScenarioName("basic-load");
-        run.setSla(sla);
-        run.setLabels(new LinkedHashMap<>(Map.of("env", "test")));
-        run.addResult(result);
+        TestRun run = new TestRun(TestType.LOAD, spec)
+            .withStatus(TestResult.TaskStatus.RUNNING)
+            .withBackend("native")
+            .withScenarioName("basic-load")
+            .withSla(sla)
+            .withLabels(new LinkedHashMap<>(Map.of("env", "test")))
+            .withAddedResult(result);
 
         return run;
     }

@@ -75,7 +75,7 @@ spec:
       containers:
       - name: producer
         image: $IMAGE
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         command: ["/bin/bash", "-c"]
         args:
         - |

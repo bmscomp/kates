@@ -39,10 +39,9 @@ if [ ! -f "${INFRA_MANIFEST}" ]; then
     exit 1
 fi
 
-info "Patching manifest for offline deployment (Litmus v${LITMUS_VERSION})..."
+info "Patching manifest image references (Litmus v${LITMUS_VERSION})..."
 PATCHED_MANIFEST=$(mktemp)
-sed -e 's/imagePullPolicy: IfNotPresent/imagePullPolicy: Never/g' \
-    -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0|litmuschaos/chaos-operator:${LITMUS_VERSION}|g" \
+sed -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator:3.23.0|litmuschaos/chaos-operator:${LITMUS_VERSION}|g" \
     -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-runner:3.23.0|litmuschaos/chaos-runner:${LITMUS_VERSION}|g" \
     -e "s|litmuschaos.docker.scarf.sh/litmuschaos/chaos-exporter:3.23.0|litmuschaos/chaos-exporter:${LITMUS_VERSION}|g" \
     -e "s|litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.23.0|litmuschaos/litmusportal-subscriber:${LITMUS_VERSION}|g" \
@@ -91,7 +90,7 @@ spec:
         resources: ["chaosengines","chaosexperiments","chaosresults"]
         verbs: ["create","list","get","patch","update","delete"]
     image: "litmuschaos/go-runner:${LITMUS_VERSION}"
-    imagePullPolicy: Never
+    imagePullPolicy: IfNotPresent
     args:
       - -name
       - pod-delete
@@ -140,7 +139,7 @@ spec:
         resources: ["networkpolicies"]
         verbs: ["create","delete","list","get"]
     image: "litmuschaos/go-runner:${LITMUS_VERSION}"
-    imagePullPolicy: Never
+    imagePullPolicy: IfNotPresent
     args:
       - -name
       - pod-network-partition
@@ -182,7 +181,7 @@ spec:
         resources: ["chaosengines","chaosexperiments","chaosresults"]
         verbs: ["create","list","get","patch","update","delete"]
     image: "litmuschaos/go-runner:${LITMUS_VERSION}"
-    imagePullPolicy: Never
+    imagePullPolicy: IfNotPresent
     args:
       - -name
       - pod-cpu-hog

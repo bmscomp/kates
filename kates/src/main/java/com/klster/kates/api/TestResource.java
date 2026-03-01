@@ -58,7 +58,13 @@ public class TestResource {
             description = "Submits a new performance test run for asynchronous execution")
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
     public Response createTest(@Valid CreateTestRequest request) {
-        TestRun run = orchestrator.executeTest(request);
+        var result = orchestrator.executeTest(request);
+        if (result.isFailure()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
+                    .build();
+        }
+        TestRun run = result.asSuccess().orElseThrow();
         auditService.record("CREATE", "test", run.getId(), request.getType() + " test");
         return Response.accepted(run).build();
     }
@@ -78,26 +84,30 @@ public class TestResource {
                     .entity(ApiError.of(400, "Bad Request", "Maximum 10 tests per bulk request"))
                     .build();
         }
-        List<java.util.Map<String, Object>> results = new java.util.ArrayList<>();
+        List<com.klster.kates.domain.BulkCreateResponse.TestRunSummary> results = new java.util.ArrayList<>();
         for (CreateTestRequest req : requests) {
             try {
-                TestRun run = orchestrator.executeTest(req);
-                auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
-                results.add(java.util.Map.of(
-                        "id", run.getId(), "status", run.getStatus().name()));
+                var testResult = orchestrator.executeTest(req);
+                if (testResult.isFailure()) {
+                    results.add(com.klster.kates.domain.BulkCreateResponse.TestRunSummary.failure(testResult.asFailure().orElseThrow().getMessage()));
+                } else {
+                    TestRun run = testResult.asSuccess().orElseThrow();
+                    auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
+                    results.add(com.klster.kates.domain.BulkCreateResponse.TestRunSummary.success(run.getId(), run.getStatus().name()));
+                }
             } catch (Exception e) {
-                results.add(java.util.Map.of("error", e.getMessage()));
+                results.add(com.klster.kates.domain.BulkCreateResponse.TestRunSummary.failure(e.getMessage()));
             }
         }
-        return Response.accepted(java.util.Map.of("created", results.size(), "runs", results))
+        return Response.accepted(new com.klster.kates.domain.BulkCreateResponse(results.size(), results))
                 .build();
     }
 
     @DELETE
     @Path("/bulk")
     @Operation(summary = "Delete multiple tests", description = "Deletes test runs by a list of IDs")
-    public Response bulkDelete(java.util.Map<String, List<String>> body) {
-        List<String> ids = body != null ? body.get("ids") : null;
+    public Response bulkDelete(com.klster.kates.domain.BulkDeleteRequest request) {
+        List<String> ids = request != null ? request.ids() : null;
         if (ids == null || ids.isEmpty()) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Field 'ids' is required"))
@@ -114,7 +124,7 @@ public class TestResource {
                 notFound++;
             }
         }
-        return Response.ok(java.util.Map.of("deleted", deleted, "notFound", notFound))
+        return Response.ok(new com.klster.kates.domain.BulkDeleteResponse(deleted, notFound))
                 .build();
     }
 
@@ -221,15 +231,22 @@ public class TestResource {
                                 .build();
                     }
                     orchestrator.stopTest(id);
-                    run.setStatus(com.klster.kates.domain.TestResult.TaskStatus.FAILED);
-                    for (var result : run.getResults()) {
-                        if (result.getStatus() == com.klster.kates.domain.TestResult.TaskStatus.RUNNING
-                                || result.getStatus() == com.klster.kates.domain.TestResult.TaskStatus.PENDING) {
-                            result.setStatus(com.klster.kates.domain.TestResult.TaskStatus.FAILED);
-                            result.setError("Cancelled by user");
-                            result.setEndTime(java.time.Instant.now().toString());
+                    run = run.withStatus(com.klster.kates.domain.TestResult.TaskStatus.FAILED);
+                    
+                    if (run.getResults() != null) {
+                        java.util.List<com.klster.kates.domain.TestResult> updatedResults = new java.util.ArrayList<>();
+                        for (var result : run.getResults()) {
+                            if (result.getStatus() == com.klster.kates.domain.TestResult.TaskStatus.RUNNING
+                                    || result.getStatus() == com.klster.kates.domain.TestResult.TaskStatus.PENDING) {
+                                result = result.withStatus(com.klster.kates.domain.TestResult.TaskStatus.FAILED)
+                                               .withError("Cancelled by user")
+                                               .withEndTime(java.time.Instant.now().toString());
+                            }
+                            updatedResults.add(result);
                         }
+                        run = run.withResults(updatedResults);
                     }
+                    
                     repository.save(run);
                     auditService.record("CANCEL", "test", id, "Test cancelled by user");
                     return Response.ok(java.util.Map.of(
@@ -262,8 +279,8 @@ public class TestResource {
     @Operation(summary = "List all baselines", description = "Returns the baseline run for each test type")
     @Tag(name = "Baselines")
     public Response listBaselines() {
-        List<java.util.Map<String, Object>> result = baselineService.listAll().stream()
-                .map(this::baselineToMap)
+        List<com.klster.kates.domain.BaselineResponse> result = baselineService.listAll().stream()
+                .map(this::baselineToResponse)
                 .collect(java.util.stream.Collectors.toList());
         return Response.ok(result).build();
     }
@@ -281,7 +298,7 @@ public class TestResource {
         }
         return baselineService
                 .get(type)
-                .map(b -> Response.ok(baselineToMap(b)).build())
+                .map(b -> Response.ok(baselineToResponse(b)).build())
                 .orElse(Response.status(404)
                         .entity(ApiError.of(404, "Not Found", "No baseline set for type: " + typeStr))
                         .build());
@@ -295,14 +312,14 @@ public class TestResource {
     @Tag(name = "Baselines")
     public Response setBaseline(
             @Parameter(description = "Test type") @PathParam("type") String typeStr,
-            java.util.Map<String, String> body) {
+            com.klster.kates.domain.SetBaselineRequest request) {
         TestType type = parseBaselineType(typeStr);
         if (type == null) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Invalid test type: " + typeStr))
                     .build();
         }
-        String runId = body != null ? body.get("runId") : null;
+        String runId = request != null ? request.runId() : null;
         if (runId == null || runId.isBlank()) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "runId is required in request body"))
@@ -314,7 +331,7 @@ public class TestResource {
                     .build();
         }
         BaselineEntity baseline = baselineService.set(type, runId);
-        return Response.ok(baselineToMap(baseline)).build();
+        return Response.ok(baselineToResponse(baseline)).build();
     }
 
     @DELETE
@@ -337,12 +354,12 @@ public class TestResource {
                 .build();
     }
 
-    private java.util.Map<String, Object> baselineToMap(BaselineEntity b) {
-        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
-        m.put("testType", b.getTestType().name());
-        m.put("runId", b.getRunId());
-        m.put("setAt", b.getSetAt().toString());
-        return m;
+    private com.klster.kates.domain.BaselineResponse baselineToResponse(BaselineEntity b) {
+        return new com.klster.kates.domain.BaselineResponse(
+            b.getTestType().name(),
+            b.getRunId(),
+            b.getSetAt()
+        );
     }
 
     private TestType parseBaselineType(String typeStr) {

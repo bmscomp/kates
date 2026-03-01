@@ -82,19 +82,22 @@ public class TestOrchestrator {
         }
         LOG.infof("Recovering %d orphaned RUNNING tests from previous lifecycle", orphans.size());
         for (TestRun run : orphans) {
-            run.setStatus(TestResult.TaskStatus.FAILED);
+            run = run.withStatus(TestResult.TaskStatus.FAILED);
+            List<TestResult> newResults = new java.util.ArrayList<>();
             for (TestResult result : run.getResults()) {
                 if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
-                    result.setStatus(TestResult.TaskStatus.FAILED);
-                    result.setError("Recovered: test was orphaned after server restart");
+                    result = result.withStatus(TestResult.TaskStatus.FAILED)
+                                   .withError("Recovered: test was orphaned after server restart");
                 }
+                newResults.add(result);
             }
+            run = run.withResults(newResults);
             repository.save(run);
             LOG.infof("  Marked test %s as FAILED (orphan recovery)", run.getId());
         }
     }
 
-    public TestRun executeTest(CreateTestRequest request) {
+    public com.klster.kates.util.Result<TestRun, Exception> executeTest(CreateTestRequest request) {
         if (request.isScenario()) {
             return executeScenario(request);
         }
@@ -103,23 +106,26 @@ public class TestOrchestrator {
         TestSpec spec = applyTypeDefaults(type, request.getSpec());
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
 
-        BenchmarkBackend backend = resolveBackend(backendName);
+        com.klster.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
+        if (backendResult.isFailure()) {
+            return com.klster.kates.util.Result.failure(backendResult.asFailure().orElseThrow());
+        }
+        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
-        TestRun run = new TestRun(type, spec);
-        run.setBackend(backendName);
+        TestRun run = new TestRun(type, spec).withBackend(backendName);
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
 
         Thread.startVirtualThread(() -> executeAsync(run, type, spec, backendName, backend));
 
-        return run;
+        return com.klster.kates.util.Result.success(run);
     }
 
     private void executeAsync(TestRun run, TestType type, TestSpec spec, String backendName, BenchmarkBackend backend) {
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
-            run.setStatus(TestResult.TaskStatus.RUNNING);
+            run = run.withStatus(TestResult.TaskStatus.RUNNING);
             fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
 
@@ -130,23 +136,23 @@ public class TestOrchestrator {
                     BenchmarkHandle handle = backend.submit(task);
                     handles.add(handle);
 
-                    TestResult result = new TestResult();
-                    result.setTaskId(task.getTaskId());
-                    result.setTestType(type);
-                    result.setStatus(TestResult.TaskStatus.RUNNING);
-                    result.setStartTime(Instant.now().toString());
-                    run.addResult(result);
+                    TestResult result = new TestResult()
+                            .withTaskId(task.getTaskId())
+                            .withTestType(type)
+                            .withStatus(TestResult.TaskStatus.RUNNING)
+                            .withStartTime(Instant.now().toString());
+                    run = run.withAddedResult(result);
                     LOG.info("Submitted task via " + backendName + ": " + task.getTaskId());
                 } catch (Exception e) {
                     LOG.warn("Failed to submit task: " + task.getTaskId(), e);
-                    TestResult failedResult = new TestResult();
-                    failedResult.setTaskId(task.getTaskId());
-                    failedResult.setTestType(type);
-                    failedResult.setStatus(TestResult.TaskStatus.FAILED);
-                    failedResult.setError(e.getMessage());
-                    failedResult.setStartTime(Instant.now().toString());
-                    failedResult.setEndTime(Instant.now().toString());
-                    run.addResult(failedResult);
+                    TestResult failedResult = new TestResult()
+                            .withTaskId(task.getTaskId())
+                            .withTestType(type)
+                            .withStatus(TestResult.TaskStatus.FAILED)
+                            .withError(e.getMessage())
+                            .withStartTime(Instant.now().toString())
+                            .withEndTime(Instant.now().toString());
+                    run = run.withAddedResult(failedResult);
                 }
             }
 
@@ -154,12 +160,12 @@ public class TestOrchestrator {
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
-                run.setStatus(TestResult.TaskStatus.FAILED);
+                run = run.withStatus(TestResult.TaskStatus.FAILED);
             }
 
         } catch (Exception e) {
             LOG.error("Test execution failed for run: " + run.getId(), e);
-            run.setStatus(TestResult.TaskStatus.FAILED);
+            run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
         repository.save(run);
@@ -176,22 +182,26 @@ public class TestOrchestrator {
      * Executes a multi-phase scenario: each phase runs sequentially,
      * using the resolved spec (base + phase overrides + type defaults).
      */
-    TestRun executeScenario(CreateTestRequest request) {
+    com.klster.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
         TestScenario scenario = request.getScenario();
         TestType type = scenario.getType() != null ? scenario.getType() : request.getType();
         String backendName = scenario.getBackend() != null
                 ? scenario.getBackend()
                 : (request.getBackend() != null ? request.getBackend() : defaultBackend);
 
-        BenchmarkBackend backend = resolveBackend(backendName);
+        com.klster.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
+        if (backendResult.isFailure()) {
+            return com.klster.kates.util.Result.failure(backendResult.asFailure().orElseThrow());
+        }
+        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
         TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
-        TestRun run = new TestRun(type, baseSpec);
-        run.setBackend(backendName);
-        run.setScenarioName(scenario.getName());
-        run.setLabels(scenario.getLabels());
-        run.setSla(scenario.getSla());
-        run.setStatus(TestResult.TaskStatus.RUNNING);
+        TestRun run = new TestRun(type, baseSpec)
+            .withBackend(backendName)
+            .withScenarioName(scenario.getName())
+            .withLabels(scenario.getLabels())
+            .withSla(scenario.getSla())
+            .withStatus(TestResult.TaskStatus.RUNNING);
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
         fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
@@ -214,25 +224,25 @@ public class TestOrchestrator {
                         BenchmarkHandle handle = backend.submit(task);
                         allHandles.add(handle);
 
-                        TestResult result = new TestResult();
-                        result.setTaskId(task.getTaskId());
-                        result.setTestType(type);
-                        result.setStatus(TestResult.TaskStatus.RUNNING);
-                        result.setStartTime(Instant.now().toString());
-                        result.setPhaseName(phaseName);
-                        run.addResult(result);
+                        TestResult result = new TestResult()
+                                .withTaskId(task.getTaskId())
+                                .withTestType(type)
+                                .withStatus(TestResult.TaskStatus.RUNNING)
+                                .withStartTime(Instant.now().toString())
+                                .withPhaseName(phaseName);
+                        run = run.withAddedResult(result);
                         LOG.info("Scenario phase [" + phaseName + "] submitted: " + task.getTaskId());
                     } catch (Exception e) {
                         LOG.warn("Phase [" + phaseName + "] failed to submit: " + task.getTaskId(), e);
-                        TestResult failedResult = new TestResult();
-                        failedResult.setTaskId(task.getTaskId());
-                        failedResult.setTestType(type);
-                        failedResult.setStatus(TestResult.TaskStatus.FAILED);
-                        failedResult.setError(e.getMessage());
-                        failedResult.setStartTime(Instant.now().toString());
-                        failedResult.setEndTime(Instant.now().toString());
-                        failedResult.setPhaseName(phaseName);
-                        run.addResult(failedResult);
+                        TestResult failedResult = new TestResult()
+                                .withTaskId(task.getTaskId())
+                                .withTestType(type)
+                                .withStatus(TestResult.TaskStatus.FAILED)
+                                .withError(e.getMessage())
+                                .withStartTime(Instant.now().toString())
+                                .withEndTime(Instant.now().toString())
+                                .withPhaseName(phaseName);
+                        run = run.withAddedResult(failedResult);
                     }
                 }
             }
@@ -241,12 +251,12 @@ public class TestOrchestrator {
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
-                run.setStatus(TestResult.TaskStatus.FAILED);
+                run = run.withStatus(TestResult.TaskStatus.FAILED);
             }
 
         } catch (Exception e) {
             LOG.error("Scenario execution failed for run: " + run.getId(), e);
-            run.setStatus(TestResult.TaskStatus.FAILED);
+            run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
         repository.save(run);
@@ -257,7 +267,7 @@ public class TestOrchestrator {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
         }
-        return run;
+        return com.klster.kates.util.Result.success(run);
     }
 
     public TestRun refreshStatus(String runId) {
@@ -266,7 +276,11 @@ public class TestOrchestrator {
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
-        BenchmarkBackend backend = resolveBackend(backendName);
+        com.klster.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
+        if (backendResult.isFailure()) {
+            return run; // Cannot poll status if backend is missing.
+        }
+        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
         List<BenchmarkHandle> handles = activeHandles.getOrDefault(runId, List.of());
         Map<String, BenchmarkHandle> handleMap = new HashMap<>();
@@ -277,6 +291,7 @@ public class TestOrchestrator {
         boolean allDone = true;
         boolean anyFailed = false;
 
+        List<TestResult> updatedResults = new java.util.ArrayList<>();
         for (TestResult result : run.getResults()) {
             if (result.getStatus() == TestResult.TaskStatus.RUNNING
                     || result.getStatus() == TestResult.TaskStatus.PENDING) {
@@ -284,7 +299,7 @@ public class TestOrchestrator {
                 if (handle != null) {
                     try {
                         BenchmarkStatus status = backend.poll(handle);
-                        applyStatus(result, status);
+                        result = applyStatus(result, status);
 
                         if (status.getHeatmapBuckets() != null) {
                             heatmapRows
@@ -307,10 +322,12 @@ public class TestOrchestrator {
             if (result.getStatus() == TestResult.TaskStatus.FAILED) {
                 anyFailed = true;
             }
+            updatedResults.add(result);
         }
+        run = run.withResults(updatedResults);
 
         if (allDone) {
-            run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
+            run = run.withStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
             activeHandles.remove(runId);
             fireEvent(run, anyFailed ? TestLifecycleEvent.EventKind.FAILED : TestLifecycleEvent.EventKind.DONE);
 
@@ -349,7 +366,11 @@ public class TestOrchestrator {
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
-        BenchmarkBackend backend = resolveBackend(backendName);
+        com.klster.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
+        if (backendResult.isFailure()) {
+            return; // Cannot cancel what has no backend.
+        }
+        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
         List<BenchmarkHandle> handles = activeHandles.getOrDefault(runId, List.of());
         for (BenchmarkHandle handle : handles) {
@@ -360,7 +381,7 @@ public class TestOrchestrator {
             }
         }
 
-        run.setStatus(TestResult.TaskStatus.STOPPING);
+        run = run.withStatus(TestResult.TaskStatus.STOPPING);
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.STOPPING);
     }
@@ -415,12 +436,13 @@ public class TestOrchestrator {
         return merged;
     }
 
-    private BenchmarkBackend resolveBackend(String name) {
+    private com.klster.kates.util.Result<BenchmarkBackend, Exception> resolveBackend(String name) {
         return backends.stream()
                 .filter(b -> b.name().equals(name))
                 .findFirst()
-                .orElseThrow(() ->
-                        new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends()));
+                .<com.klster.kates.util.Result<BenchmarkBackend, Exception>>map(com.klster.kates.util.Result::success)
+                .orElseGet(() -> com.klster.kates.util.Result.failure(
+                        new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends())));
     }
 
     private List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
@@ -583,26 +605,27 @@ public class TestOrchestrator {
         kafkaAdmin.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
     }
 
-    private void applyStatus(TestResult result, BenchmarkStatus status) {
-        result.setStatus(status.getState());
-        result.setRecordsSent(status.getRecordsProcessed());
-        result.setThroughputRecordsPerSec(status.getThroughputRecordsPerSec());
-        result.setThroughputMBPerSec(status.getThroughputMBPerSec());
-        result.setAvgLatencyMs(status.getAvgLatencyMs());
-        result.setP50LatencyMs(status.getP50LatencyMs());
-        result.setP95LatencyMs(status.getP95LatencyMs());
-        result.setP99LatencyMs(status.getP99LatencyMs());
-        result.setMaxLatencyMs(status.getMaxLatencyMs());
+    private TestResult applyStatus(TestResult result, BenchmarkStatus status) {
+        result = result.withStatus(status.getState())
+                .withRecordsSent(status.getRecordsProcessed())
+                .withThroughputRecordsPerSec(status.getThroughputRecordsPerSec())
+                .withThroughputMBPerSec(status.getThroughputMBPerSec())
+                .withAvgLatencyMs(status.getAvgLatencyMs())
+                .withP50LatencyMs(status.getP50LatencyMs())
+                .withP95LatencyMs(status.getP95LatencyMs())
+                .withP99LatencyMs(status.getP99LatencyMs())
+                .withMaxLatencyMs(status.getMaxLatencyMs());
 
         if (status.getError() != null) {
-            result.setError(status.getError());
+            result = result.withError(status.getError());
         }
         if (status.getIntegrityResult() != null) {
-            result.setIntegrity(status.getIntegrityResult());
+            result = result.withIntegrity(status.getIntegrityResult());
         }
         if (status.isTerminal()) {
-            result.setEndTime(Instant.now().toString());
+            result = result.withEndTime(Instant.now().toString());
         }
+        return result;
     }
 
     private void fireEvent(TestRun run, TestLifecycleEvent.EventKind kind) {

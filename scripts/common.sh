@@ -12,17 +12,8 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 KIND_CLUSTER_NAME="panda"
-REGISTRY="localhost:5001"
 CHARTS_DIR="${SCRIPT_DIR}/../charts"
 
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-    PLATFORM="--platform linux/arm64"
-else
-    PLATFORM="--platform linux/amd64"
-fi
-
-unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 
 info()  { echo -e "${GREEN}$*${NC}"; }
 warn()  { echo -e "${YELLOW}$*${NC}"; }
@@ -41,12 +32,6 @@ require_cluster() {
     fi
 }
 
-require_registry() {
-    if ! curl -s "http://${REGISTRY}/v2/_catalog" > /dev/null 2>&1; then
-        error "Local registry is not running at ${REGISTRY}. Run './setup-registry.sh' first."
-        exit 1
-    fi
-}
 
 require_chart() {
     local chart_dir="$1"

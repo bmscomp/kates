@@ -1,0 +1,59 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kates.fullname" . }}-migrate
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "kates.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.postgresql.enabled }}
+      initContainers:
+      - name: wait-for-postgres
+        image: {{ .Values.initContainers.waitForPostgres.image | quote }}
+        imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
+        command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
+      {{- end }}
+      containers:
+      - name: migrate
+        image: {{ .Values.migration.image | default (printf "%s:%s" .Values.image.repository .Values.image.tag) | quote }}
+        {{- if .Values.migration.command }}
+        command:
+          {{- toYaml .Values.migration.command | nindent 10 }}
+        {{- else }}
+        command:
+          - sh
+          - -c
+          - |
+            echo "Running Flyway migrations..."
+            java -jar /deployments/quarkus-run.jar flyway migrate
+            echo "Migration complete."
+        {{- end }}
+        envFrom:
+        - configMapRef:
+            name: {{ include "kates.fullname" . }}-config
+        {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
+        - secretRef:
+            name: {{ include "kates.dbSecretName" . }}
+        {{- end }}
+        {{- with .Values.containerSecurityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+{{- end }}

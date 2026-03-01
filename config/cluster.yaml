@@ -1,16 +1,9 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 # Use a stable Kubernetes version (v1.31.4) to avoid cgroup v2 issues
-# v1.35.0 has known kubelet health check issues with cgroup v2
+# v1.33+ has known kubelet health check issues with cgroup v2 on arm64
 featureGates:
   "KubeletCgroupDriverFromCRI": true
-containerdConfigPatches:
-- |-
-  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
-    endpoint = ["http://localhost:5001"]
-  [plugins."io.containerd.grpc.v1.cri".registry.configs."localhost:5001".tls]
-    insecure_skip_verify = true
-# Add cluster configuration to increase timeout
 kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration
@@ -18,7 +11,7 @@ kubeadmConfigPatches:
     timeoutForControlPlane: 8m0s
 nodes:
 - role: control-plane
-  # Use Kubernetes v1.31.4 instead of v1.35.0
+  # Use Kubernetes v1.31.4 — v1.33+ fails with cgroup v2 on arm64
   image: kindest/node:v1.31.4
   kubeadmConfigPatches:
   - |
@@ -37,7 +30,7 @@ nodes:
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf
     readOnly: true
 - role: worker
-  # Use Kubernetes v1.31.4 instead of v1.35.0
+  # Use Kubernetes v1.31.4 — v1.33+ fails with cgroup v2 on arm64
   image: kindest/node:v1.31.4
   kubeadmConfigPatches:
   - |
@@ -55,7 +48,7 @@ nodes:
     containerPath: /etc/systemd/system/containerd.service.d/proxy.conf
     readOnly: true
 - role: worker
-  # Use Kubernetes v1.31.4 instead of v1.35.0
+  # Use Kubernetes v1.31.4 — v1.33+ fails with cgroup v2 on arm64
   image: kindest/node:v1.31.4
   kubeadmConfigPatches:
   - |

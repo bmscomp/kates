@@ -1,0 +1,75 @@
+{{- if .Values.metrics.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kates.fullname" . }}-grafana-dashboard
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    {{- with .Values.metrics.grafanaDashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  kates-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "Active Test Runs",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [{ "expr": "kates_active_runs", "legendFormat": "active" }],
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 10 }] } } }
+        },
+        {
+          "title": "Request Rate (req/s)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [{ "expr": "rate(http_server_requests_seconds_count{job=\"{{ include "kates.fullname" . }}\"}[5m])", "legendFormat": "{{`{{ method }}`}} {{`{{ uri }}`}}" }]
+        },
+        {
+          "title": "Request Latency P99 (ms)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [{ "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job=\"{{ include "kates.fullname" . }}\"}[5m])) * 1000", "legendFormat": "p99" }]
+        },
+        {
+          "title": "Error Rate (5xx/s)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "targets": [{ "expr": "rate(http_server_requests_seconds_count{job=\"{{ include "kates.fullname" . }}\", status=~\"5..\"}[5m])", "legendFormat": "5xx" }],
+          "fieldConfig": { "defaults": { "color": { "fixedColor": "red", "mode": "fixed" } } }
+        },
+        {
+          "title": "JVM Heap Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "targets": [
+            { "expr": "jvm_memory_used_bytes{job=\"{{ include "kates.fullname" . }}\", area=\"heap\"}", "legendFormat": "used" },
+            { "expr": "jvm_memory_max_bytes{job=\"{{ include "kates.fullname" . }}\", area=\"heap\"}", "legendFormat": "max" }
+          ]
+        },
+        {
+          "title": "Pod CPU Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "targets": [{ "expr": "rate(container_cpu_usage_seconds_total{container=\"kates\"}[5m])", "legendFormat": "{{`{{ pod }}`}}" }]
+        },
+        {
+          "title": "Pod Memory Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "targets": [{ "expr": "container_memory_working_set_bytes{container=\"kates\"}", "legendFormat": "{{`{{ pod }}`}}" }]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kates", "kafka", "testing"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "KATES Overview",
+      "uid": "kates-overview"
+    }
+{{- end }}

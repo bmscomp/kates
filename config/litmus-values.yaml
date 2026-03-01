@@ -7,14 +7,14 @@ operator:
   image:
     repository: litmuschaos/chaos-operator
     tag: "3.24.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Runner configuration  
 runner:
   image:
     repository: litmuschaos/chaos-runner
     tag: "3.24.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
 
 # Exporter configuration
 exporter:
@@ -22,7 +22,7 @@ exporter:
   image:
     repository: litmuschaos/chaos-exporter
     tag: "3.24.0"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   service:
     type: ClusterIP
     port: 8080
@@ -47,7 +47,7 @@ portal:
     image:
       repository: litmusportal-server
       tag: "3.24.0"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     service:
       type: ClusterIP
       port: 9002
@@ -56,7 +56,7 @@ portal:
     image:
       repository: litmusportal-frontend
       tag: "3.24.0"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     service:
       type: ClusterIP
       port: 9091
@@ -73,7 +73,7 @@ mongodb:
     registry: docker.io
     repository: bitnami/mongodb
     tag: "latest"
-    pullPolicy: Never
+    pullPolicy: IfNotPresent
   # ReplicaSet mode required - litmus server expects replica set topology
   architecture: replicaset
   replicaCount: 1
@@ -97,7 +97,7 @@ mongodb:
       registry: docker.io
       repository: bitnamilegacy/os-shell
       tag: "12-debian-12-r51"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     securityContext:
       runAsUser: 0
   # Resource limits

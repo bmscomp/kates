@@ -38,3 +38,38 @@ Kates has been deployed!
     kates test scaffold --type LOAD > load-test.yaml
     kates test apply -f load-test.yaml
     kates test list
+
+  Validate the deployment:
+    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{- if .Values.metrics.serviceMonitor.enabled }}
+
+  Monitoring:
+    ServiceMonitor enabled — Prometheus will discover this service automatically.
+  {{- if .Values.metrics.prometheusRule.enabled }}
+    PrometheusRule enabled — alerts (KatesDown, KatesHighErrorRate, KatesPodRestarting) are active.
+  {{- end }}
+  {{- if .Values.metrics.grafanaDashboard.enabled }}
+    Grafana dashboard will be auto-provisioned via sidecar.
+  {{- end }}
+{{- end }}
+
+{{- if .Values.networkPolicy.enabled }}
+
+  Network Policy:
+    Ingress and egress are restricted. Only allowed sources can reach port 8080.
+{{- end }}
+
+{{- if .Values.backup.enabled }}
+
+  Backups:
+    PostgreSQL backups run on schedule: {{ .Values.backup.schedule }}
+    Retention: {{ .Values.backup.retention }} days
+{{- end }}
+
+{{- if .Values.cleanup.enabled }}
+
+  Cleanup:
+    Old completed test runs are cleaned up on schedule: {{ .Values.cleanup.schedule }}
+    Retention: {{ .Values.cleanup.retentionDays }} days
+{{- end }}

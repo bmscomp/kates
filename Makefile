@@ -14,60 +14,53 @@ all: check-prerequisites
 		./scripts/start-cluster.sh; \
 	fi
 	@echo ""
-	@echo "Step 2: Pulling missing images to local registry..."
-	./scripts/pull-images.sh
-	@echo ""
-	@echo "Step 3: Loading missing images into Kind cluster..."
-	./scripts/load-images-to-kind.sh
-	@echo ""
 	@if kubectl get pods -n monitoring -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Monitoring already deployed — skipping"; \
 	else \
-		echo "Step 4: Deploying Monitoring (Prometheus & Grafana)..."; \
+		echo "Step 2: Deploying Monitoring (Prometheus & Grafana)..."; \
 		./scripts/deploy-monitoring.sh; \
-		echo "Step 5: Waiting for monitoring to be ready..."; \
+		echo "Step 3: Waiting for monitoring to be ready..."; \
 		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true; \
 	fi
 	@echo ""
 	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kafka already deployed — skipping"; \
 	else \
-		echo "Step 6: Deploying Kafka (Strimzi)..."; \
+		echo "Step 4: Deploying Kafka (Strimzi)..."; \
 		./scripts/deploy-kafka.sh; \
-		echo "Step 7: Waiting for Kafka to be ready..."; \
+		echo "Step 5: Waiting for Kafka to be ready..."; \
 		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
 	fi
 	@echo ""
 	@if kubectl get pods -n kafka -l app=kafka-ui --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kafka UI already deployed — skipping"; \
 	else \
-		echo "Step 8: Deploying Kafka UI..."; \
+		echo "Step 6: Deploying Kafka UI..."; \
 		./scripts/deploy-kafka-ui.sh; \
 	fi
 	@echo ""
 	@if kubectl get pods -n kafka -l app=apicurio-registry --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Apicurio Registry already deployed — skipping"; \
 	else \
-		echo "Step 9: Deploying Apicurio Registry..."; \
+		echo "Step 7: Deploying Apicurio Registry..."; \
 		./scripts/deploy-apicurio.sh; \
 	fi
 	@echo ""
 	@if kubectl get pods -n litmus -l app.kubernetes.io/component=litmus --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
-		echo "Step 10: Deploying LitmusChaos..."; \
+		echo "Step 8: Deploying LitmusChaos..."; \
 		./scripts/deploy-litmuschaos.sh; \
 	fi
 	@echo ""
-	@echo "Step 11: Enabling chaos environment..."
+	@echo "Step 9: Enabling chaos environment..."
 	kubectl apply -f config/litmus/
 	@echo ""
 	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping build"; \
 	else \
-		echo "Step 12: Building and deploying Kates..."; \
-		cd kates && ./mvnw package -DskipTests -B; \
-		docker build -f kates/Dockerfile -t kates:latest .; \
+		echo "Step 10: Building and deploying Kates (native)..."; \
+		docker build -f kates/Dockerfile.native -t kates:latest .; \
 		kind load docker-image kates:latest --name panda; \
 		kubectl apply -f kates/k8s/namespace.yaml; \
 		kubectl apply -f kates/k8s/rbac.yaml; \
@@ -80,7 +73,7 @@ all: check-prerequisites
 		kubectl rollout status deployment/kates -n kates --timeout=120s; \
 	fi
 	@echo ""
-	@echo "Step 13: Exposing service ports..."
+	@echo "Step 11: Exposing service ports..."
 	./scripts/port-forward.sh
 	@echo ""
 	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
@@ -112,22 +105,6 @@ check-prerequisites:
 cluster:
 	@echo "🎯 Starting Kind cluster..."
 	./scripts/start-cluster.sh
-
-# Setup registry, pull all images, and load into Kind
-images: registry-ensure
-	@echo "🐳 Pulling and loading all images..."
-	./scripts/pull-images.sh
-	./scripts/load-images-to-kind.sh
-
-# Ensure registry is running
-registry-ensure:
-	@echo "🐳 Ensuring local registry is running..."
-	@if ! curl -s http://localhost:5001/v2/_catalog > /dev/null 2>&1; then \
-		echo "Starting registry..."; \
-		./scripts/setup-registry.sh; \
-	else \
-		echo "✅ Registry already running"; \
-	fi
 
 # Deploy monitoring stack only
 monitoring:
@@ -254,27 +231,13 @@ ports:
 	@echo "🔌 Starting Port Forwarding..."
 	./scripts/port-forward.sh
 
-# Registry Management
-registry-setup:
-	@echo "🐳 Setting up local Docker registry..."
-	./scripts/setup-registry.sh
-	./scripts/pull-images.sh
-
-registry-status:
-	@echo "📊 Checking registry status..."
-	./scripts/registry-status.sh
-
-registry-clean:
-	@echo "🧹 Cleaning up registry..."
-	./scripts/cleanup-registry.sh
-
-# Download all Helm charts for offline use
+# Download all Helm charts
 download-charts:
 	@echo "📦 Downloading all Helm charts..."
 	./scripts/download-charts.sh
 
 # LitmusChaos Management
-litmus: registry-ensure
+litmus:
 	@echo "⚡ Installing LitmusChaos..."
 	./scripts/deploy-litmuschaos.sh
 
@@ -358,9 +321,8 @@ help:
 	@echo "Available targets:"
 	@echo ""
 	@echo "  Cluster & Infrastructure"
-	@echo "  all              - Complete setup (cluster, registry, images, all services)"
+	@echo "  all              - Complete setup (cluster, all services)"
 	@echo "  cluster          - Start Kind cluster only"
-	@echo "  images           - Pull and load all images"
 	@echo "  monitoring       - Deploy Prometheus & Grafana"
 	@echo "  kafka            - Deploy Kafka (Strimzi)"
 	@echo "  ui               - Deploy Kafka UI"

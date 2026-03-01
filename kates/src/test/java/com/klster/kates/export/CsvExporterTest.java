@@ -26,16 +26,16 @@ class CsvExporterTest {
     @Test
     void resultRowContainsAllFields() {
         TestRun run = new TestRun();
-        TestResult result = new TestResult();
-        result.setTaskId("task-1");
-        result.setRecordsSent(1000);
-        result.setThroughputRecordsPerSec(500.0);
-        result.setAvgLatencyMs(5.0);
-        result.setP50LatencyMs(3.0);
-        result.setP95LatencyMs(10.0);
-        result.setP99LatencyMs(20.0);
-        result.setMaxLatencyMs(50.0);
-        run.addResult(result);
+        TestResult result = new TestResult()
+            .withTaskId("task-1")
+            .withRecordsSent(1000)
+            .withThroughputRecordsPerSec(500.0)
+            .withAvgLatencyMs(5.0)
+            .withP50LatencyMs(3.0)
+            .withP95LatencyMs(10.0)
+            .withP99LatencyMs(20.0)
+            .withMaxLatencyMs(50.0);
+        run = run.withAddedResult(result);
 
         TestReport report = new TestReport();
         report.setRun(run);
@@ -71,10 +71,10 @@ class CsvExporterTest {
     @Test
     void csvEscapingHandlesCommasAndQuotes() {
         TestRun run = new TestRun();
-        TestResult result = new TestResult();
-        result.setTaskId("task-1");
-        result.setError("Connection failed, retrying \"now\"");
-        run.addResult(result);
+        TestResult result = new TestResult()
+            .withTaskId("task-1")
+            .withError("Connection failed, retrying \"now\"");
+        run = run.withAddedResult(result);
 
         TestReport report = new TestReport();
         report.setRun(run);

@@ -48,3 +48,19 @@ jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namesp
 jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}
 {{- end -}}
 {{- end }}
+
+{{- define "kates.dbSecretName" -}}
+{{- if .Values.postgresql.enabled -}}
+  {{- if .Values.postgresql.auth.existingSecret -}}
+    {{- .Values.postgresql.auth.existingSecret -}}
+  {{- else -}}
+    {{- include "kates.fullname" . -}}-db
+  {{- end -}}
+{{- else if .Values.externalDatabase.enabled -}}
+  {{- if .Values.externalDatabase.existingSecret -}}
+    {{- .Values.externalDatabase.existingSecret -}}
+  {{- else -}}
+    {{- include "kates.fullname" . -}}-db
+  {{- end -}}
+{{- end -}}
+{{- end }}

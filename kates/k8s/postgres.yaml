@@ -22,7 +22,7 @@ spec:
       containers:
       - name: postgresql
         image: postgres:17-alpine
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5432
           name: postgres

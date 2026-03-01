@@ -87,7 +87,7 @@ class TestRunRepositoryTest {
         TestRun run = new TestRun(TestType.LOAD, new TestSpec());
         repository.save(run);
 
-        run.setStatus(TestResult.TaskStatus.DONE);
+        run = run.withStatus(TestResult.TaskStatus.DONE);
         repository.save(run);
 
         TestRun updated = repository.findById(run.getId()).orElseThrow();

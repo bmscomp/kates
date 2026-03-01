@@ -49,13 +49,11 @@ class TestRunTest {
     @Test
     void addResultAppendsToList() {
         TestRun run = new TestRun();
-        TestResult r1 = new TestResult();
-        r1.setTaskId("task-1");
-        TestResult r2 = new TestResult();
-        r2.setTaskId("task-2");
+        TestResult r1 = new TestResult().withTaskId("task-1");
+        TestResult r2 = new TestResult().withTaskId("task-2");
 
-        run.addResult(r1);
-        run.addResult(r2);
+        run = run.withAddedResult(r1);
+        run = run.withAddedResult(r2);
 
         assertEquals(2, run.getResults().size());
         assertEquals("task-1", run.getResults().get(0).getTaskId());

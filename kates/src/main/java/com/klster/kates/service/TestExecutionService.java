@@ -53,7 +53,7 @@ public class TestExecutionService {
             createTestTopic(spec, type);
 
             List<TrogdorSpec> trogdorSpecs = specFactory.buildSpecs(type, spec, run.getId());
-            run.setStatus(TestResult.TaskStatus.RUNNING);
+            run = run.withStatus(TestResult.TaskStatus.RUNNING);
 
             for (int i = 0; i < trogdorSpecs.size(); i++) {
                 String taskId = run.getId() + "-" + type.name().toLowerCase() + "-" + i;
@@ -63,34 +63,34 @@ public class TestExecutionService {
 
                 try {
                     trogdorClient.createTask(taskReq);
-                    TestResult result = new TestResult();
-                    result.setTaskId(taskId);
-                    result.setTestType(type);
-                    result.setStatus(TestResult.TaskStatus.RUNNING);
-                    result.setStartTime(Instant.now().toString());
-                    run.addResult(result);
+                    TestResult result = new TestResult()
+                            .withTaskId(taskId)
+                            .withTestType(type)
+                            .withStatus(TestResult.TaskStatus.RUNNING)
+                            .withStartTime(Instant.now().toString());
+                    run = run.withAddedResult(result);
                     LOG.info("Submitted Trogdor task: " + taskId);
                 } catch (Exception e) {
                     LOG.warn("Failed to submit Trogdor task: " + taskId, e);
-                    TestResult failedResult = new TestResult();
-                    failedResult.setTaskId(taskId);
-                    failedResult.setTestType(type);
-                    failedResult.setStatus(TestResult.TaskStatus.FAILED);
-                    failedResult.setError(e.getMessage());
-                    failedResult.setStartTime(Instant.now().toString());
-                    failedResult.setEndTime(Instant.now().toString());
-                    run.addResult(failedResult);
+                    TestResult failedResult = new TestResult()
+                            .withTaskId(taskId)
+                            .withTestType(type)
+                            .withStatus(TestResult.TaskStatus.FAILED)
+                            .withError(e.getMessage())
+                            .withStartTime(Instant.now().toString())
+                            .withEndTime(Instant.now().toString());
+                    run = run.withAddedResult(failedResult);
                 }
             }
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
-                run.setStatus(TestResult.TaskStatus.FAILED);
+                run = run.withStatus(TestResult.TaskStatus.FAILED);
             }
 
         } catch (Exception e) {
             LOG.error("Test execution failed for run: " + run.getId(), e);
-            run.setStatus(TestResult.TaskStatus.FAILED);
+            run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
         repository.save(run);
@@ -110,7 +110,8 @@ public class TestExecutionService {
                     || result.getStatus() == TestResult.TaskStatus.PENDING) {
                 try {
                     JsonNode taskStatus = trogdorClient.getTask(result.getTaskId());
-                    updateResultFromTrogdor(result, taskStatus);
+                    result = updateResultFromTrogdor(result, taskStatus);
+                    run = run.withUpdatedResult(result);
                 } catch (Exception e) {
                     LOG.warn("Failed to fetch status for task: " + result.getTaskId(), e);
                 }
@@ -126,7 +127,7 @@ public class TestExecutionService {
         }
 
         if (allDone) {
-            run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
+            run = run.withStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
         }
 
         repository.save(run);
@@ -142,14 +143,15 @@ public class TestExecutionService {
             if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
                 try {
                     trogdorClient.stopTask(result.getTaskId());
-                    result.setStatus(TestResult.TaskStatus.STOPPING);
+                    result = result.withStatus(TestResult.TaskStatus.STOPPING);
+                    run = run.withUpdatedResult(result);
                 } catch (Exception e) {
                     LOG.warn("Failed to stop task: " + result.getTaskId(), e);
                 }
             }
         }
 
-        run.setStatus(TestResult.TaskStatus.STOPPING);
+        run = run.withStatus(TestResult.TaskStatus.STOPPING);
         repository.save(run);
     }
 
@@ -174,11 +176,11 @@ public class TestExecutionService {
         }
     }
 
-    private void updateResultFromTrogdor(TestResult result, JsonNode taskStatus) {
-        if (taskStatus == null) return;
+    private TestResult updateResultFromTrogdor(TestResult result, JsonNode taskStatus) {
+        if (taskStatus == null) return result;
 
         String state = taskStatus.path("state").asText("");
-        result.setStatus(
+        result = result.withStatus(
                 switch (state) {
                     case "PENDING" -> TestResult.TaskStatus.PENDING;
                     case "RUNNING" -> TestResult.TaskStatus.RUNNING;
@@ -189,24 +191,25 @@ public class TestExecutionService {
 
         JsonNode status = taskStatus.path("status");
         if (!status.isMissingNode()) {
-            result.setThroughputRecordsPerSec(status.path("totalSent").asDouble(0)
-                    / Math.max(1, status.path("elapsedMs").asDouble(1) / 1000.0));
-            result.setAvgLatencyMs(status.path("averageLatencyMs").asDouble(0));
-            result.setP50LatencyMs(status.path("p50LatencyMs").asDouble(0));
-            result.setP95LatencyMs(status.path("p95LatencyMs").asDouble(0));
-            result.setP99LatencyMs(status.path("p99LatencyMs").asDouble(0));
-            result.setMaxLatencyMs(status.path("maxLatencyMs").asDouble(0));
-            result.setRecordsSent(status.path("totalSent").asLong(0));
+            result = result.withThroughputRecordsPerSec(status.path("totalSent").asDouble(0)
+                    / Math.max(1, status.path("elapsedMs").asDouble(1) / 1000.0))
+                .withAvgLatencyMs(status.path("averageLatencyMs").asDouble(0))
+                .withP50LatencyMs(status.path("p50LatencyMs").asDouble(0))
+                .withP95LatencyMs(status.path("p95LatencyMs").asDouble(0))
+                .withP99LatencyMs(status.path("p99LatencyMs").asDouble(0))
+                .withMaxLatencyMs(status.path("maxLatencyMs").asDouble(0))
+                .withRecordsSent(status.path("totalSent").asLong(0));
 
             if (result.getStatus() == TestResult.TaskStatus.DONE) {
-                result.setEndTime(Instant.now().toString());
+                result = result.withEndTime(Instant.now().toString());
             }
 
             String error = status.path("error").asText(null);
             if (error != null && !error.isEmpty()) {
-                result.setError(error);
-                result.setStatus(TestResult.TaskStatus.FAILED);
+                result = result.withError(error)
+                               .withStatus(TestResult.TaskStatus.FAILED);
             }
         }
+        return result;
     }
 }

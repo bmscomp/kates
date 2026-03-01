@@ -17,15 +17,6 @@ if [ -f "${SCRIPT_DIR}/../proxy/proxy.conf" ]; then
     set +a
 fi
 
-# Setup local Docker registry
-info "Setting up local Docker registry..."
-"${SCRIPT_DIR}/setup-registry.sh"
-
-# Connect registry to kind network
-info "Connecting registry to kind network..."
-docker network create kind 2>/dev/null || true
-docker network connect kind kind-registry 2>/dev/null || true
-
 # Create cluster only if it doesn't exist; recover kubeconfig if stale
 if kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"; then
     if kubectl cluster-info --context "kind-${KIND_CLUSTER_NAME}" >/dev/null 2>&1; then
@@ -38,20 +29,6 @@ else
     info "Creating Kind cluster..."
     kind create cluster --config "${SCRIPT_DIR}/../config/cluster.yaml" --name "${KIND_CLUSTER_NAME}"
 fi
-
-# Document the local registry in the cluster
-info "Configuring cluster to use local registry..."
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: local-registry-hosting
-  namespace: kube-public
-data:
-  localRegistryHosting.v1: |
-    host: "localhost:5001"
-    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
-EOF
 
 echo ""
 info "✅ Kind Cluster Setup Complete!"

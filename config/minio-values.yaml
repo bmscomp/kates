@@ -1,0 +1,46 @@
+# MinIO Configuration
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  registry: "docker.io"
+  repository: "minio/minio"
+  tag: "RELEASE.2024-09-22T00-33-43Z"
+  pullPolicy: IfNotPresent
+
+clientImage:
+  registry: "docker.io"
+  repository: "minio/mc"
+  tag: "RELEASE.2024-09-16T17-43-14Z"
+
+mode: standalone
+
+args: ["server", "/bitnami/minio/data", "--console-address", ":9001"]
+
+auth:
+  rootUser: "minio"
+  rootPassword: "minio123"
+
+defaultBuckets: "velero"
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+service:
+  type: ClusterIP
+  ports:
+    api: 9000
+    console: 9001
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+console:
+  enabled: false

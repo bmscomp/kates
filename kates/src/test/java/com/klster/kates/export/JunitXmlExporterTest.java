@@ -27,12 +27,10 @@ class JunitXmlExporterTest {
     @Test
     void testcasePerResult() {
         TestRun run = new TestRun();
-        TestResult r1 = new TestResult();
-        r1.setTaskId("produce-1");
-        TestResult r2 = new TestResult();
-        r2.setTaskId("consume-1");
-        run.addResult(r1);
-        run.addResult(r2);
+        TestResult r1 = new TestResult().withTaskId("produce-1");
+        TestResult r2 = new TestResult().withTaskId("consume-1");
+        run = run.withAddedResult(r1);
+        run = run.withAddedResult(r2);
 
         TestReport report = new TestReport();
         report.setRun(run);
@@ -47,10 +45,10 @@ class JunitXmlExporterTest {
     @Test
     void errorResultHasFailureElement() {
         TestRun run = new TestRun();
-        TestResult result = new TestResult();
-        result.setTaskId("produce-1");
-        result.setError("Connection refused");
-        run.addResult(result);
+        TestResult result = new TestResult()
+            .withTaskId("produce-1")
+            .withError("Connection refused");
+        run = run.withAddedResult(result);
 
         TestReport report = new TestReport();
         report.setRun(run);
@@ -77,10 +75,10 @@ class JunitXmlExporterTest {
     @Test
     void xmlEscapingHandlesSpecialChars() {
         TestRun run = new TestRun();
-        TestResult result = new TestResult();
-        result.setTaskId("task-1");
-        result.setError("value < threshold & \"quoted\"");
-        run.addResult(result);
+        TestResult result = new TestResult()
+            .withTaskId("task-1")
+            .withError("value < threshold & \"quoted\"");
+        run = run.withAddedResult(result);
 
         TestReport report = new TestReport();
         report.setRun(run);

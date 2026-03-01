@@ -5,22 +5,22 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class TestResult {
 
-    private String taskId;
-    private TestType testType;
-    private TaskStatus status;
-    private long recordsSent;
-    private double throughputRecordsPerSec;
-    private double throughputMBPerSec;
-    private double avgLatencyMs;
-    private double p50LatencyMs;
-    private double p95LatencyMs;
-    private double p99LatencyMs;
-    private double maxLatencyMs;
-    private String startTime;
-    private String endTime;
-    private String error;
-    private String phaseName;
-    private IntegrityResult integrity;
+    private final String taskId;
+    private final TestType testType;
+    private final TaskStatus status;
+    private final long recordsSent;
+    private final double throughputRecordsPerSec;
+    private final double throughputMBPerSec;
+    private final double avgLatencyMs;
+    private final double p50LatencyMs;
+    private final double p95LatencyMs;
+    private final double p99LatencyMs;
+    private final double maxLatencyMs;
+    private final String startTime;
+    private final String endTime;
+    private final String error;
+    private final String phaseName;
+    private final IntegrityResult integrity;
 
     public enum TaskStatus {
         PENDING,
@@ -30,133 +30,60 @@ public class TestResult {
         FAILED
     }
 
-    public TestResult() {}
-
-    public String getTaskId() {
-        return taskId;
+    public TestResult() {
+        this(null, null, TaskStatus.PENDING, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, null, null, null, null, null);
     }
 
-    public void setTaskId(String taskId) {
+    private TestResult(String taskId, TestType testType, TaskStatus status, long recordsSent, double throughputRecordsPerSec, double throughputMBPerSec, double avgLatencyMs, double p50LatencyMs, double p95LatencyMs, double p99LatencyMs, double maxLatencyMs, String startTime, String endTime, String error, String phaseName, IntegrityResult integrity) {
         this.taskId = taskId;
-    }
-
-    public TestType getTestType() {
-        return testType;
-    }
-
-    public void setTestType(TestType testType) {
         this.testType = testType;
-    }
-
-    public TaskStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(TaskStatus status) {
         this.status = status;
-    }
-
-    public long getRecordsSent() {
-        return recordsSent;
-    }
-
-    public void setRecordsSent(long recordsSent) {
         this.recordsSent = recordsSent;
-    }
-
-    public double getThroughputRecordsPerSec() {
-        return throughputRecordsPerSec;
-    }
-
-    public void setThroughputRecordsPerSec(double throughputRecordsPerSec) {
         this.throughputRecordsPerSec = throughputRecordsPerSec;
-    }
-
-    public double getThroughputMBPerSec() {
-        return throughputMBPerSec;
-    }
-
-    public void setThroughputMBPerSec(double throughputMBPerSec) {
         this.throughputMBPerSec = throughputMBPerSec;
-    }
-
-    public double getAvgLatencyMs() {
-        return avgLatencyMs;
-    }
-
-    public void setAvgLatencyMs(double avgLatencyMs) {
         this.avgLatencyMs = avgLatencyMs;
-    }
-
-    public double getP50LatencyMs() {
-        return p50LatencyMs;
-    }
-
-    public void setP50LatencyMs(double p50LatencyMs) {
         this.p50LatencyMs = p50LatencyMs;
-    }
-
-    public double getP95LatencyMs() {
-        return p95LatencyMs;
-    }
-
-    public void setP95LatencyMs(double p95LatencyMs) {
         this.p95LatencyMs = p95LatencyMs;
-    }
-
-    public double getP99LatencyMs() {
-        return p99LatencyMs;
-    }
-
-    public void setP99LatencyMs(double p99LatencyMs) {
         this.p99LatencyMs = p99LatencyMs;
-    }
-
-    public double getMaxLatencyMs() {
-        return maxLatencyMs;
-    }
-
-    public void setMaxLatencyMs(double maxLatencyMs) {
         this.maxLatencyMs = maxLatencyMs;
-    }
-
-    public String getStartTime() {
-        return startTime;
-    }
-
-    public void setStartTime(String startTime) {
         this.startTime = startTime;
-    }
-
-    public String getEndTime() {
-        return endTime;
-    }
-
-    public void setEndTime(String endTime) {
         this.endTime = endTime;
-    }
-
-    public String getError() {
-        return error;
-    }
-
-    public void setError(String error) {
         this.error = error;
-    }
-
-    public String getPhaseName() {
-        return phaseName;
-    }
-
-    public void setPhaseName(String phaseName) {
         this.phaseName = phaseName;
-    }
-
-    public IntegrityResult getIntegrity() {
-        return integrity;
-    }
-
-    public void setIntegrity(IntegrityResult integrity) {
         this.integrity = integrity;
     }
+
+    public TestResult withTaskId(String taskId) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withTestType(TestType testType) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withStatus(TaskStatus status) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withRecordsSent(long recordsSent) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withThroughputRecordsPerSec(double throughputRecordsPerSec) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withThroughputMBPerSec(double throughputMBPerSec) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withAvgLatencyMs(double avgLatencyMs) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withP50LatencyMs(double p50LatencyMs) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withP95LatencyMs(double p95LatencyMs) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withP99LatencyMs(double p99LatencyMs) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withMaxLatencyMs(double maxLatencyMs) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withStartTime(String startTime) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withEndTime(String endTime) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withError(String error) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withPhaseName(String phaseName) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+    public TestResult withIntegrity(IntegrityResult integrity) { return new TestResult(taskId, testType, status, recordsSent, throughputRecordsPerSec, throughputMBPerSec, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs, maxLatencyMs, startTime, endTime, error, phaseName, integrity); }
+
+    public String getTaskId() { return taskId; }
+    public TestType getTestType() { return testType; }
+    public TaskStatus getStatus() { return status; }
+    public long getRecordsSent() { return recordsSent; }
+    public double getThroughputRecordsPerSec() { return throughputRecordsPerSec; }
+    public double getThroughputMBPerSec() { return throughputMBPerSec; }
+    public double getAvgLatencyMs() { return avgLatencyMs; }
+    public double getP50LatencyMs() { return p50LatencyMs; }
+    public double getP95LatencyMs() { return p95LatencyMs; }
+    public double getP99LatencyMs() { return p99LatencyMs; }
+    public double getMaxLatencyMs() { return maxLatencyMs; }
+    public String getStartTime() { return startTime; }
+    public String getEndTime() { return endTime; }
+    public String getError() { return error; }
+    public String getPhaseName() { return phaseName; }
+    public IntegrityResult getIntegrity() { return integrity; }
 }

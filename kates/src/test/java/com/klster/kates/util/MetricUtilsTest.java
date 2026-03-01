@@ -52,15 +52,15 @@ class MetricUtilsTest {
 
     @Test
     void computeSummarySingleResult() {
-        TestResult r = new TestResult();
-        r.setRecordsSent(1000);
-        r.setThroughputRecordsPerSec(500.0);
-        r.setThroughputMBPerSec(5.0);
-        r.setAvgLatencyMs(10.0);
-        r.setP50LatencyMs(8.0);
-        r.setP95LatencyMs(15.0);
-        r.setP99LatencyMs(20.0);
-        r.setMaxLatencyMs(50.0);
+        TestResult r = new TestResult()
+            .withRecordsSent(1000)
+            .withThroughputRecordsPerSec(500.0)
+            .withThroughputMBPerSec(5.0)
+            .withAvgLatencyMs(10.0)
+            .withP50LatencyMs(8.0)
+            .withP95LatencyMs(15.0)
+            .withP99LatencyMs(20.0)
+            .withMaxLatencyMs(50.0);
 
         ReportSummary s = MetricUtils.computeSummary(List.of(r));
         assertEquals(1000, s.totalRecords());
@@ -73,25 +73,25 @@ class MetricUtilsTest {
 
     @Test
     void computeSummaryMultipleResultsAggregates() {
-        TestResult r1 = new TestResult();
-        r1.setRecordsSent(500);
-        r1.setThroughputRecordsPerSec(200.0);
-        r1.setThroughputMBPerSec(2.0);
-        r1.setAvgLatencyMs(10.0);
-        r1.setP50LatencyMs(8.0);
-        r1.setP95LatencyMs(15.0);
-        r1.setP99LatencyMs(18.0);
-        r1.setMaxLatencyMs(30.0);
+        TestResult r1 = new TestResult()
+            .withRecordsSent(500)
+            .withThroughputRecordsPerSec(200.0)
+            .withThroughputMBPerSec(2.0)
+            .withAvgLatencyMs(10.0)
+            .withP50LatencyMs(8.0)
+            .withP95LatencyMs(15.0)
+            .withP99LatencyMs(18.0)
+            .withMaxLatencyMs(30.0);
 
-        TestResult r2 = new TestResult();
-        r2.setRecordsSent(500);
-        r2.setThroughputRecordsPerSec(400.0);
-        r2.setThroughputMBPerSec(4.0);
-        r2.setAvgLatencyMs(20.0);
-        r2.setP50LatencyMs(16.0);
-        r2.setP95LatencyMs(25.0);
-        r2.setP99LatencyMs(28.0);
-        r2.setMaxLatencyMs(60.0);
+        TestResult r2 = new TestResult()
+            .withRecordsSent(500)
+            .withThroughputRecordsPerSec(400.0)
+            .withThroughputMBPerSec(4.0)
+            .withAvgLatencyMs(20.0)
+            .withP50LatencyMs(16.0)
+            .withP95LatencyMs(25.0)
+            .withP99LatencyMs(28.0)
+            .withMaxLatencyMs(60.0);
 
         ReportSummary s = MetricUtils.computeSummary(List.of(r1, r2));
         assertEquals(1000, s.totalRecords());
@@ -103,12 +103,12 @@ class MetricUtilsTest {
 
     @Test
     void computeSummaryCountsErrors() {
-        TestResult ok = new TestResult();
-        ok.setRecordsSent(100);
+        TestResult ok = new TestResult()
+            .withRecordsSent(100);
 
-        TestResult failed = new TestResult();
-        failed.setRecordsSent(100);
-        failed.setError("timeout");
+        TestResult failed = new TestResult()
+            .withRecordsSent(100)
+            .withError("timeout");
 
         ReportSummary s = MetricUtils.computeSummary(List.of(ok, failed));
         assertEquals(1, s.totalErrors());

@@ -48,7 +48,13 @@ public class ResilienceOrchestrator {
         try {
             // 1. Start the benchmark test
             LOG.info("Resilience test: starting benchmark");
-            TestRun run = testOrchestrator.executeTest(request.getTestRequest());
+            var result = testOrchestrator.executeTest(request.getTestRequest());
+            if (result.isFailure()) {
+                report.setStatus("ERROR");
+                LOG.error("Failed to start resilience benchmark: " + result.asFailure().orElseThrow().getMessage());
+                return report;
+            }
+            TestRun run = result.asSuccess().orElseThrow();
 
             // 2. Wait for steady state (non-blocking delay for virtual threads)
             LOG.info("Resilience test: waiting " + request.getSteadyStateSec() + "s for steady state");

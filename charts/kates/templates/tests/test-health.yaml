@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates.fullname" . }}-test
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: health-check
+    image: curlimages/curl:8.7.1
+    command:
+      - sh
+      - -c
+      - |
+        echo "Testing KATES health endpoint..."
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/health)
+        if [ "$STATUS" = "200" ]; then
+          echo "Health check passed (HTTP $STATUS)"
+          BODY=$(curl -s http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/health)
+          echo "$BODY"
+          exit 0
+        else
+          echo "Health check failed (HTTP $STATUS)"
+          exit 1
+        fi

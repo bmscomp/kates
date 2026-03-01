@@ -1,0 +1,49 @@
+{{- if .Values.cleanup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kates.fullname" . }}-cleanup
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cleanup
+spec:
+  schedule: {{ .Values.cleanup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "kates.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: cleanup
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+          - name: cleanup
+            image: {{ .Values.cleanup.image | quote }}
+            command:
+              - sh
+              - -c
+              - |
+                echo "Cleaning up test runs older than {{ .Values.cleanup.retentionDays }} days..."
+                CUTOFF=$(date -u -d "-{{ .Values.cleanup.retentionDays }} days" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -v-{{ .Values.cleanup.retentionDays }}d +%Y-%m-%dT%H:%M:%S)
+                RESPONSE=$(curl -s -w "\n%{http_code}" \
+                  "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests?size=200&status=COMPLETED")
+                HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+                BODY=$(echo "$RESPONSE" | head -1)
+                if [ "$HTTP_CODE" != "200" ]; then
+                  echo "Failed to fetch tests (HTTP $HTTP_CODE)"
+                  exit 1
+                fi
+                echo "$BODY" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//' | while read ID; do
+                  echo "Deleting old test run: $ID"
+                  curl -s -X DELETE "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests/$ID"
+                done
+                echo "Cleanup complete."
+{{- end }}

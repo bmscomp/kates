@@ -24,8 +24,8 @@ info "Installing Strimzi Operator from local chart..."
 helm upgrade --install strimzi-kafka-operator "${STRIMZI_CHART_DIR}" \
   --namespace kafka \
   --set watchAnyNamespace=true \
-  --set defaultImageTag=0.49.1 \
-  --set image.imagePullPolicy=Never \
+  --set defaultImageTag=0.50.1 \
+  --set image.imagePullPolicy=IfNotPresent \
   --timeout 10m \
   --wait
 

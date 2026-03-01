@@ -54,9 +54,14 @@ public class TestScheduler {
     private void executeSchedule(ScheduledTestRun schedule) {
         try {
             CreateTestRequest request = JSON.readValue(schedule.getRequestJson(), CreateTestRequest.class);
-            var run = orchestrator.executeTest(request);
-            repository.updateLastRun(schedule.getId(), run.getId());
-            LOG.info("Schedule '" + schedule.getName() + "' started run " + run.getId());
+            var result = orchestrator.executeTest(request);
+            if (result.isSuccess()) {
+                var run = result.asSuccess().orElseThrow();
+                repository.updateLastRun(schedule.getId(), run.getId());
+                LOG.info("Schedule '" + schedule.getName() + "' started run " + run.getId());
+            } else {
+                LOG.error("Failed to execute schedule '" + schedule.getName() + "': " + result.asFailure().orElseThrow().getMessage());
+            }
         } catch (Exception e) {
             LOG.error("Failed to execute schedule '" + schedule.getName() + "'", e);
         }
