@@ -538,6 +538,150 @@ public class DisruptionResource {
         return Response.noContent().build();
     }
 
+    @Inject
+    ChaosTemplateCatalog templateCatalog;
+
+    @Inject
+    DisruptionImpactScorer impactScorer;
+
+    @Inject
+    com.klster.kates.chaos.CompoundChaosOrchestrator compoundOrchestrator;
+
+    @GET
+    @Path("/templates")
+    @Operation(summary = "List chaos experiment templates",
+            description = "Returns pre-built chaos templates with sensible defaults for common Kafka failure scenarios")
+    public Response listTemplates() {
+        return Response.ok(templateCatalog.listTemplates()).build();
+    }
+
+    @POST
+    @Path("/templates/{id}")
+    @Operation(summary = "Run a template",
+            description = "Executes a chaos template with optional override parameters")
+    @APIResponse(responseCode = "200", description = "Disruption report from template execution")
+    @APIResponse(responseCode = "404", description = "Template not found")
+    public Response runTemplate(
+            @Parameter(description = "Template ID") @PathParam("id") String templateId,
+            Map<String, Object> overrides) {
+
+        try {
+            DisruptionPlan plan = templateCatalog.buildPlan(templateId,
+                    overrides != null ? overrides : Map.of());
+            String id = UUID.randomUUID().toString().substring(0, 8);
+            DisruptionReport report = orchestrator.execute(plan);
+            persistReport(id, report);
+            return Response.ok(Map.of("id", id, "template", templateId, "report", report)).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(404)
+                    .entity(ApiError.of(404, "Not Found", e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/{id}/impact")
+    @Operation(summary = "Get disruption impact score",
+            description = "Computes a composite 0-100 severity score across 5 dimensions")
+    @APIResponse(responseCode = "200", description = "Impact score with breakdown")
+    @APIResponse(responseCode = "404", description = "Report not found")
+    public Response getImpactScore(@Parameter(description = "Report ID") @PathParam("id") String id) {
+        DisruptionReport report = loadReport(id);
+        if (report == null) {
+            return Response.status(404)
+                    .entity(ApiError.of(404, "Not Found", "No disruption report with ID: " + id))
+                    .build();
+        }
+
+        DisruptionImpactScorer.ImpactScore score = impactScorer.score(report);
+        return Response.ok(impactScorer.toMap(score)).build();
+    }
+
+    @GET
+    @Path("/history")
+    @Operation(summary = "Disruption history by topic",
+            description = "Returns all disruption reports that targeted a specific topic")
+    public Response historyByTopic(
+            @Parameter(description = "Topic name", required = true) @QueryParam("topic") String topic,
+            @Parameter(description = "Max results") @QueryParam("limit") @DefaultValue("20") int limit) {
+
+        if (topic == null || topic.isBlank()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "Query parameter 'topic' is required"))
+                    .build();
+        }
+
+        List<DisruptionReportEntity> recent = repository.listRecent(100);
+        var matching = recent.stream()
+                .filter(e -> {
+                    try {
+                        DisruptionReport r = objectMapper.readValue(e.getReportJson(), DisruptionReport.class);
+                        return r.getStepReports().stream()
+                                .anyMatch(step -> step.chaosOutcome() != null
+                                        && step.chaosOutcome().experimentName() != null
+                                        && step.chaosOutcome().experimentName().contains(topic));
+                    } catch (Exception ignored) {
+                        String rj = e.getReportJson();
+                        return rj != null && rj.contains(topic);
+                    }
+                })
+                .limit(limit)
+                .map(e -> Map.of(
+                        "id", e.getId(),
+                        "planName", e.getPlanName(),
+                        "status", e.getStatus(),
+                        "slaGrade", e.getSlaGrade() != null ? e.getSlaGrade() : "-",
+                        "createdAt", e.getCreatedAt().toString()))
+                .toList();
+
+        return Response.ok(Map.of("topic", topic, "count", matching.size(), "reports", matching)).build();
+    }
+
+    @POST
+    @Path("/compound")
+    @Operation(summary = "Execute compound chaos",
+            description = "Runs multiple faults concurrently across different chaos providers")
+    public Response executeCompound(CompoundChaosRequest request) {
+        if (request.faults == null || request.faults.isEmpty()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "At least one fault is required"))
+                    .build();
+        }
+
+        var faults = request.faults.stream()
+                .map(f -> new com.klster.kates.chaos.CompoundChaosOrchestrator.CompoundFault(
+                        f.faultSpec, f.providerName != null ? f.providerName : "kubernetes"))
+                .toList();
+
+        var outcome = request.sequential
+                ? compoundOrchestrator.executeSequential(faults, request.delayBetweenSec)
+                : compoundOrchestrator.executeConcurrent(faults, request.timeoutSec);
+
+        return Response.ok(Map.of(
+                "allSucceeded", outcome.allSucceeded(),
+                "mode", request.sequential ? "sequential" : "concurrent",
+                "results", outcome.results())).build();
+    }
+
+    @GET
+    @Path("/providers")
+    @Operation(summary = "List chaos providers", description = "Returns all registered chaos providers and their availability")
+    public Response listProviders() {
+        return Response.ok(compoundOrchestrator.availableProviders()).build();
+    }
+
+    public static class CompoundChaosRequest {
+        public List<CompoundFaultEntry> faults;
+        public boolean sequential = false;
+        public int timeoutSec = 120;
+        public int delayBetweenSec = 5;
+    }
+
+    public static class CompoundFaultEntry {
+        public com.klster.kates.chaos.FaultSpec faultSpec;
+        public String providerName;
+    }
+
     public static class CreateDisruptionScheduleRequest {
         public String name;
         public String cronExpression;

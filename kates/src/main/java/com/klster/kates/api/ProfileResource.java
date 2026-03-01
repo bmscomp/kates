@@ -23,7 +23,6 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.klster.kates.domain.TestResult;
-import com.klster.kates.domain.TestRun;
 import com.klster.kates.persistence.ProfileEntity;
 import com.klster.kates.service.TestRunRepository;
 
