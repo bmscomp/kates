@@ -19,14 +19,12 @@ helm upgrade --install monitoring "${MONITORING_CHART_DIR}" \
   --timeout 10m \
   --wait
 
-info "Applying custom dashboards..."
-kubectl apply -f config/custom-dashboard.yaml
-
-info "Deploying KATES benchmark dashboards..."
+info "Deploying KATES dashboards..."
 kubectl create configmap kates-grafana-dashboards \
   --from-file=config/monitoring/kates-benchmark-dashboard.json \
-  --from-file=config/monitoring/kates-phase-dashboard.json \
   --from-file=config/monitoring/kates-trend-dashboard.json \
+  --from-file=config/monitoring/kates-application-dashboard.json \
+  --from-file=config/monitoring/grafana-chaos-dashboard.json \
   --namespace monitoring \
   --dry-run=client -o yaml | kubectl apply -f -
 

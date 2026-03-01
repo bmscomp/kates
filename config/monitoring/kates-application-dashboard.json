@@ -24,7 +24,7 @@
                 "y": 0
             },
             "id": 1,
-            "title": "Benchmark Status",
+            "title": "Pod Status",
             "type": "row"
         },
         {
@@ -43,14 +43,14 @@
             "id": 2,
             "options": {
                 "colorMode": "background",
-                "graphMode": "area"
+                "graphMode": "none"
             },
-            "title": "Active Runs",
+            "title": "Kates Pods Ready",
             "type": "stat",
             "targets": [
                 {
-                    "expr": "kates_benchmark_active_runs",
-                    "legendFormat": "Active",
+                    "expr": "sum(kube_pod_status_ready{namespace=\"kates\", pod=~\"kates-.*\", condition=\"true\"})",
+                    "legendFormat": "Ready",
                     "refId": "A"
                 }
             ]
@@ -73,12 +73,12 @@
                 "colorMode": "background",
                 "graphMode": "area"
             },
-            "title": "Total Records Produced",
+            "title": "Restarts (5m)",
             "type": "stat",
             "targets": [
                 {
-                    "expr": "sum(kates_benchmark_records_total{run_id=~\"$run_id\", test_type=~\"$test_type\"})",
-                    "legendFormat": "Records",
+                    "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"kates\", container=\"kates\"}[5m]))",
+                    "legendFormat": "Restarts",
                     "refId": "A"
                 }
             ]
@@ -87,7 +87,7 @@
             "datasource": "prometheus",
             "fieldConfig": {
                 "defaults": {
-                    "unit": "short"
+                    "unit": "s"
                 }
             },
             "gridPos": {
@@ -99,14 +99,14 @@
             "id": 4,
             "options": {
                 "colorMode": "background",
-                "graphMode": "area"
+                "graphMode": "none"
             },
-            "title": "Total Errors",
+            "title": "Uptime",
             "type": "stat",
             "targets": [
                 {
-                    "expr": "sum(kates_benchmark_errors_total{run_id=~\"$run_id\", test_type=~\"$test_type\"}) or vector(0)",
-                    "legendFormat": "Errors",
+                    "expr": "time() - min(kube_pod_start_time{namespace=\"kates\", pod=~\"kates-.*\"})",
+                    "legendFormat": "Uptime",
                     "refId": "A"
                 }
             ]
@@ -127,14 +127,14 @@
             "id": 5,
             "options": {
                 "colorMode": "background",
-                "graphMode": "area"
+                "graphMode": "none"
             },
-            "title": "SLA Violations",
+            "title": "Postgres Ready",
             "type": "stat",
             "targets": [
                 {
-                    "expr": "sum(kates_benchmark_sla_violations{run_id=~\"$run_id\"}) or vector(0)",
-                    "legendFormat": "Violations",
+                    "expr": "sum(kube_pod_status_ready{namespace=\"kates\", pod=~\"postgres-.*\", condition=\"true\"})",
+                    "legendFormat": "Ready",
                     "refId": "A"
                 }
             ]
@@ -148,19 +148,19 @@
                 "y": 6
             },
             "id": 10,
-            "title": "Throughput",
+            "title": "HTTP Server",
             "type": "row"
         },
         {
             "datasource": "prometheus",
             "fieldConfig": {
                 "defaults": {
-                    "unit": "ops"
+                    "unit": "reqps"
                 }
             },
             "gridPos": {
                 "h": 8,
-                "w": 12,
+                "w": 8,
                 "x": 0,
                 "y": 7
             },
@@ -171,12 +171,12 @@
                     "placement": "bottom"
                 }
             },
-            "title": "Throughput (records/sec)",
+            "title": "Request Rate (by method)",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "kates_benchmark_throughput_rec_sec{run_id=~\"$run_id\", test_type=~\"$test_type\"}",
-                    "legendFormat": "{{run_id}} - {{test_type}}",
+                    "expr": "sum by (method) (rate(http_server_requests_seconds_count{job=\"kates\"}[1m]))",
+                    "legendFormat": "{{method}}",
                     "refId": "A"
                 }
             ]
@@ -185,13 +185,13 @@
             "datasource": "prometheus",
             "fieldConfig": {
                 "defaults": {
-                    "unit": "MBs"
+                    "unit": "reqps"
                 }
             },
             "gridPos": {
                 "h": 8,
-                "w": 12,
-                "x": 12,
+                "w": 8,
+                "x": 8,
                 "y": 7
             },
             "id": 12,
@@ -201,13 +201,53 @@
                     "placement": "bottom"
                 }
             },
-            "title": "Throughput (MB/sec)",
+            "title": "Error Rate (4xx / 5xx)",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "kates_benchmark_throughput_mb_sec{run_id=~\"$run_id\", test_type=~\"$test_type\"}",
-                    "legendFormat": "{{run_id}} - {{test_type}}",
+                    "expr": "sum by (status) (rate(http_server_requests_seconds_count{job=\"kates\", status=~\"4..|5..\"}[1m]))",
+                    "legendFormat": "{{status}}",
                     "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 7
+            },
+            "id": 13,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Request Latency (p50 / p95 / p99)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"kates\"}[1m])))",
+                    "legendFormat": "p50",
+                    "refId": "A"
+                },
+                {
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"kates\"}[1m])))",
+                    "legendFormat": "p95",
+                    "refId": "B"
+                },
+                {
+                    "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"kates\"}[1m])))",
+                    "legendFormat": "p99",
+                    "refId": "C"
                 }
             ]
         },
@@ -220,51 +260,46 @@
                 "y": 15
             },
             "id": 20,
-            "title": "Latency",
+            "title": "JVM",
             "type": "row"
         },
         {
             "datasource": "prometheus",
             "fieldConfig": {
                 "defaults": {
-                    "unit": "ms"
+                    "unit": "bytes"
                 }
             },
             "gridPos": {
                 "h": 8,
-                "w": 12,
+                "w": 8,
                 "x": 0,
                 "y": 16
             },
             "id": 21,
             "options": {
                 "legend": {
-                    "displayMode": "table",
+                    "displayMode": "list",
                     "placement": "bottom"
                 }
             },
-            "title": "Latency Percentiles",
+            "title": "Heap Memory (Used vs Committed)",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "kates_benchmark_latency_ms{run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.5\"}",
-                    "legendFormat": "p50 {{run_id}}",
+                    "expr": "jvm_memory_used_bytes{job=\"kates\", area=\"heap\"}",
+                    "legendFormat": "Used",
                     "refId": "A"
                 },
                 {
-                    "expr": "kates_benchmark_latency_ms{run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.95\"}",
-                    "legendFormat": "p95 {{run_id}}",
+                    "expr": "jvm_memory_committed_bytes{job=\"kates\", area=\"heap\"}",
+                    "legendFormat": "Committed",
                     "refId": "B"
                 },
                 {
-                    "expr": "kates_benchmark_latency_ms{run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.99\"}",
-                    "legendFormat": "p99 {{run_id}}",
+                    "expr": "jvm_memory_max_bytes{job=\"kates\", area=\"heap\"}",
+                    "legendFormat": "Max",
                     "refId": "C"
-                },
-                {
-                    "expr": "kates_benchmark_latency_ms{run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.999\"}",
-                    "legendFormat": "p99.9 {{run_id}}",
-                    "refId": "D"
                 }
             ]
         },
@@ -272,100 +307,28 @@
             "datasource": "prometheus",
             "fieldConfig": {
                 "defaults": {
-                    "unit": "ms"
-                }
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 12,
-                "x": 12,
-                "y": 16
-            },
-            "id": 22,
-            "options": {
-                "legend": {
-                    "displayMode": "table",
-                    "placement": "bottom"
-                }
-            },
-            "title": "Max Latency",
-            "type": "timeseries",
-            "targets": [
-                {
-                    "expr": "kates_benchmark_latency_ms_max{run_id=~\"$run_id\", test_type=~\"$test_type\"}",
-                    "legendFormat": "max {{run_id}}",
-                    "refId": "A"
-                }
-            ]
-        },
-        {
-            "collapsed": false,
-            "gridPos": {
-                "h": 1,
-                "w": 24,
-                "x": 0,
-                "y": 24
-            },
-            "id": 40,
-            "title": "Phase Detail",
-            "type": "row"
-        },
-        {
-            "datasource": "prometheus",
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "ops"
-                }
-            },
-            "gridPos": {
-                "h": 8,
-                "w": 8,
-                "x": 0,
-                "y": 25
-            },
-            "id": 41,
-            "options": {
-                "legend": {
-                    "displayMode": "table",
-                    "placement": "bottom"
-                }
-            },
-            "title": "Throughput by Phase",
-            "type": "timeseries",
-            "targets": [
-                {
-                    "expr": "sum by (phase) (rate(kates_benchmark_records_total{run_id=~\"$run_id\", test_type=~\"$test_type\"}[30s]))",
-                    "legendFormat": "{{phase}}",
-                    "refId": "A"
-                }
-            ]
-        },
-        {
-            "datasource": "prometheus",
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "ms"
+                    "unit": "s"
                 }
             },
             "gridPos": {
                 "h": 8,
                 "w": 8,
                 "x": 8,
-                "y": 25
+                "y": 16
             },
-            "id": 42,
+            "id": 22,
             "options": {
                 "legend": {
-                    "displayMode": "table",
+                    "displayMode": "list",
                     "placement": "bottom"
                 }
             },
-            "title": "Latency by Phase (p99)",
+            "title": "GC Pause Duration",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "kates_benchmark_latency_ms{run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.99\"}",
-                    "legendFormat": "p99 {{phase}}",
+                    "expr": "rate(jvm_gc_pause_seconds_sum{job=\"kates\"}[1m])",
+                    "legendFormat": "{{cause}} {{action}}",
                     "refId": "A"
                 }
             ]
@@ -381,22 +344,32 @@
                 "h": 8,
                 "w": 8,
                 "x": 16,
-                "y": 25
+                "y": 16
             },
-            "id": 43,
+            "id": 23,
             "options": {
                 "legend": {
-                    "displayMode": "table",
+                    "displayMode": "list",
                     "placement": "bottom"
                 }
             },
-            "title": "Records by Phase",
+            "title": "Thread Count",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "sum by (phase) (kates_benchmark_records_total{run_id=~\"$run_id\", test_type=~\"$test_type\"})",
-                    "legendFormat": "{{phase}}",
+                    "expr": "jvm_threads_live_threads{job=\"kates\"}",
+                    "legendFormat": "Live",
                     "refId": "A"
+                },
+                {
+                    "expr": "jvm_threads_daemon_threads{job=\"kates\"}",
+                    "legendFormat": "Daemon",
+                    "refId": "B"
+                },
+                {
+                    "expr": "jvm_threads_peak_threads{job=\"kates\"}",
+                    "legendFormat": "Peak",
+                    "refId": "C"
                 }
             ]
         },
@@ -406,10 +379,10 @@
                 "h": 1,
                 "w": 24,
                 "x": 0,
-                "y": 33
+                "y": 24
             },
             "id": 30,
-            "title": "SLA & Errors",
+            "title": "Database (Agroal Pool)",
             "type": "row"
         },
         {
@@ -423,20 +396,107 @@
                 "h": 8,
                 "w": 12,
                 "x": 0,
-                "y": 34
+                "y": 25
             },
             "id": 31,
             "options": {
                 "legend": {
-                    "displayMode": "table"
+                    "displayMode": "list",
+                    "placement": "bottom"
                 }
             },
-            "title": "Error Rate",
+            "title": "DB Connections",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "rate(kates_benchmark_errors_total{run_id=~\"$run_id\", test_type=~\"$test_type\"}[1m])",
-                    "legendFormat": "{{run_id}} - {{phase}}",
+                    "expr": "agroal_active_count{job=\"kates\"}",
+                    "legendFormat": "Active",
+                    "refId": "A"
+                },
+                {
+                    "expr": "agroal_available_count{job=\"kates\"}",
+                    "legendFormat": "Available",
+                    "refId": "B"
+                },
+                {
+                    "expr": "agroal_max_used_count{job=\"kates\"}",
+                    "legendFormat": "Max Used",
+                    "refId": "C"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 25
+            },
+            "id": 32,
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                }
+            },
+            "title": "DB Acquire Time",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(agroal_acquire_count{job=\"kates\"}[1m])",
+                    "legendFormat": "Acquire Rate",
+                    "refId": "A"
+                },
+                {
+                    "expr": "agroal_blocking_time_total_seconds{job=\"kates\"} / agroal_blocking_time_count{job=\"kates\"}",
+                    "legendFormat": "Avg Blocking Time",
+                    "refId": "B"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 33
+            },
+            "id": 40,
+            "title": "Resource Usage",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 34
+            },
+            "id": 41,
+            "options": {
+                "legend": {
+                    "displayMode": "list"
+                }
+            },
+            "title": "CPU Usage",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(container_cpu_usage_seconds_total{namespace=\"kates\", container=\"kates\"}[5m]) * 100",
+                    "legendFormat": "{{pod}}",
                     "refId": "A"
                 }
             ]
@@ -445,7 +505,7 @@
             "datasource": "prometheus",
             "fieldConfig": {
                 "defaults": {
-                    "unit": "short"
+                    "unit": "bytes"
                 }
             },
             "gridPos": {
@@ -454,61 +514,45 @@
                 "x": 12,
                 "y": 34
             },
-            "id": 32,
+            "id": 42,
             "options": {
                 "legend": {
-                    "displayMode": "table"
+                    "displayMode": "list"
                 }
             },
-            "title": "SLA Violations by Metric",
+            "title": "Memory Usage (RSS)",
             "type": "timeseries",
             "targets": [
                 {
-                    "expr": "sum by (metric, severity) (kates_benchmark_sla_violations{run_id=~\"$run_id\"})",
-                    "legendFormat": "{{metric}} ({{severity}})",
+                    "expr": "container_memory_rss{namespace=\"kates\", container=\"kates\"}",
+                    "legendFormat": "RSS {{pod}}",
                     "refId": "A"
+                },
+                {
+                    "expr": "container_memory_working_set_bytes{namespace=\"kates\", container=\"kates\"}",
+                    "legendFormat": "Working Set {{pod}}",
+                    "refId": "B"
                 }
             ]
         }
     ],
-    "refresh": "5s",
+    "refresh": "10s",
     "schemaVersion": 38,
     "tags": [
         "kates",
-        "kafka",
-        "benchmark"
+        "application",
+        "health"
     ],
     "templating": {
-        "list": [
-            {
-                "name": "run_id",
-                "type": "query",
-                "datasource": "prometheus",
-                "query": "label_values(kates_benchmark_records_total, run_id)",
-                "refresh": 2,
-                "multi": false,
-                "includeAll": true,
-                "allValue": ".*"
-            },
-            {
-                "name": "test_type",
-                "type": "query",
-                "datasource": "prometheus",
-                "query": "label_values(kates_benchmark_records_total, test_type)",
-                "refresh": 2,
-                "multi": true,
-                "includeAll": true,
-                "allValue": ".*"
-            }
-        ]
+        "list": []
     },
     "time": {
-        "from": "now-30m",
+        "from": "now-1h",
         "to": "now"
     },
     "timepicker": {},
     "timezone": "browser",
-    "title": "KATES Benchmark & Phase",
-    "uid": "kates-benchmark-overview",
-    "version": 2
+    "title": "KATES Application Health",
+    "uid": "kates-application-health",
+    "version": 1
 }

@@ -583,6 +583,126 @@
                     "refId": "A"
                 }
             ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 43
+            },
+            "id": 30,
+            "title": "Kates During Chaos",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 20
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 44
+            },
+            "id": 31,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            },
+            "title": "Kates Benchmark Throughput",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_throughput_rec_sec",
+                    "legendFormat": "{{run_id}} ({{test_type}})",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms",
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 20
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 44
+            },
+            "id": 32,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            },
+            "title": "Kates Latency (p99)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_benchmark_latency_ms{quantile=\"0.99\"}",
+                    "legendFormat": "p99 {{run_id}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short",
+                    "custom": {
+                        "lineWidth": 2,
+                        "fillOpacity": 20
+                    }
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 44
+            },
+            "id": 33,
+            "options": {
+                "legend": {
+                    "displayMode": "table"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            },
+            "title": "Kates Errors During Chaos",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(kates_benchmark_errors_total[1m])",
+                    "legendFormat": "{{run_id}} — {{phase}}",
+                    "refId": "A"
+                }
+            ]
         }
     ],
     "refresh": "10s",
@@ -590,7 +710,8 @@
     "tags": [
         "kafka",
         "chaos",
-        "litmus"
+        "litmus",
+        "kates"
     ],
     "templating": {
         "list": []
@@ -603,5 +724,5 @@
     "timezone": "browser",
     "title": "Kafka Chaos Dashboard",
     "uid": "kafka-chaos-dashboard",
-    "version": 1
+    "version": 2
 }

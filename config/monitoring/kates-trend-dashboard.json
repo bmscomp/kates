@@ -169,6 +169,225 @@
                     "refId": "A"
                 }
             ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 27
+            },
+            "id": 30,
+            "title": "Platform Stats (KatesMetrics)",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 28
+            },
+            "id": 31,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Tests Completed (by outcome)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(kates_tests_completed_total{test_type=~\"$test_type\"}[5m])",
+                    "legendFormat": "{{test_type}} — {{outcome}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 28
+            },
+            "id": 32,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Test Duration (p50 / p95 / p99)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_tests_duration_seconds{test_type=~\"$test_type\", quantile=\"0.5\"}",
+                    "legendFormat": "p50 {{test_type}}",
+                    "refId": "A"
+                },
+                {
+                    "expr": "kates_tests_duration_seconds{test_type=~\"$test_type\", quantile=\"0.95\"}",
+                    "legendFormat": "p95 {{test_type}}",
+                    "refId": "B"
+                },
+                {
+                    "expr": "kates_tests_duration_seconds{test_type=~\"$test_type\", quantile=\"0.99\"}",
+                    "legendFormat": "p99 {{test_type}}",
+                    "refId": "C"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 28
+            },
+            "id": 33,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "SLA Pass / Fail Rate",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(kates_sla_evaluations_total{test_type=~\"$test_type\"}[5m])",
+                    "legendFormat": "{{test_type}} — {{result}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 36
+            },
+            "id": 34,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Records Processed (cumulative rate)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(kates_records_processed_total{test_type=~\"$test_type\"}[5m])",
+                    "legendFormat": "{{test_type}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 44
+            },
+            "id": 40,
+            "title": "Disruptions",
+            "type": "row"
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 45
+            },
+            "id": 41,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Disruption Completion Rate",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "rate(kates_disruptions_completed_total[5m])",
+                    "legendFormat": "{{disruption_type}} — {{outcome}}",
+                    "refId": "A"
+                }
+            ]
+        },
+        {
+            "datasource": "prometheus",
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 45
+            },
+            "id": 42,
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                }
+            },
+            "title": "Disruption Duration (p50 / p95)",
+            "type": "timeseries",
+            "targets": [
+                {
+                    "expr": "kates_disruptions_duration_seconds{quantile=\"0.5\"}",
+                    "legendFormat": "p50 {{disruption_type}}",
+                    "refId": "A"
+                },
+                {
+                    "expr": "kates_disruptions_duration_seconds{quantile=\"0.95\"}",
+                    "legendFormat": "p95 {{disruption_type}}",
+                    "refId": "B"
+                }
+            ]
         }
     ],
     "refresh": "30s",
@@ -199,7 +418,7 @@
     },
     "timepicker": {},
     "timezone": "browser",
-    "title": "KATES Trend Analysis",
+    "title": "Kates Trend & Platform",
     "uid": "kates-trend-analysis",
-    "version": 1
+    "version": 2
 }
