@@ -1,12 +1,15 @@
 package com.klster.kates.api;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
@@ -48,11 +51,19 @@ public class ClusterResource {
     @GET
     @Path("/topics")
     @Operation(summary = "List all topics")
-    @APIResponse(responseCode = "200", description = "Set of topic names")
-    public Response getTopics() {
+    @APIResponse(responseCode = "200", description = "Paginated list of topic names")
+    public Response getTopics(
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
         try {
-            Set<String> topics = kafkaAdmin.listTopics();
-            return Response.ok(topics).build();
+            int effectiveSize = Math.min(Math.max(size, 1), 200);
+            Set<String> allTopics = kafkaAdmin.listTopics();
+            List<String> sorted = allTopics.stream().sorted().toList();
+            int start = Math.min(page * effectiveSize, sorted.size());
+            int end = Math.min(start + effectiveSize, sorted.size());
+            List<String> paged = sorted.subList(start, end);
+            return Response.ok(Map.of("page", page, "size", effectiveSize,
+                    "total", sorted.size(), "count", paged.size(), "items", paged)).build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Internal Server Error", "Failed to list topics: " + e.getMessage()))
@@ -84,10 +95,18 @@ public class ClusterResource {
     @GET
     @Path("/groups")
     @Operation(summary = "List consumer groups")
-    @APIResponse(responseCode = "200", description = "List of consumer group summaries")
-    public Response getConsumerGroups() {
+    @APIResponse(responseCode = "200", description = "Paginated list of consumer group summaries")
+    public Response getConsumerGroups(
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
         try {
-            return Response.ok(kafkaAdmin.listConsumerGroups()).build();
+            int effectiveSize = Math.min(Math.max(size, 1), 200);
+            List<Map<String, Object>> allGroups = kafkaAdmin.listConsumerGroups();
+            int start = Math.min(page * effectiveSize, allGroups.size());
+            int end = Math.min(start + effectiveSize, allGroups.size());
+            List<Map<String, Object>> paged = allGroups.subList(start, end);
+            return Response.ok(Map.of("page", page, "size", effectiveSize,
+                    "total", allGroups.size(), "count", paged.size(), "items", paged)).build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(

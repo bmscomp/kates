@@ -54,7 +54,13 @@ class ClusterResourceTest {
     void topicsReturnsListSuccessfully() {
         when(kafkaAdmin.listTopics()).thenReturn(Set.of("topic-1", "topic-2", "topic-3"));
 
-        given().when().get("/api/cluster/topics").then().statusCode(200).body("$", hasSize(3));
+        given().when()
+                .get("/api/cluster/topics")
+                .then()
+                .statusCode(200)
+                .body("items", hasSize(3))
+                .body("total", is(3))
+                .body("page", is(0));
     }
 
     @Test

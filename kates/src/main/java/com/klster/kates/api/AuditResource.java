@@ -32,18 +32,20 @@ public class AuditResource {
     @GET
     @Operation(
             summary = "List audit events",
-            description = "Returns recent mutation events, optionally filtered by type and time range")
-    @APIResponse(responseCode = "200", description = "List of audit events")
+            description = "Returns paginated mutation events, optionally filtered by type and time range")
+    @APIResponse(responseCode = "200", description = "Paginated list of audit events")
     public Response listAuditEvents(
-            @Parameter(description = "Maximum number of events") @QueryParam("limit") @DefaultValue("50") int limit,
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size,
             @Parameter(description = "Filter by event type (test, topic, disruption, resilience)") @QueryParam("type") String type,
             @Parameter(description = "Filter events after this ISO-8601 timestamp") @QueryParam("since") String since) {
 
-        List<Map<String, Object>> events = auditService.list(
-                Math.max(1, Math.min(limit, 500)),
-                type,
-                since
-        );
-        return Response.ok(events).build();
+        int effectiveSize = Math.min(Math.max(size, 1), 200);
+        List<Map<String, Object>> allEvents = auditService.list(500, type, since);
+        int start = Math.min(page * effectiveSize, allEvents.size());
+        int end = Math.min(start + effectiveSize, allEvents.size());
+        List<Map<String, Object>> paged = allEvents.subList(start, end);
+        return Response.ok(Map.of("page", page, "size", effectiveSize,
+                "total", allEvents.size(), "count", paged.size(), "items", paged)).build();
     }
 }
