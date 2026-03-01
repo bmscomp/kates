@@ -1,0 +1,39 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: pod-dns-error
+  namespace: kafka
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create","delete","get","list","patch","update","deletecollection"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create","get","list","patch","update"]
+      - apiGroups: [""]
+        resources: ["pods/log","pods/exec"]
+        verbs: ["get","list","watch","create"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["create","list","get","delete","deletecollection"]
+      - apiGroups: ["litmuschaos.io"]
+        resources: ["chaosengines","chaosexperiments","chaosresults"]
+        verbs: ["create","list","get","patch","update","delete"]
+    image: "litmuschaos/go-runner:IMAGE_VERSION"
+    imagePullPolicy: IfNotPresent
+    args:
+      - -name
+      - pod-dns-error
+    command:
+      - ./experiments
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: '30'
+      - name: TARGET_HOSTNAMES
+        value: ''
+    labels:
+      name: pod-dns-error
+      app.kubernetes.io/part-of: litmus
