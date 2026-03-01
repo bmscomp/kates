@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain
 
 .DEFAULT_GOAL := help
 
@@ -270,11 +270,35 @@ chaos-kafka-cpu-stress:
 	kubectl apply -f config/litmus-experiments/kafka-cpu-stress.yaml
 	@echo "Monitor: kubectl get chaosresults -n kafka -w"
 
+chaos-kafka-memory-stress:
+	@echo "🧠 Running Kafka memory stress chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-memory-stress.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-io-stress:
+	@echo "💾 Running Kafka disk I/O stress chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-io-stress.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-dns-error:
+	@echo "🌐 Running Kafka DNS error chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-dns-error.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
+chaos-kafka-node-drain:
+	@echo "🚧 Running Kafka node drain chaos..."
+	kubectl apply -f config/litmus-experiments/kafka-node-drain.yaml
+	@echo "Monitor: kubectl get chaosresults -n kafka -w"
+
 chaos-kafka-all:
 	@echo "🌪️ Running ALL Kafka chaos experiments..."
 	kubectl apply -f config/litmus-experiments/kafka-pod-delete.yaml
 	kubectl apply -f config/litmus-experiments/kafka-network-partition.yaml
 	kubectl apply -f config/litmus-experiments/kafka-cpu-stress.yaml
+	kubectl apply -f config/litmus-experiments/kafka-memory-stress.yaml
+	kubectl apply -f config/litmus-experiments/kafka-io-stress.yaml
+	kubectl apply -f config/litmus-experiments/kafka-dns-error.yaml
+	kubectl apply -f config/litmus-experiments/kafka-node-drain.yaml
 	@echo "Monitor: kubectl get chaosresults -n kafka -w"
 
 chaos-kafka-status:

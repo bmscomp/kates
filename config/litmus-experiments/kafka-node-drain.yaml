@@ -1,0 +1,50 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-node-drain
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: node-drain
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+        probe:
+          - name: check-kafka-health
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "15s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+              comparator:
+                type: string
+                criteria: equal
+                value: "True"
+          - name: check-partition-availability
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "10s"
+              interval: "10s"
+              retry: 2
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-metadata.sh \
+                  --snapshot /var/lib/kafka/data/__cluster_metadata-0/00000000000000000000.log \
+                  --cluster-id local 2>&1 | grep -c "offline" || echo "0"
+              comparator:
+                type: int
+                criteria: lessThanOrEqualTo
+                value: "0"

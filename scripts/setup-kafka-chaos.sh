@@ -197,7 +197,183 @@ spec:
       app.kubernetes.io/part-of: litmus
 EOF
 
-info "✓ Chaos experiments installed: pod-delete, pod-network-partition, pod-cpu-hog"
+cat <<EOF | kubectl apply -f -
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: pod-memory-hog
+  namespace: kafka
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create","delete","get","list","patch","update","deletecollection"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create","get","list","patch","update"]
+      - apiGroups: [""]
+        resources: ["pods/log","pods/exec"]
+        verbs: ["get","list","watch","create"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["create","list","get","delete","deletecollection"]
+      - apiGroups: ["litmuschaos.io"]
+        resources: ["chaosengines","chaosexperiments","chaosresults"]
+        verbs: ["create","list","get","patch","update","delete"]
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
+    imagePullPolicy: IfNotPresent
+    args:
+      - -name
+      - pod-memory-hog
+    command:
+      - ./experiments
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: '60'
+      - name: MEMORY_CONSUMPTION
+        value: '500'
+      - name: NUMBER_OF_WORKERS
+        value: '1'
+    labels:
+      name: pod-memory-hog
+      app.kubernetes.io/part-of: litmus
+EOF
+
+cat <<EOF | kubectl apply -f -
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: pod-io-stress
+  namespace: kafka
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create","delete","get","list","patch","update","deletecollection"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create","get","list","patch","update"]
+      - apiGroups: [""]
+        resources: ["pods/log","pods/exec"]
+        verbs: ["get","list","watch","create"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["create","list","get","delete","deletecollection"]
+      - apiGroups: ["litmuschaos.io"]
+        resources: ["chaosengines","chaosexperiments","chaosresults"]
+        verbs: ["create","list","get","patch","update","delete"]
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
+    imagePullPolicy: IfNotPresent
+    args:
+      - -name
+      - pod-io-stress
+    command:
+      - ./experiments
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: '60'
+      - name: FILESYSTEM_UTILIZATION_PERCENTAGE
+        value: '50'
+      - name: NUMBER_OF_WORKERS
+        value: '2'
+    labels:
+      name: pod-io-stress
+      app.kubernetes.io/part-of: litmus
+EOF
+
+cat <<EOF | kubectl apply -f -
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: pod-dns-error
+  namespace: kafka
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create","delete","get","list","patch","update","deletecollection"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create","get","list","patch","update"]
+      - apiGroups: [""]
+        resources: ["pods/log","pods/exec"]
+        verbs: ["get","list","watch","create"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["create","list","get","delete","deletecollection"]
+      - apiGroups: ["litmuschaos.io"]
+        resources: ["chaosengines","chaosexperiments","chaosresults"]
+        verbs: ["create","list","get","patch","update","delete"]
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
+    imagePullPolicy: IfNotPresent
+    args:
+      - -name
+      - pod-dns-error
+    command:
+      - ./experiments
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: '30'
+      - name: TARGET_HOSTNAMES
+        value: ''
+    labels:
+      name: pod-dns-error
+      app.kubernetes.io/part-of: litmus
+EOF
+
+cat <<EOF | kubectl apply -f -
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: node-drain
+  namespace: kafka
+spec:
+  definition:
+    scope: Cluster
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create","delete","get","list","patch","update","deletecollection"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["create","get","list","patch","update"]
+      - apiGroups: [""]
+        resources: ["pods/log","pods/exec","pods/eviction"]
+        verbs: ["get","list","watch","create"]
+      - apiGroups: [""]
+        resources: ["nodes"]
+        verbs: ["get","list","patch","update"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["create","list","get","delete","deletecollection"]
+      - apiGroups: ["apps"]
+        resources: ["daemonsets"]
+        verbs: ["list","get","delete"]
+      - apiGroups: ["litmuschaos.io"]
+        resources: ["chaosengines","chaosexperiments","chaosresults"]
+        verbs: ["create","list","get","patch","update","delete"]
+    image: "litmuschaos/go-runner:${LITMUS_VERSION}"
+    imagePullPolicy: IfNotPresent
+    args:
+      - -name
+      - node-drain
+    command:
+      - ./experiments
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: '60'
+    labels:
+      name: node-drain
+      app.kubernetes.io/part-of: litmus
+EOF
+
+info "✓ Chaos experiments installed: pod-delete, pod-network-partition, pod-cpu-hog, pod-memory-hog, pod-io-stress, pod-dns-error, node-drain"
 
 # Step 4: Create RBAC for chaos in kafka namespace
 echo ""
@@ -217,14 +393,14 @@ metadata:
   namespace: kafka
 rules:
   - apiGroups: [""]
-    resources: ["pods","events","pods/log","pods/exec"]
+    resources: ["pods","events","pods/log","pods/exec","pods/eviction"]
     verbs: ["create","list","get","patch","update","delete","deletecollection"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create","list","get","patch","update","delete","deletecollection"]
   - apiGroups: ["apps"]
     resources: ["deployments","statefulsets","daemonsets","replicasets"]
-    verbs: ["list","get","patch","update"]
+    verbs: ["list","get","patch","update","delete"]
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines","chaosexperiments","chaosresults"]
     verbs: ["create","list","get","patch","update","delete"]
@@ -234,6 +410,21 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["create","delete","list","get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: litmus-node-chaos
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get","list","patch","update"]
+  - apiGroups: [""]
+    resources: ["pods","pods/eviction"]
+    verbs: ["get","list","create","delete"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["list","get","delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -248,6 +439,19 @@ subjects:
   - kind: ServiceAccount
     name: litmus-admin
     namespace: kafka
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: litmus-node-chaos
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: litmus-node-chaos
+subjects:
+  - kind: ServiceAccount
+    name: litmus-admin
+    namespace: kafka
 EOF
 
 info "✓ RBAC configured for kafka namespace"
@@ -256,9 +460,14 @@ echo ""
 info "✅ Kafka Chaos Environment Ready!"
 echo ""
 echo "Run chaos experiments:"
-echo "  make chaos-kafka-pod-delete"
-echo "  make chaos-kafka-network-partition"
-echo "  make chaos-kafka-cpu-stress"
-echo "  make chaos-kafka-all"
+echo "  make chaos-kafka-pod-delete            # Kill random broker pod"
+echo "  make chaos-kafka-network-partition      # Isolate broker from cluster"
+echo "  make chaos-kafka-cpu-stress             # CPU pressure on broker"
+echo "  make chaos-kafka-memory-stress          # Memory pressure on broker"
+echo "  make chaos-kafka-io-stress              # Disk I/O stress on broker"
+echo "  make chaos-kafka-dns-error              # DNS resolution failures"
+echo "  make chaos-kafka-node-drain             # Drain node hosting broker"
+echo "  make chaos-kafka-all                    # Run all experiments"
 echo ""
 echo "Monitor: kubectl get chaosresults -n kafka"
+

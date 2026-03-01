@@ -1,0 +1,62 @@
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: kafka-io-stress
+  namespace: kafka
+spec:
+  annotationCheck: 'false'
+  engineState: active
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: pod-io-stress
+      spec:
+        components:
+          env:
+            - name: FILESYSTEM_UTILIZATION_PERCENTAGE
+              value: '50'
+            - name: NUMBER_OF_WORKERS
+              value: '2'
+            - name: TOTAL_CHAOS_DURATION
+              value: '60'
+            - name: APP_NS
+              value: 'kafka'
+            - name: APP_LABEL
+              value: 'strimzi.io/component-type=kafka'
+            - name: TARGET_PODS
+              value: 'krafter-pool-gamma-1'
+            - name: TARGET_CONTAINER
+              value: 'kafka'
+        probe:
+          - name: check-kafka-health
+            type: cmdProbe
+            mode: Continuous
+            runProperties:
+              probeTimeout: "10s"
+              interval: "5s"
+              retry: 2
+            cmdProbe/inputs:
+              command: kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+              comparator:
+                type: string
+                criteria: equal
+                value: "True"
+          - name: check-disk-latency
+            type: cmdProbe
+            mode: Edge
+            runProperties:
+              probeTimeout: "30s"
+              interval: "10s"
+              retry: 3
+            cmdProbe/inputs:
+              command: |
+                kubectl exec -n kafka krafter-pool-alpha-0 -- kafka-producer-perf-test.sh \
+                  --topic test-chaos \
+                  --num-records 100 \
+                  --record-size 1024 \
+                  --throughput -1 \
+                  --producer-props bootstrap.servers=localhost:9092 2>&1 | \
+                  grep -oP '\d+\.\d+ ms avg latency' | head -1 || echo "latency check"
+              comparator:
+                type: string
+                criteria: contains
+                value: "ms"
