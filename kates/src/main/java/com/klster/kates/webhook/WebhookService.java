@@ -64,25 +64,37 @@ public class WebhookService {
 
     private void fireAsync(WebhookRegistration reg, WebhookPayload payload) {
         Thread.startVirtualThread(() -> {
-            try {
-                String json = MAPPER.writeValueAsString(payload);
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(reg.url()))
-                        .header("Content-Type", "application/json")
-                        .header("X-Kates-Event", payload.event())
-                        .POST(HttpRequest.BodyPublishers.ofString(json))
-                        .timeout(Duration.ofSeconds(10))
-                        .build();
+            int maxAttempts = 3;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    String json = MAPPER.writeValueAsString(payload);
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(URI.create(reg.url()))
+                            .header("Content-Type", "application/json")
+                            .header("X-Kates-Event", payload.event())
+                            .header("X-Kates-Attempt", String.valueOf(attempt))
+                            .POST(HttpRequest.BodyPublishers.ofString(json))
+                            .timeout(Duration.ofSeconds(10))
+                            .build();
 
-                HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                    LOG.debugf("Webhook %s delivered: %d", reg.name(), response.statusCode());
-                } else {
-                    LOG.warnf("Webhook %s returned %d: %s", reg.name(), response.statusCode(), response.body());
+                    HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        LOG.debugf("Webhook %s delivered (attempt %d): %d", reg.name(), attempt, response.statusCode());
+                        return;
+                    }
+                    LOG.warnf("Webhook %s returned %d (attempt %d/%d)", reg.name(), response.statusCode(), attempt, maxAttempts);
+                } catch (Exception e) {
+                    LOG.warnf("Webhook %s failed (attempt %d/%d): %s", reg.name(), attempt, maxAttempts, e.getMessage());
                 }
-            } catch (Exception e) {
-                LOG.warnf("Webhook %s failed: %s", reg.name(), e.getMessage());
+
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(1000L * (1L << (attempt - 1))); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
             }
+            LOG.errorf("Webhook %s delivery failed after %d attempts for event %s", reg.name(), maxAttempts, payload.event());
         });
     }
 

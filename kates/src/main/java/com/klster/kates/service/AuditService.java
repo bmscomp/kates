@@ -18,10 +18,29 @@ public class AuditService {
     @Inject
     EntityManager em;
 
+    private static final org.jboss.logging.Logger LOG =
+            org.jboss.logging.Logger.getLogger(AuditService.class);
+
     @Transactional
     public void record(String action, String eventType, String target, String details) {
-        AuditEventEntity event = new AuditEventEntity(action, eventType, target, details);
-        em.persist(event);
+        int maxRetries = 3;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                AuditEventEntity event = new AuditEventEntity(action, eventType, target, details);
+                em.persist(event);
+                return;
+            } catch (Exception e) {
+                if (attempt == maxRetries) {
+                    LOG.warnf("Audit event dropped after %d retries: action=%s type=%s target=%s — %s",
+                            maxRetries, action, eventType, target, e.getMessage());
+                } else {
+                    try { Thread.sleep(200L * attempt); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     @Transactional

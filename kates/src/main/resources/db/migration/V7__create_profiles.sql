@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS profiles (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL UNIQUE,
+    test_type VARCHAR(32) NOT NULL,
+    run_id VARCHAR(64),
+    throughput DOUBLE PRECISION,
+    p50_ms DOUBLE PRECISION,
+    p95_ms DOUBLE PRECISION,
+    p99_ms DOUBLE PRECISION,
+    avg_ms DOUBLE PRECISION,
+    error_rate DOUBLE PRECISION DEFAULT 0,
+    records DOUBLE PRECISION,
+    brokers INT,
+    partitions INT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

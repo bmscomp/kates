@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -43,6 +44,7 @@ public class TestOrchestrator {
     private final BenchmarkMetrics benchmarkMetrics;
     private final KatesMetrics katesMetrics;
     private final WebhookService webhookService;
+    private final Event<TestLifecycleEvent> lifecycleEvents;
     private final String defaultBackend;
     private final String bootstrapServers;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
@@ -57,6 +59,7 @@ public class TestOrchestrator {
             BenchmarkMetrics benchmarkMetrics,
             KatesMetrics katesMetrics,
             WebhookService webhookService,
+            Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.kafkaAdmin = kafkaAdmin;
@@ -66,6 +69,7 @@ public class TestOrchestrator {
         this.benchmarkMetrics = benchmarkMetrics;
         this.katesMetrics = katesMetrics;
         this.webhookService = webhookService;
+        this.lifecycleEvents = lifecycleEvents;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
     }
@@ -104,11 +108,13 @@ public class TestOrchestrator {
         TestRun run = new TestRun(type, spec);
         run.setBackend(backendName);
         repository.save(run);
+        fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
 
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
             run.setStatus(TestResult.TaskStatus.RUNNING);
+            fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
 
             var handles = new java.util.ArrayList<BenchmarkHandle>();
@@ -151,7 +157,11 @@ public class TestOrchestrator {
         }
 
         repository.save(run);
-        if (run.getStatus() == TestResult.TaskStatus.FAILED || run.getStatus() == TestResult.TaskStatus.DONE) {
+        if (run.getStatus() == TestResult.TaskStatus.FAILED) {
+            fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
+            benchmarkMetrics.endRun(run.getId());
+        } else if (run.getStatus() == TestResult.TaskStatus.DONE) {
+            fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
         }
         return run;
@@ -178,6 +188,8 @@ public class TestOrchestrator {
         run.setSla(scenario.getSla());
         run.setStatus(TestResult.TaskStatus.RUNNING);
         repository.save(run);
+        fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+        fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
 
         try {
             createTestTopic(baseSpec, type);
@@ -233,7 +245,11 @@ public class TestOrchestrator {
         }
 
         repository.save(run);
-        if (run.getStatus() == TestResult.TaskStatus.FAILED || run.getStatus() == TestResult.TaskStatus.DONE) {
+        if (run.getStatus() == TestResult.TaskStatus.FAILED) {
+            fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
+            benchmarkMetrics.endRun(run.getId());
+        } else if (run.getStatus() == TestResult.TaskStatus.DONE) {
+            fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
         }
         return run;
@@ -291,6 +307,9 @@ public class TestOrchestrator {
         if (allDone) {
             run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
             activeHandles.remove(runId);
+            fireEvent(run, anyFailed
+                    ? TestLifecycleEvent.EventKind.FAILED
+                    : TestLifecycleEvent.EventKind.DONE);
 
             String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
             String outcome = anyFailed ? "failed" : "done";
@@ -340,6 +359,7 @@ public class TestOrchestrator {
 
         run.setStatus(TestResult.TaskStatus.STOPPING);
         repository.save(run);
+        fireEvent(run, TestLifecycleEvent.EventKind.STOPPING);
     }
 
     public List<String> availableBackends() {
@@ -594,5 +614,10 @@ public class TestOrchestrator {
         if (status.isTerminal()) {
             result.setEndTime(Instant.now().toString());
         }
+    }
+
+    private void fireEvent(TestRun run, TestLifecycleEvent.EventKind kind) {
+        String type = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
+        lifecycleEvents.fireAsync(new TestLifecycleEvent(run.getId(), type, kind));
     }
 }

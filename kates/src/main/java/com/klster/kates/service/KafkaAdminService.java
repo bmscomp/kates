@@ -146,6 +146,15 @@ public class KafkaAdminService {
         }
     }
 
+    public int brokerCount() {
+        try {
+            Object count = describeCluster().get("brokerCount");
+            return count instanceof Integer ? (Integer) count : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     private Map<String, Object> nodeToMap(Node node) {
         Map<String, Object> map = new HashMap<>();
         map.put("id", node.id());

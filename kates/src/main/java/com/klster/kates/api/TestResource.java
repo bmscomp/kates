@@ -146,6 +146,46 @@ public class TestResource {
                         .build());
     }
 
+    @POST
+    @Path("/{id}/cancel")
+    @Operation(summary = "Cancel a running test", description = "Safely stops all tasks and marks the test as CANCELLED")
+    @APIResponse(responseCode = "200", description = "Test cancelled")
+    @APIResponse(responseCode = "404", description = "Test run not found")
+    @APIResponse(responseCode = "409", description = "Test is not running")
+    public Response cancelTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
+        return repository
+                .findById(id)
+                .map(run -> {
+                    var status = run.getStatus();
+                    if (status != com.klster.kates.domain.TestResult.TaskStatus.RUNNING
+                            && status != com.klster.kates.domain.TestResult.TaskStatus.PENDING) {
+                        return Response.status(Response.Status.CONFLICT)
+                                .entity(new ApiError(409, "Conflict",
+                                        "Test is not running (status: " + status + ")"))
+                                .build();
+                    }
+                    orchestrator.stopTest(id);
+                    run.setStatus(com.klster.kates.domain.TestResult.TaskStatus.FAILED);
+                    for (var result : run.getResults()) {
+                        if (result.getStatus() == com.klster.kates.domain.TestResult.TaskStatus.RUNNING
+                                || result.getStatus() == com.klster.kates.domain.TestResult.TaskStatus.PENDING) {
+                            result.setStatus(com.klster.kates.domain.TestResult.TaskStatus.FAILED);
+                            result.setError("Cancelled by user");
+                            result.setEndTime(java.time.Instant.now().toString());
+                        }
+                    }
+                    repository.save(run);
+                    auditService.record("CANCEL", "test", id, "Test cancelled by user");
+                    return Response.ok(java.util.Map.of(
+                            "id", run.getId(),
+                            "status", "CANCELLED",
+                            "message", "Test cancelled successfully")).build();
+                })
+                .orElse(Response.status(Response.Status.NOT_FOUND)
+                        .entity(new ApiError(404, "Not Found", "Test run not found: " + id))
+                        .build());
+    }
+
     @GET
     @Path("/types")
     @Operation(summary = "List available test types")
