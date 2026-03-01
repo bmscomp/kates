@@ -18,7 +18,8 @@ public class ScheduledTestRunRepository {
 
     @Transactional
     public void save(ScheduledTestRun schedule) {
-        var existing = em.find(ScheduledTestRun.class, schedule.getId());
+        @org.jspecify.annotations.Nullable
+        ScheduledTestRun existing = em.find(ScheduledTestRun.class, schedule.getId());
         if (existing != null) {
             existing.setName(schedule.getName());
             existing.setCronExpression(schedule.getCronExpression());
@@ -33,7 +34,7 @@ public class ScheduledTestRunRepository {
     }
 
     public Optional<ScheduledTestRun> findById(String id) {
-        var entity = em.find(ScheduledTestRun.class, id);
+        @org.jspecify.annotations.Nullable ScheduledTestRun entity = em.find(ScheduledTestRun.class, id);
         return Optional.ofNullable(entity);
     }
 
@@ -51,7 +52,7 @@ public class ScheduledTestRunRepository {
 
     @Transactional
     public void delete(String id) {
-        var entity = em.find(ScheduledTestRun.class, id);
+        @org.jspecify.annotations.Nullable ScheduledTestRun entity = em.find(ScheduledTestRun.class, id);
         if (entity != null) {
             em.remove(entity);
         }
@@ -59,7 +60,7 @@ public class ScheduledTestRunRepository {
 
     @Transactional
     public void updateLastRun(String scheduleId, String runId) {
-        var entity = em.find(ScheduledTestRun.class, scheduleId);
+        @org.jspecify.annotations.Nullable ScheduledTestRun entity = em.find(ScheduledTestRun.class, scheduleId);
         if (entity != null) {
             entity.setLastRunId(runId);
             entity.setLastRunAt(java.time.Instant.now());

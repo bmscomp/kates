@@ -40,38 +40,59 @@ public class TuningTestRunner {
 
     public static List<Map<String, Object>> stepsFor(TestType type) {
         return switch (type) {
-            case TUNE_REPLICATION -> List.of(
-                    Map.of("replicationFactor", 1, "minInsyncReplicas", 1, "acks", "1", "label", "RF=1, acks=1"),
-                    Map.of("replicationFactor", 2, "minInsyncReplicas", 1, "acks", "all", "label", "RF=2, acks=all"),
-                    Map.of("replicationFactor", 3, "minInsyncReplicas", 2, "acks", "all", "label", "RF=3, min.isr=2, acks=all"));
+            case TUNE_REPLICATION ->
+                List.of(
+                        Map.of("replicationFactor", 1, "minInsyncReplicas", 1, "acks", "1", "label", "RF=1, acks=1"),
+                        Map.of(
+                                "replicationFactor",
+                                2,
+                                "minInsyncReplicas",
+                                1,
+                                "acks",
+                                "all",
+                                "label",
+                                "RF=2, acks=all"),
+                        Map.of(
+                                "replicationFactor",
+                                3,
+                                "minInsyncReplicas",
+                                2,
+                                "acks",
+                                "all",
+                                "label",
+                                "RF=3, min.isr=2, acks=all"));
 
-            case TUNE_ACKS -> List.of(
-                    Map.of("acks", "0", "enableIdempotence", false, "label", "acks=0"),
-                    Map.of("acks", "1", "enableIdempotence", false, "label", "acks=1"),
-                    Map.of("acks", "all", "enableIdempotence", false, "label", "acks=all"),
-                    Map.of("acks", "all", "enableIdempotence", true, "label", "acks=all + idempotent"));
+            case TUNE_ACKS ->
+                List.of(
+                        Map.of("acks", "0", "enableIdempotence", false, "label", "acks=0"),
+                        Map.of("acks", "1", "enableIdempotence", false, "label", "acks=1"),
+                        Map.of("acks", "all", "enableIdempotence", false, "label", "acks=all"),
+                        Map.of("acks", "all", "enableIdempotence", true, "label", "acks=all + idempotent"));
 
-            case TUNE_BATCHING -> List.of(
-                    Map.of("batchSize", 16384, "lingerMs", 0, "label", "16KB / 0ms"),
-                    Map.of("batchSize", 32768, "lingerMs", 5, "label", "32KB / 5ms"),
-                    Map.of("batchSize", 65536, "lingerMs", 5, "label", "64KB / 5ms"),
-                    Map.of("batchSize", 131072, "lingerMs", 10, "label", "128KB / 10ms"),
-                    Map.of("batchSize", 262144, "lingerMs", 20, "label", "256KB / 20ms"),
-                    Map.of("batchSize", 524288, "lingerMs", 50, "label", "512KB / 50ms"));
+            case TUNE_BATCHING ->
+                List.of(
+                        Map.of("batchSize", 16384, "lingerMs", 0, "label", "16KB / 0ms"),
+                        Map.of("batchSize", 32768, "lingerMs", 5, "label", "32KB / 5ms"),
+                        Map.of("batchSize", 65536, "lingerMs", 5, "label", "64KB / 5ms"),
+                        Map.of("batchSize", 131072, "lingerMs", 10, "label", "128KB / 10ms"),
+                        Map.of("batchSize", 262144, "lingerMs", 20, "label", "256KB / 20ms"),
+                        Map.of("batchSize", 524288, "lingerMs", 50, "label", "512KB / 50ms"));
 
-            case TUNE_COMPRESSION -> List.of(
-                    Map.of("compressionType", "none", "label", "none"),
-                    Map.of("compressionType", "snappy", "label", "snappy"),
-                    Map.of("compressionType", "lz4", "label", "lz4"),
-                    Map.of("compressionType", "zstd", "label", "zstd"),
-                    Map.of("compressionType", "gzip", "label", "gzip"));
+            case TUNE_COMPRESSION ->
+                List.of(
+                        Map.of("compressionType", "none", "label", "none"),
+                        Map.of("compressionType", "snappy", "label", "snappy"),
+                        Map.of("compressionType", "lz4", "label", "lz4"),
+                        Map.of("compressionType", "zstd", "label", "zstd"),
+                        Map.of("compressionType", "gzip", "label", "gzip"));
 
-            case TUNE_PARTITIONS -> List.of(
-                    Map.of("partitions", 1, "numProducers", 1, "label", "1 partition / 1 producer"),
-                    Map.of("partitions", 3, "numProducers", 3, "label", "3 partitions / 3 producers"),
-                    Map.of("partitions", 6, "numProducers", 6, "label", "6 partitions / 6 producers"),
-                    Map.of("partitions", 12, "numProducers", 12, "label", "12 partitions / 12 producers"),
-                    Map.of("partitions", 24, "numProducers", 24, "label", "24 partitions / 24 producers"));
+            case TUNE_PARTITIONS ->
+                List.of(
+                        Map.of("partitions", 1, "numProducers", 1, "label", "1 partition / 1 producer"),
+                        Map.of("partitions", 3, "numProducers", 3, "label", "3 partitions / 3 producers"),
+                        Map.of("partitions", 6, "numProducers", 6, "label", "6 partitions / 6 producers"),
+                        Map.of("partitions", 12, "numProducers", 12, "label", "12 partitions / 12 producers"),
+                        Map.of("partitions", 24, "numProducers", 24, "label", "24 partitions / 24 producers"));
 
             default -> List.of();
         };

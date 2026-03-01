@@ -9,7 +9,12 @@ import java.time.Instant;
 public class TestLifecycleEvent {
 
     public enum EventKind {
-        CREATED, RUNNING, DONE, FAILED, CANCELLED, STOPPING
+        CREATED,
+        RUNNING,
+        DONE,
+        FAILED,
+        CANCELLED,
+        STOPPING
     }
 
     private final String runId;
@@ -30,11 +35,25 @@ public class TestLifecycleEvent {
         this(runId, testType, kind, null);
     }
 
-    public String getRunId() { return runId; }
-    public String getTestType() { return testType; }
-    public EventKind getKind() { return kind; }
-    public String getTimestamp() { return timestamp; }
-    public String getDetail() { return detail; }
+    public String getRunId() {
+        return runId;
+    }
+
+    public String getTestType() {
+        return testType;
+    }
+
+    public EventKind getKind() {
+        return kind;
+    }
+
+    public String getTimestamp() {
+        return timestamp;
+    }
+
+    public String getDetail() {
+        return detail;
+    }
 
     public String toJson() {
         var sb = new StringBuilder("{");

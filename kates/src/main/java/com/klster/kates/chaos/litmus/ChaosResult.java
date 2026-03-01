@@ -7,5 +7,4 @@ import io.fabric8.kubernetes.model.annotation.Version;
 
 @Group("litmuschaos.io")
 @Version("v1alpha1")
-public class ChaosResult extends CustomResource<Void, ChaosResultStatus> implements Namespaced {
-}
+public class ChaosResult extends CustomResource<Void, ChaosResultStatus> implements Namespaced {}

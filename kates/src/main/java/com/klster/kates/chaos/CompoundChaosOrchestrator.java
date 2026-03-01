@@ -6,7 +6,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -24,15 +23,9 @@ public class CompoundChaosOrchestrator {
 
     public record CompoundFault(FaultSpec spec, String providerName) {}
 
-    public record CompoundOutcome(
-            boolean allSucceeded,
-            List<ProviderOutcome> results) {}
+    public record CompoundOutcome(boolean allSucceeded, List<ProviderOutcome> results) {}
 
-    public record ProviderOutcome(
-            String providerName,
-            String experimentName,
-            boolean succeeded,
-            String message) {}
+    public record ProviderOutcome(String providerName, String experimentName, boolean succeeded, String message) {}
 
     /**
      * Executes multiple faults in parallel across potentially different providers.
@@ -44,9 +37,11 @@ public class CompoundChaosOrchestrator {
         for (CompoundFault fault : faults) {
             ChaosProvider provider = resolveProvider(fault.providerName());
             if (provider == null) {
-                futures.add(CompletableFuture.completedFuture(
-                        new ProviderOutcome(fault.providerName(), fault.spec().experimentName(),
-                                false, "Provider not found: " + fault.providerName())));
+                futures.add(CompletableFuture.completedFuture(new ProviderOutcome(
+                        fault.providerName(),
+                        fault.spec().experimentName(),
+                        false,
+                        "Provider not found: " + fault.providerName())));
                 continue;
             }
 
@@ -57,9 +52,7 @@ public class CompoundChaosOrchestrator {
                             outcome.isPass(),
                             outcome.failureReason()))
                     .exceptionally(ex -> new ProviderOutcome(
-                            fault.providerName(),
-                            fault.spec().experimentName(),
-                            false, ex.getMessage()));
+                            fault.providerName(), fault.spec().experimentName(), false, ex.getMessage()));
 
             futures.add(future);
         }
@@ -80,7 +73,8 @@ public class CompoundChaosOrchestrator {
                 results.add(new ProviderOutcome("unknown", "unknown", false, "Interrupted"));
                 allOk = false;
             } catch (ExecutionException e) {
-                results.add(new ProviderOutcome("unknown", "unknown", false, e.getCause().getMessage()));
+                results.add(new ProviderOutcome(
+                        "unknown", "unknown", false, e.getCause().getMessage()));
                 allOk = false;
             }
         }
@@ -98,8 +92,8 @@ public class CompoundChaosOrchestrator {
         for (CompoundFault fault : faults) {
             ChaosProvider provider = resolveProvider(fault.providerName());
             if (provider == null) {
-                results.add(new ProviderOutcome(fault.providerName(), fault.spec().experimentName(),
-                        false, "Provider not found"));
+                results.add(new ProviderOutcome(
+                        fault.providerName(), fault.spec().experimentName(), false, "Provider not found"));
                 allOk = false;
                 continue;
             }
@@ -112,13 +106,14 @@ public class CompoundChaosOrchestrator {
                 if (!outcome.isPass()) allOk = false;
             } catch (Exception e) {
                 results.add(new ProviderOutcome(
-                        fault.providerName(), fault.spec().experimentName(),
-                        false, e.getMessage()));
+                        fault.providerName(), fault.spec().experimentName(), false, e.getMessage()));
                 allOk = false;
             }
 
             if (delayBetweenSec > 0) {
-                try { Thread.sleep(delayBetweenSec * 1000L); } catch (InterruptedException e) {
+                try {
+                    Thread.sleep(delayBetweenSec * 1000L);
+                } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 }

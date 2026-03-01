@@ -115,8 +115,7 @@ public class TestOrchestrator {
         return run;
     }
 
-    private void executeAsync(TestRun run, TestType type, TestSpec spec,
-                              String backendName, BenchmarkBackend backend) {
+    private void executeAsync(TestRun run, TestType type, TestSpec spec, String backendName, BenchmarkBackend backend) {
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
@@ -313,9 +312,7 @@ public class TestOrchestrator {
         if (allDone) {
             run.setStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
             activeHandles.remove(runId);
-            fireEvent(run, anyFailed
-                    ? TestLifecycleEvent.EventKind.FAILED
-                    : TestLifecycleEvent.EventKind.DONE);
+            fireEvent(run, anyFailed ? TestLifecycleEvent.EventKind.FAILED : TestLifecycleEvent.EventKind.DONE);
 
             String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
             String outcome = anyFailed ? "failed" : "done";
@@ -399,34 +396,20 @@ public class TestOrchestrator {
         merged.setNumConsumers(defaults.numConsumers());
 
         if (userSpec != null) {
-            if (userSpec.getTopic() != null)
-                merged.setTopic(userSpec.getTopic());
-            if (userSpec.getReplicationFactor() != 3)
-                merged.setReplicationFactor(userSpec.getReplicationFactor());
-            if (userSpec.getPartitions() != 3)
-                merged.setPartitions(userSpec.getPartitions());
-            if (userSpec.getMinInsyncReplicas() != 2)
-                merged.setMinInsyncReplicas(userSpec.getMinInsyncReplicas());
-            if (!"all".equals(userSpec.getAcks()))
-                merged.setAcks(userSpec.getAcks());
-            if (userSpec.getBatchSize() != 65536)
-                merged.setBatchSize(userSpec.getBatchSize());
-            if (userSpec.getLingerMs() != 5)
-                merged.setLingerMs(userSpec.getLingerMs());
-            if (!"lz4".equals(userSpec.getCompressionType()))
-                merged.setCompressionType(userSpec.getCompressionType());
-            if (userSpec.getRecordSize() != 1024)
-                merged.setRecordSize(userSpec.getRecordSize());
-            if (userSpec.getNumRecords() != 1_000_000)
-                merged.setNumRecords(userSpec.getNumRecords());
-            if (userSpec.getThroughput() != -1)
-                merged.setThroughput(userSpec.getThroughput());
-            if (userSpec.getDurationMs() != 600_000)
-                merged.setDurationMs(userSpec.getDurationMs());
-            if (userSpec.getNumProducers() != 1)
-                merged.setNumProducers(userSpec.getNumProducers());
-            if (userSpec.getNumConsumers() != 1)
-                merged.setNumConsumers(userSpec.getNumConsumers());
+            if (userSpec.getTopic() != null) merged.setTopic(userSpec.getTopic());
+            if (userSpec.getReplicationFactor() != 3) merged.setReplicationFactor(userSpec.getReplicationFactor());
+            if (userSpec.getPartitions() != 3) merged.setPartitions(userSpec.getPartitions());
+            if (userSpec.getMinInsyncReplicas() != 2) merged.setMinInsyncReplicas(userSpec.getMinInsyncReplicas());
+            if (!"all".equals(userSpec.getAcks())) merged.setAcks(userSpec.getAcks());
+            if (userSpec.getBatchSize() != 65536) merged.setBatchSize(userSpec.getBatchSize());
+            if (userSpec.getLingerMs() != 5) merged.setLingerMs(userSpec.getLingerMs());
+            if (!"lz4".equals(userSpec.getCompressionType())) merged.setCompressionType(userSpec.getCompressionType());
+            if (userSpec.getRecordSize() != 1024) merged.setRecordSize(userSpec.getRecordSize());
+            if (userSpec.getNumRecords() != 1_000_000) merged.setNumRecords(userSpec.getNumRecords());
+            if (userSpec.getThroughput() != -1) merged.setThroughput(userSpec.getThroughput());
+            if (userSpec.getDurationMs() != 600_000) merged.setDurationMs(userSpec.getDurationMs());
+            if (userSpec.getNumProducers() != 1) merged.setNumProducers(userSpec.getNumProducers());
+            if (userSpec.getNumConsumers() != 1) merged.setNumConsumers(userSpec.getNumConsumers());
         }
 
         return merged;
@@ -436,8 +419,8 @@ public class TestOrchestrator {
         return backends.stream()
                 .filter(b -> b.name().equals(name))
                 .findFirst()
-                .orElseThrow(() -> new BenchmarkException(
-                        "Backend not found: '" + name + "'. Available: " + availableBackends()));
+                .orElseThrow(() ->
+                        new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends()));
     }
 
     private List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
@@ -516,8 +499,7 @@ public class TestOrchestrator {
                         .enableTransactions(spec.isEnableTransactions())
                         .enableCrc(spec.isEnableCrc())
                         .build());
-            case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING,
-                 TUNE_COMPRESSION, TUNE_PARTITIONS ->
+            case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS ->
                 List.of(produceTask(runId + "-tune-0", topic, spec, producerConfig));
         };
     }
@@ -588,7 +570,8 @@ public class TestOrchestrator {
     }
 
     private void createTestTopic(TestSpec spec, TestType type) {
-        String topicName = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
+        String topicName =
+                spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
         Map<String, String> topicConfig = new HashMap<>();
         topicConfig.put("min.insync.replicas", String.valueOf(spec.getMinInsyncReplicas()));
 

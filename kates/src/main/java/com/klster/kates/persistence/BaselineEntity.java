@@ -33,10 +33,27 @@ public class BaselineEntity {
         this.setAt = Instant.now();
     }
 
-    public TestType getTestType() { return testType; }
-    public void setTestType(TestType testType) { this.testType = testType; }
-    public String getRunId() { return runId; }
-    public void setRunId(String runId) { this.runId = runId; }
-    public Instant getSetAt() { return setAt; }
-    public void setSetAt(Instant setAt) { this.setAt = setAt; }
+    public TestType getTestType() {
+        return testType;
+    }
+
+    public void setTestType(TestType testType) {
+        this.testType = testType;
+    }
+
+    public String getRunId() {
+        return runId;
+    }
+
+    public void setRunId(String runId) {
+        this.runId = runId;
+    }
+
+    public Instant getSetAt() {
+        return setAt;
+    }
+
+    public void setSetAt(Instant setAt) {
+        this.setAt = setAt;
+    }
 }

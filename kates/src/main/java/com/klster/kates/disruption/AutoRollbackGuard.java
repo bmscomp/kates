@@ -2,7 +2,6 @@ package com.klster.kates.disruption;
 
 import java.time.Duration;
 import java.time.Instant;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -33,24 +32,18 @@ public class AutoRollbackGuard {
     long maxLagSpike;
 
     public record RollbackDecision(
-            boolean shouldRollback,
-            String reason,
-            String dimension,
-            String threshold,
-            String observed) {}
+            boolean shouldRollback, String reason, String dimension, String threshold, String observed) {}
 
     /**
      * Evaluates whether a step's live metrics have breached safety thresholds.
      * Called periodically during a step execution's observation window.
      */
-    public RollbackDecision evaluate(
-            DisruptionReport.StepReport step,
-            FaultSpec spec,
-            Instant stepStarted) {
+    public RollbackDecision evaluate(DisruptionReport.StepReport step, FaultSpec spec, Instant stepStarted) {
 
         long elapsedSec = Duration.between(stepStarted, Instant.now()).toSeconds();
         if (elapsedSec > maxRecoverySec) {
-            return new RollbackDecision(true,
+            return new RollbackDecision(
+                    true,
                     "Recovery time exceeded " + maxRecoverySec + "s",
                     "availability",
                     maxRecoverySec + "s",
@@ -60,7 +53,8 @@ public class AutoRollbackGuard {
         if (step.isrMetrics() != null) {
             int minDepth = step.isrMetrics().minIsrDepth();
             if (minDepth < minIsrDepth) {
-                return new RollbackDecision(true,
+                return new RollbackDecision(
+                        true,
                         "ISR depth dropped below minimum threshold (" + minIsrDepth + ")",
                         "replication",
                         String.valueOf(minIsrDepth),
@@ -71,7 +65,8 @@ public class AutoRollbackGuard {
         if (step.lagMetrics() != null) {
             long spike = step.lagMetrics().lagSpike();
             if (spike > maxLagSpike) {
-                return new RollbackDecision(true,
+                return new RollbackDecision(
+                        true,
                         "Consumer lag spike exceeded threshold (" + maxLagSpike + ")",
                         "consumer-lag",
                         String.valueOf(maxLagSpike),

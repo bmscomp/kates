@@ -7,12 +7,13 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
-import com.klster.kates.chaos.litmus.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
-import io.fabric8.kubernetes.client.Watch;
 import org.jboss.logging.Logger;
+
+import com.klster.kates.chaos.litmus.*;
 
 /**
  * Chaos provider that creates Litmus ChaosEngine CRs to trigger experiments.
@@ -70,7 +71,9 @@ public class LitmusChaosProvider implements ChaosProvider {
                         @Override
                         @SuppressWarnings("null")
                         public void eventReceived(Action action, ChaosResult result) {
-                            if (result == null || result.getStatus() == null || result.getStatus().experimentStatus == null) {
+                            if (result == null
+                                    || result.getStatus() == null
+                                    || result.getStatus().experimentStatus == null) {
                                 return;
                             }
 
@@ -89,8 +92,14 @@ public class LitmusChaosProvider implements ChaosProvider {
 
                                 if ("Pass".equalsIgnoreCase(verdict)) {
                                     future.complete(ChaosOutcome.success(
-                                            engineName, experimentName, start, Instant.now(), startNanos,
-                                            probSuccess, failStep, status.phase));
+                                            engineName,
+                                            experimentName,
+                                            start,
+                                            Instant.now(),
+                                            startNanos,
+                                            probSuccess,
+                                            failStep,
+                                            status.phase));
                                 } else {
                                     future.complete(ChaosOutcome.failure(
                                             engineName,
@@ -98,8 +107,11 @@ public class LitmusChaosProvider implements ChaosProvider {
                                             start,
                                             Instant.now(),
                                             startNanos,
-                                            "ChaosResult verdict: " + verdict + (details.isEmpty() ? "" : " (" + details + ")"),
-                                            probSuccess, failStep, status.phase));
+                                            "ChaosResult verdict: " + verdict
+                                                    + (details.isEmpty() ? "" : " (" + details + ")"),
+                                            probSuccess,
+                                            failStep,
+                                            status.phase));
                                 }
                             }
                         }
@@ -110,7 +122,11 @@ public class LitmusChaosProvider implements ChaosProvider {
                                 if (cause != null) {
                                     LOG.warn("Watcher closed with error", cause);
                                 }
-                                future.completeExceptionally(cause != null ? cause : new RuntimeException("Watcher closed unexpectedly without providing a verdict"));
+                                future.completeExceptionally(
+                                        cause != null
+                                                ? cause
+                                                : new RuntimeException(
+                                                        "Watcher closed unexpectedly without providing a verdict"));
                             }
                         }
                     });
@@ -119,24 +135,34 @@ public class LitmusChaosProvider implements ChaosProvider {
             future.whenComplete((res, err) -> watch.close());
 
             // Fallback timeout execution since we removed Thread.sleep
-            CompletableFuture.delayedExecutor(spec.chaosDurationSec() + 120, java.util.concurrent.TimeUnit.SECONDS).execute(() -> {
-                if (!future.isDone()) {
-                    future.complete(ChaosOutcome.failure(
-                            engineName,
-                            experimentName,
-                            start,
-                            Instant.now(),
-                            startNanos,
-                            "Timeout polling for ChaosResult via Watcher",
-                            null, null, null));
-                }
-            });
+            CompletableFuture.delayedExecutor(spec.chaosDurationSec() + 120, java.util.concurrent.TimeUnit.SECONDS)
+                    .execute(() -> {
+                        if (!future.isDone()) {
+                            future.complete(ChaosOutcome.failure(
+                                    engineName,
+                                    experimentName,
+                                    start,
+                                    Instant.now(),
+                                    startNanos,
+                                    "Timeout polling for ChaosResult via Watcher",
+                                    null,
+                                    null,
+                                    null));
+                        }
+                    });
 
         } catch (Exception e) {
             LOG.error("Litmus fault injection failed", e);
             future.complete(ChaosOutcome.failure(
-                    engineName, spec.experimentName(), start, Instant.now(), startNanos, e.getMessage(),
-                    null, null, null));
+                    engineName,
+                    spec.experimentName(),
+                    start,
+                    Instant.now(),
+                    startNanos,
+                    e.getMessage(),
+                    null,
+                    null,
+                    null));
         }
 
         return future;
@@ -145,11 +171,11 @@ public class LitmusChaosProvider implements ChaosProvider {
     private String resolveExperiment(FaultSpec spec) {
         if (spec.disruptionType() != null) {
             String mapped = EXPERIMENT_MAP.get(spec.disruptionType());
-            
+
             // Try to dynamically discover installed ChaosExperiments
             try {
                 if (mapped != null) {
-                    List<ChaosExperiment> exps = client.resources(ChaosExperiment.class)
+                    var exps = client.resources(ChaosExperiment.class)
                             .inNamespace(spec.targetNamespace())
                             .list()
                             .getItems();
@@ -243,7 +269,8 @@ public class LitmusChaosProvider implements ChaosProvider {
     @SuppressWarnings("null")
     public ChaosStatus pollStatus(String engineName) {
         try {
-            var engineOpt = client.resources(ChaosEngine.class)
+            var engineOpt = client
+                    .resources(ChaosEngine.class)
                     .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .list()

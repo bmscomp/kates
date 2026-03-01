@@ -117,8 +117,8 @@ public class DisruptionResource {
                         "createdAt", e.getCreatedAt().toString()))
                 .toList();
 
-        return Response.ok(Map.of("page", page, "size", effectiveSize,
-                "count", summaries.size(), "items", summaries)).build();
+        return Response.ok(Map.of("page", page, "size", effectiveSize, "count", summaries.size(), "items", summaries))
+                .build();
     }
 
     @GET
@@ -451,8 +451,8 @@ public class DisruptionResource {
                         "lastRunAt", s.getLastRunAt() != null ? s.getLastRunAt().toString() : "",
                         "createdAt", s.getCreatedAt().toString()))
                 .toList();
-        return Response.ok(Map.of("page", page, "size", effectiveSize,
-                "count", entries.size(), "items", entries)).build();
+        return Response.ok(Map.of("page", page, "size", effectiveSize, "count", entries.size(), "items", entries))
+                .build();
     }
 
     @POST
@@ -562,7 +562,8 @@ public class DisruptionResource {
 
     @GET
     @Path("/templates")
-    @Operation(summary = "List chaos experiment templates",
+    @Operation(
+            summary = "List chaos experiment templates",
             description = "Returns pre-built chaos templates with sensible defaults for common Kafka failure scenarios")
     public Response listTemplates() {
         return Response.ok(templateCatalog.listTemplates()).build();
@@ -570,21 +571,19 @@ public class DisruptionResource {
 
     @POST
     @Path("/templates/{id}")
-    @Operation(summary = "Run a template",
-            description = "Executes a chaos template with optional override parameters")
+    @Operation(summary = "Run a template", description = "Executes a chaos template with optional override parameters")
     @APIResponse(responseCode = "200", description = "Disruption report from template execution")
     @APIResponse(responseCode = "404", description = "Template not found")
     public Response runTemplate(
-            @Parameter(description = "Template ID") @PathParam("id") String templateId,
-            Map<String, Object> overrides) {
+            @Parameter(description = "Template ID") @PathParam("id") String templateId, Map<String, Object> overrides) {
 
         try {
-            DisruptionPlan plan = templateCatalog.buildPlan(templateId,
-                    overrides != null ? overrides : Map.of());
+            DisruptionPlan plan = templateCatalog.buildPlan(templateId, overrides != null ? overrides : Map.of());
             String id = UUID.randomUUID().toString().substring(0, 8);
             DisruptionReport report = orchestrator.execute(plan);
             persistReport(id, report);
-            return Response.ok(Map.of("id", id, "template", templateId, "report", report)).build();
+            return Response.ok(Map.of("id", id, "template", templateId, "report", report))
+                    .build();
         } catch (IllegalArgumentException e) {
             return Response.status(404)
                     .entity(ApiError.of(404, "Not Found", e.getMessage()))
@@ -594,7 +593,8 @@ public class DisruptionResource {
 
     @GET
     @Path("/{id}/impact")
-    @Operation(summary = "Get disruption impact score",
+    @Operation(
+            summary = "Get disruption impact score",
             description = "Computes a composite 0-100 severity score across 5 dimensions")
     @APIResponse(responseCode = "200", description = "Impact score with breakdown")
     @APIResponse(responseCode = "404", description = "Report not found")
@@ -612,7 +612,8 @@ public class DisruptionResource {
 
     @GET
     @Path("/history")
-    @Operation(summary = "Disruption history by topic",
+    @Operation(
+            summary = "Disruption history by topic",
             description = "Returns all disruption reports that targeted a specific topic")
     public Response historyByTopic(
             @Parameter(description = "Topic name", required = true) @QueryParam("topic") String topic,
@@ -647,12 +648,14 @@ public class DisruptionResource {
                         "createdAt", e.getCreatedAt().toString()))
                 .toList();
 
-        return Response.ok(Map.of("topic", topic, "count", matching.size(), "reports", matching)).build();
+        return Response.ok(Map.of("topic", topic, "count", matching.size(), "reports", matching))
+                .build();
     }
 
     @POST
     @Path("/compound")
-    @Operation(summary = "Execute compound chaos",
+    @Operation(
+            summary = "Execute compound chaos",
             description = "Runs multiple faults concurrently across different chaos providers")
     public Response executeCompound(CompoundChaosRequest request) {
         if (request.faults == null || request.faults.isEmpty()) {
@@ -671,14 +674,17 @@ public class DisruptionResource {
                 : compoundOrchestrator.executeConcurrent(faults, request.timeoutSec);
 
         return Response.ok(Map.of(
-                "allSucceeded", outcome.allSucceeded(),
-                "mode", request.sequential ? "sequential" : "concurrent",
-                "results", outcome.results())).build();
+                        "allSucceeded", outcome.allSucceeded(),
+                        "mode", request.sequential ? "sequential" : "concurrent",
+                        "results", outcome.results()))
+                .build();
     }
 
     @GET
     @Path("/providers")
-    @Operation(summary = "List chaos providers", description = "Returns all registered chaos providers and their availability")
+    @Operation(
+            summary = "List chaos providers",
+            description = "Returns all registered chaos providers and their availability")
     public Response listProviders() {
         return Response.ok(compoundOrchestrator.availableProviders()).build();
     }

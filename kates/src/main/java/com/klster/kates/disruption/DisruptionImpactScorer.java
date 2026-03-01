@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
 import jakarta.enterprise.context.ApplicationScoped;
 
 /**
@@ -140,8 +139,8 @@ public class DisruptionImpactScorer {
             factors.add("Step '" + step.stepName() + "': ISR dropped to " + isr.minIsrDepth());
         } else if (isr.underReplicatedPeakCount() > 0) {
             score = Math.min(80, isr.underReplicatedPeakCount() * 10);
-            factors.add("Step '" + step.stepName() + "': "
-                    + isr.underReplicatedPeakCount() + " under-replicated partitions");
+            factors.add("Step '" + step.stepName() + "': " + isr.underReplicatedPeakCount()
+                    + " under-replicated partitions");
         }
 
         if (isr.timeToFullIsr() != null && isr.timeToFullIsr().toSeconds() > 120) {
@@ -186,12 +185,7 @@ public class DisruptionImpactScorer {
     }
 
     private static int weightedAverage(int availability, int latency, int throughput, int replication, int lag) {
-        return (int) (
-                availability * 0.30
-                        + latency * 0.20
-                        + throughput * 0.20
-                        + replication * 0.20
-                        + lag * 0.10);
+        return (int) (availability * 0.30 + latency * 0.20 + throughput * 0.20 + replication * 0.20 + lag * 0.10);
     }
 
     private static String classifySeverity(int score) {

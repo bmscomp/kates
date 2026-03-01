@@ -1,7 +1,6 @@
 package com.klster.kates.webhook;
 
 import java.util.List;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -39,10 +38,14 @@ public class WebhookResource {
     @Operation(summary = "Register a webhook")
     public Response register(WebhookService.WebhookRegistration registration) {
         if (registration.name() == null || registration.name().isBlank()) {
-            return Response.status(400).entity("{\"error\":\"name is required\"}").build();
+            return Response.status(400)
+                    .entity("{\"error\":\"name is required\"}")
+                    .build();
         }
         if (registration.url() == null || registration.url().isBlank()) {
-            return Response.status(400).entity("{\"error\":\"url is required\"}").build();
+            return Response.status(400)
+                    .entity("{\"error\":\"url is required\"}")
+                    .build();
         }
         webhookService.register(registration);
         return Response.status(201).entity(registration).build();

@@ -62,8 +62,18 @@ public class ClusterResource {
             int start = Math.min(page * effectiveSize, sorted.size());
             int end = Math.min(start + effectiveSize, sorted.size());
             List<String> paged = sorted.subList(start, end);
-            return Response.ok(Map.of("page", page, "size", effectiveSize,
-                    "total", sorted.size(), "count", paged.size(), "items", paged)).build();
+            return Response.ok(Map.of(
+                            "page",
+                            page,
+                            "size",
+                            effectiveSize,
+                            "total",
+                            sorted.size(),
+                            "count",
+                            paged.size(),
+                            "items",
+                            paged))
+                    .build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Internal Server Error", "Failed to list topics: " + e.getMessage()))
@@ -105,8 +115,18 @@ public class ClusterResource {
             int start = Math.min(page * effectiveSize, allGroups.size());
             int end = Math.min(start + effectiveSize, allGroups.size());
             List<Map<String, Object>> paged = allGroups.subList(start, end);
-            return Response.ok(Map.of("page", page, "size", effectiveSize,
-                    "total", allGroups.size(), "count", paged.size(), "items", paged)).build();
+            return Response.ok(Map.of(
+                            "page",
+                            page,
+                            "size",
+                            effectiveSize,
+                            "total",
+                            allGroups.size(),
+                            "count",
+                            paged.size(),
+                            "items",
+                            paged))
+                    .build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(

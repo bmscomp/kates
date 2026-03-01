@@ -2,7 +2,6 @@ package com.klster.kates.api;
 
 import java.util.List;
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
@@ -37,7 +36,8 @@ public class AuditResource {
     public Response listAuditEvents(
             @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
             @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size,
-            @Parameter(description = "Filter by event type (test, topic, disruption, resilience)") @QueryParam("type") String type,
+            @Parameter(description = "Filter by event type (test, topic, disruption, resilience)") @QueryParam("type")
+                    String type,
             @Parameter(description = "Filter events after this ISO-8601 timestamp") @QueryParam("since") String since) {
 
         int effectiveSize = Math.min(Math.max(size, 1), 200);
@@ -45,7 +45,17 @@ public class AuditResource {
         int start = Math.min(page * effectiveSize, allEvents.size());
         int end = Math.min(start + effectiveSize, allEvents.size());
         List<Map<String, Object>> paged = allEvents.subList(start, end);
-        return Response.ok(Map.of("page", page, "size", effectiveSize,
-                "total", allEvents.size(), "count", paged.size(), "items", paged)).build();
+        return Response.ok(Map.of(
+                        "page",
+                        page,
+                        "size",
+                        effectiveSize,
+                        "total",
+                        allEvents.size(),
+                        "count",
+                        paged.size(),
+                        "items",
+                        paged))
+                .build();
     }
 }

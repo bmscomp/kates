@@ -1,6 +1,7 @@
 package com.klster.kates.chaos.litmus;
 
 import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -83,6 +84,7 @@ public class ChaosEngineSpec {
         public int retry = 1;
 
         public RunProperties() {}
+
         public RunProperties(int probeTimeout, int interval, int retry) {
             this.probeTimeout = probeTimeout;
             this.interval = interval;

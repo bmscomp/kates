@@ -28,19 +28,50 @@ public record ChaosOutcome(
     }
 
     public static ChaosOutcome success(
-            String engineName, String experimentName, Instant start, Instant end, long startNanos,
-            String probeSuccessPercentage, String failStep, String phase) {
+            String engineName,
+            String experimentName,
+            Instant start,
+            Instant end,
+            long startNanos,
+            String probeSuccessPercentage,
+            String failStep,
+            String phase) {
         return new ChaosOutcome(
-                engineName, experimentName, start, end, startNanos, Duration.between(start, end),
-                "Pass", null, probeSuccessPercentage, failStep, phase);
+                engineName,
+                experimentName,
+                start,
+                end,
+                startNanos,
+                Duration.between(start, end),
+                "Pass",
+                null,
+                probeSuccessPercentage,
+                failStep,
+                phase);
     }
 
     public static ChaosOutcome failure(
-            String engineName, String experimentName, Instant start, Instant end, long startNanos, String reason,
-            String probeSuccessPercentage, String failStep, String phase) {
+            String engineName,
+            String experimentName,
+            Instant start,
+            Instant end,
+            long startNanos,
+            String reason,
+            String probeSuccessPercentage,
+            String failStep,
+            String phase) {
         return new ChaosOutcome(
-                engineName, experimentName, start, end, startNanos, Duration.between(start, end),
-                "Fail", reason, probeSuccessPercentage, failStep, phase);
+                engineName,
+                experimentName,
+                start,
+                end,
+                startNanos,
+                Duration.between(start, end),
+                "Fail",
+                reason,
+                probeSuccessPercentage,
+                failStep,
+                phase);
     }
 
     public static ChaosOutcome skipped(String reason) {

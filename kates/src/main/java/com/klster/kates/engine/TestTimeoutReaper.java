@@ -3,14 +3,12 @@ package com.klster.kates.engine;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-
-import io.quarkus.scheduler.Scheduled;
 
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
@@ -45,8 +43,7 @@ public class TestTimeoutReaper {
             try {
                 Instant created = Instant.parse(run.getCreatedAt());
                 if (created.isBefore(cutoff)) {
-                    LOG.warnf("Test %s exceeded max duration (%dms) — marking as FAILED",
-                            run.getId(), maxDurationMs);
+                    LOG.warnf("Test %s exceeded max duration (%dms) — marking as FAILED", run.getId(), maxDurationMs);
                     run.setStatus(TestResult.TaskStatus.FAILED);
                     for (TestResult result : run.getResults()) {
                         if (result.getStatus() == TestResult.TaskStatus.RUNNING

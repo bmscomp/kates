@@ -86,28 +86,28 @@ func searchDocs(query string, width int) error {
 var (
 	manSectionStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7C3AED")).
+			Foreground(output.Purple).
 			MarginTop(1)
 
 	manCmdStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(output.Cyan)
 
 	manFlagStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22C55E"))
+			Foreground(output.Green)
 
 	manDefaultStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F59E0B"))
+			Foreground(output.Amber)
 
 	manDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(output.Dim)
 
 	manExampleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E5E7EB"))
+			Foreground(output.Light)
 
 	manCategoryStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#6366F1")).
+				Foreground(output.Indigo).
 				MarginTop(1)
 )
 
@@ -169,7 +169,7 @@ func renderManPage(e DocEntry, width int) string {
 func renderDocsIndex(width int) string {
 	var b strings.Builder
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("KATES Command Reference")
+	title := lipgloss.NewStyle().Bold(true).Foreground(output.Purple).Render("KATES Command Reference")
 	b.WriteString("\n  " + title + "\n")
 	b.WriteString("  " + manDimStyle.Render("Run 'kates docs <command>' for full man-page documentation") + "\n")
 

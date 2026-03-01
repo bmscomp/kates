@@ -7,12 +7,11 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-
 import jakarta.enterprise.context.ApplicationScoped;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.klster.kates.domain.TestRun;
 
 /**
@@ -23,9 +22,8 @@ import com.klster.kates.domain.TestRun;
 public class WebhookService {
 
     private static final Logger LOG = Logger.getLogger(WebhookService.class);
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .build();
+    private static final HttpClient HTTP =
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final List<WebhookRegistration> registrations = new CopyOnWriteArrayList<>();
@@ -54,8 +52,7 @@ public class WebhookService {
                 run.getId(),
                 run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
                 run.getStatus().name(),
-                run.getCreatedAt()
-        );
+                run.getCreatedAt());
 
         for (WebhookRegistration reg : registrations) {
             fireAsync(reg, payload);
@@ -82,29 +79,30 @@ public class WebhookService {
                         LOG.debugf("Webhook %s delivered (attempt %d): %d", reg.name(), attempt, response.statusCode());
                         return;
                     }
-                    LOG.warnf("Webhook %s returned %d (attempt %d/%d)", reg.name(), response.statusCode(), attempt, maxAttempts);
+                    LOG.warnf(
+                            "Webhook %s returned %d (attempt %d/%d)",
+                            reg.name(), response.statusCode(), attempt, maxAttempts);
                 } catch (Exception e) {
-                    LOG.warnf("Webhook %s failed (attempt %d/%d): %s", reg.name(), attempt, maxAttempts, e.getMessage());
+                    LOG.warnf(
+                            "Webhook %s failed (attempt %d/%d): %s", reg.name(), attempt, maxAttempts, e.getMessage());
                 }
 
                 if (attempt < maxAttempts) {
-                    try { Thread.sleep(1000L * (1L << (attempt - 1))); } catch (InterruptedException ie) {
+                    try {
+                        Thread.sleep(1000L * (1L << (attempt - 1)));
+                    } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return;
                     }
                 }
             }
-            LOG.errorf("Webhook %s delivery failed after %d attempts for event %s", reg.name(), maxAttempts, payload.event());
+            LOG.errorf(
+                    "Webhook %s delivery failed after %d attempts for event %s",
+                    reg.name(), maxAttempts, payload.event());
         });
     }
 
     public record WebhookRegistration(String name, String url, String events) {}
 
-    public record WebhookPayload(
-            String event,
-            String testId,
-            String testType,
-            String status,
-            String timestamp
-    ) {}
+    public record WebhookPayload(String event, String testId, String testType, String status, String timestamp) {}
 }

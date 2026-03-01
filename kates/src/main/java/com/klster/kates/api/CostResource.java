@@ -2,7 +2,6 @@ package com.klster.kates.api;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
@@ -27,13 +26,7 @@ public class CostResource {
     @Inject
     KafkaAdminService kafkaAdmin;
 
-    record CostRequest(
-            String cloud,
-            int records,
-            int recordSize,
-            int durationSeconds,
-            int brokers,
-            int replicas) {
+    record CostRequest(String cloud, int records, int recordSize, int durationSeconds, int brokers, int replicas) {
 
         CostRequest {
             if (cloud == null || cloud.isEmpty()) cloud = "aws";
@@ -51,8 +44,7 @@ public class CostResource {
             "aws", new CostModel("AWS MSK (us-east-1)", 0.10, 0.00, 0.09, 0.48),
             "azure", new CostModel("Azure Event Hubs (East US)", 0.045, 0.00, 0.087, 0.52),
             "gcp", new CostModel("GCP Pub/Sub (us-central1)", 0.04, 0.00, 0.12, 0.45),
-            "confluent", new CostModel("Confluent Cloud", 0.10, 0.00, 0.11, 1.20)
-    );
+            "confluent", new CostModel("Confluent Cloud", 0.10, 0.00, 0.11, 1.20));
 
     @POST
     @Path("/estimate")
@@ -64,7 +56,9 @@ public class CostResource {
         CostModel model = MODELS.get(req.cloud().toLowerCase());
         if (model == null) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(ApiError.of(400, "Bad Request",
+                    .entity(ApiError.of(
+                            400,
+                            "Bad Request",
                             "Unknown cloud provider: " + req.cloud() + ". Use: aws, azure, gcp, confluent"))
                     .build();
         }

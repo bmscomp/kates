@@ -64,19 +64,33 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     cleanup(engineName);
                 }
 
-                return ChaosOutcome.success(engineName, spec.experimentName(), start, Instant.now(), startNanos,
-                        null, null, null);
+                return ChaosOutcome.success(
+                        engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return ChaosOutcome.failure(
-                        engineName, spec.experimentName(), start, Instant.now(), startNanos, "Interrupted",
-                        null, null, null);
+                        engineName,
+                        spec.experimentName(),
+                        start,
+                        Instant.now(),
+                        startNanos,
+                        "Interrupted",
+                        null,
+                        null,
+                        null);
             } catch (Exception e) {
                 LOG.error("Fault injection failed", e);
                 return ChaosOutcome.failure(
-                        engineName, spec.experimentName(), start, Instant.now(), startNanos, e.getMessage(),
-                        null, null, null);
+                        engineName,
+                        spec.experimentName(),
+                        start,
+                        Instant.now(),
+                        startNanos,
+                        e.getMessage(),
+                        null,
+                        null,
+                        null);
             }
         });
     }

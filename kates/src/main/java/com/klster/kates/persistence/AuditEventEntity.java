@@ -31,8 +31,7 @@ public class AuditEventEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    public AuditEventEntity() {
-    }
+    public AuditEventEntity() {}
 
     public AuditEventEntity(String action, String eventType, String target, String details) {
         this.action = action;

@@ -3,15 +3,13 @@ package com.klster.kates.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
+import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-
-import io.quarkus.scheduler.Scheduled;
 
 import com.klster.kates.domain.TestResult;
 import com.klster.kates.domain.TestRun;
@@ -47,7 +45,8 @@ public class TestCleanupScheduler {
                         repository.delete(run.getId());
                         deleted++;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
         }
 

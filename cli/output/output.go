@@ -1,13 +1,33 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+var (
+	// Out is the standard output writer, defaulting to os.Stdout.
+	// Can be overridden for testing.
+	Out io.Writer = os.Stdout
+	// Err is the standard error writer, defaulting to os.Stderr.
+	// Can be overridden for testing.
+	Err io.Writer = os.Stderr
+)
+
+// ResetForTesting redirects output and error streams to a bytes.Buffer
+// and returns it so that test assertions can be made against the CLI output.
+func ResetForTesting() *bytes.Buffer {
+	buf := new(bytes.Buffer)
+	Out = buf
+	Err = buf
+	return buf
+}
 
 var (
 	Purple  = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#7C3AED"}
@@ -87,40 +107,40 @@ func StatusBadge(status string) string {
 func Header(text string) {
 	bar := lipgloss.NewStyle().Foreground(Purple).Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	title := lipgloss.NewStyle().Bold(true).Foreground(HeaderColor).Render("  " + text)
-	fmt.Println()
-	fmt.Println(bar)
-	fmt.Println(title)
-	fmt.Println(bar)
+	fmt.Fprintln(Out)
+	fmt.Fprintln(Out, bar)
+	fmt.Fprintln(Out, title)
+	fmt.Fprintln(Out, bar)
 }
 
 func SubHeader(text string) {
-	fmt.Println()
-	fmt.Println(SubHeaderStyle.Render("▸ " + text))
+	fmt.Fprintln(Out)
+	fmt.Fprintln(Out, SubHeaderStyle.Render("▸ "+text))
 }
 
 func KeyValue(key, value string) {
-	fmt.Printf("  %s %s\n", KeyStyle.Render(key), ValueStyle.Render(value))
+	fmt.Fprintf(Out, "  %s %s\n", KeyStyle.Render(key), ValueStyle.Render(value))
 }
 
 func KeyValueIndent(key, value string, indent int) {
 	prefix := strings.Repeat("  ", indent)
-	fmt.Printf("%s%s %s\n", prefix, KeyStyle.Render(key), ValueStyle.Render(value))
+	fmt.Fprintf(Out, "%s%s %s\n", prefix, KeyStyle.Render(key), ValueStyle.Render(value))
 }
 
 func Success(msg string) {
-	fmt.Println(SuccessStyle.Render("  ✓ " + msg))
+	fmt.Fprintln(Out, SuccessStyle.Render("  ✓ "+msg))
 }
 
 func Warn(msg string) {
-	fmt.Println(WarningStyle.Render("  ⚠ " + msg))
+	fmt.Fprintln(Out, WarningStyle.Render("  ⚠ "+msg))
 }
 
 func Error(msg string) {
-	fmt.Fprintln(os.Stderr, ErrorStyle.Render("  ✖ "+msg))
+	fmt.Fprintln(Err, ErrorStyle.Render("  ✖ "+msg))
 }
 
 func Hint(msg string) {
-	fmt.Println(DimStyle.Render("  " + msg))
+	fmt.Fprintln(Out, DimStyle.Render("  "+msg))
 }
 
 func JSON(v interface{}) {
@@ -129,7 +149,7 @@ func JSON(v interface{}) {
 		Error("Failed to format JSON: " + err.Error())
 		return
 	}
-	fmt.Println(string(data))
+	fmt.Fprintln(Out, string(data))
 }
 
 func RawJSON(data []byte) {
@@ -137,7 +157,7 @@ func RawJSON(data []byte) {
 	if json.Unmarshal(data, &v) == nil {
 		JSON(v)
 	} else {
-		fmt.Println(string(data))
+		fmt.Fprintln(Out, string(data))
 	}
 }
 
@@ -174,8 +194,8 @@ func Table(headers []string, rows [][]string) {
 		sepLine += "  " + sepFg.Render(strings.Repeat("─", widths[i]))
 	}
 
-	fmt.Println(headerLine)
-	fmt.Println(sepLine)
+	fmt.Fprintln(Out, headerLine)
+	fmt.Fprintln(Out, sepLine)
 
 	for _, row := range rows {
 		var line string
@@ -208,13 +228,13 @@ func Table(headers []string, rows [][]string) {
 			}
 			line += "  " + rendered
 		}
-		fmt.Println(line)
+		fmt.Fprintln(Out, line)
 	}
-	fmt.Println()
+	fmt.Fprintln(Out)
 }
 
 func Divider() {
-	fmt.Println(DimStyle.Render("  " + strings.Repeat("·", 40)))
+	fmt.Fprintln(Out, DimStyle.Render("  "+strings.Repeat("·", 40)))
 }
 
 func Banner(title, subtitle string) {
@@ -232,8 +252,8 @@ func Banner(title, subtitle string) {
 		Padding(0, 2)
 
 	content := titleStyle.Render(title) + "\n" + subStyle.Render(subtitle)
-	fmt.Println()
-	fmt.Println(box.Render(content))
+	fmt.Fprintln(Out)
+	fmt.Fprintln(Out, box.Render(content))
 }
 
 func MetricBar(label string, value, max float64) {
@@ -257,7 +277,7 @@ func MetricBar(label string, value, max float64) {
 	}
 
 	barStyled := lipgloss.NewStyle().Foreground(barColor).Render(bar)
-	fmt.Printf("  %-20s %s  %.1f\n", label, barStyled, value)
+	fmt.Fprintf(Out, "  %-20s %s  %.1f\n", label, barStyled, value)
 }
 
 func Sparkline(values []float64) string {
@@ -375,9 +395,9 @@ func ConfigList(title string, entries []ConfigEntry) {
 	countStyled := lipgloss.NewStyle().Foreground(Gray).Render(fmt.Sprintf("  (%d)", len(entries)))
 	sep := lipgloss.NewStyle().Foreground(SeparatorColor).Render(strings.Repeat("─", 50))
 
-	fmt.Println()
-	fmt.Println(titleStyled + countStyled)
-	fmt.Println("  " + sep)
+	fmt.Fprintln(Out)
+	fmt.Fprintln(Out, titleStyled+countStyled)
+	fmt.Fprintln(Out, "  "+sep)
 
 	keyFg := lipgloss.NewStyle().Foreground(Cyan)
 	valFg := lipgloss.NewStyle().Foreground(Light)
@@ -400,7 +420,7 @@ func ConfigList(title string, entries []ConfigEntry) {
 		if e.Suffix != "" {
 			line += "  " + suffFg.Render(e.Suffix)
 		}
-		fmt.Println(line)
+		fmt.Fprintln(Out, line)
 	}
 }
 

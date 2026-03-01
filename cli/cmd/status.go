@@ -18,7 +18,7 @@ var statusCmd = &cobra.Command{
 
 		health, err := apiClient.Health(context.Background())
 		if err != nil {
-			fmt.Printf("  %s %s │ %s │ %s\n",
+			fmt.Fprintf(output.Out, "  %s %s │ %s │ %s\n",
 				output.ErrorStyle.Render("✖"),
 				output.LightStyle.Render(ctxName),
 				output.DimStyle.Render(ctx.URL),
@@ -47,7 +47,7 @@ var statusCmd = &cobra.Command{
 
 		configCount := len(health.Tests)
 
-		fmt.Printf("  %s %s │ %s │ Kafka %s │ %d configs │ %s running │ %s done │ %s failed\n",
+		fmt.Fprintf(output.Out, "  %s %s │ %s │ Kafka %s │ %d configs │ %s running │ %s done │ %s failed\n",
 			output.SuccessStyle.Render("✓"),
 			output.LightStyle.Bold(true).Render(ctxName),
 			output.StatusBadge(status),

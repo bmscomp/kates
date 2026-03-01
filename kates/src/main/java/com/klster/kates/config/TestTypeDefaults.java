@@ -410,8 +410,7 @@ public class TestTypeDefaults {
                         roundTripDurationMs,
                         roundTripNumProducers,
                         roundTripNumConsumers);
-            case INTEGRITY, TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING,
-                 TUNE_COMPRESSION, TUNE_PARTITIONS ->
+            case INTEGRITY, TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS ->
                 new TypeConfig(
                         loadReplicationFactor,
                         loadPartitions,

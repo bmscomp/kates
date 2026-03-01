@@ -23,11 +23,11 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import com.klster.kates.domain.TestRun;
 import com.klster.kates.engine.LatencyHistogram;
 import com.klster.kates.engine.TestOrchestrator;
+import com.klster.kates.engine.TuningTestRunner;
 import com.klster.kates.export.CsvExporter;
 import com.klster.kates.export.HeatmapExporter;
 import com.klster.kates.export.JunitXmlExporter;
 import com.klster.kates.export.LatencyHeatmapData;
-import com.klster.kates.engine.TuningTestRunner;
 import com.klster.kates.service.BaselineService;
 import com.klster.kates.service.TestRunRepository;
 import com.klster.kates.util.MetricUtils;
@@ -71,7 +71,8 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report/regression")
-    @Operation(summary = "Regression check against baseline",
+    @Operation(
+            summary = "Regression check against baseline",
             description = "Compares this run's metrics against the baseline for its test type")
     @APIResponse(responseCode = "200", description = "Regression report with metric deltas")
     @APIResponse(responseCode = "404", description = "Run not found or no baseline set")
@@ -92,7 +93,8 @@ public class ReportResource {
 
     @GET
     @Path("/tests/{id}/report/tuning")
-    @Operation(summary = "Tuning comparison report",
+    @Operation(
+            summary = "Tuning comparison report",
             description = "Returns step-by-step parameter sweep results with best-configuration recommendation")
     @APIResponse(responseCode = "200", description = "Tuning report with ranked steps")
     @APIResponse(responseCode = "404", description = "Run not found or not a tuning test")
@@ -101,8 +103,8 @@ public class ReportResource {
         TuningReport report = tuningRunner.buildReport(id);
         if (report == null) {
             return Response.status(404)
-                    .entity(com.klster.kates.api.ApiError.of(404, "Not Found",
-                            "Run not found or not a tuning test: " + id))
+                    .entity(com.klster.kates.api.ApiError.of(
+                            404, "Not Found", "Run not found or not a tuning test: " + id))
                     .build();
         }
         return Response.ok(report).build();

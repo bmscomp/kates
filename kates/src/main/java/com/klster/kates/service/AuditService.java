@@ -1,10 +1,9 @@
 package com.klster.kates.service;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.LinkedHashMap;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -18,8 +17,7 @@ public class AuditService {
     @Inject
     EntityManager em;
 
-    private static final org.jboss.logging.Logger LOG =
-            org.jboss.logging.Logger.getLogger(AuditService.class);
+    private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(AuditService.class);
 
     @Transactional
     public void record(String action, String eventType, String target, String details) {
@@ -31,10 +29,13 @@ public class AuditService {
                 return;
             } catch (Exception e) {
                 if (attempt == maxRetries) {
-                    LOG.warnf("Audit event dropped after %d retries: action=%s type=%s target=%s — %s",
+                    LOG.warnf(
+                            "Audit event dropped after %d retries: action=%s type=%s target=%s — %s",
                             maxRetries, action, eventType, target, e.getMessage());
                 } else {
-                    try { Thread.sleep(200L * attempt); } catch (InterruptedException ie) {
+                    try {
+                        Thread.sleep(200L * attempt);
+                    } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return;
                     }
@@ -71,10 +72,7 @@ public class AuditService {
             cq.where(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
         }
 
-        return em.createQuery(cq)
-                .setMaxResults(Math.min(limit, 500))
-                .getResultList()
-                .stream()
+        return em.createQuery(cq).setMaxResults(Math.min(limit, 500)).getResultList().stream()
                 .map(this::toMap)
                 .collect(java.util.stream.Collectors.toList());
     }

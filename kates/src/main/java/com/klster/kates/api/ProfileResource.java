@@ -1,10 +1,8 @@
 package com.klster.kates.api;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
@@ -47,15 +45,17 @@ public class ProfileResource {
             @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
             @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
         int effectiveSize = Math.min(Math.max(size, 1), 200);
-        var profiles = em.createQuery("FROM ProfileEntity ORDER BY createdAt DESC", ProfileEntity.class)
+        var profiles = em
+                .createQuery("FROM ProfileEntity ORDER BY createdAt DESC", ProfileEntity.class)
                 .setFirstResult(page * effectiveSize)
                 .setMaxResults(effectiveSize)
                 .getResultList()
                 .stream()
                 .map(this::toMap)
                 .collect(Collectors.toList());
-        return Response.ok(java.util.Map.of("page", page, "size", effectiveSize,
-                "count", profiles.size(), "items", profiles)).build();
+        return Response.ok(java.util.Map.of(
+                        "page", page, "size", effectiveSize, "count", profiles.size(), "items", profiles))
+                .build();
     }
 
     @GET
@@ -111,7 +111,9 @@ public class ProfileResource {
                     }
 
                     em.persist(profile);
-                    return Response.status(Response.Status.CREATED).entity(toMap(profile)).build();
+                    return Response.status(Response.Status.CREATED)
+                            .entity(toMap(profile))
+                            .build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)
                         .entity(ApiError.of(404, "Not Found", "Test run not found: " + req.runId()))

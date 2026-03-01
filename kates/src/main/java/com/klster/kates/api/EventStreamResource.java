@@ -1,7 +1,6 @@
 package com.klster.kates.api;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.ObservesAsync;
 import jakarta.ws.rs.GET;
@@ -39,12 +38,10 @@ public class EventStreamResource {
 
     record SseSubscription(SseEventSink sink, String filterType, String filterId) {
         boolean matches(TestLifecycleEvent event) {
-            if (filterType != null && !filterType.isEmpty()
-                    && !filterType.equalsIgnoreCase(event.getTestType())) {
+            if (filterType != null && !filterType.isEmpty() && !filterType.equalsIgnoreCase(event.getTestType())) {
                 return false;
             }
-            if (filterId != null && !filterId.isEmpty()
-                    && !filterId.equals(event.getRunId())) {
+            if (filterId != null && !filterId.isEmpty() && !filterId.equals(event.getRunId())) {
                 return false;
             }
             return true;
@@ -57,16 +54,12 @@ public class EventStreamResource {
     @Operation(
             summary = "Real-time event stream",
             description = "SSE stream of test lifecycle events. Filter by test type or run ID.")
-    public void stream(
-            @Context SseEventSink sink,
-            @QueryParam("type") String type,
-            @QueryParam("id") String id) {
+    public void stream(@Context SseEventSink sink, @QueryParam("type") String type, @QueryParam("id") String id) {
 
         var sub = new SseSubscription(sink, type, id);
         subscribers.add(sub);
 
-        LOG.infof("SSE subscriber connected (type=%s, id=%s), total=%d",
-                type, id, subscribers.size());
+        LOG.infof("SSE subscriber connected (type=%s, id=%s), total=%d", type, id, subscribers.size());
 
         OutboundSseEvent welcome = sse.newEventBuilder()
                 .name("connected")

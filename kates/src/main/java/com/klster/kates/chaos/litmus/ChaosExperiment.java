@@ -9,7 +9,7 @@ import io.fabric8.kubernetes.model.annotation.Version;
 @Version("v1alpha1")
 public class ChaosExperiment extends CustomResource<Void, Void> implements Namespaced {
 
-    // We only need the metadata to read labels/annotations for dynamic discovery, 
+    // We only need the metadata to read labels/annotations for dynamic discovery,
     // which CustomResource already provides via getMetadata().
 
 }

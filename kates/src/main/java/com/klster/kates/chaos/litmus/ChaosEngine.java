@@ -7,5 +7,4 @@ import io.fabric8.kubernetes.model.annotation.Version;
 
 @Group("litmuschaos.io")
 @Version("v1alpha1")
-public class ChaosEngine extends CustomResource<ChaosEngineSpec, ChaosEngineStatus> implements Namespaced {
-}
+public class ChaosEngine extends CustomResource<ChaosEngineSpec, ChaosEngineStatus> implements Namespaced {}

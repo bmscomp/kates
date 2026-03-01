@@ -1,11 +1,11 @@
 package com.klster.kates.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ArrayList;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
@@ -30,6 +30,7 @@ public class BaselineService {
     @Inject
     ReportGenerator reportGenerator;
 
+    @SuppressWarnings("null")
     @Transactional
     public BaselineEntity set(TestType type, String runId) {
         BaselineEntity existing = em.find(BaselineEntity.class, type);
@@ -43,6 +44,7 @@ public class BaselineService {
         return entity;
     }
 
+    @SuppressWarnings("null")
     @Transactional
     public boolean unset(TestType type) {
         BaselineEntity entity = em.find(BaselineEntity.class, type);
@@ -93,48 +95,33 @@ public class BaselineService {
         result.put("testType", run.getTestType().name());
 
         Map<String, Map<String, Object>> deltas = new LinkedHashMap<>();
-        deltas.put("avgThroughputRecPerSec", buildDelta(
-                baselineSummary.avgThroughputRecPerSec(),
-                currentSummary.avgThroughputRecPerSec()));
-        deltas.put("peakThroughputRecPerSec", buildDelta(
-                baselineSummary.peakThroughputRecPerSec(),
-                currentSummary.peakThroughputRecPerSec()));
-        deltas.put("avgLatencyMs", buildDelta(
-                baselineSummary.avgLatencyMs(),
-                currentSummary.avgLatencyMs()));
-        deltas.put("p50LatencyMs", buildDelta(
-                baselineSummary.p50LatencyMs(),
-                currentSummary.p50LatencyMs()));
-        deltas.put("p95LatencyMs", buildDelta(
-                baselineSummary.p95LatencyMs(),
-                currentSummary.p95LatencyMs()));
-        deltas.put("p99LatencyMs", buildDelta(
-                baselineSummary.p99LatencyMs(),
-                currentSummary.p99LatencyMs()));
-        deltas.put("maxLatencyMs", buildDelta(
-                baselineSummary.maxLatencyMs(),
-                currentSummary.maxLatencyMs()));
-        deltas.put("errorRate", buildDelta(
-                baselineSummary.errorRate(),
-                currentSummary.errorRate()));
+        deltas.put(
+                "avgThroughputRecPerSec",
+                buildDelta(baselineSummary.avgThroughputRecPerSec(), currentSummary.avgThroughputRecPerSec()));
+        deltas.put(
+                "peakThroughputRecPerSec",
+                buildDelta(baselineSummary.peakThroughputRecPerSec(), currentSummary.peakThroughputRecPerSec()));
+        deltas.put("avgLatencyMs", buildDelta(baselineSummary.avgLatencyMs(), currentSummary.avgLatencyMs()));
+        deltas.put("p50LatencyMs", buildDelta(baselineSummary.p50LatencyMs(), currentSummary.p50LatencyMs()));
+        deltas.put("p95LatencyMs", buildDelta(baselineSummary.p95LatencyMs(), currentSummary.p95LatencyMs()));
+        deltas.put("p99LatencyMs", buildDelta(baselineSummary.p99LatencyMs(), currentSummary.p99LatencyMs()));
+        deltas.put("maxLatencyMs", buildDelta(baselineSummary.maxLatencyMs(), currentSummary.maxLatencyMs()));
+        deltas.put("errorRate", buildDelta(baselineSummary.errorRate(), currentSummary.errorRate()));
         result.put("deltas", deltas);
 
-        boolean regressionDetected =
-                detectThroughputDrop(baselineSummary.avgThroughputRecPerSec(),
-                        currentSummary.avgThroughputRecPerSec(), 0.10) ||
-                detectLatencySpike(baselineSummary.p99LatencyMs(),
-                        currentSummary.p99LatencyMs(), 0.20) ||
-                (currentSummary.errorRate() > baselineSummary.errorRate() + 0.001);
+        boolean regressionDetected = detectThroughputDrop(
+                        baselineSummary.avgThroughputRecPerSec(), currentSummary.avgThroughputRecPerSec(), 0.10)
+                || detectLatencySpike(baselineSummary.p99LatencyMs(), currentSummary.p99LatencyMs(), 0.20)
+                || (currentSummary.errorRate() > baselineSummary.errorRate() + 0.001);
 
         result.put("regressionDetected", regressionDetected);
 
         List<String> warnings = new ArrayList<>();
-        if (detectThroughputDrop(baselineSummary.avgThroughputRecPerSec(),
-                currentSummary.avgThroughputRecPerSec(), 0.10)) {
+        if (detectThroughputDrop(
+                baselineSummary.avgThroughputRecPerSec(), currentSummary.avgThroughputRecPerSec(), 0.10)) {
             warnings.add("Throughput dropped > 10%");
         }
-        if (detectLatencySpike(baselineSummary.p99LatencyMs(),
-                currentSummary.p99LatencyMs(), 0.20)) {
+        if (detectLatencySpike(baselineSummary.p99LatencyMs(), currentSummary.p99LatencyMs(), 0.20)) {
             warnings.add("P99 latency increased > 20%");
         }
         if (currentSummary.errorRate() > baselineSummary.errorRate() + 0.001) {

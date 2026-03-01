@@ -65,8 +65,7 @@ public class TestResource {
 
     @POST
     @Path("/bulk")
-    @Operation(summary = "Create multiple tests",
-            description = "Submits up to 10 test runs in a single request")
+    @Operation(summary = "Create multiple tests", description = "Submits up to 10 test runs in a single request")
     @APIResponse(responseCode = "202", description = "Tests accepted for execution")
     public Response bulkCreate(List<CreateTestRequest> requests) {
         if (requests == null || requests.isEmpty()) {
@@ -84,18 +83,19 @@ public class TestResource {
             try {
                 TestRun run = orchestrator.executeTest(req);
                 auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
-                results.add(java.util.Map.of("id", run.getId(), "status", run.getStatus().name()));
+                results.add(java.util.Map.of(
+                        "id", run.getId(), "status", run.getStatus().name()));
             } catch (Exception e) {
                 results.add(java.util.Map.of("error", e.getMessage()));
             }
         }
-        return Response.accepted(java.util.Map.of("created", results.size(), "runs", results)).build();
+        return Response.accepted(java.util.Map.of("created", results.size(), "runs", results))
+                .build();
     }
 
     @DELETE
     @Path("/bulk")
-    @Operation(summary = "Delete multiple tests",
-            description = "Deletes test runs by a list of IDs")
+    @Operation(summary = "Delete multiple tests", description = "Deletes test runs by a list of IDs")
     public Response bulkDelete(java.util.Map<String, List<String>> body) {
         List<String> ids = body != null ? body.get("ids") : null;
         if (ids == null || ids.isEmpty()) {
@@ -114,7 +114,8 @@ public class TestResource {
                 notFound++;
             }
         }
-        return Response.ok(java.util.Map.of("deleted", deleted, "notFound", notFound)).build();
+        return Response.ok(java.util.Map.of("deleted", deleted, "notFound", notFound))
+                .build();
     }
 
     @GET
@@ -202,7 +203,9 @@ public class TestResource {
 
     @POST
     @Path("/{id}/cancel")
-    @Operation(summary = "Cancel a running test", description = "Safely stops all tasks and marks the test as CANCELLED")
+    @Operation(
+            summary = "Cancel a running test",
+            description = "Safely stops all tasks and marks the test as CANCELLED")
     @APIResponse(responseCode = "200", description = "Test cancelled")
     @APIResponse(responseCode = "404", description = "Test run not found")
     @APIResponse(responseCode = "409", description = "Test is not running")
@@ -214,8 +217,7 @@ public class TestResource {
                     if (status != com.klster.kates.domain.TestResult.TaskStatus.RUNNING
                             && status != com.klster.kates.domain.TestResult.TaskStatus.PENDING) {
                         return Response.status(Response.Status.CONFLICT)
-                                .entity(new ApiError(409, "Conflict",
-                                        "Test is not running (status: " + status + ")"))
+                                .entity(new ApiError(409, "Conflict", "Test is not running (status: " + status + ")"))
                                 .build();
                     }
                     orchestrator.stopTest(id);
@@ -231,9 +233,10 @@ public class TestResource {
                     repository.save(run);
                     auditService.record("CANCEL", "test", id, "Test cancelled by user");
                     return Response.ok(java.util.Map.of(
-                            "id", run.getId(),
-                            "status", "CANCELLED",
-                            "message", "Test cancelled successfully")).build();
+                                    "id", run.getId(),
+                                    "status", "CANCELLED",
+                                    "message", "Test cancelled successfully"))
+                            .build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)
                         .entity(new ApiError(404, "Not Found", "Test run not found: " + id))
@@ -269,15 +272,15 @@ public class TestResource {
     @Path("/baselines/{type}")
     @Operation(summary = "Get baseline for a test type")
     @Tag(name = "Baselines")
-    public Response getBaseline(
-            @Parameter(description = "Test type") @PathParam("type") String typeStr) {
+    public Response getBaseline(@Parameter(description = "Test type") @PathParam("type") String typeStr) {
         TestType type = parseBaselineType(typeStr);
         if (type == null) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Invalid test type: " + typeStr))
                     .build();
         }
-        return baselineService.get(type)
+        return baselineService
+                .get(type)
                 .map(b -> Response.ok(baselineToMap(b)).build())
                 .orElse(Response.status(404)
                         .entity(ApiError.of(404, "Not Found", "No baseline set for type: " + typeStr))
@@ -286,7 +289,8 @@ public class TestResource {
 
     @PUT
     @Path("/baselines/{type}")
-    @Operation(summary = "Set baseline for a test type",
+    @Operation(
+            summary = "Set baseline for a test type",
             description = "Marks a test run as the baseline for the given type")
     @Tag(name = "Baselines")
     public Response setBaseline(
@@ -317,8 +321,7 @@ public class TestResource {
     @Path("/baselines/{type}")
     @Operation(summary = "Remove baseline for a test type")
     @Tag(name = "Baselines")
-    public Response unsetBaseline(
-            @Parameter(description = "Test type") @PathParam("type") String typeStr) {
+    public Response unsetBaseline(@Parameter(description = "Test type") @PathParam("type") String typeStr) {
         TestType type = parseBaselineType(typeStr);
         if (type == null) {
             return Response.status(400)
@@ -351,4 +354,3 @@ public class TestResource {
         }
     }
 }
-

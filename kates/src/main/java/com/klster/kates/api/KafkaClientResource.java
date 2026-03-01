@@ -2,7 +2,6 @@ package com.klster.kates.api;
 
 import java.util.List;
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -71,13 +70,17 @@ public class KafkaClientResource {
                         m.put("name", desc.name());
                         m.put("internal", desc.isInternal());
                         m.put("partitions", desc.partitions().size());
-                        int rf = desc.partitions().isEmpty() ? 0 : desc.partitions().get(0).replicas().size();
+                        int rf = desc.partitions().isEmpty()
+                                ? 0
+                                : desc.partitions().get(0).replicas().size();
                         m.put("replicationFactor", rf);
                         long underReplicated = desc.partitions().stream()
-                                .filter(pi -> pi.isr().size() < pi.replicas().size()).count();
+                                .filter(pi -> pi.isr().size() < pi.replicas().size())
+                                .count();
                         m.put("underReplicated", underReplicated);
                         return m;
-                    }).toList();
+                    })
+                    .toList();
             return Response.ok(result).build();
         } catch (Exception e) {
             return Response.serverError()
@@ -140,7 +143,8 @@ public class KafkaClientResource {
     @Operation(summary = "Fetch recent records from a topic")
     public Response consume(
             @Parameter(description = "Topic name") @PathParam("topic") String topic,
-            @Parameter(description = "Offset reset: earliest or latest") @QueryParam("offset") @DefaultValue("latest") String offset,
+            @Parameter(description = "Offset reset: earliest or latest") @QueryParam("offset") @DefaultValue("latest")
+                    String offset,
             @Parameter(description = "Maximum records to return") @QueryParam("limit") @DefaultValue("20") int limit) {
         try {
             int safeLimit = Math.min(Math.max(1, limit), 200);
@@ -157,8 +161,7 @@ public class KafkaClientResource {
     @Path("/produce/{topic}")
     @Operation(summary = "Produce a record to a topic")
     public Response produce(
-            @Parameter(description = "Topic name") @PathParam("topic") String topic,
-            ProduceRequest request) {
+            @Parameter(description = "Topic name") @PathParam("topic") String topic, ProduceRequest request) {
         try {
             if (request == null || request.value() == null) {
                 return Response.status(400)
@@ -202,10 +205,11 @@ public class KafkaClientResource {
     @Path("/topics/{name}")
     @Operation(summary = "Alter topic configuration entries")
     public Response alterTopic(
-            @Parameter(description = "Topic name") @PathParam("name") String name,
-            AlterTopicRequest request) {
+            @Parameter(description = "Topic name") @PathParam("name") String name, AlterTopicRequest request) {
         try {
-            if (request == null || request.configs() == null || request.configs().isEmpty()) {
+            if (request == null
+                    || request.configs() == null
+                    || request.configs().isEmpty()) {
                 return Response.status(400)
                         .entity(ApiError.of(400, "Bad Request", "'configs' map is required"))
                         .build();
@@ -239,6 +243,8 @@ public class KafkaClientResource {
         }
     }
 
-    public record CreateTopicRequest(String name, int partitions, int replicationFactor, java.util.Map<String, String> configs) {}
+    public record CreateTopicRequest(
+            String name, int partitions, int replicationFactor, java.util.Map<String, String> configs) {}
+
     public record AlterTopicRequest(java.util.Map<String, String> configs) {}
 }

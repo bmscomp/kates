@@ -1,7 +1,6 @@
 package com.klster.kates.api;
 
 import java.util.List;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -32,10 +31,10 @@ public class AdvisorResource {
     @Operation(
             summary = "Analyze test run",
             description = "Runs rule engine against a completed test run to generate tuning recommendations")
-    public Response analyze(
-            @Parameter(description = "Test run ID") @PathParam("id") String id) {
+    public Response analyze(@Parameter(description = "Test run ID") @PathParam("id") String id) {
 
-        return repository.findById(id)
+        return repository
+                .findById(id)
                 .map(run -> {
                     List<AdvisorService.Recommendation> recommendations = advisorService.analyze(run);
                     return Response.ok(recommendations).build();

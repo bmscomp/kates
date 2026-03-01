@@ -13,7 +13,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -156,8 +155,7 @@ public class KafkaAdminService {
                             new ConfigEntry(e.getKey(), e.getValue()),
                             org.apache.kafka.clients.admin.AlterConfigOp.OpType.SET))
                     .toList();
-            client.incrementalAlterConfigs(Map.of(resource, ops))
-                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            client.incrementalAlterConfigs(Map.of(resource, ops)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Altered config for topic: " + name);
         } catch (Exception e) {
             throw new RuntimeException("Failed to alter config for topic: " + name, e);
@@ -540,9 +538,11 @@ public class KafkaAdminService {
     public Map<String, Object> produceRecord(String topic, String key, String value) {
         Properties props = new Properties();
         props.put(org.apache.kafka.clients.producer.ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+        props.put(
+                org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringSerializer");
-        props.put(org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+        props.put(
+                org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringSerializer");
         props.put(org.apache.kafka.clients.producer.ProducerConfig.ACKS_CONFIG, "all");
         props.put(org.apache.kafka.clients.producer.ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "15000");
@@ -564,13 +564,17 @@ public class KafkaAdminService {
     public List<Map<String, Object>> fetchRecords(String topic, String offsetReset, int limit) {
         Properties props = new Properties();
         props.put(org.apache.kafka.clients.consumer.ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+        props.put(
+                org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringDeserializer");
-        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+        props.put(
+                org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringDeserializer");
-        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG,
+        props.put(
+                org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG,
                 "kates-fetch-" + System.currentTimeMillis());
-        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+        props.put(
+                org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                 "earliest".equals(offsetReset) ? "earliest" : "latest");
         props.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit);
@@ -599,4 +603,3 @@ public class KafkaAdminService {
         return records;
     }
 }
-
