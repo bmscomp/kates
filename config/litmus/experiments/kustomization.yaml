@@ -2,25 +2,35 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
+  # ChaosExperiment CRDs (installed by setup-kafka-chaos.sh)
+  - pod-delete.yaml
+  - pod-network-partition.yaml
+  - pod-cpu-hog.yaml
+  - pod-memory-hog.yaml
+  - pod-io-stress.yaml
+  - pod-dns-error.yaml
+  - node-drain.yaml
+
+  # ChaosEngine triggers (used by Makefile chaos-kafka-* targets)
   - kafka-pod-delete.yaml
-  - kafka-leader-kill.yaml
-  - kafka-network-latency.yaml
   - kafka-network-partition.yaml
   - kafka-cpu-stress.yaml
-  - kafka-disk-fill.yaml
-  - kafka-disk-stress.yaml
+  - kafka-memory-stress.yaml
+  - kafka-io-stress.yaml
+  - kafka-dns-error.yaml
+  - kafka-node-drain.yaml
+  - kafka-leader-kill.yaml
   - kafka-multi-broker-kill.yaml
   - kafka-rolling-restart.yaml
+  - kafka-disk-fill.yaml
+  - kafka-disk-stress.yaml
+  - kafka-network-latency.yaml
   - kafka-consumer-chaos.yaml
+
+  # Probes
   - isr-health-probe.yaml
   - consumer-latency-probe.yaml
   - producer-throughput-probe.yaml
-  - pod-delete-experiment.yaml
-  - pod-network-loss-experiment.yaml
-  - pod-network-partition-experiment.yaml
-  - pod-cpu-hog-experiment.yaml
-  - pod-io-stress-experiment.yaml
-  - disk-fill-experiment.yaml
 
 patches:
   # Parameterize TARGET_PODS across all ChaosEngines.
