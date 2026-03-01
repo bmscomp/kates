@@ -21,12 +21,6 @@ helm repo update strimzi
 rm -rf "${CHARTS_DIR}/strimzi-kafka-operator"
 helm pull strimzi/strimzi-kafka-operator --version "${STRIMZI_VERSION}" --untar --untardir "${CHARTS_DIR}"
 
-step "Downloading kube-prometheus-stack chart (v${PROMETHEUS_STACK_VERSION})..."
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
-helm repo update prometheus-community
-rm -rf "${CHARTS_DIR}/kube-prometheus-stack"
-helm pull prometheus-community/kube-prometheus-stack --version "${PROMETHEUS_STACK_VERSION}" --untar --untardir "${CHARTS_DIR}"
-
 echo ""
 info "Downloaded charts:"
 ls -la "${CHARTS_DIR}"

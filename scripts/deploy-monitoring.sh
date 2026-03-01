@@ -3,23 +3,25 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
-
-MONITORING_CHART_DIR="${CHARTS_DIR}/kube-prometheus-stack"
+source "${SCRIPT_DIR}/../versions.env"
 
 info "Deploying Monitoring Stack (Prometheus & Grafana)..."
 
-require_chart "${MONITORING_CHART_DIR}" "kube-prometheus-stack"
-
 ensure_namespace monitoring
 
-info "Installing Prometheus and Grafana from local chart..."
-helm upgrade --install monitoring "${MONITORING_CHART_DIR}" \
+info "Adding Helm repository..."
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
+helm repo update prometheus-community
+
+info "Installing kube-prometheus-stack v${PROMETHEUS_STACK_VERSION}..."
+helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+  --version "${PROMETHEUS_STACK_VERSION}" \
   --namespace monitoring \
   --values config/monitoring.yaml \
   --timeout 10m \
   --wait
 
-info "Deploying KATES dashboards..."
+info "Deploying Kates dashboards..."
 kubectl create configmap kates-grafana-dashboards \
   --from-file=config/monitoring/kates-benchmark-dashboard.json \
   --from-file=config/monitoring/kates-trend-dashboard.json \
