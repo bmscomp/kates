@@ -93,17 +93,22 @@ public class DisruptionResource {
             summary = "List disruption reports",
             description = "Returns recent disruption reports, optionally filtered by plan name")
     public Response listReports(
-            @Parameter(description = "Max results") @QueryParam("limit") @DefaultValue("20") int limit,
-            @Parameter(description = "Filter by plan name") @QueryParam("planName") String planName) {
+            @Parameter(description = "Filter by plan name") @QueryParam("planName") String planName,
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
 
+        int effectiveSize = Math.min(Math.max(size, 1), 200);
         List<DisruptionReportEntity> entities;
         if (planName != null && !planName.isBlank()) {
             entities = repository.findByPlanName(planName);
         } else {
-            entities = repository.listRecent(limit);
+            entities = repository.listRecent(effectiveSize * (page + 1));
         }
 
-        var summaries = entities.stream()
+        int start = page * effectiveSize;
+        var paged = entities.stream().skip(start).limit(effectiveSize).toList();
+
+        var summaries = paged.stream()
                 .map(e -> Map.of(
                         "id", e.getId(),
                         "planName", e.getPlanName(),
@@ -112,7 +117,8 @@ public class DisruptionResource {
                         "createdAt", e.getCreatedAt().toString()))
                 .toList();
 
-        return Response.ok(summaries).build();
+        return Response.ok(Map.of("page", page, "size", effectiveSize,
+                "count", summaries.size(), "items", summaries)).build();
     }
 
     @GET
@@ -422,10 +428,16 @@ public class DisruptionResource {
     @GET
     @Path("/schedules")
     @Operation(summary = "List disruption schedules")
-    public Response listSchedules() {
+    public Response listSchedules(
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
+
+        int effectiveSize = Math.min(Math.max(size, 1), 200);
         List<DisruptionScheduleEntity> schedules = em.createQuery(
                         "SELECT s FROM DisruptionScheduleEntity s ORDER BY s.createdAt DESC",
                         DisruptionScheduleEntity.class)
+                .setFirstResult(page * effectiveSize)
+                .setMaxResults(effectiveSize)
                 .getResultList();
 
         var entries = schedules.stream()
@@ -439,7 +451,8 @@ public class DisruptionResource {
                         "lastRunAt", s.getLastRunAt() != null ? s.getLastRunAt().toString() : "",
                         "createdAt", s.getCreatedAt().toString()))
                 .toList();
-        return Response.ok(entries).build();
+        return Response.ok(Map.of("page", page, "size", effectiveSize,
+                "count", entries.size(), "items", entries)).build();
     }
 
     @POST

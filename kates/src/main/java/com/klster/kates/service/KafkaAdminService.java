@@ -12,6 +12,10 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -43,15 +47,45 @@ public class KafkaAdminService {
 
     private static final Logger LOG = Logger.getLogger(KafkaAdminService.class);
     private static final int TIMEOUT_SECONDS = 30;
+    private static final long CACHE_TTL_MS = 30_000;
 
     private final String bootstrapServers;
+    private volatile AdminClient sharedClient;
+    private final ReentrantLock clientLock = new ReentrantLock();
+
+    private volatile Map<String, Object> cachedClusterInfo;
+    private volatile long clusterCacheExpiry;
+    private volatile Set<String> cachedTopics;
+    private volatile long topicsCacheExpiry;
 
     @Inject
     public KafkaAdminService(@ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
         this.bootstrapServers = bootstrapServers;
     }
 
-    private AdminClient createClient() {
+    @PostConstruct
+    void init() {
+        try {
+            sharedClient = buildClient();
+            LOG.info("AdminClient pool initialized for: " + bootstrapServers);
+        } catch (Exception e) {
+            LOG.warn("AdminClient init deferred — broker not reachable: " + e.getMessage());
+        }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (sharedClient != null) {
+            try {
+                sharedClient.close(java.time.Duration.ofSeconds(5));
+                LOG.info("AdminClient pool closed");
+            } catch (Exception e) {
+                LOG.warn("AdminClient close failed", e);
+            }
+        }
+    }
+
+    private AdminClient buildClient() {
         Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "15000");
@@ -59,8 +93,33 @@ public class KafkaAdminService {
         return AdminClient.create(props);
     }
 
+    private AdminClient getClient() {
+        AdminClient c = sharedClient;
+        if (c != null) return c;
+        clientLock.lock();
+        try {
+            if (sharedClient == null) {
+                sharedClient = buildClient();
+            }
+            return sharedClient;
+        } finally {
+            clientLock.unlock();
+        }
+    }
+
+    /**
+     * Invalidates all cached values.
+     */
+    public void evictCache() {
+        clusterCacheExpiry = 0;
+        topicsCacheExpiry = 0;
+        cachedClusterInfo = null;
+        cachedTopics = null;
+    }
+
     public void createTopic(String name, int partitions, int replicationFactor, Map<String, String> configs) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             NewTopic newTopic = new NewTopic(name, partitions, (short) replicationFactor);
             if (configs != null && !configs.isEmpty()) {
                 newTopic.configs(configs);
@@ -79,7 +138,8 @@ public class KafkaAdminService {
     }
 
     public void deleteTopic(String name) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             client.deleteTopics(Collections.singleton(name)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Deleted topic: " + name);
         } catch (Exception e) {
@@ -88,7 +148,8 @@ public class KafkaAdminService {
     }
 
     public void alterTopicConfig(String name, Map<String, String> configs) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, name);
             List<org.apache.kafka.clients.admin.AlterConfigOp> ops = configs.entrySet().stream()
                     .map(e -> new org.apache.kafka.clients.admin.AlterConfigOp(
@@ -104,16 +165,24 @@ public class KafkaAdminService {
     }
 
     public Set<String> listTopics() {
-        try (AdminClient client = createClient()) {
+        if (cachedTopics != null && System.currentTimeMillis() < topicsCacheExpiry) {
+            return cachedTopics;
+        }
+        try {
+            AdminClient client = getClient();
             ListTopicsResult result = client.listTopics();
-            return result.names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Set<String> topics = result.names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            cachedTopics = topics;
+            topicsCacheExpiry = System.currentTimeMillis() + CACHE_TTL_MS;
+            return topics;
         } catch (Exception e) {
             throw new RuntimeException("Failed to list topics", e);
         }
     }
 
     public Map<String, TopicDescription> describeTopics(Collection<String> topicNames) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             return client.describeTopics(topicNames).allTopicNames().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new RuntimeException("Failed to describe topics", e);
@@ -121,7 +190,11 @@ public class KafkaAdminService {
     }
 
     public Map<String, Object> describeCluster() {
-        try (AdminClient client = createClient()) {
+        if (cachedClusterInfo != null && System.currentTimeMillis() < clusterCacheExpiry) {
+            return cachedClusterInfo;
+        }
+        try {
+            AdminClient client = getClient();
             DescribeClusterResult cluster = client.describeCluster();
             Map<String, Object> info = new HashMap<>();
             info.put("clusterId", cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS));
@@ -131,6 +204,8 @@ public class KafkaAdminService {
             info.put("brokerCount", nodes.size());
             info.put("brokers", nodes.stream().map(this::nodeToMap).toList());
 
+            cachedClusterInfo = info;
+            clusterCacheExpiry = System.currentTimeMillis() + CACHE_TTL_MS;
             return info;
         } catch (Exception e) {
             throw new RuntimeException("Failed to describe cluster", e);
@@ -138,7 +213,8 @@ public class KafkaAdminService {
     }
 
     public boolean isReachable() {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             client.describeCluster().clusterId().get(5, TimeUnit.SECONDS);
             return true;
         } catch (Exception e) {
@@ -167,7 +243,8 @@ public class KafkaAdminService {
     }
 
     public Map<String, Object> describeTopicDetail(String topicName) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             TopicDescription desc = client.describeTopics(Collections.singleton(topicName))
                     .allTopicNames()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -230,7 +307,8 @@ public class KafkaAdminService {
     }
 
     public List<Map<String, Object>> listConsumerGroups() {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             Collection<GroupListing> groups = client.listGroups(ListGroupsOptions.forConsumerGroups())
                     .all()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -257,7 +335,8 @@ public class KafkaAdminService {
     }
 
     public Map<String, Object> describeConsumerGroup(String groupId) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             ConsumerGroupDescription desc = client.describeConsumerGroups(Collections.singleton(groupId))
                     .all()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -312,7 +391,8 @@ public class KafkaAdminService {
     }
 
     public List<Map<String, Object>> describeBrokerConfigs(int brokerId) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(brokerId));
             Config config = client.describeConfigs(Collections.singleton(resource))
                     .all()
@@ -345,7 +425,8 @@ public class KafkaAdminService {
      * Records broker membership and partition leadership for correlation with test metrics.
      */
     public ClusterSnapshot captureSnapshot(String topicName) {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             DescribeClusterResult cluster = client.describeCluster();
             String clusterId = cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             Node controller = cluster.controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -382,7 +463,8 @@ public class KafkaAdminService {
     }
 
     public Map<String, Object> clusterHealthCheck() {
-        try (AdminClient client = createClient()) {
+        AdminClient client = getClient();
+        try {
             Map<String, Object> report = new LinkedHashMap<>();
 
             DescribeClusterResult cluster = client.describeCluster();

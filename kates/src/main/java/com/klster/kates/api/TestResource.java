@@ -63,6 +63,60 @@ public class TestResource {
         return Response.accepted(run).build();
     }
 
+    @POST
+    @Path("/bulk")
+    @Operation(summary = "Create multiple tests",
+            description = "Submits up to 10 test runs in a single request")
+    @APIResponse(responseCode = "202", description = "Tests accepted for execution")
+    public Response bulkCreate(List<CreateTestRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "At least one test request required"))
+                    .build();
+        }
+        if (requests.size() > 10) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "Maximum 10 tests per bulk request"))
+                    .build();
+        }
+        List<java.util.Map<String, Object>> results = new java.util.ArrayList<>();
+        for (CreateTestRequest req : requests) {
+            try {
+                TestRun run = orchestrator.executeTest(req);
+                auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
+                results.add(java.util.Map.of("id", run.getId(), "status", run.getStatus().name()));
+            } catch (Exception e) {
+                results.add(java.util.Map.of("error", e.getMessage()));
+            }
+        }
+        return Response.accepted(java.util.Map.of("created", results.size(), "runs", results)).build();
+    }
+
+    @DELETE
+    @Path("/bulk")
+    @Operation(summary = "Delete multiple tests",
+            description = "Deletes test runs by a list of IDs")
+    public Response bulkDelete(java.util.Map<String, List<String>> body) {
+        List<String> ids = body != null ? body.get("ids") : null;
+        if (ids == null || ids.isEmpty()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", "Field 'ids' is required"))
+                    .build();
+        }
+        int deleted = 0, notFound = 0;
+        for (String id : ids) {
+            var run = repository.findById(id);
+            if (run.isPresent()) {
+                repository.delete(id);
+                auditService.record("DELETE", "test", id, "bulk delete");
+                deleted++;
+            } else {
+                notFound++;
+            }
+        }
+        return Response.ok(java.util.Map.of("deleted", deleted, "notFound", notFound)).build();
+    }
+
     @GET
     @Operation(
             summary = "List test runs",

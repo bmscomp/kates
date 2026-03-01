@@ -10,11 +10,13 @@ import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
@@ -41,12 +43,19 @@ public class ProfileResource {
 
     @GET
     @Operation(summary = "List all profiles")
-    public List<Map<String, Object>> list() {
-        return em.createQuery("FROM ProfileEntity ORDER BY createdAt DESC", ProfileEntity.class)
+    public Response list(
+            @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
+            @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
+        int effectiveSize = Math.min(Math.max(size, 1), 200);
+        var profiles = em.createQuery("FROM ProfileEntity ORDER BY createdAt DESC", ProfileEntity.class)
+                .setFirstResult(page * effectiveSize)
+                .setMaxResults(effectiveSize)
                 .getResultList()
                 .stream()
                 .map(this::toMap)
                 .collect(Collectors.toList());
+        return Response.ok(java.util.Map.of("page", page, "size", effectiveSize,
+                "count", profiles.size(), "items", profiles)).build();
     }
 
     @GET
