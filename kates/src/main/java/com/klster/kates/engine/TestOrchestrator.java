@@ -110,6 +110,13 @@ public class TestOrchestrator {
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
 
+        Thread.startVirtualThread(() -> executeAsync(run, type, spec, backendName, backend));
+
+        return run;
+    }
+
+    private void executeAsync(TestRun run, TestType type, TestSpec spec,
+                              String backendName, BenchmarkBackend backend) {
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
@@ -164,7 +171,6 @@ public class TestOrchestrator {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
         }
-        return run;
     }
 
     /**
