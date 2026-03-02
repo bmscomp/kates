@@ -23,13 +23,14 @@ COPY kates/mvnw .
 RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
 COPY kates/src src
-RUN ./mvnw package -Dnative -DskipTests -B
+RUN ./mvnw package -Dnative -DskipTests -B \
+  && mv target/*-runner target/kates-native
 
 # Stage 3: Minimal runtime
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 WORKDIR /app
 
-COPY --from=builder /build/target/*-runner ./kates
+COPY --from=builder /build/target/kates-native ./kates
 COPY --from=cli-builder /kates-cli /usr/local/bin/kates
 
 RUN chmod +x kates \
