@@ -12,8 +12,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
   -X github.com/klster/kates-cli/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o /kates-cli .
 
-# Stage 2: Build the native executable (Mandrel)
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25 AS builder
+# Stage 2: Build the native executable (GraalVM CE)
+FROM quay.io/quarkus/ubi9-quarkus-graalvmce-builder-image:jdk-25 AS builder
 USER root
 WORKDIR /build
 
