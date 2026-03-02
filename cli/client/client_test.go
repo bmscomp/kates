@@ -1143,7 +1143,7 @@ func TestReportTuning(t *testing.T) {
 
 func TestTuningTypes(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/tuning/types" {
+		if r.URL.Path != "/api/tests/tuning/types" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		json.NewEncoder(w).Encode([]TuningTypeInfo{

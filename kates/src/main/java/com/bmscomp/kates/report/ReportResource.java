@@ -35,7 +35,7 @@ import com.bmscomp.kates.util.MetricUtils;
 /**
  * REST endpoints for test report generation, export, and comparison.
  */
-@Path("/api")
+@Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Reports")
 public class ReportResource {
@@ -70,7 +70,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/regression")
+    @Path("{id}/report/regression")
     @Operation(
             summary = "Regression check against baseline",
             description = "Compares this run's metrics against the baseline for its test type")
@@ -92,7 +92,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/tuning")
+    @Path("{id}/report/tuning")
     @Operation(
             summary = "Tuning comparison report",
             description = "Returns step-by-step parameter sweep results with best-configuration recommendation")
@@ -111,7 +111,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tuning/types")
+    @Path("tuning/types")
     @Operation(summary = "List available tuning tests")
     @Tag(name = "Tuning")
     public Response listTuningTypes() {
@@ -119,7 +119,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report")
+    @Path("{id}/report")
     @Operation(summary = "Generate a full test report")
     @APIResponse(responseCode = "200", description = "Complete test report with summary, phases, and SLA verdict")
     public Response getReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
@@ -130,7 +130,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/markdown")
+    @Path("{id}/report/markdown")
     @Produces("text/markdown")
     @Operation(summary = "Export report as Markdown")
     public Response getMarkdownReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
@@ -142,7 +142,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/summary")
+    @Path("{id}/report/summary")
     @Operation(summary = "Get report summary only")
     public Response getReportSummary(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run =
@@ -152,7 +152,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/csv")
+    @Path("{id}/report/csv")
     @Produces("text/csv")
     @Operation(summary = "Export report as CSV")
     public Response getCsvReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
@@ -166,7 +166,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/junit")
+    @Path("{id}/report/junit")
     @Produces("application/xml")
     @Operation(
             summary = "Export report as JUnit XML",
@@ -182,7 +182,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/heatmap")
+    @Path("{id}/report/heatmap")
     @Operation(summary = "Get latency heatmap", description = "Returns latency distribution data as JSON or CSV")
     public Response getHeatmapReport(
             @Parameter(description = "Test run ID") @PathParam("id") String id,
@@ -218,7 +218,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/brokers")
+    @Path("{id}/report/brokers")
     @Operation(summary = "Get per-broker metrics")
     public Response getBrokerMetrics(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run =
@@ -232,7 +232,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/tests/{id}/report/snapshot")
+    @Path("{id}/report/snapshot")
     @Operation(summary = "Get cluster snapshot at test time")
     public Response getClusterSnapshot(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run =
@@ -248,7 +248,7 @@ public class ReportResource {
     }
 
     @GET
-    @Path("/reports/compare")
+    @Path("reports/compare")
     @Operation(summary = "Compare test runs", description = "Side-by-side comparison of 2+ runs with percentage deltas")
     public Response compare(
             @Parameter(description = "Comma-separated run IDs (min 2)", required = true) @QueryParam("ids")

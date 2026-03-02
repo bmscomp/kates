@@ -229,7 +229,7 @@ func (c *Client) ReportSummary(ctx context.Context, id string) (*ReportSummary, 
 }
 
 func (c *Client) Compare(ctx context.Context, ids string) (json.RawMessage, error) {
-	data, err := c.getBytes(ctx, "/api/reports/compare?ids="+ids)
+	data, err := c.getBytes(ctx, "/api/tests/reports/compare?ids="+ids)
 	if err != nil {
 		return nil, err
 	}
@@ -481,7 +481,7 @@ func (c *Client) ReportTuning(ctx context.Context, runID string) (*TuningReport,
 }
 
 func (c *Client) TuningTypes(ctx context.Context) ([]TuningTypeInfo, error) {
-	return get[[]TuningTypeInfo](c, ctx, "/api/tuning/types")
+	return get[[]TuningTypeInfo](c, ctx, "/api/tests/tuning/types")
 }
 
 func (c *Client) Audit(ctx context.Context, limit int, eventType, since string) ([]AuditEntry, error) {
