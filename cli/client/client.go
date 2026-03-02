@@ -485,12 +485,26 @@ func (c *Client) TuningTypes(ctx context.Context) ([]TuningTypeInfo, error) {
 }
 
 func (c *Client) Audit(ctx context.Context, limit int, eventType, since string) ([]AuditEntry, error) {
-	path := fmt.Sprintf("/api/audit?limit=%d", limit)
+	size := limit
+	if size <= 0 {
+		size = 50
+	}
+	path := fmt.Sprintf("/api/audit?page=0&size=%d", size)
 	if eventType != "" {
 		path += "&type=" + eventType
 	}
 	if since != "" {
 		path += "&since=" + since
 	}
-	return get[[]AuditEntry](c, ctx, path)
+	var paged struct {
+		Items []AuditEntry `json:"items"`
+	}
+	data, err := c.getBytes(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &paged); err != nil {
+		return nil, err
+	}
+	return paged.Items, nil
 }

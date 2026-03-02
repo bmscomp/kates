@@ -2,16 +2,23 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 )
 
 func TestAudit(t *testing.T) {
-	c, srv := testServer(t, jsonHandler(t, "GET", "/api/audit", []AuditEntry{
+	items := []AuditEntry{
 		{ID: 1, Action: "CREATE", EventType: "test", Target: "abc123", Details: "LOAD test", Timestamp: "2025-01-15T10:30:00Z"},
 		{ID: 2, Action: "DELETE", EventType: "topic", Target: "my-topic", Details: "Topic deleted", Timestamp: "2025-01-15T10:31:00Z"},
-	}))
+	}
+	c, srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"page": 0, "size": 50, "total": 2, "count": 2, "items": items,
+		})
+	})
 	defer srv.Close()
 
 	events, err := c.Audit(context.Background(), 50, "", "")
@@ -40,11 +47,11 @@ func TestAudit_WithFilter(t *testing.T) {
 		if !strings.Contains(r.URL.String(), "since=2025-01-01") {
 			t.Error("expected since param in query")
 		}
-		if !strings.Contains(r.URL.String(), "limit=10") {
-			t.Error("expected limit=10 in query")
+		if !strings.Contains(r.URL.String(), "size=10") {
+			t.Error("expected size=10 in query")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`[]`))
+		w.Write([]byte(`{"page":0,"size":10,"total":0,"count":0,"items":[]}`))
 	})
 	defer srv.Close()
 
@@ -58,7 +65,10 @@ func TestAudit_WithFilter(t *testing.T) {
 }
 
 func TestAudit_Empty(t *testing.T) {
-	c, srv := testServer(t, jsonHandler(t, "GET", "/api/audit", []AuditEntry{}))
+	c, srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"page":0,"size":50,"total":0,"count":0,"items":[]}`))
+	})
 	defer srv.Close()
 
 	events, err := c.Audit(context.Background(), 50, "", "")

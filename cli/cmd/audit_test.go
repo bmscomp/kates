@@ -6,14 +6,13 @@ import (
 )
 
 func TestAuditCmd_NoFlags(t *testing.T) {
-	mockResponse := `[
+	mockResponse := `{"page":0,"size":50,"total":2,"count":2,"items":[
 		{"id": 1, "timestamp": "2026-03-01T12:00:00Z", "eventType": "TEST", "action": "CREATE", "target": "run-123", "details": "Started"},
 		{"id": 2, "timestamp": "2026-03-01T12:05:00Z", "eventType": "TEST", "action": "UPDATE", "target": "run-123", "details": "Finished"}
-	]`
+	]}`
 	ts, buf := setupTest(t, "GET", "/api/audit", 200, mockResponse)
 	defer ts.Close()
 
-	// Clear flags if set by other tests
 	auditLimit = 50
 	auditType = ""
 	auditSince = ""
@@ -24,7 +23,7 @@ func TestAuditCmd_NoFlags(t *testing.T) {
 	}
 
 	out := stripAnsi(buf.String())
-	if !strings.Contains(out, "CREATE") || !strings.Contains(out, "UPDATE") { // Changed to check for actions
+	if !strings.Contains(out, "CREATE") || !strings.Contains(out, "UPDATE") {
 		t.Errorf("missing events in output: %s", out)
 	}
 	if !strings.Contains(out, "run-123") {
@@ -33,15 +32,14 @@ func TestAuditCmd_NoFlags(t *testing.T) {
 }
 
 func TestAuditCmd_WithFilters(t *testing.T) {
-	mockResponse := `[` +
+	mockResponse := `{"page":0,"size":10,"total":1,"count":1,"items":[` +
 		`{"id": 3, "timestamp": "2026-03-01T12:10:00Z", "eventType": "CONFIG", "action": "UPDATE", "target": "cluster", "details": "Updated"}` +
-		`]`
-	// The test harness will assert that the path matches exactly
+		`]}`
 	ts, buf := setupTest(t, "GET", "/api/audit", 200, mockResponse)
 	defer ts.Close()
 
 	auditLimit = 10
-	auditType = "CONFIG" // Changed to match new eventType
+	auditType = "CONFIG"
 	auditSince = "1h"
 
 	err := auditCmd.RunE(auditCmd, nil)
@@ -56,7 +54,7 @@ func TestAuditCmd_WithFilters(t *testing.T) {
 }
 
 func TestAuditCmd_Empty(t *testing.T) {
-	ts, buf := setupTest(t, "GET", "/api/audit", 200, `[]`)
+	ts, buf := setupTest(t, "GET", "/api/audit", 200, `{"page":0,"size":50,"total":0,"count":0,"items":[]}`)
 	defer ts.Close()
 
 	auditLimit = 50
