@@ -24,16 +24,16 @@ info "Installing Strimzi Operator from local chart..."
 helm upgrade --install strimzi-kafka-operator "${STRIMZI_CHART_DIR}" \
   --namespace kafka \
   --set watchAnyNamespace=true \
-  --set defaultImageTag=0.50.1 \
+  --set defaultImageTag=0.51.0 \
   --set image.imagePullPolicy=IfNotPresent \
   --timeout 10m \
   --wait
 
 info "Applying Metrics Configuration..."
-kubectl apply -f config/kafka-metrics.yaml
+kubectl apply -f config/kafka/kafka-metrics.yaml
 
 info "Creating Zone-Specific Storage Classes..."
-kubectl apply -f config/storage-classes.yaml
+kubectl apply -f config/storage/storage-classes.yaml
 
 # Cleanup old cluster if exists (before applying new one)
 kubectl delete kafka my-cluster -n kafka --ignore-not-found
@@ -42,17 +42,17 @@ kubectl delete pvc -l strimzi.io/cluster=krafter -n kafka --ignore-not-found
 kubectl delete pvc -l strimzi.io/cluster=my-cluster -n kafka --ignore-not-found
 
 info "Deploying Kafka Cluster (KRaft)..."
-kubectl apply -f config/kafka.yaml
+kubectl apply -f config/kafka/kafka.yaml
 
 info "Applying Kafka Dashboards..."
-kubectl apply -f config/kafka-dashboard.yaml
-kubectl apply -f config/kafka-performance-dashboard.yaml
-kubectl apply -f config/kafka-jvm-dashboard.yaml
-kubectl apply -f config/kafka-perf-test-dashboard.yaml
-kubectl apply -f config/kafka-working-dashboard.yaml
-kubectl apply -f config/kafka-comprehensive-dashboard.yaml
-kubectl apply -f config/kafka-all-metrics-dashboard.yaml
-kubectl apply -f config/kafka-perf-global-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-performance-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-jvm-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-perf-test-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-working-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-comprehensive-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-all-metrics-dashboard.yaml
+kubectl apply -f config/monitoring/kafka-perf-global-dashboard.yaml
 
 info "Waiting for Kafka cluster to be ready (this may take a few minutes)..."
 kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n kafka 

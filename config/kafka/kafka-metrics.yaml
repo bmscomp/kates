@@ -7,11 +7,32 @@ metadata:
     app: strimzi
 data:
   kafka-metrics-config.yml: |
-    # See https://github.com/prometheus/jmx_exporter for more info about JMX exporter configuration
     lowercaseOutputName: true
     lowercaseOutputLabelNames: true
     rules:
-    # Special cases and very specific rules
+    # KRaft controller / Raft metrics
+    - pattern: kafka.server<type=raft-metrics, name=(.+)><>Value
+      name: kafka_server_raft_metrics_$1
+      type: GAUGE
+    - pattern: kafka.server<type=raft-channel-manager-metrics, name=(.+)><>Value
+      name: kafka_server_raft_channel_$1
+      type: GAUGE
+
+    # Request metrics with error labels
+    - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+), error=(.+)><>Count
+      name: kafka_network_request_metrics_$1_total
+      type: COUNTER
+      labels:
+       request: "$2"
+       error: "$3"
+    - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>(\d+)thPercentile
+      name: kafka_network_request_metrics_$1_percentile
+      type: GAUGE
+      labels:
+       request: "$2"
+       quantile: "0.$3"
+
+    # Topic-level partition metrics
     - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
       name: kafka_server_$1_$2
       type: GAUGE
@@ -25,36 +46,36 @@ data:
       labels:
        clientId: "$3"
        broker: "$4:$5"
+
+    # Coordinator metrics
     - pattern: kafka.coordinator.(\w+)<type=(.+), name=(.+)><>Value
       name: kafka_coordinator_$1_$2_$3
       type: GAUGE
+
+    # Controller metrics
     - pattern: kafka.controller<type=(.+), name=(.+)><>Value
       name: kafka_controller_$1_$2
       type: GAUGE
+
+    # Log metrics (per topic-partition)
     - pattern: kafka.log<type=(.+), name=(.+), topic=(.+), partition=(.+)><>Value
       name: kafka_log_$1_$2
       type: GAUGE
       labels:
        topic: "$3"
        partition: "$4"
-    - pattern: kafka.log<type=(.+), name=(.+), topic=(.+), partition=(.+)><>Value
-      name: kafka_log_$1_$2
-      type: GAUGE
-      labels:
-       topic: "$3"
-       partition: "$4"
+
+    # Network metrics
     - pattern: kafka.network<type=(.+), name=(.+)><>Value
       name: kafka_network_$1_$2
       type: GAUGE
-    - pattern: kafka.network<type=(.+), name=(.+)><>Value
-      name: kafka_network_$1_$2
-      type: GAUGE
+
+    # Server metrics (general)
     - pattern: kafka.server<type=(.+), name=(.+)><>Value
       name: kafka_server_$1_$2
       type: GAUGE
-    - pattern: kafka.server<type=(.+), name=(.+)><>Value
-      name: kafka_server_$1_$2
-      type: GAUGE
+
+    # JVM metrics
     - pattern: java.lang<type=(.+), name=(.+)><>(.+)
       name: java_lang_$1_$2_$3
       type: GAUGE

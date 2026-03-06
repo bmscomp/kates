@@ -1,0 +1,274 @@
+# NetworkPolicies for the kafka namespace.
+# Restricts traffic to known clients only — all other ingress/egress is denied.
+
+# Default deny all ingress/egress in kafka namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: kafka
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow DNS resolution for all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: kafka
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Kafka brokers: allow inbound from known clients + inter-broker + controller traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-brokers
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+      strimzi.io/cluster: krafter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Inter-broker replication
+    - from:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+      ports:
+        - port: 9091
+          protocol: TCP
+    # Plain listener (SCRAM) — from kates, kafka-ui, apicurio, litmus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: litmus
+        - podSelector:
+            matchLabels:
+              app: kafka-ui
+        - podSelector:
+            matchLabels:
+              app: apicurio-registry
+      ports:
+        - port: 9092
+          protocol: TCP
+    # TLS listener
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
+      ports:
+        - port: 9093
+          protocol: TCP
+    # External NodePort
+    - from: []
+      ports:
+        - port: 9094
+          protocol: TCP
+    # JMX metrics — from Prometheus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9404
+          protocol: TCP
+  egress:
+    # Inter-broker + controller communication
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+    # Kubernetes API (for Strimzi operator)
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# Kafka controllers: allow inter-controller + broker→controller + operator traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-controllers
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/pool-name: controllers
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 9091
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# Strimzi operator: allow outbound to Kafka pods + K8s API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: strimzi-operator
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: cluster-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Prometheus metrics scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # To Kafka pods
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+    # To Kubernetes API
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# Kafka UI: allow inbound HTTP + outbound to brokers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-ui
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      app: kafka-ui
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from: []
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: Kafka
+      ports:
+        - port: 9092
+          protocol: TCP
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Cruise Control: allow operator + Prometheus access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cruise-control
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+      strimzi.io/name: krafter-cruise-control
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
+      ports:
+        - port: 9090
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9404
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Drain Cleaner: allow webhook + outbound to K8s API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      app: strimzi-drain-cleaner
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from: []
+      ports:
+        - port: 8443
+          protocol: TCP
+  egress:
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP

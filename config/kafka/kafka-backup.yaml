@@ -1,0 +1,59 @@
+# Velero backup configuration for Kafka persistent volumes.
+# Requires Velero installed in the cluster with a CSI or restic provider.
+
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: kafka-daily-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"
+  template:
+    includedNamespaces:
+      - kafka
+    includedResources:
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - secrets
+    labelSelector:
+      matchExpressions:
+        - key: strimzi.io/cluster
+          operator: In
+          values: ["krafter"]
+    storageLocation: default
+    volumeSnapshotLocations:
+      - default
+    ttl: 168h0m0s
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: false
+  useOwnerReferencesInBackup: false
+---
+# On-demand backup template (apply before major changes)
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: kafka-pre-upgrade
+  namespace: velero
+spec:
+  includedNamespaces:
+    - kafka
+  includedResources:
+    - persistentvolumeclaims
+    - persistentvolumes
+    - configmaps
+    - secrets
+    - kafka.kafka.strimzi.io
+    - kafkanodepool.kafka.strimzi.io
+    - kafkatopic.kafka.strimzi.io
+    - kafkauser.kafka.strimzi.io
+  labelSelector:
+    matchExpressions:
+      - key: strimzi.io/cluster
+        operator: In
+        values: ["krafter"]
+  storageLocation: default
+  volumeSnapshotLocations:
+    - default
+  ttl: 720h0m0s
+  snapshotVolumes: true

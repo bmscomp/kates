@@ -1,0 +1,36 @@
+# KafkaRebalance CR for Cruise Control automated partition rebalancing.
+# Apply this CR, then approve the proposal with:
+#   kubectl annotate kafkarebalance full-rebalance strimzi.io/rebalance=approve -n kafka
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaRebalance
+metadata:
+  name: full-rebalance
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  mode: full
+  goals:
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.NetworkInboundCapacityGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.NetworkOutboundCapacityGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuCapacityGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.TopicReplicaDistributionGoal
+    - com.linkedin.kafka.cruisecontrol.analyzer.goals.LeaderBytesInDistributionGoal
+  skipHardGoalCheck: false
+  rebalanceDisk: true
+---
+# Scheduled rebalance — periodically checks and proposes optimizations.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaRebalance
+metadata:
+  name: add-broker-rebalance
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  mode: add-brokers
+  brokers: []

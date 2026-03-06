@@ -17,7 +17,7 @@ info "Installing kube-prometheus-stack v${PROMETHEUS_STACK_VERSION}..."
 helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --version "${PROMETHEUS_STACK_VERSION}" \
   --namespace monitoring \
-  --values config/monitoring.yaml \
+  --values config/monitoring/monitoring.yaml \
   --timeout 10m \
   --wait
 

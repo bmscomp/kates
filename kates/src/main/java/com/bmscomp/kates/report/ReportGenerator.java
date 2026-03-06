@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,6 +23,7 @@ import com.bmscomp.kates.util.MetricUtils;
 /**
  * Builds structured {@link TestReport} instances from completed {@link TestRun}s.
  * Computes aggregate metrics and overall SLA verdicts.
+ * Reports for terminal runs (DONE/FAILED) are cached to avoid redundant recomputation.
  */
 @ApplicationScoped
 public class ReportGenerator {
@@ -32,7 +34,37 @@ public class ReportGenerator {
     @Inject
     KatesMetrics katesMetrics;
 
+    private final ConcurrentHashMap<String, TestReport> reportCache = new ConcurrentHashMap<>();
+
+    /**
+     * Evict a cached report, forcing regeneration on the next call.
+     */
+    public void evictReport(String runId) {
+        reportCache.remove(runId);
+    }
+
     public TestReport generate(TestRun run) {
+        if (run.getId() != null && isTerminal(run.getStatus())) {
+            TestReport cached = reportCache.get(run.getId());
+            if (cached != null) {
+                return cached;
+            }
+        }
+
+        TestReport report = doGenerate(run);
+
+        if (run.getId() != null && isTerminal(run.getStatus())) {
+            reportCache.put(run.getId(), report);
+        }
+
+        return report;
+    }
+
+    private boolean isTerminal(TestResult.TaskStatus status) {
+        return status == TestResult.TaskStatus.DONE || status == TestResult.TaskStatus.FAILED;
+    }
+
+    private TestReport doGenerate(TestRun run) {
         TestReport report = new TestReport();
         report.setRun(run);
         report.setGeneratedAt(Instant.now().toString());
@@ -98,7 +130,7 @@ public class ReportGenerator {
      * leadership ratio as weight. Detects skew when a broker deviates >20%
      * from the mean throughput.
      */
-    public List<BrokerMetrics> computeBrokerMetrics(ClusterSnapshot snapshot, ReportSummary overall) {
+    List<BrokerMetrics> computeBrokerMetrics(ClusterSnapshot snapshot, ReportSummary overall) {
         if (snapshot == null || overall == null || snapshot.brokers() == null) {
             return List.of();
         }

@@ -14,7 +14,7 @@ if deployment_exists kafka-ui kafka; then
     fi
 fi
 
-kubectl apply -f config/kafka-ui.yaml
+kubectl apply -f config/kafka-ui/kafka-ui.yaml
 
 info "Waiting for Kafka UI to be ready..."
 kubectl wait --for=condition=available --timeout=120s deployment/kafka-ui -n kafka

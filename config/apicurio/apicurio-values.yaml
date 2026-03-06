@@ -16,6 +16,13 @@ global:
   kafka:
     bootstrapServers:
       - "krafter-kafka-bootstrap.kafka.svc:9092"
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="apicurio-registry"
+        password="${APICURIO_KAFKA_PASSWORD}";
 
 # Service Configuration
 service:

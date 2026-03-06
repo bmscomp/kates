@@ -1,0 +1,79 @@
+# Kafka Connect cluster for data pipeline integration.
+# Deploy connectors via KafkaConnector CRs after this cluster is running.
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: kates-connect
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: 4.2.0
+  replicas: 1
+  bootstrapServers: krafter-kafka-bootstrap:9092
+  authentication:
+    type: scram-sha-512
+    username: kates-backend
+    passwordSecret:
+      secretName: kates-backend
+      password: password
+  config:
+    group.id: kates-connect
+    offset.storage.topic: kates-connect-offsets
+    config.storage.topic: kates-connect-configs
+    status.storage.topic: kates-connect-status
+    offset.storage.replication.factor: 3
+    config.storage.replication.factor: 3
+    status.storage.replication.factor: 3
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: false
+    value.converter.schemas.enable: false
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: kafka-metrics
+        key: kafka-metrics-config.yml
+  template:
+    pod:
+      securityContext:
+        runAsNonRoot: true
+      metadata:
+        labels:
+          app: kates-connect
+    connectContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+---
+# Example: File sink connector for test results archival
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: kates-results-sink
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kates-connect
+spec:
+  class: org.apache.kafka.connect.file.FileStreamSinkConnector
+  tasksMax: 1
+  autoRestart:
+    enabled: true
+    maxRestarts: 5
+  config:
+    topics: kates-results
+    file: /tmp/kates-results.log
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: org.apache.kafka.connect.storage.StringConverter

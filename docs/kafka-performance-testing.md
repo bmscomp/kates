@@ -63,7 +63,7 @@ Performance tests should use port 9092 (plain) for baseline measurements. TLS ad
 
 ### Monitoring Stack
 
-Prometheus scrapes JMX metrics from each broker every 15 seconds via a JMX Prometheus exporter sidecar. The exporter rules are defined in `config/kafka-metrics.yaml` and cover:
+Prometheus scrapes JMX metrics from each broker every 15 seconds via a JMX Prometheus exporter sidecar. The exporter rules are defined in `config/kafka/kafka-metrics.yaml` and cover:
 
 - `kafka.server.*` — Broker-level metrics (request rates, bytes in/out, ISR stats)
 - `kafka.network.*` — Network handler threads, request queue depth
@@ -546,7 +546,7 @@ Broker tuning on Strimzi differs from bare-metal Kafka because resource allocati
 
 ### Memory Allocation
 
-In `config/kafka.yaml`, each `KafkaNodePool` specifies:
+In `config/kafka/kafka.yaml`, each `KafkaNodePool` specifies:
 
 ```yaml
 resources:
@@ -640,7 +640,7 @@ Default is 30,000ms (30s). If a follower hasn't fetched from the leader within t
 
 ### Strimzi Resource Requests in Practice
 
-For performance testing, you might want to temporarily increase broker resources. Edit `config/kafka.yaml`:
+For performance testing, you might want to temporarily increase broker resources. Edit `config/kafka/kafka.yaml`:
 
 ```yaml
 spec:
@@ -660,7 +660,7 @@ spec:
 Then reapply:
 
 ```bash
-kubectl apply -f config/kafka.yaml
+kubectl apply -f config/kafka/kafka.yaml
 ```
 
 Strimzi performs a rolling restart automatically. Watch with:
@@ -1064,10 +1064,10 @@ Running Kafka on Strimzi introduces behaviors and constraints that don't exist o
 
 ### KafkaNodePool Resource Isolation
 
-Each `KafkaNodePool` in `config/kafka.yaml` independently specifies resource limits. This means the alpha, sigma, and gamma brokers can be configured with different resources:
+Each `KafkaNodePool` in `config/kafka/kafka.yaml` independently specifies resource limits. This means the alpha, sigma, and gamma brokers can be configured with different resources:
 
 ```yaml
-# In config/kafka.yaml
+# In config/kafka/kafka.yaml
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -1617,7 +1617,7 @@ done
 
 **Consumer scalability:** Test how throughput scales with consumer count by deploying 1, 2, and 3 consumers against a 3-partition topic (see Chapter 5 — Consumer Parallelism for the theory).
 
-**Vertical scalability (resource adjustment):** To test the effect of more memory, temporarily modify the `KafkaNodePool` resources in `config/kafka.yaml` (see Chapter 6 — Strimzi Resource Requests in Practice), run the same benchmark, and compare. Remember to restore original values afterward.
+**Vertical scalability (resource adjustment):** To test the effect of more memory, temporarily modify the `KafkaNodePool` resources in `config/kafka/kafka.yaml` (see Chapter 6 — Strimzi Resource Requests in Practice), run the same benchmark, and compare. Remember to restore original values afterward.
 
 **Pass criteria:**
 - Throughput scales at least 2× from 1 partition to 3 partitions
@@ -2459,18 +2459,18 @@ Use the **"Kafka Performance Testing"** dashboard in Grafana during all perf tes
 
 | File | Purpose |
 |------|---------|
-| `config/kafka.yaml` | Kafka cluster + node pool definitions |
-| `config/kafka-metrics.yaml` | JMX exporter rules for Prometheus |
-| `config/kafka-perf-global-dashboard.yaml` | Unified performance testing Grafana dashboard |
-| `config/monitoring.yaml` | Prometheus + Grafana Helm values |
+| `config/kafka/kafka.yaml` | Kafka cluster + node pool definitions |
+| `config/kafka/kafka-metrics.yaml` | JMX exporter rules for Prometheus |
+| `config/monitoring/kafka-perf-global-dashboard.yaml` | Unified performance testing Grafana dashboard |
+| `config/monitoring/monitoring.yaml` | Prometheus + Grafana Helm values |
 | `test-kafka-performance.sh` | Built-in 1M-message perf test |
-| `config/storage-classes.yaml` | Zone-pinned StorageClasses |
+| `config/storage/storage-classes.yaml` | Zone-pinned StorageClasses |
 
 ---
 
 ## Appendix: Performance Testing Dashboard Reference
 
-The **"Kafka Performance Testing"** dashboard (`config/kafka-perf-global-dashboard.yaml`) is a single-pane view designed for use during all performance tests. It has a `$topic` template variable — select your test topic from the dropdown to populate the "Test Topic Detail" row.
+The **"Kafka Performance Testing"** dashboard (`config/monitoring/kafka-perf-global-dashboard.yaml`) is a single-pane view designed for use during all performance tests. It has a `$topic` template variable — select your test topic from the dropdown to populate the "Test Topic Detail" row.
 
 Open it at: **Grafana → Dashboards → Kafka Performance Testing**
 

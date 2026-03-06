@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -39,6 +40,9 @@ public class ClusterHealthService {
     private volatile Map<String, Object> cachedClusterInfo;
     private volatile long clusterCacheExpiry;
 
+    private volatile Map<String, Object> cachedHealthCheck;
+    private volatile long healthCacheExpiry;
+
     @Inject
     public ClusterHealthService(KafkaAdminService adminService) {
         this.adminService = adminService;
@@ -47,6 +51,11 @@ public class ClusterHealthService {
     public void evictCache() {
         clusterCacheExpiry = 0;
         cachedClusterInfo = null;
+    }
+
+    public void evictHealthCache() {
+        healthCacheExpiry = 0;
+        cachedHealthCheck = null;
     }
 
     public Map<String, Object> describeCluster() {
@@ -171,20 +180,68 @@ public class ClusterHealthService {
     }
 
     public Map<String, Object> clusterHealthCheck() {
+        if (cachedHealthCheck != null && System.currentTimeMillis() < healthCacheExpiry) {
+            return cachedHealthCheck;
+        }
+
         AdminClient client = adminService.getClient();
         try {
             Map<String, Object> report = new LinkedHashMap<>();
 
             DescribeClusterResult cluster = client.describeCluster();
-            String clusterId = cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            Node controller = cluster.controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            Collection<Node> nodes = cluster.nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            var clusterIdFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            var controllerFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return cluster.controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            var nodesFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return cluster.nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            var topicsFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            var groupsFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return client.listGroups(ListGroupsOptions.forConsumerGroups())
+                            .all()
+                            .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            CompletableFuture.allOf(clusterIdFuture, controllerFuture, nodesFuture, topicsFuture, groupsFuture).join();
+
+            String clusterId = clusterIdFuture.join();
+            Node controller = controllerFuture.join();
+            Collection<Node> nodes = nodesFuture.join();
+            Set<String> topics = topicsFuture.join();
+            Collection<GroupListing> groups = groupsFuture.join();
 
             report.put("clusterId", clusterId);
             report.put("brokers", nodes.size());
             report.put("controllerId", controller.id());
 
-            Set<String> topics = client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             Map<String, TopicDescription> topicDescs = topics.isEmpty()
                     ? Map.of()
                     : client.describeTopics(topics).allTopicNames().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -226,9 +283,6 @@ public class ClusterHealthService {
             partitionHealth.put("problems", problems);
             report.put("partitionHealth", partitionHealth);
 
-            Collection<GroupListing> groups = client.listGroups(ListGroupsOptions.forConsumerGroups())
-                    .all()
-                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             report.put("consumerGroups", groups.size());
 
             String status = "HEALTHY";
@@ -239,9 +293,13 @@ public class ClusterHealthService {
             }
             report.put("status", status);
 
+            cachedHealthCheck = report;
+            healthCacheExpiry = System.currentTimeMillis() + CACHE_TTL_MS;
+
             return report;
         } catch (Exception e) {
             throw new RuntimeException("Failed to perform cluster health check", e);
         }
     }
 }
+

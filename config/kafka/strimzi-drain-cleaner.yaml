@@ -1,0 +1,150 @@
+# Strimzi Drain Cleaner — Handles pod eviction during Kubernetes node drain.
+# When a node is drained, the Drain Cleaner intercepts the eviction and
+# triggers a controlled rolling restart via Strimzi instead of an abrupt kill.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: kafka
+  labels:
+    app: strimzi-drain-cleaner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: strimzi-drain-cleaner
+  labels:
+    app: strimzi-drain-cleaner
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create", "get"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["strimzipodsets"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: strimzi-drain-cleaner
+  labels:
+    app: strimzi-drain-cleaner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: strimzi-drain-cleaner
+subjects:
+  - kind: ServiceAccount
+    name: strimzi-drain-cleaner
+    namespace: kafka
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: kafka
+  labels:
+    app: strimzi-drain-cleaner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: strimzi-drain-cleaner
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: strimzi-drain-cleaner
+    spec:
+      serviceAccountName: strimzi-drain-cleaner
+      containers:
+        - name: drain-cleaner
+          image: quay.io/strimzi/drain-cleaner:0.51.0
+          ports:
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: STRIMZI_DRAIN_KAFKA
+              value: "true"
+            - name: STRIMZI_DRAIN_ZOOKEEPER
+              value: "false"
+            - name: STRIMZI_NAMESPACE
+              value: "kafka"
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 100m
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: kafka
+  labels:
+    app: strimzi-drain-cleaner
+spec:
+  ports:
+    - port: 443
+      targetPort: 8443
+      protocol: TCP
+      name: https
+  selector:
+    app: strimzi-drain-cleaner
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: strimzi-drain-cleaner
+  labels:
+    app: strimzi-drain-cleaner
+webhooks:
+  - name: strimzi-drain-cleaner.kafka.svc.cluster.local
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods/eviction"]
+    clientConfig:
+      service:
+        name: strimzi-drain-cleaner
+        namespace: kafka
+        path: /drainer
+        port: 443
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 5
+    failurePolicy: Ignore
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kafka

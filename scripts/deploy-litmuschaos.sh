@@ -24,7 +24,7 @@ ensure_namespace litmus
 step "Step 1: Deploying MongoDB first..."
 helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --namespace litmus \
-  --values config/litmus-values.yaml \
+  --values config/litmus/litmus-values.yaml \
   --set portal.frontend.replicas=0 \
   --set portal.server.replicas=0 \
   --set portal.server.authServer.replicas=0 \
@@ -49,7 +49,7 @@ sleep 15
 step "Step 2: Deploying Litmus portal components..."
 helm upgrade --install chaos "${LITMUS_CHART_DIR}" \
   --namespace litmus \
-  --values config/litmus-values.yaml \
+  --values config/litmus/litmus-values.yaml \
   --timeout 10m \
   --wait
 

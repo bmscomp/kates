@@ -70,6 +70,29 @@ public class TestRunRepository {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * JSONB-native label search using PostgreSQL containment operator.
+     * Requires the GIN index from V11 migration. Falls back to LIKE-based
+     * {@link #findByLabel} if running on H2 (tests).
+     */
+    @SuppressWarnings("unchecked")
+    public List<TestRun> findByLabelJsonb(String key, String value) {
+        try {
+            String jsonPattern = "{\"" + key + "\":\"" + value + "\"}";
+            return ((List<TestRunEntity>) em
+                    .createNativeQuery(
+                            "SELECT * FROM test_runs WHERE labels_json @> CAST(:pattern AS jsonb) ORDER BY created_at DESC",
+                            TestRunEntity.class)
+                    .setParameter("pattern", jsonPattern)
+                    .getResultList())
+                    .stream()
+                    .map(EntityMapper::toDomain)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            return findByLabel(key, value);
+        }
+    }
+
     public Optional<TestRun> findLatestByType(TestType type) {
         return em
                 .createQuery(

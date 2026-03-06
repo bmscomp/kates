@@ -9,7 +9,13 @@ data:
       clusters:
         - name: krafter
           bootstrapServers: krafter-kafka-bootstrap:9092
-          properties: {}
+          properties:
+            security.protocol: SASL_PLAINTEXT
+            sasl.mechanism: SCRAM-SHA-512
+            sasl.jaas.config: >-
+              org.apache.kafka.common.security.scram.ScramLoginModule required
+              username="kafka-ui"
+              password="${KAFKA_UI_PASSWORD}";
           metrics:
             port: 9404
             type: JMX
@@ -52,6 +58,11 @@ spec:
           value: INFO
         - name: LOGGING_LEVEL_COM_PROVECTUS
           value: INFO
+        - name: KAFKA_UI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ui
+              key: password
         volumeMounts:
         - name: config
           mountPath: /etc/kafkaui

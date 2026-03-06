@@ -13,6 +13,7 @@ import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 
+import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
@@ -96,4 +97,33 @@ public class EventStreamResource {
             }
         }
     }
+
+    @Scheduled(every = "30s")
+    void pruneAndHeartbeat() {
+        if (sse == null || subscribers.isEmpty()) return;
+
+        var iter = subscribers.iterator();
+        int pruned = 0;
+        while (iter.hasNext()) {
+            var sub = iter.next();
+            if (sub.sink().isClosed()) {
+                iter.remove();
+                pruned++;
+                continue;
+            }
+            try {
+                OutboundSseEvent heartbeat = sse.newEventBuilder()
+                        .comment("heartbeat")
+                        .build();
+                sub.sink().send(heartbeat);
+            } catch (Exception e) {
+                iter.remove();
+                pruned++;
+            }
+        }
+        if (pruned > 0) {
+            LOG.debugf("Pruned %d stale SSE subscribers, remaining=%d", pruned, subscribers.size());
+        }
+    }
 }
+

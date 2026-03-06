@@ -1,0 +1,152 @@
+# JSON Schemas for Kates Kafka topics.
+# Register these with Apicurio Registry for schema enforcement.
+# Apply with: curl -X POST http://apicurio:30082/apis/registry/v2/groups/kates/artifacts \
+#   -H "Content-Type: application/json" \
+#   -H "X-Registry-ArtifactId: <artifact-id>" \
+#   -H "X-Registry-ArtifactType: JSON" \
+#   -d @<schema-file>
+
+# To enforce validation, configure producers with:
+#   value.serializer=io.apicurio.registry.serde.jsonschema.JsonSchemaKafkaSerializer
+#   apicurio.registry.url=http://apicurio-registry.apicurio.svc:8080/apis/registry/v2
+#   apicurio.registry.auto-register=true
+---
+# Schema: kates-events
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kates-json-schemas
+  namespace: kafka
+  labels:
+    app.kubernetes.io/part-of: kates
+data:
+  kates-events-value.json: |
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://kates.bmscomp.com/schemas/kates-events-value.json",
+      "title": "KatesEvent",
+      "description": "Event emitted during test lifecycle transitions",
+      "type": "object",
+      "required": ["eventId", "testRunId", "eventType", "timestamp"],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique event identifier"
+        },
+        "testRunId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Associated test run ID"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": ["CREATED", "STARTED", "PROGRESS", "COMPLETED", "FAILED", "CANCELLED"],
+          "description": "Test lifecycle event type"
+        },
+        "testType": {
+          "type": "string",
+          "enum": ["LOAD", "STRESS", "SPIKE", "ENDURANCE", "VOLUME", "CAPACITY", "ROUND_TRIP", "INTEGRITY"],
+          "description": "Type of test"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Additional event-specific data"
+        }
+      },
+      "additionalProperties": false
+    }
+  kates-results-value.json: |
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://kates.bmscomp.com/schemas/kates-results-value.json",
+      "title": "KatesTestResult",
+      "description": "Performance test result record",
+      "type": "object",
+      "required": ["testRunId", "testType", "status", "startedAt", "completedAt", "metrics"],
+      "properties": {
+        "testRunId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "testType": {
+          "type": "string",
+          "enum": ["LOAD", "STRESS", "SPIKE", "ENDURANCE", "VOLUME", "CAPACITY", "ROUND_TRIP", "INTEGRITY"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["DONE", "FAILED", "CANCELLED"]
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "totalRecords": { "type": "integer", "minimum": 0 },
+            "throughputRecordsPerSec": { "type": "number", "minimum": 0 },
+            "throughputMBPerSec": { "type": "number", "minimum": 0 },
+            "avgLatencyMs": { "type": "number", "minimum": 0 },
+            "p50LatencyMs": { "type": "number", "minimum": 0 },
+            "p95LatencyMs": { "type": "number", "minimum": 0 },
+            "p99LatencyMs": { "type": "number", "minimum": 0 },
+            "maxLatencyMs": { "type": "number", "minimum": 0 }
+          },
+          "required": ["totalRecords", "throughputRecordsPerSec"]
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Custom labels for categorization"
+        }
+      },
+      "additionalProperties": false
+    }
+  kates-metrics-value.json: |
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://kates.bmscomp.com/schemas/kates-metrics-value.json",
+      "title": "KatesMetricSample",
+      "description": "Real-time metric sample emitted during test execution",
+      "type": "object",
+      "required": ["testRunId", "timestamp", "metricName", "value"],
+      "properties": {
+        "testRunId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metricName": {
+          "type": "string",
+          "description": "Metric identifier (e.g., throughput, latency_p99)"
+        },
+        "value": {
+          "type": "number",
+          "description": "Metric value"
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["records/sec", "MB/sec", "ms", "bytes", "count"],
+          "description": "Measurement unit"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }

@@ -75,8 +75,15 @@ spec:
         - secretRef:
             name: {{ include "kates.dbSecretName" . }}
         {{- end }}
-        {{- with .Values.extraEnv }}
         env:
+        {{- if .Values.kafka.sasl.enabled }}
+        - name: KATES_KAFKA_SASL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.kafka.sasl.secretName }}
+              key: {{ .Values.kafka.sasl.secretKey }}
+        {{- end }}
+        {{- with .Values.extraEnv }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
         resources:

@@ -1,0 +1,73 @@
+# MirrorMaker 2 for cross-cluster Kafka replication (disaster recovery).
+# Configure the source cluster bootstrap servers before deploying.
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaMirrorMaker2
+metadata:
+  name: krafter-mirror
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  version: 4.2.0
+  replicas: 1
+  connectCluster: target
+  clusters:
+    - alias: source
+      bootstrapServers: source-kafka-bootstrap:9092
+      authentication:
+        type: scram-sha-512
+        username: mirror-source
+        passwordSecret:
+          secretName: mirror-source-credentials
+          password: password
+    - alias: target
+      bootstrapServers: krafter-kafka-bootstrap:9092
+      authentication:
+        type: scram-sha-512
+        username: kates-backend
+        passwordSecret:
+          secretName: kates-backend
+          password: password
+      config:
+        config.storage.replication.factor: 3
+        offset.storage.replication.factor: 3
+        status.storage.replication.factor: 3
+  mirrors:
+    - sourceCluster: source
+      targetCluster: target
+      sourceConnector:
+        tasksMax: 2
+        autoRestart:
+          enabled: true
+          maxRestarts: 10
+        config:
+          replication.factor: 3
+          offset-syncs.topic.replication.factor: 3
+          sync.topic.acls.enabled: "false"
+          refresh.topics.interval.seconds: "60"
+      heartbeatConnector:
+        autoRestart:
+          enabled: true
+        config:
+          heartbeats.topic.replication.factor: 3
+      checkpointConnector:
+        autoRestart:
+          enabled: true
+        config:
+          checkpoints.topic.replication.factor: 3
+          sync.group.offsets.enabled: "true"
+          refresh.groups.interval.seconds: "60"
+      topicsPattern: "kates-.*"
+      groupsPattern: ".*"
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  template:
+    pod:
+      securityContext:
+        runAsNonRoot: true

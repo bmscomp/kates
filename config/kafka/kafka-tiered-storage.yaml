@@ -1,0 +1,58 @@
+# Tiered Storage configuration for Apache Kafka 4.2 (KIP-405).
+# Offloads cold log segments to S3-compatible object storage (MinIO).
+#
+# Prerequisites:
+#   1. MinIO must be deployed (already in config/velero/)
+#   2. Create bucket: mc mb minio/kafka-tiered-storage
+#   3. The kafka-tiered-storage-credentials secret must exist (see below)
+#
+# This ConfigMap is referenced by kafka.yaml via remote.log.storage config.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-tiered-storage-credentials
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: minio
+  AWS_SECRET_ACCESS_KEY: minio123
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-tiered-storage-config
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+data:
+  tiered-storage.properties: |
+    # Remote Log Manager (KIP-405)
+    remote.log.storage.system.enable=true
+
+    # Remote Storage Manager — S3-compatible (MinIO)
+    remote.log.storage.manager.class.name=org.apache.kafka.server.log.remote.storage.RemoteLogManager
+    remote.log.storage.manager.impl.prefix=rsm.config.
+    rsm.config.s3.bucket.name=kafka-tiered-storage
+    rsm.config.s3.region=us-east-1
+    rsm.config.s3.endpoint.url=http://minio.velero.svc:9000
+    rsm.config.s3.path.style.access.enabled=true
+
+    # Remote Log Metadata Manager
+    remote.log.metadata.manager.class.name=org.apache.kafka.server.log.remote.metadata.storage.TopicBasedRemoteLogMetadataManager
+    remote.log.metadata.manager.impl.prefix=rlmm.config.
+    rlmm.config.remote.log.metadata.topic.replication.factor=3
+    rlmm.config.remote.log.metadata.topic.partitions=50
+    rlmm.config.remote.log.metadata.topic.retention.ms=-1
+
+    # Retention for tiered segments (30 days for remote, 24h local hot)
+    remote.log.manager.task.interval.ms=30000
+    log.local.retention.ms=86400000
+    log.local.retention.bytes=-1
+
+    # Copy quota (limit impact on broker I/O)
+    remote.log.manager.copy.quota.window.size.sec=10
+    remote.log.manager.fetch.quota.window.size.sec=10

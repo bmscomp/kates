@@ -23,7 +23,7 @@ ensure_namespace apicurio
 info "Installing Apicurio Registry..."
 helm upgrade --install apicurio-registry "${APICURIO_CHART_DIR}" \
   --namespace apicurio \
-  --values config/apicurio-values.yaml \
+  --values config/apicurio/apicurio-values.yaml \
   --timeout 10m \
   --wait
 

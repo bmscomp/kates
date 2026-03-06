@@ -771,6 +771,6 @@ Lost records in a contiguous range during chaos suggests they were acked but the
 |------|---------|
 | `setup-kafka-chaos.sh` | CLI chaos environment setup |
 | `test-kafka-performance.sh` | 1M-message perf test |
-| `config/kafka.yaml` | Kafka cluster definition |
+| `config/kafka/kafka.yaml` | Kafka cluster definition |
 | `config/litmus/experiments/*.yaml` | All chaos experiment definitions |
 | `config/litmus/chaos-litmus-chaos-enable.yml` | Infrastructure registration manifest |

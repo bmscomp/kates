@@ -6,6 +6,12 @@ metadata:
     {{- include "kates.labels" . | nindent 4 }}
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: {{ .Values.kafka.bootstrapServers | quote }}
+  {{- if .Values.kafka.sasl.enabled }}
+  KATES_KAFKA_SASL_USERNAME: {{ .Values.kafka.sasl.username | quote }}
+  {{- end }}
+  {{- if .Values.kafka.clientRack }}
+  KATES_KAFKA_CLIENT_RACK: {{ .Values.kafka.clientRack | quote }}
+  {{- end }}
   KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
   KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}
 

@@ -133,6 +133,12 @@ initContainers:
 
 kafka:
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  clientRack: ""
+  sasl:
+    enabled: true
+    username: kates-backend
+    secretName: kates-backend
+    secretKey: password
 
 trogdor:
   coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"

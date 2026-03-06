@@ -21,7 +21,7 @@ make monitoring
 This runs `scripts/deploy-monitoring.sh`, which:
 
 1. Adds the `prometheus-community` Helm repo
-2. Installs `kube-prometheus-stack` with values from `config/monitoring.yaml`
+2. Installs `kube-prometheus-stack` with values from `config/monitoring/monitoring.yaml`
 3. Creates a ConfigMap with all Kates Grafana dashboards
 4. Labels the ConfigMap with `grafana_dashboard=1` so the Grafana sidecar auto-discovers it
 
@@ -135,7 +135,7 @@ Registered by `KatesMetrics.java` — persistent across benchmark runs:
 
 ## Configuration
 
-The monitoring values file is `config/monitoring.yaml`. Key settings:
+The monitoring values file is `config/monitoring/monitoring.yaml`. Key settings:
 
 | Setting | Value | Notes |
 |---|---|---|

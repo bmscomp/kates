@@ -1,0 +1,87 @@
+# Declarative KafkaTopic resources managed by the Strimzi Topic Operator.
+# These topics are used by the Kates platform for test lifecycle events,
+# results, and internal coordination.
+
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: kates-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "172800000"
+    min.insync.replicas: "2"
+    cleanup.policy: delete
+    segment.bytes: "1073741824"
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: kates-results
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    retention.ms: "604800000"
+    min.insync.replicas: "2"
+    cleanup.policy: delete
+    segment.bytes: "1073741824"
+    compression.type: lz4
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: kates-metrics
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: "86400000"
+    min.insync.replicas: "2"
+    cleanup.policy: delete
+    compression.type: lz4
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: kates-audit
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+spec:
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: "2592000000"
+    min.insync.replicas: "2"
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: kates-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+spec:
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: "-1"
+    min.insync.replicas: "2"
+    cleanup.policy: compact

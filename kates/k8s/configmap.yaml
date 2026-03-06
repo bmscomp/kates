@@ -10,6 +10,7 @@ metadata:
 data:
   # Kafka cluster
   KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
+  KATES_KAFKA_SASL_USERNAME: "kates-backend"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
 
   # Benchmark engine (native | trogdor)
@@ -20,7 +21,7 @@ data:
   QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres.kates.svc:5432/kates"
   QUARKUS_DATASOURCE_USERNAME: "kates"
   QUARKUS_DATASOURCE_PASSWORD: "kates"
-  QUARKUS_DATASOURCE_JDBC_MAX_SIZE: "16"
+  QUARKUS_DATASOURCE_JDBC_MAX_SIZE: "20"
   QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: "none"
   QUARKUS_HIBERNATE_ORM_LOG_SQL: "false"
   QUARKUS_FLYWAY_MIGRATE_AT_START: "true"

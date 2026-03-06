@@ -192,12 +192,14 @@ kubectl describe pod <pod-name> -n <namespace> | grep -A5 Events
 |------|---------|
 | `images.env` | Central image manifest (all image:tag definitions) |
 | `config/cluster.yaml` | Kind cluster topology (3 nodes, 3 zones) |
-| `config/monitoring.yaml` | Prometheus + Grafana Helm values |
-| `config/kafka.yaml` | Kafka KRaft cluster + node pools |
-| `config/kafka-ui.yaml` | Kafka UI deployment manifest |
-| `config/apicurio-values-offline.yaml` | Apicurio Registry Helm values |
-| `config/litmus-values.yaml` | LitmusChaos Helm values |
-| `config/storage-classes.yaml` | Zone-specific storage classes |
+| `config/kafka/` | Kafka cluster, metrics, users, topics, alerts, rebalance, backup, drain cleaner |
+| `config/kafka-connect/` | Kafka Connect cluster, MirrorMaker 2 |
+| `config/kafka-ui/` | Kafka UI deployment manifest |
+| `config/apicurio/` | Apicurio Registry Helm values |
+| `config/monitoring/` | Prometheus + Grafana values, dashboards |
+| `config/litmus/` | LitmusChaos values, experiments, RBAC |
+| `config/storage/` | Zone-specific storage classes |
+| `config/velero/` | Velero + MinIO Helm values |
 
 ## Kates CLI
 

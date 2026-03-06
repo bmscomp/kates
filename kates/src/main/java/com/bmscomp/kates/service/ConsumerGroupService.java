@@ -40,19 +40,12 @@ public class ConsumerGroupService {
                     .all()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            List<String> groupIds = groups.stream().map(GroupListing::groupId).toList();
-
-            Map<String, ConsumerGroupDescription> descriptions = groupIds.isEmpty()
-                    ? Map.of()
-                    : client.describeConsumerGroups(groupIds).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
             List<Map<String, Object>> result = new ArrayList<>();
             for (GroupListing listing : groups) {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("groupId", listing.groupId());
-                ConsumerGroupDescription desc = descriptions.get(listing.groupId());
-                item.put("state", desc != null ? desc.groupState().toString() : "UNKNOWN");
-                item.put("members", desc != null ? desc.members().size() : 0);
+                item.put("state", listing.groupState().isPresent()
+                        ? listing.groupState().get().toString() : "UNKNOWN");
                 result.add(item);
             }
             return result;

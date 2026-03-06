@@ -21,7 +21,7 @@ ensure_namespace ${NAMESPACE}
 info "Installing MinIO..."
 helm upgrade --install minio "${CHARTS_DIR}/minio" \
   --namespace ${NAMESPACE} \
-  --values config/minio-values.yaml \
+  --values config/velero/minio-values.yaml \
   --wait \
   --timeout 5m
 
@@ -30,7 +30,7 @@ info "MinIO deployed successfully."
 info "Installing Velero..."
 helm upgrade --install velero "${CHARTS_DIR}/velero" \
   --namespace ${NAMESPACE} \
-  --values config/velero-values.yaml \
+  --values config/velero/velero-values.yaml \
   --wait \
   --timeout 5m
 

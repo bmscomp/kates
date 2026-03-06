@@ -19,6 +19,7 @@ import com.bmscomp.kates.domain.TestType;
 
 @Entity
 @Table(name = "test_runs")
+@jakarta.persistence.Cacheable
 public class TestRunEntity {
 
     @Id

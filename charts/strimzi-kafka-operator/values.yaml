@@ -10,7 +10,7 @@ watchAnyNamespace: false
 
 defaultImageRegistry: quay.io
 defaultImageRepository: strimzi
-defaultImageTag: 0.50.1
+defaultImageTag: 0.51.0
 
 image:
   registry: ""
@@ -58,7 +58,7 @@ leaderElection:
 
 # https://kubernetes.io/docs/tasks/run-application/configure-pdb/
 podDisruptionBudget:
-  enabled: false
+  enabled: true
   # The PDB definition three attributes to control the availability requirements:
   # minAvailable or maxUnavailable (mutually exclusive).
   # unhealthyPodEvictionPolicy
@@ -103,8 +103,8 @@ operatorNetworkPolicy:
 # If you are using the grafana dashboard sidecar,
 # you can import some default dashboards here
 dashboards:
-  enabled: false
-  namespace: ~
+  enabled: true
+  namespace: monitoring
   label: grafana_dashboard # this is the default value from the grafana chart
   labelValue: "1" # this is the default value from the grafana chart
   annotations: {}
