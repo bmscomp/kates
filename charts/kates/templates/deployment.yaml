@@ -52,6 +52,9 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
       {{- end }}
       containers:
       - name: kates
@@ -86,22 +89,26 @@ spec:
         {{- end }}
         startupProbe:
           httpGet:
-            path: /q/health/started
+            path: {{ .Values.probes.startup.path | default "/q/health/started" }}
             port: 8080
-          failureThreshold: 30
-          periodSeconds: 2
+          failureThreshold: {{ .Values.probes.startup.failureThreshold | default 30 }}
+          periodSeconds: {{ .Values.probes.startup.periodSeconds | default 2 }}
         readinessProbe:
           httpGet:
-            path: /api/health
+            path: {{ .Values.probes.readiness.path | default "/api/health" }}
             port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 5 }}
+          periodSeconds: {{ .Values.probes.readiness.periodSeconds | default 10 }}
         livenessProbe:
           httpGet:
-            path: /q/health/live
+            path: {{ .Values.probes.liveness.path | default "/q/health/live" }}
             port: 8080
-          initialDelaySeconds: 15
-          periodSeconds: 30
+          initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 15 }}
+          periodSeconds: {{ .Values.probes.liveness.periodSeconds | default 30 }}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh", "-c", "sleep {{ .Values.lifecycle.preStopSleepSeconds | default 5 }}"]
       volumes:
       - name: tmp
         emptyDir: {}

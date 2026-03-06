@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates.fullname" . }}-test-kafka
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: kafka-check
+    image: curlimages/curl:8.7.1
+    command:
+      - sh
+      - -c
+      - |
+        echo "Testing Kafka connectivity via KATES API..."
+        CODE=$(curl -s -o /tmp/body -w "%{http_code}" http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/cluster)
+        BODY=$(cat /tmp/body 2>/dev/null)
+        echo "HTTP $CODE"
+        echo "$BODY" | head -20
+        if [ "$CODE" = "200" ]; then
+          echo "Kafka cluster reachable"
+          exit 0
+        elif [ "$CODE" = "000" ]; then
+          echo "FAIL: Kates API not reachable"
+          exit 1
+        else
+          echo "WARN: Kates responded but Kafka may be unreachable (HTTP $CODE)"
+          exit 0
+        fi

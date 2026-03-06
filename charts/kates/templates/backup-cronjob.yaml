@@ -63,5 +63,28 @@ spec:
               {{- toYaml .Values.backup.resources | nindent 14 }}
           volumes:
             - name: backup-storage
+              {{- if .Values.backup.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ .Values.backup.persistence.existingClaim | default (printf "%s-backup" (include "kates.fullname" .)) }}
+              {{- else }}
               emptyDir: {}
+              {{- end }}
+---
+{{- if and .Values.backup.persistence.enabled (not .Values.backup.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kates.fullname" . }}-backup
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.backup.persistence.storageClass }}
+  storageClassName: {{ .Values.backup.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.persistence.size | default "5Gi" }}
+{{- end }}
 {{- end }}

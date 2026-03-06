@@ -15,6 +15,10 @@ serviceAccount:
   annotations: {}
   automount: true
 
+rbac:
+  create: true
+  extraRules: []
+
 podAnnotations: {}
 podLabels: {}
 
@@ -105,6 +109,23 @@ extraEnv: []
 extraVolumes: []
 extraVolumeMounts: []
 
+probes:
+  startup:
+    path: /q/health/started
+    failureThreshold: 30
+    periodSeconds: 2
+  readiness:
+    path: /api/health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  liveness:
+    path: /q/health/live
+    initialDelaySeconds: 15
+    periodSeconds: 30
+
+lifecycle:
+  preStopSleepSeconds: 5
+
 initContainers:
   waitForPostgres:
     image: busybox:1.36
@@ -136,6 +157,12 @@ networkPolicy:
       ports:
         - port: 8080
           protocol: TCP
+  kafka:
+    namespace: kafka
+    port: 9092
+  prometheus:
+    namespace: monitoring
+    port: 9090
   egressRules: []
 
 metrics:
@@ -280,6 +307,11 @@ backup:
   schedule: "0 2 * * *"
   image: postgres:16-alpine
   retention: 7
+  persistence:
+    enabled: false
+    existingClaim: ""
+    storageClass: ""
+    size: 5Gi
   resources:
     requests:
       memory: "64Mi"

@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates.fullname" . }}-test-api
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: api-check
+    image: curlimages/curl:8.7.1
+    command:
+      - sh
+      - -c
+      - |
+        PASS=0
+        FAIL=0
+        check() {
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "$1")
+          if [ "$CODE" = "$2" ]; then
+            echo "PASS $1 -> $CODE"
+            PASS=$((PASS+1))
+          else
+            echo "FAIL $1 -> $CODE (expected $2)"
+            FAIL=$((FAIL+1))
+          fi
+        }
+        BASE="http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}"
+        check "$BASE/q/health/live" 200
+        check "$BASE/q/health/ready" 200
+        check "$BASE/q/health/started" 200
+        check "$BASE/q/openapi" 200
+        check "$BASE/api/health" 200
+        echo ""
+        echo "Results: $PASS passed, $FAIL failed"
+        [ "$FAIL" -eq 0 ]

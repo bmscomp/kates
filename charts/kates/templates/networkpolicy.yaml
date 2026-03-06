@@ -34,6 +34,20 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.kafka.namespace | default "kafka" }}
+      ports:
+        - port: {{ .Values.networkPolicy.kafka.port | default 9092 }}
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.prometheus.namespace | default "monitoring" }}
+      ports:
+        - port: {{ .Values.networkPolicy.prometheus.port | default 9090 }}
+          protocol: TCP
     {{- with .Values.networkPolicy.egressRules }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
