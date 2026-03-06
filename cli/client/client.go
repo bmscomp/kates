@@ -166,7 +166,17 @@ func (c *Client) ClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 }
 
 func (c *Client) Topics(ctx context.Context) ([]string, error) {
-	return get[[]string](c, ctx, "/api/cluster/topics")
+	var paged struct {
+		Items []string `json:"items"`
+	}
+	data, err := c.getBytes(ctx, "/api/cluster/topics")
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &paged); err != nil {
+		return nil, err
+	}
+	return paged.Items, nil
 }
 
 func (c *Client) TopicDetail(ctx context.Context, name string) (*TopicDetail, error) {
@@ -174,7 +184,17 @@ func (c *Client) TopicDetail(ctx context.Context, name string) (*TopicDetail, er
 }
 
 func (c *Client) ConsumerGroups(ctx context.Context) ([]ConsumerGroupSummary, error) {
-	return get[[]ConsumerGroupSummary](c, ctx, "/api/cluster/groups")
+	var paged struct {
+		Items []ConsumerGroupSummary `json:"items"`
+	}
+	data, err := c.getBytes(ctx, "/api/cluster/groups")
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &paged); err != nil {
+		return nil, err
+	}
+	return paged.Items, nil
 }
 
 func (c *Client) ConsumerGroupDetail(ctx context.Context, id string) (*ConsumerGroupDetail, error) {

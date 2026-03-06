@@ -90,7 +90,9 @@ func TestClusterInfo(t *testing.T) {
 }
 
 func TestTopics(t *testing.T) {
-	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/topics", []string{"topic-1", "topic-2"}))
+	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/topics", map[string]interface{}{
+		"page": 0, "size": 50, "total": 2, "count": 2, "items": []string{"topic-1", "topic-2"},
+	}))
 	topics, err := c.Topics(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -127,9 +129,12 @@ func TestTopicDetail(t *testing.T) {
 }
 
 func TestConsumerGroups(t *testing.T) {
-	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/groups", []ConsumerGroupSummary{
-		{GroupID: "group-1", State: "STABLE", Members: 3},
-		{GroupID: "group-2", State: "EMPTY", Members: 0},
+	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/groups", map[string]interface{}{
+		"page": 0, "size": 50, "total": 2, "count": 2,
+		"items": []ConsumerGroupSummary{
+			{GroupID: "group-1", State: "STABLE", Members: 3},
+			{GroupID: "group-2", State: "EMPTY", Members: 0},
+		},
 	}))
 	groups, err := c.ConsumerGroups(context.Background())
 	if err != nil {
@@ -870,7 +875,9 @@ func TestHTTPError_ConnectionRefused(t *testing.T) {
 }
 
 func TestTopics_Empty(t *testing.T) {
-	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/topics", []string{}))
+	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/topics", map[string]interface{}{
+		"page": 0, "size": 50, "total": 0, "count": 0, "items": []string{},
+	}))
 	topics, err := c.Topics(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -881,7 +888,9 @@ func TestTopics_Empty(t *testing.T) {
 }
 
 func TestConsumerGroups_Empty(t *testing.T) {
-	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/groups", []ConsumerGroupSummary{}))
+	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/groups", map[string]interface{}{
+		"page": 0, "size": 50, "total": 0, "count": 0, "items": []ConsumerGroupSummary{},
+	}))
 	groups, err := c.ConsumerGroups(context.Background())
 	if err != nil {
 		t.Fatal(err)
