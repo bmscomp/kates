@@ -17,12 +17,10 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class KafkaClientService {
 
-    private static final Logger LOG = Logger.getLogger(KafkaClientService.class);
     private static final int TIMEOUT_SECONDS = 30;
 
     private final String bootstrapServers;

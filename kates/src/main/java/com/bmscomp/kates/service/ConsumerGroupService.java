@@ -20,12 +20,10 @@ import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
-import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class ConsumerGroupService {
 
-    private static final Logger LOG = Logger.getLogger(ConsumerGroupService.class);
     private static final int TIMEOUT_SECONDS = 30;
 
     private final KafkaAdminService adminService;

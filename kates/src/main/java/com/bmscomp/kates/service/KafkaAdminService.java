@@ -1,10 +1,6 @@
 package com.bmscomp.kates.service;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 import jakarta.annotation.PostConstruct;
@@ -14,15 +10,12 @@ import jakarta.inject.Inject;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.TopicDescription;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import com.bmscomp.kates.report.ClusterSnapshot;
-
 /**
  * Manages the shared Kafka AdminClient lifecycle.
- * Business operations are delegated to focused services:
+ * Business operations live in focused services:
  * {@link TopicService}, {@link ConsumerGroupService},
  * {@link ClusterHealthService}, {@link KafkaClientService}.
  */
@@ -34,18 +27,6 @@ public class KafkaAdminService {
     private final String bootstrapServers;
     private volatile AdminClient sharedClient;
     private final ReentrantLock clientLock = new ReentrantLock();
-
-    @Inject
-    TopicService topicService;
-
-    @Inject
-    ConsumerGroupService consumerGroupService;
-
-    @Inject
-    ClusterHealthService clusterHealthService;
-
-    @Inject
-    KafkaClientService kafkaClientService;
 
     @Inject
     public KafkaAdminService(@ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
@@ -99,90 +80,5 @@ public class KafkaAdminService {
 
     public String getBootstrapServers() {
         return bootstrapServers;
-    }
-
-    public void evictCache() {
-        topicService.evictCache();
-        clusterHealthService.evictCache();
-    }
-
-    @Deprecated(forRemoval = true)
-    public void createTopic(String name, int partitions, int replicationFactor, Map<String, String> configs) {
-        topicService.createTopic(name, partitions, replicationFactor, configs);
-    }
-
-    @Deprecated(forRemoval = true)
-    public void deleteTopic(String name) {
-        topicService.deleteTopic(name);
-    }
-
-    @Deprecated(forRemoval = true)
-    public void alterTopicConfig(String name, Map<String, String> configs) {
-        topicService.alterTopicConfig(name, configs);
-    }
-
-    @Deprecated(forRemoval = true)
-    public Set<String> listTopics() {
-        return topicService.listTopics();
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, TopicDescription> describeTopics(Collection<String> topicNames) {
-        return topicService.describeTopics(topicNames);
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, Object> describeTopicDetail(String topicName) {
-        return topicService.describeTopicDetail(topicName);
-    }
-
-    @Deprecated(forRemoval = true)
-    public List<Map<String, Object>> listConsumerGroups() {
-        return consumerGroupService.listConsumerGroups();
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, Object> describeConsumerGroup(String groupId) {
-        return consumerGroupService.describeConsumerGroup(groupId);
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, Object> describeCluster() {
-        return clusterHealthService.describeCluster();
-    }
-
-    @Deprecated(forRemoval = true)
-    public boolean isReachable() {
-        return clusterHealthService.isReachable();
-    }
-
-    @Deprecated(forRemoval = true)
-    public int brokerCount() {
-        return clusterHealthService.brokerCount();
-    }
-
-    @Deprecated(forRemoval = true)
-    public List<Map<String, Object>> describeBrokerConfigs(int brokerId) {
-        return clusterHealthService.describeBrokerConfigs(brokerId);
-    }
-
-    @Deprecated(forRemoval = true)
-    public ClusterSnapshot captureSnapshot(String topicName) {
-        return clusterHealthService.captureSnapshot(topicName);
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, Object> clusterHealthCheck() {
-        return clusterHealthService.clusterHealthCheck();
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, Object> produceRecord(String topic, String key, String value) {
-        return kafkaClientService.produceRecord(topic, key, value);
-    }
-
-    @Deprecated(forRemoval = true)
-    public List<Map<String, Object>> fetchRecords(String topic, String offsetReset, int limit) {
-        return kafkaClientService.fetchRecords(topic, offsetReset, limit);
     }
 }

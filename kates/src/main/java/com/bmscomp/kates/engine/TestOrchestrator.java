@@ -122,6 +122,9 @@ public class TestOrchestrator {
     }
 
     private void executeAsync(TestRun run, TestType type, TestSpec spec, String backendName, BenchmarkBackend backend) {
+        org.jboss.logging.MDC.put("runId", run.getId());
+        org.jboss.logging.MDC.put("testType", type.name());
+        org.jboss.logging.MDC.put("backend", backendName);
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
@@ -176,6 +179,9 @@ public class TestOrchestrator {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
         }
+        org.jboss.logging.MDC.remove("runId");
+        org.jboss.logging.MDC.remove("testType");
+        org.jboss.logging.MDC.remove("backend");
     }
 
     /**
