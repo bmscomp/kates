@@ -78,8 +78,10 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
-        {{- with .Values.extraVolumeMounts }}
         volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- with .Values.extraVolumeMounts }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
         startupProbe:
@@ -100,8 +102,10 @@ spec:
             port: 8080
           initialDelaySeconds: 15
           periodSeconds: 30
-      {{- with .Values.extraVolumes }}
       volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 6 }}
       {{- end }}
       {{- with .Values.nodeSelector }}

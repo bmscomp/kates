@@ -131,6 +131,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
         }
 
+        props.put(ProducerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
         task.getProducerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
@@ -203,6 +204,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
         task.getConsumerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
@@ -236,6 +238,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
         }
 
+        props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
         task.getConsumerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();

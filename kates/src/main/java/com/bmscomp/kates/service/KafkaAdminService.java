@@ -89,6 +89,7 @@ public class KafkaAdminService {
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "15000");
         props.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "30000");
+        props.put(AdminClientConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
         return AdminClient.create(props);
     }
 
@@ -546,6 +547,7 @@ public class KafkaAdminService {
                 "org.apache.kafka.common.serialization.StringSerializer");
         props.put(org.apache.kafka.clients.producer.ProducerConfig.ACKS_CONFIG, "all");
         props.put(org.apache.kafka.clients.producer.ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "15000");
+        props.put(org.apache.kafka.clients.producer.ProducerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
 
         try (var producer = new org.apache.kafka.clients.producer.KafkaProducer<String, String>(props)) {
             var record = new org.apache.kafka.clients.producer.ProducerRecord<>(topic, key, value);
@@ -578,6 +580,7 @@ public class KafkaAdminService {
                 "earliest".equals(offsetReset) ? "earliest" : "latest");
         props.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit);
+        props.put(org.apache.kafka.clients.consumer.ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
 
         List<Map<String, Object>> records = new ArrayList<>();
         try (var consumer = new org.apache.kafka.clients.consumer.KafkaConsumer<String, String>(props)) {
