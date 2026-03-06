@@ -7,6 +7,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+
 import jakarta.enterprise.context.ApplicationScoped;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,11 +23,26 @@ import com.bmscomp.kates.domain.TestRun;
 public class WebhookService {
 
     private static final Logger LOG = Logger.getLogger(WebhookService.class);
-    private static final HttpClient HTTP =
-            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private volatile HttpClient httpClient;
     private final List<WebhookRegistration> registrations = new CopyOnWriteArrayList<>();
+
+    private HttpClient http() {
+        HttpClient client = httpClient;
+        if (client == null) {
+            synchronized (this) {
+                client = httpClient;
+                if (client == null) {
+                    client = HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofSeconds(5))
+                            .build();
+                    httpClient = client;
+                }
+            }
+        }
+        return client;
+    }
 
     public void register(WebhookRegistration registration) {
         registrations.add(registration);
@@ -74,7 +90,7 @@ public class WebhookService {
                             .timeout(Duration.ofSeconds(10))
                             .build();
 
-                    HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+                    HttpResponse<String> response = http().send(request, HttpResponse.BodyHandlers.ofString());
                     if (response.statusCode() >= 200 && response.statusCode() < 300) {
                         LOG.debugf("Webhook %s delivered (attempt %d): %d", reg.name(), attempt, response.statusCode());
                         return;
@@ -102,7 +118,9 @@ public class WebhookService {
         });
     }
 
-    public record WebhookRegistration(String name, String url, String events) {}
+    public record WebhookRegistration(String name, String url, String events) {
+    }
 
-    public record WebhookPayload(String event, String testId, String testType, String status, String timestamp) {}
+    public record WebhookPayload(String event, String testId, String testType, String status, String timestamp) {
+    }
 }
