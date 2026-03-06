@@ -18,18 +18,25 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
+import com.bmscomp.kates.service.ConsumerGroupService;
+import com.bmscomp.kates.service.TopicService;
 
 @Path("/api/cluster")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Cluster")
 public class ClusterResource {
 
-    private final KafkaAdminService kafkaAdmin;
+    private final TopicService topicService;
+    private final ConsumerGroupService consumerGroupService;
+    private final ClusterHealthService clusterHealthService;
 
     @Inject
-    public ClusterResource(KafkaAdminService kafkaAdmin) {
-        this.kafkaAdmin = kafkaAdmin;
+    public ClusterResource(TopicService topicService, ConsumerGroupService consumerGroupService,
+                           ClusterHealthService clusterHealthService) {
+        this.topicService = topicService;
+        this.consumerGroupService = consumerGroupService;
+        this.clusterHealthService = clusterHealthService;
     }
 
     @GET
@@ -38,7 +45,7 @@ public class ClusterResource {
     @APIResponse(responseCode = "200", description = "Cluster information")
     public Response getClusterInfo() {
         try {
-            Map<String, Object> info = kafkaAdmin.describeCluster();
+            Map<String, Object> info = clusterHealthService.describeCluster();
             return Response.ok(info).build();
         } catch (Exception e) {
             return Response.serverError()
@@ -57,7 +64,7 @@ public class ClusterResource {
             @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
         try {
             int effectiveSize = Math.min(Math.max(size, 1), 200);
-            Set<String> allTopics = kafkaAdmin.listTopics();
+            Set<String> allTopics = topicService.listTopics();
             List<String> sorted = allTopics.stream().sorted().toList();
             int start = Math.min(page * effectiveSize, sorted.size());
             int end = Math.min(start + effectiveSize, sorted.size());
@@ -88,7 +95,7 @@ public class ClusterResource {
     @APIResponse(responseCode = "404", description = "Topic not found")
     public Response getTopicDetail(@Parameter(description = "Topic name") @PathParam("name") String name) {
         try {
-            Map<String, Object> detail = kafkaAdmin.describeTopicDetail(name);
+            Map<String, Object> detail = topicService.describeTopicDetail(name);
             return Response.ok(detail).build();
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
@@ -111,7 +118,7 @@ public class ClusterResource {
             @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size) {
         try {
             int effectiveSize = Math.min(Math.max(size, 1), 200);
-            List<Map<String, Object>> allGroups = kafkaAdmin.listConsumerGroups();
+            List<Map<String, Object>> allGroups = consumerGroupService.listConsumerGroups();
             int start = Math.min(page * effectiveSize, allGroups.size());
             int end = Math.min(start + effectiveSize, allGroups.size());
             List<Map<String, Object>> paged = allGroups.subList(start, end);
@@ -142,7 +149,7 @@ public class ClusterResource {
     @APIResponse(responseCode = "404", description = "Consumer group not found")
     public Response getConsumerGroupDetail(@Parameter(description = "Group ID") @PathParam("id") String id) {
         try {
-            Map<String, Object> detail = kafkaAdmin.describeConsumerGroup(id);
+            Map<String, Object> detail = consumerGroupService.describeConsumerGroup(id);
             return Response.ok(detail).build();
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
@@ -165,7 +172,7 @@ public class ClusterResource {
     @APIResponse(responseCode = "200", description = "Broker configuration")
     public Response getBrokerConfigs(@Parameter(description = "Broker ID") @PathParam("id") int id) {
         try {
-            return Response.ok(kafkaAdmin.describeBrokerConfigs(id)).build();
+            return Response.ok(clusterHealthService.describeBrokerConfigs(id)).build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(
@@ -178,7 +185,7 @@ public class ClusterResource {
     @Path("/check")
     public Response clusterCheck() {
         try {
-            return Response.ok(kafkaAdmin.clusterHealthCheck()).build();
+            return Response.ok(clusterHealthService.clusterHealthCheck()).build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))

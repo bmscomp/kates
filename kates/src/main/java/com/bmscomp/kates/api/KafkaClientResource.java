@@ -20,7 +20,10 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
+import com.bmscomp.kates.service.ConsumerGroupService;
+import com.bmscomp.kates.service.KafkaClientService;
+import com.bmscomp.kates.service.TopicService;
 
 /**
  * Interactive Kafka client endpoints: produce, consume, and full topic/broker inspection.
@@ -32,11 +35,18 @@ import com.bmscomp.kates.service.KafkaAdminService;
 @Consumes(MediaType.APPLICATION_JSON)
 public class KafkaClientResource {
 
-    private final KafkaAdminService kafkaAdmin;
+    private final TopicService topicService;
+    private final ConsumerGroupService consumerGroupService;
+    private final ClusterHealthService clusterHealthService;
+    private final KafkaClientService kafkaClientService;
 
     @Inject
-    public KafkaClientResource(KafkaAdminService kafkaAdmin) {
-        this.kafkaAdmin = kafkaAdmin;
+    public KafkaClientResource(TopicService topicService, ConsumerGroupService consumerGroupService,
+                               ClusterHealthService clusterHealthService, KafkaClientService kafkaClientService) {
+        this.topicService = topicService;
+        this.consumerGroupService = consumerGroupService;
+        this.clusterHealthService = clusterHealthService;
+        this.kafkaClientService = kafkaClientService;
     }
 
     @GET
@@ -44,7 +54,7 @@ public class KafkaClientResource {
     @Operation(summary = "List brokers with full metadata")
     public Response brokers() {
         try {
-            Map<String, Object> info = kafkaAdmin.describeCluster();
+            Map<String, Object> info = clusterHealthService.describeCluster();
             return Response.ok(info).build();
         } catch (Exception e) {
             return Response.serverError()
@@ -58,11 +68,11 @@ public class KafkaClientResource {
     @Operation(summary = "List all topics with partition and replication details")
     public Response topics() {
         try {
-            var topicNames = kafkaAdmin.listTopics();
+            var topicNames = topicService.listTopics();
             if (topicNames.isEmpty()) {
                 return Response.ok(List.of()).build();
             }
-            var descs = kafkaAdmin.describeTopics(topicNames);
+            var descs = topicService.describeTopics(topicNames);
             var result = descs.values().stream()
                     .sorted(java.util.Comparator.comparing(t -> t.name()))
                     .map(desc -> {
@@ -94,7 +104,7 @@ public class KafkaClientResource {
     @Operation(summary = "Describe a topic in detail")
     public Response topicDetail(@PathParam("name") String name) {
         try {
-            return Response.ok(kafkaAdmin.describeTopicDetail(name)).build();
+            return Response.ok(topicService.describeTopicDetail(name)).build();
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
                 return Response.status(404)
@@ -112,7 +122,7 @@ public class KafkaClientResource {
     @Operation(summary = "List consumer groups with state and member count")
     public Response groups() {
         try {
-            return Response.ok(kafkaAdmin.listConsumerGroups()).build();
+            return Response.ok(consumerGroupService.listConsumerGroups()).build();
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Kafka Error", e.getMessage()))
@@ -125,7 +135,7 @@ public class KafkaClientResource {
     @Operation(summary = "Describe a consumer group with offsets and lag")
     public Response groupDetail(@PathParam("id") String id) {
         try {
-            return Response.ok(kafkaAdmin.describeConsumerGroup(id)).build();
+            return Response.ok(consumerGroupService.describeConsumerGroup(id)).build();
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
                 return Response.status(404)
@@ -148,7 +158,7 @@ public class KafkaClientResource {
             @Parameter(description = "Maximum records to return") @QueryParam("limit") @DefaultValue("20") int limit) {
         try {
             int safeLimit = Math.min(Math.max(1, limit), 200);
-            List<Map<String, Object>> records = kafkaAdmin.fetchRecords(topic, offset, safeLimit);
+            List<Map<String, Object>> records = kafkaClientService.fetchRecords(topic, offset, safeLimit);
             return Response.ok(records).build();
         } catch (Exception e) {
             return Response.serverError()
@@ -168,7 +178,7 @@ public class KafkaClientResource {
                         .entity(ApiError.of(400, "Bad Request", "Request body with 'value' is required"))
                         .build();
             }
-            Map<String, Object> meta = kafkaAdmin.produceRecord(topic, request.key(), request.value());
+            Map<String, Object> meta = kafkaClientService.produceRecord(topic, request.key(), request.value());
             return Response.status(201).entity(meta).build();
         } catch (Exception e) {
             return Response.serverError()
@@ -191,8 +201,8 @@ public class KafkaClientResource {
             }
             int partitions = request.partitions() > 0 ? request.partitions() : 1;
             int rf = request.replicationFactor() > 0 ? request.replicationFactor() : 1;
-            kafkaAdmin.createTopic(request.name(), partitions, rf, request.configs());
-            var detail = kafkaAdmin.describeTopicDetail(request.name());
+            topicService.createTopic(request.name(), partitions, rf, request.configs());
+            var detail = topicService.describeTopicDetail(request.name());
             return Response.status(201).entity(detail).build();
         } catch (Exception e) {
             return Response.serverError()
@@ -214,8 +224,8 @@ public class KafkaClientResource {
                         .entity(ApiError.of(400, "Bad Request", "'configs' map is required"))
                         .build();
             }
-            kafkaAdmin.alterTopicConfig(name, request.configs());
-            var detail = kafkaAdmin.describeTopicDetail(name);
+            topicService.alterTopicConfig(name, request.configs());
+            var detail = topicService.describeTopicDetail(name);
             return Response.ok(detail).build();
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("not found")) {
@@ -234,7 +244,7 @@ public class KafkaClientResource {
     @Operation(summary = "Delete a topic")
     public Response deleteTopic(@Parameter(description = "Topic name") @PathParam("name") String name) {
         try {
-            kafkaAdmin.deleteTopic(name);
+            topicService.deleteTopic(name);
             return Response.noContent().build();
         } catch (Exception e) {
             return Response.serverError()

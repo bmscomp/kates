@@ -6,7 +6,7 @@ import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Readiness;
 
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
 
 /**
  * Readiness probe: checks Kafka and database connectivity.
@@ -16,14 +16,14 @@ import com.bmscomp.kates.service.KafkaAdminService;
 public class KatesReadinessCheck implements HealthCheck {
 
     @Inject
-    KafkaAdminService kafkaAdmin;
+    ClusterHealthService clusterHealthService;
 
     @Inject
     jakarta.persistence.EntityManager em;
 
     @Override
     public HealthCheckResponse call() {
-        boolean kafkaOk = kafkaAdmin.isReachable();
+        boolean kafkaOk = clusterHealthService.isReachable();
         boolean dbOk = checkDatabase();
 
         var builder = HealthCheckResponse.named("kates-readiness");

@@ -36,7 +36,7 @@ class TestExecutionServiceTest {
     TrogdorClient trogdorClient;
 
     @InjectMock
-    KafkaAdminService kafkaAdmin;
+    TopicService topicService;
 
     @Inject
     EntityManager em;
@@ -45,7 +45,7 @@ class TestExecutionServiceTest {
 
     @BeforeEach
     void setUp() {
-        doNothing().when(kafkaAdmin).createTopic(anyString(), anyInt(), anyInt(), any());
+        doNothing().when(topicService).createTopic(anyString(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -55,7 +55,7 @@ class TestExecutionServiceTest {
 
         executionService.executeTest(request);
 
-        verify(kafkaAdmin, atLeastOnce()).createTopic(anyString(), anyInt(), anyInt(), any());
+        verify(topicService, atLeastOnce()).createTopic(anyString(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -185,7 +185,7 @@ class TestExecutionServiceTest {
 
         executionService.executeTest(createRequest(TestType.VOLUME));
 
-        verify(kafkaAdmin, atLeast(3)).createTopic(anyString(), anyInt(), anyInt(), any());
+        verify(topicService, atLeast(3)).createTopic(anyString(), anyInt(), anyInt(), any());
     }
 
     private CreateTestRequest createRequest(TestType type) {

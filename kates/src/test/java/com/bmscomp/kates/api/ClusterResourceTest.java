@@ -11,17 +11,21 @@ import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
+import com.bmscomp.kates.service.TopicService;
 
 @QuarkusTest
 class ClusterResourceTest {
 
     @InjectMock
-    KafkaAdminService kafkaAdmin;
+    ClusterHealthService clusterHealthService;
+
+    @InjectMock
+    TopicService topicService;
 
     @Test
     void clusterInfoReturnsSuccessfully() {
-        when(kafkaAdmin.describeCluster())
+        when(clusterHealthService.describeCluster())
                 .thenReturn(Map.of(
                         "clusterId",
                         "test-cluster-id",
@@ -40,7 +44,7 @@ class ClusterResourceTest {
 
     @Test
     void clusterInfoReturns500WhenUnreachable() {
-        when(kafkaAdmin.describeCluster()).thenThrow(new RuntimeException("Connection refused"));
+        when(clusterHealthService.describeCluster()).thenThrow(new RuntimeException("Connection refused"));
 
         given().when()
                 .get("/api/cluster/info")
@@ -52,7 +56,7 @@ class ClusterResourceTest {
 
     @Test
     void topicsReturnsListSuccessfully() {
-        when(kafkaAdmin.listTopics()).thenReturn(Set.of("topic-1", "topic-2", "topic-3"));
+        when(topicService.listTopics()).thenReturn(Set.of("topic-1", "topic-2", "topic-3"));
 
         given().when()
                 .get("/api/cluster/topics")
@@ -65,7 +69,7 @@ class ClusterResourceTest {
 
     @Test
     void topicsReturns500OnError() {
-        when(kafkaAdmin.listTopics()).thenThrow(new RuntimeException("Timeout"));
+        when(topicService.listTopics()).thenThrow(new RuntimeException("Timeout"));
 
         given().when()
                 .get("/api/cluster/topics")

@@ -26,18 +26,18 @@ public class TestExecutionService {
     private static final Logger LOG = Logger.getLogger(TestExecutionService.class);
 
     private final SpecFactory specFactory;
-    private final KafkaAdminService kafkaAdmin;
+    private final TopicService topicService;
     private final TestRunRepository repository;
     private final TrogdorClient trogdorClient;
 
     @Inject
     public TestExecutionService(
             SpecFactory specFactory,
-            KafkaAdminService kafkaAdmin,
+            TopicService topicService,
             TestRunRepository repository,
             @RestClient TrogdorClient trogdorClient) {
         this.specFactory = specFactory;
-        this.kafkaAdmin = kafkaAdmin;
+        this.topicService = topicService;
         this.repository = repository;
         this.trogdorClient = trogdorClient;
     }
@@ -166,12 +166,12 @@ public class TestExecutionService {
             topicConfig.put("max.message.bytes", "1048576");
         }
 
-        kafkaAdmin.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
+        topicService.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
 
         if (type == TestType.VOLUME) {
-            kafkaAdmin.createTopic(
+            topicService.createTopic(
                     topicName + "-large", spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
-            kafkaAdmin.createTopic(
+            topicService.createTopic(
                     topicName + "-count", spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
         }
     }

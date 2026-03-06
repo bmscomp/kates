@@ -13,7 +13,7 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
 
 /**
  * Server-side cost estimation using real cluster metadata.
@@ -24,7 +24,7 @@ import com.bmscomp.kates.service.KafkaAdminService;
 public class CostResource {
 
     @Inject
-    KafkaAdminService kafkaAdmin;
+    ClusterHealthService clusterHealthService;
 
     record CostRequest(String cloud, int records, int recordSize, int durationSeconds, int brokers, int replicas) {
 
@@ -64,7 +64,7 @@ public class CostResource {
         }
 
         int actualBrokers = req.brokers();
-        int clusterBrokers = kafkaAdmin.brokerCount();
+        int clusterBrokers = clusterHealthService.brokerCount();
         if (clusterBrokers > 0) {
             actualBrokers = clusterBrokers;
         }

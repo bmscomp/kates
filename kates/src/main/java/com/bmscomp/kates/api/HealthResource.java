@@ -14,14 +14,14 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.engine.TestOrchestrator;
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
 
 @Path("/api/health")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Health")
 public class HealthResource {
 
-    private final KafkaAdminService kafkaAdmin;
+    private final ClusterHealthService clusterHealthService;
     private final TestOrchestrator orchestrator;
     private final TestTypeDefaults typeDefaults;
     private final String defaultBackend;
@@ -29,12 +29,12 @@ public class HealthResource {
 
     @Inject
     public HealthResource(
-            KafkaAdminService kafkaAdmin,
+            ClusterHealthService clusterHealthService,
             TestOrchestrator orchestrator,
             TestTypeDefaults typeDefaults,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
-        this.kafkaAdmin = kafkaAdmin;
+        this.clusterHealthService = clusterHealthService;
         this.orchestrator = orchestrator;
         this.typeDefaults = typeDefaults;
         this.defaultBackend = defaultBackend;
@@ -46,7 +46,7 @@ public class HealthResource {
             summary = "Application health",
             description = "Returns engine status, Kafka connectivity, and test type configurations")
     public Map<String, Object> health() {
-        boolean kafkaReachable = kafkaAdmin.isReachable();
+        boolean kafkaReachable = clusterHealthService.isReachable();
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("status", kafkaReachable ? "UP" : "DEGRADED");

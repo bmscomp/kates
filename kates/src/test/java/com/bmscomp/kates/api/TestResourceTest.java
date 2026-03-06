@@ -10,7 +10,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.trogdor.TrogdorClient;
 
 @QuarkusTest
@@ -21,11 +21,11 @@ class TestResourceTest {
     TrogdorClient trogdorClient;
 
     @InjectMock
-    KafkaAdminService kafkaAdmin;
+    TopicService topicService;
 
     @BeforeEach
     void setUp() {
-        doNothing().when(kafkaAdmin).createTopic(anyString(), anyInt(), anyInt(), any());
+        doNothing().when(topicService).createTopic(anyString(), anyInt(), anyInt(), any());
     }
 
     @Test

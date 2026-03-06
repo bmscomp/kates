@@ -16,7 +16,7 @@ import com.bmscomp.kates.domain.SlaViolation;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.engine.KatesMetrics;
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
 import com.bmscomp.kates.util.MetricUtils;
 
 /**
@@ -27,7 +27,7 @@ import com.bmscomp.kates.util.MetricUtils;
 public class ReportGenerator {
 
     @Inject
-    KafkaAdminService kafkaAdminService;
+    ClusterHealthService clusterHealthService;
 
     @Inject
     KatesMetrics katesMetrics;
@@ -76,7 +76,7 @@ public class ReportGenerator {
         String topic = (run.getSpec() != null) ? run.getSpec().getTopic() : null;
         if (topic != null && !topic.isBlank()) {
             try {
-                ClusterSnapshot snapshot = kafkaAdminService.captureSnapshot(topic);
+                ClusterSnapshot snapshot = clusterHealthService.captureSnapshot(topic);
                 if (snapshot != null) {
                     report.setClusterSnapshot(snapshot);
                     report.setBrokerMetrics(computeBrokerMetrics(snapshot, report.getSummary()));

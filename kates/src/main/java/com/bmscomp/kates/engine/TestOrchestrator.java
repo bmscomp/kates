@@ -24,7 +24,7 @@ import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.export.LatencyHeatmapData;
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.webhook.WebhookService;
 
@@ -37,7 +37,7 @@ public class TestOrchestrator {
 
     private static final Logger LOG = Logger.getLogger(TestOrchestrator.class);
 
-    private final KafkaAdminService kafkaAdmin;
+    private final TopicService topicService;
     private final TestRunRepository repository;
     private final Instance<BenchmarkBackend> backends;
     private final TestTypeDefaults typeDefaults;
@@ -52,7 +52,7 @@ public class TestOrchestrator {
 
     @Inject
     public TestOrchestrator(
-            KafkaAdminService kafkaAdmin,
+            TopicService topicService,
             TestRunRepository repository,
             @Any Instance<BenchmarkBackend> backends,
             TestTypeDefaults typeDefaults,
@@ -62,7 +62,7 @@ public class TestOrchestrator {
             Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
-        this.kafkaAdmin = kafkaAdmin;
+        this.topicService = topicService;
         this.repository = repository;
         this.backends = backends;
         this.typeDefaults = typeDefaults;
@@ -602,7 +602,7 @@ public class TestOrchestrator {
             topicConfig.put("max.message.bytes", "1048576");
         }
 
-        kafkaAdmin.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
+        topicService.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
     }
 
     private TestResult applyStatus(TestResult result, BenchmarkStatus status) {

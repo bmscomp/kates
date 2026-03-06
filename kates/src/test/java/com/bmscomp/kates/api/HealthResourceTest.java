@@ -11,20 +11,20 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.engine.TestOrchestrator;
-import com.bmscomp.kates.service.KafkaAdminService;
+import com.bmscomp.kates.service.ClusterHealthService;
 
 @QuarkusTest
 class HealthResourceTest {
 
     @InjectMock
-    KafkaAdminService kafkaAdmin;
+    ClusterHealthService clusterHealthService;
 
     @InjectMock
     TestOrchestrator orchestrator;
 
     @Test
     void healthReturnsUpWithEngineAndPerTypeConfig() {
-        when(kafkaAdmin.isReachable()).thenReturn(true);
+        when(clusterHealthService.isReachable()).thenReturn(true);
         when(orchestrator.availableBackends()).thenReturn(List.of("native", "trogdor"));
 
         given().when()
@@ -54,7 +54,7 @@ class HealthResourceTest {
 
     @Test
     void healthReturnsDegradedWhenKafkaUnreachable() {
-        when(kafkaAdmin.isReachable()).thenReturn(false);
+        when(clusterHealthService.isReachable()).thenReturn(false);
         when(orchestrator.availableBackends()).thenReturn(List.of("native"));
 
         given().when()

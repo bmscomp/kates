@@ -17,7 +17,7 @@ import com.bmscomp.kates.domain.TestSpec;
 public class AdvisorService {
 
     @Inject
-    KafkaAdminService kafkaAdmin;
+    ClusterHealthService clusterHealthService;
 
     public record Recommendation(String severity, String title, String fix, String evidence) {}
 
@@ -41,7 +41,7 @@ public class AdvisorService {
             avgP99 /= count;
         }
 
-        int clusterBrokers = kafkaAdmin.brokerCount();
+        int clusterBrokers = clusterHealthService.brokerCount();
 
         if (spec.getBatchSize() > 0 && spec.getBatchSize() <= 16384 && avgThroughput > 10000) {
             rules.add(new Recommendation(
