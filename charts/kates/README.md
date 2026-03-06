@@ -2,6 +2,8 @@
 
 Install [Kates](https://github.com/klster/kates) — Kafka Advanced Testing & Engineering Suite — on any Kubernetes cluster.
 
+> **Schema validated** — `values.schema.json` catches invalid config at install time.
+
 ## Install
 
 ```bash
@@ -50,6 +52,10 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
 | `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
 | `networkPolicy.enabled` | `false` | Enable NetworkPolicy |
+| `networkPolicy.kafka.namespace` | `kafka` | Kafka egress target namespace |
+| `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
+| `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace |
+| `networkPolicy.prometheus.port` | `9090` | Prometheus egress target port |
 
 ### Security
 
@@ -60,6 +66,20 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
+| `rbac.create` | `true` | Create ClusterRole/ClusterRoleBinding for Litmus CRD access |
+| `rbac.extraRules` | `[]` | Additional RBAC rules to append |
+
+### Probes & Lifecycle
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `probes.startup.path` | `/q/health/started` | Startup probe path |
+| `probes.readiness.path` | `/api/health` | Readiness probe path |
+| `probes.liveness.path` | `/q/health/live` | Liveness probe path |
+| `probes.startup.failureThreshold` | `30` | Startup probe max failures |
+| `probes.readiness.periodSeconds` | `10` | Readiness check interval |
+| `probes.liveness.periodSeconds` | `30` | Liveness check interval |
+| `lifecycle.preStopSleepSeconds` | `5` | Pre-stop sleep for graceful drain |
 
 ### Scaling & Availability
 
@@ -102,6 +122,10 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `backup.enabled` | `false` | Enable PostgreSQL backup CronJob |
 | `backup.schedule` | `0 2 * * *` | Backup cron schedule |
 | `backup.retention` | `7` | Days to keep backups |
+| `backup.persistence.enabled` | `false` | Use PVC instead of emptyDir |
+| `backup.persistence.size` | `5Gi` | PVC size |
+| `backup.persistence.storageClass` | `""` | StorageClass (empty = default) |
+| `backup.persistence.existingClaim` | `""` | Use an existing PVC |
 | `migration.enabled` | `false` | Enable pre-upgrade migration Job |
 | `cleanup.enabled` | `false` | Enable test run cleanup CronJob |
 | `cleanup.schedule` | `0 4 * * 0` | Cleanup cron schedule |

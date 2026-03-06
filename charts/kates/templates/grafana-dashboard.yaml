@@ -13,63 +13,129 @@ data:
     {
       "annotations": { "list": [] },
       "editable": true,
-      "fiscalYearStartMonth": 0,
       "graphTooltip": 1,
-      "links": [],
       "panels": [
         {
           "title": "Active Test Runs",
           "type": "stat",
-          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
           "targets": [{ "expr": "kates_active_runs", "legendFormat": "active" }],
           "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 10 }] } } }
         },
         {
-          "title": "Request Rate (req/s)",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-          "targets": [{ "expr": "rate(http_server_requests_seconds_count{job=\"{{ include "kates.fullname" . }}\"}[5m])", "legendFormat": "{{`{{ method }}`}} {{`{{ uri }}`}}" }]
+          "title": "Uptime",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "targets": [{ "expr": "process_uptime_seconds{job=\"{{ include "kates.fullname" . }}\"}", "legendFormat": "" }],
+          "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
         },
         {
-          "title": "Request Latency P99 (ms)",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-          "targets": [{ "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job=\"{{ include "kates.fullname" . }}\"}[5m])) * 1000", "legendFormat": "p99" }]
+          "title": "Total Completed Tests",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "targets": [{ "expr": "kates_tests_completed_total", "legendFormat": "" }],
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] } } }
         },
         {
-          "title": "Error Rate (5xx/s)",
+          "title": "Request Rate",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-          "targets": [{ "expr": "rate(http_server_requests_seconds_count{job=\"{{ include "kates.fullname" . }}\", status=~\"5..\"}[5m])", "legendFormat": "5xx" }],
-          "fieldConfig": { "defaults": { "color": { "fixedColor": "red", "mode": "fixed" } } }
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+          "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{job=\"{{ include "kates.fullname" . }}\"}[5m])) by (method, uri)", "legendFormat": "{{`{{ method }}`}} {{`{{ uri }}`}}" }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 15 } } }
         },
         {
-          "title": "JVM Heap Usage",
+          "title": "Request Latency",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
           "targets": [
-            { "expr": "jvm_memory_used_bytes{job=\"{{ include "kates.fullname" . }}\", area=\"heap\"}", "legendFormat": "used" },
-            { "expr": "jvm_memory_max_bytes{job=\"{{ include "kates.fullname" . }}\", area=\"heap\"}", "legendFormat": "max" }
-          ]
+            { "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job=\"{{ include "kates.fullname" . }}\"}[5m])) by (le)) * 1000", "legendFormat": "p50" },
+            { "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"{{ include "kates.fullname" . }}\"}[5m])) by (le)) * 1000", "legendFormat": "p95" },
+            { "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=\"{{ include "kates.fullname" . }}\"}[5m])) by (le)) * 1000", "legendFormat": "p99" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms", "custom": { "fillOpacity": 10 } } }
         },
         {
-          "title": "Pod CPU Usage",
+          "title": "Error Rate (5xx)",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-          "targets": [{ "expr": "rate(container_cpu_usage_seconds_total{container=\"kates\"}[5m])", "legendFormat": "{{`{{ pod }}`}}" }]
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
+          "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{job=\"{{ include "kates.fullname" . }}\", status=~\"5..\"}[5m])) by (status)", "legendFormat": "{{`{{ status }}`}}" }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "color": { "fixedColor": "red", "mode": "fixed" }, "custom": { "fillOpacity": 30 } } }
         },
         {
-          "title": "Pod Memory Usage",
+          "title": "Kafka Admin Connections",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-          "targets": [{ "expr": "container_memory_working_set_bytes{container=\"kates\"}", "legendFormat": "{{`{{ pod }}`}}" }]
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
+          "targets": [
+            { "expr": "kafka_admin_client_connection_count{job=\"{{ include "kates.fullname" . }}\"}", "legendFormat": "connections" },
+            { "expr": "rate(kafka_admin_client_request_total{job=\"{{ include "kates.fullname" . }}\"}[5m])", "legendFormat": "requests/s" }
+          ],
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } } }
+        },
+        {
+          "title": "Benchmark Throughput (records/s)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+          "targets": [
+            { "expr": "kates_benchmark_throughput_records_per_sec", "legendFormat": "{{`{{ task_id }}`}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 20, "gradientMode": "scheme" } } }
+        },
+        {
+          "title": "Benchmark P99 Latency (ms)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+          "targets": [
+            { "expr": "kates_benchmark_p99_latency_ms", "legendFormat": "{{`{{ task_id }}`}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms", "custom": { "fillOpacity": 10 } } }
+        },
+        {
+          "title": "JVM Heap / Native Memory",
+          "type": "timeseries",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+          "targets": [
+            { "expr": "jvm_memory_used_bytes{job=\"{{ include "kates.fullname" . }}\", area=\"heap\"}", "legendFormat": "heap used" },
+            { "expr": "jvm_memory_committed_bytes{job=\"{{ include "kates.fullname" . }}\", area=\"heap\"}", "legendFormat": "heap committed" },
+            { "expr": "process_resident_memory_bytes{job=\"{{ include "kates.fullname" . }}\"}", "legendFormat": "RSS" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 10 } } }
+        },
+        {
+          "title": "CPU Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+          "targets": [
+            { "expr": "rate(process_cpu_seconds_total{job=\"{{ include "kates.fullname" . }}\"}[5m])", "legendFormat": "app cpu" },
+            { "expr": "rate(container_cpu_usage_seconds_total{container=\"kates\"}[5m])", "legendFormat": "{{`{{ pod }}`}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percentunit", "custom": { "fillOpacity": 10 } } }
+        },
+        {
+          "title": "Database Connections",
+          "type": "timeseries",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 33 },
+          "targets": [
+            { "expr": "agroal_pool_active_count{job=\"{{ include "kates.fullname" . }}\"}", "legendFormat": "active" },
+            { "expr": "agroal_pool_available_count{job=\"{{ include "kates.fullname" . }}\"}", "legendFormat": "available" },
+            { "expr": "agroal_pool_max_used_count{job=\"{{ include "kates.fullname" . }}\"}", "legendFormat": "max used" }
+          ],
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15 } } }
+        },
+        {
+          "title": "Vert.x Event Loop Latency",
+          "type": "timeseries",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 33 },
+          "targets": [
+            { "expr": "histogram_quantile(0.99, sum(rate(vertx_eventbus_delivery_time_seconds_bucket{job=\"{{ include "kates.fullname" . }}\"}[5m])) by (le))", "legendFormat": "p99 delivery" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } } }
         }
       ],
       "schemaVersion": 39,
-      "tags": ["kates", "kafka", "testing"],
+      "tags": ["kates", "kafka", "benchmarking", "chaos"],
       "templating": { "list": [] },
       "time": { "from": "now-1h", "to": "now" },
-      "title": "KATES Overview",
+      "title": "KATES — Kafka Testing Suite",
       "uid": "kates-overview"
     }
 {{- end }}
