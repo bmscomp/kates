@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push
 
 .DEFAULT_GOAL := help
 
@@ -225,6 +225,30 @@ kates-undeploy:
 	@echo "🗑️  Removing Kates..."
 	kubectl delete namespace kates --ignore-not-found
 	@echo "✅ Kates removed"
+
+CHART_REGISTRY ?= oci://ghcr.io/klster/charts
+CHART_DIR      := charts/kates
+CHART_VERSION  := $(shell grep '^version:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}')
+
+chart-lint:
+	@echo "🔍 Linting Kates chart..."
+	helm lint $(CHART_DIR) --strict
+	@if command -v ct >/dev/null 2>&1; then \
+		ct lint --config ct.yaml --charts $(CHART_DIR); \
+	else \
+		echo "⚠️  chart-testing (ct) not found — skipping ct lint"; \
+	fi
+	@echo "✅ Chart lint passed"
+
+chart-package:
+	@echo "📦 Packaging Kates chart v$(CHART_VERSION)..."
+	helm package $(CHART_DIR) --destination .build/
+	@echo "✅ Chart packaged: .build/kates-$(CHART_VERSION).tgz"
+
+chart-push: chart-package
+	@echo "🚀 Pushing to $(CHART_REGISTRY)..."
+	helm push .build/kates-$(CHART_VERSION).tgz $(CHART_REGISTRY)
+	@echo "✅ Chart pushed: $(CHART_REGISTRY)/kates:$(CHART_VERSION)"
 
 # Port Forwarding
 ports:

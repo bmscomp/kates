@@ -20,3 +20,9 @@ icon: https://raw.githubusercontent.com/klster/kates/main/docs/icon.png
 annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
+dependencies:
+  - name: postgresql
+    version: "16.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.useSubchart
+    alias: postgresqlHA

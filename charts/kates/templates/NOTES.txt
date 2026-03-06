@@ -1,5 +1,8 @@
 
-Kates has been deployed!
+╔══════════════════════════════════════════════════════════════╗
+║  KATES — Kafka Advanced Testing & Engineering Suite          ║
+║  Chart {{ .Chart.Version }}  •  App {{ .Chart.AppVersion }}  ║
+╚══════════════════════════════════════════════════════════════╝
 
 {{- if .Values.ingress.enabled }}
 
@@ -29,7 +32,7 @@ Kates has been deployed!
 
 {{- end }}
 
-  Configure the CLI:
+  Quick start:
     kates ctx set {{ .Release.Name }} --url <API_URL>
     kates ctx use {{ .Release.Name }}
     kates health
@@ -42,34 +45,39 @@ Kates has been deployed!
   Validate the deployment:
     helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
+  Status:
+    RBAC:       {{ if .Values.rbac.create }}enabled{{ else }}disabled{{ end }}
+    Engine:     {{ .Values.engine.defaultBackend }}
+    Database:   {{ if .Values.postgresql.enabled }}bundled PostgreSQL{{ else if .Values.externalDatabase.enabled }}external{{ else }}none{{ end }}
+    Replicas:   {{ if .Values.autoscaling.enabled }}auto ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }}){{ else }}{{ .Values.replicaCount }}{{ end }}
+
 {{- if .Values.metrics.serviceMonitor.enabled }}
 
   Monitoring:
     ServiceMonitor enabled — Prometheus will discover this service automatically.
   {{- if .Values.metrics.prometheusRule.enabled }}
-    PrometheusRule enabled — alerts (KatesDown, KatesHighErrorRate, KatesPodRestarting) are active.
+    PrometheusRule enabled — alerts (KatesDown, KatesHighErrorRate) are active.
   {{- end }}
   {{- if .Values.metrics.grafanaDashboard.enabled }}
-    Grafana dashboard will be auto-provisioned via sidecar.
+    Grafana dashboard auto-provisioned (13 panels).
   {{- end }}
 {{- end }}
 
 {{- if .Values.networkPolicy.enabled }}
 
   Network Policy:
-    Ingress and egress are restricted. Only allowed sources can reach port 8080.
+    Ingress/egress restricted. Kafka egress → {{ .Values.networkPolicy.kafka.namespace }}:{{ .Values.networkPolicy.kafka.port }}
 {{- end }}
 
 {{- if .Values.backup.enabled }}
 
   Backups:
-    PostgreSQL backups run on schedule: {{ .Values.backup.schedule }}
-    Retention: {{ .Values.backup.retention }} days
+    Schedule: {{ .Values.backup.schedule }} | Retention: {{ .Values.backup.retention }} days
+    Storage:  {{ if .Values.backup.persistence.enabled }}PVC ({{ .Values.backup.persistence.size }}){{ else }}emptyDir (non-persistent){{ end }}
 {{- end }}
 
 {{- if .Values.cleanup.enabled }}
 
   Cleanup:
-    Old completed test runs are cleaned up on schedule: {{ .Values.cleanup.schedule }}
-    Retention: {{ .Values.cleanup.retentionDays }} days
+    Schedule: {{ .Values.cleanup.schedule }} | Retention: {{ .Values.cleanup.retentionDays }} days
 {{- end }}

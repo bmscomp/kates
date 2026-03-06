@@ -1,0 +1,37 @@
+replicaCount: 1
+
+image:
+  pullPolicy: Never
+
+service:
+  type: NodePort
+  nodePort: "30083"
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "250m"
+
+probes:
+  startup:
+    failureThreshold: 60
+    periodSeconds: 2
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 5
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 15
+
+postgresql:
+  enabled: true
+  storage:
+    size: 512Mi
+
+defaults:
+  replicationFactor: "1"
+  partitions: "1"
+  minInsyncReplicas: "1"

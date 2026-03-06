@@ -202,6 +202,7 @@ metrics:
 
 postgresql:
   enabled: true
+  useSubchart: false
   image:
     repository: postgres
     tag: "16-alpine"
@@ -240,6 +241,20 @@ externalDatabase:
   password: ""
   existingSecret: ""
   passwordKey: "password"
+
+postgresqlHA:
+  auth:
+    database: kates
+    username: kates
+    password: kates
+  architecture: replication
+  primary:
+    persistence:
+      size: 10Gi
+  readReplicas:
+    replicaCount: 2
+    persistence:
+      size: 10Gi
 
 defaults:
   replicationFactor: "3"

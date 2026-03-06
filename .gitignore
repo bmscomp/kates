@@ -249,3 +249,5 @@ site/
 .grunt
 bower_components
 .metals
+charts/*/charts/
+charts/*/*.lock

@@ -1,0 +1,7 @@
+chart-dirs:
+  - charts/kates
+
+validate-maintainers: false
+validate-chart-schema: true
+
+helm-extra-args: --timeout 120s

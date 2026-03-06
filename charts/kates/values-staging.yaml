@@ -1,0 +1,47 @@
+replicaCount: 2
+
+image:
+  pullPolicy: Always
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+networkPolicy:
+  enabled: true
+
+metrics:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+  grafanaDashboard:
+    enabled: true
+
+backup:
+  enabled: true
+  schedule: "0 3 * * *"
+  retention: 14
+  persistence:
+    enabled: true
+    size: 10Gi
+
+cleanup:
+  enabled: true
+  retentionDays: 60
+
+defaults:
+  replicationFactor: "2"
+  partitions: "3"
+  minInsyncReplicas: "1"
