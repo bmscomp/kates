@@ -92,6 +92,12 @@
             <artifactId>quarkus-kubernetes-client</artifactId>
         </dependency>
 
+        <!-- gRPC API (alongside REST) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-grpc</artifactId>
+        </dependency>
+
         <!-- Kafka Admin Client -->
         <dependency>
             <groupId>org.apache.kafka</groupId>

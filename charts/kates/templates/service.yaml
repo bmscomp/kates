@@ -23,3 +23,10 @@ spec:
     {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
     nodePort: {{ .Values.service.nodePort }}
     {{- end }}
+  - port: {{ .Values.grpc.port | default 9000 }}
+    targetPort: 9000
+    protocol: TCP
+    name: grpc
+    {{- if and (eq .Values.service.type "NodePort") .Values.grpc.nodePort }}
+    nodePort: {{ .Values.grpc.nodePort }}
+    {{- end }}

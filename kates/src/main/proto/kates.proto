@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.bmscomp.kates.grpc.proto";
+option java_outer_classname = "KatesProto";
+
+package kates;
+
+import "google/protobuf/empty.proto";
+
+// Test execution service — create, query, cancel, and delete test runs.
+service TestService {
+  rpc CreateTest(CreateTestRequest) returns (TestRun);
+  rpc GetTest(GetTestRequest) returns (TestRun);
+  rpc ListTests(ListTestsRequest) returns (ListTestsResponse);
+  rpc CancelTest(CancelTestRequest) returns (TestRun);
+  rpc DeleteTest(DeleteTestRequest) returns (google.protobuf.Empty);
+}
+
+// Kafka cluster introspection service.
+service ClusterService {
+  rpc GetClusterInfo(google.protobuf.Empty) returns (ClusterInfo);
+  rpc ListTopics(ListTopicsRequest) returns (ListTopicsResponse);
+  rpc GetTopicDetail(GetTopicRequest) returns (TopicDetail);
+  rpc ListConsumerGroups(ListGroupsRequest) returns (ListGroupsResponse);
+}
+
+// Health check service.
+service HealthService {
+  rpc Check(google.protobuf.Empty) returns (HealthResponse);
+}
+
+enum TestType {
+  TEST_TYPE_UNSPECIFIED = 0;
+  LOAD = 1;
+  STRESS = 2;
+  SPIKE = 3;
+  ENDURANCE = 4;
+  VOLUME = 5;
+  CAPACITY = 6;
+  ROUND_TRIP = 7;
+  INTEGRITY = 8;
+  TUNE_REPLICATION = 9;
+  TUNE_ACKS = 10;
+  TUNE_BATCHING = 11;
+  TUNE_COMPRESSION = 12;
+  TUNE_PARTITIONS = 13;
+}
+
+enum TestStatus {
+  TEST_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  RUNNING = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+  CANCELLED = 5;
+}
+
+message TestSpec {
+  int64 num_records = 1;
+  int32 record_size = 2;
+  int64 throughput = 3;
+  string acks = 4;
+  int32 batch_size = 5;
+  int32 linger_ms = 6;
+  string compression_type = 7;
+  int32 num_producers = 8;
+  int32 num_consumers = 9;
+  int64 duration_ms = 10;
+  int32 replication_factor = 11;
+  int32 partitions = 12;
+  int32 min_insync_replicas = 13;
+}
+
+message TestResult {
+  string task_id = 1;
+  TestType test_type = 2;
+  TestStatus status = 3;
+  int64 records_sent = 4;
+  double throughput_records_per_sec = 5;
+  double throughput_mb_per_sec = 6;
+  double avg_latency_ms = 7;
+  double p50_latency_ms = 8;
+  double p95_latency_ms = 9;
+  double p99_latency_ms = 10;
+  double max_latency_ms = 11;
+  string start_time = 12;
+  string end_time = 13;
+  string error = 14;
+  string phase_name = 15;
+}
+
+message TestRun {
+  string id = 1;
+  TestType test_type = 2;
+  TestStatus status = 3;
+  TestSpec spec = 4;
+  repeated TestResult results = 5;
+  string created_at = 6;
+  string backend = 7;
+  string scenario_name = 8;
+  map<string, string> labels = 9;
+}
+
+message CreateTestRequest {
+  TestType type = 1;
+  int64 num_records = 2;
+  int32 record_size = 3;
+  int32 partitions = 4;
+  int32 replication_factor = 5;
+  string compression_type = 6;
+  map<string, string> labels = 7;
+}
+
+message GetTestRequest {
+  string id = 1;
+}
+
+message ListTestsRequest {
+  string type = 1;
+  string status = 2;
+  int32 page = 3;
+  int32 size = 4;
+}
+
+message ListTestsResponse {
+  repeated TestRun items = 1;
+  int32 page = 2;
+  int32 size = 3;
+  int64 total = 4;
+}
+
+message CancelTestRequest {
+  string id = 1;
+}
+
+message DeleteTestRequest {
+  string id = 1;
+}
+
+message ClusterInfo {
+  string cluster_id = 1;
+  int32 controller_id = 2;
+  repeated BrokerInfo brokers = 3;
+}
+
+message BrokerInfo {
+  int32 id = 1;
+  string host = 2;
+  int32 port = 3;
+  string rack = 4;
+}
+
+message ListTopicsRequest {
+  int32 page = 1;
+  int32 size = 2;
+}
+
+message ListTopicsResponse {
+  repeated TopicInfo items = 1;
+  int32 page = 2;
+  int32 size = 3;
+  int64 total = 4;
+}
+
+message TopicInfo {
+  string name = 1;
+  int32 partitions = 2;
+  int32 replication_factor = 3;
+  bool internal = 4;
+}
+
+message GetTopicRequest {
+  string name = 1;
+}
+
+message TopicDetail {
+  string name = 1;
+  int32 partitions = 2;
+  int32 replication_factor = 3;
+  bool internal = 4;
+  map<string, string> configs = 5;
+}
+
+message ListGroupsRequest {
+  int32 page = 1;
+  int32 size = 2;
+}
+
+message ListGroupsResponse {
+  repeated ConsumerGroupInfo items = 1;
+  int32 page = 2;
+  int32 size = 3;
+  int64 total = 4;
+}
+
+message ConsumerGroupInfo {
+  string group_id = 1;
+  string state = 2;
+  int32 members = 3;
+}
+
+message HealthResponse {
+  string status = 1;
+  EngineInfo engine = 2;
+  KafkaHealth kafka = 3;
+}
+
+message EngineInfo {
+  string active_backend = 1;
+  repeated string available_backends = 2;
+}
+
+message KafkaHealth {
+  string status = 1;
+  string bootstrap_servers = 2;
+  string message = 3;
+}

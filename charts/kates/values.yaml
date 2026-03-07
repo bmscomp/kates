@@ -29,6 +29,10 @@ service:
   appProtocol: http
   annotations: {}
 
+grpc:
+  port: 9000
+  nodePort: ""
+
 ingress:
   enabled: false
   className: ""

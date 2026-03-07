@@ -1,6 +1,6 @@
 # KafkaRebalance CR for Cruise Control automated partition rebalancing.
 # Apply this CR, then approve the proposal with:
-#   kubectl annotate kafkarebalance full-rebalance strimzi.io/rebalance=approve -n kafka
+# kubectl annotate kafkarebalance full-rebalance strimzi.io/rebalance=approve -n kafka
 
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaRebalance

@@ -68,6 +68,9 @@ spec:
         - containerPort: 8080
           name: http
           protocol: TCP
+        - containerPort: 9000
+          name: grpc
+          protocol: TCP
         envFrom:
         - configMapRef:
             name: {{ include "kates.fullname" . }}-config
