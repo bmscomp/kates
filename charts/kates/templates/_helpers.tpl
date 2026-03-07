@@ -25,6 +25,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- end }}
 
 {{- define "kates.selectorLabels" -}}
+app: {{ include "kates.name" . }}
 app.kubernetes.io/name: {{ include "kates.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
