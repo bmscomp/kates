@@ -54,7 +54,8 @@ all: check-prerequisites
 	fi
 	@echo ""
 	@echo "Step 9: Enabling chaos environment..."
-	kubectl apply -f config/litmus/
+	kubectl apply -f config/litmus/kates-chaos-rbac.yaml
+	kubectl apply -f config/litmus/kafka-rbac.yaml
 	@echo ""
 	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping build"; \
