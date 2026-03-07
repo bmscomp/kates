@@ -22,6 +22,7 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 | 12 | [Deployment Guide](12-deployment.md) | Installing and operating the full stack |
 | 13 | [Scenario Files & SLA Gates](13-scenario-files.md) | YAML scenario format, spec fields, and automated SLA enforcement |
 | 14 | [Recipes & Patterns](14-recipes.md) | Ready-to-use workflows for upgrades, nightly regressions, chaos certification, and tuning |
+| 15 | [Kafka Deployment Engineering](15-kafka-deployment.md) | Strimzi operator, KRaft architecture, broker tuning, security, and operations |
 | A | [Glossary](appendix-a-glossary.md) | Quick reference for all terms and abbreviations |
 
 ## Who This Book Is For
@@ -33,5 +34,5 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 
 ## How to Read This Book
 
-Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows.
+Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows. Chapter 15 is the **Kafka operations manual** — read it when deploying, upgrading, or troubleshooting the cluster.
 
