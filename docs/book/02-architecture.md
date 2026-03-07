@@ -26,6 +26,7 @@ graph TB
         KAFKA[Kafka Brokers]
         PROM[Prometheus]
         GRAF[Grafana]
+        JAEGER[Jaeger]
         LIT[LitmusChaos]
     end
     
@@ -42,6 +43,7 @@ graph TB
     ENG --> KAFKA
     PROM --> KAFKA
     GRAF --> PROM
+    API --> JAEGER
 ```
 
 ## Backend Engine
@@ -300,15 +302,17 @@ sequenceDiagram
 | Backend | Quarkus | 3.x | REST framework, CDI, native compilation |
 | Runtime | Java | 21+ | Virtual threads, modern GC |
 | Build | Maven | 3.x | Backend build system |
-| CLI | Go | 1.22+ | Cross-platform binary |
+| CLI | Go | 1.25+ | Cross-platform binary |
 | CLI Framework | Cobra | Latest | Command parsing, help generation |
 | Cluster | Kind | Latest | Local Kubernetes simulation |
-| Kafka | Apache Kafka | 4.1.1 | KRaft mode, no ZooKeeper |
-| Operator | Strimzi | 0.49.1 | Kafka lifecycle management |
+| Kafka | Apache Kafka | 4.2.0 | KRaft mode, Share Groups, Tiered Storage |
+| Operator | Strimzi | 0.51.0 | Kafka lifecycle management |
 | Chaos | LitmusChaos | Latest | Advanced chaos experiments |
 | Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |
+| Tracing | Jaeger (OTLP) | 1.64 | Distributed trace collection |
 | Registry | Apicurio | Latest | Schema registry for Kafka |
 | Database | PostgreSQL | Latest | Test results and schedule persistence |
+| Backup | Velero + MinIO | Latest | Cluster backup and restore |
 
 ## Data Model
 
@@ -384,3 +388,6 @@ erDiagram
 | V2 | `V2__create_schedules_table.sql` | `scheduled_test_runs` for recurring test automation |
 | V3 | `V3__create_disruption_reports.sql` | `disruption_reports` with SLA grade tracking |
 | V4 | `V4__create_disruption_schedules.sql` | `disruption_schedules` for recurring chaos tests |
+| V5–V9 | Various | Connection pooling, batch optimizations, additional indexes |
+| V10 | `V10__add_composite_indexes.sql` | Composite indexes for test_type + status queries |
+| V11 | `V11__labels_jsonb.sql` | JSONB labels column for flexible test categorization |

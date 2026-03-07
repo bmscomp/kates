@@ -5,18 +5,24 @@ A terminal-first platform for **performance testing**, **chaos engineering**, an
 ## Features
 
 - **8 test types** — LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY
-- **Chaos engineering** — 6 built-in playbooks with LitmusChaos, SLA grading, and safety guardrails
+- **Chaos engineering** — 7 built-in playbooks with LitmusChaos, SLA grading, and safety guardrails
 - **Scenario files** — Declarative YAML test definitions with SLA gates for CI/CD
 - **CLI** — Full-featured terminal client with dashboards, sparklines, trend analysis, and export
 - **Kafka client** — Interactive Kafka CLI with topic CRUD, produce, consume, and consumer group inspection
 - **Interactive TUI** — Full-screen Kafka explorer with tab-based navigation, search, and consumer tail
 - **Backend API** — Quarkus REST API with PostgreSQL persistence and native image support
+- **Kafka 4.2 (Strimzi KRaft)** — Role-separated controllers/brokers, SCRAM-SHA-512 auth, TLS, rack awareness
+- **Tiered Storage** — KIP-405 cold segment offload to MinIO
+- **Share Groups** — KIP-932 work-queue consumers with server-side message distribution
+- **Dead Letter Queue** — Automated DLQ consumer with alerting and `/api/dlq/stats` endpoint
+- **Schema enforcement** — JSON schemas for kates topics via Apicurio Registry
+- **Distributed tracing** — OpenTelemetry OTLP → Jaeger with Kafka client instrumentation
+- **Security** — NetworkPolicies, certificate auto-rotation, ACL GitOps via KafkaUser CRs
+- **CI/CD** — Backend CI pipeline + Kind-based integration tests + GameDay automation
+- **Monitoring** — Prometheus, Grafana with 10+ dashboards, 20+ PrometheusRule alerts
 - **Offline-first infrastructure** — all images pulled once, loaded into Kind, deployed with `imagePullPolicy: Never`
 - **One-command setup** — `make all` brings up the entire stack
 - **Multi-AZ simulation** — 3-node Kind cluster labeled `alpha`, `sigma`, `gamma`
-- **Monitoring** — Prometheus, Grafana with custom Kafka dashboards
-- **Kafka (Strimzi KRaft)** — 3-broker cluster with rack awareness, no ZooKeeper
-- **Schema registry** — Apicurio connected to Kafka
 
 ## Prerequisites
 
@@ -53,6 +59,10 @@ This runs a 10-step pipeline:
 |---------|-----|-------------|
 | Grafana | http://localhost:30080 | admin / admin |
 | Kafka UI | http://localhost:30081 | — |
+| Apicurio Registry | http://localhost:30082 | — |
+| Kates API | http://localhost:30083 | — |
+| Jaeger UI | http://localhost:30086 | — |
+| Prometheus | http://localhost:30090 | — |
 | Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
 
 ### Destroy
@@ -119,6 +129,8 @@ kind load docker-image provectuslabs/kafka-ui:v1.0.0 --name panda
 | `make chaos-experiments` | Apply chaos experiments |
 | `make velero` | Deploy Velero backup |
 | `make test` | Run Kafka performance test (1M messages) |
+| `make gameday` | Run automated GameDay validation pipeline |
+| `make chart-lint` | Lint Kates Helm chart |
 | `make ports` | Start port forwarding |
 | `make status` | Check cluster status |
 | `make destroy` | Destroy cluster |
@@ -131,6 +143,16 @@ Custom Grafana dashboards (auto-provisioned):
 - **Kafka Performance Metrics** — topic growth, partitions, broker count
 - **Kafka Performance Test Results** — perf-test throughput, message counts
 - **Kafka JVM Metrics** — heap memory, GC rate, thread count per zone
+- **Strimzi Operator & Kafka Connect** — reconciliation p99, success/failure rates, Connect task health
+
+### Distributed Tracing
+
+OpenTelemetry traces are exported via OTLP to Jaeger. Auto-instrumented spans cover:
+- REST API calls (JAX-RS)
+- Kafka producer/consumer operations
+- Database queries (JDBC)
+
+Access the Jaeger UI at http://localhost:30086 after deployment.
 
 ## Documentation
 

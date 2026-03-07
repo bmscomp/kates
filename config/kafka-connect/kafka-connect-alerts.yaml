@@ -1,0 +1,107 @@
+# PrometheusRule alerts for Strimzi operator health and Kafka Connect.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: strimzi-operator-alerts
+  namespace: kafka
+  labels:
+    app: strimzi
+    release: monitoring
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: strimzi.operator.health
+      rules:
+        - alert: StrimziReconciliationFailing
+          expr: increase(strimzi_reconciliations_failed_total[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Strimzi reconciliation failures detected"
+            description: "{{ $labels.kind }} has {{ $value }} failed reconciliations in the last 15 minutes."
+
+        - alert: StrimziReconciliationSlow
+          expr: histogram_quantile(0.99, sum(rate(strimzi_reconciliations_duration_seconds_bucket[5m])) by (le, kind)) > 120
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Strimzi reconciliation p99 above 2 minutes"
+            description: "{{ $labels.kind }} reconciliation p99 is {{ $value | humanizeDuration }}."
+
+        - alert: StrimziReconciliationStalled
+          expr: time() - strimzi_reconciliations_successful_total > 900
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Strimzi reconciliation stalled"
+            description: "No successful {{ $labels.kind }} reconciliation in the last 15 minutes."
+
+        - alert: StrimziResourceCountDrift
+          expr: |
+            changes(strimzi_resources{kind=~"Kafka|KafkaConnect|KafkaTopic|KafkaUser"}[1h]) > 10
+          for: 5m
+          labels:
+            severity: info
+          annotations:
+            summary: "Strimzi resource count changing rapidly"
+            description: "{{ $labels.kind }} resource count changed {{ $value }} times in the last hour."
+
+    - name: kafka.connect.health
+      rules:
+        - alert: KafkaConnectWorkerDown
+          expr: kafka_connect_worker_connector_count == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka Connect has no active connectors"
+            description: "The Connect worker has 0 connectors registered."
+
+        - alert: KafkaConnectTaskFailed
+          expr: kafka_connect_connector_task_status{status="failed"} > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka Connect task has failed"
+            description: "Connector {{ $labels.connector }} task {{ $labels.task }} is in FAILED state."
+
+        - alert: KafkaConnectTaskRestarting
+          expr: increase(kafka_connect_task_error_total_errors_logged[10m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka Connect task logging errors"
+            description: "Connector {{ $labels.connector }} has logged {{ $value }} errors in the last 10 minutes."
+
+        - alert: KafkaConnectSinkLag
+          expr: kafka_connect_sink_task_sink_record_lag > 10000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka Connect sink lag is high"
+            description: "Connector {{ $labels.connector }} has {{ $value }} records lag."
+
+        - alert: KafkaConnectSinkLagCritical
+          expr: kafka_connect_sink_task_sink_record_lag > 100000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka Connect sink lag is critical"
+            description: "Connector {{ $labels.connector }} has {{ $value }} records lag. Data pipeline is falling behind."
+
+        - alert: KafkaConnectWorkerRebalancing
+          expr: kafka_connect_worker_rebalance_rebalancing > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka Connect worker stuck rebalancing"
+            description: "Connect worker has been in rebalancing state for over 10 minutes."

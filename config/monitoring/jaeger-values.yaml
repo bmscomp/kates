@@ -1,0 +1,39 @@
+# Jaeger Helm values — all-in-one deployment for trace collection.
+# Receives OTLP traces from kates backend on port 4317 (gRPC).
+# UI exposed on NodePort 30086.
+
+provisionDataStore:
+  cassandra: false
+
+allInOne:
+  enabled: true
+  image:
+    repository: jaegertracing/all-in-one
+    tag: "1.64"
+    pullPolicy: IfNotPresent
+  extraEnv:
+    - name: COLLECTOR_OTLP_ENABLED
+      value: "true"
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+collector:
+  enabled: false
+
+query:
+  enabled: false
+
+agent:
+  enabled: false
+
+storage:
+  type: memory
+
+service:
+  type: NodePort
+  nodePort: 30086

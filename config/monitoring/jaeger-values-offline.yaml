@@ -1,0 +1,6 @@
+# Jaeger offline Helm values — overrides image pull to IfNotPresent
+# for pre-loaded Kind environments.
+
+allInOne:
+  image:
+    pullPolicy: IfNotPresent

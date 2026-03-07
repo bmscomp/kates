@@ -144,7 +144,10 @@ make ports
 |---------|-----|-------------|
 | Grafana | http://localhost:30080 | admin / admin |
 | Kafka UI | http://localhost:30081 | — |
+| Apicurio Registry | http://localhost:30082 | — |
 | Kates API | http://localhost:30083 | — |
+| Jaeger UI | http://localhost:30086 | — |
+| Prometheus | http://localhost:30090 | — |
 | Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
 
 ## CLI Configuration
@@ -278,9 +281,53 @@ kubectl logs deployment/kates -n kates | head -1
 | `make chaos-kafka-cpu-stress` | Run CPU stress |
 | `make chaos-kafka-all` | Run all chaos experiments |
 | `make chaos-kafka-status` | Check chaos status |
+| `make gameday` | Run automated GameDay validation pipeline |
+| `make velero` | Deploy Velero backup |
+| `make chart-lint` | Lint Kates Helm chart |
 | `make ports` | Start port forwarding |
 | `make status` | Check cluster status |
 | `make destroy` | Destroy everything |
+
+## Security Configuration
+
+The Kafka cluster uses multiple layers of security:
+
+### Authentication
+
+- **SCRAM-SHA-512** on the plain (9092) and external (9094) listeners
+- **TLS mutual auth** on the TLS listener (9093)
+- Credentials managed via `KafkaUser` CRs in `config/kafka/kafka-users.yaml`
+
+### Certificate Rotation
+
+Certificates are auto-managed by Strimzi:
+- **Cluster CA**: 5-year validity, auto-renewed 180 days before expiry
+- **Clients CA**: 5-year validity, auto-renewed 180 days before expiry
+- Policy: `replace-key` (new key pair on renewal)
+
+### Network Policies
+
+`config/kafka/kafka-networkpolicies.yaml` implements default-deny with client whitelisting:
+- Only kates, kafka-ui, apicurio, litmus, and monitoring can reach brokers
+- Controller mesh traffic isolated
+- Operator access scoped to Kafka pods + K8s API
+
+### ACL Management
+
+ACLs are declared via `KafkaUser` CRs (GitOps):
+- `kates-backend` — superUser with full access
+- `kafka-ui` — read-only on all topics
+- `apicurio-registry` — read/write on internal topics
+
+## GameDay Validation
+
+Run an automated 7-phase validation pipeline:
+
+```bash
+make gameday
+```
+
+Phases: pre-flight → baseline → chaos-inject → observe → recover → post-flight → report
 
 ## Troubleshooting
 

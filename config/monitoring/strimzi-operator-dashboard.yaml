@@ -1,0 +1,143 @@
+# Strimzi Operator and Kafka Connect observability dashboard.
+# Tracks operator reconciliation performance, Connect cluster health,
+# and correlates with cluster-level metrics.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: strimzi-operator-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: kates-observability
+data:
+  strimzi-operator-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "Operator Reconciliation Duration (p99)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "targets": [{
+            "expr": "histogram_quantile(0.99, sum(rate(strimzi_reconciliations_duration_seconds_bucket[5m])) by (le, kind))",
+            "legendFormat": "{{ kind }}"
+          }],
+          "fieldConfig": {
+            "defaults": { "unit": "s", "color": { "mode": "palette-classic" } }
+          }
+        },
+        {
+          "title": "Reconciliations per Minute",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [{
+            "expr": "sum(rate(strimzi_reconciliations_successful_total[5m])) by (kind) * 60",
+            "legendFormat": "{{ kind }} (success)"
+          }, {
+            "expr": "sum(rate(strimzi_reconciliations_failed_total[5m])) by (kind) * 60",
+            "legendFormat": "{{ kind }} (failed)"
+          }],
+          "fieldConfig": {
+            "defaults": { "unit": "opm", "color": { "mode": "palette-classic" } }
+          }
+        },
+        {
+          "title": "Reconciliation Queue Depth",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+          "targets": [{
+            "expr": "sum(strimzi_reconciliations_locked_total - strimzi_reconciliations_successful_total - strimzi_reconciliations_failed_total)",
+            "legendFormat": "Pending"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 5 },
+                  { "color": "red", "value": 20 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Failed Reconciliations (24h)",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+          "targets": [{
+            "expr": "sum(increase(strimzi_reconciliations_failed_total[24h]))",
+            "legendFormat": "Failed"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 10 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Operator Resources per Kind",
+          "type": "table",
+          "gridPos": { "h": 4, "w": 12, "x": 12, "y": 8 },
+          "targets": [{
+            "expr": "strimzi_resources{kind=~\"Kafka|KafkaConnect|KafkaTopic|KafkaUser|KafkaRebalance\"}",
+            "format": "table",
+            "instant": true
+          }]
+        },
+        {
+          "title": "Connect Worker — Task Status",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+          "targets": [{
+            "expr": "kafka_connect_connector_task_status{connector=~\".*\"}",
+            "legendFormat": "{{ connector }} / {{ task }} — {{ status }}"
+          }]
+        },
+        {
+          "title": "Connect — Records per Minute",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+          "targets": [{
+            "expr": "sum(rate(kafka_connect_sink_task_sink_record_send_total[5m])) by (connector) * 60",
+            "legendFormat": "{{ connector }} (sink)"
+          }, {
+            "expr": "sum(rate(kafka_connect_source_task_source_record_poll_total[5m])) by (connector) * 60",
+            "legendFormat": "{{ connector }} (source)"
+          }],
+          "fieldConfig": {
+            "defaults": { "unit": "opm" }
+          }
+        },
+        {
+          "title": "Connect — Error Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+          "targets": [{
+            "expr": "sum(rate(kafka_connect_task_error_total_errors_logged[5m])) by (connector) * 60",
+            "legendFormat": "{{ connector }}"
+          }],
+          "fieldConfig": {
+            "defaults": { "unit": "opm", "color": { "fixedColor": "red", "mode": "fixed" } }
+          }
+        }
+      ],
+      "title": "Strimzi Operator & Kafka Connect",
+      "uid": "strimzi-operator-connect",
+      "version": 1,
+      "schemaVersion": 39,
+      "time": { "from": "now-3h", "to": "now" },
+      "timezone": "browser",
+      "refresh": "30s"
+    }

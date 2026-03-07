@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -92,6 +92,7 @@ all: check-prerequisites
 	@echo "  - Apicurio Registry:http://localhost:30082"
 	@echo "  - Kates:            http://localhost:30083"
 	@echo "  - Prometheus:       http://localhost:30090"
+	@echo "  - Jaeger UI:        http://localhost:30086"
 	@echo "  - Litmus UI:        http://localhost:9091  (admin/litmus)"
 	@echo ""
 
@@ -118,6 +119,7 @@ deploy-all:
 	./scripts/deploy-kafka.sh
 	./scripts/deploy-kafka-ui.sh
 	./scripts/deploy-apicurio.sh
+	./scripts/deploy-jaeger.sh
 	./scripts/deploy-litmuschaos.sh
 	./scripts/port-forward.sh
 	@echo "✅ Full stack deployed!"
@@ -136,6 +138,10 @@ ui:
 apicurio:
 	@echo "📝 Deploying Apicurio Registry..."
 	./scripts/deploy-apicurio.sh
+
+jaeger:
+	@echo "🔍 Deploying Jaeger (distributed tracing)..."
+	./scripts/deploy-jaeger.sh
 
 # Run Performance Test
 test:
@@ -347,6 +353,10 @@ velero:
 	@echo "💾 Deploying Velero backup..."
 	./scripts/deploy-velero.sh
 
+gameday:
+	@echo "🎮 Running Automated GameDay Validation..."
+	./scripts/gameday.sh
+
 # Status check
 status:
 	@echo "📊 Cluster Status:"
@@ -375,6 +385,7 @@ help:
 	@echo "  kafka            - Deploy Kafka (Strimzi)"
 	@echo "  ui               - Deploy Kafka UI"
 	@echo "  apicurio         - Deploy Apicurio Registry"
+	@echo "  jaeger           - Deploy Jaeger (distributed tracing)"
 	@echo "  litmus           - Deploy LitmusChaos (with images)"
 	@echo "  velero           - Deploy Velero backup"
 	@echo ""
@@ -407,6 +418,7 @@ help:
 	@echo "  status           - Check cluster status"
 	@echo "  chaos-ui         - Port-forward Litmus UI"
 	@echo "  chaos-experiments- Apply chaos experiments"
+	@echo "  gameday          - Run automated GameDay validation"
 	@echo "  destroy          - Destroy cluster (FORCE=1 to skip prompt)"
 	@echo "  help             - Show this help"
 

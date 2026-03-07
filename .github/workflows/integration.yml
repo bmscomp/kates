@@ -110,10 +110,11 @@ jobs:
           kubectl apply -f config/kafka/kafka-networkpolicies.yaml --dry-run=server
           echo "✅ NetworkPolicies are valid"
 
-      - name: Verify monitoring manifests
+      - name: Verify monitoring config
         run: |
-          kubectl apply -f config/monitoring/jaeger.yaml --dry-run=server
-          echo "✅ Jaeger manifests valid"
+          echo "Jaeger Helm values present:"
+          test -f config/monitoring/jaeger-values.yaml && echo "✅ jaeger-values.yaml"
+          test -f config/monitoring/jaeger-values-offline.yaml && echo "✅ jaeger-values-offline.yaml"
 
       - name: Summary
         if: always()

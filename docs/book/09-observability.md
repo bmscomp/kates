@@ -10,22 +10,26 @@ graph TB
         KB[Kafka Brokers<br/>JMX metrics]
         KE[Kates Engine<br/>Test metrics]
         K8S[Kubernetes<br/>Pod events]
+        OTEL[OTel SDK<br/>Trace spans]
     end
     
     subgraph Collection["Collection"]
         JMX[JMX Exporter<br/>Sidecar]
         API[Kates REST API]
+        OTLP[OTLP Collector]
     end
     
     subgraph Storage["Storage"]
         PROM[Prometheus<br/>Time-series DB]
         DB[Kates DB<br/>PostgreSQL]
+        JAEGER[Jaeger<br/>Trace Store]
     end
     
     subgraph Visualization["Visualization"]
         GRAF[Grafana<br/>Dashboards]
         CLI[Kates CLI<br/>Terminal UI]
         HM[Heatmap Export<br/>JSON/CSV]
+        JUI[Jaeger UI<br/>Trace Explorer]
     end
     
     KB --> JMX --> PROM --> GRAF
@@ -33,11 +37,12 @@ graph TB
     API --> CLI
     API --> HM
     K8S --> API
+    OTEL --> OTLP --> JAEGER --> JUI
 ```
 
 ## Grafana Dashboards
 
-Kates deploys 4 Grafana dashboards, each focused on a specific monitoring dimension. See [docs/monitoring.md](../monitoring.md) for the full dashboard and metrics reference.
+Kates deploys 6 Grafana dashboards, each focused on a specific monitoring dimension. See [docs/monitoring.md](../monitoring.md) for the full dashboard and metrics reference.
 
 ### Kafka Cluster Health
 
@@ -308,3 +313,63 @@ This is particularly valuable after chaos tests — you can see exactly how the 
 | JUnit XML | `kates report export <id> --format junit` | CI/CD pipelines |
 | Heatmap JSON | `kates report export <id> --format heatmap` | Grafana visualization |
 | Heatmap CSV | `kates report export <id> --format heatmap-csv` | Spreadsheet analysis |
+
+## Distributed Tracing
+
+Kates uses **OpenTelemetry** to propagate traces across the entire request lifecycle — from REST API entry through Kafka producer/consumer operations to database queries.
+
+### Configuration
+
+Tracing is configured in `application.properties`:
+
+| Property | Value | Purpose |
+|----------|-------|---------|
+| `quarkus.otel.traces.exporter` | `otlp` | Export spans via OTLP (gRPC) |
+| `quarkus.otel.exporter.otlp.endpoint` | `jaeger-collector:4317` | Jaeger collector address |
+| `quarkus.otel.traces.sampler` | `parentbased_traceidratio` | Sample based on parent trace |
+| `quarkus.otel.traces.sampler.arg` | `0.1` (prod) / `1.0` (dev) | 10% sampling in prod, 100% in dev |
+| `quarkus.otel.instrument.kafka` | `true` | Auto-instrument Kafka client operations |
+
+### What Gets Traced
+
+| Layer | Span Name Pattern | Details |
+|-------|-------------------|---------|
+| JAX-RS | `GET /api/tests/{id}` | HTTP method + path |
+| Kafka Producer | `kates-results send` | Topic, partition, serialized size |
+| Kafka Consumer | `kates-dlq receive` | Topic, consumer group, lag |
+| JDBC | `SELECT test_runs` | SQL operation + table |
+
+### Viewing Traces
+
+Access the Jaeger UI at http://localhost:30086:
+
+1. Select service **kates** in the dropdown
+2. Click **Find Traces** to see recent requests
+3. Click a trace to see the full span tree (REST → Kafka → DB)
+
+## Strimzi Operator Dashboard
+
+The **Strimzi Operator & Kafka Connect** Grafana dashboard (`config/monitoring/strimzi-operator-dashboard.yaml`) provides visibility into operator health and Connect workloads:
+
+| Panel | Metric | Alert Level |
+|-------|--------|:---:|
+| Reconciliation p99 | `strimzi_reconciliations_duration_seconds_bucket` | > 120s = warning |
+| Success/failure rate | `strimzi_reconciliations_{successful,failed}_total` | > 3 failures in 15m |
+| Queue depth | Pending reconciliations | > 20 = critical |
+| Resources per kind | `strimzi_resources{kind=...}` | Informational |
+| Connect task status | `kafka_connect_connector_task_status` | Failed = critical |
+| Connect records/min | `kafka_connect_sink_task_sink_record_send_total` | Informational |
+| Connect error rate | `kafka_connect_task_error_total_errors_logged` | > 5 in 10m = warning |
+
+## Alerting
+
+Kates deploys 20+ PrometheusRule alerts across 6 alert groups:
+
+| Group | File | Alerts |
+|-------|------|---------|
+| `kafka.cluster` | `kafka-alerts.yaml` | Offline partitions, under-replicated, no active controller, disk usage |
+| `kafka.consumer` | `kafka-alerts.yaml` | Consumer group lag warning + critical |
+| `kafka.kraft` | `kafka-alerts.yaml` | Leader election rate, uncommitted records |
+| `kafka.network` | `kafka-alerts.yaml` | Request latency p99 > 1s |
+| `strimzi.operator.health` | `kafka-connect-alerts.yaml` | Reconciliation failing/slow/stalled, resource count drift |
+| `kafka.connect.health` | `kafka-connect-alerts.yaml` | Worker down, task failed, error rate, sink lag, stuck rebalancing |
