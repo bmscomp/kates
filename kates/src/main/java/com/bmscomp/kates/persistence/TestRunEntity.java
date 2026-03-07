@@ -56,7 +56,7 @@ public class TestRunEntity {
     @Column(name = "labels_json", columnDefinition = "jsonb")
     private String labelsJson;
 
-    @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("id ASC")
     private List<TestResultEntity> results = new ArrayList<>();
 

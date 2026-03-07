@@ -34,7 +34,7 @@ public class TestRunRepository {
                 .createQuery("SELECT r FROM TestRunEntity r ORDER BY r.createdAt DESC", TestRunEntity.class)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 
@@ -46,7 +46,7 @@ public class TestRunRepository {
                 .setParameter("type", type)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 
@@ -66,7 +66,7 @@ public class TestRunRepository {
                 .setParameter("pattern", "%" + "\"" + key + "\":\"" + value + "\"" + "%")
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 
@@ -86,7 +86,7 @@ public class TestRunRepository {
                     .setParameter("pattern", jsonPattern)
                     .getResultList())
                     .stream()
-                    .map(EntityMapper::toDomain)
+                    .map(EntityMapper::toDomainSummary)
                     .collect(Collectors.toList());
         } catch (Exception e) {
             return findByLabel(key, value);
@@ -113,7 +113,7 @@ public class TestRunRepository {
                 .setMaxResults(size)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 
@@ -132,7 +132,7 @@ public class TestRunRepository {
                 .setMaxResults(size)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 
@@ -150,7 +150,7 @@ public class TestRunRepository {
                 .setParameter("status", status)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 
@@ -164,7 +164,7 @@ public class TestRunRepository {
                 .setParameter("to", to)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomain)
+                .map(EntityMapper::toDomainSummary)
                 .collect(Collectors.toList());
     }
 }

@@ -67,6 +67,23 @@ public final class EntityMapper {
         return run;
     }
 
+    /**
+     * Lightweight mapper for list endpoints — skips the lazy-loaded results collection
+     * to avoid N+1 queries. Use {@link #toDomain} when results are needed (detail view).
+     */
+    public static TestRun toDomainSummary(TestRunEntity entity) {
+        return new TestRun()
+            .withId(entity.getId())
+            .withTestType(entity.getTestType())
+            .withStatus(entity.getStatus())
+            .withCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
+            .withBackend(entity.getBackend())
+            .withScenarioName(entity.getScenarioName())
+            .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
+            .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
+            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}));
+    }
+
     public static void updateEntity(TestRunEntity entity, TestRun run) {
         entity.setTestType(run.getTestType());
         entity.setStatus(run.getStatus());
