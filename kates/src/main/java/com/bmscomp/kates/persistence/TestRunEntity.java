@@ -14,6 +14,9 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestType;
 
@@ -49,7 +52,8 @@ public class TestRunEntity {
     @Column(name = "sla_json", columnDefinition = "TEXT")
     private String slaJson;
 
-    @Column(name = "labels_json", columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "labels_json", columnDefinition = "jsonb")
     private String labelsJson;
 
     @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
