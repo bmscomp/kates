@@ -4,7 +4,7 @@
 
 # kates-backend: superUser — full access, declared in Kafka CR authorization.
 # No ACLs needed since superUsers bypass authorization.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
   name: kates-backend
@@ -16,7 +16,7 @@ spec:
     type: scram-sha-512
 ---
 # kafka-ui: admin-level read access for monitoring the cluster.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
   name: kafka-ui
@@ -51,7 +51,7 @@ spec:
         host: "*"
 ---
 # apicurio-registry: read/write on its internal topics (__apicurio*).
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
   name: apicurio-registry
@@ -82,7 +82,7 @@ spec:
         host: "*"
 ---
 # litmus-chaos: read/write on test topics for chaos experiments.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
   name: litmus-chaos

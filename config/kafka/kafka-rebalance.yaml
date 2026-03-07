@@ -2,7 +2,7 @@
 # Apply this CR, then approve the proposal with:
 # kubectl annotate kafkarebalance full-rebalance strimzi.io/rebalance=approve -n kafka
 
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaRebalance
 metadata:
   name: full-rebalance
@@ -24,7 +24,7 @@ spec:
   rebalanceDisk: true
 ---
 # Scheduled rebalance — periodically checks and proposes optimizations.
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaRebalance
 metadata:
   name: add-broker-rebalance

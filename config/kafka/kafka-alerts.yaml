@@ -120,3 +120,45 @@ spec:
           annotations:
             summary: "Strimzi Cluster Operator is down"
             description: "The Strimzi Cluster Operator has been unreachable for 5 minutes."
+
+    - name: kafka.replication
+      rules:
+        - alert: KafkaISRShrinkRate
+          expr: rate(kafka_server_replicamanager_isrshrinkspersec[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ISR is shrinking"
+            description: "Broker {{ $labels.kubernetes_pod_name }} ISR shrink rate is {{ $value }}/s — replicas are falling behind."
+
+    - name: kafka.performance
+      rules:
+        - alert: KafkaLogFlushLatencyHigh
+          expr: kafka_log_logflushrateandduration_logflushrateandtimems{quantile="0.99"} > 500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka log flush p99 latency above 500ms"
+            description: "Broker {{ $labels.kubernetes_pod_name }} log flush p99 is {{ $value }}ms — disk I/O may be saturated."
+
+        - alert: KafkaRequestHandlerSaturated
+          expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent < 0.3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka request handlers over 70% busy"
+            description: "Broker {{ $labels.kubernetes_pod_name }} handler idle is {{ $value | humanizePercentage }} — consider adding threads or brokers."
+
+    - name: kafka.cruisecontrol
+      rules:
+        - alert: CruiseControlAnomalyDetected
+          expr: increase(cruise_control_anomaly_detector_anomaly_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cruise Control detected an anomaly"
+            description: "Cruise Control detected {{ $value }} anomalies in the last 10 minutes."

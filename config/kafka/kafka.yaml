@@ -1,4 +1,4 @@
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: controllers
@@ -40,7 +40,7 @@ spec:
           operator: "Exists"
           effect: "NoSchedule"
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: brokers-alpha
@@ -59,6 +59,10 @@ spec:
         size: 50Gi
         class: local-storage-alpha
         deleteClaim: false
+  jvmOptions:
+    -Xms: 2048m
+    -Xmx: 2048m
+    gcLoggingEnabled: true
   resources:
     requests:
       memory: 4Gi
@@ -88,7 +92,7 @@ spec:
           operator: "Exists"
           effect: "NoSchedule"
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: brokers-sigma
@@ -107,6 +111,10 @@ spec:
         size: 50Gi
         class: local-storage-sigma
         deleteClaim: false
+  jvmOptions:
+    -Xms: 2048m
+    -Xmx: 2048m
+    gcLoggingEnabled: true
   resources:
     requests:
       memory: 4Gi
@@ -132,7 +140,7 @@ spec:
                     values:
                       - sigma
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: brokers-gamma
@@ -151,6 +159,10 @@ spec:
         size: 50Gi
         class: local-storage-gamma
         deleteClaim: false
+  jvmOptions:
+    -Xms: 2048m
+    -Xmx: 2048m
+    gcLoggingEnabled: true
   resources:
     requests:
       memory: 4Gi
@@ -176,7 +188,7 @@ spec:
                     values:
                       - gamma
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: krafter
@@ -278,7 +290,22 @@ spec:
         limits:
           memory: 256Mi
           cpu: 500m
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
   cruiseControl:
+    brokerCapacity:
+      cpu: "2000m"
+      inboundNetwork: 50MiB/s
+      outboundNetwork: 50MiB/s
+      disk: 50Gi
     config:
       goals: >-
         com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareGoal,
