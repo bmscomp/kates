@@ -3,12 +3,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
-
-STRIMZI_CHART_DIR="${CHARTS_DIR}/strimzi-kafka-operator"
+source "${SCRIPT_DIR}/../versions.env"
 
 info "Deploying Kafka Strimzi Cluster..."
-
-require_chart "${STRIMZI_CHART_DIR}" "strimzi-kafka-operator"
 
 ensure_namespace kafka
 
@@ -20,11 +17,13 @@ if kubectl get kafka krafter -n kafka &>/dev/null && \
     exit 0
 fi
 
-info "Installing Strimzi Operator from local chart..."
-helm upgrade --install strimzi-kafka-operator "${STRIMZI_CHART_DIR}" \
+info "Installing Strimzi Operator from remote chart (v${STRIMZI_VERSION})..."
+helm repo add strimzi https://strimzi.io/charts/ 2>/dev/null || true
+helm repo update strimzi
+helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
+  --version "${STRIMZI_VERSION}" \
   --namespace kafka \
   --set watchAnyNamespace=true \
-  --set defaultImageTag=0.51.0 \
   --set image.imagePullPolicy=IfNotPresent \
   --timeout 10m \
   --wait
