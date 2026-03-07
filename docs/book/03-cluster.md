@@ -1,6 +1,6 @@
 # Chapter 3: The Cluster Under Test
 
-Before you can measure performance or inject chaos, you need to understand the system you're testing. This chapter documents the **krafter** Kafka cluster — a 3-broker KRaft deployment on Kubernetes.
+Before you can measure performance or inject chaos, you need to understand the system you're testing. This chapter documents the **krafter** Kafka cluster — a dedicated-role KRaft deployment on Kubernetes with zone-aware storage.
 
 ## Physical Topology
 
@@ -8,51 +8,63 @@ Before you can measure performance or inject chaos, you need to understand the s
 graph TB
     subgraph Kind["Kind Cluster: panda"]
         subgraph Alpha["Node: alpha (control-plane)"]
-            PA[pool-alpha-0<br/>Broker + Controller<br/>2Gi Memory | 10Gi PVC<br/>StorageClass: local-alpha]
+            B0["brokers-alpha-0<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass: local-storage-alpha"]
+            C3["controllers-3<br/>Controller<br/>1Gi Memory | 5Gi PVC"]
         end
-        
+
         subgraph Sigma["Node: sigma (worker)"]
-            PS[pool-sigma-0<br/>Broker + Controller<br/>2Gi Memory | 10Gi PVC<br/>StorageClass: local-sigma]
+            B2["brokers-sigma-2<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass: local-storage-sigma"]
+            C4["controllers-4<br/>Controller<br/>1Gi Memory | 5Gi PVC"]
         end
-        
+
         subgraph Gamma["Node: gamma (worker)"]
-            PG[pool-gamma-0<br/>Broker + Controller<br/>2Gi Memory | 10Gi PVC<br/>StorageClass: local-gamma]
+            B1["brokers-gamma-1<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass: local-storage-gamma"]
+            C5["controllers-5<br/>Controller<br/>1Gi Memory | 5Gi PVC"]
         end
     end
-    
-    PA ---|"Inter-broker<br/>replication"| PS
-    PS ---|"KRaft metadata<br/>quorum"| PG
-    PG ---|"Inter-broker<br/>replication"| PA
+
+    C3 <-->|"Raft<br/>metadata"| C4
+    C4 <-->|"Raft<br/>metadata"| C5
+    C5 <-->|"Raft<br/>metadata"| C3
+
+    B0 <-.->|"replication"| B2
+    B2 <-.->|"replication"| B1
+    B1 <-.->|"replication"| B0
+
+    B0 -->|"fetch metadata"| C3
+    B2 -->|"fetch metadata"| C4
+    B1 -->|"fetch metadata"| C5
 ```
 
-Each broker runs as a **combined controller + broker** in KRaft mode. There is no ZooKeeper. The three brokers form both the metadata quorum (controller role) and the data plane (broker role).
+The cluster uses **dedicated roles** — controllers and brokers run in separate pods. There is no ZooKeeper. The three controllers form the KRaft metadata quorum via Raft consensus, while the three brokers handle the data plane (produce, consume, replicate). This separation ensures a heavy I/O workload on a broker can never delay metadata operations like leader elections.
 
 ### Node Labeling and Zone Simulation
 
 Each Kind node is labeled with a simulated availability zone:
 
-| Node | Zone Label | Role | Broker ID |
-|------|-----------|------|-----------|
-| alpha | `topology.kubernetes.io/zone: zone-a` | Control-plane + Worker | 0 |
-| sigma | `topology.kubernetes.io/zone: zone-b` | Worker | 1 |
-| gamma | `topology.kubernetes.io/zone: zone-c` | Worker | 2 |
+| Node | Zone Label | Role | Pods |
+|------|-----------|------|------|
+| alpha | `topology.kubernetes.io/zone: alpha` | Control-plane + Worker | brokers-alpha-0, controllers-3 |
+| sigma | `topology.kubernetes.io/zone: sigma` | Worker | brokers-sigma-2, controllers-4 |
+| gamma | `topology.kubernetes.io/zone: gamma` | Worker | brokers-gamma-1, controllers-5 |
 
 Strimzi's `rack` configuration uses these labels to ensure:
 
-- Each broker is pinned to exactly one zone via `nodeAffinity`
+- Each broker is pinned to exactly one zone via `nodeAffinity` (per-zone `KafkaNodePool`)
 - Partition replicas are spread across zones (rack-aware assignment)
 - PVCs use zone-specific `StorageClass` resources for data locality
 
 ## Resource Budget
 
-| Resource | Per Broker | Total Cluster | Impact |
-|----------|-----------|---------------|--------|
-| Memory | 2Gi (request = limit) | 6Gi | JVM heap + page cache + metadata must fit |
-| Storage | 10Gi persistent | 30Gi | Log retention before rotation |
-| CPU | Not limited | Shared with Kind | CPU contention possible under stress |
-| Network | Kind internal (loopback) | No real latency | Artificial; production will have network costs |
+| Component | Memory (req=limit) | CPU (req / limit) | Storage | JVM Heap |
+|-----------|:------------------:|:-----------------:|:-------:|:--------:|
+| Controller | 1Gi | 500m / 1000m | 5Gi | Default |
+| Broker | 4Gi | 1000m / 2000m | 50Gi | 2Gi fixed |
+| **Total cluster** | **15Gi** | **4.5 / 9 cores** | **165Gi** | — |
 
-The 2Gi memory limit is a hard constraint. Kafka relies heavily on the OS page cache for read performance — the tighter the memory, the faster the page cache evicts and the more disk I/O occurs. This makes performance testing on this cluster **more sensitive** to workload patterns than a production cluster with 64Gi per broker.
+The 4Gi broker memory with a 2Gi fixed heap (`-Xms2048m -Xmx2048m`) leaves ~2Gi for the OS page cache. Kafka relies heavily on page cache for read performance — the tighter the memory, the faster eviction occurs and the more disk I/O results. This makes performance testing on this cluster **more sensitive** to workload patterns than a production cluster with 64Gi per broker.
+
+GC logging is enabled (`gcLoggingEnabled: true`) on all brokers, making it possible to correlate latency spikes with garbage collection pauses.
 
 ## Replication Configuration
 
@@ -84,16 +96,33 @@ With RF=3 and ISR=2, every produce request with `acks=all` requires the leader t
 | 1 broker down | ✅ | ❌ | ISR still ≥ 2, `min.insync.replicas` satisfied |
 | 2 brokers down | ❌ | ❌ | ISR = 1 < `min.insync.replicas`, writes rejected |
 | 3 brokers down | ❌ | ❌ | No leader, cluster unavailable |
-| 1 broker data corruption | ✅ | ❌ | Follower catches up from remaining replicas |
+| 1 controller down | ✅ | ❌ | Quorum of 2 still holds, metadata operations continue |
+| 2 controllers down | ❌ | ❌ | No quorum — metadata operations halt, brokers freeze |
+| 1 broker + 1 controller | ✅ | ❌ | Quorum intact, ISR ≥ 2 |
 
 ## Listeners
 
-| Name | Port | TLS | Use Case |
-|------|------|-----|----------|
-| `plain` | 9092 | No | Internal traffic, performance tests |
-| `tls` | 9093 | Yes | Encrypted communication |
+| Name | Port | Type | Auth | TLS | Use Case |
+|------|------|------|------|-----|----------|
+| `plain` | 9092 | internal | SCRAM-SHA-512 | No | Service-to-service traffic, performance tests |
+| `tls` | 9093 | internal | mTLS | Yes | Encrypted internal communication |
+| `external` | 9094 | nodeport | SCRAM-SHA-512 | Yes | Access from outside the cluster |
 
 Performance tests use port 9092 (plain) for baseline measurements. TLS adds measurable CPU overhead — test both to quantify the encryption cost on a memory-constrained cluster.
+
+## Topics
+
+Kates provisions five declarative topics via `KafkaTopic` CRDs:
+
+| Topic | Partitions | Retention | Compression | Purpose |
+|-------|:----------:|-----------|:-----------:|---------|
+| `kates-events` | 6 | 48h | — | Test lifecycle events |
+| `kates-results` | 12 | 7d | lz4 | Test results (high-throughput) |
+| `kates-metrics` | 6 | 24h | lz4 | Real-time broker metrics |
+| `kates-audit` | 3 | 30d | — | Audit trail |
+| `kates-dlq` | 3 | ∞ | — | Dead letter queue (compacted) |
+
+`kates-results` has 12 partitions (4× the broker count) for maximum consumer parallelism during high-throughput test runs.
 
 ## Monitoring Stack
 
@@ -104,16 +133,21 @@ graph LR
         B2[Broker 1] --> JMX2[JMX Exporter]
         B3[Broker 2] --> JMX3[JMX Exporter]
     end
-    
+
+    subgraph Exporter
+        KE[Kafka Exporter<br/>Consumer lag<br/>Topic offsets]
+    end
+
     subgraph Monitoring
         JMX1 --> PROM[Prometheus<br/>15s scrape]
         JMX2 --> PROM
         JMX3 --> PROM
+        KE --> PROM
         PROM --> GRAF[Grafana<br/>:30080]
     end
 ```
 
-Prometheus scrapes JMX metrics from each broker every 15 seconds via sidecar exporters. The exporter rules cover:
+Prometheus scrapes JMX metrics from each broker every 15 seconds via sidecar exporters. The **Kafka Exporter** adds consumer lag and topic offset metrics not available via JMX.
 
 | Metric Namespace | What It Tracks |
 |-----------------|----------------|
@@ -123,6 +157,7 @@ Prometheus scrapes JMX metrics from each broker every 15 seconds via sidecar exp
 | `kafka.controller.*` | KRaft controller metrics, leader elections |
 | `kafka.coordinator.*` | Group coordinator stats, consumer joins |
 | `java.lang.*` | JVM heap, GC, thread counts |
+| `kafka_consumergroup_*` | Consumer lag, committed offsets (via Kafka Exporter) |
 
 ### Pre-Provisioned Dashboards
 
@@ -136,6 +171,10 @@ Prometheus scrapes JMX metrics from each broker every 15 seconds via sidecar exp
 | Kafka Replication | ISR count, under-replicated partitions, lag |
 | Kafka Unified Performance | Combined view across all performance dimensions |
 
+### Prometheus Alerts
+
+16 alert rules monitor cluster health across five categories — see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) for the complete list.
+
 ### Access Points
 
 | Service | URL | Credentials |
@@ -144,6 +183,19 @@ Prometheus scrapes JMX metrics from each broker every 15 seconds via sidecar exp
 | Kafka UI | http://localhost:30081 | — |
 | Kates API | http://localhost:30083 | — |
 | Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
+
+## Operational Components
+
+Beyond the brokers and controllers, the cluster includes:
+
+| Component | Purpose |
+|-----------|---------|
+| **Cruise Control** | Automated partition rebalancing based on resource utilization |
+| **Kafka Exporter** | Consumer lag and topic offset metrics |
+| **Drain Cleaner** | Graceful pod rolling during node drains |
+| **Entity Operator** | Topic and User lifecycle management via CRDs |
+
+For deep operational details, see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
 
 ## Using the CLI to Inspect the Cluster
 

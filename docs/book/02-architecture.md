@@ -14,6 +14,7 @@ graph TB
     
     subgraph Backend["Kates Backend (Quarkus / Java)"]
         API[REST API]
+        GRPC[gRPC API]
         ORCH[TestOrchestrator]
         ENG[Benchmark Engine]
         CHAOS[Disruption Orchestrator]
@@ -33,6 +34,7 @@ graph TB
     CLI1 --> API
     CLI2 --> API
     CLI3 --> API
+    GRPC -.->|"CI/CD pipelines"| ORCH
     API --> ORCH
     ORCH --> ENG
     ORCH --> CHAOS
@@ -48,7 +50,7 @@ graph TB
 
 ## Backend Engine
 
-The backend is a **Quarkus application** running in JVM mode (with native image support via GraalVM). It exposes a REST API and manages the full test lifecycle.
+The backend is a **Quarkus application** running in JVM mode (with native image support via GraalVM). It exposes both a REST API and a **gRPC API** (see [Chapter 16](16-grpc-api.md)), and manages the full test lifecycle. Both APIs delegate to the same service layer — identical behavior, different wire formats.
 
 ### Component Map
 
@@ -299,13 +301,13 @@ sequenceDiagram
 
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
-| Backend | Quarkus | 3.x | REST framework, CDI, native compilation |
+| Backend | Quarkus | 3.x | REST + gRPC framework, CDI, native compilation |
 | Runtime | Java | 21+ | Virtual threads, modern GC |
 | Build | Maven | 3.x | Backend build system |
 | CLI | Go | 1.25+ | Cross-platform binary |
 | CLI Framework | Cobra | Latest | Command parsing, help generation |
 | Cluster | Kind | Latest | Local Kubernetes simulation |
-| Kafka | Apache Kafka | 4.2.0 | KRaft mode, Share Groups, Tiered Storage |
+| Kafka | Apache Kafka | 4.1.1 | KRaft mode, Share Groups |
 | Operator | Strimzi | 0.51.0 | Kafka lifecycle management |
 | Chaos | LitmusChaos | Latest | Advanced chaos experiments |
 | Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |

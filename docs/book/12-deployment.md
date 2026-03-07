@@ -91,6 +91,8 @@ make ui
 make apicurio
 ```
 
+For deep Kafka configuration details (broker tuning, security, Cruise Control, troubleshooting), see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
+
 ### LitmusChaos
 
 ```bash

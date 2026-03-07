@@ -23,7 +23,25 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 | 13 | [Scenario Files & SLA Gates](13-scenario-files.md) | YAML scenario format, spec fields, and automated SLA enforcement |
 | 14 | [Recipes & Patterns](14-recipes.md) | Ready-to-use workflows for upgrades, nightly regressions, chaos certification, and tuning |
 | 15 | [Kafka Deployment Engineering](15-kafka-deployment.md) | Strimzi operator, KRaft architecture, broker tuning, security, and operations |
+| 16 | [gRPC API Reference](16-grpc-api.md) | Protobuf service definitions, message types, and usage examples |
+| 17 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, and audit checklist |
+| 18 | [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |
+| 19 | [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
 | A | [Glossary](appendix-a-glossary.md) | Quick reference for all terms and abbreviations |
+| B | [Troubleshooting Index](appendix-b-troubleshooting.md) | Consolidated troubleshooting procedures from across the book |
+
+## Tutorials
+
+Hands-on step-by-step guides for specific workflows:
+
+| Tutorial | Description |
+|----------|-------------|
+| [Getting Started](../tutorials/01-getting-started.md) | First deployment and test execution |
+| [All Test Types](../tutorials/02-all-test-types.md) | Walkthrough of every test type |
+| [Chaos Engineering](../tutorials/03-chaos-engineering.md) | Your first chaos experiment |
+| [Integrity Under Fire](../tutorials/04-integrity-under-fire.md) | Data integrity verification under fault conditions |
+| [Observability](../tutorials/05-observability.md) | Setting up dashboards and alerts |
+| [CI/CD Integration](../tutorials/06-cicd-integration.md) | Automated testing in pipelines |
 
 ## Who This Book Is For
 
@@ -34,5 +52,4 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 
 ## How to Read This Book
 
-Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows. Chapter 15 is the **Kafka operations manual** — read it when deploying, upgrading, or troubleshooting the cluster.
-
+Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows. Chapter 15 is the **Kafka operations manual** — read it when deploying, upgrading, or troubleshooting the cluster. Chapters 16–19 cover advanced topics: gRPC integration, security hardening, upgrade procedures, and multi-tenant operations. The appendices provide quick reference for terminology and troubleshooting.
