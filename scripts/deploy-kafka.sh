@@ -56,5 +56,14 @@ kubectl apply -f config/monitoring/kafka-perf-global-dashboard.yaml
 info "Waiting for Kafka cluster to be ready (this may take a few minutes)..."
 kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n kafka 
 
+info "Applying Kafka Users (SCRAM credentials)..."
+kubectl apply -f config/kafka/kafka-users.yaml
+
+info "Applying Kafka Topics..."
+kubectl apply -f config/kafka/kafka-topics.yaml
+
+info "Waiting for user secrets to be created..."
+kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka
+
 info "✅ Kafka deployment complete!"
 echo "Check the 'Kafka Cluster Health' dashboard in Grafana."
