@@ -200,11 +200,6 @@ spec:
         tls: true
         authentication:
           type: tls
-        configuration:
-          brokerCertChainAndKey:
-            certificate: tls.crt
-            key: tls.key
-            secretName: krafter-tls-listener-cert
       - name: external
         port: 9094
         type: nodeport
@@ -234,10 +229,6 @@ spec:
       quota.producer.default: 52428800
       quota.consumer.default: 104857600
       group.share.enable: true
-      # Tiered Storage (KIP-405) — offload cold segments to MinIO
-      remote.log.storage.system.enable: true
-      log.local.retention.ms: 86400000
-      log.local.retention.bytes: -1
       # Dynamic KRaft quorum (KIP-853) — controller scaling
       controller.quorum.election.timeout.ms: 5000
       controller.quorum.fetch.timeout.ms: 10000
@@ -291,11 +282,19 @@ spec:
     config:
       goals: >-
         com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareDistributionGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.MinTopicLeadersPerBrokerGoal,
         com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal,
         com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal,
         com.linkedin.kafka.cruisecontrol.analyzer.goals.NetworkInboundCapacityGoal,
         com.linkedin.kafka.cruisecontrol.analyzer.goals.NetworkOutboundCapacityGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuCapacityGoal
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuCapacityGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaDistributionGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskUsageDistributionGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuUsageDistributionGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.TopicReplicaDistributionGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.LeaderReplicaDistributionGoal,
+        com.linkedin.kafka.cruisecontrol.analyzer.goals.PreferredLeaderElectionGoal
     resources:
       requests:
         memory: 512Mi
