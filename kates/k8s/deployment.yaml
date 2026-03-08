@@ -41,6 +41,7 @@ spec:
             path: /api/health
             port: 8080
           initialDelaySeconds: 5
+          timeoutSeconds: 10
           periodSeconds: 10
         livenessProbe:
           httpGet:

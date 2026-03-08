@@ -26,7 +26,6 @@ HELM_ARGS=(
     --namespace monitoring
     --values "${VALUES_FILE}"
     --timeout 5m
-    --wait
 )
 
 if [ -f "${OFFLINE_VALUES}" ]; then
@@ -37,9 +36,14 @@ fi
 info "Installing Jaeger chart v${JAEGER_CHART_VERSION}..."
 helm "${HELM_ARGS[@]}"
 
+info "Patching health probes for Jaeger v2 (chart hardcodes v1 admin port 14269)..."
+kubectl patch deployment jaeger -n monitoring --type=json -p '[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},
+  {"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}
+]'
+
 info "Verifying Jaeger is ready..."
-kubectl wait --for=condition=available --timeout=120s deployment/jaeger -n monitoring 2>/dev/null || \
-    kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=jaeger -n monitoring --timeout=120s 2>/dev/null || \
+kubectl rollout status deployment/jaeger -n monitoring --timeout=120s || \
     warn "Jaeger pods may still be starting"
 
 info "✅ Jaeger deployment complete!"

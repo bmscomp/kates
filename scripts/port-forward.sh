@@ -36,6 +36,7 @@ forward "Kafka UI"          "🖥️ " kafka-ui                                 
 forward "Apicurio Registry" "📚" apicurio-registry                          30082 8080 apicurio
 forward "Kates API"         "🧪" kates                                      30083 8080 kates
 forward "Prometheus"        "🔥" monitoring-kube-prometheus-prometheus       30090 9090 monitoring
+forward "Jaeger UI"         "🔍" jaeger-query                               30086 16686 monitoring
 forward "Litmus UI"         "⚡" chaos-litmus-frontend-service              9091  9091 litmus
 
 echo ""

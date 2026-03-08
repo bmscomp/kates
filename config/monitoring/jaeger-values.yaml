@@ -8,12 +8,9 @@ provisionDataStore:
 allInOne:
   enabled: true
   image:
-    repository: jaegertracing/all-in-one
-    tag: "1.64"
+    repository: jaegertracing/jaeger
+    tag: "2.15.0"
     pullPolicy: IfNotPresent
-  extraEnv:
-    - name: COLLECTOR_OTLP_ENABLED
-      value: "true"
   resources:
     requests:
       memory: 256Mi
