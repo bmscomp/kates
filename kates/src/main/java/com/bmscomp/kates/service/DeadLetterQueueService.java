@@ -22,6 +22,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import io.quarkus.scheduler.Scheduled;
 
 /**
@@ -30,6 +31,10 @@ import io.quarkus.scheduler.Scheduled;
  * Messages in the DLQ are records that failed processing in upstream consumers.
  */
 @ApplicationScoped
+@RegisterForReflection(targets = {
+        org.apache.kafka.common.serialization.StringDeserializer.class,
+        org.apache.kafka.common.serialization.StringSerializer.class
+})
 public class DeadLetterQueueService {
 
     private static final Logger LOG = Logger.getLogger(DeadLetterQueueService.class);
@@ -86,15 +91,18 @@ public class DeadLetterQueueService {
     }
 
     /**
-     * Polls the DLQ topic every 30 seconds and processes any dead-lettered messages.
+     * Polls the DLQ topic every 30 seconds and processes any dead-lettered
+     * messages.
      */
     @Scheduled(every = "30s", identity = "dlq-poller")
     void pollDlq() {
-        if (!running || consumer == null) return;
+        if (!running || consumer == null)
+            return;
 
         try {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
-            if (records.isEmpty()) return;
+            if (records.isEmpty())
+                return;
 
             records.forEach(record -> {
                 totalDlqMessages.incrementAndGet();
@@ -156,21 +164,23 @@ public class DeadLetterQueueService {
             props.put(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-512");
             props.put(SaslConfigs.SASL_JAAS_CONFIG,
                     "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                    + "username=\"" + saslUsername.get() + "\" "
-                    + "password=\"" + saslPassword.get() + "\";");
+                            + "username=\"" + saslUsername.get() + "\" "
+                            + "password=\"" + saslPassword.get() + "\";");
         }
 
         return new KafkaConsumer<>(props);
     }
 
     private String extractSource(String key) {
-        if (key == null) return "unknown";
+        if (key == null)
+            return "unknown";
         int dot = key.indexOf('.');
         return dot > 0 ? key.substring(0, dot) : key;
     }
 
     private String truncate(String value, int maxLen) {
-        if (value == null) return "null";
+        if (value == null)
+            return "null";
         return value.length() <= maxLen ? value : value.substring(0, maxLen) + "...";
     }
 }
