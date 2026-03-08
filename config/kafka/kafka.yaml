@@ -305,23 +305,7 @@ spec:
       cpu: "2000m"
       inboundNetwork: 50MiB/s
       outboundNetwork: 50MiB/s
-      disk: 50Gi
-    config:
-      goals: >-
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareDistributionGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.MinTopicLeadersPerBrokerGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.NetworkInboundCapacityGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.NetworkOutboundCapacityGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuCapacityGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaDistributionGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskUsageDistributionGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuUsageDistributionGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.TopicReplicaDistributionGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.LeaderReplicaDistributionGoal,
-        com.linkedin.kafka.cruisecontrol.analyzer.goals.PreferredLeaderElectionGoal
+    config: {}
     resources:
       requests:
         memory: 512Mi

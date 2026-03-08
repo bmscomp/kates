@@ -28,13 +28,16 @@ helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
   --timeout 10m \
   --wait
 
-info "Installing Strimzi Drain Cleaner..."
-helm upgrade --install strimzi-drain-cleaner strimzi/strimzi-drain-cleaner \
-  --version 1.5.0 \
-  --namespace kafka \
-  --set certManager.create=false \
-  --set image.imagePullPolicy=IfNotPresent \
-  --wait || warn "Drain Cleaner install skipped (may already exist)"
+# Drain Cleaner requires cert-manager for webhook TLS (optional component).
+# Uncomment if cert-manager is installed.
+# info "Installing Strimzi Drain Cleaner..."
+# helm upgrade --install strimzi-drain-cleaner strimzi/strimzi-drain-cleaner \
+#   --version 1.5.0 \
+#   --namespace strimzi-drain-cleaner \
+#   --create-namespace \
+#   --set certManager.create=true \
+#   --set image.imagePullPolicy=IfNotPresent \
+#   --wait || warn "Drain Cleaner install skipped"
 
 info "Applying Metrics Configuration..."
 kubectl apply -f config/kafka/kafka-metrics.yaml
