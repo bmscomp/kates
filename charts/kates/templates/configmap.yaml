@@ -6,11 +6,30 @@ metadata:
     {{- include "kates.labels" . | nindent 4 }}
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: {{ .Values.kafka.bootstrapServers | quote }}
+  KATES_KAFKA_SECURITY_PROTOCOL: {{ .Values.kafka.security.protocol | quote }}
   {{- if .Values.kafka.sasl.enabled }}
+  KATES_KAFKA_SASL_MECHANISM: {{ .Values.kafka.sasl.mechanism | quote }}
+  {{- if ne .Values.kafka.sasl.mechanism "OAUTHBEARER" }}
   KATES_KAFKA_SASL_USERNAME: {{ .Values.kafka.sasl.username | quote }}
   {{- end }}
-  {{- if .Values.kafka.clientRack }}
-  KATES_KAFKA_CLIENT_RACK: {{ .Values.kafka.clientRack | quote }}
+  {{- if eq .Values.kafka.sasl.mechanism "OAUTHBEARER" }}
+  {{- with .Values.kafka.sasl.oauthbearer }}
+  {{- if .tokenEndpointUrl }}
+  KATES_KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL: {{ .tokenEndpointUrl | quote }}
+  {{- end }}
+  {{- if .clientId }}
+  KATES_KAFKA_SASL_OAUTHBEARER_CLIENT_ID: {{ .clientId | quote }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- if .Values.kafka.ssl.enabled }}
+  {{- if .Values.kafka.ssl.truststore.secretName }}
+  KATES_KAFKA_SSL_TRUSTSTORE_LOCATION: "/etc/kafka/ssl/truststore/{{ .Values.kafka.ssl.truststore.key }}"
+  {{- end }}
+  {{- if .Values.kafka.ssl.keystore.secretName }}
+  KATES_KAFKA_SSL_KEYSTORE_LOCATION: "/etc/kafka/ssl/keystore/{{ .Values.kafka.ssl.keystore.key }}"
+  {{- end }}
   {{- end }}
   KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
   KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}

@@ -23,6 +23,7 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.config.KafkaSecurityConfig;
 import com.bmscomp.kates.domain.IntegrityResult;
 import com.bmscomp.kates.domain.TestResult.TaskStatus;
 
@@ -37,11 +38,15 @@ public class NativeKafkaBackend implements BenchmarkBackend {
     private static final Logger LOG = Logger.getLogger(NativeKafkaBackend.class);
 
     private final String bootstrapServers;
+    private final KafkaSecurityConfig securityConfig;
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
 
     @Inject
-    public NativeKafkaBackend(@ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+    public NativeKafkaBackend(
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
+            KafkaSecurityConfig securityConfig) {
         this.bootstrapServers = bootstrapServers;
+        this.securityConfig = securityConfig;
     }
 
     @Override
@@ -132,6 +137,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         }
 
         props.put(ProducerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
+        securityConfig.apply(props);
         task.getProducerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
@@ -205,6 +211,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
+        securityConfig.apply(props);
         task.getConsumerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
@@ -239,6 +246,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         }
 
         props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
+        securityConfig.apply(props);
         task.getConsumerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();

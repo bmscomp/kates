@@ -17,13 +17,14 @@ import jakarta.inject.Inject;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.config.SaslConfigs;
+
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import io.quarkus.runtime.annotations.RegisterForReflection;
 import io.quarkus.scheduler.Scheduled;
+
+import com.bmscomp.kates.config.KafkaSecurityConfig;
 
 /**
  * Consumes messages from the Dead Letter Queue (kates-dlq) topic.
@@ -31,18 +32,13 @@ import io.quarkus.scheduler.Scheduled;
  * Messages in the DLQ are records that failed processing in upstream consumers.
  */
 @ApplicationScoped
-@RegisterForReflection(targets = {
-        org.apache.kafka.common.serialization.StringDeserializer.class,
-        org.apache.kafka.common.serialization.StringSerializer.class
-})
 public class DeadLetterQueueService {
 
     private static final Logger LOG = Logger.getLogger(DeadLetterQueueService.class);
     private static final String DLQ_TOPIC = "kates-dlq";
 
     private final String bootstrapServers;
-    private final Optional<String> saslUsername;
-    private final Optional<String> saslPassword;
+    private final KafkaSecurityConfig securityConfig;
     private final Optional<String> clientRack;
 
     private volatile KafkaConsumer<String, String> consumer;
@@ -56,12 +52,10 @@ public class DeadLetterQueueService {
     @Inject
     public DeadLetterQueueService(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
-            @ConfigProperty(name = "kates.kafka.sasl.username") Optional<String> saslUsername,
-            @ConfigProperty(name = "kates.kafka.sasl.password") Optional<String> saslPassword,
+            KafkaSecurityConfig securityConfig,
             @ConfigProperty(name = "kates.kafka.client-rack") Optional<String> clientRack) {
         this.bootstrapServers = bootstrapServers;
-        this.saslUsername = saslUsername;
-        this.saslPassword = saslPassword;
+        this.securityConfig = securityConfig;
         this.clientRack = clientRack;
     }
 
@@ -158,15 +152,7 @@ public class DeadLetterQueueService {
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "100");
 
         clientRack.ifPresent(rack -> props.put(ConsumerConfig.CLIENT_RACK_CONFIG, rack));
-
-        if (saslUsername.isPresent() && saslPassword.isPresent()) {
-            props.put("security.protocol", "SASL_PLAINTEXT");
-            props.put(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-512");
-            props.put(SaslConfigs.SASL_JAAS_CONFIG,
-                    "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                            + "username=\"" + saslUsername.get() + "\" "
-                            + "password=\"" + saslPassword.get() + "\";");
-        }
+        securityConfig.apply(props);
 
         return new KafkaConsumer<>(props);
     }

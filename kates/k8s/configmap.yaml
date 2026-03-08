@@ -10,6 +10,8 @@ metadata:
 data:
   # Kafka cluster
   KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
+  KATES_KAFKA_SECURITY_PROTOCOL: "SASL_PLAINTEXT"
+  KATES_KAFKA_SASL_MECHANISM: "SCRAM-SHA-512"
   KATES_KAFKA_SASL_USERNAME: "kates-backend"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
 

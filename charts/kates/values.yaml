@@ -138,11 +138,29 @@ initContainers:
 kafka:
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
   clientRack: ""
+  security:
+    protocol: PLAINTEXT
   sasl:
     enabled: true
+    mechanism: SCRAM-SHA-512
     username: kates-backend
     secretName: kates-backend
     secretKey: password
+    oauthbearer:
+      tokenEndpointUrl: ""
+      clientId: ""
+      clientSecretName: ""
+      clientSecretKey: client-secret
+  ssl:
+    enabled: false
+    truststore:
+      secretName: ""
+      key: truststore.jks
+      password: ""
+    keystore:
+      secretName: ""
+      key: keystore.jks
+      password: ""
 
 trogdor:
   coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"

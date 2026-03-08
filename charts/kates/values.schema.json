@@ -200,6 +200,102 @@
                 "bootstrapServers": {
                     "type": "string",
                     "minLength": 1
+                },
+                "clientRack": {
+                    "type": "string"
+                },
+                "security": {
+                    "type": "object",
+                    "properties": {
+                        "protocol": {
+                            "type": "string",
+                            "enum": [
+                                "PLAINTEXT",
+                                "SASL_PLAINTEXT",
+                                "SSL",
+                                "SASL_SSL"
+                            ]
+                        }
+                    }
+                },
+                "sasl": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "mechanism": {
+                            "type": "string",
+                            "enum": [
+                                "SCRAM-SHA-512",
+                                "SCRAM-SHA-256",
+                                "PLAIN",
+                                "OAUTHBEARER"
+                            ]
+                        },
+                        "username": {
+                            "type": "string"
+                        },
+                        "secretName": {
+                            "type": "string"
+                        },
+                        "secretKey": {
+                            "type": "string"
+                        },
+                        "oauthbearer": {
+                            "type": "object",
+                            "properties": {
+                                "tokenEndpointUrl": {
+                                    "type": "string"
+                                },
+                                "clientId": {
+                                    "type": "string"
+                                },
+                                "clientSecretName": {
+                                    "type": "string"
+                                },
+                                "clientSecretKey": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
+                "ssl": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "truststore": {
+                            "type": "object",
+                            "properties": {
+                                "secretName": {
+                                    "type": "string"
+                                },
+                                "key": {
+                                    "type": "string"
+                                },
+                                "password": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "keystore": {
+                            "type": "object",
+                            "properties": {
+                                "secretName": {
+                                    "type": "string"
+                                },
+                                "key": {
+                                    "type": "string"
+                                },
+                                "password": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
                 }
             },
             "required": [

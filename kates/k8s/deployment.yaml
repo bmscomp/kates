@@ -20,7 +20,7 @@ spec:
       serviceAccountName: kates
       containers:
       - name: kates
-        image: kates:latest
+        image: kates:jvm-v2
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -29,6 +29,12 @@ spec:
         envFrom:
         - configMapRef:
             name: kates-config
+        env:
+        - name: KATES_KAFKA_SASL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kates-kafka-credentials
+              key: password
         resources:
           requests:
             memory: "256Mi"

@@ -15,10 +15,11 @@ import jakarta.inject.Inject;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import com.bmscomp.kates.config.KafkaSecurityConfig;
 
 /**
  * Share Groups consumer for Kafka 4.2 (KIP-932).
@@ -44,8 +45,7 @@ public class ShareGroupConsumerService {
     private static final String RESULTS_TOPIC = "kates-results";
 
     private final String bootstrapServers;
-    private final Optional<String> saslUsername;
-    private final Optional<String> saslPassword;
+    private final KafkaSecurityConfig securityConfig;
     private final Optional<String> clientRack;
 
     private volatile KafkaConsumer<String, String> consumer;
@@ -58,12 +58,10 @@ public class ShareGroupConsumerService {
     @Inject
     public ShareGroupConsumerService(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
-            @ConfigProperty(name = "kates.kafka.sasl.username") Optional<String> saslUsername,
-            @ConfigProperty(name = "kates.kafka.sasl.password") Optional<String> saslPassword,
+            KafkaSecurityConfig securityConfig,
             @ConfigProperty(name = "kates.kafka.client-rack") Optional<String> clientRack) {
         this.bootstrapServers = bootstrapServers;
-        this.saslUsername = saslUsername;
-        this.saslPassword = saslPassword;
+        this.securityConfig = securityConfig;
         this.clientRack = clientRack;
     }
 
@@ -176,15 +174,7 @@ public class ShareGroupConsumerService {
                 props.put(ConsumerConfig.CLIENT_RACK_CONFIG, rack);
             }
         });
-
-        if (saslUsername.isPresent() && saslPassword.isPresent()) {
-            props.put("security.protocol", "SASL_PLAINTEXT");
-            props.put(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-512");
-            props.put(SaslConfigs.SASL_JAAS_CONFIG,
-                    "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                    + "username=\"" + saslUsername.get() + "\" "
-                    + "password=\"" + saslPassword.get() + "\";");
-        }
+        securityConfig.apply(props);
 
         return new KafkaConsumer<>(props);
     }

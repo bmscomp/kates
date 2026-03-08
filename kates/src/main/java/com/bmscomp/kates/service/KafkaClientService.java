@@ -18,17 +18,22 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import com.bmscomp.kates.config.KafkaSecurityConfig;
+
 @ApplicationScoped
 public class KafkaClientService {
 
     private static final int TIMEOUT_SECONDS = 30;
 
     private final String bootstrapServers;
+    private final KafkaSecurityConfig securityConfig;
 
     @Inject
     public KafkaClientService(
-            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
+            KafkaSecurityConfig securityConfig) {
         this.bootstrapServers = bootstrapServers;
+        this.securityConfig = securityConfig;
     }
 
     public Map<String, Object> produceRecord(String topic, String key, String value) {
@@ -41,6 +46,7 @@ public class KafkaClientService {
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "15000");
         props.put(ProducerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
+        securityConfig.apply(props);
 
         try (var producer = new KafkaProducer<String, String>(props)) {
             var record = new ProducerRecord<>(topic, key, value);
@@ -69,6 +75,7 @@ public class KafkaClientService {
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, limit);
         props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
+        securityConfig.apply(props);
 
         List<Map<String, Object>> records = new ArrayList<>();
         try (var consumer = new KafkaConsumer<String, String>(props)) {

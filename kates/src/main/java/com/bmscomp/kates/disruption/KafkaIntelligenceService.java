@@ -5,7 +5,9 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -17,6 +19,8 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import com.bmscomp.kates.config.KafkaSecurityConfig;
 
 /**
  * Kafka intelligence layer for disruption tests.
@@ -32,8 +36,16 @@ public class KafkaIntelligenceService {
     private static final Logger LOG = Logger.getLogger(KafkaIntelligenceService.class);
     private static final int TIMEOUT_SECONDS = 15;
 
-    @ConfigProperty(name = "kates.kafka.bootstrap-servers")
-    String bootstrapServers;
+    private final String bootstrapServers;
+    private final KafkaSecurityConfig securityConfig;
+
+    @Inject
+    public KafkaIntelligenceService(
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
+            KafkaSecurityConfig securityConfig) {
+        this.bootstrapServers = bootstrapServers;
+        this.securityConfig = securityConfig;
+    }
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "kafka-intelligence");
@@ -46,6 +58,7 @@ public class KafkaIntelligenceService {
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "10000");
         props.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "15000");
+        securityConfig.apply(props);
         return AdminClient.create(props);
     }
 

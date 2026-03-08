@@ -1,6 +1,5 @@
 package com.bmscomp.kates.service;
 
-import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -11,9 +10,10 @@ import jakarta.inject.Inject;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.common.config.SaslConfigs;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import com.bmscomp.kates.config.KafkaSecurityConfig;
 
 /**
  * Manages the shared Kafka AdminClient lifecycle.
@@ -27,19 +27,16 @@ public class KafkaAdminService {
     private static final Logger LOG = Logger.getLogger(KafkaAdminService.class);
 
     private final String bootstrapServers;
-    private final Optional<String> saslUsername;
-    private final Optional<String> saslPassword;
+    private final KafkaSecurityConfig securityConfig;
     private volatile AdminClient sharedClient;
     private final ReentrantLock clientLock = new ReentrantLock();
 
     @Inject
     public KafkaAdminService(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
-            @ConfigProperty(name = "kates.kafka.sasl.username") Optional<String> saslUsername,
-            @ConfigProperty(name = "kates.kafka.sasl.password") Optional<String> saslPassword) {
+            KafkaSecurityConfig securityConfig) {
         this.bootstrapServers = bootstrapServers;
-        this.saslUsername = saslUsername;
-        this.saslPassword = saslPassword;
+        this.securityConfig = securityConfig;
     }
 
     @PostConstruct
@@ -70,17 +67,7 @@ public class KafkaAdminService {
         props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "5000");
         props.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "15000");
         props.put(AdminClientConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
-
-        if (saslUsername.isPresent() && saslPassword.isPresent()) {
-            props.put(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SASL_PLAINTEXT");
-            props.put(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-512");
-            props.put(SaslConfigs.SASL_JAAS_CONFIG,
-                    "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                    + "username=\"" + saslUsername.get() + "\" "
-                    + "password=\"" + saslPassword.get() + "\";");
-            LOG.infof("AdminClient SASL/SCRAM-SHA-512 enabled for user: %s", saslUsername.get());
-        }
-
+        securityConfig.apply(props);
         return AdminClient.create(props);
     }
 

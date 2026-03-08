@@ -79,12 +79,37 @@ spec:
             name: {{ include "kates.dbSecretName" . }}
         {{- end }}
         env:
+        {{- if .Values.kafka.clientRack }}
+        - name: KATES_KAFKA_CLIENT_RACK
+          value: {{ .Values.kafka.clientRack | quote }}
+        {{- end }}
         {{- if .Values.kafka.sasl.enabled }}
+        {{- if and .Values.kafka.sasl.secretName (ne .Values.kafka.sasl.mechanism "OAUTHBEARER") }}
         - name: KATES_KAFKA_SASL_PASSWORD
           valueFrom:
             secretKeyRef:
               name: {{ .Values.kafka.sasl.secretName }}
               key: {{ .Values.kafka.sasl.secretKey }}
+        {{- end }}
+        {{- if eq .Values.kafka.sasl.mechanism "OAUTHBEARER" }}
+        {{- if .Values.kafka.sasl.oauthbearer.clientSecretName }}
+        - name: KATES_KAFKA_SASL_OAUTHBEARER_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.kafka.sasl.oauthbearer.clientSecretName }}
+              key: {{ .Values.kafka.sasl.oauthbearer.clientSecretKey }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.kafka.ssl.enabled }}
+        {{- if .Values.kafka.ssl.truststore.password }}
+        - name: KATES_KAFKA_SSL_TRUSTSTORE_PASSWORD
+          value: {{ .Values.kafka.ssl.truststore.password | quote }}
+        {{- end }}
+        {{- if .Values.kafka.ssl.keystore.password }}
+        - name: KATES_KAFKA_SSL_KEYSTORE_PASSWORD
+          value: {{ .Values.kafka.ssl.keystore.password | quote }}
+        {{- end }}
         {{- end }}
         {{- with .Values.extraEnv }}
           {{- toYaml . | nindent 8 }}
@@ -94,6 +119,16 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
+        {{- if and .Values.kafka.ssl.enabled .Values.kafka.ssl.truststore.secretName }}
+        - name: kafka-truststore
+          mountPath: /etc/kafka/ssl/truststore
+          readOnly: true
+        {{- end }}
+        {{- if and .Values.kafka.ssl.enabled .Values.kafka.ssl.keystore.secretName }}
+        - name: kafka-keystore
+          mountPath: /etc/kafka/ssl/keystore
+          readOnly: true
+        {{- end }}
         {{- with .Values.extraVolumeMounts }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -122,6 +157,16 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
+      {{- if and .Values.kafka.ssl.enabled .Values.kafka.ssl.truststore.secretName }}
+      - name: kafka-truststore
+        secret:
+          secretName: {{ .Values.kafka.ssl.truststore.secretName }}
+      {{- end }}
+      {{- if and .Values.kafka.ssl.enabled .Values.kafka.ssl.keystore.secretName }}
+      - name: kafka-keystore
+        secret:
+          secretName: {{ .Values.kafka.ssl.keystore.secretName }}
+      {{- end }}
       {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 6 }}
       {{- end }}
