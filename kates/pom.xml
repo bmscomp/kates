@@ -100,9 +100,8 @@
 
         <!-- Kafka Admin Client -->
         <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
-            <version>${kafka.version}</version>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-kafka-client</artifactId>
         </dependency>
         <dependency>
             <groupId>org.lz4</groupId>
@@ -144,15 +143,6 @@
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
-        </dependency>
-
-        <!-- No-op Krb5LoginModule stub for GraalVM native image (ServiceLoader needs the class) -->
-        <dependency>
-            <groupId>com.bmscomp</groupId>
-            <artifactId>krb5-stub</artifactId>
-            <version>1.0.0</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/krb5-stub-1.0.0.jar</systemPath>
         </dependency>
 
         <!-- Testing -->

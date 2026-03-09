@@ -12,19 +12,20 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
   -X github.com/klster/kates-cli/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o /kates-cli .
 
-# Stage 2: Build the native executable (GraalVM CE)
-FROM quay.io/quarkus/ubi9-quarkus-graalvmce-builder-image:jdk-25 AS builder
+# Stage 2: Build the native executable (Mandrel)
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25 AS builder
 USER root
 WORKDIR /build
 
 COPY kates/pom.xml .
 COPY kates/.mvn .mvn
 COPY kates/mvnw .
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
+RUN --mount=type=cache,target=/root/.m2 \
+  chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
-COPY kates/lib lib
 COPY kates/src src
-RUN ./mvnw package -Dnative -DskipTests -B \
+RUN --mount=type=cache,target=/root/.m2 \
+  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g" \
   && mv target/*-runner target/kates-native
 
 # Stage 3: Minimal runtime
