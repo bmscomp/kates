@@ -21,11 +21,14 @@ rules:
     resources: ["chaosengines", "chaosexperiments", "chaosresults"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "watch", "delete"]
+    resources: ["pods", "pods/log", "nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments"]
     verbs: ["get", "list"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkanodepools", "kafkatopics", "kafkausers", "kafkaconnects", "kafkamirrormaker2s"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

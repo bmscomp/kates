@@ -1177,10 +1177,13 @@ func TestTuningTypes(t *testing.T) {
 
 func TestClusterTopology(t *testing.T) {
 	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/topology", ClusterTopology{
-		ClusterName:            "krafter",
-		KafkaVersion:           "4.1.1",
-		KraftMode:              true,
-		ControllerQuorumLeader: 4,
+		Cluster: &TopoClusterInfo{
+			Name:                   "krafter",
+			KafkaVersion:           "4.1.1",
+			KraftMode:              true,
+			ControllerQuorumLeader: 4,
+			BrokerCount:            1,
+		},
 		NodePools: []NodePoolInfo{
 			{Name: "controllers", Role: "controller", Replicas: 3, StorageType: "jbod", StorageSize: "5Gi"},
 			{Name: "brokers-alpha", Role: "broker", Replicas: 1, StorageType: "persistent-claim", StorageSize: "50Gi"},
@@ -1195,17 +1198,20 @@ func TestClusterTopology(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.ClusterName != "krafter" {
-		t.Errorf("ClusterName = %q", resp.ClusterName)
+	if resp.Cluster == nil {
+		t.Fatal("Cluster should not be nil")
 	}
-	if resp.KafkaVersion != "4.1.1" {
-		t.Errorf("KafkaVersion = %q", resp.KafkaVersion)
+	if resp.Cluster.Name != "krafter" {
+		t.Errorf("ClusterName = %q", resp.Cluster.Name)
 	}
-	if !resp.KraftMode {
+	if resp.Cluster.KafkaVersion != "4.1.1" {
+		t.Errorf("KafkaVersion = %q", resp.Cluster.KafkaVersion)
+	}
+	if !resp.Cluster.KraftMode {
 		t.Error("KraftMode should be true")
 	}
-	if resp.ControllerQuorumLeader != 4 {
-		t.Errorf("ControllerQuorumLeader = %d, want 4", resp.ControllerQuorumLeader)
+	if resp.Cluster.ControllerQuorumLeader != 4 {
+		t.Errorf("ControllerQuorumLeader = %d, want 4", resp.Cluster.ControllerQuorumLeader)
 	}
 	if len(resp.NodePools) != 2 {
 		t.Fatalf("NodePools count = %d, want 2", len(resp.NodePools))

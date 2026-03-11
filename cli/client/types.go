@@ -45,20 +45,45 @@ type BrokerNode struct {
 }
 
 type ClusterTopology struct {
-	ClusterName           string         `json:"clusterName"`
-	KafkaVersion          string         `json:"kafkaVersion"`
-	KraftMode             bool           `json:"kraftMode"`
-	ControllerQuorumLeader int           `json:"controllerQuorumLeader"`
-	NodePools             []NodePoolInfo `json:"nodePools,omitempty"`
-	Nodes                 []TopologyNode `json:"nodes,omitempty"`
+	Kubernetes  *K8sInfo                 `json:"kubernetes,omitempty"`
+	Strimzi     map[string]interface{}   `json:"strimzi,omitempty"`
+	Cluster     *TopoClusterInfo         `json:"cluster,omitempty"`
+	NodePools   []NodePoolInfo           `json:"nodePools,omitempty"`
+	Nodes       []TopologyNode           `json:"nodes,omitempty"`
+	Topics      *TopoTopics              `json:"topics,omitempty"`
+	Users       *TopoUsers               `json:"users,omitempty"`
+	Connect     []map[string]interface{} `json:"connect,omitempty"`
+	MirrorMaker []map[string]interface{} `json:"mirrorMaker2,omitempty"`
+}
+
+type K8sInfo struct {
+	Version    string                   `json:"version,omitempty"`
+	Platform   string                   `json:"platform,omitempty"`
+	GitVersion string                   `json:"gitVersion,omitempty"`
+	Nodes      []map[string]interface{} `json:"nodes,omitempty"`
+	NodeCount  int                      `json:"nodeCount,omitempty"`
+}
+
+type TopoClusterInfo struct {
+	Name                   string                   `json:"name,omitempty"`
+	Namespace              string                   `json:"namespace,omitempty"`
+	KraftMode              bool                     `json:"kraftMode"`
+	KafkaVersion           string                   `json:"kafkaVersion,omitempty"`
+	ClusterID              string                   `json:"clusterId,omitempty"`
+	ControllerQuorumLeader int                      `json:"controllerQuorumLeader"`
+	BrokerCount            int                      `json:"brokerCount"`
+	Ready                  bool                     `json:"ready"`
+	Listeners              []map[string]interface{} `json:"listeners,omitempty"`
+	Authorization          map[string]interface{}   `json:"authorization,omitempty"`
 }
 
 type NodePoolInfo struct {
-	Name        string `json:"name"`
-	Role        string `json:"role"`
-	Replicas    int    `json:"replicas"`
-	StorageType string `json:"storageType"`
-	StorageSize string `json:"storageSize"`
+	Name        string                 `json:"name"`
+	Role        string                 `json:"role"`
+	Replicas    int                    `json:"replicas"`
+	StorageType string                 `json:"storageType"`
+	StorageSize string                 `json:"storageSize"`
+	Resources   map[string]interface{} `json:"resources,omitempty"`
 }
 
 type TopologyNode struct {
@@ -70,6 +95,17 @@ type TopologyNode struct {
 	Pool           string `json:"pool"`
 	Status         string `json:"status"`
 	IsQuorumLeader bool   `json:"isQuorumLeader"`
+	K8sNode        string `json:"k8sNode,omitempty"`
+}
+
+type TopoTopics struct {
+	Count int                      `json:"count"`
+	Items []map[string]interface{} `json:"items,omitempty"`
+}
+
+type TopoUsers struct {
+	Count int                      `json:"count"`
+	Items []map[string]interface{} `json:"items,omitempty"`
 }
 
 // TestRun from GET /api/tests/:id and POST /api/tests

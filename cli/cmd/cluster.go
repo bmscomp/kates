@@ -83,27 +83,137 @@ var clusterTopologyCmd = &cobra.Command{
 			return nil
 		}
 
-		kraftLabel := ""
-		if result.KraftMode {
-			kraftLabel = "KRaft Mode"
+		// Banner
+		clusterName, kafkaVersion, kraftLabel := "unknown", "unknown", ""
+		if c := result.Cluster; c != nil {
+			clusterName = c.Name
+			kafkaVersion = c.KafkaVersion
+			if c.KraftMode {
+				kraftLabel = "KRaft Mode"
+			}
 		}
 		output.Banner("Kafka Cluster Topology",
-			fmt.Sprintf("Cluster: %s  │  Kafka %s  │  %s", result.ClusterName, result.KafkaVersion, kraftLabel))
+			fmt.Sprintf("Cluster: %s  │  Kafka %s  │  %s", clusterName, kafkaVersion, kraftLabel))
 
+		// Kubernetes
+		if k := result.Kubernetes; k != nil {
+			output.SubHeader("Kubernetes Platform")
+			output.KeyValue("Version", k.GitVersion)
+			output.KeyValue("Platform", k.Platform)
+			output.KeyValue("Nodes", fmt.Sprintf("%d", k.NodeCount))
+			if len(k.Nodes) > 0 {
+				rows := make([][]string, 0, len(k.Nodes))
+				for _, n := range k.Nodes {
+					name, _ := n["name"].(string)
+					role, _ := n["role"].(string)
+					kubelet, _ := n["kubeletVersion"].(string)
+					arch, _ := n["arch"].(string)
+					runtime, _ := n["containerRuntime"].(string)
+					ready, _ := n["ready"].(bool)
+					readyStr := "✗"
+					if ready {
+						readyStr = "✓"
+					}
+					rows = append(rows, []string{name, role, kubelet, arch, runtime, readyStr})
+				}
+				output.Table([]string{"Node", "Role", "Kubelet", "Arch", "Runtime", "Ready"}, rows)
+			}
+		}
+
+		// Strimzi
+		if s := result.Strimzi; s != nil && len(s) > 0 {
+			output.SubHeader("Strimzi Operator")
+			if v, ok := s["version"].(string); ok {
+				output.KeyValue("Version", v)
+			}
+			if img, ok := s["operatorImage"].(string); ok {
+				output.KeyValue("Image", img)
+			}
+			statusParts := []string{}
+			for _, key := range []string{"operatorReady", "entityOperatorReady", "cruiseControlReady", "kafkaExporterReady"} {
+				label := strings.TrimSuffix(key, "Ready")
+				label = strings.ReplaceAll(label, "operator", "Operator")
+				label = strings.ReplaceAll(label, "entityOperator", "Entity Operator")
+				label = strings.ReplaceAll(label, "cruiseControl", "Cruise Control")
+				label = strings.ReplaceAll(label, "kafkaExporter", "Kafka Exporter")
+				if v, ok := s[key].(bool); ok {
+					icon := "✗"
+					if v {
+						icon = "✓"
+					}
+					statusParts = append(statusParts, fmt.Sprintf("  %s %s", icon, label))
+				}
+			}
+			if len(statusParts) > 0 {
+				output.KeyValue("Components", "")
+				for _, p := range statusParts {
+					fmt.Println(p)
+				}
+			}
+		}
+
+		// Cluster details
+		if c := result.Cluster; c != nil {
+			output.SubHeader("Kafka Cluster")
+			output.KeyValue("Cluster ID", c.ClusterID)
+			output.KeyValue("Namespace", c.Namespace)
+			output.KeyValue("Brokers", fmt.Sprintf("%d", c.BrokerCount))
+			if c.ControllerQuorumLeader >= 0 {
+				output.KeyValue("Quorum Leader", fmt.Sprintf("Node %d", c.ControllerQuorumLeader))
+			}
+			readyStr := "✗ Not Ready"
+			if c.Ready {
+				readyStr = "✓ Ready"
+			}
+			output.KeyValue("Status", readyStr)
+
+			if len(c.Listeners) > 0 {
+				rows := make([][]string, 0, len(c.Listeners))
+				for _, l := range c.Listeners {
+					name, _ := l["name"].(string)
+					lType, _ := l["type"].(string)
+					port := fmt.Sprintf("%v", l["port"])
+					tls := fmt.Sprintf("%v", l["tls"])
+					auth, _ := l["authType"].(string)
+					rows = append(rows, []string{name, lType, port, tls, auth})
+				}
+				output.Table([]string{"Listener", "Type", "Port", "TLS", "Auth"}, rows)
+			}
+
+			if auth := c.Authorization; auth != nil {
+				if t, ok := auth["type"].(string); ok {
+					output.KeyValue("Authorization", t)
+				}
+				if su, ok := auth["superUsers"].([]interface{}); ok && len(su) > 0 {
+					parts := make([]string, len(su))
+					for i, u := range su {
+						parts[i] = fmt.Sprintf("%v", u)
+					}
+					output.KeyValue("Super Users", strings.Join(parts, ", "))
+				}
+			}
+		}
+
+		// Node Pools
 		if len(result.NodePools) > 0 {
 			output.SubHeader(fmt.Sprintf("Node Pools (%d)", len(result.NodePools)))
 			rows := make([][]string, 0, len(result.NodePools))
 			for _, p := range result.NodePools {
+				storage := p.StorageSize
+				if p.StorageType != "" {
+					storage = fmt.Sprintf("%s (%s)", p.StorageSize, p.StorageType)
+				}
 				rows = append(rows, []string{
 					p.Name,
 					p.Role,
 					fmt.Sprintf("%d", p.Replicas),
-					fmt.Sprintf("%s %s", p.StorageSize, p.StorageType),
+					storage,
 				})
 			}
 			output.Table([]string{"Name", "Role", "Replicas", "Storage"}, rows)
 		}
 
+		// Nodes
 		var controllers, brokers [][]string
 		for _, n := range result.Nodes {
 			leader := ""
@@ -116,6 +226,7 @@ var clusterTopologyCmd = &cobra.Command{
 				fmt.Sprintf("%d", n.Port),
 				n.Rack,
 				n.Pool,
+				n.K8sNode,
 				n.Status,
 				leader,
 			}
@@ -126,23 +237,75 @@ var clusterTopologyCmd = &cobra.Command{
 			}
 		}
 
+		headers := []string{"ID", "Host", "Port", "Rack", "Pool", "K8s Node", "Status", ""}
 		if len(controllers) > 0 {
-			leaderLabel := ""
-			if result.ControllerQuorumLeader >= 0 {
-				leaderLabel = fmt.Sprintf("   Quorum Leader: %d", result.ControllerQuorumLeader)
-			}
-			output.SubHeader(fmt.Sprintf("Controllers (%d)%s", len(controllers), leaderLabel))
-			output.Table([]string{"ID", "Host", "Port", "Rack / AZ", "Pool", "Status", ""}, controllers)
+			output.SubHeader(fmt.Sprintf("Controllers (%d)", len(controllers)))
+			output.Table(headers, controllers)
 		}
-
 		if len(brokers) > 0 {
 			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(brokers)))
-			output.Table([]string{"ID", "Host", "Port", "Rack / AZ", "Pool", "Status", ""}, brokers)
+			output.Table(headers, brokers)
+		}
+
+		// Topics
+		if t := result.Topics; t != nil && t.Count > 0 {
+			output.SubHeader(fmt.Sprintf("Managed Topics (%d)", t.Count))
+			rows := make([][]string, 0, len(t.Items))
+			for _, item := range t.Items {
+				name, _ := item["name"].(string)
+				partitions := fmt.Sprintf("%v", item["partitions"])
+				replicas := fmt.Sprintf("%v", item["replicas"])
+				rows = append(rows, []string{name, partitions, replicas})
+			}
+			output.Table([]string{"Topic", "Partitions", "Replicas"}, rows)
+		}
+
+		// Users
+		if u := result.Users; u != nil && u.Count > 0 {
+			output.SubHeader(fmt.Sprintf("Kafka Users (%d)", u.Count))
+			rows := make([][]string, 0, len(u.Items))
+			for _, item := range u.Items {
+				name, _ := item["name"].(string)
+				authType, _ := item["authType"].(string)
+				aclType, _ := item["aclType"].(string)
+				ready, _ := item["ready"].(bool)
+				readyStr := "✗"
+				if ready {
+					readyStr = "✓"
+				}
+				if aclType == "" {
+					aclType = "superUser"
+				}
+				rows = append(rows, []string{name, authType, aclType, readyStr})
+			}
+			output.Table([]string{"User", "Auth", "ACL", "Ready"}, rows)
+		}
+
+		// Connect
+		if len(result.Connect) > 0 {
+			output.SubHeader(fmt.Sprintf("Kafka Connect (%d)", len(result.Connect)))
+			for _, c := range result.Connect {
+				name, _ := c["name"].(string)
+				output.KeyValue("Name", name)
+				if r, ok := c["replicas"].(float64); ok {
+					output.KeyValue("Replicas", fmt.Sprintf("%d", int(r)))
+				}
+			}
+		}
+
+		// MirrorMaker2
+		if len(result.MirrorMaker) > 0 {
+			output.SubHeader(fmt.Sprintf("MirrorMaker2 (%d)", len(result.MirrorMaker)))
+			for _, m := range result.MirrorMaker {
+				name, _ := m["name"].(string)
+				output.KeyValue("Name", name)
+			}
 		}
 
 		return nil
 	},
 }
+
 
 var clusterTopicsCmd = &cobra.Command{
 	Use:   "topics",
