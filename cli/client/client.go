@@ -165,6 +165,10 @@ func (c *Client) ClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	return get[*ClusterInfo](c, ctx, "/api/cluster/info")
 }
 
+func (c *Client) ClusterTopology(ctx context.Context) (*ClusterTopology, error) {
+	return get[*ClusterTopology](c, ctx, "/api/cluster/topology")
+}
+
 func (c *Client) Topics(ctx context.Context) ([]string, error) {
 	var paged struct {
 		Items []string `json:"items"`

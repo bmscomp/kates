@@ -1,7 +1,7 @@
 # Kafka Connect cluster for data pipeline integration.
 # Deploy connectors via KafkaConnector CRs after this cluster is running.
 
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnect
 metadata:
   name: kates-connect
@@ -16,10 +16,33 @@ spec:
   bootstrapServers: krafter-kafka-bootstrap:9092
   authentication:
     type: scram-sha-512
-    username: kates-backend
+    username: kates-connect
     passwordSecret:
-      secretName: kates-backend
+      secretName: kates-connect
       password: password
+  build:
+    output:
+      type: docker
+      image: kind-registry:5000/kates-connect:latest
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-postgres
+            version: 3.1.1.Final
+      - name: camel-s3-sink
+        artifacts:
+          - type: maven
+            group: org.apache.camel.kafkaconnector
+            artifact: camel-aws-s3-sink-kafka-connector
+            version: 4.8.3
+      - name: jdbc-sink
+        artifacts:
+          - type: maven
+            group: io.aiven
+            artifact: jdbc-connector-for-apache-kafka
+            version: 6.11.1
   config:
     group.id: kates-connect
     offset.storage.topic: kates-connect-offsets
@@ -32,6 +55,13 @@ spec:
     value.converter: org.apache.kafka.connect.json.JsonConverter
     key.converter.schemas.enable: false
     value.converter.schemas.enable: false
+  logging:
+    type: inline
+    loggers:
+      connect.root.logger.level: "INFO"
+      log4j.logger.org.apache.kafka.connect: "INFO"
+      log4j.logger.org.apache.kafka.connect.runtime.WorkerSourceTask: "WARN"
+      log4j.logger.org.reflections: "ERROR"
   resources:
     requests:
       memory: 512Mi
@@ -49,17 +79,23 @@ spec:
     pod:
       securityContext:
         runAsNonRoot: true
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       metadata:
         labels:
           app: kates-connect
     connectContainer:
       securityContext:
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]
+    podDisruptionBudget:
+      maxUnavailable: 0
 ---
-# Example: File sink connector for test results archival
-apiVersion: kafka.strimzi.io/v1beta2
+# File sink connector for test results archival
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
 metadata:
   name: kates-results-sink
@@ -77,3 +113,40 @@ spec:
     file: /tmp/kates-results.log
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: org.apache.kafka.connect.storage.StringConverter
+    errors.tolerance: all
+    errors.deadletterqueue.topic.name: kates-connect-dlq
+    errors.deadletterqueue.topic.replication.factor: 3
+    errors.deadletterqueue.context.headers.enable: true
+    errors.log.enable: true
+    errors.log.include.messages: true
+---
+# PodMonitor for Connect metrics
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-connect-metrics
+  namespace: kafka
+  labels:
+    app: strimzi
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/kind: KafkaConnect
+  namespaceSelector:
+    matchNames:
+      - kafka
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+      relabelings:
+        - separator: ;
+          regex: __meta_kubernetes_pod_label_(.+)
+          replacement: $1
+          action: labelmap
+        - sourceLabels: [__meta_kubernetes_namespace]
+          action: replace
+          targetLabel: kubernetes_namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          action: replace
+          targetLabel: kubernetes_pod_name

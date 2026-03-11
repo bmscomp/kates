@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
@@ -59,6 +60,84 @@ var clusterInfoCmd = &cobra.Command{
 				})
 			}
 			output.Table([]string{"ID", "Host", "Port", "Rack / AZ", "Role"}, rows)
+		}
+
+		return nil
+	},
+}
+
+var clusterTopologyCmd = &cobra.Command{
+	Use:   "topology",
+	Short: "Show full cluster topology including KRaft controllers and broker node pools",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.ClusterTopology(context.Background())
+		if err != nil {
+			if strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Service Unavailable") {
+				return cmdErr("Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs.")
+			}
+			return cmdErr("Failed to get cluster topology: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		kraftLabel := ""
+		if result.KraftMode {
+			kraftLabel = "KRaft Mode"
+		}
+		output.Banner("Kafka Cluster Topology",
+			fmt.Sprintf("Cluster: %s  │  Kafka %s  │  %s", result.ClusterName, result.KafkaVersion, kraftLabel))
+
+		if len(result.NodePools) > 0 {
+			output.SubHeader(fmt.Sprintf("Node Pools (%d)", len(result.NodePools)))
+			rows := make([][]string, 0, len(result.NodePools))
+			for _, p := range result.NodePools {
+				rows = append(rows, []string{
+					p.Name,
+					p.Role,
+					fmt.Sprintf("%d", p.Replicas),
+					fmt.Sprintf("%s %s", p.StorageSize, p.StorageType),
+				})
+			}
+			output.Table([]string{"Name", "Role", "Replicas", "Storage"}, rows)
+		}
+
+		var controllers, brokers [][]string
+		for _, n := range result.Nodes {
+			leader := ""
+			if n.IsQuorumLeader {
+				leader = "★"
+			}
+			row := []string{
+				fmt.Sprintf("%d", n.ID),
+				n.Host,
+				fmt.Sprintf("%d", n.Port),
+				n.Rack,
+				n.Pool,
+				n.Status,
+				leader,
+			}
+			if n.Role == "controller" {
+				controllers = append(controllers, row)
+			} else {
+				brokers = append(brokers, row)
+			}
+		}
+
+		if len(controllers) > 0 {
+			leaderLabel := ""
+			if result.ControllerQuorumLeader >= 0 {
+				leaderLabel = fmt.Sprintf("   Quorum Leader: %d", result.ControllerQuorumLeader)
+			}
+			output.SubHeader(fmt.Sprintf("Controllers (%d)%s", len(controllers), leaderLabel))
+			output.Table([]string{"ID", "Host", "Port", "Rack / AZ", "Pool", "Status", ""}, controllers)
+		}
+
+		if len(brokers) > 0 {
+			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(brokers)))
+			output.Table([]string{"ID", "Host", "Port", "Rack / AZ", "Pool", "Status", ""}, brokers)
 		}
 
 		return nil
@@ -250,6 +329,7 @@ var clusterBrokerCmd = &cobra.Command{
 func init() {
 	clusterBrokerCmd.AddCommand(clusterBrokerConfigsCmd)
 	clusterCmd.AddCommand(clusterInfoCmd)
+	clusterCmd.AddCommand(clusterTopologyCmd)
 	clusterCmd.AddCommand(clusterTopicsCmd)
 	clusterCmd.AddCommand(clusterBrokerCmd)
 	clusterTopicsCmd.AddCommand(clusterTopicDescribeCmd)

@@ -44,6 +44,34 @@ type BrokerNode struct {
 	Rack string      `json:"rack"`
 }
 
+type ClusterTopology struct {
+	ClusterName           string         `json:"clusterName"`
+	KafkaVersion          string         `json:"kafkaVersion"`
+	KraftMode             bool           `json:"kraftMode"`
+	ControllerQuorumLeader int           `json:"controllerQuorumLeader"`
+	NodePools             []NodePoolInfo `json:"nodePools,omitempty"`
+	Nodes                 []TopologyNode `json:"nodes,omitempty"`
+}
+
+type NodePoolInfo struct {
+	Name        string `json:"name"`
+	Role        string `json:"role"`
+	Replicas    int    `json:"replicas"`
+	StorageType string `json:"storageType"`
+	StorageSize string `json:"storageSize"`
+}
+
+type TopologyNode struct {
+	ID             int    `json:"id"`
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	Rack           string `json:"rack"`
+	Role           string `json:"role"`
+	Pool           string `json:"pool"`
+	Status         string `json:"status"`
+	IsQuorumLeader bool   `json:"isQuorumLeader"`
+}
+
 // TestRun from GET /api/tests/:id and POST /api/tests
 type TestRun struct {
 	ID           string        `json:"id"`

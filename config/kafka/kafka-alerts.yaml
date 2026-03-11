@@ -162,3 +162,23 @@ spec:
           annotations:
             summary: "Cruise Control detected an anomaly"
             description: "Cruise Control detected {{ $value }} anomalies in the last 10 minutes."
+
+    - name: kafka.certificates
+      rules:
+        - alert: KafkaCertificateExpiringSoon
+          expr: (strimzi_certificate_not_after - time()) / 86400 < 30
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Strimzi certificate expiring within 30 days"
+            description: "Certificate {{ $labels.type }} for cluster {{ $labels.cluster }} expires in {{ $value | humanize }} days."
+
+        - alert: KafkaCertificateExpiryCritical
+          expr: (strimzi_certificate_not_after - time()) / 86400 < 7
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Strimzi certificate expiring within 7 days"
+            description: "Certificate {{ $labels.type }} for cluster {{ $labels.cluster }} expires in {{ $value | humanize }} days. Immediate renewal required."

@@ -1,7 +1,7 @@
 # MirrorMaker 2 for cross-cluster Kafka replication (disaster recovery).
 # Configure the source cluster bootstrap servers before deploying.
 
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaMirrorMaker2
 metadata:
   name: krafter-mirror
@@ -67,7 +67,61 @@ spec:
     limits:
       memory: 1Gi
       cpu: 500m
+  logging:
+    type: inline
+    loggers:
+      connect.root.logger.level: "INFO"
+      log4j.logger.org.apache.kafka.connect.mirror: "INFO"
+      log4j.logger.org.reflections: "ERROR"
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: kafka-metrics
+        key: kafka-metrics-config.yml
   template:
     pod:
       securityContext:
         runAsNonRoot: true
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+    connectContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+    podDisruptionBudget:
+      maxUnavailable: 0
+---
+# PodMonitor for MirrorMaker2 metrics
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-mirror-maker-metrics
+  namespace: kafka
+  labels:
+    app: strimzi
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/kind: KafkaMirrorMaker2
+  namespaceSelector:
+    matchNames:
+      - kafka
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+      relabelings:
+        - separator: ;
+          regex: __meta_kubernetes_pod_label_(.+)
+          replacement: $1
+          action: labelmap
+        - sourceLabels: [__meta_kubernetes_namespace]
+          action: replace
+          targetLabel: kubernetes_namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          action: replace
+          targetLabel: kubernetes_pod_name

@@ -16,6 +16,10 @@ spec:
         type: persistent-claim
         size: 5Gi
         deleteClaim: false
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 512m
+    gcLoggingEnabled: true
   resources:
     requests:
       memory: 1Gi
@@ -28,6 +32,15 @@ spec:
       securityContext:
         runAsNonRoot: true
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/pool-name: controllers
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -39,6 +52,12 @@ spec:
         - key: "node-role.kubernetes.io/control-plane"
           operator: "Exists"
           effect: "NoSchedule"
+    kafkaContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
@@ -78,6 +97,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -130,6 +151,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -178,6 +201,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -231,6 +256,8 @@ spec:
       transaction.state.log.min.isr: 2
       default.replication.factor: 3
       min.insync.replicas: 2
+      unclean.leader.election.enable: false
+      auto.create.topics.enable: false
       log.retention.hours: 24
       log.retention.bytes: 10737418240
       log.segment.bytes: 1073741824
@@ -240,8 +267,11 @@ spec:
       num.replica.fetchers: 3
       quota.producer.default: 52428800
       quota.consumer.default: 104857600
+      message.max.bytes: 10485760
       group.share.enable: true
-      # Dynamic KRaft quorum (KIP-853) — controller scaling
+      group.min.session.timeout.ms: 6000
+      group.max.session.timeout.ms: 1800000
+      metadata.log.max.record.bytes.between.snapshots: 20971520
       controller.quorum.election.timeout.ms: 5000
       controller.quorum.fetch.timeout.ms: 10000
       controller.quorum.election.backoff.max.ms: 5000
@@ -281,6 +311,9 @@ spec:
         limits:
           memory: 256Mi
           cpu: 500m
+      jvmOptions:
+        -Xms: 128m
+        -Xmx: 256m
       reconciliationIntervalMs: 60000
     userOperator:
       resources:
@@ -290,6 +323,9 @@ spec:
         limits:
           memory: 256Mi
           cpu: 500m
+      jvmOptions:
+        -Xms: 128m
+        -Xmx: 256m
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"
@@ -305,6 +341,9 @@ spec:
       cpu: "2000m"
       inboundNetwork: 50MiB/s
       outboundNetwork: 50MiB/s
+    autoRebalance:
+      - mode: add-brokers
+      - mode: remove-brokers
     config: {}
     resources:
       requests:

@@ -11,6 +11,7 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 
 import com.bmscomp.kates.service.ClusterHealthService;
+import com.bmscomp.kates.service.ClusterTopologyService;
 import com.bmscomp.kates.service.ConsumerGroupService;
 import com.bmscomp.kates.service.TopicService;
 
@@ -32,6 +33,9 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
 
     @Inject
     ClusterHealthService clusterHealthService;
+
+    @Inject
+    ClusterTopologyService clusterTopologyService;
 
     @Override
     public Uni<ClusterInfo> getClusterInfo(com.google.protobuf.Empty request) {
@@ -131,6 +135,53 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
                 if (g.get("members") instanceof Number n) gb.setMembers(n.intValue());
                 builder.addItems(gb.build());
             }
+            return builder.build();
+        });
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Uni<ClusterTopology> getClusterTopology(com.google.protobuf.Empty request) {
+        return Uni.createFrom().item(() -> {
+            Map<String, Object> topo = clusterTopologyService.describeTopology();
+            var builder = ClusterTopology.newBuilder();
+
+            if (topo.get("clusterName") != null) builder.setClusterName(topo.get("clusterName").toString());
+            if (topo.get("kafkaVersion") != null) builder.setKafkaVersion(topo.get("kafkaVersion").toString());
+            if (topo.get("kraftMode") instanceof Boolean b) builder.setKraftMode(b);
+            if (topo.get("controllerQuorumLeader") instanceof Number n) builder.setControllerQuorumLeader(n.intValue());
+
+            if (topo.get("nodePools") instanceof List<?> pools) {
+                for (Object p : pools) {
+                    if (p instanceof Map<?, ?> pm) {
+                        var pb = NodePoolInfo.newBuilder();
+                        if (pm.get("name") != null) pb.setName(pm.get("name").toString());
+                        if (pm.get("role") != null) pb.setRole(pm.get("role").toString());
+                        if (pm.get("replicas") instanceof Number n) pb.setReplicas(n.intValue());
+                        if (pm.get("storageType") != null) pb.setStorageType(pm.get("storageType").toString());
+                        if (pm.get("storageSize") != null) pb.setStorageSize(pm.get("storageSize").toString());
+                        builder.addNodePools(pb.build());
+                    }
+                }
+            }
+
+            if (topo.get("nodes") instanceof List<?> nodes) {
+                for (Object nd : nodes) {
+                    if (nd instanceof Map<?, ?> nm) {
+                        var nb = NodeInfo.newBuilder();
+                        if (nm.get("id") instanceof Number n) nb.setId(n.intValue());
+                        if (nm.get("host") != null) nb.setHost(nm.get("host").toString());
+                        if (nm.get("port") instanceof Number n) nb.setPort(n.intValue());
+                        if (nm.get("rack") != null) nb.setRack(nm.get("rack").toString());
+                        if (nm.get("role") != null) nb.setRole(nm.get("role").toString());
+                        if (nm.get("pool") != null) nb.setPool(nm.get("pool").toString());
+                        if (nm.get("status") != null) nb.setStatus(nm.get("status").toString());
+                        if (nm.get("isQuorumLeader") instanceof Boolean b) nb.setIsQuorumLeader(b);
+                        builder.addNodes(nb.build());
+                    }
+                }
+            }
+
             return builder.build();
         });
     }

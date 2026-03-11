@@ -1,0 +1,55 @@
+# Strimzi Operator values override for production hardening.
+# Referenced by deploy-kafka.sh: helm upgrade ... -f config/kafka/strimzi-values.yaml
+
+replicas: 1
+watchAnyNamespace: true
+defaultImageTag: 0.51.0
+
+featureGates: "+UseKRaft,+KafkaNodePools,+UnidirectionalTopicOperator"
+
+fullReconciliationIntervalMs: 60000
+
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 250m
+  limits:
+    memory: 512Mi
+    cpu: 1000m
+
+operatorNetworkPolicy:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+
+livenessProbe:
+  initialDelaySeconds: 15
+  periodSeconds: 30
+
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+dashboards:
+  enabled: true
+  namespace: monitoring
+  label: grafana_dashboard
+  labelValue: "1"
+
+generateNetworkPolicy: true
+generatePodDisruptionBudget: true

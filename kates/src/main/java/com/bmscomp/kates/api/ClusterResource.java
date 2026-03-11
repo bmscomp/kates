@@ -20,6 +20,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.service.ClusterHealthService;
+import com.bmscomp.kates.service.ClusterTopologyService;
 import com.bmscomp.kates.service.ConsumerGroupService;
 import com.bmscomp.kates.service.TopicService;
 
@@ -32,13 +33,16 @@ public class ClusterResource {
     private final TopicService topicService;
     private final ConsumerGroupService consumerGroupService;
     private final ClusterHealthService clusterHealthService;
+    private final ClusterTopologyService clusterTopologyService;
 
     @Inject
     public ClusterResource(TopicService topicService, ConsumerGroupService consumerGroupService,
-                           ClusterHealthService clusterHealthService) {
+                           ClusterHealthService clusterHealthService,
+                           ClusterTopologyService clusterTopologyService) {
         this.topicService = topicService;
         this.consumerGroupService = consumerGroupService;
         this.clusterHealthService = clusterHealthService;
+        this.clusterTopologyService = clusterTopologyService;
     }
 
     @GET
@@ -191,6 +195,27 @@ public class ClusterResource {
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/topology")
+    @Operation(summary = "Get cluster topology",
+            description = "Returns full cluster topology including KRaft controllers and broker node pools")
+    @APIResponse(responseCode = "200", description = "Cluster topology")
+    @APIResponse(responseCode = "503", description = "Kubernetes API not available")
+    public Response getClusterTopology() {
+        try {
+            return Response.ok(clusterTopologyService.describeTopology()).build();
+        } catch (ClusterTopologyService.KubernetesNotAvailableException e) {
+            return Response.status(503)
+                    .entity(ApiError.of(503, "Service Unavailable", e.getMessage()))
+                    .build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(
+                            500, "Internal Server Error", "Failed to describe cluster topology: " + e.getMessage()))
                     .build();
         }
     }

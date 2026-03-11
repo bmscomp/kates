@@ -111,3 +111,47 @@ spec:
           type: cluster
         operations: ["Describe"]
         host: "*"
+---
+# kates-connect: scoped access for Kafka Connect internal topics + pipeline topics.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kates-connect
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  authentication:
+    type: scram-sha-512
+  quotas:
+    producerByteRate: 52428800
+    consumerByteRate: 52428800
+    requestPercentage: 25
+  authorization:
+    type: simple
+    acls:
+      # Connect internal topics (offsets, configs, status)
+      - resource:
+          type: topic
+          name: "kates-connect-"
+          patternType: prefix
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
+      # Source/sink pipeline topics
+      - resource:
+          type: topic
+          name: "kates-"
+          patternType: prefix
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
+      # Consumer groups
+      - resource:
+          type: group
+          name: "kates-connect"
+          patternType: prefix
+        operations: ["Read", "Describe"]
+        host: "*"
+      - resource:
+          type: cluster
+        operations: ["Describe"]
+        host: "*"

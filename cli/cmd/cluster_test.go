@@ -65,7 +65,7 @@ func TestClusterInfoCmd_Table(t *testing.T) {
 }
 
 func TestClusterTopicsCmd_Empty(t *testing.T) {
-	ts, buf := setupTest(t, "GET", "/api/cluster/topics", 200, `[]`)
+	ts, buf := setupTest(t, "GET", "/api/cluster/topics", 200, `{"items":[],"page":0,"size":50,"total":0,"count":0}`)
 	defer ts.Close()
 
 	err := clusterTopicsCmd.RunE(clusterTopicsCmd, nil)
@@ -80,7 +80,7 @@ func TestClusterTopicsCmd_Empty(t *testing.T) {
 }
 
 func TestClusterTopicsCmd_List(t *testing.T) {
-	ts, buf := setupTest(t, "GET", "/api/cluster/topics", 200, `["topic-a", "topic-b"]`)
+	ts, buf := setupTest(t, "GET", "/api/cluster/topics", 200, `{"items":["topic-a","topic-b"],"page":0,"size":50,"total":2,"count":2}`)
 	defer ts.Close()
 
 	err := clusterTopicsCmd.RunE(clusterTopicsCmd, nil)
