@@ -65,11 +65,15 @@ all: check-prerequisites
 		echo "✅ Kates already deployed — skipping build"; \
 	else \
 		echo "Step 10: Building and deploying Kates (native)..."; \
-		docker build -f kates/Dockerfile.native -t kates:latest .; \
-		kind load docker-image kates:latest --name panda; \
+		docker build -f kates/Dockerfile.native -t kates:native-v1 .; \
+		kind load docker-image kates:native-v1 --name panda; \
 		kubectl apply -f kates/k8s/namespace.yaml; \
 		kubectl apply -f kates/k8s/rbac.yaml; \
 		kubectl apply -f kates/k8s/configmap.yaml; \
+		echo "Copying Kafka SASL credentials to kates namespace..."; \
+		kubectl create secret generic kates-kafka-credentials \
+			--from-literal=password="$$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
+			-n kates --dry-run=client -o yaml | kubectl apply -f -; \
 		kubectl apply -f kates/k8s/postgres.yaml; \
 		echo "Waiting for PostgreSQL to be ready..."; \
 		kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s; \
@@ -215,6 +219,10 @@ kates-deploy:
 	kubectl apply -f kates/k8s/namespace.yaml
 	kubectl apply -f kates/k8s/rbac.yaml
 	kubectl apply -f kates/k8s/configmap.yaml
+	@echo "Copying Kafka SASL credentials to kates namespace..."
+	@kubectl create secret generic kates-kafka-credentials \
+		--from-literal=password="$$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
+		-n kates --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -f kates/k8s/postgres.yaml
 	@echo "Waiting for PostgreSQL to be ready..."
 	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
