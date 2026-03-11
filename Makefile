@@ -31,6 +31,10 @@ all: check-prerequisites
 		echo "Step 5: Waiting for Kafka to be ready..."; \
 		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
 	fi
+	@echo "Ensuring Kafka users and topics are applied..."
+	@kubectl apply -f config/kafka/kafka-users.yaml
+	@kubectl apply -f config/kafka/kafka-topics.yaml
+	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
 	@echo ""
 	@if kubectl get pods -n kafka -l app=kafka-ui --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kafka UI already deployed — skipping"; \
