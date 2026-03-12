@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -833,68 +835,119 @@ func renderResources(data map[string]interface{}) {
 var clusterAlertsCmd = &cobra.Command{
 	Use:   "alerts",
 	Short: "Show critical Kafka cluster alerts from PrometheusRules",
-	Long:  "Displays critical and warning alerts from PrometheusRule CRDs that can affect Kafka cluster health.",
+	Long: `Displays critical and warning alerts from PrometheusRule CRDs that can affect Kafka cluster health.
+
+Use --severity to filter by level and --group to filter by alert group.
+Returns exit code 2 when critical alerts are configured (useful for CI/CD health gates).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.ClusterAlerts(context.Background())
 		if err != nil {
 			return fmt.Errorf("failed to fetch cluster alerts: %w", err)
 		}
 
-		output.Header("Kafka Cluster Alerts")
+		severityFilter, _ := cmd.Flags().GetString("severity")
+		groupFilter, _ := cmd.Flags().GetString("group")
 
-		critIcon := "🔴"
-		warnIcon := "🟡"
-		if result.CriticalCount > 0 {
-			output.KeyValue("Critical", fmt.Sprintf("%s %d alerts", critIcon, result.CriticalCount))
-		} else {
-			output.KeyValue("Critical", "✅ 0")
+		filtered := result.Alerts
+		if severityFilter != "" {
+			var f []client.AlertRule
+			for _, a := range filtered {
+				if a.Severity == severityFilter {
+					f = append(f, a)
+				}
+			}
+			filtered = f
 		}
-		if result.WarningCount > 0 {
-			output.KeyValue("Warning", fmt.Sprintf("%s %d alerts", warnIcon, result.WarningCount))
-		} else {
-			output.KeyValue("Warning", "✅ 0")
+		if groupFilter != "" {
+			var f []client.AlertRule
+			for _, a := range filtered {
+				if a.Group == groupFilter {
+					f = append(f, a)
+				}
+			}
+			filtered = f
 		}
-		output.KeyValue("Rules Scanned", fmt.Sprintf("%d", result.TotalRulesScanned))
-		fmt.Println()
 
-		if len(result.Alerts) == 0 {
-			fmt.Println("  No critical alerts configured.")
+		if outputMode == "json" {
+			output.JSON(map[string]interface{}{
+				"totalRulesScanned": result.TotalRulesScanned,
+				"criticalCount":     result.CriticalCount,
+				"warningCount":      result.WarningCount,
+				"filteredCount":     len(filtered),
+				"alerts":            filtered,
+			})
+			if result.CriticalCount > 0 {
+				os.Exit(2)
+			}
 			return nil
 		}
 
-		rows := make([][]string, 0, len(result.Alerts))
-		for _, a := range result.Alerts {
-			icon := warnIcon
-			if a.Severity == "critical" {
-				icon = critIcon
+		output.Header("Kafka Cluster Alerts")
+
+		critLabel := output.ErrorStyle.Render(fmt.Sprintf("● %d critical", result.CriticalCount))
+		warnLabel := output.WarningStyle.Render(fmt.Sprintf("◈ %d warning", result.WarningCount))
+		if result.CriticalCount == 0 {
+			critLabel = output.SuccessStyle.Render("✓ 0 critical")
+		}
+		if result.WarningCount == 0 {
+			warnLabel = output.SuccessStyle.Render("✓ 0 warning")
+		}
+		output.KeyValue("Critical", critLabel)
+		output.KeyValue("Warning", warnLabel)
+		output.KeyValue("Rules Scanned", fmt.Sprintf("%d", result.TotalRulesScanned))
+		if severityFilter != "" || groupFilter != "" {
+			filterDesc := ""
+			if severityFilter != "" {
+				filterDesc += "severity=" + severityFilter
 			}
-			rows = append(rows, []string{
-				icon + " " + a.Severity,
-				a.Name,
-				a.Group,
-				a.For,
-				a.Summary,
-			})
+			if groupFilter != "" {
+				if filterDesc != "" {
+					filterDesc += ", "
+				}
+				filterDesc += "group=" + groupFilter
+			}
+			output.KeyValue("Filter", output.AccentStyle.Render(filterDesc))
+			output.KeyValue("Matched", fmt.Sprintf("%d / %d", len(filtered), result.Count))
+		}
+		fmt.Println()
+
+		if len(filtered) == 0 {
+			fmt.Println("  No alerts match the current filter.")
+			return nil
+		}
+
+		rows := make([][]string, 0, len(filtered))
+		for _, a := range filtered {
+			sev := output.WarningStyle.Render("◈ " + a.Severity)
+			if a.Severity == "critical" {
+				sev = output.ErrorStyle.Render("● " + a.Severity)
+			}
+			rows = append(rows, []string{sev, a.Name, a.Group, a.For, a.Summary})
 		}
 		output.Table([]string{"Severity", "Alert", "Group", "For", "Summary"}, rows)
 
 		fmt.Println()
 		output.SubHeader("Alert Details")
-		for _, a := range result.Alerts {
-			icon := warnIcon
+		for _, a := range filtered {
+			sev := output.WarningStyle.Render("◈")
 			if a.Severity == "critical" {
-				icon = critIcon
+				sev = output.ErrorStyle.Render("●")
 			}
-			fmt.Printf("  %s %s\n", icon, a.Name)
-			fmt.Printf("    Expr: %s\n", a.Expr)
+			fmt.Printf("  %s %s\n", sev, a.Name)
+			fmt.Printf("    Expr: %s\n", output.DimStyle.Render(a.Expr))
 			fmt.Printf("    %s\n\n", a.Description)
 		}
 
+		if result.CriticalCount > 0 {
+			os.Exit(2)
+		}
 		return nil
 	},
 }
 
 func init() {
+	clusterAlertsCmd.Flags().String("severity", "", "Filter by severity: critical or warning")
+	clusterAlertsCmd.Flags().String("group", "", "Filter by alert group (e.g. kafka.cluster, kafka.kraft)")
 	clusterBrokerCmd.AddCommand(clusterBrokerConfigsCmd)
 	clusterCmd.AddCommand(clusterInfoCmd)
 	clusterCmd.AddCommand(clusterTopologyCmd)
@@ -904,3 +957,4 @@ func init() {
 	clusterTopicsCmd.AddCommand(clusterTopicDescribeCmd)
 	rootCmd.AddCommand(clusterCmd)
 }
+
