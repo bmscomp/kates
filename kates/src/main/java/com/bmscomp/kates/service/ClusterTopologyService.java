@@ -137,6 +137,9 @@ public class ClusterTopologyService {
         topology.put("rebalances", describeRebalances());
         topology.put("drainCleaner", describeDrainCleaner());
         topology.put("podSets", describeStrimziPodSets());
+        topology.put("networkPolicies", describeNetworkPolicies());
+        topology.put("pvcs", describePvcs());
+        topology.put("services", describeServices());
         topology.put("connect", describeConnect());
         topology.put("mirrorMaker2", describeMirrorMaker2());
 
@@ -921,6 +924,111 @@ public class ClusterTopologyService {
             }
         } catch (Exception e) {
             LOG.debug("Unable to read StrimziPodSets", e);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> describeNetworkPolicies() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            var policies = kubernetesClient.network().networkPolicies()
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
+            for (var np : policies) {
+                Map<String, Object> p = new LinkedHashMap<>();
+                p.put("name", np.getMetadata().getName());
+                var podSel = np.getSpec().getPodSelector();
+                if (podSel != null && podSel.getMatchLabels() != null && !podSel.getMatchLabels().isEmpty()) {
+                    p.put("targetPods", podSel.getMatchLabels());
+                } else {
+                    p.put("targetPods", "all");
+                }
+                p.put("policyTypes", np.getSpec().getPolicyTypes());
+                if (np.getSpec().getIngress() != null) {
+                    p.put("ingressRules", np.getSpec().getIngress().size());
+                }
+                if (np.getSpec().getEgress() != null) {
+                    p.put("egressRules", np.getSpec().getEgress().size());
+                }
+                result.add(p);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to list NetworkPolicies", e);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> describePvcs() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            var pvcs = kubernetesClient.persistentVolumeClaims()
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
+            for (var pvc : pvcs) {
+                Map<String, Object> p = new LinkedHashMap<>();
+                p.put("name", pvc.getMetadata().getName());
+                p.put("status", pvc.getStatus() != null ? pvc.getStatus().getPhase() : "Unknown");
+                if (pvc.getSpec().getStorageClassName() != null) {
+                    p.put("storageClass", pvc.getSpec().getStorageClassName());
+                }
+                var capacity = pvc.getStatus() != null ? pvc.getStatus().getCapacity() : null;
+                if (capacity != null && capacity.get("storage") != null) {
+                    p.put("capacity", capacity.get("storage").toString());
+                } else if (pvc.getSpec().getResources() != null
+                        && pvc.getSpec().getResources().getRequests() != null
+                        && pvc.getSpec().getResources().getRequests().get("storage") != null) {
+                    p.put("capacity", pvc.getSpec().getResources().getRequests().get("storage").toString());
+                }
+                if (pvc.getSpec().getAccessModes() != null) {
+                    p.put("accessModes", pvc.getSpec().getAccessModes());
+                }
+                var labels = pvc.getMetadata().getLabels();
+                if (labels != null && labels.get("strimzi.io/pool-name") != null) {
+                    p.put("nodePool", labels.get("strimzi.io/pool-name"));
+                }
+                result.add(p);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to list PVCs", e);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> describeServices() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            var svcs = kubernetesClient.services()
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
+            for (var svc : svcs) {
+                Map<String, Object> s = new LinkedHashMap<>();
+                s.put("name", svc.getMetadata().getName());
+                s.put("type", svc.getSpec().getType());
+                s.put("clusterIP", svc.getSpec().getClusterIP());
+                List<Map<String, Object>> ports = new ArrayList<>();
+                if (svc.getSpec().getPorts() != null) {
+                    for (var port : svc.getSpec().getPorts()) {
+                        Map<String, Object> portInfo = new LinkedHashMap<>();
+                        if (port.getName() != null) portInfo.put("name", port.getName());
+                        portInfo.put("port", port.getPort());
+                        portInfo.put("protocol", port.getProtocol());
+                        if (port.getNodePort() != null && port.getNodePort() > 0) {
+                            portInfo.put("nodePort", port.getNodePort());
+                        }
+                        ports.add(portInfo);
+                    }
+                }
+                s.put("ports", ports);
+                if (svc.getSpec().getSelector() != null) {
+                    s.put("selector", svc.getSpec().getSelector());
+                }
+                result.add(s);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to list Services", e);
         }
         return result;
     }

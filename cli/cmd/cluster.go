@@ -518,6 +518,63 @@ var clusterTopologyCmd = &cobra.Command{
 			}
 			output.Table([]string{"Pod Set", "Desired", "Current", "Ready"}, rows)
 		}
+		// NetworkPolicies
+		if len(result.NetworkPolicies) > 0 {
+			output.SubHeader(fmt.Sprintf("Network Policies (%d)", len(result.NetworkPolicies)))
+			rows := make([][]string, 0, len(result.NetworkPolicies))
+			for _, np := range result.NetworkPolicies {
+				name, _ := np["name"].(string)
+				target := fmt.Sprintf("%v", np["targetPods"])
+				types := fmt.Sprintf("%v", np["policyTypes"])
+				ingress := fmt.Sprintf("%v", np["ingressRules"])
+				egress := fmt.Sprintf("%v", np["egressRules"])
+				rows = append(rows, []string{name, target, types, ingress, egress})
+			}
+			output.Table([]string{"Policy", "Target Pods", "Types", "Ingress", "Egress"}, rows)
+		}
+
+		// PVCs
+		if len(result.PVCs) > 0 {
+			output.SubHeader(fmt.Sprintf("Persistent Volume Claims (%d)", len(result.PVCs)))
+			rows := make([][]string, 0, len(result.PVCs))
+			for _, pvc := range result.PVCs {
+				name, _ := pvc["name"].(string)
+				status, _ := pvc["status"].(string)
+				capacity, _ := pvc["capacity"].(string)
+				sc, _ := pvc["storageClass"].(string)
+				pool, _ := pvc["nodePool"].(string)
+				rows = append(rows, []string{name, status, capacity, sc, pool})
+			}
+			output.Table([]string{"PVC", "Status", "Capacity", "Storage Class", "Node Pool"}, rows)
+		}
+
+		// Services
+		if len(result.Services) > 0 {
+			output.SubHeader(fmt.Sprintf("Services (%d)", len(result.Services)))
+			rows := make([][]string, 0, len(result.Services))
+			for _, svc := range result.Services {
+				name, _ := svc["name"].(string)
+				stype, _ := svc["type"].(string)
+				cip, _ := svc["clusterIP"].(string)
+				portStr := ""
+				if ports, ok := svc["ports"].([]interface{}); ok {
+					for i, p := range ports {
+						if pm, ok := p.(map[string]interface{}); ok {
+							pn := fmt.Sprintf("%v", pm["port"])
+							if np, ok := pm["nodePort"]; ok {
+								pn += fmt.Sprintf("→%v", np)
+							}
+							if i > 0 {
+								portStr += ", "
+							}
+							portStr += pn
+						}
+					}
+				}
+				rows = append(rows, []string{name, stype, cip, portStr})
+			}
+			output.Table([]string{"Service", "Type", "Cluster IP", "Ports"}, rows)
+		}
 
 		// Connect
 		if len(result.Connect) > 0 {
