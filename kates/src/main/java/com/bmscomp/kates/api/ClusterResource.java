@@ -19,6 +19,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.service.ClusterAlertsService;
 import com.bmscomp.kates.service.ClusterHealthService;
 import com.bmscomp.kates.service.ClusterTopologyService;
 import com.bmscomp.kates.service.ConsumerGroupService;
@@ -34,15 +35,18 @@ public class ClusterResource {
     private final ConsumerGroupService consumerGroupService;
     private final ClusterHealthService clusterHealthService;
     private final ClusterTopologyService clusterTopologyService;
+    private final ClusterAlertsService clusterAlertsService;
 
     @Inject
     public ClusterResource(TopicService topicService, ConsumerGroupService consumerGroupService,
                            ClusterHealthService clusterHealthService,
-                           ClusterTopologyService clusterTopologyService) {
+                           ClusterTopologyService clusterTopologyService,
+                           ClusterAlertsService clusterAlertsService) {
         this.topicService = topicService;
         this.consumerGroupService = consumerGroupService;
         this.clusterHealthService = clusterHealthService;
         this.clusterTopologyService = clusterTopologyService;
+        this.clusterAlertsService = clusterAlertsService;
     }
 
     @GET
@@ -216,6 +220,22 @@ public class ClusterResource {
             return Response.serverError()
                     .entity(ApiError.of(
                             500, "Internal Server Error", "Failed to describe cluster topology: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/alerts")
+    @Operation(summary = "Get critical cluster alerts",
+            description = "Returns critical and warning PrometheusRule alerts that affect Kafka cluster health")
+    @APIResponse(responseCode = "200", description = "Cluster alerts")
+    public Response getClusterAlerts() {
+        try {
+            return Response.ok(clusterAlertsService.describeAlerts()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(
+                            500, "Internal Server Error", "Failed to describe cluster alerts: " + e.getMessage()))
                     .build();
         }
     }

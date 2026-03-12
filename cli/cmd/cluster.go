@@ -830,10 +830,75 @@ func renderResources(data map[string]interface{}) {
 	}
 }
 
+var clusterAlertsCmd = &cobra.Command{
+	Use:   "alerts",
+	Short: "Show critical Kafka cluster alerts from PrometheusRules",
+	Long:  "Displays critical and warning alerts from PrometheusRule CRDs that can affect Kafka cluster health.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.ClusterAlerts(context.Background())
+		if err != nil {
+			return fmt.Errorf("failed to fetch cluster alerts: %w", err)
+		}
+
+		output.Header("Kafka Cluster Alerts")
+
+		critIcon := "🔴"
+		warnIcon := "🟡"
+		if result.CriticalCount > 0 {
+			output.KeyValue("Critical", fmt.Sprintf("%s %d alerts", critIcon, result.CriticalCount))
+		} else {
+			output.KeyValue("Critical", "✅ 0")
+		}
+		if result.WarningCount > 0 {
+			output.KeyValue("Warning", fmt.Sprintf("%s %d alerts", warnIcon, result.WarningCount))
+		} else {
+			output.KeyValue("Warning", "✅ 0")
+		}
+		output.KeyValue("Rules Scanned", fmt.Sprintf("%d", result.TotalRulesScanned))
+		fmt.Println()
+
+		if len(result.Alerts) == 0 {
+			fmt.Println("  No critical alerts configured.")
+			return nil
+		}
+
+		rows := make([][]string, 0, len(result.Alerts))
+		for _, a := range result.Alerts {
+			icon := warnIcon
+			if a.Severity == "critical" {
+				icon = critIcon
+			}
+			rows = append(rows, []string{
+				icon + " " + a.Severity,
+				a.Name,
+				a.Group,
+				a.For,
+				a.Summary,
+			})
+		}
+		output.Table([]string{"Severity", "Alert", "Group", "For", "Summary"}, rows)
+
+		fmt.Println()
+		output.SubHeader("Alert Details")
+		for _, a := range result.Alerts {
+			icon := warnIcon
+			if a.Severity == "critical" {
+				icon = critIcon
+			}
+			fmt.Printf("  %s %s\n", icon, a.Name)
+			fmt.Printf("    Expr: %s\n", a.Expr)
+			fmt.Printf("    %s\n\n", a.Description)
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	clusterBrokerCmd.AddCommand(clusterBrokerConfigsCmd)
 	clusterCmd.AddCommand(clusterInfoCmd)
 	clusterCmd.AddCommand(clusterTopologyCmd)
+	clusterCmd.AddCommand(clusterAlertsCmd)
 	clusterCmd.AddCommand(clusterTopicsCmd)
 	clusterCmd.AddCommand(clusterBrokerCmd)
 	clusterTopicsCmd.AddCommand(clusterTopicDescribeCmd)

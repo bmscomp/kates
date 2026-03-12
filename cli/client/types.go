@@ -77,6 +77,25 @@ type TopoCountItems struct {
 	Items []map[string]interface{} `json:"items,omitempty"`
 }
 
+type ClusterAlertsResponse struct {
+	TotalRulesScanned int         `json:"totalRulesScanned"`
+	CriticalCount     int         `json:"criticalCount"`
+	WarningCount      int         `json:"warningCount"`
+	Count             int         `json:"count"`
+	Alerts            []AlertRule `json:"alerts"`
+}
+
+type AlertRule struct {
+	Name        string `json:"name"`
+	Severity    string `json:"severity"`
+	Group       string `json:"group"`
+	Source      string `json:"source"`
+	Expr        string `json:"expr"`
+	For         string `json:"for"`
+	Summary     string `json:"summary"`
+	Description string `json:"description"`
+}
+
 type K8sInfo struct {
 	Version    string                   `json:"version,omitempty"`
 	Platform   string                   `json:"platform,omitempty"`

@@ -33,7 +33,7 @@ rules:
     resources: ["kafkas", "kafkanodepools", "kafkatopics", "kafkausers", "kafkaconnects", "kafkamirrormaker2s", "kafkarebalances"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["monitoring.coreos.com"]
-    resources: ["podmonitors"]
+    resources: ["podmonitors", "prometheusrules"]
     verbs: ["get", "list"]
   - apiGroups: ["core.strimzi.io"]
     resources: ["strimzipodsets"]
