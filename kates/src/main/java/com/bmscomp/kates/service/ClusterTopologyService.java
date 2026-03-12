@@ -12,8 +12,13 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.ConsumerGroupListing;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
+import org.apache.kafka.clients.admin.DescribeLogDirsResult;
+import org.apache.kafka.clients.admin.LogDirDescription;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.acl.AclBinding;
+import org.apache.kafka.common.acl.AclBindingFilter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -111,6 +116,10 @@ public class ClusterTopologyService {
         topology.put("metrics", describeMetrics(kafkaCrSpec));
         topology.put("topics", describeTopics());
         topology.put("users", describeUsers());
+        topology.put("consumerGroups", describeConsumerGroups());
+        topology.put("acls", describeAcls());
+        topology.put("logDirs", describeLogDirs());
+        topology.put("featureFlags", describeFeatureFlags());
         topology.put("connect", describeConnect());
         topology.put("mirrorMaker2", describeMirrorMaker2());
 
@@ -682,6 +691,127 @@ public class ClusterTopologyService {
             users.put("count", 0);
         }
         return users;
+    }
+
+    private List<Map<String, Object>> describeLogDirs() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            AdminClient client = adminService.getClient();
+            Collection<Node> nodes = client.describeCluster().nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            List<Integer> brokerIds = nodes.stream().map(Node::id).toList();
+            DescribeLogDirsResult logDirs = client.describeLogDirs(brokerIds);
+            Map<Integer, Map<String, LogDirDescription>> allLogDirs = logDirs.allDescriptions()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            for (var entry : allLogDirs.entrySet()) {
+                int brokerId = entry.getKey();
+                for (var dirEntry : entry.getValue().entrySet()) {
+                    Map<String, Object> dir = new LinkedHashMap<>();
+                    dir.put("brokerId", brokerId);
+                    dir.put("path", dirEntry.getKey());
+                    LogDirDescription desc = dirEntry.getValue();
+                    long totalBytes = desc.replicaInfos().values().stream()
+                            .mapToLong(r -> r.size())
+                            .sum();
+                    dir.put("sizeMb", totalBytes / (1024 * 1024));
+                    dir.put("partitions", desc.replicaInfos().size());
+                    if (desc.error() != null) dir.put("error", desc.error().getMessage());
+                    result.add(dir);
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to describe log dirs", e);
+        }
+        result.sort(Comparator.comparingInt(d -> (int) d.get("brokerId")));
+        return result;
+    }
+
+    private Map<String, Object> describeConsumerGroups() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            AdminClient client = adminService.getClient();
+            Collection<ConsumerGroupListing> groups = client.listConsumerGroups()
+                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            List<Map<String, Object>> items = new ArrayList<>();
+            if (!groups.isEmpty()) {
+                var descriptions = client.describeConsumerGroups(
+                        groups.stream().map(ConsumerGroupListing::groupId).toList()
+                ).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                for (var entry : descriptions.entrySet()) {
+                    Map<String, Object> g = new LinkedHashMap<>();
+                    g.put("groupId", entry.getKey());
+                    g.put("state", entry.getValue().state().toString());
+                    g.put("type", entry.getValue().type().toString());
+                    g.put("members", entry.getValue().members().size());
+                    if (entry.getValue().coordinator() != null) {
+                        g.put("coordinator", entry.getValue().coordinator().id());
+                    }
+                    items.add(g);
+                }
+            }
+            result.put("count", items.size());
+            result.put("items", items);
+        } catch (Exception e) {
+            LOG.debug("Unable to describe consumer groups", e);
+            result.put("count", 0);
+            result.put("items", List.of());
+        }
+        return result;
+    }
+
+    private Map<String, Object> describeAcls() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            AdminClient client = adminService.getClient();
+            Collection<AclBinding> acls = client.describeAcls(AclBindingFilter.ANY)
+                    .values().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (AclBinding acl : acls) {
+                Map<String, Object> a = new LinkedHashMap<>();
+                a.put("principal", acl.entry().principal());
+                a.put("resourceType", acl.pattern().resourceType().toString());
+                a.put("resourceName", acl.pattern().name());
+                a.put("operation", acl.entry().operation().toString());
+                a.put("permission", acl.entry().permissionType().toString());
+                a.put("host", acl.entry().host());
+                items.add(a);
+            }
+            items.sort(Comparator.comparing((Map<String, Object> a) -> (String) a.get("principal"))
+                    .thenComparing(a -> (String) a.get("resourceType"))
+                    .thenComparing(a -> (String) a.get("resourceName")));
+            result.put("count", items.size());
+            result.put("items", items);
+        } catch (Exception e) {
+            LOG.debug("Unable to describe ACLs", e);
+            result.put("count", 0);
+            result.put("items", List.of());
+        }
+        return result;
+    }
+
+    private Map<String, Object> describeFeatureFlags() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            AdminClient client = adminService.getClient();
+            var features = client.describeFeatures().featureMetadata()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            var finalized = features.finalizedFeatures();
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (var entry : finalized.entrySet()) {
+                Map<String, Object> f = new LinkedHashMap<>();
+                f.put("name", entry.getKey());
+                f.put("minVersion", entry.getValue().minVersionLevel());
+                f.put("maxVersion", entry.getValue().maxVersionLevel());
+                items.add(f);
+            }
+            items.sort(Comparator.comparing(f -> (String) f.get("name")));
+            result.put("count", items.size());
+            result.put("items", items);
+        } catch (Exception e) {
+            LOG.debug("Unable to describe feature flags", e);
+            result.put("count", 0);
+            result.put("items", List.of());
+        }
+        return result;
     }
 
     @SuppressWarnings("unchecked")

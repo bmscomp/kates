@@ -413,6 +413,62 @@ var clusterTopologyCmd = &cobra.Command{
 			}
 			output.Table([]string{"User", "Auth", "ACL", "Ready"}, rows)
 		}
+		// Consumer Groups
+		if cg := result.ConsumerGroups; cg != nil && cg.Count > 0 {
+			output.SubHeader(fmt.Sprintf("Consumer Groups (%d)", cg.Count))
+			rows := make([][]string, 0, len(cg.Items))
+			for _, item := range cg.Items {
+				gid, _ := item["groupId"].(string)
+				state, _ := item["state"].(string)
+				gtype, _ := item["type"].(string)
+				members := fmt.Sprintf("%v", item["members"])
+				coord := fmt.Sprintf("%v", item["coordinator"])
+				rows = append(rows, []string{gid, state, gtype, members, coord})
+			}
+			output.Table([]string{"Group ID", "State", "Type", "Members", "Coordinator"}, rows)
+		}
+
+		// ACLs
+		if acls := result.ACLs; acls != nil && acls.Count > 0 {
+			output.SubHeader(fmt.Sprintf("Access Control Lists (%d)", acls.Count))
+			rows := make([][]string, 0, len(acls.Items))
+			for _, item := range acls.Items {
+				principal, _ := item["principal"].(string)
+				resType, _ := item["resourceType"].(string)
+				resName, _ := item["resourceName"].(string)
+				op, _ := item["operation"].(string)
+				perm, _ := item["permission"].(string)
+				rows = append(rows, []string{principal, resType, resName, op, perm})
+			}
+			output.Table([]string{"Principal", "Resource", "Name", "Operation", "Permission"}, rows)
+		}
+
+		// Log Dirs
+		if len(result.LogDirs) > 0 {
+			output.SubHeader(fmt.Sprintf("Log Directories (%d)", len(result.LogDirs)))
+			rows := make([][]string, 0, len(result.LogDirs))
+			for _, d := range result.LogDirs {
+				broker := fmt.Sprintf("%v", d["brokerId"])
+				path, _ := d["path"].(string)
+				sizeMb := fmt.Sprintf("%v MB", d["sizeMb"])
+				parts := fmt.Sprintf("%v", d["partitions"])
+				rows = append(rows, []string{broker, path, sizeMb, parts})
+			}
+			output.Table([]string{"Broker", "Path", "Size", "Partitions"}, rows)
+		}
+
+		// Feature Flags
+		if ff := result.FeatureFlags; ff != nil && ff.Count > 0 {
+			output.SubHeader(fmt.Sprintf("Feature Flags (%d)", ff.Count))
+			rows := make([][]string, 0, len(ff.Items))
+			for _, item := range ff.Items {
+				name, _ := item["name"].(string)
+				minV := fmt.Sprintf("%v", item["minVersion"])
+				maxV := fmt.Sprintf("%v", item["maxVersion"])
+				rows = append(rows, []string{name, minV, maxV})
+			}
+			output.Table([]string{"Feature", "Min Version", "Max Version"}, rows)
+		}
 
 		// Connect
 		if len(result.Connect) > 0 {

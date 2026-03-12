@@ -58,8 +58,17 @@ type ClusterTopology struct {
 	Metrics        map[string]interface{}   `json:"metrics,omitempty"`
 	Topics         *TopoTopics              `json:"topics,omitempty"`
 	Users          *TopoUsers               `json:"users,omitempty"`
-	Connect        []map[string]interface{} `json:"connect,omitempty"`
-	MirrorMaker    []map[string]interface{} `json:"mirrorMaker2,omitempty"`
+	ConsumerGroups *TopoCountItems           `json:"consumerGroups,omitempty"`
+	ACLs           *TopoCountItems           `json:"acls,omitempty"`
+	LogDirs        []map[string]interface{}  `json:"logDirs,omitempty"`
+	FeatureFlags   *TopoCountItems           `json:"featureFlags,omitempty"`
+	Connect        []map[string]interface{}  `json:"connect,omitempty"`
+	MirrorMaker    []map[string]interface{}  `json:"mirrorMaker2,omitempty"`
+}
+
+type TopoCountItems struct {
+	Count int                      `json:"count"`
+	Items []map[string]interface{} `json:"items,omitempty"`
 }
 
 type K8sInfo struct {
