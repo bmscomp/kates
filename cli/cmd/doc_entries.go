@@ -96,7 +96,57 @@ var docEntries = []DocEntry{
 			"broker availability, under-replicated partitions, offline\n" +
 			"partitions, consumer group states, and ISR health.",
 		Examples: []string{"kates cluster check", "kates cluster check -o json"},
-		SeeAlso:  []string{"doctor", "cluster info"},
+		SeeAlso:  []string{"doctor", "cluster info", "cluster topology"},
+	},
+	{
+		Name:     "cluster topology",
+		Category: "Cluster",
+		Synopsis: "kates cluster topology [flags]",
+		Short:    "Full Strimzi/Kafka cluster topology with 26 sections",
+		Description: "Displays a comprehensive view of the entire Kafka cluster\n" +
+			"including Kubernetes platform, Strimzi operator, KRaft\n" +
+			"controllers, broker node pools, entity operator, Cruise\n" +
+			"Control, Kafka Exporter, TLS certificates, metrics,\n" +
+			"managed topics, users, consumer groups, ACLs, log\n" +
+			"directories, feature flags, KafkaRebalances, Drain\n" +
+			"Cleaner, StrimziPodSets, NetworkPolicies, PVCs,\n" +
+			"Services, Endpoints, Connect, and MirrorMaker2.\n\n" +
+			"Requires the Kates backend to be deployed on Kubernetes\n" +
+			"with access to Strimzi CRDs and AdminClient APIs.",
+		Examples: []string{
+			"kates cluster topology",
+			"kates cluster topology -o json",
+		},
+		SeeAlso: []string{"cluster info", "cluster check", "cluster alerts"},
+	},
+	{
+		Name:     "cluster alerts",
+		Category: "Cluster",
+		Synopsis: "kates cluster alerts [flags]",
+		Short:    "Show critical Kafka health alerts from PrometheusRules",
+		Description: "Reads PrometheusRule CRDs from the cluster and displays\n" +
+			"critical and warning alerts that affect Kafka health.\n" +
+			"Alerts are sorted by severity (critical first), showing\n" +
+			"name, group, firing threshold, PromQL expression, and\n" +
+			"description.\n\n" +
+			"Returns exit code 2 when critical alerts are configured,\n" +
+			"making it suitable for CI/CD health gates.\n\n" +
+			"Covers 16 alert rules across 8 groups: cluster health,\n" +
+			"consumer lag, KRaft stability, network latency, operator\n" +
+			"availability, replication, performance, Cruise Control,\n" +
+			"and certificate expiry.",
+		Flags: []DocFlag{
+			{Name: "--severity", Type: "string", Desc: "Filter by severity: critical or warning"},
+			{Name: "--group", Type: "string", Desc: "Filter by alert group (e.g. kafka.cluster, kafka.kraft)"},
+		},
+		Examples: []string{
+			"kates cluster alerts",
+			"kates cluster alerts --severity critical",
+			"kates cluster alerts --group kafka.kraft",
+			"kates cluster alerts -o json",
+			"kates cluster alerts --severity critical && echo 'safe'",
+		},
+		SeeAlso: []string{"cluster topology", "cluster check"},
 	},
 	{
 		Name:     "cluster groups",

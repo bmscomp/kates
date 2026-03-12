@@ -106,6 +106,12 @@ kates cluster group <group-name>
 
 # Broker configuration
 kates cluster brokers
+
+# Full cluster topology (26 sections)
+kates cluster topology
+
+# Critical Kafka health alerts
+kates cluster alerts
 ```
 
 #### cluster check
@@ -118,6 +124,76 @@ kates cluster check -o json
 ```
 
 Output statuses: `● HEALTHY`, `▲ WARNING`, `✖ CRITICAL`.
+
+#### cluster topology
+
+Display the full Strimzi/Kafka cluster topology with 26 data sections. Requires the Kates backend to be deployed on Kubernetes with access to Strimzi CRDs and Kafka AdminClient APIs.
+
+```bash
+kates cluster topology
+kates cluster topology -o json
+```
+
+| # | Section | Source |
+|---|---------|--------|
+| 1 | Kubernetes Platform | K8s API |
+| 2 | Strimzi Operator | Deployment |
+| 3 | Kafka Cluster | CR + AdminClient |
+| 4 | Kafka Config | CR |
+| 5 | Node Pools | CRD |
+| 6 | Controllers | AdminClient + Pods |
+| 7 | Brokers | AdminClient + Pods |
+| 8 | Entity Operator | CR |
+| 9 | Cruise Control | CR |
+| 10 | Kafka Exporter | CR |
+| 11 | TLS Certificates | CR |
+| 12 | Metrics & Monitoring | CR + PodMonitors |
+| 13 | Managed Topics | CRD |
+| 14 | Kafka Users | CRD |
+| 15 | Consumer Groups | AdminClient |
+| 16 | ACLs | AdminClient |
+| 17 | Log Directories | AdminClient |
+| 18 | Feature Flags | AdminClient |
+| 19 | Kafka Rebalances | CRD |
+| 20 | Strimzi Drain Cleaner | Deployment |
+| 21 | Strimzi Pod Sets | CRD |
+| 22 | Network Policies | K8s API |
+| 23 | PVCs | K8s API |
+| 24 | Services | K8s API |
+| 25 | Endpoints | K8s API |
+| 26 | Connect / MirrorMaker2 | CRD |
+
+#### cluster alerts
+
+Show critical Kafka health alerts from PrometheusRule CRDs. Displays 16 alert rules across 8 groups that can affect cluster health. Alerts are sorted by severity (critical first) with styled indicators.
+
+Returns **exit code 2** when critical alerts are configured — useful for CI/CD health gates.
+
+```bash
+# Show all alerts
+kates cluster alerts
+
+# Filter by severity
+kates cluster alerts --severity critical
+kates cluster alerts --severity warning
+
+# Filter by alert group
+kates cluster alerts --group kafka.kraft
+kates cluster alerts --group kafka.cluster
+
+# JSON output for scripting
+kates cluster alerts -o json
+
+# CI/CD health gate
+kates cluster alerts --severity critical && echo "safe"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--severity` | Filter by severity: `critical` or `warning` |
+| `--group` | Filter by alert group (e.g. `kafka.cluster`, `kafka.kraft`, `kafka.certificates`) |
+
+Alert groups: `kafka.cluster`, `kafka.consumer`, `kafka.kraft`, `kafka.network`, `strimzi.operator`, `kafka.replication`, `kafka.performance`, `kafka.cruisecontrol`, `kafka.certificates`.
 
 #### cluster watch
 
