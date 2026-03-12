@@ -470,6 +470,55 @@ var clusterTopologyCmd = &cobra.Command{
 			output.Table([]string{"Feature", "Min Version", "Max Version"}, rows)
 		}
 
+		// Rebalances
+		if len(result.Rebalances) > 0 {
+			output.SubHeader(fmt.Sprintf("Kafka Rebalances (%d)", len(result.Rebalances)))
+			rows := make([][]string, 0, len(result.Rebalances))
+			for _, r := range result.Rebalances {
+				name, _ := r["name"].(string)
+				mode, _ := r["mode"].(string)
+				status, _ := r["status"].(string)
+				goals := fmt.Sprintf("%v", r["goalCount"])
+				disk := fmt.Sprintf("%v", r["rebalanceDisk"])
+				rows = append(rows, []string{name, mode, goals, disk, status})
+			}
+			output.Table([]string{"Name", "Mode", "Goals", "Disk", "Status"}, rows)
+		}
+
+		// Drain Cleaner
+		if len(result.DrainCleaner) > 0 {
+			output.SubHeader("Strimzi Drain Cleaner")
+			if ready, ok := result.DrainCleaner["ready"].(bool); ok {
+				icon := "✗"
+				if ready {
+					icon = "✓"
+				}
+				output.KeyValue("Ready", icon)
+			}
+			if img, ok := result.DrainCleaner["image"].(string); ok {
+				output.KeyValue("Image", img)
+			}
+			if cfg, ok := result.DrainCleaner["config"].(map[string]interface{}); ok {
+				for k, v := range cfg {
+					output.KeyValue("  "+k, fmt.Sprintf("%v", v))
+				}
+			}
+		}
+
+		// StrimziPodSets
+		if len(result.PodSets) > 0 {
+			output.SubHeader(fmt.Sprintf("Strimzi Pod Sets (%d)", len(result.PodSets)))
+			rows := make([][]string, 0, len(result.PodSets))
+			for _, ps := range result.PodSets {
+				name, _ := ps["name"].(string)
+				pods := fmt.Sprintf("%v", ps["pods"])
+				ready := fmt.Sprintf("%v", ps["readyPods"])
+				desired := fmt.Sprintf("%v", ps["desiredPods"])
+				rows = append(rows, []string{name, desired, pods, ready})
+			}
+			output.Table([]string{"Pod Set", "Desired", "Current", "Ready"}, rows)
+		}
+
 		// Connect
 		if len(result.Connect) > 0 {
 			output.SubHeader(fmt.Sprintf("Kafka Connect (%d)", len(result.Connect)))

@@ -76,6 +76,20 @@ public class ClusterTopologyService {
             .withScope("Namespaced")
             .build();
 
+    private static final CustomResourceDefinitionContext KAFKA_REBALANCE_CRD = new CustomResourceDefinitionContext.Builder()
+            .withGroup("kafka.strimzi.io")
+            .withVersion("v1")
+            .withPlural("kafkarebalances")
+            .withScope("Namespaced")
+            .build();
+
+    private static final CustomResourceDefinitionContext STRIMZI_POD_SET_CRD = new CustomResourceDefinitionContext.Builder()
+            .withGroup("core.strimzi.io")
+            .withVersion("v1beta2")
+            .withPlural("strimzipodsets")
+            .withScope("Namespaced")
+            .build();
+
     @Inject
     KubernetesClient kubernetesClient;
 
@@ -120,6 +134,9 @@ public class ClusterTopologyService {
         topology.put("acls", describeAcls());
         topology.put("logDirs", describeLogDirs());
         topology.put("featureFlags", describeFeatureFlags());
+        topology.put("rebalances", describeRebalances());
+        topology.put("drainCleaner", describeDrainCleaner());
+        topology.put("podSets", describeStrimziPodSets());
         topology.put("connect", describeConnect());
         topology.put("mirrorMaker2", describeMirrorMaker2());
 
@@ -810,6 +827,100 @@ public class ClusterTopologyService {
             LOG.debug("Unable to describe feature flags", e);
             result.put("count", 0);
             result.put("items", List.of());
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> describeRebalances() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            var list = kubernetesClient.genericKubernetesResources(KAFKA_REBALANCE_CRD)
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
+            for (GenericKubernetesResource res : list) {
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("name", res.getMetadata().getName());
+                Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
+                        .getOrDefault("spec", Map.of());
+                if (spec.get("mode") != null) r.put("mode", spec.get("mode"));
+                if (spec.get("goals") instanceof List<?> goals) r.put("goalCount", goals.size());
+                if (spec.get("rebalanceDisk") instanceof Boolean rd) r.put("rebalanceDisk", rd);
+                Map<String, Object> status = (Map<String, Object>) res.getAdditionalProperties()
+                        .getOrDefault("status", Map.of());
+                if (status.get("conditions") instanceof List<?> conditions && !conditions.isEmpty()) {
+                    Map<String, Object> last = (Map<String, Object>) conditions.get(conditions.size() - 1);
+                    r.put("status", last.getOrDefault("type", "Unknown"));
+                    r.put("lastTransition", last.get("lastTransitionTime"));
+                } else {
+                    r.put("status", "Unknown");
+                }
+                result.add(r);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to read KafkaRebalances", e);
+        }
+        return result;
+    }
+
+    private Map<String, Object> describeDrainCleaner() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            var deploy = kubernetesClient.apps().deployments()
+                    .inNamespace(kafkaNamespace)
+                    .withName("strimzi-drain-cleaner")
+                    .get();
+            if (deploy != null) {
+                result.put("ready", deploy.getStatus() != null
+                        && deploy.getStatus().getReadyReplicas() != null
+                        && deploy.getStatus().getReadyReplicas() > 0);
+                result.put("replicas", deploy.getSpec().getReplicas());
+                if (deploy.getStatus() != null && deploy.getStatus().getReadyReplicas() != null) {
+                    result.put("readyReplicas", deploy.getStatus().getReadyReplicas());
+                }
+                var containers = deploy.getSpec().getTemplate().getSpec().getContainers();
+                if (!containers.isEmpty()) {
+                    result.put("image", containers.get(0).getImage());
+                    var envVars = containers.get(0).getEnv();
+                    if (envVars != null) {
+                        Map<String, String> config = new LinkedHashMap<>();
+                        for (var env : envVars) {
+                            config.put(env.getName(), env.getValue());
+                        }
+                        result.put("config", config);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to describe Drain Cleaner", e);
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> describeStrimziPodSets() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            var list = kubernetesClient.genericKubernetesResources(STRIMZI_POD_SET_CRD)
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
+            for (GenericKubernetesResource res : list) {
+                Map<String, Object> ps = new LinkedHashMap<>();
+                ps.put("name", res.getMetadata().getName());
+                Map<String, Object> status = (Map<String, Object>) res.getAdditionalProperties()
+                        .getOrDefault("status", Map.of());
+                if (status.get("pods") instanceof Number n) ps.put("pods", n.intValue());
+                if (status.get("readyPods") instanceof Number n) ps.put("readyPods", n.intValue());
+                if (status.get("currentPods") instanceof Number n) ps.put("currentPods", n.intValue());
+                Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
+                        .getOrDefault("spec", Map.of());
+                if (spec.get("pods") instanceof List<?> pods) ps.put("desiredPods", pods.size());
+                result.add(ps);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to read StrimziPodSets", e);
         }
         return result;
     }

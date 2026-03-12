@@ -62,6 +62,9 @@ type ClusterTopology struct {
 	ACLs           *TopoCountItems           `json:"acls,omitempty"`
 	LogDirs        []map[string]interface{}  `json:"logDirs,omitempty"`
 	FeatureFlags   *TopoCountItems           `json:"featureFlags,omitempty"`
+	Rebalances     []map[string]interface{}  `json:"rebalances,omitempty"`
+	DrainCleaner   map[string]interface{}    `json:"drainCleaner,omitempty"`
+	PodSets        []map[string]interface{}  `json:"podSets,omitempty"`
 	Connect        []map[string]interface{}  `json:"connect,omitempty"`
 	MirrorMaker    []map[string]interface{}  `json:"mirrorMaker2,omitempty"`
 }

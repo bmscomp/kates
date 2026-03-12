@@ -27,10 +27,13 @@ rules:
     resources: ["statefulsets", "deployments"]
     verbs: ["get", "list"]
   - apiGroups: ["kafka.strimzi.io"]
-    resources: ["kafkas", "kafkanodepools", "kafkatopics", "kafkausers", "kafkaconnects", "kafkamirrormaker2s"]
+    resources: ["kafkas", "kafkanodepools", "kafkatopics", "kafkausers", "kafkaconnects", "kafkamirrormaker2s", "kafkarebalances"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["monitoring.coreos.com"]
     resources: ["podmonitors"]
+    verbs: ["get", "list"]
+  - apiGroups: ["core.strimzi.io"]
+    resources: ["strimzipodsets"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
