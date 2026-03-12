@@ -68,6 +68,7 @@ type ClusterTopology struct {
 	NetworkPolicies  []map[string]interface{}  `json:"networkPolicies,omitempty"`
 	PVCs             []map[string]interface{}  `json:"pvcs,omitempty"`
 	Services         []map[string]interface{}  `json:"services,omitempty"`
+	Endpoints        []map[string]interface{}  `json:"endpoints,omitempty"`
 	Connect          []map[string]interface{}  `json:"connect,omitempty"`
 	MirrorMaker    []map[string]interface{}  `json:"mirrorMaker2,omitempty"`
 }

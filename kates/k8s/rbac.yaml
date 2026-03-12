@@ -21,7 +21,7 @@ rules:
     resources: ["chaosengines", "chaosexperiments", "chaosresults"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "nodes", "namespaces", "persistentvolumeclaims", "services"]
+    resources: ["pods", "pods/log", "nodes", "namespaces", "persistentvolumeclaims", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments"]

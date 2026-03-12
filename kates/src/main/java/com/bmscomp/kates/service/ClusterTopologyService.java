@@ -140,6 +140,7 @@ public class ClusterTopologyService {
         topology.put("networkPolicies", describeNetworkPolicies());
         topology.put("pvcs", describePvcs());
         topology.put("services", describeServices());
+        topology.put("endpoints", describeEndpoints());
         topology.put("connect", describeConnect());
         topology.put("mirrorMaker2", describeMirrorMaker2());
 
@@ -1029,6 +1030,45 @@ public class ClusterTopologyService {
             }
         } catch (Exception e) {
             LOG.debug("Unable to list Services", e);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> describeEndpoints() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            var endpoints = kubernetesClient.endpoints()
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
+            for (var ep : endpoints) {
+                Map<String, Object> e = new LinkedHashMap<>();
+                e.put("name", ep.getMetadata().getName());
+                int readyAddrs = 0;
+                int notReadyAddrs = 0;
+                List<Map<String, Object>> ports = new ArrayList<>();
+                if (ep.getSubsets() != null) {
+                    for (var subset : ep.getSubsets()) {
+                        if (subset.getAddresses() != null) readyAddrs += subset.getAddresses().size();
+                        if (subset.getNotReadyAddresses() != null) notReadyAddrs += subset.getNotReadyAddresses().size();
+                        if (subset.getPorts() != null) {
+                            for (var port : subset.getPorts()) {
+                                Map<String, Object> p = new LinkedHashMap<>();
+                                if (port.getName() != null) p.put("name", port.getName());
+                                p.put("port", port.getPort());
+                                p.put("protocol", port.getProtocol());
+                                ports.add(p);
+                            }
+                        }
+                    }
+                }
+                e.put("readyAddresses", readyAddrs);
+                e.put("notReadyAddresses", notReadyAddrs);
+                if (!ports.isEmpty()) e.put("ports", ports);
+                result.add(e);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to list Endpoints", e);
         }
         return result;
     }

@@ -577,6 +577,22 @@ var clusterTopologyCmd = &cobra.Command{
 			}
 			output.Table([]string{"Service", "Type", "Cluster IP", "Ports"}, rows)
 		}
+		// Endpoints
+		if len(result.Endpoints) > 0 {
+			output.SubHeader(fmt.Sprintf("Endpoints (%d)", len(result.Endpoints)))
+			rows := make([][]string, 0, len(result.Endpoints))
+			for _, ep := range result.Endpoints {
+				name, _ := ep["name"].(string)
+				ready := fmt.Sprintf("%v", ep["readyAddresses"])
+				notReady := fmt.Sprintf("%v", ep["notReadyAddresses"])
+				status := "✓"
+				if nr, ok := ep["notReadyAddresses"].(float64); ok && nr > 0 {
+					status = "✗"
+				}
+				rows = append(rows, []string{name, ready, notReady, status})
+			}
+			output.Table([]string{"Endpoint", "Ready", "Not Ready", "Status"}, rows)
+		}
 
 		// Connect
 		if len(result.Connect) > 0 {
