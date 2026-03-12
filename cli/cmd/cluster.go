@@ -192,6 +192,31 @@ var clusterTopologyCmd = &cobra.Command{
 					output.KeyValue("Super Users", strings.Join(parts, ", "))
 				}
 			}
+			if rack := c.RackAwareness; rack != nil {
+				if key, ok := rack["topologyKey"].(string); ok {
+					output.KeyValue("Rack Awareness", key)
+				}
+			}
+			if pdb := c.PodDisruptionBudget; pdb != nil {
+				if mu, ok := pdb["maxUnavailable"].(float64); ok {
+					output.KeyValue("PDB maxUnavailable", fmt.Sprintf("%d", int(mu)))
+				}
+			}
+		}
+
+		// Kafka Broker Config
+		if len(result.KafkaConfig) > 0 {
+			output.SubHeader(fmt.Sprintf("Kafka Broker Configuration (%d)", len(result.KafkaConfig)))
+			keys := make([]string, 0, len(result.KafkaConfig))
+			for k := range result.KafkaConfig {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			rows := make([][]string, 0, len(keys))
+			for _, k := range keys {
+				rows = append(rows, []string{k, fmt.Sprintf("%v", result.KafkaConfig[k])})
+			}
+			output.Table([]string{"Property", "Value"}, rows)
 		}
 
 		// Node Pools
@@ -203,14 +228,39 @@ var clusterTopologyCmd = &cobra.Command{
 				if p.StorageType != "" {
 					storage = fmt.Sprintf("%s (%s)", p.StorageSize, p.StorageType)
 				}
+				if p.StorageClass != "" {
+					storage += " [" + p.StorageClass + "]"
+				}
+				jvm := ""
+				if p.JVMOptions != nil {
+					xms, _ := p.JVMOptions["-Xms"].(string)
+					xmx, _ := p.JVMOptions["-Xmx"].(string)
+					if xms != "" && xmx != "" {
+						jvm = fmt.Sprintf("%s/%s", xms, xmx)
+					}
+				}
+				sched := ""
+				if p.Scheduling != nil {
+					if zone, ok := p.Scheduling["zone"].(string); ok {
+						sched = "zone=" + zone
+					}
+					if _, ok := p.Scheduling["affinity"].(bool); ok {
+						if sched != "" {
+							sched += " "
+						}
+						sched += "affinity"
+					}
+				}
 				rows = append(rows, []string{
 					p.Name,
 					p.Role,
 					fmt.Sprintf("%d", p.Replicas),
 					storage,
+					jvm,
+					sched,
 				})
 			}
-			output.Table([]string{"Name", "Role", "Replicas", "Storage"}, rows)
+			output.Table([]string{"Name", "Role", "Replicas", "Storage", "JVM Heap", "Scheduling"}, rows)
 		}
 
 		// Nodes
@@ -245,6 +295,89 @@ var clusterTopologyCmd = &cobra.Command{
 		if len(brokers) > 0 {
 			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(brokers)))
 			output.Table(headers, brokers)
+		}
+
+		// Entity Operator
+		if len(result.EntityOperator) > 0 {
+			output.SubHeader("Entity Operator")
+			renderOperatorComponent(result.EntityOperator, "topicOperator", "Topic Operator")
+			renderOperatorComponent(result.EntityOperator, "userOperator", "User Operator")
+		}
+
+		// Cruise Control
+		if len(result.CruiseControl) > 0 {
+			output.SubHeader("Cruise Control")
+			if bc, ok := result.CruiseControl["brokerCapacity"].(map[string]interface{}); ok {
+				parts := []string{}
+				if cpu, ok := bc["cpu"].(string); ok {
+					parts = append(parts, "CPU: "+cpu)
+				}
+				if in, ok := bc["inboundNetwork"].(string); ok {
+					parts = append(parts, "In: "+in)
+				}
+				if out, ok := bc["outboundNetwork"].(string); ok {
+					parts = append(parts, "Out: "+out)
+				}
+				output.KeyValue("Broker Capacity", strings.Join(parts, "  │  "))
+			}
+			if ar, ok := result.CruiseControl["autoRebalance"].([]interface{}); ok {
+				modes := make([]string, 0, len(ar))
+				for _, a := range ar {
+					if am, ok := a.(map[string]interface{}); ok {
+						if m, ok := am["mode"].(string); ok {
+							modes = append(modes, m)
+						}
+					}
+				}
+				output.KeyValue("Auto Rebalance", strings.Join(modes, ", "))
+			}
+			renderResources(result.CruiseControl)
+		}
+
+		// Kafka Exporter
+		if len(result.KafkaExporter) > 0 {
+			output.SubHeader("Kafka Exporter")
+			if tr, ok := result.KafkaExporter["topicRegex"].(string); ok {
+				output.KeyValue("Topic Regex", tr)
+			}
+			if gr, ok := result.KafkaExporter["groupRegex"].(string); ok {
+				output.KeyValue("Group Regex", gr)
+			}
+			renderResources(result.KafkaExporter)
+		}
+
+		// Certificates
+		if len(result.Certificates) > 0 {
+			output.SubHeader("TLS Certificates")
+			for _, caName := range []string{"clusterCa", "clientsCa"} {
+				if ca, ok := result.Certificates[caName].(map[string]interface{}); ok {
+					label := "Cluster CA"
+					if caName == "clientsCa" {
+						label = "Clients CA"
+					}
+					validity := fmt.Sprintf("%v", ca["validityDays"])
+					renewal := fmt.Sprintf("%v", ca["renewalDays"])
+					policy, _ := ca["certificateExpirationPolicy"].(string)
+					output.KeyValue(label, fmt.Sprintf("validity=%sd  renewal=%sd  policy=%s", validity, renewal, policy))
+				}
+			}
+		}
+
+		// Metrics
+		if len(result.Metrics) > 0 {
+			output.SubHeader("Metrics & Monitoring")
+			if km, ok := result.Metrics["kafka"].(map[string]interface{}); ok {
+				if t, ok := km["type"].(string); ok {
+					output.KeyValue("Kafka Metrics", t)
+				}
+			}
+			if pms, ok := result.Metrics["podMonitors"].([]interface{}); ok {
+				names := make([]string, len(pms))
+				for i, pm := range pms {
+					names[i] = fmt.Sprintf("%v", pm)
+				}
+				output.KeyValue("PodMonitors", strings.Join(names, ", "))
+			}
 		}
 
 		// Topics
@@ -487,6 +620,52 @@ var clusterBrokerConfigsCmd = &cobra.Command{
 var clusterBrokerCmd = &cobra.Command{
 	Use:   "broker",
 	Short: "Broker-level commands",
+}
+
+func renderOperatorComponent(data map[string]interface{}, key string, label string) {
+	if comp, ok := data[key].(map[string]interface{}); ok {
+		parts := []string{}
+		if res, ok := comp["resources"].(map[string]interface{}); ok {
+			if req, ok := res["requests"].(map[string]interface{}); ok {
+				mem, _ := req["memory"].(string)
+				cpu, _ := req["cpu"].(string)
+				parts = append(parts, fmt.Sprintf("req=%s/%s", cpu, mem))
+			}
+			if lim, ok := res["limits"].(map[string]interface{}); ok {
+				mem, _ := lim["memory"].(string)
+				cpu, _ := lim["cpu"].(string)
+				parts = append(parts, fmt.Sprintf("lim=%s/%s", cpu, mem))
+			}
+		}
+		if jvm, ok := comp["jvmOptions"].(map[string]interface{}); ok {
+			xms, _ := jvm["-Xms"].(string)
+			xmx, _ := jvm["-Xmx"].(string)
+			if xms != "" && xmx != "" {
+				parts = append(parts, fmt.Sprintf("JVM=%s/%s", xms, xmx))
+			}
+		}
+		if ri, ok := comp["reconciliationIntervalMs"].(float64); ok {
+			parts = append(parts, fmt.Sprintf("reconcile=%ds", int(ri)/1000))
+		}
+		output.KeyValue(label, strings.Join(parts, "  │  "))
+	}
+}
+
+func renderResources(data map[string]interface{}) {
+	if res, ok := data["resources"].(map[string]interface{}); ok {
+		parts := []string{}
+		if req, ok := res["requests"].(map[string]interface{}); ok {
+			mem, _ := req["memory"].(string)
+			cpu, _ := req["cpu"].(string)
+			parts = append(parts, fmt.Sprintf("req=%s/%s", cpu, mem))
+		}
+		if lim, ok := res["limits"].(map[string]interface{}); ok {
+			mem, _ := lim["memory"].(string)
+			cpu, _ := lim["cpu"].(string)
+			parts = append(parts, fmt.Sprintf("lim=%s/%s", cpu, mem))
+		}
+		output.KeyValue("Resources", strings.Join(parts, "  │  "))
+	}
 }
 
 func init() {

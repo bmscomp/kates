@@ -95,28 +95,22 @@ public class ClusterTopologyService {
 
         Map<String, Object> topology = new LinkedHashMap<>();
 
-        // Kubernetes info
+        // Read the Kafka CR once and share it across sections
+        Map<String, Object> kafkaCrSpec = readKafkaCrSpec();
+
         topology.put("kubernetes", describeKubernetes());
-
-        // Strimzi operator info
         topology.put("strimzi", describeStrimzi());
-
-        // Kafka cluster overview
-        topology.put("cluster", describeKafkaCluster());
-
-        // Node pools
+        topology.put("cluster", describeKafkaCluster(kafkaCrSpec));
+        topology.put("kafkaConfig", describeKafkaConfig(kafkaCrSpec));
         topology.put("nodePools", describeNodePools());
-
-        // Nodes (brokers + controllers)
         topology.put("nodes", describeNodes());
-
-        // Topics summary
+        topology.put("entityOperator", describeEntityOperator(kafkaCrSpec));
+        topology.put("cruiseControl", describeCruiseControl(kafkaCrSpec));
+        topology.put("kafkaExporter", describeKafkaExporter(kafkaCrSpec));
+        topology.put("certificates", describeCertificates(kafkaCrSpec));
+        topology.put("metrics", describeMetrics(kafkaCrSpec));
         topology.put("topics", describeTopics());
-
-        // Users summary
         topology.put("users", describeUsers());
-
-        // Kafka Connect & MirrorMaker2
         topology.put("connect", describeConnect());
         topology.put("mirrorMaker2", describeMirrorMaker2());
 
@@ -235,14 +229,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> describeKafkaCluster() {
-        Map<String, Object> cluster = new LinkedHashMap<>();
-        cluster.put("name", kafkaCluster);
-        cluster.put("namespace", kafkaNamespace);
-        cluster.put("kraftMode", true);
-
-        // Read from Kafka CR
-        String kafkaVersion = "unknown";
+    private Map<String, Object> readKafkaCrSpec() {
         try {
             GenericKubernetesResource kafka = kubernetesClient.genericKubernetesResources(KAFKA_CRD)
                     .inNamespace(kafkaNamespace)
@@ -250,54 +237,87 @@ public class ClusterTopologyService {
                     .get();
             if (kafka != null) {
                 Map<String, Object> props = kafka.getAdditionalProperties();
-                Map<String, Object> spec = (Map<String, Object>) props.getOrDefault("spec", Map.of());
-                Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
-
-                if (kafkaSpec.get("version") != null) {
-                    kafkaVersion = kafkaSpec.get("version").toString();
-                }
-
-                // Listeners
-                if (kafkaSpec.get("listeners") instanceof List<?> listeners) {
-                    List<Map<String, Object>> listenerList = new ArrayList<>();
-                    for (Object l : listeners) {
-                        if (l instanceof Map<?, ?> lm) {
-                            Map<String, Object> li = new LinkedHashMap<>();
-                            li.put("name", lm.get("name"));
-                            li.put("type", lm.get("type"));
-                            li.put("port", lm.get("port"));
-                            li.put("tls", lm.get("tls"));
-                            if (lm.get("authentication") instanceof Map<?, ?> auth) {
-                                li.put("authType", auth.get("type"));
-                            }
-                            listenerList.add(li);
-                        }
-                    }
-                    cluster.put("listeners", listenerList);
-                }
-
-                // Authorization
-                if (kafkaSpec.get("authorization") instanceof Map<?, ?> authz) {
-                    Map<String, Object> auth = new LinkedHashMap<>();
-                    auth.put("type", authz.get("type"));
-                    if (authz.get("superUsers") instanceof List<?> su) {
-                        auth.put("superUsers", su);
-                    }
-                    cluster.put("authorization", auth);
-                }
-
-                // Status
-                Map<String, Object> status = (Map<String, Object>) props.getOrDefault("status", Map.of());
-                if (status.get("conditions") instanceof List<?> conditions) {
-                    for (Object c : conditions) {
-                        if (c instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
-                            cluster.put("ready", "True".equals(cm.get("status")));
-                        }
-                    }
-                }
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("spec", props.getOrDefault("spec", Map.of()));
+                result.put("status", props.getOrDefault("status", Map.of()));
+                return result;
             }
         } catch (Exception e) {
             LOG.warn("Failed to read Kafka CR", e);
+        }
+        return Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> describeKafkaCluster(Map<String, Object> kafkaCr) {
+        Map<String, Object> cluster = new LinkedHashMap<>();
+        cluster.put("name", kafkaCluster);
+        cluster.put("namespace", kafkaNamespace);
+        cluster.put("kraftMode", true);
+
+        String kafkaVersion = "unknown";
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
+
+        if (kafkaSpec.get("version") != null) {
+            kafkaVersion = kafkaSpec.get("version").toString();
+        }
+
+        // Listeners
+        if (kafkaSpec.get("listeners") instanceof List<?> listeners) {
+            List<Map<String, Object>> listenerList = new ArrayList<>();
+            for (Object l : listeners) {
+                if (l instanceof Map<?, ?> lm) {
+                    Map<String, Object> li = new LinkedHashMap<>();
+                    li.put("name", lm.get("name"));
+                    li.put("type", lm.get("type"));
+                    li.put("port", lm.get("port"));
+                    li.put("tls", lm.get("tls"));
+                    if (lm.get("authentication") instanceof Map<?, ?> auth) {
+                        li.put("authType", auth.get("type"));
+                    }
+                    if (lm.get("configuration") instanceof Map<?, ?> conf) {
+                        li.put("configuration", conf);
+                    }
+                    listenerList.add(li);
+                }
+            }
+            cluster.put("listeners", listenerList);
+        }
+
+        // Authorization
+        if (kafkaSpec.get("authorization") instanceof Map<?, ?> authz) {
+            Map<String, Object> auth = new LinkedHashMap<>();
+            auth.put("type", authz.get("type"));
+            if (authz.get("superUsers") instanceof List<?> su) {
+                auth.put("superUsers", su);
+            }
+            cluster.put("authorization", auth);
+        }
+
+        // Rack awareness
+        if (kafkaSpec.get("rack") instanceof Map<?, ?> rack) {
+            cluster.put("rackAwareness", rack);
+        }
+
+        // PDB
+        if (kafkaSpec.get("template") instanceof Map<?, ?> template) {
+            if (template.get("podDisruptionBudget") instanceof Map<?, ?> pdb) {
+                cluster.put("podDisruptionBudget", pdb);
+            }
+        }
+
+        // Status from CR
+        Map<String, Object> status = (Map<String, Object>) kafkaCr.getOrDefault("status", Map.of());
+        if (status.get("conditions") instanceof List<?> conditions) {
+            for (Object c : conditions) {
+                if (c instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
+                    cluster.put("ready", "True".equals(cm.get("status")));
+                }
+            }
+        }
+        if (status.get("kafkaVersion") != null) {
+            kafkaVersion = status.get("kafkaVersion").toString();
         }
         cluster.put("kafkaVersion", kafkaVersion);
 
@@ -323,6 +343,109 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
+    private Map<String, Object> describeKafkaConfig(Map<String, Object> kafkaCr) {
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
+        if (kafkaSpec.get("config") instanceof Map<?, ?> config) {
+            return new LinkedHashMap<>((Map<String, Object>) config);
+        }
+        return Map.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> describeEntityOperator(Map<String, Object> kafkaCr) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        if (spec.get("entityOperator") instanceof Map<?, ?> eo) {
+            if (eo.get("topicOperator") instanceof Map<?, ?> to) {
+                Map<String, Object> topicOp = new LinkedHashMap<>();
+                if (to.get("resources") != null) topicOp.put("resources", to.get("resources"));
+                if (to.get("jvmOptions") != null) topicOp.put("jvmOptions", to.get("jvmOptions"));
+                if (to.get("reconciliationIntervalMs") != null)
+                    topicOp.put("reconciliationIntervalMs", to.get("reconciliationIntervalMs"));
+                result.put("topicOperator", topicOp);
+            }
+            if (eo.get("userOperator") instanceof Map<?, ?> uo) {
+                Map<String, Object> userOp = new LinkedHashMap<>();
+                if (uo.get("resources") != null) userOp.put("resources", uo.get("resources"));
+                if (uo.get("jvmOptions") != null) userOp.put("jvmOptions", uo.get("jvmOptions"));
+                result.put("userOperator", userOp);
+            }
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> describeCruiseControl(Map<String, Object> kafkaCr) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        if (spec.get("cruiseControl") instanceof Map<?, ?> cc) {
+            if (cc.get("brokerCapacity") != null) result.put("brokerCapacity", cc.get("brokerCapacity"));
+            if (cc.get("autoRebalance") != null) result.put("autoRebalance", cc.get("autoRebalance"));
+            if (cc.get("resources") != null) result.put("resources", cc.get("resources"));
+            if (cc.get("config") != null) result.put("config", cc.get("config"));
+            if (cc.get("metricsConfig") != null) result.put("metricsConfig", cc.get("metricsConfig"));
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> describeKafkaExporter(Map<String, Object> kafkaCr) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        if (spec.get("kafkaExporter") instanceof Map<?, ?> ke) {
+            if (ke.get("topicRegex") != null) result.put("topicRegex", ke.get("topicRegex"));
+            if (ke.get("groupRegex") != null) result.put("groupRegex", ke.get("groupRegex"));
+            if (ke.get("resources") != null) result.put("resources", ke.get("resources"));
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> describeCertificates(Map<String, Object> kafkaCr) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        if (spec.get("clusterCa") instanceof Map<?, ?> clusterCa) {
+            result.put("clusterCa", new LinkedHashMap<>(clusterCa));
+        }
+        if (spec.get("clientsCa") instanceof Map<?, ?> clientsCa) {
+            result.put("clientsCa", new LinkedHashMap<>(clientsCa));
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> describeMetrics(Map<String, Object> kafkaCr) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
+        Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
+        if (kafkaSpec.get("metricsConfig") instanceof Map<?, ?> mc) {
+            result.put("kafka", mc);
+        }
+        // PodMonitors
+        try {
+            var monitors = kubernetesClient.genericKubernetesResources(
+                    new CustomResourceDefinitionContext.Builder()
+                            .withGroup("monitoring.coreos.com")
+                            .withVersion("v1")
+                            .withPlural("podmonitors")
+                            .withScope("Namespaced")
+                            .build()
+            ).inNamespace(kafkaNamespace).list().getItems();
+            List<String> monitorNames = new ArrayList<>();
+            for (var m : monitors) {
+                monitorNames.add(m.getMetadata().getName());
+            }
+            if (!monitorNames.isEmpty()) {
+                result.put("podMonitors", monitorNames);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to read PodMonitors", e);
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
     private List<Map<String, Object>> describeNodePools() {
         List<Map<String, Object>> nodePools = new ArrayList<>();
         try {
@@ -344,12 +467,13 @@ public class ClusterTopologyService {
                 Map<String, Object> storage = (Map<String, Object>) spec.getOrDefault("storage", Map.of());
                 String storageType = (String) storage.getOrDefault("type", "unknown");
                 String storageSize = "";
+                String storageClass = "";
                 if (storage.get("volumes") instanceof List<?> volumes && !volumes.isEmpty()) {
                     Map<String, Object> vol = (Map<String, Object>) volumes.get(0);
                     storageSize = (String) vol.getOrDefault("size", "");
+                    if (vol.get("class") != null) storageClass = vol.get("class").toString();
                 }
 
-                // Resources
                 Map<String, Object> resources = (Map<String, Object>) spec.getOrDefault("resources", Map.of());
 
                 Map<String, Object> poolInfo = new LinkedHashMap<>();
@@ -358,9 +482,34 @@ public class ClusterTopologyService {
                 poolInfo.put("replicas", replicas);
                 poolInfo.put("storageType", storageType);
                 poolInfo.put("storageSize", storageSize);
-                if (!resources.isEmpty()) {
-                    poolInfo.put("resources", resources);
+                if (!storageClass.isEmpty()) poolInfo.put("storageClass", storageClass);
+                if (!resources.isEmpty()) poolInfo.put("resources", resources);
+
+                // JVM options
+                if (spec.get("jvmOptions") instanceof Map<?, ?> jvm) {
+                    poolInfo.put("jvmOptions", jvm);
                 }
+
+                // Scheduling (affinity, tolerations, topology spread)
+                if (spec.get("template") instanceof Map<?, ?> template) {
+                    if (template.get("pod") instanceof Map<?, ?> pod) {
+                        Map<String, Object> scheduling = new LinkedHashMap<>();
+                        if (pod.get("affinity") != null) scheduling.put("affinity", true);
+                        if (pod.get("tolerations") instanceof List<?> tols && !tols.isEmpty()) {
+                            scheduling.put("tolerations", tols.size());
+                        }
+                        if (pod.get("topologySpreadConstraints") instanceof List<?> tsc && !tsc.isEmpty()) {
+                            scheduling.put("topologySpreadConstraints", tsc.size());
+                        }
+                        if (pod.get("metadata") instanceof Map<?, ?> meta
+                                && meta.get("labels") instanceof Map<?, ?> labels
+                                && labels.get("zone") != null) {
+                            scheduling.put("zone", labels.get("zone"));
+                        }
+                        if (!scheduling.isEmpty()) poolInfo.put("scheduling", scheduling);
+                    }
+                }
+
                 nodePools.add(poolInfo);
             }
         } catch (Exception e) {

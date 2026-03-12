@@ -45,15 +45,21 @@ type BrokerNode struct {
 }
 
 type ClusterTopology struct {
-	Kubernetes  *K8sInfo                 `json:"kubernetes,omitempty"`
-	Strimzi     map[string]interface{}   `json:"strimzi,omitempty"`
-	Cluster     *TopoClusterInfo         `json:"cluster,omitempty"`
-	NodePools   []NodePoolInfo           `json:"nodePools,omitempty"`
-	Nodes       []TopologyNode           `json:"nodes,omitempty"`
-	Topics      *TopoTopics              `json:"topics,omitempty"`
-	Users       *TopoUsers               `json:"users,omitempty"`
-	Connect     []map[string]interface{} `json:"connect,omitempty"`
-	MirrorMaker []map[string]interface{} `json:"mirrorMaker2,omitempty"`
+	Kubernetes     *K8sInfo                 `json:"kubernetes,omitempty"`
+	Strimzi        map[string]interface{}   `json:"strimzi,omitempty"`
+	Cluster        *TopoClusterInfo         `json:"cluster,omitempty"`
+	KafkaConfig    map[string]interface{}   `json:"kafkaConfig,omitempty"`
+	NodePools      []NodePoolInfo           `json:"nodePools,omitempty"`
+	Nodes          []TopologyNode           `json:"nodes,omitempty"`
+	EntityOperator map[string]interface{}   `json:"entityOperator,omitempty"`
+	CruiseControl  map[string]interface{}   `json:"cruiseControl,omitempty"`
+	KafkaExporter  map[string]interface{}   `json:"kafkaExporter,omitempty"`
+	Certificates   map[string]interface{}   `json:"certificates,omitempty"`
+	Metrics        map[string]interface{}   `json:"metrics,omitempty"`
+	Topics         *TopoTopics              `json:"topics,omitempty"`
+	Users          *TopoUsers               `json:"users,omitempty"`
+	Connect        []map[string]interface{} `json:"connect,omitempty"`
+	MirrorMaker    []map[string]interface{} `json:"mirrorMaker2,omitempty"`
 }
 
 type K8sInfo struct {
@@ -75,15 +81,20 @@ type TopoClusterInfo struct {
 	Ready                  bool                     `json:"ready"`
 	Listeners              []map[string]interface{} `json:"listeners,omitempty"`
 	Authorization          map[string]interface{}   `json:"authorization,omitempty"`
+	RackAwareness          map[string]interface{}   `json:"rackAwareness,omitempty"`
+	PodDisruptionBudget    map[string]interface{}   `json:"podDisruptionBudget,omitempty"`
 }
 
 type NodePoolInfo struct {
-	Name        string                 `json:"name"`
-	Role        string                 `json:"role"`
-	Replicas    int                    `json:"replicas"`
-	StorageType string                 `json:"storageType"`
-	StorageSize string                 `json:"storageSize"`
-	Resources   map[string]interface{} `json:"resources,omitempty"`
+	Name         string                 `json:"name"`
+	Role         string                 `json:"role"`
+	Replicas     int                    `json:"replicas"`
+	StorageType  string                 `json:"storageType"`
+	StorageSize  string                 `json:"storageSize"`
+	StorageClass string                 `json:"storageClass,omitempty"`
+	Resources    map[string]interface{} `json:"resources,omitempty"`
+	JVMOptions   map[string]interface{} `json:"jvmOptions,omitempty"`
+	Scheduling   map[string]interface{} `json:"scheduling,omitempty"`
 }
 
 type TopologyNode struct {
