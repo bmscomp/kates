@@ -25,7 +25,7 @@ spec:
       - apiGroups: ["networking.k8s.io"]
         resources: ["networkpolicies"]
         verbs: ["create","delete","list","get"]
-    image: "litmuschaos/go-runner:IMAGE_VERSION"
+    image: "litmuschaos/go-runner:latest"
     imagePullPolicy: IfNotPresent
     args:
       - -name

@@ -22,7 +22,7 @@ spec:
       - apiGroups: ["litmuschaos.io"]
         resources: ["chaosengines","chaosexperiments","chaosresults"]
         verbs: ["create","list","get","patch","update","delete"]
-    image: "litmuschaos/go-runner:IMAGE_VERSION"
+    image: "litmuschaos/go-runner:latest"
     imagePullPolicy: IfNotPresent
     args:
       - -name
