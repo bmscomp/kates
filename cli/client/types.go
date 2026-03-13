@@ -217,11 +217,12 @@ type LostRange struct {
 
 // PagedTests from GET /api/tests (paginated)
 type PagedTests struct {
-	Content    []TestRun `json:"content"`
+	Content    []TestRun `json:"items"`
 	Page       int       `json:"page"`
 	Size       int       `json:"size"`
-	TotalItems int       `json:"totalItems"`
+	TotalItems int       `json:"total"`
 	TotalPages int       `json:"totalPages"`
+	Count      int       `json:"count"`
 }
 
 // ReportSummary from GET /api/tests/:id/report/summary
@@ -529,9 +530,9 @@ type StepReport struct {
 	DisruptionType        string             `json:"disruptionType"`
 	ChaosOutcome          *ChaosOutcome      `json:"chaosOutcome,omitempty"`
 	PodTimeline           []PodEvent         `json:"podTimeline,omitempty"`
-	TimeToFirstReady      string             `json:"timeToFirstReady,omitempty"`
-	TimeToAllReady        string             `json:"timeToAllReady,omitempty"`
-	StrimziRecoveryTime   string             `json:"strimziRecoveryTime,omitempty"`
+	TimeToFirstReady      interface{}        `json:"timeToFirstReady,omitempty"`
+	TimeToAllReady        interface{}        `json:"timeToAllReady,omitempty"`
+	StrimziRecoveryTime   interface{}        `json:"strimziRecoveryTime,omitempty"`
 	PreDisruptionMetrics  *ReportSummary     `json:"preDisruptionMetrics,omitempty"`
 	PostDisruptionMetrics *ReportSummary     `json:"postDisruptionMetrics,omitempty"`
 	ImpactDeltas          map[string]float64 `json:"impactDeltas,omitempty"`
@@ -552,14 +553,14 @@ type PodEvent struct {
 }
 
 type DisruptionSummary struct {
-	TotalSteps               int     `json:"totalSteps"`
-	PassedSteps              int     `json:"passedSteps"`
-	WorstRecovery            string  `json:"worstRecovery,omitempty"`
-	AvgThroughputDegradation float64 `json:"avgThroughputDegradation"`
-	MaxP99LatencySpike       float64 `json:"maxP99LatencySpike"`
-	SlaViolated              bool    `json:"slaViolated"`
-	WorstIsrRecovery         string  `json:"worstIsrRecovery,omitempty"`
-	PeakConsumerLag          int64   `json:"peakConsumerLag,omitempty"`
+	TotalSteps               int         `json:"totalSteps"`
+	PassedSteps              int         `json:"passedSteps"`
+	WorstRecovery            interface{} `json:"worstRecovery,omitempty"`
+	AvgThroughputDegradation float64     `json:"avgThroughputDegradation"`
+	MaxP99LatencySpike       float64     `json:"maxP99LatencySpike"`
+	SlaViolated              bool        `json:"slaViolated"`
+	WorstIsrRecovery         interface{} `json:"worstIsrRecovery,omitempty"`
+	PeakConsumerLag          int64       `json:"peakConsumerLag,omitempty"`
 }
 
 type DisruptionTypeInfo struct {
@@ -571,16 +572,16 @@ type DisruptionTimeline struct {
 	Step             string     `json:"step"`
 	Type             string     `json:"type"`
 	Events           []PodEvent `json:"events"`
-	TimeToFirstReady string     `json:"timeToFirstReady"`
-	TimeToAllReady   string     `json:"timeToAllReady"`
+	TimeToFirstReady interface{}`json:"timeToFirstReady"`
+	TimeToAllReady   interface{}`json:"timeToAllReady"`
 }
 
 type IsrMetrics struct {
-	TimeToFullIsr       string     `json:"timeToFullIsr,omitempty"`
-	MinIsrDepth         int        `json:"minIsrDepth"`
-	UnderReplicatedPeak int        `json:"underReplicatedPeakCount"`
-	TotalPartitions     int        `json:"totalPartitions"`
-	Timeline            []IsrEntry `json:"timeline,omitempty"`
+	TimeToFullIsr       interface{} `json:"timeToFullIsr,omitempty"`
+	MinIsrDepth         int         `json:"minIsrDepth"`
+	UnderReplicatedPeak int         `json:"underReplicatedPeakCount"`
+	TotalPartitions     int         `json:"totalPartitions"`
+	Timeline            []IsrEntry  `json:"timeline,omitempty"`
 }
 
 type IsrEntry struct {
@@ -593,10 +594,10 @@ type IsrEntry struct {
 }
 
 type LagMetrics struct {
-	BaselineLag       int64      `json:"baselineLag"`
-	PeakLag           int64      `json:"peakLag"`
-	TimeToLagRecovery string     `json:"timeToLagRecovery,omitempty"`
-	Timeline          []LagEntry `json:"timeline,omitempty"`
+	BaselineLag       int64       `json:"baselineLag"`
+	PeakLag           int64       `json:"peakLag"`
+	TimeToLagRecovery interface{} `json:"timeToLagRecovery,omitempty"`
+	Timeline          []LagEntry  `json:"timeline,omitempty"`
 }
 
 type LagEntry struct {

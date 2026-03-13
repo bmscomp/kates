@@ -352,8 +352,44 @@ func (c *Client) Resilience(ctx context.Context, request interface{}) (*Resilien
 	return postJSON[*ResilienceResult](c, ctx, "/api/resilience", request)
 }
 
+func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, payload interface{}, timeout time.Duration) (T, error) {
+	var result T
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return result, fmt.Errorf("marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return result, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Create a custom client with the extended timeout
+	customClient := &http.Client{Timeout: timeout}
+	resp, err := customClient.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("connection failed: %w", err)
+	}
+	
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return result, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	if len(body) == 0 {
+		return result, nil
+	}
+	return result, json.Unmarshal(body, &result)
+}
+
 func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*DisruptionRunResponse, error) {
-	return postJSON[*DisruptionRunResponse](c, ctx, "/api/disruptions", plan)
+	// Chaos tests are synchronous on the backend and wait for steady state + recovery. Give it 20 mins.
+	return postJSONWithTimeout[*DisruptionRunResponse](c, ctx, "/api/disruptions", plan, 20*time.Minute)
 }
 
 func (c *Client) RunDryRun(ctx context.Context, plan interface{}) (*DryRunResult, error) {
@@ -376,7 +412,17 @@ func (c *Client) DisruptionTypes(ctx context.Context) ([]DisruptionTypeInfo, err
 
 func (c *Client) DisruptionList(ctx context.Context, limit int) ([]DisruptionListEntry, error) {
 	path := fmt.Sprintf("/api/disruptions?limit=%d", limit)
-	return get[[]DisruptionListEntry](c, ctx, path)
+	var paged struct {
+		Items []DisruptionListEntry `json:"items"`
+	}
+	data, err := c.getBytes(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &paged); err != nil {
+		return nil, err
+	}
+	return paged.Items, nil
 }
 
 func (c *Client) DisruptionKafkaMetrics(ctx context.Context, id string) ([]KafkaMetricsEntry, error) {
@@ -390,7 +436,8 @@ func (c *Client) PlaybookList(ctx context.Context) ([]PlaybookEntry, error) {
 
 func (c *Client) PlaybookRun(ctx context.Context, name string) (*DisruptionRunResponse, error) {
 	path := fmt.Sprintf("/api/disruptions/playbooks/%s", name)
-	return postJSON[*DisruptionRunResponse](c, ctx, path, nil)
+	// Chaos tests are synchronous on the backend and wait for steady state + recovery. Give it 20 mins.
+	return postJSONWithTimeout[*DisruptionRunResponse](c, ctx, path, nil, 20*time.Minute)
 }
 
 func (c *Client) DisruptionScheduleList(ctx context.Context) ([]DisruptionScheduleEntry, error) {

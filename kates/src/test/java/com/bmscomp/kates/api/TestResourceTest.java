@@ -34,10 +34,10 @@ class TestResourceTest {
                 .get("/api/tests")
                 .then()
                 .statusCode(200)
-                .body("content", notNullValue())
+                .body("items", notNullValue())
                 .body("page", is(0))
                 .body("size", is(50))
-                .body("totalElements", greaterThanOrEqualTo(0));
+                .body("total", greaterThanOrEqualTo(0));
     }
 
     @Test

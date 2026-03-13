@@ -51,8 +51,8 @@ func writeJUnitXML(report *client.DisruptionReport, outputPath string) error {
 			Time:      "0",
 		}
 
-		if step.TimeToAllReady != "" {
-			tc.Time = step.TimeToAllReady
+		if step.TimeToAllReady != nil {
+			tc.Time = fmt.Sprintf("%v", step.TimeToAllReady)
 		}
 
 		passed := step.ChaosOutcome != nil && step.ChaosOutcome.Verdict == "PASS"

@@ -265,8 +265,13 @@ var testCreateCmd = &cobra.Command{
   kates test create --type LOAD --records 100000 --consumers 4 --consumer-group perf-cg
   kates test create --type LOAD --records 100000 --throughput 10000 --fetch-min-bytes 1048576`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		upperType := strings.ToUpper(createType)
+		if !isValidTestType(upperType) {
+			return cmdErr(fmt.Sprintf("Unknown test type %q. Valid types: %s",
+				createType, strings.Join(validTestTypes, ", ")))
+		}
 		req := &client.CreateTestRequest{
-			TestType: strings.ToUpper(createType),
+			TestType: upperType,
 		}
 		if createBackend != "" {
 			req.Backend = createBackend
@@ -345,6 +350,21 @@ func hasSpecOverrides() bool {
 		createConsumers > 0 || createReplicationFactor > 0 || createPartitions > 0 ||
 		createMinISR > 0 || createConsumerGroup != "" || createThroughput > 0 ||
 		createFetchMinBytes > 0 || createFetchMaxWaitMs > 0
+}
+
+var validTestTypes = []string{
+	"LOAD", "STRESS", "SPIKE", "ENDURANCE", "VOLUME", "CAPACITY",
+	"ROUND_TRIP", "INTEGRITY",
+	"TUNE_REPLICATION", "TUNE_ACKS", "TUNE_BATCHING", "TUNE_COMPRESSION", "TUNE_PARTITIONS",
+}
+
+func isValidTestType(t string) bool {
+	for _, v := range validTestTypes {
+		if v == t {
+			return true
+		}
+	}
+	return false
 }
 
 var testTypesCmd = &cobra.Command{

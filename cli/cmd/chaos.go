@@ -80,8 +80,8 @@ var chaosShowCmd = &cobra.Command{
 			s := report.Summary
 			output.SubHeader("Summary")
 			output.KeyValue("Steps", fmt.Sprintf("%d/%d passed", s.PassedSteps, s.TotalSteps))
-			if s.WorstRecovery != "" {
-				output.KeyValue("Worst Recovery", s.WorstRecovery)
+			if s.WorstRecovery != nil {
+				output.KeyValue("Worst Recovery", fmt.Sprintf("%v", s.WorstRecovery))
 			}
 			output.KeyValue("Throughput Impact", fmt.Sprintf("%+.1f%%", s.AvgThroughputDegradation))
 			output.KeyValue("Max P99 Spike", fmt.Sprintf("%+.1f%%", s.MaxP99LatencySpike))

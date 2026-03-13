@@ -1,36 +1,39 @@
 package com.bmscomp.kates.api;
 
 import java.util.List;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
  * Standard paginated response wrapper for list endpoints.
  *
  * @param <T> the type of items in the page
  */
+@RegisterForReflection
 public class PagedResponse<T> {
 
-    private List<T> content;
+    private List<T> items;
     private int page;
     private int size;
-    private long totalElements;
-    private int totalPages;
+    private long total;
+    private int count;
 
     public PagedResponse() {}
 
-    public PagedResponse(List<T> content, int page, int size, long totalElements) {
-        this.content = content;
+    public PagedResponse(List<T> items, int page, int size, long total) {
+        this.items = items;
         this.page = page;
         this.size = size;
-        this.totalElements = totalElements;
-        this.totalPages = size > 0 ? (int) Math.ceil((double) totalElements / size) : 0;
+        this.total = total;
+        this.count = items != null ? items.size() : 0;
     }
 
-    public List<T> getContent() {
-        return content;
+    public List<T> getItems() {
+        return items;
     }
 
-    public void setContent(List<T> content) {
-        this.content = content;
+    public void setItems(List<T> items) {
+        this.items = items;
+        this.count = items != null ? items.size() : 0;
     }
 
     public int getPage() {
@@ -49,19 +52,19 @@ public class PagedResponse<T> {
         this.size = size;
     }
 
-    public long getTotalElements() {
-        return totalElements;
+    public long getTotal() {
+        return total;
     }
 
-    public void setTotalElements(long totalElements) {
-        this.totalElements = totalElements;
+    public void setTotal(long total) {
+        this.total = total;
     }
 
-    public int getTotalPages() {
-        return totalPages;
+    public int getCount() {
+        return count;
     }
 
-    public void setTotalPages(int totalPages) {
-        this.totalPages = totalPages;
+    public void setCount(int count) {
+        this.count = count;
     }
 }

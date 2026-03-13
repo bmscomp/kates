@@ -20,7 +20,7 @@ spec:
       serviceAccountName: kates
       containers:
       - name: kates
-        image: kates:native-v1
+        image: kates:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -33,7 +33,7 @@ spec:
         - name: KATES_KAFKA_SASL_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: kates-kafka-credentials
+              name: kates-backend
               key: password
         resources:
           requests:

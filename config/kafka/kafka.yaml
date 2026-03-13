@@ -249,7 +249,7 @@ spec:
     authorization:
       type: simple
       superUsers:
-        - CN=kates-backend
+        - kates-backend
     config:
       offsets.topic.replication.factor: 3
       transaction.state.log.replication.factor: 3
