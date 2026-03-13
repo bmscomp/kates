@@ -57,9 +57,12 @@ all: check-prerequisites
 		./scripts/deploy-litmuschaos.sh; \
 	fi
 	@echo ""
-	@echo "Step 9: Enabling chaos environment..."
-	kubectl apply -f config/litmus/kates-chaos-rbac.yaml
-	kubectl apply -f config/litmus/kafka-rbac.yaml
+	@echo "Step 9: Verifying chaos infrastructure..."
+	@if kubectl get crd chaosengines.litmuschaos.io &>/dev/null; then \
+		echo "✅ Litmus CRDs installed"; \
+	else \
+		echo "⚠️  Litmus CRDs not found — chaos provider will fall back to noop"; \
+	fi
 	@echo ""
 	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping build"; \

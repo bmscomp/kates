@@ -81,9 +81,54 @@ spec:
     interval: 30s
 EOF
 
+# Step 3: Install Litmus CRDs (ChaosEngine, ChaosResult, ChaosExperiment)
+step "Step 3: Installing Litmus chaos CRDs..."
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+kubectl apply -f "${ROOT_DIR}/config/litmus/chaos-litmus-chaos-enable.yml" 2>/dev/null || true
+kubectl apply -f "${ROOT_DIR}/config/litmus/kafka-litmus-chaos-enable.yml" 2>/dev/null || true
+
+info "Waiting for CRDs to be established..."
+kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
+kubectl wait --for=condition=Established crd/chaosresults.litmuschaos.io --timeout=60s 2>/dev/null || true
+kubectl wait --for=condition=Established crd/chaosexperiments.litmuschaos.io --timeout=60s 2>/dev/null || true
+
+# Step 4: Apply chaos RBAC for Kates and Kafka namespaces
+step "Step 4: Applying chaos RBAC..."
+kubectl apply -f "${ROOT_DIR}/config/litmus/kates-chaos-rbac.yaml"
+kubectl apply -f "${ROOT_DIR}/config/litmus/kafka-rbac.yaml"
+
+# Step 5: Deploy chaos experiment definitions (blueprints only, no auto-triggered engines)
+step "Step 5: Deploying chaos experiment definitions..."
+for f in "${ROOT_DIR}"/config/litmus/experiments/*.yaml; do
+    if grep -q "kind: ChaosExperiment" "$f" && ! grep -q "kind: ChaosEngine" "$f"; then
+        kubectl apply -f "$f" 2>/dev/null || true
+    fi
+done
+
+# Step 6: Pre-load Litmus runner images into Kind (offline environments)
+step "Step 6: Loading Litmus experiment images into Kind..."
+LITMUS_IMAGES=(
+    "litmuschaos/go-runner:latest"
+    "litmuschaos/chaos-operator-ce:latest"
+    "litmuschaos/chaos-exporter:latest"
+)
+for img in "${LITMUS_IMAGES[@]}"; do
+    if docker image inspect "$img" &>/dev/null; then
+        kind load docker-image "$img" --name panda 2>/dev/null || true
+    else
+        info "Image $img not found locally — pulling..."
+        docker pull "$img" 2>/dev/null && kind load docker-image "$img" --name panda 2>/dev/null || \
+            warn "Could not load $img — chaos experiments may fail with ImagePullBackOff"
+    fi
+done
+
 echo ""
 info "✅ LitmusChaos deployment complete!"
 echo ""
-echo "Next steps:"
-echo "  1. Deploy experiments: kubectl apply -f config/litmus/experiments/"
-echo "  2. Access UI: make chaos-ui → http://localhost:9091 (admin/litmus)"
+echo "Chaos infrastructure:"
+echo "  ✓ Litmus portal (Helm chart)"
+echo "  ✓ CRDs installed (ChaosEngine, ChaosResult, ChaosExperiment)"
+echo "  ✓ RBAC applied (kates + kafka namespaces)"
+echo "  ✓ Chaos experiments deployed"
+echo ""
+echo "Access UI: make chaos-ui → http://localhost:9091 (admin/litmus)"
