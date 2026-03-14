@@ -303,6 +303,7 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 
 func waitForTest(id, name string) (*client.TestRun, error) {
 	tick := 0
+	staleRetries := 0
 	for {
 		result, err := apiClient.GetTest(context.Background(), id)
 		if err != nil {
@@ -311,11 +312,25 @@ func waitForTest(id, name string) (*client.TestRun, error) {
 		status := strings.ToUpper(result.Status)
 		switch status {
 		case "DONE", "COMPLETED":
-			fmt.Printf("\r  %s %s → %s\n",
-				output.SuccessStyle.Render("✓"),
-				output.LightStyle.Render(name),
-				output.StatusBadge(status),
-			)
+			if isStaleResult(result.Results) && staleRetries < maxStaleRetries {
+				staleRetries++
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			if isStaleResult(result.Results) {
+				fmt.Printf("\r  %s %s → %s %s\n",
+					output.WarningStyle.Render("⚠"),
+					output.LightStyle.Render(name),
+					output.StatusBadge(status),
+					output.DimStyle.Render("(no data)"),
+				)
+			} else {
+				fmt.Printf("\r  %s %s → %s\n",
+					output.SuccessStyle.Render("✓"),
+					output.LightStyle.Render(name),
+					output.StatusBadge(status),
+				)
+			}
 			return result, nil
 		case "FAILED", "ERROR":
 			fmt.Printf("\r  %s %s → %s\n",

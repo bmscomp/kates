@@ -160,6 +160,9 @@ type pollDoneMsg struct {
 	summary *client.ReportSummary
 }
 
+const maxStaleRetries = 5
+const maxConnRetries = 10
+
 type pollModel struct {
 	id             string
 	progress       progress.Model
@@ -172,6 +175,10 @@ type pollModel struct {
 	phases         []client.PhaseResult
 	done           bool
 	failed         bool
+	noData         bool
+	staleRetries   int
+	connRetries    int
+	lastErr        error
 	summary        *client.ReportSummary
 	err            error
 }
@@ -232,9 +239,16 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pollResultMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.connRetries++
+			m.lastErr = msg.err
+			if m.connRetries > maxConnRetries {
+				m.err = fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, msg.err)
+				return m, tea.Quit
+			}
 			return m, nil
 		}
+		m.connRetries = 0
+		m.lastErr = nil
 		test := msg.test
 		m.lastStatus = strings.ToUpper(test.Status)
 		m.phases = test.Results
@@ -256,7 +270,12 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.lastStatus {
 		case "DONE", "COMPLETED":
+			if isStaleResult(test.Results) && m.staleRetries < maxStaleRetries {
+				m.staleRetries++
+				return m, nil
+			}
 			m.done = true
+			m.noData = isStaleResult(test.Results)
 			return m, m.fetchSummary()
 		case "FAILED", "ERROR":
 			m.failed = true
@@ -349,13 +368,35 @@ func (m pollModel) View() string {
 		}
 	}
 
-	if m.done && m.summary != nil {
-		s := m.summary
+	if m.done && m.noData {
+		b.WriteString(fmt.Sprintf("\n  %s\n", output.WarningStyle.Render("⚠ Test completed but produced no data (0 records sent)")))
+		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("Possible causes:")))
+		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("  • Backend pod restarted (in-memory state lost)")))
+		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("  • Kafka producer/consumer failed to connect")))
+		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("  • Check logs: kubectl logs -n kates -l app=kates --tail=50")))
+	} else if m.done {
+		throughput := 0.0
+		p99 := 0.0
+		errorRate := 0.0
+		if m.summary != nil && m.summary.AvgThroughputRecPerSec > 0 {
+			throughput = m.summary.AvgThroughputRecPerSec
+			p99 = m.summary.P99LatencyMs
+			errorRate = m.summary.ErrorRate * 100
+		} else {
+			for _, r := range m.phases {
+				if r.ThroughputRecordsPerSec > throughput {
+					throughput = r.ThroughputRecordsPerSec
+				}
+				if r.P99LatencyMs > p99 {
+					p99 = r.P99LatencyMs
+				}
+			}
+		}
 		b.WriteString(fmt.Sprintf("\n  %s\n", output.SuccessStyle.Render("Test completed successfully")))
 		b.WriteString(fmt.Sprintf("  Throughput: %s rec/s  │  P99: %s ms  │  Errors: %.4f%%\n",
-			fmtNum(s.AvgThroughputRecPerSec),
-			fmtFloat(s.P99LatencyMs, 2),
-			s.ErrorRate*100,
+			fmtNum(throughput),
+			fmtFloat(p99, 2),
+			errorRate,
 		))
 		b.WriteString(fmt.Sprintf("  %s\n",
 			output.DimStyle.Render(fmt.Sprintf("Full report: kates report show %s", m.id)),
@@ -367,9 +408,15 @@ func (m pollModel) View() string {
 	}
 
 	if !m.done && !m.failed {
-		b.WriteString(fmt.Sprintf("\n  %s\n",
-			output.DimStyle.Render("Polling every 2s · q to detach"),
-		))
+		if m.connRetries > 0 {
+			b.WriteString(fmt.Sprintf("\n  %s\n",
+				output.WarningStyle.Render(fmt.Sprintf("⚠ Connection error (retry %d/%d)...", m.connRetries, maxConnRetries)),
+			))
+		} else {
+			b.WriteString(fmt.Sprintf("\n  %s\n",
+				output.DimStyle.Render("Polling every 2s · q to detach"),
+			))
+		}
 	}
 
 	return b.String()
@@ -398,6 +445,18 @@ func (m pollModel) progressPercent() float64 {
 		pct = 0.95
 	}
 	return pct
+}
+
+func isStaleResult(results []client.PhaseResult) bool {
+	if len(results) == 0 {
+		return true
+	}
+	for _, r := range results {
+		if r.RecordsSent > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func pollUntilDone(id string) {

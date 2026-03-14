@@ -240,6 +240,20 @@ var testGetCmd = &cobra.Command{
 					break
 				}
 			}
+		} else if isStaleResult(result.Results) {
+			output.SubHeader("Diagnosis")
+			output.Warn(fmt.Sprintf("Test finished with status %s but recorded 0 data", strings.ToUpper(result.Status)))
+			fmt.Println()
+			output.Warn("Possible reasons:")
+			output.Hint("  • Backend pod restarted while the test was running (in-memory state lost)")
+			output.Hint("  • Kafka producer/consumer failed to connect (check broker connectivity)")
+			output.Hint("  • Topic creation failed (partition count or replication factor too high)")
+			output.Hint("  • SASL authentication error (credentials expired or misconfigured)")
+			output.Hint("  • Test duration too short for record count (increase --duration)")
+			fmt.Println()
+			output.Hint("Next steps:")
+			output.Hint("  kubectl logs -n kates -l app=kates --tail=50")
+			output.Hint("  kates doctor")
 		} else {
 			effectiveStatus := strings.ToUpper(result.Status)
 			if effectiveStatus == "DONE" || effectiveStatus == "COMPLETED" {
@@ -346,7 +360,9 @@ var testCreateCmd = &cobra.Command{
 		output.Success("Test created successfully")
 		output.KeyValue("ID", result.ID)
 		output.KeyValue("Type", result.TestType)
-		output.KeyValue("Status", output.StatusBadge(result.Status))
+		if !createWait {
+			output.KeyValue("Status", output.StatusBadge(result.Status))
+		}
 
 		if createWait {
 			fmt.Println()

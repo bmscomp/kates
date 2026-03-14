@@ -248,7 +248,10 @@ var kafkaGroupsCmd = &cobra.Command{
 				stateLabel = errorBadge("✖ DEAD")
 			}
 
-			members := fmt.Sprintf("%v", g["members"])
+			members := "0"
+			if g["members"] != nil {
+				members = fmt.Sprintf("%v", g["members"])
+			}
 			rows = append(rows, []string{fmt.Sprintf("%v", g["groupId"]), stateLabel, members})
 		}
 		output.Table([]string{"Group ID", "State", "Members"}, rows)
@@ -273,7 +276,10 @@ var kafkaGroupCmd = &cobra.Command{
 
 		groupID := fmt.Sprintf("%v", detail["groupId"])
 		state := strings.ToUpper(fmt.Sprintf("%v", detail["state"]))
-		members := fmt.Sprintf("%v", detail["members"])
+		members := "0"
+		if detail["members"] != nil {
+			members = fmt.Sprintf("%v", detail["members"])
+		}
 		totalLag := fmt.Sprintf("%v", detail["totalLag"])
 
 		stateLabel := state

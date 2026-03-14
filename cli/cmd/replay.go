@@ -38,7 +38,9 @@ var replayCmd = &cobra.Command{
 		output.Success(fmt.Sprintf("Created %s → %s", truncID(original.ID), truncID(result.ID)))
 		output.KeyValue("ID", result.ID)
 		output.KeyValue("Type", result.TestType)
-		output.KeyValue("Status", output.StatusBadge(result.Status))
+		if !replayWait {
+			output.KeyValue("Status", output.StatusBadge(result.Status))
+		}
 
 		if replayWait {
 			fmt.Println()
