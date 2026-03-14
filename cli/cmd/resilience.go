@@ -5,11 +5,51 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
+
+type ResilienceConfig struct {
+	TestRequest struct {
+		Type    string                 `yaml:"type" json:"type"`
+		Backend string                 `yaml:"backend,omitempty" json:"backend,omitempty"`
+		Spec    map[string]interface{} `yaml:"spec,omitempty" json:"spec,omitempty"`
+	} `yaml:"testRequest" json:"testRequest"`
+
+	ChaosSpec struct {
+		ExperimentName   string            `yaml:"experimentName" json:"experimentName"`
+		TargetNamespace  string            `yaml:"targetNamespace,omitempty" json:"targetNamespace,omitempty"`
+		TargetLabel      string            `yaml:"targetLabel,omitempty" json:"targetLabel,omitempty"`
+		TargetPod        string            `yaml:"targetPod,omitempty" json:"targetPod,omitempty"`
+		ChaosDurationSec int               `yaml:"chaosDurationSec,omitempty" json:"chaosDurationSec,omitempty"`
+		DelayBeforeSec   int               `yaml:"delayBeforeSec,omitempty" json:"delayBeforeSec,omitempty"`
+		DisruptionType   string            `yaml:"disruptionType,omitempty" json:"disruptionType,omitempty"`
+		TargetBrokerId   int               `yaml:"targetBrokerId,omitempty" json:"targetBrokerId,omitempty"`
+		NetworkLatencyMs int               `yaml:"networkLatencyMs,omitempty" json:"networkLatencyMs,omitempty"`
+		FillPercentage   int               `yaml:"fillPercentage,omitempty" json:"fillPercentage,omitempty"`
+		CpuCores         int               `yaml:"cpuCores,omitempty" json:"cpuCores,omitempty"`
+		MemoryMb         int               `yaml:"memoryMb,omitempty" json:"memoryMb,omitempty"`
+		IoWorkers        int               `yaml:"ioWorkers,omitempty" json:"ioWorkers,omitempty"`
+		GracePeriodSec   int               `yaml:"gracePeriodSec,omitempty" json:"gracePeriodSec,omitempty"`
+		TargetTopic      string            `yaml:"targetTopic,omitempty" json:"targetTopic,omitempty"`
+		TargetPartition  int               `yaml:"targetPartition,omitempty" json:"targetPartition,omitempty"`
+		EnvOverrides     map[string]string `yaml:"envOverrides,omitempty" json:"envOverrides,omitempty"`
+	} `yaml:"chaosSpec" json:"chaosSpec"`
+
+	SteadyStateSec     int `yaml:"steadyStateSec" json:"steadyStateSec"`
+	MaxRecoveryWaitSec int `yaml:"maxRecoveryWaitSec,omitempty" json:"maxRecoveryWaitSec,omitempty"`
+
+	Probes []struct {
+		Name     string `yaml:"name" json:"name"`
+		Type     string `yaml:"type" json:"type"`
+		Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+		Command  string `yaml:"command,omitempty" json:"command,omitempty"`
+	} `yaml:"probes,omitempty" json:"probes,omitempty"`
+}
 
 var resilienceFile string
 var resilienceDryRun bool
@@ -21,18 +61,30 @@ var resilienceCmd = &cobra.Command{
 
 var resilienceRunCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Execute a resilience test from a JSON config file",
-	Example: `  kates resilience run --config resilience-test.json
+	Short: "Execute a resilience test from a YAML or JSON config file",
+	Example: `  kates resilience run -f resilience-test.yaml
+  kates resilience run -f resilience-test.json    # JSON still supported
+  kates resilience run -f config.yaml --dry-run
 
-  # Example resilience-test.json:
-  {
-    "testRequest": { "testType": "LOAD", "spec": { "records": 100000 } },
-    "chaosSpec": { "experimentName": "kafka-pod-kill", "targetNamespace": "kafka" },
-    "steadyStateSec": 30
-  }`,
+  # Example resilience-test.yaml:
+  testRequest:
+    type: LOAD
+    spec:
+      numRecords: 100000
+      numProducers: 2
+      recordSize: 512
+
+  chaosSpec:
+    experimentName: kafka-broker-pod-kill
+    targetNamespace: kafka
+    targetLabel: "strimzi.io/component-type=kafka"
+    chaosDurationSec: 30
+    disruptionType: POD_KILL
+
+  steadyStateSec: 30`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if resilienceFile == "" {
-			return cmdErr("--config is required (path to JSON file)")
+			return cmdErr("--file / -f is required (path to YAML or JSON file)")
 		}
 
 		data, err := os.ReadFile(resilienceFile)
@@ -40,10 +92,26 @@ var resilienceRunCmd = &cobra.Command{
 			return cmdErr("Failed to read config file: " + err.Error())
 		}
 
-		var req interface{}
-		if err := json.Unmarshal(data, &req); err != nil {
-			return cmdErr("Invalid JSON: " + err.Error())
+		var cfg ResilienceConfig
+		if strings.HasSuffix(resilienceFile, ".json") {
+			err = json.Unmarshal(data, &cfg)
+		} else {
+			err = yaml.Unmarshal(data, &cfg)
 		}
+		if err != nil {
+			return cmdErr("Failed to parse config: " + err.Error())
+		}
+
+		if cfg.TestRequest.Type == "" {
+			return cmdErr("testRequest.type is required")
+		}
+		if cfg.ChaosSpec.ExperimentName == "" {
+			return cmdErr("chaosSpec.experimentName is required")
+		}
+
+		payload, _ := json.Marshal(cfg)
+		var req interface{}
+		json.Unmarshal(payload, &req)
 
 		if resilienceDryRun {
 			printDryRun("Would run resilience test", req)
@@ -115,7 +183,7 @@ var resilienceRunCmd = &cobra.Command{
 }
 
 func init() {
-	resilienceRunCmd.Flags().StringVar(&resilienceFile, "config", "", "Path to resilience test JSON config (required)")
+	resilienceRunCmd.Flags().StringVarP(&resilienceFile, "file", "f", "", "Path to resilience test config (YAML or JSON)")
 	resilienceRunCmd.Flags().BoolVar(&resilienceDryRun, "dry-run", false, "Print parsed config without executing")
 
 	resilienceCmd.AddCommand(resilienceRunCmd)

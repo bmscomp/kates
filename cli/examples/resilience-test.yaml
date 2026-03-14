@@ -1,0 +1,15 @@
+testRequest:
+  type: LOAD
+  spec:
+    numRecords: 100000
+    numProducers: 2
+    recordSize: 512
+
+chaosSpec:
+  experimentName: kafka-broker-pod-kill
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka"
+  chaosDurationSec: 30
+  disruptionType: POD_KILL
+
+steadyStateSec: 30
