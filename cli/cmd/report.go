@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -31,26 +32,92 @@ var reportShowCmd = &cobra.Command{
 
 		output.Banner("Performance Report", "Test: "+truncID(args[0]))
 
-		if s := result.Summary; s != nil {
+		summary := result.Summary
+
+		if summary == nil || summary.AvgThroughputRecPerSec == 0 {
+			if len(result.Phases) > 0 {
+				s := &client.ReportSummary{}
+				count := 0
+				for _, p := range result.Phases {
+					s.TotalRecords += p.RecordsSent
+					if p.ThroughputRecPerSec > s.PeakThroughputRecPerSec {
+						s.PeakThroughputRecPerSec = p.ThroughputRecPerSec
+					}
+					if p.ThroughputRecPerSec > 0 {
+						s.AvgThroughputRecPerSec += p.ThroughputRecPerSec
+						count++
+					}
+					if p.P99LatencyMs > s.P99LatencyMs {
+						s.P99LatencyMs = p.P99LatencyMs
+					}
+				}
+				if count > 0 {
+					s.AvgThroughputRecPerSec /= float64(count)
+				}
+				summary = s
+			} else {
+				run, fetchErr := apiClient.GetTest(context.Background(), args[0])
+				if fetchErr == nil && len(run.Results) > 0 && !isStaleResult(run.Results) {
+					s := &client.ReportSummary{}
+					count := 0
+					for _, r := range run.Results {
+						s.TotalRecords += r.RecordsSent
+						if r.ThroughputRecordsPerSec > s.PeakThroughputRecPerSec {
+							s.PeakThroughputRecPerSec = r.ThroughputRecordsPerSec
+						}
+						if r.ThroughputRecordsPerSec > 0 {
+							s.AvgThroughputRecPerSec += r.ThroughputRecordsPerSec
+							count++
+						}
+						if r.P99LatencyMs > s.P99LatencyMs {
+							s.P99LatencyMs = r.P99LatencyMs
+						}
+						if r.AvgLatencyMs > s.AvgLatencyMs {
+							s.AvgLatencyMs = r.AvgLatencyMs
+						}
+						if r.P50LatencyMs > s.P50LatencyMs {
+							s.P50LatencyMs = r.P50LatencyMs
+						}
+						if r.P95LatencyMs > s.P95LatencyMs {
+							s.P95LatencyMs = r.P95LatencyMs
+						}
+						if r.MaxLatencyMs > s.MaxLatencyMs {
+							s.MaxLatencyMs = r.MaxLatencyMs
+						}
+					}
+					if count > 0 {
+						s.AvgThroughputRecPerSec /= float64(count)
+					}
+					summary = s
+				}
+			}
+		}
+
+		if summary != nil && summary.AvgThroughputRecPerSec > 0 {
 			output.SubHeader("Throughput")
-			output.KeyValue("Total Records", fmtNum(s.TotalRecords))
-			output.KeyValue("Avg Throughput", fmt.Sprintf("%s rec/s", fmtNum(s.AvgThroughputRecPerSec)))
-			output.KeyValue("Peak Throughput", fmt.Sprintf("%s rec/s", fmtNum(s.PeakThroughputRecPerSec)))
-			output.KeyValue("Avg MB/s", fmtFloat(s.AvgThroughputMBPerSec, 2))
+			output.KeyValue("Total Records", fmtNum(summary.TotalRecords))
+			output.KeyValue("Avg Throughput", fmt.Sprintf("%s rec/s", fmtNum(summary.AvgThroughputRecPerSec)))
+			output.KeyValue("Peak Throughput", fmt.Sprintf("%s rec/s", fmtNum(summary.PeakThroughputRecPerSec)))
+			output.KeyValue("Avg MB/s", fmtFloat(summary.AvgThroughputMBPerSec, 2))
 
 			output.SubHeader("Latency Distribution")
-			maxLat := s.MaxLatencyMs
+			maxLat := summary.MaxLatencyMs
 			if maxLat == 0 {
 				maxLat = 1
 			}
-			output.MetricBar("Average", s.AvgLatencyMs, maxLat)
-			output.MetricBar("P50", s.P50LatencyMs, maxLat)
-			output.MetricBar("P95", s.P95LatencyMs, maxLat)
-			output.MetricBar("P99", s.P99LatencyMs, maxLat)
-			output.MetricBar("Max", s.MaxLatencyMs, maxLat)
+			output.MetricBar("Average", summary.AvgLatencyMs, maxLat)
+			output.MetricBar("P50", summary.P50LatencyMs, maxLat)
+			output.MetricBar("P95", summary.P95LatencyMs, maxLat)
+			output.MetricBar("P99", summary.P99LatencyMs, maxLat)
+			output.MetricBar("Max", summary.MaxLatencyMs, maxLat)
 
 			output.SubHeader("Reliability")
-			output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", s.ErrorRate*100))
+			output.KeyValue("Error Rate", fmt.Sprintf("%.4f%%", summary.ErrorRate*100))
+		} else {
+			output.SubHeader("Diagnosis")
+			output.Warn("Report has no performance data")
+			output.Hint("  The backend may not have collected metrics for this test.")
+			output.Hint("  Check logs: kubectl logs -n kates -l app=kates --tail=50")
 		}
 
 		if v := result.OverallSlaVerdict; v != nil {
