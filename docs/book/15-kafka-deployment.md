@@ -360,6 +360,9 @@ graph LR
 | `cruise-control` | Operator + Prometheus access |
 | `strimzi-drain-cleaner` | Webhook port + K8s API |
 
+> [!CAUTION]
+> **Do not set `generateNetworkPolicy: true` in the Strimzi Helm values** unless you also provide explicit egress rules in `operatorNetworkPolicy.egress`. When enabled with no egress rules, Strimzi creates an operator NetworkPolicy with empty egress — Kubernetes interprets this as "deny all outgoing traffic." The operator cannot reach the Kafka controllers' admin API (port 9090), causing the Kafka CR to remain `NotReady` indefinitely. Set `generateNetworkPolicy: false` and manage operator network policies manually.
+
 ## Operational Components
 
 ### Cruise Control
@@ -547,9 +550,57 @@ helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
 
 **Symptom:** `secret "kafka-ui" not found`
 
-**Cause:** `KafkaUser` resources haven't been applied yet — the secret is created by the User Operator
+**Cause:** The `kafka-ui` Secret is created by the Strimzi Entity Operator (User Operator sub-component) when it reconciles the `KafkaUser` CR. The dependency chain is:
 
-**Fix:** Ensure `deploy-kafka.sh` applies `kafka-users.yaml` before the UI deployment step
+```
+Kafka CR Ready → Entity Operator deploys → User Operator reconciles KafkaUser → Secret created
+```
+
+If the Kafka CR hasn't reached `Ready` (e.g., due to a NetworkPolicy blocking the operator), the Entity Operator never starts and no user secrets are created.
+
+**Fix:**
+1. Ensure the Kafka CR reaches `Ready` before deploying Kafka UI
+2. The `deploy-kafka-ui.sh` script includes a wait loop for the `kafka-ui` Secret (up to 180s) to handle this race condition
+3. If the secret never appears, check Kafka CR status and operator logs:
+
+```bash
+kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions}'
+kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
+```
+
+### Strimzi Operator Cannot Determine Active Controller
+
+**Symptom:** Kafka CR stuck on `NotReady` with `UnforceableProblem: An error while trying to determine the active controller`
+
+**Cause:** The Strimzi operator's `describeMetadataQuorum` admin API call to port 9090 times out. Most commonly caused by:
+- `generateNetworkPolicy: true` in Helm values creating an empty-egress NetworkPolicy that blocks all operator outgoing traffic
+- Resource pressure on the active controller pod causing admin API timeouts
+
+**Diagnosis:**
+
+```bash
+# Check for blocking NetworkPolicy
+kubectl describe networkpolicy strimzi-cluster-operator-network-policy -n kafka
+# Look for: "Allowing egress traffic: <none>"
+
+# Check operator logs
+kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
+# Look for: "Error getting controller config: TimeoutException"
+```
+
+**Fix:**
+
+```bash
+# Set generateNetworkPolicy to false in Helm chart values
+helm upgrade strimzi-kafka-operator <chart-path> -n kafka \
+  --reuse-values --set generateNetworkPolicy=false
+
+# Delete the blocking NetworkPolicy
+kubectl delete networkpolicy strimzi-cluster-operator-network-policy -n kafka
+
+# Restart the operator to clear stale backoff state
+kubectl rollout restart deployment/strimzi-cluster-operator -n kafka
+```
 
 ### Cruise Control Goal Mismatch
 

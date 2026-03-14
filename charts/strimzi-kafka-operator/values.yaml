@@ -205,7 +205,7 @@ createAggregateRoles: false
 # Override the exclude pattern for exclude some labels
 labelsExclusionPattern: ""
 # Controls whether Strimzi generates network policy resources (By default true)
-generateNetworkPolicy: true
+generateNetworkPolicy: false
 # Override the value for Connect build timeout
 connectBuildTimeoutMs: 300000
 # Controls whether Strimzi generates pod disruption budget resources (By default true)

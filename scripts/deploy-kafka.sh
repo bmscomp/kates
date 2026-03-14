@@ -34,7 +34,7 @@ helm upgrade --install strimzi-drain-cleaner strimzi/strimzi-drain-cleaner \
   --create-namespace \
   --set certManager.create=true \
   --set image.imagePullPolicy=IfNotPresent \
-  --wait || warn "Drain Cleaner install skipped (cert-manager may not be installed)"
+  --wait
 
 info "Applying Metrics Configuration..."
 kubectl apply -f config/kafka/kafka-metrics.yaml

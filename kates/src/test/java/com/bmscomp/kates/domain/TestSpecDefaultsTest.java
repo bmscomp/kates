@@ -72,4 +72,43 @@ class TestSpecDefaultsTest {
     void defaultTopicIsNull() {
         assertNull(new TestSpec().getTopic());
     }
+
+    @Test
+    void newSpecHasNoUserValues() {
+        TestSpec spec = new TestSpec();
+        assertFalse(spec.hasNumRecords());
+        assertFalse(spec.hasRecordSize());
+        assertFalse(spec.hasThroughput());
+        assertFalse(spec.hasAcks());
+        assertFalse(spec.hasBatchSize());
+        assertFalse(spec.hasLingerMs());
+        assertFalse(spec.hasCompressionType());
+        assertFalse(spec.hasNumProducers());
+        assertFalse(spec.hasNumConsumers());
+        assertFalse(spec.hasDurationMs());
+        assertFalse(spec.hasReplicationFactor());
+        assertFalse(spec.hasPartitions());
+        assertFalse(spec.hasMinInsyncReplicas());
+    }
+
+    @Test
+    void setterMarksFieldAsProvided() {
+        TestSpec spec = new TestSpec();
+        spec.setPartitions(3);
+        assertTrue(spec.hasPartitions());
+        assertEquals(3, spec.getPartitions());
+    }
+
+    @Test
+    void setterValueMatchingDefaultIsStillDetected() {
+        TestSpec spec = new TestSpec();
+        spec.setReplicationFactor(3);
+        assertTrue(spec.hasReplicationFactor());
+
+        spec.setAcks("all");
+        assertTrue(spec.hasAcks());
+
+        spec.setCompressionType("lz4");
+        assertTrue(spec.hasCompressionType());
+    }
 }

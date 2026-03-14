@@ -12,6 +12,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Ch 15](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [Ch 3](03-cluster.md#failure-tolerance-matrix) |
 | Cruise Control `unsupported goals` error | Goals list doesn't match Strimzi's default goals | [Ch 15](15-kafka-deployment.md#cruise-control-goal-mismatch) |
+| Kafka CR stuck on `NotReady` with `UnforceableProblem` | Strimzi operator egress blocked by `generateNetworkPolicy` — can't reach controllers | [Ch 15](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 
 ## Kafka Connectivity
 
@@ -39,6 +40,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Images won't load into Kind | Registry unreachable or platform mismatch (arm64/amd64) | [Ch 12](12-deployment.md#images-wont-load) |
 | Kafka pods stuck in `Pending` | StorageClass not created or no available nodes in the zone | [Ch 12](12-deployment.md#kafka-pods-not-starting) |
 | PDB blocks rolling restart | Only 1 pod can be unavailable — intentional safety behavior | [Ch 18](18-upgrade-playbook.md#common-upgrade-issues) |
+| Entity Operator never starts | Kafka CR hasn't reached `Ready` — check operator logs for `UnforceableProblem` | [Ch 15](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 
 ## Chaos Engineering
 

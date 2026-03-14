@@ -20,7 +20,7 @@ spec:
       serviceAccountName: kates
       containers:
       - name: kates
-        image: kates:latest
+        image: kates:native-v1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080

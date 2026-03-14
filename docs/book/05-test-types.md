@@ -100,6 +100,9 @@ scenarios:
 | Error Rate | 0% | Any errors indicate a configuration problem |
 | Throughput variability | \< 10% stddev | High variance suggests GC or I/O pressure |
 
+> [!TIP]
+> For iterative parameter tuning, use `kates lab` instead of individual `test create` commands. Lab lets you tweak parameters, run tests, and compare results in a single session — see [Chapter 10b: Lab](10b-lab.md).
+
 ---
 
 ## STRESS Test

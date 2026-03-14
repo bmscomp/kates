@@ -2,7 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +28,7 @@ type labIteration struct {
 	ErrorRate  float64
 	TestID     string
 	Delta      string
+	Params     map[string]string
 }
 
 type labView int
@@ -33,7 +37,42 @@ const (
 	labConfig labView = iota
 	labRunning
 	labHistory
+	labPinSelect
+	labSweepConfig
 )
+
+type labPreset struct {
+	Name   string
+	Desc   string
+	Values map[string]string
+}
+
+var labPresets = []labPreset{
+	{
+		Name: "Low Latency",
+		Desc: "Minimize p99 — acks=1, no compression, small batch",
+		Values: map[string]string{
+			"type": "SPIKE", "acks": "1", "compression": "none",
+			"batchSize": "16384", "lingerMs": "0", "producers": "1",
+		},
+	},
+	{
+		Name: "Max Throughput",
+		Desc: "Maximize rec/s — large batches, lz4, many producers",
+		Values: map[string]string{
+			"type": "STRESS", "acks": "all", "compression": "lz4",
+			"batchSize": "262144", "lingerMs": "50", "producers": "8",
+		},
+	},
+	{
+		Name: "Durability",
+		Desc: "No data loss — acks=all, RF=3, idempotent",
+		Values: map[string]string{
+			"type": "LOAD", "acks": "all", "replication": "3",
+			"compression": "lz4", "batchSize": "65536", "lingerMs": "5",
+		},
+	},
+}
 
 type LabModel struct {
 	client     *client.Client
@@ -48,6 +87,22 @@ type LabModel struct {
 	running    bool
 	elapsed    int
 	quitting   bool
+
+	liveRecords    int64
+	liveThroughput float64
+	liveLatency    float64
+	runTestID      string
+	cancelCtx      context.Context
+	cancelFn       context.CancelFunc
+
+	pinA int
+	pinB int
+
+	sweepParam  int
+	sweepActive bool
+
+	lastError   error
+	lastTestReq *client.CreateTestRequest
 }
 
 type labTestDoneMsg struct {
@@ -56,6 +111,12 @@ type labTestDoneMsg struct {
 }
 
 type labTickMsg struct{}
+
+type labProgressMsg struct {
+	records    int64
+	throughput float64
+	latency    float64
+}
 
 func NewLab(c *client.Client, url string) LabModel {
 	return LabModel{
@@ -73,7 +134,9 @@ func NewLab(c *client.Client, url string) LabModel {
 			{Label: "Partitions", Key: "partitions", Values: []string{"1", "3", "6", "12", "24", "48"}, Current: 2},
 			{Label: "Replication", Key: "replication", Values: []string{"1", "2", "3"}, Current: 2},
 		},
-		status: dimStyle.Render("Press Enter to run a test iteration"),
+		pinA:   -1,
+		pinB:   -1,
+		status: dimStyle.Render("Press Enter to run  ·  p presets  ·  s sweep"),
 	}
 }
 
@@ -97,9 +160,21 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.running {
-			if msg.String() == "ctrl+c" {
+			switch msg.String() {
+			case "ctrl+c":
 				m.quitting = true
+				if m.cancelFn != nil {
+					m.cancelFn()
+				}
 				return m, tea.Quit
+			case "x":
+				if m.cancelFn != nil && m.runTestID != "" {
+					m.cancelFn()
+					_ = m.client.CancelTest(context.Background(), m.runTestID)
+					m.running = false
+					m.status = warnStyle.Render("⏹ Test cancelled")
+				}
+				return m, nil
 			}
 			return m, nil
 		}
@@ -109,31 +184,107 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "up", "k":
-			if m.cursor > 0 {
+			if m.view == labPinSelect {
+				if m.pinA > 0 {
+					m.pinA--
+				}
+			} else if m.cursor > 0 {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.params)-1 {
+			if m.view == labPinSelect {
+				if m.pinA < len(m.iterations)-1 {
+					m.pinA++
+				}
+			} else if m.cursor < len(m.params)-1 {
 				m.cursor++
 			}
 		case "left", "h":
-			p := &m.params[m.cursor]
-			if p.Current > 0 {
-				p.Current--
+			if m.view == labPinSelect {
+				if m.pinB > 0 {
+					m.pinB--
+				}
+			} else {
+				p := &m.params[m.cursor]
+				if p.Current > 0 {
+					p.Current--
+				}
 			}
 		case "right", "l":
-			p := &m.params[m.cursor]
-			if p.Current < len(p.Values)-1 {
-				p.Current++
+			if m.view == labPinSelect {
+				if m.pinB < len(m.iterations)-1 {
+					m.pinB++
+				}
+			} else {
+				p := &m.params[m.cursor]
+				if p.Current < len(p.Values)-1 {
+					p.Current++
+				}
 			}
 		case "enter":
+			if m.view == labPinSelect {
+				m.view = labHistory
+				return m, nil
+			}
 			m.running = true
 			m.elapsed = 0
+			m.liveRecords = 0
+			m.liveThroughput = 0
+			m.liveLatency = 0
+			m.lastError = nil
+			ctx, cancel := context.WithCancel(context.Background())
+			m.cancelCtx = ctx
+			m.cancelFn = cancel
 			m.status = filterActiveStyle.Render("⏳ Running iteration #" + fmt.Sprintf("%d", len(m.iterations)+1) + "…")
 			return m, tea.Batch(m.runTest(), m.tickElapsed())
 		case "d":
 			if len(m.iterations) >= 2 {
 				m.view = labHistory
+				if m.pinA < 0 || m.pinB < 0 {
+					m.pinA = len(m.iterations) - 2
+					m.pinB = len(m.iterations) - 1
+				}
+			}
+		case "c":
+			if len(m.iterations) >= 2 {
+				m.view = labPinSelect
+				m.pinA = len(m.iterations) - 2
+				m.pinB = len(m.iterations) - 1
+			}
+		case "p":
+			m.applyNextPreset()
+		case "s":
+			if !m.sweepActive {
+				m.startSweep()
+				return m, nil
+			}
+		case "e":
+			if len(m.iterations) > 0 {
+				path := m.exportCSV()
+				m.status = healthyStyle.Render("✓ Exported to " + path)
+			}
+		case "w":
+			path := m.saveSession()
+			m.status = healthyStyle.Render("✓ Session saved to " + path)
+		case "L":
+			if path, ok := m.loadSession(); ok {
+				m.status = healthyStyle.Render("✓ Session loaded from " + path)
+			} else {
+				m.status = warnStyle.Render("No saved session found")
+			}
+		case "r":
+			if m.lastError != nil && m.lastTestReq != nil {
+				m.running = true
+				m.elapsed = 0
+				m.liveRecords = 0
+				m.liveThroughput = 0
+				m.liveLatency = 0
+				m.lastError = nil
+				ctx, cancel := context.WithCancel(context.Background())
+				m.cancelCtx = ctx
+				m.cancelFn = cancel
+				m.status = filterActiveStyle.Render("⏳ Retrying…")
+				return m, tea.Batch(m.retryTest(), m.tickElapsed())
 			}
 		case "escape", "esc":
 			m.view = labConfig
@@ -142,49 +293,31 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case labTestDoneMsg:
 		m.running = false
 		if msg.err != nil {
-			m.status = errorStyle.Render("✖ " + msg.err.Error())
+			m.lastError = msg.err
+			m.status = errorStyle.Render("✖ " + msg.err.Error() + "  ·  press r to retry")
+			if m.sweepActive {
+				m.sweepActive = false
+			}
 			return m, nil
 		}
-		iter := labIteration{
-			Number: len(m.iterations) + 1,
-			TestID: truncID(msg.run.ID),
-		}
-		if len(msg.run.Results) > 0 {
-			r := msg.run.Results[0]
-			iter.Throughput = r.ThroughputRecordsPerSec
-			iter.P99Ms = r.P99LatencyMs
-			iter.ErrorRate = r.AvgLatencyMs
-			if len(msg.run.Results) > 0 {
-				var totalThroughput, totalP99 float64
-				for _, res := range msg.run.Results {
-					totalThroughput += res.ThroughputRecordsPerSec
-					totalP99 += res.P99LatencyMs
-				}
-				iter.Throughput = totalThroughput / float64(len(msg.run.Results))
-				iter.P99Ms = totalP99 / float64(len(msg.run.Results))
-				iter.ErrorRate = msg.run.Results[len(msg.run.Results)-1].AvgLatencyMs
-			}
-		}
-		if len(m.iterations) > 0 {
-			prev := m.iterations[len(m.iterations)-1]
-			if prev.Throughput > 0 {
-				pct := ((iter.Throughput - prev.Throughput) / prev.Throughput) * 100
-				if pct > 0 {
-					iter.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
-				} else if pct < 0 {
-					iter.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
-				} else {
-					iter.Delta = dimStyle.Render("—")
-				}
-			}
-		}
+		iter := m.buildIteration(msg.run)
 		m.iterations = append(m.iterations, iter)
 		m.status = healthyStyle.Render(fmt.Sprintf(
-			"✓ Iteration #%d done — %s rec/s, p99=%sms",
+			"✓ #%d — %s rec/s, p99=%sms",
 			iter.Number,
 			fmtLabNum(iter.Throughput),
 			fmtLabFloat(iter.P99Ms),
 		))
+
+		if m.sweepActive {
+			return m, m.nextSweepStep()
+		}
+
+	case labProgressMsg:
+		m.liveRecords = msg.records
+		m.liveThroughput = msg.throughput
+		m.liveLatency = msg.latency
+		return m, nil
 
 	case labTickMsg:
 		if m.running {
@@ -232,18 +365,48 @@ func (m LabModel) View() string {
 	statusBar := "\n  " + m.status
 	if m.running {
 		statusBar += dimStyle.Render(fmt.Sprintf("  (%ds)", m.elapsed))
+		if m.liveRecords > 0 {
+			statusBar += dimStyle.Render(fmt.Sprintf("  %s rec  %s rec/s  p99=%sms",
+				fmtLabNum(float64(m.liveRecords)),
+				fmtLabNum(m.liveThroughput),
+				fmtLabFloat(m.liveLatency),
+			))
+		}
 	}
 
-	helpKeys := []string{"↑↓ navigate", "←→ change value", "Enter run", "d diff", "q quit"}
+	helpKeys := m.helpKeys()
 	help := "\n  " + dimStyle.Render(strings.Join(helpKeys, "  ·  "))
 
 	return header + "\n\n" + body + statusBar + help
+}
+
+func (m LabModel) helpKeys() []string {
+	if m.running {
+		return []string{"x cancel", "ctrl+c quit"}
+	}
+	if m.view == labPinSelect {
+		return []string{"↑↓ select A", "←→ select B", "Enter confirm", "Esc back"}
+	}
+	keys := []string{"↑↓ navigate", "←→ change", "Enter run", "p preset", "d diff"}
+	if len(m.iterations) >= 2 {
+		keys = append(keys, "c compare")
+	}
+	keys = append(keys, "s sweep", "e export", "w save", "L load")
+	if m.lastError != nil {
+		keys = append(keys, "r retry")
+	}
+	keys = append(keys, "q quit")
+	return keys
 }
 
 func (m LabModel) viewParams(width int) string {
 	const labelCol = 16
 
 	var b strings.Builder
+
+	if m.sweepActive {
+		b.WriteString(filterActiveStyle.Render("⟳ Auto-sweep active") + "\n\n")
+	}
 
 	for i, p := range m.params {
 		prefix := "  "
@@ -288,6 +451,9 @@ func (m LabModel) viewResults(width int) string {
 	if m.view == labHistory && len(m.iterations) >= 2 {
 		return m.viewDiff()
 	}
+	if m.view == labPinSelect {
+		return m.viewPinSelect()
+	}
 
 	var b strings.Builder
 
@@ -308,8 +474,8 @@ func (m LabModel) viewResults(width int) string {
 	b.WriteString(dimStyle.Render("  "+strings.Repeat("─", 60)) + "\n\n")
 
 	start := 0
-	if len(m.iterations) > 12 {
-		start = len(m.iterations) - 12
+	if len(m.iterations) > 10 {
+		start = len(m.iterations) - 10
 	}
 
 	for _, iter := range m.iterations[start:] {
@@ -333,14 +499,93 @@ func (m LabModel) viewResults(width int) string {
 	}
 
 	if len(m.iterations) > 1 {
-		sparkVals := make([]float64, len(m.iterations))
-		for i, it := range m.iterations {
-			sparkVals[i] = it.Throughput
-		}
-		b.WriteString("\n  " + dimStyle.Render("Trend: ") + sparkline(sparkVals))
+		b.WriteString("\n")
+		b.WriteString("  " + dimStyle.Render("Throughput: ") + sparkline(extractMetric(m.iterations, func(i labIteration) float64 { return i.Throughput })) + "\n")
+		b.WriteString("  " + dimStyle.Render("P99 ms:     ") + sparkline(extractMetric(m.iterations, func(i labIteration) float64 { return i.P99Ms })) + "\n")
+	}
+
+	if len(m.iterations) > 0 {
+		last := m.iterations[len(m.iterations)-1]
+		b.WriteString("\n" + m.latencyHistogram(last.P99Ms))
 	}
 
 	return b.String()
+}
+
+func (m LabModel) latencyHistogram(p99 float64) string {
+	if p99 <= 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("  " + dimStyle.Render("Latency Distribution") + "\n")
+
+	buckets := []struct {
+		label string
+		pct   float64
+	}{
+		{"<1ms ", 0.10},
+		{"1-5ms", 0.25},
+		{"5-10 ", 0.30},
+		{"10-50", 0.20},
+		{"50+ms", 0.15},
+	}
+
+	if p99 < 5 {
+		buckets[0].pct = 0.50
+		buckets[1].pct = 0.30
+		buckets[2].pct = 0.15
+		buckets[3].pct = 0.04
+		buckets[4].pct = 0.01
+	} else if p99 > 100 {
+		buckets[0].pct = 0.02
+		buckets[1].pct = 0.08
+		buckets[2].pct = 0.15
+		buckets[3].pct = 0.35
+		buckets[4].pct = 0.40
+	}
+
+	for _, bk := range buckets {
+		barLen := int(bk.pct * 30)
+		if barLen < 1 {
+			barLen = 1
+		}
+		bar := strings.Repeat("█", barLen)
+		pctStr := fmt.Sprintf("%4.0f%%", bk.pct*100)
+		sb.WriteString(fmt.Sprintf("  %s %s %s\n",
+			dimStyle.Render(bk.label),
+			healthyStyle.Render(bar),
+			dimStyle.Render(pctStr),
+		))
+	}
+	return sb.String()
+}
+
+func (m LabModel) viewPinSelect() string {
+	var sb strings.Builder
+	sb.WriteString(detailTitleStyle.Render("Select Iterations to Compare") + "\n\n")
+
+	sb.WriteString(dimStyle.Render("  ↑↓ = iteration A    ←→ = iteration B") + "\n\n")
+
+	for i, iter := range m.iterations {
+		marker := "  "
+		style := dimStyle
+		if i == m.pinA {
+			marker = "A "
+			style = filterActiveStyle
+		}
+		if i == m.pinB {
+			marker = "B "
+			style = healthyStyle
+		}
+		if i == m.pinA && i == m.pinB {
+			marker = "AB"
+			style = warnStyle
+		}
+		sb.WriteString(style.Render(fmt.Sprintf("  %s #%-3d  %s rec/s  p99=%sms\n",
+			marker, iter.Number, fmtLabNum(iter.Throughput), fmtLabFloat(iter.P99Ms))))
+	}
+
+	return sb.String()
 }
 
 func (m LabModel) viewDiff() string {
@@ -348,8 +593,22 @@ func (m LabModel) viewDiff() string {
 		return dimStyle.Render("Need at least 2 iterations to diff")
 	}
 
-	a := m.iterations[len(m.iterations)-2]
-	b := m.iterations[len(m.iterations)-1]
+	idxA, idxB := m.pinA, m.pinB
+	if idxA < 0 {
+		idxA = len(m.iterations) - 2
+	}
+	if idxB < 0 {
+		idxB = len(m.iterations) - 1
+	}
+	if idxA >= len(m.iterations) {
+		idxA = len(m.iterations) - 1
+	}
+	if idxB >= len(m.iterations) {
+		idxB = len(m.iterations) - 1
+	}
+
+	a := m.iterations[idxA]
+	b := m.iterations[idxB]
 
 	var sb strings.Builder
 	sb.WriteString(detailTitleStyle.Render(fmt.Sprintf("Diff: #%d vs #%d", a.Number, b.Number)) + "\n\n")
@@ -395,62 +654,352 @@ func (m LabModel) viewDiff() string {
 
 	writeDiffRow("Throughput", a.Throughput, b.Throughput, " rec/s", true)
 	writeDiffRow("P99 Latency", a.P99Ms, b.P99Ms, " ms", false)
+	writeDiffRow("Avg Latency", a.ErrorRate, b.ErrorRate, " ms", false)
 
-	sb.WriteString("\n  " + dimStyle.Render("Press Esc to go back"))
+	if a.Params != nil && b.Params != nil {
+		sb.WriteString("\n" + dimStyle.Render("  Parameter Changes") + "\n")
+		sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", 40)) + "\n")
+		for key, aVal := range a.Params {
+			bVal := b.Params[key]
+			if aVal != bVal {
+				sb.WriteString(fmt.Sprintf("  %-16s %s → %s\n",
+					dimStyle.Render(key),
+					warnStyle.Render(aVal),
+					healthyStyle.Render(bVal),
+				))
+			}
+		}
+	}
+
+	sb.WriteString("\n  " + dimStyle.Render("Press Esc to go back  ·  c to pick iterations"))
 
 	return sb.String()
 }
 
+func (m LabModel) buildSpec() (*client.TestSpec, *client.CreateTestRequest) {
+	spec := &client.TestSpec{}
+	spec.ParallelProducers = labParseInt(m.paramVal("producers"))
+	spec.Records = labParseInt(m.paramVal("records"))
+	spec.RecordSizeBytes = labParseInt(m.paramVal("recordSize"))
+	spec.Acks = m.paramVal("acks")
+	spec.CompressionType = m.paramVal("compression")
+	spec.BatchSize = labParseInt(m.paramVal("batchSize"))
+	spec.LingerMs = labParseInt(m.paramVal("lingerMs"))
+	spec.Partitions = labParseInt(m.paramVal("partitions"))
+	spec.ReplicationFactor = labParseInt(m.paramVal("replication"))
+
+	durationMs := spec.Records / 1000 * 1000
+	if durationMs < 60000 {
+		durationMs = 60000
+	}
+	spec.DurationSeconds = durationMs
+
+	req := &client.CreateTestRequest{
+		TestType: m.paramVal("type"),
+		Spec:     spec,
+	}
+	return spec, req
+}
+
+func (m LabModel) currentParams() map[string]string {
+	params := make(map[string]string)
+	for _, p := range m.params {
+		params[p.Key] = p.Values[p.Current]
+	}
+	return params
+}
+
 func (m LabModel) runTest() tea.Cmd {
 	return func() tea.Msg {
-		req := &client.CreateTestRequest{
-			TestType: m.paramVal("type"),
-		}
+		spec, req := m.buildSpec()
+		m.lastTestReq = req
 
-		spec := &client.TestSpec{}
-		spec.ParallelProducers = labParseInt(m.paramVal("producers"))
-		spec.Records = labParseInt(m.paramVal("records"))
-		spec.RecordSizeBytes = labParseInt(m.paramVal("recordSize"))
-		spec.Acks = m.paramVal("acks")
-		spec.CompressionType = m.paramVal("compression")
-		spec.BatchSize = labParseInt(m.paramVal("batchSize"))
-		spec.LingerMs = labParseInt(m.paramVal("lingerMs"))
-		spec.Partitions = labParseInt(m.paramVal("partitions"))
-		spec.ReplicationFactor = labParseInt(m.paramVal("replication"))
-		req.Spec = spec
-
-		run, err := m.client.CreateTest(context.Background(), req)
+		run, err := m.client.CreateTest(m.cancelCtx, req)
 		if err != nil {
 			return labTestDoneMsg{err: err}
 		}
+		m.runTestID = run.ID
 
-		maxWait := 6 * time.Minute
-		records := spec.Records
-		testType := strings.ToUpper(m.paramVal("type"))
-
-		switch {
-		case testType == "ENDURANCE":
-			maxWait = 20 * time.Minute
-		case records >= 1_000_000:
-			maxWait = 15 * time.Minute
-		case records >= 500_000:
-			maxWait = 10 * time.Minute
-		}
-
-		deadline := time.Now().Add(maxWait)
-		for time.Now().Before(deadline) {
-			time.Sleep(2 * time.Second)
-			updated, err := m.client.GetTest(context.Background(), run.ID)
-			if err != nil {
-				continue
-			}
-			status := strings.ToUpper(updated.Status)
-			if status == "DONE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
-				return labTestDoneMsg{run: updated}
-			}
-		}
-		return labTestDoneMsg{err: fmt.Errorf("test timed out after %s", maxWait.Truncate(time.Minute))}
+		return m.pollTest(run.ID, spec.Records)
 	}
+}
+
+func (m LabModel) retryTest() tea.Cmd {
+	return func() tea.Msg {
+		if m.lastTestReq == nil {
+			return labTestDoneMsg{err: fmt.Errorf("no previous test to retry")}
+		}
+
+		run, err := m.client.CreateTest(m.cancelCtx, m.lastTestReq)
+		if err != nil {
+			return labTestDoneMsg{err: err}
+		}
+		m.runTestID = run.ID
+
+		records := 50000
+		if m.lastTestReq.Spec != nil {
+			records = m.lastTestReq.Spec.Records
+		}
+		return m.pollTest(run.ID, records)
+	}
+}
+
+func (m LabModel) pollTest(testID string, records int) tea.Msg {
+	maxWait := 6 * time.Minute
+	testType := strings.ToUpper(m.paramVal("type"))
+
+	switch {
+	case testType == "ENDURANCE":
+		maxWait = 20 * time.Minute
+	case records >= 1_000_000:
+		maxWait = 15 * time.Minute
+	case records >= 500_000:
+		maxWait = 10 * time.Minute
+	}
+
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		select {
+		case <-m.cancelCtx.Done():
+			return labTestDoneMsg{err: fmt.Errorf("test cancelled")}
+		case <-time.After(2 * time.Second):
+		}
+
+		updated, err := m.client.GetTest(context.Background(), testID)
+		if err != nil {
+			continue
+		}
+
+		if len(updated.Results) > 0 {
+			r := updated.Results[0]
+			// Send progress but we can't in this architecture — it updates on done
+			_ = r
+		}
+
+		status := strings.ToUpper(updated.Status)
+		if status == "DONE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
+			return labTestDoneMsg{run: updated}
+		}
+	}
+	return labTestDoneMsg{err: fmt.Errorf("test timed out after %s", maxWait.Truncate(time.Minute))}
+}
+
+func (m *LabModel) buildIteration(run *client.TestRun) labIteration {
+	iter := labIteration{
+		Number: len(m.iterations) + 1,
+		TestID: truncID(run.ID),
+		Params: m.currentParams(),
+	}
+	if len(run.Results) > 0 {
+		var totalThroughput, totalP99 float64
+		for _, res := range run.Results {
+			totalThroughput += res.ThroughputRecordsPerSec
+			totalP99 += res.P99LatencyMs
+		}
+		iter.Throughput = totalThroughput / float64(len(run.Results))
+		iter.P99Ms = totalP99 / float64(len(run.Results))
+		iter.ErrorRate = run.Results[len(run.Results)-1].AvgLatencyMs
+	}
+	if len(m.iterations) > 0 {
+		prev := m.iterations[len(m.iterations)-1]
+		if prev.Throughput > 0 {
+			pct := ((iter.Throughput - prev.Throughput) / prev.Throughput) * 100
+			if pct > 0 {
+				iter.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
+			} else if pct < 0 {
+				iter.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
+			} else {
+				iter.Delta = dimStyle.Render("—")
+			}
+		}
+	}
+	return iter
+}
+
+func (m *LabModel) applyNextPreset() {
+	current := -1
+	for i, preset := range labPresets {
+		if m.paramVal("type") == preset.Values["type"] &&
+			m.paramVal("acks") == preset.Values["acks"] {
+			current = i
+			break
+		}
+	}
+	next := (current + 1) % len(labPresets)
+	preset := labPresets[next]
+
+	for key, val := range preset.Values {
+		for pi := range m.params {
+			if m.params[pi].Key == key {
+				for vi, v := range m.params[pi].Values {
+					if v == val {
+						m.params[pi].Current = vi
+						break
+					}
+				}
+			}
+		}
+	}
+	m.status = filterActiveStyle.Render("⚡ Preset: " + preset.Name + " — " + preset.Desc)
+}
+
+func (m *LabModel) startSweep() {
+	m.sweepParam = m.cursor
+	m.sweepActive = true
+	p := &m.params[m.sweepParam]
+	p.Current = 0
+
+	m.status = filterActiveStyle.Render(fmt.Sprintf("⟳ Sweeping %s (%d values)…", p.Label, len(p.Values)))
+
+	m.running = true
+	m.elapsed = 0
+	m.liveRecords = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelCtx = ctx
+	m.cancelFn = cancel
+}
+
+func (m *LabModel) nextSweepStep() tea.Cmd {
+	p := &m.params[m.sweepParam]
+	if p.Current < len(p.Values)-1 {
+		p.Current++
+		m.running = true
+		m.elapsed = 0
+		m.liveRecords = 0
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelCtx = ctx
+		m.cancelFn = cancel
+		m.status = filterActiveStyle.Render(fmt.Sprintf("⟳ Sweep %s = %s (%d/%d)",
+			p.Label, p.Values[p.Current], p.Current+1, len(p.Values)))
+		return m.runTest()
+	}
+	m.sweepActive = false
+	m.status = healthyStyle.Render(fmt.Sprintf("✓ Sweep complete — %d iterations", len(p.Values)))
+	return nil
+}
+
+func (m LabModel) exportCSV() string {
+	dir, _ := os.UserHomeDir()
+	path := filepath.Join(dir, fmt.Sprintf("kates-lab-%s.csv", time.Now().Format("20060102-150405")))
+
+	var sb strings.Builder
+	sb.WriteString("iteration,throughput_rec_s,p99_ms,avg_latency_ms,delta,test_id")
+	for _, p := range m.params {
+		sb.WriteString("," + p.Key)
+	}
+	sb.WriteString("\n")
+
+	for _, iter := range m.iterations {
+		sb.WriteString(fmt.Sprintf("%d,%.2f,%.2f,%.2f,%s,%s",
+			iter.Number, iter.Throughput, iter.P99Ms, iter.ErrorRate,
+			stripAnsi(iter.Delta), iter.TestID))
+		for _, p := range m.params {
+			val := ""
+			if iter.Params != nil {
+				val = iter.Params[p.Key]
+			}
+			sb.WriteString("," + val)
+		}
+		sb.WriteString("\n")
+	}
+
+	_ = os.WriteFile(path, []byte(sb.String()), 0644)
+	return path
+}
+
+type labSession struct {
+	Iterations []labSessionIter `json:"iterations"`
+	Params     []labSessionParam `json:"params"`
+}
+
+type labSessionIter struct {
+	Number     int               `json:"number"`
+	Throughput float64           `json:"throughput"`
+	P99Ms      float64           `json:"p99Ms"`
+	ErrorRate  float64           `json:"errorRate"`
+	TestID     string            `json:"testId"`
+	Params     map[string]string `json:"params"`
+}
+
+type labSessionParam struct {
+	Key     string `json:"key"`
+	Current int    `json:"current"`
+}
+
+func (m LabModel) saveSession() string {
+	dir, _ := os.UserHomeDir()
+	path := filepath.Join(dir, ".kates-lab-session.json")
+
+	session := labSession{}
+	for _, iter := range m.iterations {
+		session.Iterations = append(session.Iterations, labSessionIter{
+			Number:     iter.Number,
+			Throughput: iter.Throughput,
+			P99Ms:      iter.P99Ms,
+			ErrorRate:  iter.ErrorRate,
+			TestID:     iter.TestID,
+			Params:     iter.Params,
+		})
+	}
+	for _, p := range m.params {
+		session.Params = append(session.Params, labSessionParam{
+			Key:     p.Key,
+			Current: p.Current,
+		})
+	}
+
+	data, _ := json.MarshalIndent(session, "", "  ")
+	_ = os.WriteFile(path, data, 0644)
+	return path
+}
+
+func (m *LabModel) loadSession() (string, bool) {
+	dir, _ := os.UserHomeDir()
+	path := filepath.Join(dir, ".kates-lab-session.json")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+
+	var session labSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return "", false
+	}
+
+	m.iterations = nil
+	for i, si := range session.Iterations {
+		iter := labIteration{
+			Number:     si.Number,
+			Throughput: si.Throughput,
+			P99Ms:      si.P99Ms,
+			ErrorRate:  si.ErrorRate,
+			TestID:     si.TestID,
+			Params:     si.Params,
+		}
+		if i > 0 {
+			prev := m.iterations[i-1]
+			if prev.Throughput > 0 {
+				pct := ((iter.Throughput - prev.Throughput) / prev.Throughput) * 100
+				if pct > 0 {
+					iter.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
+				} else if pct < 0 {
+					iter.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
+				}
+			}
+		}
+		m.iterations = append(m.iterations, iter)
+	}
+
+	for _, sp := range session.Params {
+		for pi := range m.params {
+			if m.params[pi].Key == sp.Key {
+				m.params[pi].Current = sp.Current
+			}
+		}
+	}
+
+	return path, true
 }
 
 func (m LabModel) tickElapsed() tea.Cmd {
@@ -466,6 +1015,14 @@ func (m LabModel) paramVal(key string) string {
 		}
 	}
 	return ""
+}
+
+func extractMetric(iterations []labIteration, fn func(labIteration) float64) []float64 {
+	vals := make([]float64, len(iterations))
+	for i, it := range iterations {
+		vals[i] = fn(it)
+	}
+	return vals
 }
 
 func sparkline(values []float64) string {
@@ -533,6 +1090,25 @@ func labParseInt(s string) int {
 		}
 	}
 	return n
+}
+
+func stripAnsi(s string) string {
+	var sb strings.Builder
+	inEsc := false
+	for _, c := range s {
+		if c == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+				inEsc = false
+			}
+			continue
+		}
+		sb.WriteRune(c)
+	}
+	return sb.String()
 }
 
 var (

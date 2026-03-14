@@ -23,6 +23,13 @@ all: check-prerequisites
 		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true; \
 	fi
 	@echo ""
+	@if kubectl get deployment cert-manager -n cert-manager --no-headers 2>/dev/null | grep -q '1/1'; then \
+		echo "✅ cert-manager already deployed — skipping"; \
+	else \
+		echo "Step 3: Deploying cert-manager..."; \
+		./scripts/deploy-cert-manager.sh; \
+	fi
+	@echo ""
 	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kafka already deployed — skipping"; \
 	else \
@@ -74,9 +81,9 @@ all: check-prerequisites
 		kubectl apply -f kates/k8s/rbac.yaml; \
 		kubectl apply -f kates/k8s/configmap.yaml; \
 		echo "Copying Kafka SASL credentials to kates namespace..."; \
-		kubectl create secret generic kates-kafka-credentials \
-			--from-literal=password="$$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
-			-n kates --dry-run=client -o yaml | kubectl apply -f -; \
+		kubectl get secret kates-backend -n kafka -o json \
+			| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
+			| kubectl apply -n kates -f -; \
 		kubectl apply -f kates/k8s/postgres.yaml; \
 		echo "Waiting for PostgreSQL to be ready..."; \
 		kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s; \
@@ -123,6 +130,10 @@ cluster:
 monitoring:
 	@echo "📊 Deploying monitoring stack..."
 	./scripts/deploy-monitoring.sh
+
+cert-manager:
+	@echo "🔐 Deploying cert-manager..."
+	./scripts/deploy-cert-manager.sh
 
 # Deploy full stack (monitoring, Kafka, UI, Litmus) — without cluster/images
 deploy-all:
@@ -223,9 +234,9 @@ kates-deploy:
 	kubectl apply -f kates/k8s/rbac.yaml
 	kubectl apply -f kates/k8s/configmap.yaml
 	@echo "Copying Kafka SASL credentials to kates namespace..."
-	@kubectl create secret generic kates-kafka-credentials \
-		--from-literal=password="$$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
-		-n kates --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl get secret kates-backend -n kafka -o json \
+		| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
+		| kubectl apply -n kates -f -
 	kubectl apply -f kates/k8s/postgres.yaml
 	@echo "Waiting for PostgreSQL to be ready..."
 	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
@@ -398,6 +409,7 @@ help:
 	@echo "  all              - Complete setup (cluster, all services)"
 	@echo "  cluster          - Start Kind cluster only"
 	@echo "  monitoring       - Deploy Prometheus & Grafana"
+	@echo "  cert-manager     - Deploy cert-manager"
 	@echo "  kafka            - Deploy Kafka (Strimzi)"
 	@echo "  ui               - Deploy Kafka UI"
 	@echo "  apicurio         - Deploy Apicurio Registry"

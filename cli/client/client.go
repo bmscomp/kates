@@ -240,6 +240,11 @@ func (c *Client) DeleteTest(ctx context.Context, id string) error {
 	return c.delete(ctx, "/api/tests/"+id)
 }
 
+func (c *Client) CancelTest(ctx context.Context, id string) error {
+	_, err := postJSON[json.RawMessage](c, ctx, "/api/tests/"+id+"/cancel", nil)
+	return err
+}
+
 func (c *Client) TestTypes(ctx context.Context) ([]string, error) {
 	return get[[]string](c, ctx, "/api/tests/types")
 }

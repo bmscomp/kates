@@ -424,19 +424,19 @@ public class TestOrchestrator {
 
         if (userSpec != null) {
             if (userSpec.getTopic() != null) merged.setTopic(userSpec.getTopic());
-            if (userSpec.getReplicationFactor() != 3) merged.setReplicationFactor(userSpec.getReplicationFactor());
-            if (userSpec.getPartitions() != 3) merged.setPartitions(userSpec.getPartitions());
-            if (userSpec.getMinInsyncReplicas() != 2) merged.setMinInsyncReplicas(userSpec.getMinInsyncReplicas());
-            if (!"all".equals(userSpec.getAcks())) merged.setAcks(userSpec.getAcks());
-            if (userSpec.getBatchSize() != 65536) merged.setBatchSize(userSpec.getBatchSize());
-            if (userSpec.getLingerMs() != 5) merged.setLingerMs(userSpec.getLingerMs());
-            if (!"lz4".equals(userSpec.getCompressionType())) merged.setCompressionType(userSpec.getCompressionType());
-            if (userSpec.getRecordSize() != 1024) merged.setRecordSize(userSpec.getRecordSize());
-            if (userSpec.getNumRecords() != 1_000_000) merged.setNumRecords(userSpec.getNumRecords());
-            if (userSpec.getThroughput() != -1) merged.setThroughput(userSpec.getThroughput());
-            if (userSpec.getDurationMs() != 600_000) merged.setDurationMs(userSpec.getDurationMs());
-            if (userSpec.getNumProducers() != 1) merged.setNumProducers(userSpec.getNumProducers());
-            if (userSpec.getNumConsumers() != 1) merged.setNumConsumers(userSpec.getNumConsumers());
+            if (userSpec.hasReplicationFactor()) merged.setReplicationFactor(userSpec.getReplicationFactor());
+            if (userSpec.hasPartitions()) merged.setPartitions(userSpec.getPartitions());
+            if (userSpec.hasMinInsyncReplicas()) merged.setMinInsyncReplicas(userSpec.getMinInsyncReplicas());
+            if (userSpec.hasAcks()) merged.setAcks(userSpec.getAcks());
+            if (userSpec.hasBatchSize()) merged.setBatchSize(userSpec.getBatchSize());
+            if (userSpec.hasLingerMs()) merged.setLingerMs(userSpec.getLingerMs());
+            if (userSpec.hasCompressionType()) merged.setCompressionType(userSpec.getCompressionType());
+            if (userSpec.hasRecordSize()) merged.setRecordSize(userSpec.getRecordSize());
+            if (userSpec.hasNumRecords()) merged.setNumRecords(userSpec.getNumRecords());
+            if (userSpec.hasThroughput()) merged.setThroughput(userSpec.getThroughput());
+            if (userSpec.hasDurationMs()) merged.setDurationMs(userSpec.getDurationMs());
+            if (userSpec.hasNumProducers()) merged.setNumProducers(userSpec.getNumProducers());
+            if (userSpec.hasNumConsumers()) merged.setNumConsumers(userSpec.getNumConsumers());
         }
 
         return merged;

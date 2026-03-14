@@ -96,6 +96,18 @@ var testGetCmd = &cobra.Command{
 		output.KeyValue("Scenario", result.ScenarioName)
 		output.KeyValue("Created", formatTime(result.CreatedAt))
 
+		if result.Spec != nil {
+			output.SubHeader("Configuration")
+			output.KeyValue("Records", fmtNum(float64(result.Spec.Records)))
+			output.KeyValue("Producers", fmt.Sprintf("%d", result.Spec.ParallelProducers))
+			output.KeyValue("Acks", result.Spec.Acks)
+			output.KeyValue("Compression", result.Spec.CompressionType)
+			output.KeyValue("Batch Size", fmtNum(float64(result.Spec.BatchSize)))
+			output.KeyValue("Linger ms", fmt.Sprintf("%d", result.Spec.LingerMs))
+			output.KeyValue("Partitions", fmt.Sprintf("%d", result.Spec.Partitions))
+			output.KeyValue("Replication", fmt.Sprintf("%d", result.Spec.ReplicationFactor))
+		}
+
 		if len(result.Results) > 0 {
 			output.SubHeader(fmt.Sprintf("Results (%d phases)", len(result.Results)))
 			rows := make([][]string, 0, len(result.Results))
@@ -228,6 +240,24 @@ var testGetCmd = &cobra.Command{
 					break
 				}
 			}
+		} else {
+			effectiveStatus := strings.ToUpper(result.Status)
+			if effectiveStatus == "DONE" || effectiveStatus == "COMPLETED" {
+				effectiveStatus = "FAILED"
+			}
+			output.SubHeader("Diagnosis")
+			output.Error(fmt.Sprintf("Test finished with status %s but produced no results", strings.ToUpper(result.Status)))
+			fmt.Println()
+			output.Warn("Possible reasons:")
+			output.Hint("  • Backend pod restarted while the test was running (in-memory state lost)")
+			output.Hint("  • Kafka producer/consumer failed to connect (check broker connectivity)")
+			output.Hint("  • Topic creation failed (partition count or replication factor too high)")
+			output.Hint("  • SASL authentication error (credentials expired or misconfigured)")
+			output.Hint("  • Test duration too short for record count (increase --duration)")
+			fmt.Println()
+			output.Hint("Next steps:")
+			output.Hint("  kubectl logs -n kates -l app=kates --tail=50")
+			output.Hint("  kates doctor")
 		}
 		return nil
 	},

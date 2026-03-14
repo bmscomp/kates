@@ -105,6 +105,7 @@ Tuning:
   profile        Save, compare, and assert performance profiles
   flow           Declarative multi-step pipeline orchestrator
   benchmark      Run full test battery with letter-grade scorecard
+  tune           Parameter sweep tests for optimal configuration
 
 Analysis:
   report         View reports, export CSV/JUnit/Markdown/HTML
@@ -130,6 +131,7 @@ Observability:
   badge          Generate status badges for README files
 
 Toolbox:
+  help           Help about any command
   init           Initialize workspace with config, scenarios, and CI gate
   test scaffold  Browse and export built-in scenario templates
   plugin         Discover and run external plugin commands
@@ -143,6 +145,7 @@ Configuration:
 
 Disruption & Chaos:
   disruption     Run, list, and monitor disruption experiments
+  chaos          Chaos experiment history and probe analysis
   resilience     Combined performance + chaos resilience testing
   schedule       Automated recurring test schedules
 
@@ -220,4 +223,18 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&outputMode, "output", "o", "", "Output format: table or json")
 	rootCmd.PersistentFlags().StringVar(&contextFlag, "context", "", "Use a specific context instead of current")
 	rootCmd.AddCommand(docsCmd)
+
+	defaultHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd != rootCmd {
+			defaultHelp(cmd, args)
+			return
+		}
+		fmt.Println(cmd.Long)
+		fmt.Println()
+		fmt.Println("Usage:")
+		fmt.Printf("  %s [command]\n", cmd.CommandPath())
+		fmt.Println()
+		fmt.Printf("Use \"%s [command] --help\" for more information about a command.\n", cmd.CommandPath())
+	})
 }

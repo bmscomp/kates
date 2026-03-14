@@ -550,6 +550,20 @@ kates top
 
 ---
 
+### lab
+
+Interactive performance tuning workbench. Opens a full-screen TUI for iterative parameter tuning with live results, sparklines, A/B comparison, auto-sweep, and CSV export.
+
+```bash
+kates lab
+```
+
+Key features: parameter presets (`p`), auto-sweep (`s`), iteration diff (`d`), pin-and-compare (`c`), export (`e`), session save/load (`w`/`L`), cancel running test (`x`), retry on failure (`r`).
+
+See [Chapter 10b: Lab](10b-lab.md) for the full guide.
+
+---
+
 ## Output Modes
 
 All commands support two output modes:
