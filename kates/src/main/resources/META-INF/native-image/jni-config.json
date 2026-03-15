@@ -1,0 +1,24 @@
+[
+  {
+    "name": "com.github.luben.zstd.ZstdOutputStreamNoFinalizer",
+    "methods": [
+      {"name": "createCStream", "parameterTypes": []},
+      {"name": "freeCStream", "parameterTypes": ["long"]}
+    ]
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdInputStreamNoFinalizer",
+    "methods": [
+      {"name": "createDStream", "parameterTypes": []},
+      {"name": "freeDStream", "parameterTypes": ["long"]}
+    ]
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdCompressCtx",
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdDecompressCtx",
+    "allPublicMethods": true
+  }
+]

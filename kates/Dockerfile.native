@@ -25,8 +25,9 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 COPY kates/src src
 RUN --mount=type=cache,target=/root/.m2 \
-  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g" \
+  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g,--initialize-at-run-time=com.github.luben.zstd" \
   && mv target/*-runner target/kates-native
+
 
 # Stage 3: Minimal runtime
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5

@@ -147,6 +147,8 @@ var hintPatterns = []struct {
 }{
 	{"LZ4Factory", "Missing lz4-java dependency — add it to pom.xml"},
 	{"NoClassDefFoundError", "A required class is missing at runtime — check Maven dependencies"},
+	{"UnsatisfiedLinkError", "Native library failed to load — if using native image, check JNI config; if JVM, check platform .so/.dylib"},
+	{"zstd", "zstd compression requires the zstd-jni native library — use compression=lz4 as a workaround"},
 	{"Connection refused", "Kafka broker unreachable — verify bootstrap servers and network"},
 	{"TimeoutException", "Operation timed out — increase timeout or check broker health"},
 	{"TopicAuthorizationException", "ACL permission denied — check Kafka ACL configuration"},
