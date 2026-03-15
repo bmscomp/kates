@@ -99,7 +99,7 @@ var tldrCmd = &cobra.Command{
 	Use:   "tldr [category]",
 	Short: "Quick command reference cheatsheet",
 	Long: `Context-aware quick reference — the essential commands you need,
-organized by workflow. Like 'tldr' but for KATES.`,
+organized by workflow. Like 'tldr' but for Kates.`,
 	Example: `  kates tldr
   kates tldr test
   kates tldr kafka`,
@@ -110,7 +110,7 @@ organized by workflow. Like 'tldr' but for KATES.`,
 		}
 
 		fmt.Println()
-		fmt.Println("  " + tldrTitleStyle.Render("KATES Quick Reference"))
+		fmt.Println("  " + tldrTitleStyle.Render("Kates Quick Reference"))
 		fmt.Println()
 
 		for _, g := range tldrGroups {

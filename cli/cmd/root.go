@@ -122,7 +122,7 @@ Kafka Client:
 Observability:
   dashboard      Full-screen monitoring dashboard (alias: dash)
   top            Live view of running tests (like kubectl top)
-  watch          Live event stream of all KATES activity
+  watch          Live event stream of all Kates activity
   audit          Audit log of all mutating operations
   webhook        Manage test-completion webhook notifications
   cost           Estimate cloud costs for test configurations

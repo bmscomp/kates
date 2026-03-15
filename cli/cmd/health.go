@@ -10,7 +10,7 @@ import (
 
 var healthCmd = &cobra.Command{
 	Use:   "health",
-	Short: "Show KATES system health and Kafka connectivity",
+	Short: "Show Kates system health and Kafka connectivity",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.Health(context.Background())
 		if err != nil {
@@ -22,7 +22,7 @@ var healthCmd = &cobra.Command{
 			return nil
 		}
 
-		output.Banner("KATES Health Dashboard", "System Status: "+result.Status)
+		output.Banner("Kates Health Dashboard", "System Status: "+result.Status)
 
 		if eng := result.Engine; eng != nil {
 			output.SubHeader("Engine")

@@ -35,8 +35,8 @@ var (
 
 var watchEventsCmd = &cobra.Command{
 	Use:   "watch",
-	Short: "Live event stream of all KATES activity",
-	Long: `Stream a live log of all KATES events: test starts/completions,
+	Short: "Live event stream of all Kates activity",
+	Long: `Stream a live log of all Kates events: test starts/completions,
 chaos experiments, SLA breaches, and configuration changes.
 
 Like 'kubectl get events --watch' but for Kafka testing.`,
@@ -44,7 +44,7 @@ Like 'kubectl get events --watch' but for Kafka testing.`,
   kates watch --type test
   kates watch --id abc123`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("  KATES Event Stream"))
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("  Kates Event Stream"))
 		fmt.Println(watchTimeStyle.Render("  Watching for events… (Ctrl+C to stop)"))
 		fmt.Println()
 

@@ -32,7 +32,7 @@ var versionCmd = &cobra.Command{
 		}
 
 		output.Header("Version")
-		output.KeyValue("KATES CLI", Version)
+		output.KeyValue("Kates CLI", Version)
 		output.KeyValue("Commit", Commit)
 		output.KeyValue("Built", BuildDate)
 		output.KeyValue("Go", runtime.Version())

@@ -41,7 +41,7 @@ var dashboardCmd = &cobra.Command{
 				Width(w).
 				Padding(0, 1).
 				Render(fmt.Sprintf(
-					"  KATES Dashboard  %s  %s",
+					"  Kates Dashboard  %s  %s",
 					output.DimStyle.Render("│"),
 					time.Now().Format("15:04:05"),
 				))

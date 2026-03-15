@@ -22,7 +22,7 @@ var ctxShowCmd = &cobra.Command{
 	Short: "Show all contexts and current selection",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := loadConfig()
-		output.Header("KATES Contexts")
+		output.Header("Kates Contexts")
 		output.KeyValue("Config File", configPath())
 		output.KeyValue("Active Context", cfg.CurrentContext)
 		fmt.Println()
@@ -239,7 +239,7 @@ var ctxImportCmd = &cobra.Command{
 }
 
 func init() {
-	ctxSetCmd.Flags().StringVar(&ctxSetURL, "url", "", "KATES API base URL (required)")
+	ctxSetCmd.Flags().StringVar(&ctxSetURL, "url", "", "Kates API base URL (required)")
 	ctxSetCmd.Flags().StringVar(&ctxSetOutput, "output", "", "Default output format for this context")
 
 	ctxExportCmd.Flags().StringVar(&ctxExportFlag, "name", "", "Export only a specific context")

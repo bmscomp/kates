@@ -32,9 +32,9 @@ var docsSearch string
 
 var docsCmd = &cobra.Command{
 	Use:   "docs [command...]",
-	Short: "Man-style documentation for all KATES commands",
+	Short: "Man-style documentation for all Kates commands",
 	Long: strings.TrimSpace(`
-Show detailed man-page-style documentation for any KATES command.
+Show detailed man-page-style documentation for any Kates command.
 Without arguments, lists all available documented commands grouped by category.`),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		width := 80
@@ -169,7 +169,7 @@ func renderManPage(e DocEntry, width int) string {
 func renderDocsIndex(width int) string {
 	var b strings.Builder
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(output.Purple).Render("KATES Command Reference")
+	title := lipgloss.NewStyle().Bold(true).Foreground(output.Purple).Render("Kates Command Reference")
 	b.WriteString("\n  " + title + "\n")
 	b.WriteString("  " + manDimStyle.Render("Run 'kates docs <command>' for full man-page documentation") + "\n")
 

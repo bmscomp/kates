@@ -139,7 +139,7 @@ SCENARIO_FILE="${1:-scenarios/ci-gate.yaml}"
 EXIT_CODE=0
 
 echo "╭──────────────────────────────────╮"
-echo "│   KATES — CI Performance Gate    │"
+echo "│   Kates — CI Performance Gate    │"
 echo "╰──────────────────────────────────╯"
 echo ""
 echo "API:      ${KATES_URL}"
@@ -183,7 +183,7 @@ exit ${EXIT_CODE}
 
 func init() {
 	initCmd.Flags().String("name", "default", "Context name")
-	initCmd.Flags().String("url", "http://localhost:8080", "KATES API URL")
+	initCmd.Flags().String("url", "http://localhost:8080", "Kates API URL")
 	initCmd.Flags().String("dir", ".", "Project directory to scaffold into")
 	initCmd.Flags().Bool("no-scenarios", false, "Skip scenario template export")
 	initCmd.Flags().Bool("no-ci", false, "Skip CI gate script generation")

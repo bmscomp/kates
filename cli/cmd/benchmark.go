@@ -24,7 +24,7 @@ var benchmarkCmd = &cobra.Command{
 		ctx := context.Background()
 		types := []string{"LOAD", "STRESS", "SPIKE"}
 
-		output.Banner("KATES Benchmark", "Full performance battery")
+		output.Banner("Kates Benchmark", "Full performance battery")
 		fmt.Println()
 
 		type benchResult struct {

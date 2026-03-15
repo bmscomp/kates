@@ -84,7 +84,7 @@ Groups events by category with statistics.`,
 		}
 
 		fmt.Println()
-		fmt.Println("  " + clTitleStyle.Render(fmt.Sprintf("KATES Changelog — %s", period)))
+		fmt.Println("  " + clTitleStyle.Render(fmt.Sprintf("Kates Changelog — %s", period)))
 		fmt.Println()
 
 		if len(categories) == 0 {

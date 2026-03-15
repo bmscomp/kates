@@ -23,7 +23,7 @@ var doctorCmd = &cobra.Command{
 		ctx := context.Background()
 		var checks []checkResult
 
-		output.Banner("KATES Doctor", "Pre-flight cluster readiness")
+		output.Banner("Kates Doctor", "Pre-flight cluster readiness")
 		fmt.Println()
 
 		health, err := apiClient.Health(ctx)

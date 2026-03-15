@@ -5,8 +5,8 @@ var docEntries = []DocEntry{
 		Name:     "health",
 		Category: "Core",
 		Synopsis: "kates health",
-		Short:    "Show KATES system health and Kafka connectivity",
-		Description: "Displays the overall health status of the KATES platform,\n" +
+		Short:    "Show Kates system health and Kafka connectivity",
+		Description: "Displays the overall health status of the Kates platform,\n" +
 			"including the backend engine, Kafka cluster connectivity,\n" +
 			"bootstrap servers, and the active test backend.",
 		Examples: []string{"kates health", "kates health -o json"},
@@ -16,7 +16,7 @@ var docEntries = []DocEntry{
 		Name:     "status",
 		Category: "Core",
 		Synopsis: "kates status",
-		Short:    "Quick one-line status of KATES and running tests",
+		Short:    "Quick one-line status of Kates and running tests",
 		Description: "Prints a compact single-line summary showing system state,\n" +
 			"active test count, and last completed test.",
 		Examples: []string{"kates status"},
@@ -37,7 +37,7 @@ var docEntries = []DocEntry{
 		Synopsis: "kates doctor",
 		Short:    "Pre-flight cluster readiness checklist",
 		Description: "Runs a series of diagnostic checks against the Kafka cluster\n" +
-			"and KATES backend to verify everything is properly configured\n" +
+			"and Kates backend to verify everything is properly configured\n" +
 			"and ready for testing. Checks connectivity, topic access,\n" +
 			"broker health, and engine availability.",
 		Examples: []string{"kates doctor"},
@@ -924,7 +924,7 @@ var docEntries = []DocEntry{
 		Synopsis: "kates ctx set <name> [flags]",
 		Short:    "Create or update a context",
 		Flags: []DocFlag{
-			{Name: "--url", Type: "string", Desc: "KATES API base URL (required)"},
+			{Name: "--url", Type: "string", Desc: "Kates API base URL (required)"},
 			{Name: "--output", Type: "string", Desc: "Default output format for this context"},
 		},
 		Examples: []string{
@@ -1082,7 +1082,7 @@ var docEntries = []DocEntry{
 			"   KATES_URL env var support and exit code propagation.",
 		Flags: []DocFlag{
 			{Name: "--name", Type: "string", Default: "default", Desc: "Context name"},
-			{Name: "--url", Type: "string", Default: "http://localhost:8080", Desc: "KATES API URL"},
+			{Name: "--url", Type: "string", Default: "http://localhost:8080", Desc: "Kates API URL"},
 			{Name: "--dir", Type: "string", Default: ".", Desc: "Project directory to scaffold into"},
 			{Name: "--no-scenarios", Type: "bool", Desc: "Skip scenario template export"},
 			{Name: "--no-ci", Type: "bool", Desc: "Skip CI gate script generation"},

@@ -10,7 +10,7 @@ import (
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Quick one-line status of KATES and running tests",
+	Short: "Quick one-line status of Kates and running tests",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadConfig()
 		ctxName := cfg.CurrentContext

@@ -42,7 +42,7 @@ var topCmd = &cobra.Command{
 			counts := CountStatuses(paged.Content)
 
 			fmt.Printf("  %s API: %s  Kafka: %s  │  %s running  %s pending  %s done  %s failed  │  %s total\n\n",
-				output.AccentStyle.Bold(true).Render("KATES TOP"),
+				output.AccentStyle.Bold(true).Render("Kates Top"),
 				output.StatusBadge(apiStatus),
 				output.StatusBadge(kafkaStatus),
 				output.AccentStyle.Render(fmt.Sprintf("%d", counts.Running)),

@@ -30,7 +30,7 @@ func TestHealthCmd(t *testing.T) {
 	}
 
 	out := stripAnsi(buf.String())
-	if !strings.Contains(out, "KATES Health Dashboard") {
+	if !strings.Contains(out, "Kates Health Dashboard") {
 		t.Errorf("missing header: %s", out)
 	}
 	if !strings.Contains(out, "UP") {
