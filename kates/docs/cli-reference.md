@@ -63,12 +63,47 @@ kates test delete <id>
 | `test types` | List available test types with descriptions |
 | `test backends` | List available benchmark backends |
 | `test apply` | Run tests from a YAML scenario file |
-| `test scaffold` | Generate a YAML scenario template |
+| `test scaffold` | Generate a YAML scenario template (use `--type` to filter) |
 | `test compare` | Side-by-side metric comparison of two runs |
 | `test summary` | Aggregate statistics across all completed tests |
 | `test flame` | ASCII latency distribution histogram |
 | `test cleanup` | Delete orphaned RUNNING tests (stuck >5 minutes) |
 | `test export` | Export results to CSV or JSON file |
+
+#### test scaffold
+
+Browse, preview, and export built-in scenario templates:
+
+```bash
+kates test scaffold                           # list all templates
+kates test scaffold list                      # same — list all templates
+kates test scaffold list --type INTEGRITY     # filter by test type
+kates test scaffold show integrity-tx         # preview a template
+kates test scaffold export integrity-tx       # export to current directory
+kates test scaffold export integrity-tx -o my-test.yaml  # custom output file
+kates test scaffold export --all              # export all templates
+kates test scaffold export --all --type LOAD  # export only LOAD templates
+```
+
+**Available templates:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `quick-load` | LOAD | Quick smoke test — 50k records, 2 producers |
+| `production-load` | LOAD | Production-grade — 1M records, 8 producers, lz4 |
+| `ci-gate` | LOAD | CI pipeline gate — fast 10k-record validation |
+| `stress-test` | STRESS | High-throughput — 5M records, 16 producers |
+| `endurance-soak` | ENDURANCE | 1-hour soak at 5k msg/s |
+| `exactly-once` | ROUND_TRIP | E2E integrity — idempotent + transactional |
+| `integrity-tx` | INTEGRITY | Transactional integrity — zstd, CRC, zero-loss |
+| `spike-test` | SPIKE | Burst traffic — 32 producers for 60s |
+
+| Flag | Description |
+|------|-------------|
+| `-t, --type` | Filter templates by test type (persistent, works on all subcommands) |
+| `-o, --output` | Custom output filename (export only) |
+| `-d, --dir` | Output directory (export only, default: current) |
+| `--all` | Export all templates (export only) |
 
 #### test compare
 
@@ -355,3 +390,5 @@ When `kates test get` encounters a failed test, it pattern-matches the error mes
 | `TopicAuthorizationException` | Check Kafka ACL configuration |
 | `RecordTooLargeException` | Reduce record size or increase broker limit |
 | `OutOfMemoryError` | Increase -Xmx in deployment config |
+| `UnsatisfiedLinkError` | Native library missing — check GraalVM native-image resource includes |
+| `zstd` | Ensure zstd-jni is on classpath and initialized at run-time for native images |

@@ -28,9 +28,14 @@ var builtinScenarios = []scenarioMeta{
 	{filename: "stress-test.yaml", name: "stress-test", testType: "STRESS", description: "High-throughput stress — 5M records, 16 producers, find breaking points"},
 	{filename: "endurance-soak.yaml", name: "endurance-soak", testType: "ENDURANCE", description: "1-hour soak at 5k msg/s — detect GC pauses and log compaction issues"},
 	{filename: "exactly-once.yaml", name: "exactly-once", testType: "ROUND_TRIP", description: "E2E integrity — idempotent + transactional, zero-loss, CRC verification"},
+	{filename: "integrity-tx.yaml", name: "integrity-tx", testType: "INTEGRITY", description: "Transactional integrity — 4 producers, zstd, CRC, zero-loss verification"},
 	{filename: "spike-test.yaml", name: "spike-test", testType: "SPIKE", description: "Burst traffic — 32 producers for 60s, test backpressure handling"},
 	{filename: "ci-gate.yaml", name: "ci-gate", testType: "LOAD", description: "CI pipeline gate — fast 10k-record validation with strict zero-error SLA"},
 }
+
+var (
+	scaffoldTypeFilter string
+)
 
 var testScaffoldCmd = &cobra.Command{
 	Use:   "scaffold",
@@ -38,6 +43,7 @@ var testScaffoldCmd = &cobra.Command{
 	Long: `Browse the curated scenario library with 'list', preview with 'show',
 and export ready-to-use YAML files with 'export'.
 
+Use --type to filter by test type (e.g. LOAD, STRESS, INTEGRITY).
 Without subcommands, lists all available templates.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		showScenarioList()
@@ -52,11 +58,30 @@ var scaffoldListCmd = &cobra.Command{
 	},
 }
 
-func showScenarioList() {
-	output.Banner("Scenario Library", fmt.Sprintf("%d templates", len(builtinScenarios)))
-
-	rows := make([][]string, 0, len(builtinScenarios))
+func filteredScenarios() []scenarioMeta {
+	if scaffoldTypeFilter == "" {
+		return builtinScenarios
+	}
+	filter := strings.ToUpper(scaffoldTypeFilter)
+	var result []scenarioMeta
 	for _, s := range builtinScenarios {
+		if s.testType == filter {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func showScenarioList() {
+	scenarios := filteredScenarios()
+	title := fmt.Sprintf("%d templates", len(scenarios))
+	if scaffoldTypeFilter != "" {
+		title = fmt.Sprintf("%d %s templates", len(scenarios), strings.ToUpper(scaffoldTypeFilter))
+	}
+	output.Banner("Scenario Library", title)
+
+	rows := make([][]string, 0, len(scenarios))
+	for _, s := range scenarios {
 		rows = append(rows, []string{s.name, s.testType, s.description})
 	}
 	output.Table([]string{"Name", "Type", "Description"}, rows)
@@ -112,8 +137,9 @@ var scaffoldShowCmd = &cobra.Command{
 }
 
 var (
-	scaffoldExportAll bool
-	scaffoldExportDir string
+	scaffoldExportAll  bool
+	scaffoldExportDir  string
+	scaffoldExportFile string
 )
 
 var scaffoldExportCmd = &cobra.Command{
@@ -129,9 +155,10 @@ var scaffoldExportCmd = &cobra.Command{
 		}
 
 		if scaffoldExportAll {
+			scenarios := filteredScenarios()
 			count := 0
-			for _, s := range builtinScenarios {
-				if err := exportScenario(s, dir); err != nil {
+			for _, s := range scenarios {
+				if err := exportScenario(s, dir, ""); err != nil {
 					output.Warn(fmt.Sprintf("Failed to export %s: %s", s.name, err))
 				} else {
 					count++
@@ -150,23 +177,30 @@ var scaffoldExportCmd = &cobra.Command{
 			return cmdErr(fmt.Sprintf("Unknown scenario '%s'. Use 'kates test scaffold list'.", args[0]))
 		}
 
-		return exportScenario(*meta, dir)
+		return exportScenario(*meta, dir, scaffoldExportFile)
 	},
 }
 
-func exportScenario(s scenarioMeta, dir string) error {
+func exportScenario(s scenarioMeta, dir string, outFile string) error {
 	data, err := scenarioFS.ReadFile("scenarios/" + s.filename)
 	if err != nil {
 		return err
 	}
 
-	outPath := filepath.Join(dir, s.filename)
+	outPath := outFile
+	if outPath == "" {
+		outPath = filepath.Join(dir, s.filename)
+	} else if !filepath.IsAbs(outPath) {
+		outPath = filepath.Join(dir, outPath)
+	}
+
 	if _, err := os.Stat(outPath); err == nil {
 		output.Warn(fmt.Sprintf("Skipping %s (already exists)", outPath))
 		return nil
 	}
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	parentDir := filepath.Dir(outPath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
 		return err
 	}
 
@@ -190,7 +224,9 @@ func findScenario(name string) *scenarioMeta {
 }
 
 func init() {
+	testScaffoldCmd.PersistentFlags().StringVarP(&scaffoldTypeFilter, "type", "t", "", "Filter by test type (LOAD, STRESS, INTEGRITY, etc.)")
 	scaffoldExportCmd.Flags().StringVarP(&scaffoldExportDir, "dir", "d", "", "Output directory (default: current)")
+	scaffoldExportCmd.Flags().StringVarP(&scaffoldExportFile, "output", "o", "", "Output filename (overrides default)")
 	scaffoldExportCmd.Flags().BoolVar(&scaffoldExportAll, "all", false, "Export all templates")
 
 	testScaffoldCmd.AddCommand(scaffoldListCmd)

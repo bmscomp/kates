@@ -1,0 +1,21 @@
+scenarios:
+  - name: "Transactional Integrity Verification"
+    type: INTEGRITY
+    spec:
+      records: 200000
+      parallelProducers: 4
+      recordSizeBytes: 512
+      acks: "all"
+      compressionType: "zstd"
+      enableIdempotence: true
+      enableTransactions: true
+      enableCrc: true
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numConsumers: 4
+    validate:
+      maxDataLossPercent: 0
+      maxDuplicatePercent: 0
+      maxOutOfOrder: 0
+      maxCrcFailures: 0
+      maxP99LatencyMs: 150
