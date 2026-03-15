@@ -35,13 +35,15 @@ spec:
             secretKeyRef:
               name: kates-backend
               key: password
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Xms512m -Xmx2560m"
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "250m"
+            memory: "2Gi"
+            cpu: "500m"
           limits:
-            memory: "1Gi"
-            cpu: "1"
+            memory: "4Gi"
+            cpu: "2"
         readinessProbe:
           httpGet:
             path: /api/health

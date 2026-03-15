@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 var (
@@ -169,14 +170,14 @@ func Table(headers []string, rows [][]string) {
 
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = runewidth.StringWidth(h)
 	}
 	for _, row := range rows {
 		for i, cell := range row {
 			if i < len(widths) {
 				pure := stripAnsi(cell)
-				if len(pure) > widths[i] {
-					widths[i] = len(pure)
+				if w := runewidth.StringWidth(pure); w > widths[i] {
+					widths[i] = w
 				}
 			}
 		}
@@ -426,10 +427,11 @@ func ConfigList(title string, entries []ConfigEntry) {
 
 func padRight(s string, width int) string {
 	pure := stripAnsi(s)
-	if len(pure) >= width {
+	w := runewidth.StringWidth(pure)
+	if w >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-len(pure))
+	return s + strings.Repeat(" ", width-w)
 }
 
 func stripAnsi(s string) string {
