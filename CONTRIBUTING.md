@@ -1,6 +1,6 @@
-# Contributing to KATES
+# Contributing to Kates
 
-Thank you for your interest in contributing to KATES (Kafka Advanced Testing & Engineering Suite). This guide will help you get started.
+Thank you for your interest in contributing to Kates (Kafka Advanced Testing & Engineering Suite). This guide will help you get started.
 
 ## Table of Contents
 
@@ -245,11 +245,11 @@ All user-facing documentation lives in `kates/docs/` and is structured as a book
 
 ## License
 
-By contributing to KATES, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+By contributing to Kates, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
 
 All new files should include the following header comment where appropriate:
 
 ```
-Copyright 2026 KATES Contributors
+Copyright 2026 Kates Contributors
 SPDX-License-Identifier: Apache-2.0
 ```

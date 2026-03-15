@@ -189,7 +189,7 @@ func Table(headers []string, rows [][]string) {
 
 	var headerLine, sepLine string
 	for i, h := range headers {
-		headerLine += "  " + headerFg.Render(padRight(h, widths[i]))
+		headerLine += "  " + headerFg.Render(PadRight(h, widths[i]))
 	}
 	for i := range headers {
 		sepLine += "  " + sepFg.Render(strings.Repeat("─", widths[i]))
@@ -206,7 +206,7 @@ func Table(headers []string, rows [][]string) {
 			}
 			pure := stripAnsi(cell)
 			upper := strings.ToUpper(pure)
-			padded := padRight(pure, widths[i])
+			padded := PadRight(pure, widths[i])
 
 			var rendered string
 			switch upper {
@@ -408,7 +408,7 @@ func ConfigList(title string, entries []ConfigEntry) {
 
 	for _, e := range entries {
 		key := keyFg.Render(e.Key)
-		paddedKey := padRight(key, maxKey+len(key)-len(e.Key))
+		paddedKey := PadRight(key, maxKey+len(key)-len(e.Key))
 
 		val := e.Value
 		if val == "" {
@@ -425,7 +425,7 @@ func ConfigList(title string, entries []ConfigEntry) {
 	}
 }
 
-func padRight(s string, width int) string {
+func PadRight(s string, width int) string {
 	pure := stripAnsi(s)
 	w := runewidth.StringWidth(pure)
 	if w >= width {

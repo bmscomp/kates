@@ -1,6 +1,6 @@
-# KATES Documentation
+# Kates Documentation
 
-Welcome to the KATES (Kafka Advanced Testing & Engineering Suite) documentation. This book is designed to be read cover-to-cover for a complete understanding of the system, or used as a reference for specific topics.
+Welcome to the Kates (Kafka Advanced Testing & Engineering Suite) documentation. This book is designed to be read cover-to-cover for a complete understanding of the system, or used as a reference for specific topics.
 
 ## Getting Started
 

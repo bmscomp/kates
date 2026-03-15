@@ -1,6 +1,6 @@
 # CLI Reference
 
-The KATES CLI is a terminal-first interface for managing performance tests, diagnosing cluster health, analysing results, and automating workflows. Every command respects the `--context` and `--output` flags and communicates with a single KATES API server.
+The Kates CLI is a terminal-first interface for managing performance tests, diagnosing cluster health, analysing results, and automating workflows. Every command respects the `--context` and `--output` flags and communicates with a single Kates API server.
 
 ## Configuration
 

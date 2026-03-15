@@ -82,8 +82,9 @@ var themeListCmd = &cobra.Command{
 				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Render("■") + " " +
 				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Error)).Render("■")
 
-			label := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.Primary)).Render(name)
-			fmt.Printf("  %-20s %s%s\n", label, swatch,
+			label := output.PadRight(
+				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.Primary)).Render(name), 14)
+			fmt.Printf("  %s %s%s\n", label, swatch,
 				lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(active))
 		}
 		fmt.Println()
