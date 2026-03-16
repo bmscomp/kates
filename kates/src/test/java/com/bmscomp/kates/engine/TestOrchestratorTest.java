@@ -43,7 +43,8 @@ class TestOrchestratorTest {
                 mock(WebhookService.class),
                 mock(Event.class),
                 "native",
-                "localhost:9092");
+                "localhost:9092",
+                3);
     }
 
     /**

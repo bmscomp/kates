@@ -5,7 +5,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Any;
@@ -47,6 +49,8 @@ public class TestOrchestrator {
     private final Event<TestLifecycleEvent> lifecycleEvents;
     private final String defaultBackend;
     private final String bootstrapServers;
+    private final int maxConcurrentTests;
+    private final Semaphore concurrencyGuard;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
     private final Map<String, List<LatencyHeatmapData.HeatmapRow>> heatmapRows = new ConcurrentHashMap<>();
 
@@ -61,7 +65,8 @@ public class TestOrchestrator {
             WebhookService webhookService,
             Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
-            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers) {
+            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
+            @ConfigProperty(name = "kates.engine.max-concurrent-tests", defaultValue = "3") int maxConcurrentTests) {
         this.topicService = topicService;
         this.repository = repository;
         this.backends = backends;
@@ -72,6 +77,8 @@ public class TestOrchestrator {
         this.lifecycleEvents = lifecycleEvents;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
+        this.maxConcurrentTests = maxConcurrentTests;
+        this.concurrencyGuard = new Semaphore(maxConcurrentTests);
     }
 
     @PostConstruct
@@ -102,12 +109,19 @@ public class TestOrchestrator {
             return executeScenario(request);
         }
 
+        if (!concurrencyGuard.tryAcquire()) {
+            return com.bmscomp.kates.util.Result.failure(new BenchmarkException(
+                    "Concurrency limit reached: " + maxConcurrentTests
+                    + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
+        }
+
         TestType type = request.getType();
         TestSpec spec = applyTypeDefaults(type, request.getSpec());
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
+            concurrencyGuard.release();
             return com.bmscomp.kates.util.Result.failure(backendResult.asFailure().orElseThrow());
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
@@ -116,7 +130,13 @@ public class TestOrchestrator {
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
 
-        Thread.startVirtualThread(() -> executeAsync(run, type, spec, backendName, backend));
+        Thread.startVirtualThread(() -> {
+            try {
+                executeAsync(run, type, spec, backendName, backend);
+            } finally {
+                concurrencyGuard.release();
+            }
+        });
 
         return com.bmscomp.kates.util.Result.success(run);
     }
@@ -364,6 +384,64 @@ public class TestOrchestrator {
 
         repository.save(run);
         return run;
+    }
+
+    /**
+     * Returns the number of concurrency permits currently in use.
+     */
+    public int activeTestCount() {
+        return maxConcurrentTests - concurrencyGuard.availablePermits();
+    }
+
+    /**
+     * Returns the configured maximum concurrent test limit.
+     */
+    public int maxConcurrentTests() {
+        return maxConcurrentTests;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (activeHandles.isEmpty()) {
+            return;
+        }
+        LOG.infof("Graceful shutdown: stopping %d active test run(s)", activeHandles.size());
+        for (var entry : activeHandles.entrySet()) {
+            String runId = entry.getKey();
+            List<BenchmarkHandle> handles = entry.getValue();
+            for (BenchmarkHandle handle : handles) {
+                try {
+                    String backendName = defaultBackend;
+                    var backendResult = resolveBackend(backendName);
+                    if (backendResult.isSuccess()) {
+                        backendResult.asSuccess().orElseThrow().stop(handle);
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Shutdown: failed to stop task " + handle.taskId(), e);
+                }
+            }
+            try {
+                var run = repository.findById(runId);
+                if (run.isPresent()) {
+                    TestRun updated = run.get().withStatus(TestResult.TaskStatus.FAILED);
+                    List<TestResult> newResults = new java.util.ArrayList<>();
+                    for (TestResult result : updated.getResults()) {
+                        if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
+                            result = result.withStatus(TestResult.TaskStatus.FAILED)
+                                           .withError("Server shutdown")
+                                           .withEndTime(Instant.now().toString());
+                        }
+                        newResults.add(result);
+                    }
+                    updated = updated.withResults(newResults);
+                    repository.save(updated);
+                    LOG.infof("  Shutdown: marked test %s as FAILED", runId);
+                }
+            } catch (Exception e) {
+                LOG.warn("Shutdown: failed to update test run " + runId, e);
+            }
+        }
+        activeHandles.clear();
     }
 
     public void stopTest(String runId) {
