@@ -20,6 +20,8 @@ import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 
 @ApplicationScoped
 public class ConsumerGroupService {
@@ -33,6 +35,8 @@ public class ConsumerGroupService {
         this.adminService = adminService;
     }
 
+    @Retry(maxRetries = 2, delay = 500)
+    @Timeout(35_000)
     public List<Map<String, Object>> listConsumerGroups() {
         AdminClient client = adminService.getClient();
         try {
@@ -54,6 +58,7 @@ public class ConsumerGroupService {
         }
     }
 
+    @Timeout(35_000)
     public Map<String, Object> describeConsumerGroup(String groupId) {
         AdminClient client = adminService.getClient();
         try {

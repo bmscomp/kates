@@ -21,6 +21,8 @@ import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 @ApplicationScoped
@@ -45,6 +47,11 @@ public class TopicService {
         cachedTopics = null;
     }
 
+    @Retry(maxRetries = 3, delay = 1000, abortOn = {
+            org.apache.kafka.common.errors.TopicExistsException.class,
+            IllegalArgumentException.class
+    })
+    @Timeout(35_000)
     public void createTopic(String name, int partitions, int replicationFactor, Map<String, String> configs) {
         AdminClient client = adminService.getClient();
         try {
@@ -65,6 +72,7 @@ public class TopicService {
         }
     }
 
+    @Timeout(35_000)
     public void deleteTopic(String name) {
         AdminClient client = adminService.getClient();
         try {
@@ -75,6 +83,7 @@ public class TopicService {
         }
     }
 
+    @Timeout(35_000)
     public void alterTopicConfig(String name, Map<String, String> configs) {
         AdminClient client = adminService.getClient();
         try {
@@ -91,6 +100,8 @@ public class TopicService {
         }
     }
 
+    @Retry(maxRetries = 2, delay = 500)
+    @Timeout(35_000)
     public Set<String> listTopics() {
         if (cachedTopics != null && System.currentTimeMillis() < topicsCacheExpiry) {
             return cachedTopics;
@@ -107,6 +118,8 @@ public class TopicService {
         }
     }
 
+    @Retry(maxRetries = 2, delay = 500)
+    @Timeout(35_000)
     public Map<String, TopicDescription> describeTopics(Collection<String> topicNames) {
         AdminClient client = adminService.getClient();
         try {
@@ -116,6 +129,7 @@ public class TopicService {
         }
     }
 
+    @Timeout(35_000)
     public Map<String, Object> describeTopicDetail(String topicName) {
         AdminClient client = adminService.getClient();
         try {

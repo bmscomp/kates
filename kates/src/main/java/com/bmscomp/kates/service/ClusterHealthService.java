@@ -24,6 +24,8 @@ import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.report.ClusterSnapshot;
@@ -58,6 +60,8 @@ public class ClusterHealthService {
         cachedHealthCheck = null;
     }
 
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(35_000)
     public Map<String, Object> describeCluster() {
         if (cachedClusterInfo != null && System.currentTimeMillis() < clusterCacheExpiry) {
             return cachedClusterInfo;
@@ -81,6 +85,7 @@ public class ClusterHealthService {
         }
     }
 
+    @Timeout(10_000)
     public boolean isReachable() {
         AdminClient client = adminService.getClient();
         try {
@@ -111,6 +116,7 @@ public class ClusterHealthService {
         return map;
     }
 
+    @Timeout(35_000)
     public List<Map<String, Object>> describeBrokerConfigs(int brokerId) {
         AdminClient client = adminService.getClient();
         try {
@@ -141,6 +147,7 @@ public class ClusterHealthService {
         }
     }
 
+    @Timeout(35_000)
     public ClusterSnapshot captureSnapshot(String topicName) {
         AdminClient client = adminService.getClient();
         try {
@@ -179,6 +186,8 @@ public class ClusterHealthService {
         }
     }
 
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(60_000)
     public Map<String, Object> clusterHealthCheck() {
         if (cachedHealthCheck != null && System.currentTimeMillis() < healthCacheExpiry) {
             return cachedHealthCheck;
