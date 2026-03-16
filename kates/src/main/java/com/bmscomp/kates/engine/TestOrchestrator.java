@@ -451,7 +451,7 @@ public class TestOrchestrator {
                         new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends())));
     }
 
-    private List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
+    List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
         String topic = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
 
         Map<String, String> producerConfig = Map.of(
