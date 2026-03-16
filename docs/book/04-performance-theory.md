@@ -122,6 +122,9 @@ In Kafka, tail latency is caused by:
 - **Log roll** — the broker creates a new log segment, causing I/O spikes
 - **Controller elections** — KRaft metadata operations can cause brief pauses
 
+> [!TIP]
+> GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** (`-XX:+UseZGC -XX:+ZGenerational`) reduces GC pauses to under 1ms regardless of heap size. Kates deploys with ZGC by default — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning) for details.
+
 ## Coordinated Omission
 
 One of the most insidious measurement errors in load testing is **coordinated omission**. It occurs when your measurement tool slows down along with the system, causing it to miss the worst-case latencies.

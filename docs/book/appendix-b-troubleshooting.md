@@ -30,6 +30,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | P99 latency regression between test runs | Partition hotspot, GC pauses, or ISR changes | [Ch 14 Recipe 4](14-recipes.md#recipe-4-investigate-a-latency-regression) |
 | Bimodal latency distribution in heatmap | Some requests hitting page cache, others going to disk | [Ch 4](04-performance-theory.md#heatmaps-seeing-the-full-picture) |
 | Artificially low latency measurements | Coordinated omission — tool slows down with the system | [Ch 4](04-performance-theory.md#coordinated-omission) |
+| Stress test results vary wildly between identical runs | JVM warmup (JIT), GC pauses, small sample size — increase records to 500K+, use ZGC, discard first 2–3 warmup iterations | [Ch 4](04-performance-theory.md#the-long-tail-problem), [Ch 12](12-deployment.md#jvm-tuning) |
 | `KafkaRequestHandlerSaturated` alert | Request handlers over 70% busy — add threads or brokers | [Ch 15](15-kafka-deployment.md#prometheus-alerts) |
 | `KafkaLogFlushLatencyHigh` alert | Disk I/O saturated — check storage class and disk utilization | [Ch 15](15-kafka-deployment.md#prometheus-alerts) |
 
@@ -41,6 +42,13 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Kafka pods stuck in `Pending` | StorageClass not created or no available nodes in the zone | [Ch 12](12-deployment.md#kafka-pods-not-starting) |
 | PDB blocks rolling restart | Only 1 pod can be unavailable — intentional safety behavior | [Ch 18](18-upgrade-playbook.md#common-upgrade-issues) |
 | Entity Operator never starts | Kafka CR hasn't reached `Ready` — check operator logs for `UnforceableProblem` | [Ch 15](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
+
+## CLI Issues
+
+| Symptom | Likely Cause | Chapter |
+|---------|-------------|---------|
+| `kates health` killed immediately (exit 137) on macOS | macOS blocks unsigned binary — `com.apple.provenance` xattr | [Ch 12](12-deployment.md#cli-binary-killed-on-macos) |
+| CLI connection timeout / connection refused | Backend not running or port-forward died | [Ch 12](12-deployment.md#kates-cant-connect-to-kafka) |
 
 ## Chaos Engineering
 

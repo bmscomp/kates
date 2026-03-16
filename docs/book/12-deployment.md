@@ -121,6 +121,43 @@ make kates-deploy    # Apply K8s manifests
 make kates-native
 ```
 
+### Kates Application Configuration
+
+#### Fault Tolerance Timeouts
+
+All `@Timeout` annotations in Kates services are externally configurable via MicroProfile Fault Tolerance properties. The defaults are set in `application.properties` and overridable at deploy time through the ConfigMap.
+
+Pattern: `<fully.qualified.class>/<method>/Timeout/value=<millis>`
+
+```properties
+# Example: increase describeTopicDetail timeout to 60 seconds
+com.bmscomp.kates.service.TopicService/describeTopicDetail/Timeout/value=60000
+```
+
+In `k8s/configmap.yaml` the equivalent env var is:
+
+```yaml
+COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_DESCRIBETOPICDETAIL_TIMEOUT_VALUE: "60000"
+```
+
+All 13 annotated methods across `TopicService`, `ClusterHealthService`, and `ConsumerGroupService` have corresponding entries in both files.
+
+#### JVM Tuning
+
+The deployment uses **ZGC** (Z Garbage Collector) for sub-millisecond GC pauses, which prevents throughput dips during stress tests:
+
+```yaml
+# k8s/deployment.yaml
+- name: JAVA_TOOL_OPTIONS
+  value: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
+```
+
+| GC | Max Pause | Best For |
+|----|:-:|----------|
+| G1 (default) | ~10–200ms | General workloads |
+| ZGC | < 1ms | Latency-sensitive benchmarking |
+| Shenandoah | < 1ms | Alternative low-pause GC |
+
 ### Kates CLI
 
 ```bash
@@ -133,6 +170,9 @@ make cli-build
 # Cleanup build artifacts
 make cli-clean
 ```
+
+> [!NOTE]
+> **macOS:** `make cli-install` automatically strips provenance/quarantine extended attributes and ad-hoc codesigns the binary. See [Chapter 10: CLI Reference](10-cli-reference.md#installation) for manual install instructions.
 
 ## Access Points
 
@@ -352,6 +392,20 @@ kubectl logs -f deployment/strimzi-cluster-operator -n kafka
 
 # Check Kafka pod events
 kubectl describe pod pool-alpha-0 -n kafka
+```
+
+### CLI Binary Killed on macOS
+
+If `kates health` is immediately killed (exit code 137), macOS is blocking the unsigned binary:
+
+```bash
+# Fix: reinstall with codesigning
+make cli-install
+
+# Or manually
+sudo xattr -dr com.apple.provenance /usr/local/bin/kates
+sudo xattr -dr com.apple.quarantine /usr/local/bin/kates
+sudo codesign -f -s - /usr/local/bin/kates
 ```
 
 ### Kates Can't Connect to Kafka

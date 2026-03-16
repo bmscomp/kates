@@ -13,6 +13,14 @@ make cli-build
 # Binaries in cli/dist/ for macOS (amd64/arm64) and Linux (amd64/arm64)
 ```
 
+> [!NOTE]
+> **macOS:** `make cli-install` automatically strips `com.apple.provenance` / `com.apple.quarantine` extended attributes and ad-hoc codesigns the binary. If you install manually (e.g. `cp` instead of `make`), the kernel may SIGKILL the binary. Fix with:
+> ```bash
+> sudo xattr -dr com.apple.provenance /usr/local/bin/kates
+> sudo xattr -dr com.apple.quarantine /usr/local/bin/kates
+> sudo codesign -f -s - /usr/local/bin/kates
+> ```
+
 ## Configuration
 
 Kates CLI uses a config file at `~/.kates.yaml` for managing server contexts.
