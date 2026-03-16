@@ -209,7 +209,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, task.getConsumerGroup());
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
         securityConfig.apply(props);
         task.getConsumerConfig().forEach(props::put);
