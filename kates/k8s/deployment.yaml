@@ -36,7 +36,7 @@ spec:
               name: kates-backend
               key: password
         - name: JAVA_TOOL_OPTIONS
-          value: "-Xms512m -Xmx2560m"
+          value: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
         resources:
           requests:
             memory: "2Gi"

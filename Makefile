@@ -205,6 +205,9 @@ cli-install:
 	cd cli && go build -ldflags="-s -w" -o dist/kates .
 	@echo "📦 Installing to /usr/local/bin/kates..."
 	sudo cp cli/dist/kates /usr/local/bin/kates
+	sudo xattr -dr com.apple.provenance /usr/local/bin/kates 2>/dev/null || true
+	sudo xattr -dr com.apple.quarantine /usr/local/bin/kates 2>/dev/null || true
+	sudo codesign -f -s - /usr/local/bin/kates
 	@echo "✅ Installed: $$(kates version 2>/dev/null || echo '/usr/local/bin/kates')"
 
 cli-clean:
