@@ -29,6 +29,7 @@ type labIteration struct {
 	TestID     string
 	Delta      string
 	Params     map[string]string
+	Warmup     bool
 }
 
 type labView int
@@ -100,6 +101,13 @@ type LabModel struct {
 
 	sweepParam  int
 	sweepActive bool
+
+	warmupCount     int
+	warmupRemaining int
+
+	medianActive    bool
+	medianRemaining int
+	medianResults   []labIteration
 
 	lastError   error
 	lastTestReq *client.CreateTestRequest
@@ -226,6 +234,9 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = labHistory
 				return m, nil
 			}
+			if m.warmupCount > 0 && m.warmupRemaining == 0 {
+				m.warmupRemaining = m.warmupCount
+			}
 			m.running = true
 			m.elapsed = 0
 			m.liveRecords = 0
@@ -235,7 +246,11 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ctx, cancel := context.WithCancel(context.Background())
 			m.cancelCtx = ctx
 			m.cancelFn = cancel
-			m.status = filterActiveStyle.Render("⏳ Running iteration #" + fmt.Sprintf("%d", len(m.iterations)+1) + "…")
+			if m.warmupRemaining > 0 {
+				m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup %d/%d…", m.warmupCount-m.warmupRemaining+1, m.warmupCount))
+			} else {
+				m.status = filterActiveStyle.Render("⏳ Running iteration #" + fmt.Sprintf("%d", len(m.iterations)+1) + "…")
+			}
 			return m, tea.Batch(m.runTest(), m.tickElapsed())
 		case "d":
 			if len(m.iterations) >= 2 {
@@ -257,6 +272,35 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.sweepActive {
 				m.startSweep()
 				return m, nil
+			}
+		case "W":
+			if !m.running {
+				m.warmupCount++
+				if m.warmupCount > 5 {
+					m.warmupCount = 0
+				}
+				if m.warmupCount == 0 {
+					m.status = dimStyle.Render("Warmup: off")
+				} else {
+					m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup: %d iteration(s) before measuring", m.warmupCount))
+				}
+			}
+		case "m":
+			if !m.running && !m.medianActive {
+				m.medianActive = true
+				m.medianRemaining = 3
+				m.medianResults = nil
+				m.running = true
+				m.elapsed = 0
+				m.liveRecords = 0
+				m.liveThroughput = 0
+				m.liveLatency = 0
+				m.lastError = nil
+				ctx, cancel := context.WithCancel(context.Background())
+				m.cancelCtx = ctx
+				m.cancelFn = cancel
+				m.status = filterActiveStyle.Render("📊 Median mode: running 1/3…")
+				return m, tea.Batch(m.runTest(), m.tickElapsed())
 			}
 		case "e":
 			if len(m.iterations) > 0 {
@@ -298,9 +342,54 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sweepActive {
 				m.sweepActive = false
 			}
+			m.warmupRemaining = 0
+			m.medianActive = false
 			return m, nil
 		}
 		iter := m.buildIteration(msg.run)
+
+		// Warmup: discard this iteration silently
+		if m.warmupRemaining > 0 {
+			m.warmupRemaining--
+			if m.warmupRemaining > 0 {
+				m.running = true
+				m.elapsed = 0
+				ctx, cancel := context.WithCancel(context.Background())
+				m.cancelCtx = ctx
+				m.cancelFn = cancel
+				m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup %d/%d…", m.warmupCount-m.warmupRemaining+1, m.warmupCount))
+				return m, tea.Batch(m.runTest(), m.tickElapsed())
+			}
+			// Last warmup done — now run the real iteration
+			m.running = true
+			m.elapsed = 0
+			ctx, cancel := context.WithCancel(context.Background())
+			m.cancelCtx = ctx
+			m.cancelFn = cancel
+			m.status = filterActiveStyle.Render("⏳ Running measured iteration…")
+			return m, tea.Batch(m.runTest(), m.tickElapsed())
+		}
+
+		// Median mode: collect 3 runs, report median
+		if m.medianActive {
+			m.medianResults = append(m.medianResults, iter)
+			m.medianRemaining--
+			if m.medianRemaining > 0 {
+				m.running = true
+				m.elapsed = 0
+				ctx, cancel := context.WithCancel(context.Background())
+				m.cancelCtx = ctx
+				m.cancelFn = cancel
+				m.status = filterActiveStyle.Render(fmt.Sprintf("📊 Median mode: running %d/3…", 3-m.medianRemaining+1))
+				return m, tea.Batch(m.runTest(), m.tickElapsed())
+			}
+			// All 3 done — pick the median by throughput
+			median := m.computeMedianIteration()
+			m.medianActive = false
+			m.medianResults = nil
+			iter = median
+		}
+
 		m.iterations = append(m.iterations, iter)
 		m.status = healthyStyle.Render(fmt.Sprintf(
 			"✓ #%d — %s rec/s, p99=%sms",
@@ -391,7 +480,7 @@ func (m LabModel) helpKeys() []string {
 	if len(m.iterations) >= 2 {
 		keys = append(keys, "c compare")
 	}
-	keys = append(keys, "s sweep", "e export", "w save", "L load")
+	keys = append(keys, "s sweep", "m median", "W warmup", "e export", "w save", "L load")
 	if m.lastError != nil {
 		keys = append(keys, "r retry")
 	}
@@ -814,6 +903,34 @@ func (m *LabModel) buildIteration(run *client.TestRun) labIteration {
 		}
 	}
 	return iter
+}
+
+func (m *LabModel) computeMedianIteration() labIteration {
+	// Sort by throughput and pick the middle element
+	results := make([]labIteration, len(m.medianResults))
+	copy(results, m.medianResults)
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].Throughput < results[i].Throughput {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+	median := results[len(results)/2]
+	median.Number = len(m.iterations) + 1
+	median.Delta = ""
+	if len(m.iterations) > 0 {
+		prev := m.iterations[len(m.iterations)-1]
+		if prev.Throughput > 0 {
+			pct := ((median.Throughput - prev.Throughput) / prev.Throughput) * 100
+			if pct > 0 {
+				median.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
+			} else if pct < 0 {
+				median.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
+			}
+		}
+	}
+	return median
 }
 
 func (m *LabModel) applyNextPreset() {
