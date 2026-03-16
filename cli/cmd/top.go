@@ -117,6 +117,6 @@ var topCmd = &cobra.Command{
 }
 
 func init() {
-	topCmd.Flags().IntVar(&topInterval, "interval", 3, "Refresh interval in seconds")
+	topCmd.Flags().IntVar(&topInterval, "interval", 2, "Refresh interval in seconds")
 	rootCmd.AddCommand(topCmd)
 }

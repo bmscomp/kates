@@ -28,9 +28,9 @@ Lab splits the terminal into two panes:
 │    Producers     [4]     │                              │
 │    Records       [50000] │  #   Throughput  P99    Δ    │
 │    Record Size   [512]   │  ──────────────────────────  │
-│    Acks          [all]   │  1   45.2K rec/s 12ms   —   │
-│    Compression   [lz4]   │  2   52.1K rec/s  8ms  ▲15% │
-│    Batch Size    [16384] │  3   48.7K rec/s 11ms  ▼7%  │
+│    Acks          [all]   │  1   45.2K rec/s 12ms   —    │
+│    Compression   [lz4]   │  2   52.1K rec/s  8ms  ▲15%  │
+│    Batch Size    [16384] │  3   48.7K rec/s 11ms  ▼7%   │
 │    Linger ms     [0]     │                              │
 │    Partitions    [6]     │  Throughput: ▃▇▅             │
 │    Replication   [3]     │  P99 ms:     ▅▂▄             │
@@ -42,8 +42,8 @@ Lab splits the terminal into two panes:
 │                          │  10-50 █                4%   │
 │                          │  50+ms ▏                1%   │
 ├──────────────────────────┴──────────────────────────────┤
-│  ✓ #3 — 48.7K rec/s, p99=11.00ms  (23s)                │
-│  ↑↓ navigate  ←→ change  Enter run  p preset  d diff   │
+│  ✓ #3 — 48.7K rec/s, p99=11.00ms  (23s)                 │
+│  ↑↓ navigate  ←→ change  Enter run  p preset  d diff    │
 └─────────────────────────────────────────────────────────┘
 ```
 
