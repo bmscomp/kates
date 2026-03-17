@@ -121,13 +121,9 @@ var kafkaTopicsCmd = &cobra.Command{
 			if ur != "0" && ur != "<nil>" {
 				isrHealth = warnBadge("⚠ " + ur + " under-replicated")
 			}
-			internalLabel := ""
-			if t.Internal {
-				internalLabel = dimStyle.Render("(internal)")
-			}
 			rows = append(rows, []string{
 				t.Name,
-				internalLabel,
+				topicTypeLabel(t.Name, t.Internal),
 				fmt.Sprintf("%d", t.Partitions),
 				fmt.Sprintf("%d", t.ReplicationFactor),
 				isrHealth,
@@ -590,6 +586,23 @@ func healthyBadge(s string) string {
 
 func warnBadge(s string) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(s)
+}
+
+func topicTypeLabel(name string, internal bool) string {
+	if internal {
+		return dimStyle.Render("internal")
+	}
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, "-test"):
+		return output.AccentStyle.Render("test")
+	case strings.HasPrefix(lower, "kates-"):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("system")
+	case strings.HasPrefix(lower, "strimzi."):
+		return dimStyle.Render("strimzi")
+	default:
+		return ""
+	}
 }
 
 func errorBadge(s string) string {
