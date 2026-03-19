@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -262,9 +262,50 @@ kates-undeploy:
 	kubectl delete namespace kates --ignore-not-found
 	@echo "✅ Kates removed"
 
+CLUSTER_NAME   ?= panda
+KATES_NS       ?= kates
+KATES_IMAGE    ?= kates:latest
 CHART_REGISTRY ?= oci://ghcr.io/klster/charts
 CHART_DIR      := charts/kates
 CHART_VERSION  := $(shell grep '^version:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}')
+kates-helm:
+	@echo "🚀 Installing Kates via Helm chart..."
+	@echo ""
+	@echo "Step 1: Ensuring namespace exists..."
+	@kubectl create namespace $(KATES_NS) 2>/dev/null || true
+	@echo ""
+	@echo "Step 2: Copying Kafka SASL credentials..."
+	@kubectl get secret kates-backend -n kafka -o json \
+		| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
+		| kubectl apply -n $(KATES_NS) -f -
+	@echo ""
+	@echo "Step 3: Ensuring image is loaded into Kind..."
+	@if docker image inspect $(KATES_IMAGE) >/dev/null 2>&1; then \
+		kind load docker-image $(KATES_IMAGE) --name $(CLUSTER_NAME) 2>/dev/null || true; \
+		echo "✅ Image $(KATES_IMAGE) loaded"; \
+	else \
+		echo "⚠️  Image $(KATES_IMAGE) not found locally — will use existing image in cluster"; \
+	fi
+	@echo ""
+	@echo "Step 4: Installing/upgrading Helm release..."
+	helm upgrade --install kates $(CHART_DIR) \
+		--namespace $(KATES_NS) \
+		--wait --timeout 300s
+	@echo ""
+	@echo "✅ Kates deployed via Helm!"
+	@echo ""
+	@echo "  Access the API:"
+	@echo "    kubectl port-forward svc/kates 8080:8080 -n $(KATES_NS)"
+	@echo "    curl http://localhost:8080/api/health"
+	@echo ""
+	@echo "  Run Helm tests:"
+	@echo "    helm test kates -n $(KATES_NS)"
+
+kates-helm-undeploy:
+	@echo "🗑️  Removing Kates (Helm release)..."
+	helm uninstall kates -n $(KATES_NS) 2>/dev/null || true
+	kubectl delete namespace $(KATES_NS) --ignore-not-found
+	@echo "✅ Kates Helm release removed"
 
 chart-lint:
 	@echo "🔍 Linting Kates chart..."
@@ -434,7 +475,13 @@ help:
 	@echo "  kates-logs       - Stream Kates logs"
 	@echo "  kates-undeploy   - Remove Kates namespace"
 	@echo ""
-	@echo "  Performance Tests"
+	@echo "  Kates Application (Helm chart)"
+	@echo "  kates-helm       - Install/upgrade Kates via Helm (one command)"
+	@echo "  kates-helm-undeploy - Remove Kates Helm release"
+	@echo "  chart-lint       - Lint the Helm chart"
+	@echo "  chart-package    - Package the Helm chart"
+	@echo "  chart-push       - Push the chart to OCI registry"
+	@echo ""
 	@echo "  test             - Run baseline 1M-message perf test"
 	@echo "  test-load        - Run load test (concurrent producers/consumers)"
 	@echo "  test-stress      - Run stress test (ramp to breaking point)"

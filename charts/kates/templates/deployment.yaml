@@ -24,6 +24,7 @@ spec:
         {{- end }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -65,10 +66,10 @@ spec:
           {{- toYaml . | nindent 10 }}
         {{- end }}
         ports:
-        - containerPort: 8080
+        - containerPort: {{ .Values.service.port }}
           name: http
           protocol: TCP
-        - containerPort: 9000
+        - containerPort: {{ .Values.grpc.port }}
           name: grpc
           protocol: TCP
         envFrom:
@@ -104,12 +105,22 @@ spec:
         {{- if .Values.kafka.ssl.enabled }}
         {{- if .Values.kafka.ssl.truststore.password }}
         - name: KATES_KAFKA_SSL_TRUSTSTORE_PASSWORD
-          value: {{ .Values.kafka.ssl.truststore.password | quote }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kates.fullname" . }}-kafka-ssl
+              key: truststore-password
         {{- end }}
         {{- if .Values.kafka.ssl.keystore.password }}
         - name: KATES_KAFKA_SSL_KEYSTORE_PASSWORD
-          value: {{ .Values.kafka.ssl.keystore.password | quote }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kates.fullname" . }}-kafka-ssl
+              key: keystore-password
         {{- end }}
+        {{- end }}
+        {{- if .Values.jvm.options }}
+        - name: JAVA_TOOL_OPTIONS
+          value: {{ .Values.jvm.options | quote }}
         {{- end }}
         {{- with .Values.extraEnv }}
           {{- toYaml . | nindent 8 }}
@@ -135,19 +146,19 @@ spec:
         startupProbe:
           httpGet:
             path: {{ .Values.probes.startup.path | default "/q/health/started" }}
-            port: 8080
+            port: http
           failureThreshold: {{ .Values.probes.startup.failureThreshold | default 30 }}
           periodSeconds: {{ .Values.probes.startup.periodSeconds | default 2 }}
         readinessProbe:
           httpGet:
             path: {{ .Values.probes.readiness.path | default "/api/health" }}
-            port: 8080
+            port: http
           initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 5 }}
           periodSeconds: {{ .Values.probes.readiness.periodSeconds | default 10 }}
         livenessProbe:
           httpGet:
             path: {{ .Values.probes.liveness.path | default "/q/health/live" }}
-            port: 8080
+            port: http
           initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 15 }}
           periodSeconds: {{ .Values.probes.liveness.periodSeconds | default 30 }}
         lifecycle:

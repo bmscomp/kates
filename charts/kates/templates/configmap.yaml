@@ -37,6 +37,8 @@ data:
   {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
   QUARKUS_DATASOURCE_DB_KIND: "postgresql"
   QUARKUS_DATASOURCE_JDBC_URL: {{ include "kates.postgresql.jdbcUrl" . | quote }}
+  QUARKUS_DATASOURCE_JDBC_MAX_SIZE: {{ .Values.postgresql.connectionPool.maxSize | default "20" | quote }}
+  QUARKUS_DATASOURCE_JDBC_MIN_SIZE: {{ .Values.postgresql.connectionPool.minSize | default "5" | quote }}
   QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: "none"
   QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
   QUARKUS_FLYWAY_BASELINE_ON_MIGRATE: "true"
@@ -55,6 +57,15 @@ data:
   KATES_DEFAULTS_DURATION_MS: {{ .Values.defaults.durationMs | quote }}
   KATES_DEFAULTS_NUM_PRODUCERS: {{ .Values.defaults.numProducers | quote }}
   KATES_DEFAULTS_NUM_CONSUMERS: {{ .Values.defaults.numConsumers | quote }}
+
+  {{- with .Values.tests.load }}
+  KATES_TESTS_LOAD_PARTITIONS: {{ .partitions | quote }}
+  KATES_TESTS_LOAD_BATCH_SIZE: {{ .batchSize | quote }}
+  KATES_TESTS_LOAD_LINGER_MS: {{ .lingerMs | quote }}
+  KATES_TESTS_LOAD_NUM_RECORDS: {{ .numRecords | quote }}
+  KATES_TESTS_LOAD_DURATION_MS: {{ .durationMs | quote }}
+  KATES_TESTS_LOAD_NUM_PRODUCERS: {{ .numProducers | quote }}
+  {{- end }}
 
   {{- with .Values.tests.stress }}
   KATES_TESTS_STRESS_PARTITIONS: {{ .partitions | quote }}
@@ -103,4 +114,20 @@ data:
   KATES_TESTS_ROUNDTRIP_COMPRESSION_TYPE: {{ .compressionType | quote }}
   KATES_TESTS_ROUNDTRIP_NUM_RECORDS: {{ .numRecords | quote }}
   KATES_TESTS_ROUNDTRIP_THROUGHPUT: {{ .throughput | quote }}
+  {{- end }}
+
+  {{- with .Values.faultTolerance }}
+  COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_CREATETOPIC_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_DELETETOPIC_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_ALTERTOPICCONFIG_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_LISTTOPICS_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_DESCRIBETOPICS_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_DESCRIBETOPICDETAIL_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CLUSTERHEALTHSERVICE_DESCRIBECLUSTER_TIMEOUT_VALUE: {{ .clusterHealthService.defaultTimeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CLUSTERHEALTHSERVICE_ISREACHABLE_TIMEOUT_VALUE: {{ .clusterHealthService.reachableTimeoutMs | default "10000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CLUSTERHEALTHSERVICE_DESCRIBEBROKERCONFIGS_TIMEOUT_VALUE: {{ .clusterHealthService.defaultTimeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CLUSTERHEALTHSERVICE_CAPTURESNAPSHOT_TIMEOUT_VALUE: {{ .clusterHealthService.defaultTimeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CLUSTERHEALTHSERVICE_CLUSTERHEALTHCHECK_TIMEOUT_VALUE: {{ .clusterHealthService.healthCheckTimeoutMs | default "60000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CONSUMERGROUPSERVICE_LISTCONSUMERGROUPS_TIMEOUT_VALUE: {{ .consumerGroupService.timeoutMs | default "35000" | quote }}
+  COM_BMSCOMP_KATES_SERVICE_CONSUMERGROUPSERVICE_DESCRIBECONSUMERGROUP_TIMEOUT_VALUE: {{ .consumerGroupService.timeoutMs | default "35000" | quote }}
   {{- end }}

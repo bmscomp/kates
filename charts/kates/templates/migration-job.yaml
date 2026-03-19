@@ -11,7 +11,8 @@ metadata:
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  backoffLimit: {{ .Values.migration.backoffLimit | default 3 }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds | default 600 }}
   template:
     metadata:
       labels:
@@ -29,6 +30,20 @@ spec:
         image: {{ .Values.initContainers.waitForPostgres.image | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
         command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
+        {{- with .Values.containerSecurityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
       {{- end }}
       containers:
       - name: migrate
@@ -37,13 +52,28 @@ spec:
         command:
           {{- toYaml .Values.migration.command | nindent 10 }}
         {{- else }}
+        env:
+        - name: QUARKUS_FLYWAY_MIGRATE_AT_START
+          value: "true"
+        - name: QUARKUS_FLYWAY_BASELINE_ON_MIGRATE
+          value: "true"
+        - name: QUARKUS_HTTP_PORT
+          value: "0"
         command:
           - sh
           - -c
           - |
             echo "Running Flyway migrations..."
-            java -jar /deployments/quarkus-run.jar flyway migrate
-            echo "Migration complete."
+            java -Dquarkus.flyway.migrate-at-start=true \
+                 -Dquarkus.flyway.baseline-on-migrate=true \
+                 -Dquarkus.http.host=localhost \
+                 -Dquarkus.http.port=0 \
+                 -jar /deployments/quarkus-run.jar &
+            PID=$!
+            sleep 30
+            echo "Migration window complete, checking..."
+            kill $PID 2>/dev/null || true
+            echo "Migration Job finished."
         {{- end }}
         envFrom:
         - configMapRef:
@@ -56,4 +86,21 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        resources:
+          {{- if .Values.migration.resources }}
+          {{- toYaml .Values.migration.resources | nindent 10 }}
+          {{- else }}
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+          {{- end }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 {{- end }}

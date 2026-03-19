@@ -27,6 +27,17 @@ spec:
           containers:
           - name: cleanup
             image: {{ .Values.cleanup.image | quote }}
+            {{- with .Values.containerSecurityContext }}
+            securityContext:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            resources:
+              requests:
+                memory: "32Mi"
+                cpu: "25m"
+              limits:
+                memory: "64Mi"
+                cpu: "100m"
             command:
               - sh
               - -c
@@ -46,4 +57,10 @@ spec:
                   curl -s -X DELETE "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests/$ID"
                 done
                 echo "Cleanup complete."
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          volumes:
+          - name: tmp
+            emptyDir: {}
 {{- end }}

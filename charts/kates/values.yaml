@@ -1,53 +1,101 @@
+# -- Number of KATES replicas
 replicaCount: 1
 
+# -- Container image configuration
 image:
+  # -- Image repository
   repository: kates
+  # -- Image tag
   tag: latest
+  # -- Image pull policy
   pullPolicy: IfNotPresent
 
+# -- Secrets for pulling images from private registries
 imagePullSecrets: []
+# -- Override the chart name
 nameOverride: ""
+# -- Override the full release name
 fullnameOverride: ""
 
+# -- Service account configuration
 serviceAccount:
+  # -- Create a ServiceAccount
   create: true
+  # -- ServiceAccount name (auto-generated if empty)
   name: ""
+  # -- Extra annotations for the ServiceAccount
   annotations: {}
+  # -- Automount the service account token
   automount: true
 
+# -- RBAC configuration
 rbac:
+  # -- Create ClusterRole and ClusterRoleBinding
   create: true
+  # -- Extra RBAC rules (e.g. for Litmus Chaos integration)
   extraRules: []
 
+# -- Extra annotations to add to pods
 podAnnotations: {}
+# -- Extra labels to add to pods
 podLabels: {}
 
+# -- Kubernetes Service configuration
 service:
+  # -- Service type
   type: ClusterIP
+  # -- HTTP service port
   port: 8080
+  # -- NodePort value (only when type=NodePort)
   nodePort: ""
+  # -- Application protocol hint for service mesh
   appProtocol: http
+  # -- Extra annotations for the Service
   annotations: {}
 
+# -- gRPC port configuration
 grpc:
+  # -- gRPC container/service port
   port: 9000
+  # -- gRPC NodePort value (only when type=NodePort)
   nodePort: ""
 
+# -- Ingress configuration
 ingress:
+  # -- Enable Ingress
   enabled: false
+  # -- Ingress class name (e.g. nginx)
   className: ""
+  # -- Extra Ingress annotations
   annotations: {}
+  # -- cert-manager integration
   certManager:
+    # -- Enable cert-manager annotations
     enabled: false
+    # -- Issuer or ClusterIssuer name
     issuerName: ""
+    # -- Issuer kind (ClusterIssuer or Issuer)
     issuerKind: ClusterIssuer
+  # -- Ingress hosts
   hosts:
     - host: kates.local
       paths:
         - path: /
           pathType: Prefix
+  # -- TLS configuration
   tls: []
+  # -- gRPC Ingress (separate Ingress resource for gRPC traffic)
+  grpc:
+    # -- Enable gRPC Ingress
+    enabled: false
+    # -- gRPC Ingress hostname
+    host: grpc.kates.local
+    # -- Extra gRPC Ingress annotations
+    annotations: {}
+    # -- gRPC TLS configuration
+    tls: []
 
+# -- Resource requests and limits for the KATES container
 resources:
   requests:
     memory: "256Mi"
@@ -56,33 +104,54 @@ resources:
     memory: "512Mi"
     cpu: "500m"
 
+# -- JVM configuration
+jvm:
+  # -- JVM options passed via JAVA_TOOL_OPTIONS (e.g. "-Xms512m -Xmx2560m -XX:+UseZGC")
+  options: ""
+
+# -- Pod-level security context (PSS restricted compliant)
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
   fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
+# -- Container-level security context
 containerSecurityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
+  seccompProfile:
+    type: RuntimeDefault
   capabilities:
     drop:
       - ALL
 
+# -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
 
+# -- Deployment update strategy
 strategy:
   type: RollingUpdate
   rollingUpdate:
     maxSurge: 1
     maxUnavailable: 0
 
+# -- Horizontal Pod Autoscaler configuration
 autoscaling:
+  # -- Enable HPA
   enabled: false
+  # -- Minimum replicas
   minReplicas: 1
+  # -- Maximum replicas
   maxReplicas: 5
+  # -- Target CPU utilization percentage
   targetCPUUtilizationPercentage: 80
+  # -- Target memory utilization percentage (empty to disable)
   targetMemoryUtilizationPercentage: ""
+  # -- Custom metrics for HPA
   customMetrics: []
+  # -- Scale behavior policies
   behavior:
     scaleDown:
       stabilizationWindowSeconds: 300
@@ -97,79 +166,148 @@ autoscaling:
           value: 2
           periodSeconds: 60
 
+# -- Pod Disruption Budget configuration
 podDisruptionBudget:
+  # -- Enable PDB
   enabled: false
+  # -- Minimum available pods (overrides maxUnavailable)
   minAvailable: ""
+  # -- Maximum unavailable pods
   maxUnavailable: 1
+  # -- Unhealthy pod eviction policy
   unhealthyPodEvictionPolicy: IfHealthy
 
+# -- Topology spread constraints for pod scheduling
 topologySpreadConstraints: []
 
+# -- Node selector for pod scheduling
 nodeSelector: {}
+# -- Tolerations for pod scheduling
 tolerations: []
-affinity: {}
+# -- Affinity rules (includes default pod anti-affinity for HA)
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - kates
+          topologyKey: kubernetes.io/hostname
 
+# -- Extra environment variables for the KATES container
 extraEnv: []
+# -- Extra volumes
 extraVolumes: []
+# -- Extra volume mounts
 extraVolumeMounts: []
 
+# -- Health probe configuration
 probes:
+  # -- Startup probe (gates readiness/liveness probes)
   startup:
     path: /q/health/started
     failureThreshold: 30
     periodSeconds: 2
+  # -- Readiness probe
   readiness:
     path: /api/health
     initialDelaySeconds: 5
     periodSeconds: 10
+  # -- Liveness probe
   liveness:
     path: /q/health/live
     initialDelaySeconds: 15
     periodSeconds: 30
 
+# -- Container lifecycle hooks
 lifecycle:
+  # -- Seconds to sleep in preStop hook (allows LB drain)
   preStopSleepSeconds: 5
 
+# -- Init container configuration
 initContainers:
+  # -- Busybox image for wait-for-postgres init container
   waitForPostgres:
     image: busybox:1.36
     pullPolicy: IfNotPresent
 
+# -- Kafka connection configuration
 kafka:
+  # -- Kafka bootstrap servers
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  # -- Client rack ID for rack-aware consumption
   clientRack: ""
+  # -- Security protocol
   security:
-    protocol: PLAINTEXT
+    protocol: SASL_PLAINTEXT
+  # -- SASL authentication
   sasl:
+    # -- Enable SASL
     enabled: true
+    # -- SASL mechanism
     mechanism: SCRAM-SHA-512
+    # -- SASL username
     username: kates-backend
+    # -- K8s Secret name containing the SASL password
     secretName: kates-backend
+    # -- Key in the Secret containing the SASL password
     secretKey: password
+    # -- OAuthBearer configuration (when mechanism=OAUTHBEARER)
     oauthbearer:
       tokenEndpointUrl: ""
       clientId: ""
       clientSecretName: ""
       clientSecretKey: client-secret
+  # -- SSL/TLS configuration
   ssl:
+    # -- Enable SSL
     enabled: false
+    # -- Truststore configuration
     truststore:
       secretName: ""
       key: truststore.jks
       password: ""
+    # -- Keystore configuration
     keystore:
       secretName: ""
       key: keystore.jks
       password: ""
 
+# -- Trogdor coordinator configuration
 trogdor:
+  # -- Trogdor coordinator URL
   coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"
 
+# -- Benchmark engine configuration
 engine:
+  # -- Default benchmark backend (native or trogdor)
   defaultBackend: "native"
 
+# -- Fault tolerance timeout configuration (ms)
+faultTolerance:
+  topicService:
+    # -- Timeout for all TopicService operations
+    timeoutMs: "35000"
+  clusterHealthService:
+    # -- Default timeout for cluster health operations
+    defaultTimeoutMs: "35000"
+    # -- Timeout for reachability check
+    reachableTimeoutMs: "10000"
+    # -- Timeout for full health check
+    healthCheckTimeoutMs: "60000"
+  consumerGroupService:
+    # -- Timeout for consumer group operations
+    timeoutMs: "35000"
+
+# -- NetworkPolicy configuration
 networkPolicy:
+  # -- Enable NetworkPolicy
   enabled: false
+  # -- Ingress rules
   ingressRules:
     - from:
         - namespaceSelector:
@@ -185,27 +323,44 @@ networkPolicy:
       ports:
         - port: 8080
           protocol: TCP
+  # -- Kafka egress configuration
   kafka:
     namespace: kafka
     port: 9092
+  # -- Prometheus egress configuration
   prometheus:
     namespace: monitoring
     port: 9090
+  # -- Extra egress rules
   egressRules: []
 
+# -- Observability and monitoring
 metrics:
+  # -- Prometheus ServiceMonitor
   serviceMonitor:
+    # -- Enable ServiceMonitor
     enabled: false
+    # -- Target namespace for the ServiceMonitor
     namespace: ""
+    # -- Scrape interval
     interval: "30s"
+    # -- Scrape timeout
     scrapeTimeout: ""
+    # -- Extra labels for ServiceMonitor
     labels: {}
+    # -- Metric relabeling rules
     metricRelabelings: []
+    # -- Relabeling rules
     relabelings: []
+  # -- PrometheusRule for alerting
   prometheusRule:
+    # -- Enable PrometheusRule
     enabled: false
+    # -- Target namespace for the PrometheusRule
     namespace: ""
+    # -- Extra labels
     labels: {}
+    # -- Alert rules
     rules:
       - alert: KatesDown
         expr: up{job="{{ include \"kates.fullname\" . }}"} == 0
@@ -223,26 +378,43 @@ metrics:
         annotations:
           summary: "KATES high error rate"
           description: "KATES is returning more than 10% 5xx responses."
+  # -- Grafana dashboard auto-provisioning
   grafanaDashboard:
+    # -- Enable Grafana dashboard ConfigMap
     enabled: false
+    # -- Labels for Grafana sidecar discovery
     labels:
       grafana_dashboard: "1"
 
+# -- Bundled PostgreSQL configuration
 postgresql:
+  # -- Deploy bundled PostgreSQL
   enabled: true
+  # -- Use Bitnami PostgreSQL subchart instead
   useSubchart: false
+  # -- PostgreSQL image
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "17-alpine"
+  # -- Database authentication
   auth:
+    # -- Database name
     database: kates
+    # -- Database username
     username: kates
+    # -- Database password (ignored if existingSecret is set)
     password: kates
+    # -- Use an existing Secret for DB credentials
     existingSecret: ""
+    # -- Key in the existing Secret
     passwordKey: "password"
+  # -- PVC storage configuration
   storage:
+    # -- Storage size
     size: 1Gi
+    # -- Storage class (empty for default)
     storageClass: ""
+  # -- PostgreSQL resource requests and limits
   resources:
     requests:
       memory: "128Mi"
@@ -250,26 +422,44 @@ postgresql:
     limits:
       memory: "256Mi"
       cpu: "250m"
+  # -- PostgreSQL pod security context
   securityContext:
     runAsNonRoot: true
     runAsUser: 999
     fsGroup: 999
+  # -- PostgreSQL container security context
   containerSecurityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop:
         - ALL
+  # -- JDBC connection pool settings
+  connectionPool:
+    # -- Maximum pool size
+    maxSize: "20"
+    # -- Minimum pool size
+    minSize: "5"
 
+# -- External database configuration (when postgresql.enabled=false)
 externalDatabase:
+  # -- Enable external database
   enabled: false
+  # -- Database host
   host: ""
+  # -- Database port
   port: 5432
+  # -- Database name
   database: kates
+  # -- Database username
   username: kates
+  # -- Database password (ignored if existingSecret is set)
   password: ""
+  # -- Use an existing Secret for DB credentials
   existingSecret: ""
+  # -- Key in the existing Secret
   passwordKey: "password"
 
+# -- Bitnami PostgreSQL HA subchart values (when postgresql.useSubchart=true)
 postgresqlHA:
   auth:
     database: kates
@@ -284,6 +474,7 @@ postgresqlHA:
     persistence:
       size: 10Gi
 
+# -- Default benchmark parameters (fallback for all test types)
 defaults:
   replicationFactor: "3"
   partitions: "3"
@@ -299,7 +490,9 @@ defaults:
   numProducers: "1"
   numConsumers: "1"
 
+# -- Per-test-type parameter overrides
 tests:
+  # -- LOAD: baseline throughput test
   load:
     partitions: "3"
     batchSize: "65536"
@@ -307,6 +500,7 @@ tests:
     numRecords: "1000000"
     durationMs: "600000"
     numProducers: "1"
+  # -- STRESS: high-concurrency, large batches
   stress:
     partitions: "6"
     batchSize: "131072"
@@ -314,6 +508,7 @@ tests:
     numRecords: "5000000"
     durationMs: "900000"
     numProducers: "3"
+  # -- SPIKE: burst traffic, low-latency
   spike:
     acks: "1"
     batchSize: "131072"
@@ -321,16 +516,19 @@ tests:
     compressionType: "none"
     numRecords: "2000000"
     durationMs: "300000"
+  # -- ENDURANCE: long-running, rate-limited
   endurance:
     numRecords: "10000000"
     throughput: "5000"
     durationMs: "3600000"
+  # -- VOLUME: large records, high batch size
   volume:
     partitions: "6"
     batchSize: "262144"
     lingerMs: "50"
     recordSize: "10240"
     numRecords: "2000000"
+  # -- CAPACITY: max parallelism
   capacity:
     partitions: "12"
     batchSize: "131072"
@@ -338,6 +536,7 @@ tests:
     numRecords: "10000000"
     durationMs: "1200000"
     numProducers: "5"
+  # -- ROUNDTRIP: latency-focused
   roundtrip:
     batchSize: "16384"
     lingerMs: "0"
@@ -345,16 +544,23 @@ tests:
     numRecords: "500000"
     throughput: "10000"
 
+# -- PostgreSQL backup CronJob
 backup:
+  # -- Enable backup CronJob
   enabled: false
+  # -- Cron schedule expression
   schedule: "0 2 * * *"
+  # -- PostgreSQL image for pg_dump
   image: postgres:16-alpine
+  # -- Days to retain backups
   retention: 7
+  # -- Backup persistence
   persistence:
     enabled: false
     existingClaim: ""
     storageClass: ""
     size: 5Gi
+  # -- Backup job resources
   resources:
     requests:
       memory: "64Mi"
@@ -363,13 +569,34 @@ backup:
       memory: "256Mi"
       cpu: "250m"
 
+# -- Pre-upgrade Flyway migration Job
 migration:
+  # -- Enable migration Job (runs as pre-upgrade Helm hook)
   enabled: false
+  # -- Override image (defaults to KATES app image)
   image: ""
+  # -- Custom command (overrides default Flyway migration)
   command: []
+  # -- Maximum retry attempts
+  backoffLimit: 3
+  # -- Maximum Job duration (seconds)
+  activeDeadlineSeconds: 600
+  # -- Migration job resources
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
 
+# -- Stale test run cleanup CronJob
 cleanup:
+  # -- Enable cleanup CronJob
   enabled: false
+  # -- Cron schedule expression
   schedule: "0 4 * * 0"
+  # -- Delete completed test runs older than N days
   retentionDays: 30
+  # -- Curl image for API calls
   image: curlimages/curl:8.7.1

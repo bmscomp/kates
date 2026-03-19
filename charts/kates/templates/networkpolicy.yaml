@@ -34,6 +34,14 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
+    {{- if .Values.externalDatabase.enabled }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: {{ .Values.externalDatabase.port | default 5432 }}
+          protocol: TCP
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:
