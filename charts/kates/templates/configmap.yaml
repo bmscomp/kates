@@ -58,63 +58,103 @@ data:
   KATES_DEFAULTS_NUM_PRODUCERS: {{ .Values.defaults.numProducers | quote }}
   KATES_DEFAULTS_NUM_CONSUMERS: {{ .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.load }}
-  KATES_TESTS_LOAD_PARTITIONS: {{ .partitions | quote }}
-  KATES_TESTS_LOAD_BATCH_SIZE: {{ .batchSize | quote }}
-  KATES_TESTS_LOAD_LINGER_MS: {{ .lingerMs | quote }}
-  KATES_TESTS_LOAD_NUM_RECORDS: {{ .numRecords | quote }}
-  KATES_TESTS_LOAD_DURATION_MS: {{ .durationMs | quote }}
-  KATES_TESTS_LOAD_NUM_PRODUCERS: {{ .numProducers | quote }}
-  {{- end }}
+  KATES_TESTS_LOAD_REPLICATION_FACTOR: {{ .Values.tests.load.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_LOAD_PARTITIONS: {{ .Values.tests.load.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_LOAD_MIN_INSYNC_REPLICAS: {{ .Values.tests.load.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_LOAD_ACKS: {{ .Values.tests.load.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_LOAD_BATCH_SIZE: {{ .Values.tests.load.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_LOAD_LINGER_MS: {{ .Values.tests.load.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_LOAD_COMPRESSION_TYPE: {{ .Values.tests.load.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_LOAD_RECORD_SIZE: {{ .Values.tests.load.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_LOAD_NUM_RECORDS: {{ .Values.tests.load.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_LOAD_THROUGHPUT: {{ .Values.tests.load.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_LOAD_DURATION_MS: {{ .Values.tests.load.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_LOAD_NUM_PRODUCERS: {{ .Values.tests.load.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_LOAD_NUM_CONSUMERS: {{ .Values.tests.load.numConsumers | default .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.stress }}
-  KATES_TESTS_STRESS_PARTITIONS: {{ .partitions | quote }}
-  KATES_TESTS_STRESS_BATCH_SIZE: {{ .batchSize | quote }}
-  KATES_TESTS_STRESS_LINGER_MS: {{ .lingerMs | quote }}
-  KATES_TESTS_STRESS_NUM_RECORDS: {{ .numRecords | quote }}
-  KATES_TESTS_STRESS_DURATION_MS: {{ .durationMs | quote }}
-  KATES_TESTS_STRESS_NUM_PRODUCERS: {{ .numProducers | quote }}
-  {{- end }}
+  KATES_TESTS_STRESS_REPLICATION_FACTOR: {{ .Values.tests.stress.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_STRESS_PARTITIONS: {{ .Values.tests.stress.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_STRESS_MIN_INSYNC_REPLICAS: {{ .Values.tests.stress.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_STRESS_ACKS: {{ .Values.tests.stress.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_STRESS_BATCH_SIZE: {{ .Values.tests.stress.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_STRESS_LINGER_MS: {{ .Values.tests.stress.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_STRESS_COMPRESSION_TYPE: {{ .Values.tests.stress.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_STRESS_RECORD_SIZE: {{ .Values.tests.stress.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_STRESS_NUM_RECORDS: {{ .Values.tests.stress.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_STRESS_THROUGHPUT: {{ .Values.tests.stress.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_STRESS_DURATION_MS: {{ .Values.tests.stress.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_STRESS_NUM_PRODUCERS: {{ .Values.tests.stress.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_STRESS_NUM_CONSUMERS: {{ .Values.tests.stress.numConsumers | default .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.spike }}
-  KATES_TESTS_SPIKE_ACKS: {{ .acks | quote }}
-  KATES_TESTS_SPIKE_BATCH_SIZE: {{ .batchSize | quote }}
-  KATES_TESTS_SPIKE_LINGER_MS: {{ .lingerMs | quote }}
-  KATES_TESTS_SPIKE_COMPRESSION_TYPE: {{ .compressionType | quote }}
-  KATES_TESTS_SPIKE_NUM_RECORDS: {{ .numRecords | quote }}
-  KATES_TESTS_SPIKE_DURATION_MS: {{ .durationMs | quote }}
-  {{- end }}
+  KATES_TESTS_SPIKE_REPLICATION_FACTOR: {{ .Values.tests.spike.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_SPIKE_PARTITIONS: {{ .Values.tests.spike.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_SPIKE_MIN_INSYNC_REPLICAS: {{ .Values.tests.spike.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_SPIKE_ACKS: {{ .Values.tests.spike.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_SPIKE_BATCH_SIZE: {{ .Values.tests.spike.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_SPIKE_LINGER_MS: {{ .Values.tests.spike.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_SPIKE_COMPRESSION_TYPE: {{ .Values.tests.spike.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_SPIKE_RECORD_SIZE: {{ .Values.tests.spike.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_SPIKE_NUM_RECORDS: {{ .Values.tests.spike.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_SPIKE_THROUGHPUT: {{ .Values.tests.spike.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_SPIKE_DURATION_MS: {{ .Values.tests.spike.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_SPIKE_NUM_PRODUCERS: {{ .Values.tests.spike.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_SPIKE_NUM_CONSUMERS: {{ .Values.tests.spike.numConsumers | default .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.endurance }}
-  KATES_TESTS_ENDURANCE_NUM_RECORDS: {{ .numRecords | quote }}
-  KATES_TESTS_ENDURANCE_THROUGHPUT: {{ .throughput | quote }}
-  KATES_TESTS_ENDURANCE_DURATION_MS: {{ .durationMs | quote }}
-  {{- end }}
+  KATES_TESTS_ENDURANCE_REPLICATION_FACTOR: {{ .Values.tests.endurance.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_ENDURANCE_PARTITIONS: {{ .Values.tests.endurance.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_ENDURANCE_MIN_INSYNC_REPLICAS: {{ .Values.tests.endurance.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_ENDURANCE_ACKS: {{ .Values.tests.endurance.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_ENDURANCE_BATCH_SIZE: {{ .Values.tests.endurance.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_ENDURANCE_LINGER_MS: {{ .Values.tests.endurance.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_ENDURANCE_COMPRESSION_TYPE: {{ .Values.tests.endurance.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_ENDURANCE_RECORD_SIZE: {{ .Values.tests.endurance.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_ENDURANCE_NUM_RECORDS: {{ .Values.tests.endurance.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_ENDURANCE_THROUGHPUT: {{ .Values.tests.endurance.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_ENDURANCE_DURATION_MS: {{ .Values.tests.endurance.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_ENDURANCE_NUM_PRODUCERS: {{ .Values.tests.endurance.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_ENDURANCE_NUM_CONSUMERS: {{ .Values.tests.endurance.numConsumers | default .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.volume }}
-  KATES_TESTS_VOLUME_PARTITIONS: {{ .partitions | quote }}
-  KATES_TESTS_VOLUME_BATCH_SIZE: {{ .batchSize | quote }}
-  KATES_TESTS_VOLUME_LINGER_MS: {{ .lingerMs | quote }}
-  KATES_TESTS_VOLUME_RECORD_SIZE: {{ .recordSize | quote }}
-  KATES_TESTS_VOLUME_NUM_RECORDS: {{ .numRecords | quote }}
-  {{- end }}
+  KATES_TESTS_VOLUME_REPLICATION_FACTOR: {{ .Values.tests.volume.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_VOLUME_PARTITIONS: {{ .Values.tests.volume.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_VOLUME_MIN_INSYNC_REPLICAS: {{ .Values.tests.volume.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_VOLUME_ACKS: {{ .Values.tests.volume.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_VOLUME_BATCH_SIZE: {{ .Values.tests.volume.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_VOLUME_LINGER_MS: {{ .Values.tests.volume.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_VOLUME_COMPRESSION_TYPE: {{ .Values.tests.volume.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_VOLUME_RECORD_SIZE: {{ .Values.tests.volume.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_VOLUME_NUM_RECORDS: {{ .Values.tests.volume.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_VOLUME_THROUGHPUT: {{ .Values.tests.volume.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_VOLUME_DURATION_MS: {{ .Values.tests.volume.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_VOLUME_NUM_PRODUCERS: {{ .Values.tests.volume.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_VOLUME_NUM_CONSUMERS: {{ .Values.tests.volume.numConsumers | default .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.capacity }}
-  KATES_TESTS_CAPACITY_PARTITIONS: {{ .partitions | quote }}
-  KATES_TESTS_CAPACITY_BATCH_SIZE: {{ .batchSize | quote }}
-  KATES_TESTS_CAPACITY_LINGER_MS: {{ .lingerMs | quote }}
-  KATES_TESTS_CAPACITY_NUM_RECORDS: {{ .numRecords | quote }}
-  KATES_TESTS_CAPACITY_DURATION_MS: {{ .durationMs | quote }}
-  KATES_TESTS_CAPACITY_NUM_PRODUCERS: {{ .numProducers | quote }}
-  {{- end }}
+  KATES_TESTS_CAPACITY_REPLICATION_FACTOR: {{ .Values.tests.capacity.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_CAPACITY_PARTITIONS: {{ .Values.tests.capacity.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_CAPACITY_MIN_INSYNC_REPLICAS: {{ .Values.tests.capacity.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_CAPACITY_ACKS: {{ .Values.tests.capacity.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_CAPACITY_BATCH_SIZE: {{ .Values.tests.capacity.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_CAPACITY_LINGER_MS: {{ .Values.tests.capacity.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_CAPACITY_COMPRESSION_TYPE: {{ .Values.tests.capacity.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_CAPACITY_RECORD_SIZE: {{ .Values.tests.capacity.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_CAPACITY_NUM_RECORDS: {{ .Values.tests.capacity.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_CAPACITY_THROUGHPUT: {{ .Values.tests.capacity.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_CAPACITY_DURATION_MS: {{ .Values.tests.capacity.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_CAPACITY_NUM_PRODUCERS: {{ .Values.tests.capacity.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_CAPACITY_NUM_CONSUMERS: {{ .Values.tests.capacity.numConsumers | default .Values.defaults.numConsumers | quote }}
 
-  {{- with .Values.tests.roundtrip }}
-  KATES_TESTS_ROUNDTRIP_BATCH_SIZE: {{ .batchSize | quote }}
-  KATES_TESTS_ROUNDTRIP_LINGER_MS: {{ .lingerMs | quote }}
-  KATES_TESTS_ROUNDTRIP_COMPRESSION_TYPE: {{ .compressionType | quote }}
-  KATES_TESTS_ROUNDTRIP_NUM_RECORDS: {{ .numRecords | quote }}
-  KATES_TESTS_ROUNDTRIP_THROUGHPUT: {{ .throughput | quote }}
-  {{- end }}
+  KATES_TESTS_ROUNDTRIP_REPLICATION_FACTOR: {{ .Values.tests.roundtrip.replicationFactor | default .Values.defaults.replicationFactor | quote }}
+  KATES_TESTS_ROUNDTRIP_PARTITIONS: {{ .Values.tests.roundtrip.partitions | default .Values.defaults.partitions | quote }}
+  KATES_TESTS_ROUNDTRIP_MIN_INSYNC_REPLICAS: {{ .Values.tests.roundtrip.minInsyncReplicas | default .Values.defaults.minInsyncReplicas | quote }}
+  KATES_TESTS_ROUNDTRIP_ACKS: {{ .Values.tests.roundtrip.acks | default .Values.defaults.acks | quote }}
+  KATES_TESTS_ROUNDTRIP_BATCH_SIZE: {{ .Values.tests.roundtrip.batchSize | default .Values.defaults.batchSize | quote }}
+  KATES_TESTS_ROUNDTRIP_LINGER_MS: {{ .Values.tests.roundtrip.lingerMs | default .Values.defaults.lingerMs | quote }}
+  KATES_TESTS_ROUNDTRIP_COMPRESSION_TYPE: {{ .Values.tests.roundtrip.compressionType | default .Values.defaults.compressionType | quote }}
+  KATES_TESTS_ROUNDTRIP_RECORD_SIZE: {{ .Values.tests.roundtrip.recordSize | default .Values.defaults.recordSize | quote }}
+  KATES_TESTS_ROUNDTRIP_NUM_RECORDS: {{ .Values.tests.roundtrip.numRecords | default .Values.defaults.numRecords | quote }}
+  KATES_TESTS_ROUNDTRIP_THROUGHPUT: {{ .Values.tests.roundtrip.throughput | default .Values.defaults.throughput | quote }}
+  KATES_TESTS_ROUNDTRIP_DURATION_MS: {{ .Values.tests.roundtrip.durationMs | default .Values.defaults.durationMs | quote }}
+  KATES_TESTS_ROUNDTRIP_NUM_PRODUCERS: {{ .Values.tests.roundtrip.numProducers | default .Values.defaults.numProducers | quote }}
+  KATES_TESTS_ROUNDTRIP_NUM_CONSUMERS: {{ .Values.tests.roundtrip.numConsumers | default .Values.defaults.numConsumers | quote }}
 
   {{- with .Values.faultTolerance }}
   COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_CREATETOPIC_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}
