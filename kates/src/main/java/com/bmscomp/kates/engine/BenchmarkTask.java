@@ -16,6 +16,7 @@ public class BenchmarkTask {
     }
 
     private final String taskId;
+    private final String runId;
     private final WorkloadType workloadType;
     private final String topic;
     private final int partitions;
@@ -33,6 +34,7 @@ public class BenchmarkTask {
 
     private BenchmarkTask(Builder builder) {
         this.taskId = builder.taskId;
+        this.runId = builder.runId;
         this.workloadType = builder.workloadType;
         this.topic = builder.topic;
         this.partitions = builder.partitions;
@@ -51,6 +53,10 @@ public class BenchmarkTask {
 
     public String getTaskId() {
         return taskId;
+    }
+
+    public String getRunId() {
+        return runId;
     }
 
     public WorkloadType getWorkloadType() {
@@ -115,6 +121,7 @@ public class BenchmarkTask {
 
     public static class Builder {
         private final String taskId;
+        private String runId;
         private final WorkloadType workloadType;
         private String topic = "benchmark-test";
         private int partitions = 3;
@@ -133,6 +140,11 @@ public class BenchmarkTask {
         private Builder(String taskId, WorkloadType workloadType) {
             this.taskId = taskId;
             this.workloadType = workloadType;
+        }
+
+        public Builder runId(String runId) {
+            this.runId = runId;
+            return this;
         }
 
         public Builder topic(String topic) {

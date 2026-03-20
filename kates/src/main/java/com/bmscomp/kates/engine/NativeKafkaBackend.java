@@ -235,8 +235,19 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     continue;
                 }
                 emptyPollStreak = 0;
-                consumed += records.count();
-                state.recordsProcessed.addAndGet(records.count());
+
+                for (ConsumerRecord<byte[], byte[]> record : records) {
+                    try {
+                        SequencedPayload payload = SequencedPayload.decode(record.value());
+                        if (payload.getRunIdHash() != state.runIdHash) {
+                            continue;
+                        }
+                        consumed++;
+                        state.recordsProcessed.incrementAndGet();
+                    } catch (Exception e) {
+                        LOG.debug("Skipping malformed record at offset " + record.offset());
+                    }
+                }
             }
         } catch (Exception e) {
             throw new BenchmarkException("Consumer failed: " + e.getMessage(), e);
@@ -322,7 +333,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
-            this.runIdHash = SequencedPayload.hashRunId(task.getTaskId());
+            String hashSource = task.getRunId() != null ? task.getRunId() : task.getTaskId();
+            this.runIdHash = SequencedPayload.hashRunId(hashSource);
         }
 
         BenchmarkStatus toStatus() {

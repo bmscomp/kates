@@ -542,17 +542,18 @@ public class TestOrchestrator {
         return switch (type) {
             case LOAD ->
                 List.of(
-                        produceTask(runId + "-produce-0", topic, spec, producerConfig),
-                        consumeTask(runId + "-consume-0", topic, spec));
+                        produceTask(runId + "-produce-0", runId, topic, spec, producerConfig),
+                        consumeTask(runId + "-consume-0", runId, topic, spec));
             case STRESS -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 for (int i = 0; i < spec.getNumProducers(); i++) {
-                    tasks.add(produceTask(runId + "-stress-" + i, topic, spec, producerConfig));
+                    tasks.add(produceTask(runId + "-stress-" + i, runId, topic, spec, producerConfig));
                 }
                 yield tasks;
             }
             case SPIKE ->
                 List.of(BenchmarkTask.builder(runId + "-spike-burst", BenchmarkTask.WorkloadType.PRODUCE)
+                        .runId(runId)
                         .topic(topic)
                         .partitions(spec.getPartitions())
                         .targetMessagesPerSec(-1)
@@ -563,13 +564,14 @@ public class TestOrchestrator {
                         .build());
             case ENDURANCE ->
                 List.of(
-                        produceTask(runId + "-endurance-produce", topic, spec, producerConfig),
-                        consumeTask(runId + "-endurance-consume", topic, spec));
-            case VOLUME -> List.of(produceTask(runId + "-volume-0", topic, spec, producerConfig));
+                        produceTask(runId + "-endurance-produce", runId, topic, spec, producerConfig),
+                        consumeTask(runId + "-endurance-consume", runId, topic, spec));
+            case VOLUME -> List.of(produceTask(runId + "-volume-0", runId, topic, spec, producerConfig));
             case CAPACITY -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 for (int i = 0; i < spec.getNumProducers(); i++) {
                     tasks.add(BenchmarkTask.builder(runId + "-cap-" + i, BenchmarkTask.WorkloadType.PRODUCE)
+                            .runId(runId)
                             .topic(topic)
                             .partitions(spec.getPartitions())
                             .targetMessagesPerSec(-1)
@@ -583,6 +585,7 @@ public class TestOrchestrator {
             }
             case ROUND_TRIP ->
                 List.of(BenchmarkTask.builder(runId + "-roundtrip-0", BenchmarkTask.WorkloadType.ROUND_TRIP)
+                        .runId(runId)
                         .topic(topic)
                         .partitions(spec.getPartitions())
                         .targetMessagesPerSec(spec.getThroughput())
@@ -593,6 +596,7 @@ public class TestOrchestrator {
                         .build());
             case INTEGRITY ->
                 List.of(BenchmarkTask.builder(runId + "-integrity-0", BenchmarkTask.WorkloadType.INTEGRITY)
+                        .runId(runId)
                         .topic(topic)
                         .partitions(spec.getPartitions())
                         .targetMessagesPerSec(spec.getThroughput())
@@ -606,7 +610,7 @@ public class TestOrchestrator {
                         .enableCrc(spec.isEnableCrc())
                         .build());
             case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS ->
-                List.of(produceTask(runId + "-tune-0", topic, spec, producerConfig));
+                List.of(produceTask(runId + "-tune-0", runId, topic, spec, producerConfig));
         };
     }
 
@@ -622,7 +626,7 @@ public class TestOrchestrator {
         String taskId = runId + "-" + phaseName;
 
         return switch (phase.getPhaseType()) {
-            case WARMUP, STEADY, COOLDOWN -> List.of(produceTask(taskId + "-produce", topic, spec, producerConfig));
+            case WARMUP, STEADY, COOLDOWN -> List.of(produceTask(taskId + "-produce", runId, topic, spec, producerConfig));
             case RAMP -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 int steps = Math.max(1, phase.getRampSteps());
@@ -636,12 +640,13 @@ public class TestOrchestrator {
                     stepSpec.setNumRecords(spec.getNumRecords() / steps);
                     stepSpec.setDurationMs(spec.getDurationMs() / steps);
                     stepSpec.setRecordSize(spec.getRecordSize());
-                    tasks.add(produceTask(taskId + "-ramp-" + s, topic, stepSpec, producerConfig));
+                    tasks.add(produceTask(taskId + "-ramp-" + s, runId, topic, stepSpec, producerConfig));
                 }
                 yield tasks;
             }
             case SPIKE ->
                 List.of(BenchmarkTask.builder(taskId + "-spike", BenchmarkTask.WorkloadType.PRODUCE)
+                        .runId(runId)
                         .topic(topic)
                         .partitions(spec.getPartitions())
                         .targetMessagesPerSec(-1)
@@ -653,8 +658,9 @@ public class TestOrchestrator {
         };
     }
 
-    private BenchmarkTask produceTask(String taskId, String topic, TestSpec spec, Map<String, String> producerConfig) {
+    private BenchmarkTask produceTask(String taskId, String runId, String topic, TestSpec spec, Map<String, String> producerConfig) {
         return BenchmarkTask.builder(taskId, BenchmarkTask.WorkloadType.PRODUCE)
+                .runId(runId)
                 .topic(topic)
                 .partitions(spec.getPartitions())
                 .targetMessagesPerSec(spec.getThroughput())
@@ -665,8 +671,9 @@ public class TestOrchestrator {
                 .build();
     }
 
-    private BenchmarkTask consumeTask(String taskId, String topic, TestSpec spec) {
+    private BenchmarkTask consumeTask(String taskId, String runId, String topic, TestSpec spec) {
         return BenchmarkTask.builder(taskId, BenchmarkTask.WorkloadType.CONSUME)
+                .runId(runId)
                 .topic(topic)
                 .partitions(spec.getPartitions())
                 .maxMessages(spec.getNumRecords())
