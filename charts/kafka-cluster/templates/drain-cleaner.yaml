@@ -1,0 +1,147 @@
+{{- if .Values.drainCleaner.enabled }}
+{{- $namespace := include "kafka-cluster.namespace" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: strimzi-drain-cleaner
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create", "get"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["strimzipodsets"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: strimzi-drain-cleaner
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: strimzi-drain-cleaner
+subjects:
+  - kind: ServiceAccount
+    name: strimzi-drain-cleaner
+    namespace: {{ $namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: strimzi-drain-cleaner
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: strimzi-drain-cleaner
+    spec:
+      serviceAccountName: strimzi-drain-cleaner
+      containers:
+        - name: drain-cleaner
+          image: {{ .Values.drainCleaner.image }}
+          ports:
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: STRIMZI_DRAIN_KAFKA
+              value: "true"
+            - name: STRIMZI_DRAIN_ZOOKEEPER
+              value: "false"
+            - name: STRIMZI_NAMESPACE
+              value: {{ $namespace | quote }}
+          resources:
+            {{- toYaml .Values.drainCleaner.resources | nindent 12 }}
+          securityContext:
+            {{- include "kafka-cluster.containerSecurityContext" . | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+spec:
+  ports:
+    - port: 443
+      targetPort: 8443
+      protocol: TCP
+      name: https
+  selector:
+    app: strimzi-drain-cleaner
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: strimzi-drain-cleaner
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+webhooks:
+  - name: strimzi-drain-cleaner.{{ $namespace }}.svc.cluster.local
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods/eviction"]
+    clientConfig:
+      service:
+        name: strimzi-drain-cleaner
+        namespace: {{ $namespace }}
+        path: /drainer
+        port: 443
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 5
+    failurePolicy: Ignore
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $namespace }}
+{{- end }}

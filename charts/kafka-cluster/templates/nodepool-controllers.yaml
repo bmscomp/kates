@@ -1,0 +1,56 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: controllers
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  replicas: {{ .Values.controllers.replicas }}
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ .Values.controllers.storage.size }}
+        {{- if .Values.controllers.storage.class }}
+        class: {{ .Values.controllers.storage.class }}
+        {{- end }}
+        deleteClaim: {{ .Values.controllers.storage.deleteClaim }}
+  jvmOptions:
+    {{- toYaml .Values.controllers.jvmOptions | nindent 4 }}
+  resources:
+    {{- toYaml .Values.controllers.resources | nindent 4 }}
+  template:
+    pod:
+      securityContext:
+        {{- include "kafka-cluster.podSecurityContext" . | nindent 8 }}
+      {{- if .Values.controllers.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.controllers.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.controllers.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ .Values.controllers.topologySpreadConstraints.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              strimzi.io/pool-name: controllers
+      {{- end }}
+      {{- if .Values.controllers.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  strimzi.io/pool-name: controllers
+              topologyKey: {{ .Values.controllers.podAntiAffinity.topologyKey }}
+      {{- end }}
+      {{- with .Values.controllers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    kafkaContainer:
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}

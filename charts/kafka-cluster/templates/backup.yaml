@@ -1,0 +1,61 @@
+{{- if .Values.backup.enabled }}
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: kafka-daily-backup
+  namespace: velero
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  template:
+    includedNamespaces:
+      - {{ include "kafka-cluster.namespace" . }}
+    includedResources:
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - secrets
+    labelSelector:
+      matchExpressions:
+        - key: strimzi.io/cluster
+          operator: In
+          values: [{{ include "kafka-cluster.clusterName" . | quote }}]
+    storageLocation: default
+    volumeSnapshotLocations:
+      - default
+    ttl: {{ .Values.backup.ttl }}
+    snapshotVolumes: {{ .Values.backup.snapshotVolumes }}
+    defaultVolumesToFsBackup: false
+  useOwnerReferencesInBackup: false
+---
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: kafka-pre-upgrade
+  namespace: velero
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  includedNamespaces:
+    - {{ include "kafka-cluster.namespace" . }}
+  includedResources:
+    - persistentvolumeclaims
+    - persistentvolumes
+    - configmaps
+    - secrets
+    - kafka.kafka.strimzi.io
+    - kafkanodepool.kafka.strimzi.io
+    - kafkatopic.kafka.strimzi.io
+    - kafkauser.kafka.strimzi.io
+  labelSelector:
+    matchExpressions:
+      - key: strimzi.io/cluster
+        operator: In
+        values: [{{ include "kafka-cluster.clusterName" . | quote }}]
+  storageLocation: default
+  volumeSnapshotLocations:
+    - default
+  ttl: 720h0m0s
+  snapshotVolumes: true
+{{- end }}

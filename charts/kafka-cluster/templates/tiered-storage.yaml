@@ -1,0 +1,45 @@
+{{- if .Values.tieredStorage.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-tiered-storage-credentials
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: {{ .Values.tieredStorage.credentials.accessKeyId }}
+  AWS_SECRET_ACCESS_KEY: {{ .Values.tieredStorage.credentials.secretAccessKey }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-tiered-storage-config
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: kates
+data:
+  tiered-storage.properties: |
+    remote.log.storage.system.enable=true
+
+    remote.log.storage.manager.class.name=org.apache.kafka.server.log.remote.storage.RemoteLogManager
+    remote.log.storage.manager.impl.prefix=rsm.config.
+    rsm.config.s3.bucket.name={{ .Values.tieredStorage.s3.bucketName }}
+    rsm.config.s3.region={{ .Values.tieredStorage.s3.region }}
+    rsm.config.s3.endpoint.url={{ .Values.tieredStorage.s3.endpointUrl }}
+    rsm.config.s3.path.style.access.enabled={{ .Values.tieredStorage.s3.pathStyleAccessEnabled }}
+
+    remote.log.metadata.manager.class.name=org.apache.kafka.server.log.remote.metadata.storage.TopicBasedRemoteLogMetadataManager
+    remote.log.metadata.manager.impl.prefix=rlmm.config.
+    rlmm.config.remote.log.metadata.topic.replication.factor={{ .Values.tieredStorage.metadata.replicationFactor }}
+    rlmm.config.remote.log.metadata.topic.partitions={{ .Values.tieredStorage.metadata.partitions }}
+    rlmm.config.remote.log.metadata.topic.retention.ms=-1
+
+    remote.log.manager.task.interval.ms={{ .Values.tieredStorage.retention.taskIntervalMs }}
+    log.local.retention.ms={{ .Values.tieredStorage.retention.localRetentionMs }}
+    log.local.retention.bytes=-1
+
+    remote.log.manager.copy.quota.window.size.sec=10
+    remote.log.manager.fetch.quota.window.size.sec=10
+{{- end }}

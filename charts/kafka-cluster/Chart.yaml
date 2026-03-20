@@ -1,0 +1,18 @@
+apiVersion: v2
+name: kafka-cluster
+description: Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability
+type: application
+version: 0.1.0
+appVersion: "4.1.1"
+home: https://strimzi.io/
+keywords:
+  - kafka
+  - strimzi
+  - kraft
+  - streaming
+  - messaging
+maintainers:
+  - name: Platform Team
+sources:
+  - https://github.com/strimzi/strimzi-kafka-operator
+dependencies: []

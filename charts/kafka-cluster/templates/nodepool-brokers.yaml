@@ -1,0 +1,54 @@
+{{- range .Values.brokerPools }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "kafka-cluster.namespace" $ }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  replicas: {{ .replicas }}
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ .storageSize }}
+        {{- if .storageClass }}
+        class: {{ .storageClass }}
+        {{- end }}
+        deleteClaim: {{ $.Values.brokerDefaults.deleteClaim }}
+  jvmOptions:
+    {{- toYaml $.Values.brokerDefaults.jvmOptions | nindent 4 }}
+  resources:
+    {{- toYaml $.Values.brokerDefaults.resources | nindent 4 }}
+  template:
+    pod:
+      {{- if .zone }}
+      metadata:
+        labels:
+          zone: {{ .zone }}
+      {{- end }}
+      securityContext:
+        {{- include "kafka-cluster.podSecurityContext" $ | nindent 8 }}
+      {{- if .zone }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - {{ .zone }}
+      {{- end }}
+      {{- with $.Values.brokerDefaults.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

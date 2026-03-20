@@ -1,0 +1,184 @@
+{{- if .Values.alerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kafka-cluster-alerts
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{- with .Values.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kafka.cluster
+      rules:
+        - alert: KafkaOfflinePartitions
+          expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka has offline partitions"
+            description: "{{ "{{" }} $value {{ "}}" }} partitions are offline on cluster {{ include "kafka-cluster.clusterName" . }}."
+
+        - alert: KafkaUnderReplicatedPartitions
+          expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Under-replicated partitions detected"
+            description: "{{ "{{" }} $value {{ "}}" }} partitions are under-replicated on {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }}."
+
+        - alert: KafkaActiveControllerCount
+          expr: kafka_controller_kafkacontroller_activecontrollercount != 1
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No active Kafka controller"
+            description: "Active controller count is {{ "{{" }} $value {{ "}}" }}, expected exactly 1."
+
+        - alert: KafkaBrokerDiskUsageHigh
+          expr: (1 - (node_filesystem_avail_bytes{mountpoint=~"/var/lib/kafka.*"} / node_filesystem_size_bytes{mountpoint=~"/var/lib/kafka.*"})) > 0.8
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka broker disk usage above 80%"
+            description: "Broker {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }} disk usage is {{ "{{" }} $value | humanizePercentage {{ "}}" }}."
+
+        - alert: KafkaBrokerDiskUsageCritical
+          expr: (1 - (node_filesystem_avail_bytes{mountpoint=~"/var/lib/kafka.*"} / node_filesystem_size_bytes{mountpoint=~"/var/lib/kafka.*"})) > 0.9
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka broker disk usage above 90%"
+            description: "Broker {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }} disk usage is {{ "{{" }} $value | humanizePercentage {{ "}}" }}. Immediate action required."
+
+    - name: kafka.consumer
+      rules:
+        - alert: KafkaConsumerGroupLag
+          expr: kafka_consumergroup_lag_sum > 1000000
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Consumer group lag exceeds threshold"
+            description: "Consumer group {{ "{{" }} $labels.consumergroup {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} messages lag."
+
+        - alert: KafkaConsumerGroupLagCritical
+          expr: kafka_consumergroup_lag_sum > 10000000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Consumer group lag critical"
+            description: "Consumer group {{ "{{" }} $labels.consumergroup {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} messages lag."
+
+    - name: kafka.kraft
+      rules:
+        - alert: KafkaRaftLeaderElectionRate
+          expr: rate(kafka_server_raft_metrics_numberofleaderelections[5m]) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High KRaft leader election rate"
+            description: "KRaft leader elections are happening at {{ "{{" }} $value {{ "}}" }}/s, indicating instability."
+
+        - alert: KafkaRaftUncommittedRecords
+          expr: kafka_server_raft_metrics_numberofuncommittedrecords > 1000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High uncommitted KRaft records"
+            description: "{{ "{{" }} $value {{ "}}" }} uncommitted records in the KRaft metadata log."
+
+    - name: kafka.network
+      rules:
+        - alert: KafkaRequestLatencyHigh
+          expr: kafka_network_request_metrics_totaltimems_percentile{quantile="0.99"} > 1000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka p99 request latency above 1s"
+            description: "{{ "{{" }} $labels.request {{ "}}" }} p99 latency is {{ "{{" }} $value {{ "}}" }}ms on {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }}."
+
+    - name: strimzi.operator
+      rules:
+        - alert: StrimziOperatorDown
+          expr: up{job=~".*strimzi.*cluster-operator.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Strimzi Cluster Operator is down"
+            description: "The Strimzi Cluster Operator has been unreachable for 5 minutes."
+
+    - name: kafka.replication
+      rules:
+        - alert: KafkaISRShrinkRate
+          expr: rate(kafka_server_replicamanager_isrshrinkspersec[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ISR is shrinking"
+            description: "Broker {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }} ISR shrink rate is {{ "{{" }} $value {{ "}}" }}/s — replicas are falling behind."
+
+    - name: kafka.performance
+      rules:
+        - alert: KafkaLogFlushLatencyHigh
+          expr: kafka_log_logflushrateandduration_logflushrateandtimems{quantile="0.99"} > 500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka log flush p99 latency above 500ms"
+            description: "Broker {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }} log flush p99 is {{ "{{" }} $value {{ "}}" }}ms — disk I/O may be saturated."
+
+        - alert: KafkaRequestHandlerSaturated
+          expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent < 0.3
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka request handlers over 70% busy"
+            description: "Broker {{ "{{" }} $labels.kubernetes_pod_name {{ "}}" }} handler idle is {{ "{{" }} $value | humanizePercentage {{ "}}" }} — consider adding threads or brokers."
+
+    - name: kafka.cruisecontrol
+      rules:
+        - alert: CruiseControlAnomalyDetected
+          expr: increase(cruise_control_anomaly_detector_anomaly_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cruise Control detected an anomaly"
+            description: "Cruise Control detected {{ "{{" }} $value {{ "}}" }} anomalies in the last 10 minutes."
+
+    - name: kafka.certificates
+      rules:
+        - alert: KafkaCertificateExpiringSoon
+          expr: (strimzi_certificate_not_after - time()) / 86400 < 30
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Strimzi certificate expiring within 30 days"
+            description: "Certificate {{ "{{" }} $labels.type {{ "}}" }} for cluster {{ "{{" }} $labels.cluster {{ "}}" }} expires in {{ "{{" }} $value | humanize {{ "}}" }} days."
+
+        - alert: KafkaCertificateExpiryCritical
+          expr: (strimzi_certificate_not_after - time()) / 86400 < 7
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Strimzi certificate expiring within 7 days"
+            description: "Certificate {{ "{{" }} $labels.type {{ "}}" }} for cluster {{ "{{" }} $labels.cluster {{ "}}" }} expires in {{ "{{" }} $value | humanize {{ "}}" }} days. Immediate renewal required."
+{{- end }}

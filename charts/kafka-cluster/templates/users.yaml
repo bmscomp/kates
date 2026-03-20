@@ -1,0 +1,25 @@
+{{- range .Values.users }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "kafka-cluster.namespace" $ }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  authentication:
+    {{- toYaml .authentication | nindent 4 }}
+  {{- with .quotas }}
+  quotas:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .authorization }}
+  authorization:
+    type: {{ .type }}
+    acls:
+      {{- toYaml .acls | nindent 6 }}
+  {{- end }}
+{{- end }}

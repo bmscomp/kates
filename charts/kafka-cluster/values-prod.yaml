@@ -1,0 +1,9 @@
+# Production overrides — full HA, tiered storage, backup enabled
+tieredStorage:
+  enabled: true
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  ttl: 336h0m0s
+  snapshotVolumes: true

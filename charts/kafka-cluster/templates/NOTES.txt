@@ -1,0 +1,27 @@
+Kafka cluster "{{ include "kafka-cluster.clusterName" . }}" deployed to namespace {{ .Release.Namespace }}.
+
+  Version:    Kafka {{ .Values.kafkaVersion }} / Strimzi {{ .Values.strimziVersion }}
+  Mode:       KRaft (node pools enabled)
+  Brokers:    {{ len .Values.brokerPools }} zone-aware pool(s)
+  Controllers: {{ .Values.controllers.replicas }} replica(s)
+  Topics:     {{ len .Values.topics }} managed topic(s)
+  Users:      {{ len .Values.users }} managed user(s)
+
+Listeners:
+{{- range .Values.kafka.listeners }}
+  • {{ .name }} — port {{ .port }} ({{ .type }}{{ if .tls }}, TLS{{ end }})
+{{- end }}
+
+Components:
+  Kafka Exporter:  {{ if .Values.kafkaExporter.enabled }}enabled{{ else }}disabled{{ end }}
+  Cruise Control:  {{ if .Values.cruiseControl.enabled }}enabled{{ else }}disabled{{ end }}
+  Drain Cleaner:   {{ if .Values.drainCleaner.enabled }}enabled{{ else }}disabled{{ end }}
+  Network Policies: {{ if .Values.networkPolicies.enabled }}enabled{{ else }}disabled{{ end }}
+  Alerts:          {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
+  Tiered Storage:  {{ if .Values.tieredStorage.enabled }}enabled{{ else }}disabled{{ end }}
+  Backup:          {{ if .Values.backup.enabled }}enabled{{ else }}disabled{{ end }}
+
+Commands:
+  kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
+  kubectl get kafkanodepools -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
+  kubectl get kafkatopics -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}

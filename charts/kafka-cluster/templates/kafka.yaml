@@ -1,0 +1,70 @@
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ include "kafka-cluster.clusterName" . }}
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+    helm.sh/resource-policy: keep
+spec:
+  kafka:
+    version: {{ .Values.kafkaVersion }}
+    listeners:
+      {{- toYaml .Values.kafka.listeners | nindent 6 }}
+    authorization:
+      {{- toYaml .Values.kafka.authorization | nindent 6 }}
+    config:
+      {{- range $key, $value := .Values.kafka.config }}
+      {{ $key }}: {{ $value }}
+      {{- end }}
+    metricsConfig:
+      type: {{ .Values.kafka.metricsConfig.type }}
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+    {{- with .Values.kafka.rack }}
+    rack:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    template:
+      podDisruptionBudget:
+        {{- toYaml .Values.kafka.template.podDisruptionBudget | nindent 8 }}
+      kafkaContainer:
+        securityContext:
+          {{- include "kafka-cluster.containerSecurityContext" . | nindent 10 }}
+  clusterCa:
+    {{- toYaml .Values.kafka.clusterCa | nindent 4 }}
+  clientsCa:
+    {{- toYaml .Values.kafka.clientsCa | nindent 4 }}
+  entityOperator:
+    topicOperator:
+      {{- toYaml .Values.entityOperator.topicOperator | nindent 6 }}
+    userOperator:
+      {{- toYaml .Values.entityOperator.userOperator | nindent 6 }}
+  {{- if .Values.kafkaExporter.enabled }}
+  kafkaExporter:
+    topicRegex: {{ .Values.kafkaExporter.topicRegex | quote }}
+    groupRegex: {{ .Values.kafkaExporter.groupRegex | quote }}
+    resources:
+      {{- toYaml .Values.kafkaExporter.resources | nindent 6 }}
+  {{- end }}
+  {{- if .Values.cruiseControl.enabled }}
+  cruiseControl:
+    brokerCapacity:
+      {{- toYaml .Values.cruiseControl.brokerCapacity | nindent 6 }}
+    autoRebalance:
+      {{- toYaml .Values.cruiseControl.autoRebalance | nindent 6 }}
+    config: {{ .Values.cruiseControl.config | toYaml | nindent 6 }}
+    resources:
+      {{- toYaml .Values.cruiseControl.resources | nindent 6 }}
+    metricsConfig:
+      type: {{ .Values.kafka.metricsConfig.type }}
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+  {{- end }}

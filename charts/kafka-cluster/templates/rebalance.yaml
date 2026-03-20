@@ -1,0 +1,30 @@
+{{- if .Values.rebalance.enabled }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaRebalance
+metadata:
+  name: full-rebalance
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  mode: full
+  goals:
+    {{- toYaml .Values.rebalance.goals | nindent 4 }}
+  skipHardGoalCheck: false
+  rebalanceDisk: true
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaRebalance
+metadata:
+  name: add-broker-rebalance
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  mode: add-brokers
+  brokers: []
+{{- end }}

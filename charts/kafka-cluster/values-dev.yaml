@@ -1,0 +1,92 @@
+# Development overrides — single-node, minimal resources, relaxed policies
+controllers:
+  replicas: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 256m
+    gcLoggingEnabled: false
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
+  tolerations: []
+
+brokerPools:
+  - name: brokers-dev
+    zone: ""
+    replicas: 1
+    storageSize: 5Gi
+    storageClass: ""
+
+brokerDefaults:
+  deleteClaim: true
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 512m
+    gcLoggingEnabled: false
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  tolerations: []
+
+entityOperator:
+  topicOperator:
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 200m
+    jvmOptions:
+      -Xms: 64m
+      -Xmx: 128m
+    reconciliationIntervalMs: 120000
+  userOperator:
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 200m
+    jvmOptions:
+      -Xms: 64m
+      -Xmx: 128m
+
+kafkaExporter:
+  enabled: false
+
+cruiseControl:
+  enabled: false
+
+networkPolicies:
+  enabled: false
+
+tieredStorage:
+  enabled: false
+
+backup:
+  enabled: false
+
+drainCleaner:
+  enabled: false
+
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false

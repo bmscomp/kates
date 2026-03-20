@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+    # KRaft controller / Raft metrics
+    - pattern: kafka.server<type=raft-metrics, name=(.+)><>Value
+      name: kafka_server_raft_metrics_$1
+      type: GAUGE
+    - pattern: kafka.server<type=raft-channel-manager-metrics, name=(.+)><>Value
+      name: kafka_server_raft_channel_$1
+      type: GAUGE
+
+    # Request metrics with error labels
+    - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+), error=(.+)><>Count
+      name: kafka_network_request_metrics_$1_total
+      type: COUNTER
+      labels:
+       request: "$2"
+       error: "$3"
+    - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>(\d+)thPercentile
+      name: kafka_network_request_metrics_$1_percentile
+      type: GAUGE
+      labels:
+       request: "$2"
+       quantile: "0.$3"
+
+    # Topic-level partition metrics
+    - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+      labels:
+       clientId: "$3"
+       topic: "$4"
+       partition: "$5"
+    - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+      labels:
+       clientId: "$3"
+       broker: "$4:$5"
+
+    # Coordinator metrics
+    - pattern: kafka.coordinator.(\w+)<type=(.+), name=(.+)><>Value
+      name: kafka_coordinator_$1_$2_$3
+      type: GAUGE
+
+    # Controller metrics
+    - pattern: kafka.controller<type=(.+), name=(.+)><>Value
+      name: kafka_controller_$1_$2
+      type: GAUGE
+
+    # Log metrics (per topic-partition)
+    - pattern: kafka.log<type=(.+), name=(.+), topic=(.+), partition=(.+)><>Value
+      name: kafka_log_$1_$2
+      type: GAUGE
+      labels:
+       topic: "$3"
+       partition: "$4"
+
+    # Network metrics
+    - pattern: kafka.network<type=(.+), name=(.+)><>Value
+      name: kafka_network_$1_$2
+      type: GAUGE
+
+    # Server metrics (general)
+    - pattern: kafka.server<type=(.+), name=(.+)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+
+    # JVM metrics
+    - pattern: java.lang<type=(.+), name=(.+)><>(.+)
+      name: java_lang_$1_$2_$3
+      type: GAUGE
+    - pattern: java.lang<type=(.+)><>(.+)
+      name: java_lang_$1_$2
+      type: GAUGE
