@@ -120,12 +120,6 @@ securityContext:
 # -- Container-level security context
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: true
-  seccompProfile:
-    type: RuntimeDefault
-  capabilities:
-    drop:
-      - ALL
 
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
