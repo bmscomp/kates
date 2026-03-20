@@ -209,12 +209,14 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, task.getConsumerGroup());
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, "");
         securityConfig.apply(props);
         task.getConsumerConfig().forEach(props::put);
 
         long deadline = System.currentTimeMillis() + task.getDurationMs();
+        int emptyPollStreak = 0;
+        int maxEmptyPolls = 20;
 
         try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(props)) {
             consumer.subscribe(Collections.singletonList(task.getTopic()));
@@ -225,6 +227,14 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     && System.currentTimeMillis() < deadline) {
 
                 ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofMillis(500));
+                if (records.isEmpty()) {
+                    emptyPollStreak++;
+                    if (emptyPollStreak >= maxEmptyPolls && consumed > 0) {
+                        break;
+                    }
+                    continue;
+                }
+                emptyPollStreak = 0;
                 consumed += records.count();
                 state.recordsProcessed.addAndGet(records.count());
             }
