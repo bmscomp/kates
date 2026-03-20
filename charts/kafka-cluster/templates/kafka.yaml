@@ -18,7 +18,7 @@ spec:
       {{- toYaml .Values.kafka.authorization | nindent 6 }}
     config:
       {{- range $key, $value := .Values.kafka.config }}
-      {{ $key }}: {{ $value }}
+      {{ $key }}: {{ $value | toJson }}
       {{- end }}
     metricsConfig:
       type: {{ .Values.kafka.metricsConfig.type }}
