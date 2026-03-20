@@ -15,11 +15,8 @@ helm repo update litmuschaos
 rm -rf "${CHARTS_DIR}/litmus"
 helm pull litmuschaos/litmus --version "${LITMUS_CHART_VERSION}" --untar --untardir "${CHARTS_DIR}"
 
-step "Downloading Strimzi Kafka Operator chart (v${STRIMZI_VERSION})..."
-helm repo add strimzi https://strimzi.io/charts/ 2>/dev/null || true
-helm repo update strimzi
-rm -rf "${CHARTS_DIR}/strimzi-kafka-operator"
-helm pull strimzi/strimzi-kafka-operator --version "${STRIMZI_VERSION}" --untar --untardir "${CHARTS_DIR}"
+step "Building kafka-cluster chart dependencies (Strimzi v${STRIMZI_VERSION})..."
+helm dependency build "${CHARTS_DIR}/kafka-cluster"
 
 echo ""
 info "Downloaded charts:"

@@ -15,4 +15,8 @@ maintainers:
   - name: Platform Team
 sources:
   - https://github.com/strimzi/strimzi-kafka-operator
-dependencies: []
+dependencies:
+  - name: strimzi-kafka-operator
+    version: "0.51.0"
+    repository: "https://strimzi.io/charts/"
+    condition: strimziOperator.enabled
