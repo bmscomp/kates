@@ -1,4 +1,5 @@
 {{- if .Values.tieredStorage.enabled }}
+{{- if not .Values.tieredStorage.credentials.existingSecret }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -8,8 +9,9 @@ metadata:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
 type: Opaque
 stringData:
-  AWS_ACCESS_KEY_ID: {{ .Values.tieredStorage.credentials.accessKeyId }}
-  AWS_SECRET_ACCESS_KEY: {{ .Values.tieredStorage.credentials.secretAccessKey }}
+  {{ .Values.tieredStorage.credentials.accessKeyIdKey | default "AWS_ACCESS_KEY_ID" }}: {{ .Values.tieredStorage.credentials.accessKeyId }}
+  {{ .Values.tieredStorage.credentials.secretAccessKeyKey | default "AWS_SECRET_ACCESS_KEY" }}: {{ .Values.tieredStorage.credentials.secretAccessKey }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap

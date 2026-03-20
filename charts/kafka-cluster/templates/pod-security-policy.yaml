@@ -1,0 +1,75 @@
+{{- if .Values.podSecurityPolicy.enabled }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kafka-pod-security-standards
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Kafka Pod Security Standards
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Enforces restricted pod security standards for all pods in the Kafka
+      namespace: non-root containers, read-only root filesystem, dropped
+      capabilities, and seccomp profile.
+spec:
+  validationFailureAction: {{ .Values.podSecurityPolicy.action | default "Audit" }}
+  background: true
+  rules:
+    - name: require-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      validate:
+        message: "Kafka pods must run as non-root."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+
+    - name: restrict-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      validate:
+        message: "Containers must drop ALL capabilities."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop: ["ALL"]
+
+    - name: require-seccomp
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      validate:
+        message: "Pods must use RuntimeDefault or Localhost seccomp profile."
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: "RuntimeDefault | Localhost"
+
+    - name: restrict-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      validate:
+        message: "Containers must not allow privilege escalation."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+{{- end }}

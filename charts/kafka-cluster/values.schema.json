@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["clusterName", "kafkaVersion", "brokerPools", "controllers"],
+  "properties": {
+    "clusterName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+      "description": "Name of the Kafka cluster (must be a valid Kubernetes resource name)"
+    },
+    "kafkaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Apache Kafka version"
+    },
+    "strimziVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Strimzi operator version"
+    },
+    "kafka": {
+      "type": "object",
+      "required": ["listeners", "config"],
+      "properties": {
+        "listeners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "port", "type"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "type": { "type": "string", "enum": ["internal", "route", "loadbalancer", "nodeport", "ingress", "cluster-ip"] },
+              "tls": { "type": "boolean" }
+            }
+          }
+        },
+        "authorization": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["simple", "opa", "keycloak", "custom"] },
+            "superUsers": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "config": { "type": "object" },
+        "rack": {
+          "type": "object",
+          "properties": {
+            "topologyKey": { "type": "string" }
+          }
+        },
+        "metricsConfig": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["jmxPrometheusExporter"] }
+          }
+        },
+        "clusterCa": { "$ref": "#/$defs/caConfig" },
+        "clientsCa": { "$ref": "#/$defs/caConfig" }
+      }
+    },
+    "controllers": {
+      "type": "object",
+      "required": ["replicas"],
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "size": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
+            "class": { "type": "string" },
+            "deleteClaim": { "type": "boolean" }
+          }
+        },
+        "resources": { "$ref": "#/$defs/resources" },
+        "jvmOptions": { "$ref": "#/$defs/jvmOptions" }
+      }
+    },
+    "brokerPools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "replicas", "storageSize"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "zone": { "type": "string" },
+          "replicas": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "storageSize": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
+          "storageClass": { "type": "string" }
+        }
+      }
+    },
+    "brokerDefaults": {
+      "type": "object",
+      "properties": {
+        "deleteClaim": { "type": "boolean" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "jvmOptions": { "$ref": "#/$defs/jvmOptions" }
+      }
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "partitions", "replicas"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "partitions": { "type": "integer", "minimum": 1, "maximum": 10000 },
+          "replicas": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "config": { "type": "object" }
+        }
+      }
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "authentication"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "authentication": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["scram-sha-512", "tls", "tls-external"] }
+            }
+          }
+        }
+      }
+    },
+    "kafkaConnect": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "version": { "type": "string" }
+      }
+    },
+    "alerts": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "networkPolicies": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "allowedClientNamespaces": { "type": "array", "items": { "type": "string" } },
+        "monitoringNamespace": { "type": "string" }
+      }
+    },
+    "tieredStorage": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "credentials": {
+          "type": "object",
+          "properties": {
+            "existingSecret": { "type": "string" }
+          }
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "schedule": { "type": "string" }
+      }
+    },
+    "drainCleaner": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "podMonitors": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "strimziOperator": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "crdUpgrade": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "dashboards": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "podSecurityPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "strimzi-kafka-operator": { "type": "object" }
+  },
+  "$defs": {
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "memory": { "type": "string" },
+            "cpu": { "type": "string" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "memory": { "type": "string" },
+            "cpu": { "type": "string" }
+          }
+        }
+      }
+    },
+    "jvmOptions": {
+      "type": "object",
+      "properties": {
+        "-Xms": { "type": "string" },
+        "-Xmx": { "type": "string" },
+        "gcLoggingEnabled": { "type": "boolean" }
+      }
+    },
+    "caConfig": {
+      "type": "object",
+      "properties": {
+        "generateCertificateAuthority": { "type": "boolean" },
+        "validityDays": { "type": "integer", "minimum": 1 },
+        "renewalDays": { "type": "integer", "minimum": 1 },
+        "certificateExpirationPolicy": { "type": "string", "enum": ["replace-key", "renew-certificate"] }
+      }
+    }
+  }
+}

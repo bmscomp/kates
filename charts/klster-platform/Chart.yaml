@@ -1,0 +1,22 @@
+apiVersion: v2
+name: klster-platform
+description: Umbrella chart for the full Klster platform — Kafka, Kates, and supporting infrastructure
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - kafka
+  - kates
+  - platform
+  - strimzi
+maintainers:
+  - name: Platform Team
+dependencies:
+  - name: kafka-cluster
+    version: "0.1.0"
+    repository: "file://../kafka-cluster"
+    condition: kafka-cluster.enabled
+  - name: kates
+    version: "0.3.0"
+    repository: "file://../kates"
+    condition: kates.enabled

@@ -1,0 +1,13 @@
+Klster Platform deployed!
+
+Components:
+{{- if index .Values "kafka-cluster" "enabled" }}
+  ✓ Kafka Cluster (kafka-cluster subchart)
+{{- end }}
+{{- if .Values.kates.enabled }}
+  ✓ Kates Application (kates subchart)
+{{- end }}
+
+To check status:
+  helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+  kubectl get kafka -n {{ .Release.Namespace }}

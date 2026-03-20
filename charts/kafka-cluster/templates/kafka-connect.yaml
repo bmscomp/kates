@@ -1,0 +1,53 @@
+{{- if .Values.kafkaConnect.enabled }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnect
+metadata:
+  name: {{ include "kafka-cluster.clusterName" . }}-connect
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: {{ .Values.kafkaConnect.version | default .Values.kafkaVersion }}
+  replicas: {{ .Values.kafkaConnect.replicas }}
+  bootstrapServers: {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092
+  authentication:
+    type: scram-sha-512
+    username: kates-connect
+    passwordSecret:
+      secretName: kates-connect
+      password: password
+  config:
+    group.id: {{ .Values.kafkaConnect.groupId | default "kates-connect-cluster" }}
+    offset.storage.topic: kates-connect-offsets
+    config.storage.topic: kates-connect-configs
+    status.storage.topic: kates-connect-status
+    offset.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
+    config.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
+    status.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: true
+    value.converter.schemas.enable: true
+  resources:
+    {{- toYaml .Values.kafkaConnect.resources | nindent 4 }}
+  {{- if .Values.kafkaConnect.build }}
+  build:
+    {{- toYaml .Values.kafkaConnect.build | nindent 4 }}
+  {{- end }}
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: kafka-metrics
+        key: kafka-metrics-config.yml
+  template:
+    pod:
+      securityContext:
+        {{- include "kafka-cluster.podSecurityContext" . | nindent 8 }}
+    connectContainer:
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+{{- end }}

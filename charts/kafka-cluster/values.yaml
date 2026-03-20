@@ -363,8 +363,11 @@ networkPolicies:
 tieredStorage:
   enabled: false
   credentials:
+    existingSecret: ""
     accessKeyId: minio
     secretAccessKey: minio123
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
   s3:
     bucketName: kafka-tiered-storage
     region: us-east-1
@@ -376,6 +379,36 @@ tieredStorage:
   retention:
     taskIntervalMs: 30000
     localRetentionMs: 86400000
+
+kafkaConnect:
+  enabled: false
+  replicas: 1
+  version: ""
+  groupId: kates-connect-cluster
+  config:
+    replicationFactor: 3
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 200m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+  build: {}
+
+crdUpgrade:
+  enabled: true
+  image: "bitnami/kubectl:latest"
+
+dashboards:
+  enabled: true
+  namespace: monitoring
+  label: grafana_dashboard
+  labelValue: "1"
+
+podSecurityPolicy:
+  enabled: false
+  action: Audit
 
 backup:
   enabled: false

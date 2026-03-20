@@ -1,0 +1,150 @@
+{{- if .Values.dashboards.enabled }}
+{{- $clusterName := include "kafka-cluster.clusterName" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-overview-dashboard
+  namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+data:
+  kafka-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "Active Controllers",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "targets": [{
+            "expr": "kafka_controller_kafkacontroller_activecontrollercount",
+            "legendFormat": "Controllers"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Offline Partitions",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "targets": [{
+            "expr": "sum(kafka_controller_kafkacontroller_offlinepartitionscount)",
+            "legendFormat": "Offline"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Under-Replicated Partitions",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "targets": [{
+            "expr": "sum(kafka_server_replicamanager_underreplicatedpartitions)",
+            "legendFormat": "Under-replicated"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Consumer Group Lag (Top 10)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [{
+            "expr": "topk(10, kafka_consumergroup_lag_sum)",
+            "legendFormat": "{{ "{{" }}consumergroup{{ "}}" }}"
+          }]
+        },
+        {
+          "title": "Bytes In/Out per Broker",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [
+            {
+              "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesinpersec[5m])) by (kubernetes_pod_name)",
+              "legendFormat": "{{ "{{" }}kubernetes_pod_name{{ "}}" }} IN"
+            },
+            {
+              "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesoutpersec[5m])) by (kubernetes_pod_name)",
+              "legendFormat": "{{ "{{" }}kubernetes_pod_name{{ "}}" }} OUT"
+            }
+          ]
+        },
+        {
+          "title": "Request Latency p99",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "targets": [{
+            "expr": "kafka_network_request_metrics_totaltimems_percentile{quantile=\"0.99\"}",
+            "legendFormat": "{{ "{{" }}request{{ "}}" }} p99"
+          }]
+        },
+        {
+          "title": "KRaft Leader Elections",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "targets": [{
+            "expr": "rate(kafka_server_raft_metrics_numberofleaderelections[5m])",
+            "legendFormat": "Elections/s"
+          }]
+        },
+        {
+          "title": "Disk Usage per Broker",
+          "type": "gauge",
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 20 },
+          "targets": [{
+            "expr": "1 - (node_filesystem_avail_bytes{mountpoint=~\"/var/lib/kafka.*\"} / node_filesystem_size_bytes{mountpoint=~\"/var/lib/kafka.*\"})",
+            "legendFormat": "{{ "{{" }}kubernetes_pod_name{{ "}}" }}"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0, "max": 1,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 0.7 },
+                  { "color": "red", "value": 0.85 }
+                ]
+              },
+              "unit": "percentunit"
+            }
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "strimzi", "{{ $clusterName }}"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "Kafka Cluster Overview — {{ $clusterName }}",
+      "uid": "kafka-cluster-overview"
+    }
+{{- end }}
