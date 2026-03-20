@@ -352,7 +352,7 @@ public class TestOrchestrator {
         }
         run = run.withResults(updatedResults);
 
-        if (allDone) {
+        if (allDone && !updatedResults.isEmpty()) {
             run = run.withStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
             activeHandles.remove(runId);
             fireEvent(run, anyFailed ? TestLifecycleEvent.EventKind.FAILED : TestLifecycleEvent.EventKind.DONE);
