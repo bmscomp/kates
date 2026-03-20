@@ -98,16 +98,16 @@ ingress:
 # -- Resource requests and limits for the KATES container
 resources:
   requests:
-    memory: "256Mi"
-    cpu: "250m"
-  limits:
-    memory: "512Mi"
+    memory: "2Gi"
     cpu: "500m"
+  limits:
+    memory: "4Gi"
+    cpu: "2"
 
 # -- JVM configuration
 jvm:
-  # -- JVM options passed via JAVA_TOOL_OPTIONS (e.g. "-Xms512m -Xmx2560m -XX:+UseZGC")
-  options: ""
+  # -- JVM options passed via JAVA_TOOL_OPTIONS
+  options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
 # -- Pod-level security context (PSS restricted compliant)
 securityContext:
