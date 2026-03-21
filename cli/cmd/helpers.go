@@ -136,6 +136,18 @@ func describeType(t string) string {
 		return "Maximum capacity planning workload"
 	case "ROUND_TRIP":
 		return "End-to-end produce → consume latency"
+	case "INTEGRITY":
+		return "Data integrity verification with CRC checks"
+	case "TUNE_REPLICATION":
+		return "Sweep replication factor to measure throughput cost"
+	case "TUNE_ACKS":
+		return "Compare acks=0, acks=1, acks=all throughput"
+	case "TUNE_BATCHING":
+		return "Sweep batch size and linger.ms for optimal throughput"
+	case "TUNE_COMPRESSION":
+		return "Compare none, lz4, snappy, zstd compression"
+	case "TUNE_PARTITIONS":
+		return "Sweep partition count to find parallelism sweet spot"
 	default:
 		return ""
 	}
