@@ -1,0 +1,68 @@
+clusterName: krafter
+kafkaVersion: "4.1.1"
+
+controllers:
+  replicas: 3
+  storage:
+    size: 10Gi
+
+brokerPools:
+  - name: brokers-alpha
+    zone: alpha
+    replicas: 1
+    storageSize: 100Gi
+    storageClass: local-storage-alpha
+  - name: brokers-sigma
+    zone: sigma
+    replicas: 1
+    storageSize: 100Gi
+    storageClass: local-storage-sigma
+  - name: brokers-gamma
+    zone: gamma
+    replicas: 1
+    storageSize: 100Gi
+    storageClass: local-storage-gamma
+
+brokerDefaults:
+  jvmOptions:
+    -Xms: 2048m
+    -Xmx: 2048m
+  resources:
+    requests:
+      memory: 4Gi
+      cpu: 1000m
+    limits:
+      memory: 4Gi
+      cpu: 2000m
+
+networkPolicies:
+  enabled: true
+
+alerts:
+  enabled: true
+
+podSecurityPolicy:
+  enabled: true
+  action: Enforce
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  ttl: 168h0m0s
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: standard
+
+lifecycle:
+  preStopSleepSeconds: 15
+
+rbac:
+  create: true
+
+dashboards:
+  enabled: true
+  brokerDashboard: true
+  kraftDashboard: true
+  cruiseControlDashboard: true
+  connectDashboard: true

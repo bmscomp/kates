@@ -170,7 +170,18 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "schedule": { "type": "string" }
+        "schedule": { "type": "string", "pattern": "^[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+$" },
+        "ttl": { "type": "string", "pattern": "^[0-9]+h[0-9]+m[0-9]+s$" },
+        "snapshotVolumes": { "type": "boolean" },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
+            "storageClass": { "type": "string" },
+            "existingClaim": { "type": "string" }
+          }
+        }
       }
     },
     "drainCleaner": {
@@ -200,7 +211,14 @@
     "dashboards": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string" },
+        "label": { "type": "string" },
+        "labelValue": { "type": "string" },
+        "brokerDashboard": { "type": "boolean" },
+        "kraftDashboard": { "type": "boolean" },
+        "cruiseControlDashboard": { "type": "boolean" },
+        "connectDashboard": { "type": "boolean" }
       }
     },
     "podSecurityPolicy": {
@@ -209,7 +227,26 @@
         "enabled": { "type": "boolean" }
       }
     },
-    "strimzi-kafka-operator": { "type": "object" }
+    "strimzi-kafka-operator": { "type": "object" },
+    "lifecycle": {
+      "type": "object",
+      "properties": {
+        "preStopSleepSeconds": { "type": "integer", "minimum": 0, "maximum": 120 }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "extraRules": { "type": "array" }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "annotations": { "type": "object" }
+      }
+    }
   },
   "$defs": {
     "resources": {

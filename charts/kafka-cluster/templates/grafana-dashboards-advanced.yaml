@@ -1,0 +1,265 @@
+{{- if and .Values.dashboards.enabled .Values.dashboards.brokerDashboard }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-broker-dashboard
+  namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+data:
+  kafka-broker.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "Request Handler Idle %",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_count{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Network Processor Idle %",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [{"expr": "kafka_network_socketserver_networkprocessoravgidlepercent{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Bytes In/Out Per Broker",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [
+            {"expr": "rate(kafka_server_brokertopicmetrics_bytesin_total{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])", "legendFormat": "{{`{{`}}strimzi_io_name{{`}}`}} IN"},
+            {"expr": "rate(kafka_server_brokertopicmetrics_bytesout_total{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])", "legendFormat": "{{`{{`}}strimzi_io_name{{`}}`}} OUT"}
+          ]
+        },
+        {
+          "title": "Messages In/sec",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [{"expr": "rate(kafka_server_brokertopicmetrics_messagesin_total{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])"}]
+        },
+        {
+          "title": "Log Flush Rate & Time (ms)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "targets": [
+            {"expr": "rate(kafka_log_logflushstats_logflushtimems_count{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])", "legendFormat": "flush rate"},
+            {"expr": "kafka_log_logflushstats_logflushtimems{namespace=\"{{ include "kafka-cluster.namespace" . }}\",quantile=\"0.99\"}", "legendFormat": "p99 flush time"}
+          ]
+        },
+        {
+          "title": "JVM Heap Used vs Committed",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "targets": [
+            {"expr": "jvm_memory_bytes_used{namespace=\"{{ include "kafka-cluster.namespace" . }}\",area=\"heap\"}", "legendFormat": "used"},
+            {"expr": "jvm_memory_bytes_committed{namespace=\"{{ include "kafka-cluster.namespace" . }}\",area=\"heap\"}", "legendFormat": "committed"}
+          ]
+        },
+        {
+          "title": "Under-Replicated Partitions",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 24},
+          "targets": [{"expr": "sum(kafka_server_replicamanager_underreplicatedpartitions{namespace=\"{{ include "kafka-cluster.namespace" . }}\"})"}],
+          "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]}}}
+        },
+        {
+          "title": "Active Controller Count",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 24},
+          "targets": [{"expr": "sum(kafka_controller_kafkacontroller_activecontrollercount{namespace=\"{{ include "kafka-cluster.namespace" . }}\"})"}]
+        },
+        {
+          "title": "ISR Shrinks/Expands",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "targets": [
+            {"expr": "rate(kafka_server_replicamanager_isrshrinks_total{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])", "legendFormat": "shrinks"},
+            {"expr": "rate(kafka_server_replicamanager_isrexpands_total{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])", "legendFormat": "expands"}
+          ]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "strimzi", "broker"],
+      "templating": {"list": []},
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Kafka Broker Metrics",
+      "uid": "kafka-broker-{{ include "kafka-cluster.clusterName" . }}"
+    }
+{{- end }}
+---
+{{- if and .Values.dashboards.enabled .Values.dashboards.kraftDashboard }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-kraft-dashboard
+  namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+data:
+  kafka-kraft.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "title": "KRaft Commit Latency (ms)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "kafka_server_raftmanager_commitlatency{namespace=\"{{ include "kafka-cluster.namespace" . }}\",quantile=\"0.99\"}"}]
+        },
+        {
+          "title": "Current Leader Epoch",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [{"expr": "kafka_server_raftmanager_currentleaderepoch{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "High Watermark",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [{"expr": "kafka_server_raftmanager_highwatermark{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Log End Offset",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [{"expr": "kafka_server_raftmanager_logendoffset{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Election Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "targets": [{"expr": "rate(kafka_server_raftmanager_electionlatency_count{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])"}]
+        },
+        {
+          "title": "Number of Voters",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 16},
+          "targets": [{"expr": "kafka_server_raftmanager_numberofvoters{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "kraft", "raft"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Kafka KRaft Quorum",
+      "uid": "kafka-kraft-{{ include "kafka-cluster.clusterName" . }}"
+    }
+{{- end }}
+---
+{{- if and .Values.dashboards.enabled .Values.dashboards.cruiseControlDashboard }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-cruise-control-dashboard
+  namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+data:
+  kafka-cruise-control.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "title": "Executor State",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [{"expr": "kafka_cruisecontrol_executor_state{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Monitored Partitions %",
+          "type": "gauge",
+          "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+          "targets": [{"expr": "kafka_cruisecontrol_monitoredpartitionspercentage{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}],
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+        },
+        {
+          "title": "Optimization Proposals Ready",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [{"expr": "kafka_cruisecontrol_optimizationproposalscomputed{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Rebalance Data Movement (bytes)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [{"expr": "rate(kafka_cruisecontrol_executor_totaldatatomove{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])"}]
+        },
+        {
+          "title": "Balancedness Score",
+          "type": "gauge",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [{"expr": "kafka_cruisecontrol_balancednessscore{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}],
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "cruise-control"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Kafka Cruise Control",
+      "uid": "kafka-cc-{{ include "kafka-cluster.clusterName" . }}"
+    }
+{{- end }}
+---
+{{- if and .Values.dashboards.enabled .Values.dashboards.connectDashboard }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-connect-dashboard
+  namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+data:
+  kafka-connect.json: |-
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "title": "Connector Count",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [{"expr": "kafka_connect_worker_connectorcount{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Task Count",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "targets": [{"expr": "kafka_connect_worker_taskcount{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}]
+        },
+        {
+          "title": "Source Records/sec",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "targets": [{"expr": "rate(kafka_connect_worker_sourcerecordpollrate{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])"}]
+        },
+        {
+          "title": "Sink Records/sec",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "targets": [{"expr": "rate(kafka_connect_worker_sinkrecordreadrate{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}[5m])"}]
+        },
+        {
+          "title": "Failed Task Count",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [{"expr": "kafka_connect_worker_connectorstalerestarting{namespace=\"{{ include "kafka-cluster.namespace" . }}\"}"}],
+          "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]}}}
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "connect"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Kafka Connect",
+      "uid": "kafka-connect-{{ include "kafka-cluster.clusterName" . }}"
+    }
+{{- end }}

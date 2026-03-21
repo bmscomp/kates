@@ -327,6 +327,44 @@ chart-push: chart-package
 	helm push .build/kates-$(CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Chart pushed: $(CHART_REGISTRY)/kates:$(CHART_VERSION)"
 
+KAFKA_CHART_DIR     := charts/kafka-cluster
+KAFKA_CHART_VERSION := $(shell grep '^version:' $(KAFKA_CHART_DIR)/Chart.yaml | awk '{print $$2}')
+
+kafka-chart-deps:
+	helm dependency build $(KAFKA_CHART_DIR)
+
+kafka-chart-lint: kafka-chart-deps
+	@echo "🔍 Linting kafka-cluster chart (all environments)..."
+	helm lint $(KAFKA_CHART_DIR)
+	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-dev.yaml
+	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-staging.yaml
+	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-prod.yaml
+	@echo "✅ Kafka chart lint passed"
+
+kafka-chart-template: kafka-chart-deps
+	@mkdir -p .build
+	helm template kafka-cluster $(KAFKA_CHART_DIR) \
+		--namespace kafka \
+		--set strimziOperator.enabled=false \
+		--set crdUpgrade.enabled=false \
+		> .build/kafka-rendered.yaml
+	@echo "Rendered $$(grep -c '^kind:' .build/kafka-rendered.yaml) resources → .build/kafka-rendered.yaml"
+
+kafka-chart-package: kafka-chart-deps
+	@mkdir -p .build
+	helm package $(KAFKA_CHART_DIR) --destination .build/
+	@echo "✅ Kafka chart packaged: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
+
+kafka-chart-push: kafka-chart-package
+	helm push .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz $(CHART_REGISTRY)
+	@echo "✅ Kafka chart pushed: $(CHART_REGISTRY)/kafka-cluster:$(KAFKA_CHART_VERSION)"
+
+kafka-chart-test:
+	helm test kafka-cluster --namespace kafka --timeout 120s
+
+kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package
+	@echo "✅ All kafka chart checks passed: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
+
 # Port Forwarding
 ports:
 	@echo "🔌 Starting Port Forwarding..."

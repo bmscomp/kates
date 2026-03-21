@@ -1,0 +1,57 @@
+{{- if .Values.rbac.create }}
+{{- $namespace := include "kafka-cluster.namespace" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kafka-cluster.clusterName" . }}-admin
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kafka-cluster.clusterName" . }}-viewer
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kafka.strimzi.io"]
+    resources:
+      - kafkas
+      - kafkanodepools
+      - kafkatopics
+      - kafkausers
+      - kafkaconnects
+      - kafkarebalances
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  {{- with .Values.rbac.extraRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kafka-cluster.clusterName" . }}-viewer
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kafka-cluster.clusterName" . }}-viewer
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kafka-cluster.clusterName" . }}-admin
+    namespace: {{ $namespace }}
+{{- end }}

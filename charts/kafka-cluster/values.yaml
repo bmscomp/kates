@@ -405,6 +405,10 @@ dashboards:
   namespace: monitoring
   label: grafana_dashboard
   labelValue: "1"
+  brokerDashboard: true
+  kraftDashboard: true
+  cruiseControlDashboard: true
+  connectDashboard: false
 
 podSecurityPolicy:
   enabled: false
@@ -415,6 +419,11 @@ backup:
   schedule: "0 2 * * *"
   ttl: 168h0m0s
   snapshotVolumes: true
+  persistence:
+    enabled: false
+    size: 20Gi
+    storageClass: ""
+    existingClaim: ""
 
 rebalance:
   enabled: true
@@ -488,3 +497,13 @@ strimzi-kafka-operator:
     labelValue: "1"
   generateNetworkPolicy: true
   generatePodDisruptionBudget: true
+
+lifecycle:
+  preStopSleepSeconds: 15
+
+rbac:
+  create: true
+  extraRules: []
+
+serviceAccount:
+  annotations: {}

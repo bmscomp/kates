@@ -4,6 +4,7 @@ description: Strimzi-based Kafka cluster deployment with KRaft, zone-aware broke
 type: application
 version: 0.1.0
 appVersion: "4.1.1"
+icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
 keywords:
   - kafka

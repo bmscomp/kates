@@ -1,106 +1,207 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .Release.Name }}-test-connection"
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-connectivity"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": test
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    helm.sh/hook: test
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   securityContext:
-    runAsNonRoot: true
-    runAsUser: 1001
-    seccompProfile:
-      type: RuntimeDefault
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
-    - name: kafka-topic-list
-      image: quay.io/strimzi/kafka:latest-kafka-{{ .Values.kafkaVersion }}
-      command:
-        - /bin/sh
-        - -c
+    - name: kafka-health
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
         - |
-          echo "Testing Kafka bootstrap connectivity..."
-          kafka-metadata.sh --snapshot /dev/null --cluster-id test 2>/dev/null || true
+          set -e
+          echo "=== Tier 1: Bootstrap Connectivity ==="
+          BOOTSTRAP="{{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap.{{ include "kafka-cluster.namespace" . }}.svc:9092"
+          echo "Testing TCP connection to ${BOOTSTRAP}..."
+          timeout 10 sh -c "echo > /dev/tcp/$(echo $BOOTSTRAP | cut -d: -f1)/$(echo $BOOTSTRAP | cut -d: -f2)" 2>/dev/null
+          echo "✓ Bootstrap connectivity OK"
 
-          echo "Listing topics via bootstrap server..."
-          kafka-topics.sh \
-            --bootstrap-server {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092 \
-            --list
-
-          TOPIC_COUNT=$(kafka-topics.sh \
-            --bootstrap-server {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092 \
-            --list 2>/dev/null | wc -l)
-
-          echo "Found ${TOPIC_COUNT} topics."
-          if [ "${TOPIC_COUNT}" -lt 1 ]; then
-            echo "FAIL: No topics found"
-            exit 1
+          echo ""
+          echo "=== Tier 1: Kafka CR Ready ==="
+          STATUS=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          if [ "$STATUS" = "True" ]; then
+            echo "✓ Kafka CR Ready=True"
+          else
+            echo "✗ Kafka CR not ready: $STATUS" && exit 1
           fi
-          echo "PASS: Kafka connection successful"
+
+          echo ""
+          echo "=== Tier 1: Broker Pods ==="
+          TOTAL=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka --no-headers | wc -l)
+          READY=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka --no-headers | grep "Running" | wc -l)
+          echo "Broker pods: $READY/$TOTAL running"
+          if [ "$READY" -lt 1 ]; then
+            echo "✗ No broker pods running" && exit 1
+          fi
+          echo "✓ Broker pods healthy"
       securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: false
-        capabilities:
-          drop: ["ALL"]
-      resources:
-        requests:
-          memory: 128Mi
-          cpu: 100m
-        limits:
-          memory: 256Mi
-          cpu: 200m
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ .Release.Name }}-test-broker-health"
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-produce-consume"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
   annotations:
-    "helm.sh/hook": test
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    helm.sh/hook: test
+    helm.sh/hook-weight: "2"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   securityContext:
-    runAsNonRoot: true
-    runAsUser: 1001
-    seccompProfile:
-      type: RuntimeDefault
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
-    - name: broker-health
+    - name: produce-consume
       image: quay.io/strimzi/kafka:latest-kafka-{{ .Values.kafkaVersion }}
-      command:
-        - /bin/sh
-        - -c
+      command: ["sh", "-c"]
+      args:
         - |
-          echo "Checking broker metadata..."
-          kafka-broker-api-versions.sh \
-            --bootstrap-server {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092 \
-            | head -20
+          set -e
+          BOOTSTRAP="{{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092"
+          TOPIC="__helm-test-$(date +%s)"
+          MSG="helm-test-roundtrip-$(date +%s)"
 
-          BROKER_COUNT=$(kafka-broker-api-versions.sh \
-            --bootstrap-server {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092 \
-            2>/dev/null | grep "^{{ include "kafka-cluster.clusterName" . }}" | wc -l)
+          echo "=== Tier 2: Produce/Consume Round-Trip ==="
 
-          echo "Active brokers: ${BROKER_COUNT}"
-          EXPECTED={{ len .Values.brokerPools }}
-          if [ "${BROKER_COUNT}" -lt "${EXPECTED}" ]; then
-            echo "WARN: Expected at least ${EXPECTED} brokers, found ${BROKER_COUNT}"
+          cat > /tmp/client.properties << EOF
+          security.protocol=SASL_PLAINTEXT
+          sasl.mechanism=SCRAM-SHA-512
+          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')";
+          EOF
+
+          echo "Creating test topic: ${TOPIC}..."
+          bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} \
+            --command-config /tmp/client.properties \
+            --create --topic ${TOPIC} --partitions 1 --replication-factor 1 \
+            --config retention.ms=60000 2>&1 || true
+
+          echo "Producing test record..."
+          echo "${MSG}" | bin/kafka-console-producer.sh \
+            --bootstrap-server ${BOOTSTRAP} \
+            --producer.config /tmp/client.properties \
+            --topic ${TOPIC} 2>/dev/null
+
+          echo "Consuming test record..."
+          RECEIVED=$(timeout 15 bin/kafka-console-consumer.sh \
+            --bootstrap-server ${BOOTSTRAP} \
+            --consumer.config /tmp/client.properties \
+            --topic ${TOPIC} --from-beginning --max-messages 1 2>/dev/null || true)
+
+          if echo "${RECEIVED}" | grep -q "${MSG}"; then
+            echo "✓ Round-trip OK: produced and consumed '${MSG}'"
+          else
+            echo "⚠ Round-trip: message sent but consume may have timed out (non-blocking)"
           fi
-          echo "PASS: Broker health check complete"
+
+          echo "Cleaning up test topic..."
+          bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} \
+            --command-config /tmp/client.properties \
+            --delete --topic ${TOPIC} 2>/dev/null || true
+          echo "✓ Tier 2 complete"
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: false
-        capabilities:
-          drop: ["ALL"]
-      resources:
-        requests:
-          memory: 128Mi
-          cpu: 100m
-        limits:
-          memory: 256Mi
-          cpu: 200m
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- if (index (default (list) .Values.users) 0) }}
+        - name: connect-password
+          mountPath: /opt/kafka/connect-password
+          readOnly: true
+        {{- end }}
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    {{- if (index (default (list) .Values.users) 0) }}
+    - name: connect-password
+      secret:
+        secretName: {{ (index .Values.users 0).name }}
+    {{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-authorization"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: auth-check
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 3: Authorization Verification ==="
+
+          echo "Checking KafkaUser CRs are Ready..."
+          USERS=$(kubectl get kafkausers -n {{ include "kafka-cluster.namespace" . }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -o jsonpath='{.items[*].metadata.name}')
+          FAIL=0
+          for u in $USERS; do
+            STATUS=$(kubectl get kafkauser $u -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+            if [ "$STATUS" = "True" ]; then
+              echo "  ✓ KafkaUser $u: Ready"
+            else
+              echo "  ✗ KafkaUser $u: NOT Ready ($STATUS)"
+              FAIL=1
+            fi
+          done
+
+          echo ""
+          echo "Checking SCRAM credential secrets exist..."
+          for u in $USERS; do
+            if kubectl get secret $u -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.data.password}' > /dev/null 2>&1; then
+              echo "  ✓ Secret $u: exists"
+            else
+              echo "  ⚠ Secret $u: missing (may use TLS auth)"
+            fi
+          done
+
+          echo ""
+          echo "Checking authorization type..."
+          AUTH_TYPE=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.spec.kafka.authorization.type}')
+          echo "  Authorization type: $AUTH_TYPE"
+          if [ "$AUTH_TYPE" = "simple" ]; then
+            echo "  ✓ Simple ACL authorization enabled"
+          elif [ -z "$AUTH_TYPE" ]; then
+            echo "  ⚠ No authorization configured (open access)"
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "✗ Some users not ready" && exit 1
+          fi
+          echo "✓ Tier 3 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

@@ -33,9 +33,19 @@ spec:
     template:
       podDisruptionBudget:
         {{- toYaml .Values.kafka.template.podDisruptionBudget | nindent 8 }}
+      {{- if .Values.lifecycle }}
+      pod:
+        terminationGracePeriodSeconds: {{ add (default 15 .Values.lifecycle.preStopSleepSeconds) 30 }}
+      {{- end }}
       kafkaContainer:
         securityContext:
           {{- include "kafka-cluster.containerSecurityContext" . | nindent 10 }}
+        {{- if .Values.lifecycle }}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sh", "-c", "sleep {{ .Values.lifecycle.preStopSleepSeconds | default 15 }}"]
+        {{- end }}
   clusterCa:
     {{- toYaml .Values.kafka.clusterCa | nindent 4 }}
   clientsCa:

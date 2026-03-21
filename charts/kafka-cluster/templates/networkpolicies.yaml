@@ -97,6 +97,15 @@ spec:
         - podSelector:
             matchLabels:
               strimzi.io/cluster: {{ $clusterName }}
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
     - to: []
       ports:
         - port: 443
@@ -356,5 +365,83 @@ spec:
         - port: 443
           protocol: TCP
         - port: 6443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: entity-operator
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+      strimzi.io/name: {{ $clusterName }}-entity-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $monitoringNs }}
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ $clusterName }}
+      ports:
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-exporter
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+      strimzi.io/name: {{ $clusterName }}-kafka-exporter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $monitoringNs }}
+      ports:
+        - port: 9404
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ $clusterName }}
+      ports:
+        - port: 9092
+          protocol: TCP
+    - to: []
+      ports:
+        - port: 443
           protocol: TCP
 {{- end }}
