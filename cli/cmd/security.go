@@ -522,6 +522,12 @@ var securityGateCmd = &cobra.Command{
 
 			failingChecks, _ := result["failingChecks"].([]interface{})
 			if len(failingChecks) > 0 {
+				tw := output.TermWidth()
+				fixWidth := tw - 36
+				if fixWidth < 30 {
+					fixWidth = 30
+				}
+
 				fmt.Println()
 				output.SubHeader("Failing Checks (fix to raise grade)")
 				rows := make([][]string, 0, len(failingChecks))
@@ -533,7 +539,7 @@ var securityGateCmd = &cobra.Command{
 					rows = append(rows, []string{
 						statusIcon(fmt.Sprintf("%v", fc["status"])),
 						fmt.Sprintf("%v", fc["check"]),
-						truncate(fmt.Sprintf("%v", fc["fix"]), 55),
+						truncate(fmt.Sprintf("%v", fc["fix"]), fixWidth),
 					})
 				}
 				output.Table([]string{"", "Check", "Remediation"}, rows)
