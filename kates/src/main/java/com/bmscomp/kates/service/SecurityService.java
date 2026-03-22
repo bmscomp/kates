@@ -368,6 +368,180 @@ public class SecurityService {
                     "LOW", "CIS-3.14",
                     "Set compression.type to lz4 or zstd for bandwidth savings"));
 
+            // 31. SSL cipher suites
+            String cipherSuites = brokerConfig.getOrDefault("ssl.cipher.suites", "");
+            boolean hasWeakCipher = cipherSuites.contains("RC4") || cipherSuites.contains("DES")
+                    || cipherSuites.contains("MD5") || cipherSuites.contains("NULL");
+            checks.add(check("SSL Cipher Suites", "transport",
+                    cipherSuites.isEmpty() ? "PASS"
+                            : hasWeakCipher ? "FAIL" : "PASS",
+                    cipherSuites.isEmpty() ? "Using JVM default ciphers (secure)"
+                            : hasWeakCipher ? "Weak ciphers detected: " + cipherSuites
+                                    : "Custom ciphers: " + cipherSuites,
+                    "HIGH", "CIS-4.5",
+                    "Remove RC4, DES, MD5, NULL ciphers from ssl.cipher.suites"));
+
+            // 32. SSL endpoint identification algorithm
+            String endpointIdAlgo = brokerConfig.getOrDefault("ssl.endpoint.identification.algorithm", "https");
+            checks.add(check("SSL Hostname Verification", "transport",
+                    "https".equals(endpointIdAlgo) ? "PASS" : "WARN",
+                    "ssl.endpoint.identification.algorithm = " + (endpointIdAlgo.isEmpty() ? "(empty)" : endpointIdAlgo)
+                            + ("https".equals(endpointIdAlgo) ? " — hostname verification enabled" : " — hostname verification DISABLED, vulnerable to MITM"),
+                    "HIGH", "CIS-4.6",
+                    "Set ssl.endpoint.identification.algorithm: https"));
+
+            // 33. SSL enabled protocols
+            String sslEnabledProtocols = brokerConfig.getOrDefault("ssl.enabled.protocols", "");
+            boolean hasLegacyProtocol = sslEnabledProtocols.contains("TLSv1,")
+                    || sslEnabledProtocols.contains("TLSv1.0")
+                    || sslEnabledProtocols.contains("SSLv3");
+            checks.add(check("SSL Enabled Protocols", "transport",
+                    sslEnabledProtocols.isEmpty() ? "PASS"
+                            : hasLegacyProtocol ? "FAIL" : "PASS",
+                    sslEnabledProtocols.isEmpty() ? "Using JVM defaults (TLSv1.2+)"
+                            : hasLegacyProtocol ? "Legacy protocols enabled: " + sslEnabledProtocols
+                                    : "Protocols: " + sslEnabledProtocols,
+                    "HIGH", "CIS-4.7",
+                    "Remove SSLv3 and TLSv1.0 from ssl.enabled.protocols"));
+
+            // Topic-level checks
+            var topicNames = client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            var topicDescriptions = client.describeTopics(topicNames).allTopicNames()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            // 34. Topics with RF=1
+            long rf1Topics = topicDescriptions.values().stream()
+                    .filter(td -> !td.name().startsWith("__"))
+                    .filter(td -> td.partitions().stream()
+                            .anyMatch(p -> p.replicas().size() < 2))
+                    .count();
+            checks.add(check("Topics with RF=1", "topics",
+                    rf1Topics == 0 ? "PASS" : "WARN",
+                    rf1Topics == 0 ? "All user topics have replication factor ≥ 2"
+                            : rf1Topics + " topics have RF=1 — single point of failure",
+                    "HIGH", "CIS-3.15",
+                    "Increase replication.factor to at least 2 for all production topics"));
+
+            // 35. Under-replicated partitions
+            long underReplicated = topicDescriptions.values().stream()
+                    .flatMap(td -> td.partitions().stream())
+                    .filter(p -> p.isr().size() < p.replicas().size())
+                    .count();
+            checks.add(check("Under-Replicated Partitions", "topics",
+                    underReplicated == 0 ? "PASS" : "WARN",
+                    underReplicated == 0 ? "All partitions fully replicated"
+                            : underReplicated + " partitions under-replicated — data at risk",
+                    "CRITICAL", "CIS-3.16",
+                    "Investigate broker health — under-replicated partitions indicate failing nodes"));
+
+            // 36. Internal topic protection (__consumer_offsets RF)
+            var consumerOffsets = topicDescriptions.get("__consumer_offsets");
+            int offsetsRf = consumerOffsets != null && !consumerOffsets.partitions().isEmpty()
+                    ? consumerOffsets.partitions().get(0).replicas().size() : 0;
+            checks.add(check("Internal Topic Protection", "topics",
+                    offsetsRf >= 3 ? "PASS" : "WARN",
+                    offsetsRf == 0 ? "__consumer_offsets not found"
+                            : "__consumer_offsets RF=" + offsetsRf
+                                    + (offsetsRf >= 3 ? " — properly replicated" : " — should be ≥ 3"),
+                    "HIGH", "CIS-3.17",
+                    "Set offsets.topic.replication.factor: 3"));
+
+            // 37. Excessive topic count
+            long userTopics = topicDescriptions.keySet().stream()
+                    .filter(n -> !n.startsWith("__"))
+                    .count();
+            checks.add(check("Topic Count", "topics",
+                    userTopics <= 1000 ? "PASS" : "WARN",
+                    userTopics + " user topics" + (userTopics > 1000 ? " — excessive count strains metadata and controller" : ""),
+                    "LOW", "CIS-3.18",
+                    "Consider consolidating topics or partitioning strategy if count exceeds 1000"));
+
+            // 38. Max connections per IP
+            String maxConnsPerIp = brokerConfig.getOrDefault("max.connections.per.ip", "");
+            checks.add(check("Max Connections Per IP", "network",
+                    !maxConnsPerIp.isEmpty() && !"2147483647".equals(maxConnsPerIp) ? "PASS" : "WARN",
+                    !maxConnsPerIp.isEmpty() && !"2147483647".equals(maxConnsPerIp)
+                            ? "max.connections.per.ip = " + maxConnsPerIp
+                            : "No per-IP connection limit — single host can exhaust all connections",
+                    "MEDIUM", "CIS-6.4",
+                    "Set max.connections.per.ip to limit connection exhaustion from single host"));
+
+            // 39. Network threads
+            String netThreads = brokerConfig.getOrDefault("num.network.threads", "3");
+            int netThreadCount = Integer.parseInt(netThreads);
+            checks.add(check("Network Threads", "network",
+                    netThreadCount >= 3 ? "PASS" : "WARN",
+                    "num.network.threads = " + netThreadCount
+                            + (netThreadCount < 3 ? " — too few for production traffic" : ""),
+                    "MEDIUM", "CIS-6.5",
+                    "Set num.network.threads >= 3 (typically 8 for production)"));
+
+            // 40. IO threads
+            String ioThreads = brokerConfig.getOrDefault("num.io.threads", "8");
+            int ioThreadCount = Integer.parseInt(ioThreads);
+            checks.add(check("IO Threads", "network",
+                    ioThreadCount >= 8 ? "PASS" : "WARN",
+                    "num.io.threads = " + ioThreadCount
+                            + (ioThreadCount < 8 ? " — may bottleneck disk I/O under load" : ""),
+                    "MEDIUM", "CIS-6.6",
+                    "Set num.io.threads >= 8 for production workloads"));
+
+            // 41. Listener security protocol map
+            String protocolMap = brokerConfig.getOrDefault("listener.security.protocol.map", "");
+            boolean hasPlaintextListener = protocolMap.contains("PLAINTEXT") && !protocolMap.contains("SASL_PLAINTEXT");
+            checks.add(check("Listener Protocol Map", "network",
+                    protocolMap.isEmpty() || !hasPlaintextListener ? "PASS" : "WARN",
+                    protocolMap.isEmpty() ? "Using default listener protocols"
+                            : hasPlaintextListener ? "PLAINTEXT listeners in protocol map — unencrypted traffic allowed"
+                                    : "Protocol map: " + protocolMap,
+                    "HIGH", "CIS-4.8",
+                    "Map all listeners to SASL_SSL or SSL in listener.security.protocol.map"));
+
+            // 42. Log flush interval
+            String flushIntervalMs = brokerConfig.getOrDefault("log.flush.interval.ms", "");
+            String flushIntervalMsgs = brokerConfig.getOrDefault("log.flush.interval.messages", "9223372036854775807");
+            long flushMsgs = Long.parseLong(flushIntervalMsgs);
+            checks.add(check("Log Flush Interval", "durability",
+                    !flushIntervalMs.isEmpty() || flushMsgs < Long.MAX_VALUE ? "PASS" : "WARN",
+                    !flushIntervalMs.isEmpty() ? "log.flush.interval.ms = " + flushIntervalMs
+                            : flushMsgs < Long.MAX_VALUE ? "log.flush.interval.messages = " + flushMsgs
+                                    : "Using OS-level fsync only — may lose data on power failure",
+                    "MEDIUM", "CIS-3.19",
+                    "Set log.flush.interval.ms or log.flush.interval.messages for durability vs performance trade-off"));
+
+            // 43. Group coordinator replication
+            String groupMetadataRf = brokerConfig.getOrDefault("offsets.topic.replication.factor", "1");
+            int gmRf = Integer.parseInt(groupMetadataRf);
+            checks.add(check("Group Coordinator Replication", "durability",
+                    gmRf >= 3 ? "PASS" : "WARN",
+                    "offsets.topic.replication.factor = " + gmRf
+                            + (gmRf >= 3 ? "" : " — consumer group metadata at risk if broker fails"),
+                    "HIGH", "CIS-3.20",
+                    "Set offsets.topic.replication.factor: 3"));
+
+            // 44. Leader imbalance threshold
+            String imbalanceRatio = brokerConfig.getOrDefault("leader.imbalance.per.broker.percentage", "10");
+            int imbalancePct = Integer.parseInt(imbalanceRatio);
+            checks.add(check("Leader Imbalance Threshold", "durability",
+                    imbalancePct <= 10 ? "PASS" : "WARN",
+                    "leader.imbalance.per.broker.percentage = " + imbalancePct + "%"
+                            + (imbalancePct > 10 ? " — high threshold may mask uneven load" : ""),
+                    "LOW", "CIS-3.21",
+                    "Keep leader.imbalance.per.broker.percentage <= 10"));
+
+            // 45. Delegation token support
+            String delegationTokenSecret = brokerConfig.getOrDefault("delegation.token.master.key", "");
+            String delegationTokenMaxLife = brokerConfig.getOrDefault("delegation.token.max.lifetime.ms", "604800000");
+            long maxLifeMs = Long.parseLong(delegationTokenMaxLife);
+            long maxLifeDays = maxLifeMs / 86_400_000;
+            checks.add(check("Delegation Token Config", "auth",
+                    !delegationTokenSecret.isEmpty() ? "PASS" : "WARN",
+                    !delegationTokenSecret.isEmpty()
+                            ? "Delegation tokens enabled, max lifetime: " + maxLifeDays + " days"
+                            : "No delegation token master key — tokens unavailable for short-lived clients",
+                    "LOW", "CIS-4.9",
+                    "Configure delegation.token.master.key for short-lived client credentials"));
+
             for (Map<String, Object> c : checks) {
                 String status = (String) c.get("status");
                 if ("PASS".equals(status)) passed++;

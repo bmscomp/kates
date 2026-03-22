@@ -67,13 +67,15 @@ var securityAuditCmd = &cobra.Command{
 					severityRank(fmt.Sprintf("%v", parsed[j]["severity"]))
 			})
 
-			categoryOrder := []string{"auth", "authz", "transport", "config", "durability", "dos", "limits"}
+			categoryOrder := []string{"auth", "authz", "transport", "topics", "config", "durability", "network", "dos", "limits"}
 			categoryLabel := map[string]string{
 				"auth":       "Authentication",
 				"authz":      "Authorization",
 				"transport":  "Transport Security",
+				"topics":     "Topic Health",
 				"config":     "Broker Configuration",
 				"durability": "Data Durability",
+				"network":    "Network & Threading",
 				"dos":        "DoS Protection",
 				"limits":     "Resource Limits",
 			}
