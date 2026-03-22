@@ -1,5 +1,5 @@
 clusterName: krafter
-kafkaVersion: "4.1.1"
+kafkaVersion: "4.2.0"
 strimziVersion: "0.51.0"
 
 kafka:
