@@ -579,37 +579,43 @@ func (m LabModel) viewParams(width int) string {
 		}
 
 		if i == m.cursor {
-			maxVals := len(p.Values)
-			if compact && maxVals > 4 {
-				// Show a window of 4 values centered on current
-				start := p.Current - 1
-				if start < 0 {
-					start = 0
+			indent := labelCol + 2
+			valSlotW := valPad + 1
+			availW := width - indent
+			valsPerRow := availW / valSlotW
+			if valsPerRow < 2 {
+				valsPerRow = 2
+			}
+
+			vals := p.Values
+			startIdx := 0
+			if compact && len(vals) > valsPerRow*2 {
+				startIdx = p.Current - valsPerRow/2
+				if startIdx < 0 {
+					startIdx = 0
 				}
-				end := start + 4
-				if end > len(p.Values) {
-					end = len(p.Values)
-					start = end - 4
-					if start < 0 {
-						start = 0
+				endIdx := startIdx + valsPerRow*2
+				if endIdx > len(vals) {
+					endIdx = len(vals)
+					startIdx = endIdx - valsPerRow*2
+					if startIdx < 0 {
+						startIdx = 0
 					}
 				}
-				for vi := start; vi < end; vi++ {
-					padded := fmt.Sprintf(" %-*s", valPad, p.Values[vi])
-					if vi == p.Current {
-						b.WriteString(selectedValueStyle.Render(padded))
-					} else {
-						b.WriteString(dimStyle.Render(padded))
-					}
+				vals = vals[startIdx:endIdx]
+			}
+
+			for vi, v := range vals {
+				if vi > 0 && vi%valsPerRow == 0 {
+					b.WriteString("\n")
+					b.WriteString(strings.Repeat(" ", indent))
 				}
-			} else {
-				for vi, v := range p.Values {
-					padded := fmt.Sprintf(" %-*s", valPad, v)
-					if vi == p.Current {
-						b.WriteString(selectedValueStyle.Render(padded))
-					} else {
-						b.WriteString(dimStyle.Render(padded))
-					}
+				padded := fmt.Sprintf(" %-*s", valPad, v)
+				actualIdx := startIdx + vi
+				if actualIdx == p.Current {
+					b.WriteString(selectedValueStyle.Render(padded))
+				} else {
+					b.WriteString(dimStyle.Render(padded))
 				}
 			}
 		} else {
