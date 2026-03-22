@@ -446,8 +446,8 @@ rebalance:
     - com.linkedin.kafka.cruisecontrol.analyzer.goals.LeaderBytesInDistributionGoal
 
 drainCleaner:
-  enabled: true
-  image: quay.io/strimzi/drain-cleaner:0.51.0
+  enabled: false
+  image: quay.io/strimzi/drain-cleaner:1.2.0
   resources:
     requests:
       memory: 64Mi

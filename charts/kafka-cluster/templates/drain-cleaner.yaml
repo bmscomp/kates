@@ -85,6 +85,9 @@ spec:
             {{- toYaml .Values.drainCleaner.resources | nindent 12 }}
           securityContext:
             {{- include "kafka-cluster.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /health
@@ -99,6 +102,9 @@ spec:
             periodSeconds: 10
       securityContext:
         runAsNonRoot: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

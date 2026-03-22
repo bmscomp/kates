@@ -40,12 +40,6 @@ spec:
       kafkaContainer:
         securityContext:
           {{- include "kafka-cluster.containerSecurityContext" . | nindent 10 }}
-        {{- if .Values.lifecycle }}
-        lifecycle:
-          preStop:
-            exec:
-              command: ["sh", "-c", "sleep {{ .Values.lifecycle.preStopSleepSeconds | default 15 }}"]
-        {{- end }}
   clusterCa:
     {{- toYaml .Values.kafka.clusterCa | nindent 4 }}
   clientsCa:
