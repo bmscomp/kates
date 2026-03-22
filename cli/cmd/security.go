@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -139,15 +141,23 @@ var securityAuditCmd = &cobra.Command{
 			output.KeyValue("Grade", gradeStyle(grade))
 		}
 
+		if auditExportFile != "" {
+			if err := exportAuditReport(result, auditExportFile); err != nil {
+				return cmdErr("Export failed: " + err.Error())
+			}
+			fmt.Printf("\n  📄 Report exported to %s\n", auditExportFile)
+		}
+
 		return nil
 	},
 }
 
 var (
-	authTestUser string
-	pentestName  string
+	authTestUser    string
+	pentestName     string
 	secGateMinGrade string
-	baselineSave bool
+	baselineSave    bool
+	auditExportFile string
 )
 
 var securityTLSCmd = &cobra.Command{
@@ -586,7 +596,324 @@ func severityRank(sev string) int {
 	}
 }
 
+var securityCertsCmd = &cobra.Command{
+	Use:     "certs",
+	Aliases: []string{"cert", "certificates"},
+	Short:   "Inspect SSL/TLS certificate configuration across brokers",
+	Example: "  kates security certs",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityCerts(context.Background())
+		if err != nil {
+			return cmdErr("Certificate check failed: " + err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		output.Banner("Certificate Check", "SSL/TLS Configuration Inspection")
+
+		certs, _ := result["certificates"].([]interface{})
+		for _, c := range certs {
+			cert, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			fmt.Println()
+			output.KeyValue("Broker", fmt.Sprintf("%v", cert["broker"]))
+			output.KeyValue("SSL Protocol", fmt.Sprintf("%v", cert["sslProtocol"]))
+			output.KeyValue("Client Auth", fmt.Sprintf("%v", cert["clientAuth"]))
+			output.KeyValue("Hostname Verify", fmt.Sprintf("%v", cert["endpointIdentification"]))
+			output.KeyValue("Cipher Suites", fmt.Sprintf("%v", cert["cipherSuites"]))
+			output.KeyValue("Enabled Protocols", fmt.Sprintf("%v", cert["enabledProtocols"]))
+
+			checks, _ := cert["checks"].([]interface{})
+			if len(checks) > 0 {
+				tw := output.TermWidth()
+				detailWidth := tw - 50
+				if detailWidth < 30 {
+					detailWidth = 30
+				}
+				rows := make([][]string, 0, len(checks))
+				for _, ch := range checks {
+					chk, ok := ch.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					rows = append(rows, []string{
+						statusIcon(fmt.Sprintf("%v", chk["status"])),
+						fmt.Sprintf("%v", chk["name"]),
+						fmt.Sprintf("%v", chk["severity"]),
+						truncate(fmt.Sprintf("%v", chk["detail"]), detailWidth),
+					})
+				}
+				output.Table([]string{"", "Check", "Severity", "Detail"}, rows)
+			}
+		}
+		return nil
+	},
+}
+
+var securityCVECmd = &cobra.Command{
+	Use:     "cve",
+	Aliases: []string{"vuln", "vulnerabilities"},
+	Short:   "Check running Kafka version against known CVEs",
+	Example: "  kates security cve",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityCVE(context.Background())
+		if err != nil {
+			return cmdErr("CVE check failed: " + err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		version := fmt.Sprintf("%v", result["kafkaVersion"])
+		grade := fmt.Sprintf("%v", result["grade"])
+		gradeStyled := output.SuccessStyle.Render(grade)
+		if grade == "FAIL" {
+			gradeStyled = output.ErrorStyle.Render(grade)
+		}
+		output.Banner("CVE Vulnerability Check", "Kafka "+version+"  │  "+gradeStyled)
+
+		tw := output.TermWidth()
+		descWidth := tw - 52
+		if descWidth < 30 {
+			descWidth = 30
+		}
+
+		vulns, _ := result["vulnerabilities"].([]interface{})
+		if len(vulns) > 0 {
+			output.SubHeader("Vulnerabilities")
+			rows := make([][]string, 0, len(vulns))
+			for _, v := range vulns {
+				cve, ok := v.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					"✗",
+					fmt.Sprintf("%v", cve["id"]),
+					fmt.Sprintf("%v", cve["severity"]),
+					truncate(fmt.Sprintf("%v", cve["description"]), descWidth),
+				})
+			}
+			output.Table([]string{"", "CVE", "Severity", "Description"}, rows)
+		}
+
+		patched, _ := result["patched"].([]interface{})
+		if len(patched) > 0 {
+			output.SubHeader("Patched")
+			rows := make([][]string, 0, len(patched))
+			for _, v := range patched {
+				cve, ok := v.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					"✓",
+					fmt.Sprintf("%v", cve["id"]),
+					fmt.Sprintf("%v", cve["severity"]),
+					truncate(fmt.Sprintf("%v", cve["title"]), descWidth),
+				})
+			}
+			output.Table([]string{"", "CVE", "Severity", "Title"}, rows)
+		}
+
+		summary, _ := result["summary"].(map[string]interface{})
+		if summary != nil {
+			fmt.Println()
+			output.KeyValue("Total CVEs Checked", fmt.Sprintf("%v", summary["total"]))
+			output.KeyValue("Vulnerable", output.ErrorStyle.Render(fmt.Sprintf("%v", summary["vulnerable"])))
+			output.KeyValue("Patched", output.SuccessStyle.Render(fmt.Sprintf("%v", summary["patched"])))
+		}
+		return nil
+	},
+}
+
+var securityConfigDiffCmd = &cobra.Command{
+	Use:     "config-diff",
+	Aliases: []string{"diff", "consistency"},
+	Short:   "Compare security configuration across all brokers for consistency",
+	Example: "  kates security config-diff",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityConfigDiff(context.Background())
+		if err != nil {
+			return cmdErr("Config consistency check failed: " + err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		grade := fmt.Sprintf("%v", result["grade"])
+		gradeStyled := output.SuccessStyle.Render(grade)
+		if grade == "WARN" {
+			gradeStyled = output.WarningStyle.Render(grade)
+		}
+		brokerCount := fmt.Sprintf("%v", result["brokerCount"])
+		output.Banner("Config Consistency", brokerCount+" Brokers  │  "+gradeStyled)
+
+		tw := output.TermWidth()
+
+		mismatches, _ := result["mismatches"].([]interface{})
+		if len(mismatches) > 0 {
+			output.SubHeader(fmt.Sprintf("Mismatches (%d)", len(mismatches)))
+			for _, m := range mismatches {
+				mm, ok := m.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				key := fmt.Sprintf("%v", mm["key"])
+				output.Warn(key)
+				values, _ := mm["values"].(map[string]interface{})
+				for broker, val := range values {
+					fmt.Printf("     Broker %s: %s\n", broker, val)
+				}
+			}
+		}
+
+		consistent, _ := result["consistent"].([]interface{})
+		if len(consistent) > 0 {
+			valWidth := tw - 46
+			if valWidth < 30 {
+				valWidth = 30
+			}
+			output.SubHeader(fmt.Sprintf("Consistent (%d)", len(consistent)))
+			rows := make([][]string, 0, len(consistent))
+			for _, c := range consistent {
+				cc, ok := c.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					"✓",
+					fmt.Sprintf("%v", cc["key"]),
+					truncate(fmt.Sprintf("%v", cc["value"]), valWidth),
+				})
+			}
+			output.Table([]string{"", "Config Key", "Value"}, rows)
+		}
+
+		fmt.Println()
+		output.KeyValue("Keys Checked", fmt.Sprintf("%v", result["keysChecked"]))
+		output.KeyValue("Mismatches", output.ErrorStyle.Render(fmt.Sprintf("%v", result["mismatchCount"])))
+		return nil
+	},
+}
+
+func exportAuditReport(result map[string]interface{}, filePath string) error {
+	ext := filepath.Ext(filePath)
+	if ext == ".json" {
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filePath, data, 0644)
+	}
+
+	grade := fmt.Sprintf("%v", result["grade"])
+	summary, _ := result["summary"].(map[string]interface{})
+	checks, _ := result["checks"].([]interface{})
+
+	var sb strings.Builder
+	if ext == ".md" {
+		sb.WriteString("# Kafka Security Audit Report\n\n")
+		sb.WriteString(fmt.Sprintf("**Grade: %s** | Generated: %v\n\n", grade, result["timestamp"]))
+		if summary != nil {
+			sb.WriteString(fmt.Sprintf("| Metric | Count |\n|--------|-------|\n"))
+			sb.WriteString(fmt.Sprintf("| Total | %v |\n", summary["total"]))
+			sb.WriteString(fmt.Sprintf("| Passed | %v |\n", summary["passed"]))
+			sb.WriteString(fmt.Sprintf("| Warnings | %v |\n", summary["warnings"]))
+			sb.WriteString(fmt.Sprintf("| Failures | %v |\n\n", summary["failures"]))
+		}
+		sb.WriteString("| Status | CIS | Check | Severity | Detail |\n")
+		sb.WriteString("|--------|-----|-------|----------|--------|\n")
+		for _, c := range checks {
+			chk, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			status := fmt.Sprintf("%v", chk["status"])
+			icon := "✓"
+			if status == "FAIL" {
+				icon = "✗"
+			} else if status == "WARN" {
+				icon = "⚠"
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %v | %v | %v | %v |\n",
+				icon, chk["compliance"], chk["name"], chk["severity"], chk["detail"]))
+		}
+		return os.WriteFile(filePath, []byte(sb.String()), 0644)
+	}
+
+	// Default: HTML
+	sb.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Kafka Security Audit</title>
+<style>
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:2rem}
+.container{max-width:1100px;margin:0 auto}
+h1{color:#c4b5fd;border-bottom:2px solid #7c3aed;padding-bottom:.5rem}
+.grade{font-size:3rem;font-weight:bold;text-align:center;padding:1rem;border-radius:12px;margin:1rem 0}
+.grade-a,.grade-b{background:#065f46;color:#10b981}
+.grade-c{background:#78350f;color:#f59e0b}
+.grade-d,.grade-f{background:#7f1d1d;color:#ef4444}
+.summary{display:flex;gap:1rem;margin:1rem 0}
+.card{background:#1e293b;border-radius:8px;padding:1rem 1.5rem;flex:1;text-align:center}
+.card h3{color:#94a3b8;margin:0 0 .5rem 0;font-size:.85rem;text-transform:uppercase}
+.card .num{font-size:2rem;font-weight:bold}
+.pass{color:#10b981}.warn{color:#f59e0b}.fail{color:#ef4444}
+table{width:100%;border-collapse:collapse;margin:1rem 0}
+th{background:#1e293b;color:#c4b5fd;padding:.6rem;text-align:left;font-size:.8rem;text-transform:uppercase}
+td{padding:.5rem .6rem;border-bottom:1px solid #334155;font-size:.9rem}
+tr:hover{background:#1e293b}
+.status-pass{color:#10b981}.status-warn{color:#f59e0b}.status-fail{color:#ef4444}
+footer{text-align:center;color:#64748b;margin-top:2rem;font-size:.8rem}
+</style></head><body><div class="container">
+`)
+
+	sb.WriteString(fmt.Sprintf("<h1>Kafka Security Audit Report</h1>\n"))
+	gradeClass := "grade-" + strings.ToLower(grade)
+	sb.WriteString(fmt.Sprintf(`<div class="grade %s">Grade: %s</div>`, gradeClass, grade))
+
+	if summary != nil {
+		sb.WriteString(`<div class="summary">`)
+		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Total</h3><div class="num">%v</div></div>`, summary["total"]))
+		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Passed</h3><div class="num pass">%v</div></div>`, summary["passed"]))
+		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Warnings</h3><div class="num warn">%v</div></div>`, summary["warnings"]))
+		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Failures</h3><div class="num fail">%v</div></div>`, summary["failures"]))
+		sb.WriteString(`</div>`)
+	}
+
+	sb.WriteString(`<table><thead><tr><th>Status</th><th>CIS</th><th>Check</th><th>Severity</th><th>Detail</th><th>Remediation</th></tr></thead><tbody>`)
+	for _, c := range checks {
+		chk, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		status := fmt.Sprintf("%v", chk["status"])
+		statusClass := "status-pass"
+		icon := "✓"
+		if status == "FAIL" {
+			statusClass = "status-fail"
+			icon = "✗"
+		} else if status == "WARN" {
+			statusClass = "status-warn"
+			icon = "⚠"
+		}
+		sb.WriteString(fmt.Sprintf(`<tr><td class="%s">%s</td><td>%v</td><td>%v</td><td>%v</td><td>%v</td><td>%v</td></tr>`,
+			statusClass, icon, chk["compliance"], chk["name"], chk["severity"], chk["detail"], chk["fix"]))
+	}
+	sb.WriteString("</tbody></table>\n")
+	sb.WriteString(fmt.Sprintf(`<footer>Generated by kates security audit — %v</footer>`, result["timestamp"]))
+	sb.WriteString("</div></body></html>")
+
+	return os.WriteFile(filePath, []byte(sb.String()), 0644)
+}
+
 func init() {
+	securityAuditCmd.Flags().StringVar(&auditExportFile, "export", "", "Export report to file (.html, .md, or .json)")
 	securityAuthTestCmd.Flags().StringVar(&authTestUser, "user", "", "Kafka username to test ACLs for")
 	securityPentestCmd.Flags().StringVar(&pentestName, "test", "all", "Specific pentest to run (auto-create, large-message, metadata-leak, connection-flood, unencrypted, acl-bypass, or all)")
 	securityBaselineCmd.Flags().BoolVar(&baselineSave, "save", false, "Save current posture as baseline")
@@ -600,6 +927,9 @@ func init() {
 	securityCmd.AddCommand(securityBaselineCmd)
 	securityCmd.AddCommand(securityDriftCmd)
 	securityCmd.AddCommand(securityGateCmd)
+	securityCmd.AddCommand(securityCertsCmd)
+	securityCmd.AddCommand(securityCVECmd)
+	securityCmd.AddCommand(securityConfigDiffCmd)
 
 	rootCmd.AddCommand(securityCmd)
 }

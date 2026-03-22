@@ -163,4 +163,49 @@ public class SecurityResource {
                     .build();
         }
     }
+
+    @GET
+    @Path("/certs")
+    @Operation(summary = "Certificate check",
+            description = "Inspects SSL/TLS certificate configuration across brokers")
+    @APIResponse(responseCode = "200", description = "Certificate check report")
+    public Response certs() {
+        try {
+            return Response.ok(securityService.certificateCheck()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Certificate check failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/cve")
+    @Operation(summary = "CVE vulnerability check",
+            description = "Checks running Kafka version against known CVEs")
+    @APIResponse(responseCode = "200", description = "CVE check report")
+    public Response cve() {
+        try {
+            return Response.ok(securityService.cveCheck()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "CVE check failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/config-diff")
+    @Operation(summary = "Broker config consistency check",
+            description = "Compares security-critical configuration across all brokers to detect drift")
+    @APIResponse(responseCode = "200", description = "Config consistency report")
+    public Response configDiff() {
+        try {
+            return Response.ok(securityService.configConsistency()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Config consistency check failed: " + e.getMessage()))
+                    .build();
+        }
+    }
 }

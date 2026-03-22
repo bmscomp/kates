@@ -620,3 +620,15 @@ func (c *Client) SecurityDrift(ctx context.Context) (map[string]interface{}, err
 func (c *Client) SecurityGate(ctx context.Context, minGrade string) (map[string]interface{}, error) {
 	return get[map[string]interface{}](c, ctx, "/api/security/gate?min-grade="+minGrade)
 }
+
+func (c *Client) SecurityCerts(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/certs")
+}
+
+func (c *Client) SecurityCVE(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/cve")
+}
+
+func (c *Client) SecurityConfigDiff(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/config-diff")
+}

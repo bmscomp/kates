@@ -1123,4 +1123,241 @@ public class SecurityService {
         if (bytes >= 1_024) return String.format("%.1fKB", bytes / 1_024.0);
         return bytes + "B";
     }
+
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(60_000)
+    public Map<String, Object> certificateCheck() {
+        Map<String, Object> report = new LinkedHashMap<>();
+        List<Map<String, Object>> certs = new ArrayList<>();
+
+        try {
+            AdminClient client = adminService.getClient();
+            var clusterInfo = clusterHealthService.describeCluster();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> brokers = (List<Map<String, Object>>) clusterInfo.getOrDefault("brokers", List.of());
+            int brokerId = brokers.isEmpty() ? 0 : (int) brokers.get(0).get("id");
+            Map<String, String> brokerConfig = fetchBrokerConfig(client, brokerId);
+
+            String keystoreLocation = brokerConfig.getOrDefault("ssl.keystore.location", "");
+            String truststoreLocation = brokerConfig.getOrDefault("ssl.truststore.location", "");
+            String sslProtocol = brokerConfig.getOrDefault("ssl.protocol", "TLSv1.3");
+            String clientAuth = brokerConfig.getOrDefault("ssl.client.auth", "none");
+            String endpointAlgo = brokerConfig.getOrDefault("ssl.endpoint.identification.algorithm", "https");
+            String cipherSuites = brokerConfig.getOrDefault("ssl.cipher.suites", "");
+            String enabledProtocols = brokerConfig.getOrDefault("ssl.enabled.protocols", "");
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("broker", brokerId);
+            entry.put("keystoreConfigured", !keystoreLocation.isEmpty());
+            entry.put("truststoreConfigured", !truststoreLocation.isEmpty());
+            entry.put("sslProtocol", sslProtocol);
+            entry.put("clientAuth", clientAuth);
+            entry.put("endpointIdentification", endpointAlgo);
+            entry.put("cipherSuites", cipherSuites.isEmpty() ? "JVM defaults" : cipherSuites);
+            entry.put("enabledProtocols", enabledProtocols.isEmpty() ? "JVM defaults" : enabledProtocols);
+
+            boolean modernTls = sslProtocol.contains("1.2") || sslProtocol.contains("1.3");
+            boolean mTls = "required".equals(clientAuth);
+            boolean hostnameVerify = "https".equalsIgnoreCase(endpointAlgo);
+
+            List<Map<String, Object>> checks = new ArrayList<>();
+            checks.add(check("Keystore Configured", "transport",
+                    !keystoreLocation.isEmpty() ? "PASS" : "FAIL",
+                    !keystoreLocation.isEmpty() ? "SSL keystore present" : "No SSL keystore — TLS unavailable",
+                    "CRITICAL", "CIS-4.11",
+                    "Configure ssl.keystore.location with broker certificate"));
+
+            checks.add(check("Truststore Configured", "transport",
+                    !truststoreLocation.isEmpty() ? "PASS" : "WARN",
+                    !truststoreLocation.isEmpty() ? "SSL truststore present" : "No truststore — client certs not verifiable",
+                    "HIGH", "CIS-4.12",
+                    "Configure ssl.truststore.location for client certificate validation"));
+
+            checks.add(check("TLS Protocol", "transport",
+                    modernTls ? "PASS" : "FAIL",
+                    "ssl.protocol = " + sslProtocol,
+                    "HIGH", "CIS-4.4",
+                    "Set ssl.protocol: TLSv1.3"));
+
+            checks.add(check("Mutual TLS", "transport",
+                    mTls ? "PASS" : "WARN",
+                    "ssl.client.auth = " + clientAuth,
+                    "HIGH", "CIS-4.13",
+                    "Set ssl.client.auth: required"));
+
+            checks.add(check("Hostname Verification", "transport",
+                    hostnameVerify ? "PASS" : "WARN",
+                    "ssl.endpoint.identification.algorithm = " + (endpointAlgo.isEmpty() ? "(empty)" : endpointAlgo),
+                    "HIGH", "CIS-4.6",
+                    "Set ssl.endpoint.identification.algorithm: https"));
+
+            entry.put("checks", checks);
+            certs.add(entry);
+
+            report.put("certificates", certs);
+            report.put("totalBrokers", brokers.size());
+            report.put("timestamp", Instant.now().toString());
+
+        } catch (Exception e) {
+            LOG.error("Certificate check failed", e);
+            report.put("error", "Certificate check failed: " + e.getMessage());
+        }
+        return report;
+    }
+
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(30_000)
+    public Map<String, Object> cveCheck() {
+        Map<String, Object> report = new LinkedHashMap<>();
+
+        try {
+            var clusterInfo = clusterHealthService.describeCluster();
+            String kafkaVersion = String.valueOf(clusterInfo.getOrDefault("kafkaVersion", "unknown"));
+
+            List<Map<String, Object>> knownCves = new ArrayList<>();
+            knownCves.add(cve("CVE-2024-31141", "Apache Kafka Client JNDI Injection", "CRITICAL",
+                    "0.0.0", "3.7.0", "Clients can be tricked into JNDI lookups via SASL/OAUTHBEARER"));
+            knownCves.add(cve("CVE-2024-27309", "ACL Bypass during migration", "HIGH",
+                    "3.5.0", "3.6.2", "ACL authorizer may not apply during ZK-to-KRaft migration"));
+            knownCves.add(cve("CVE-2023-44981", "Zookeeper SASL quorum bypass", "CRITICAL",
+                    "0.0.0", "3.5.2", "ZK-based clusters may have SASL quorum peer bypass"));
+            knownCves.add(cve("CVE-2023-34455", "Snappy DoS decompression", "HIGH",
+                    "0.0.0", "3.4.1", "Snappy decompression can cause OutOfMemoryError"));
+            knownCves.add(cve("CVE-2023-25194", "JNDI Injection via SASL JAAS config", "HIGH",
+                    "2.3.0", "3.3.2", "JNDI injection possible through SASL JAAS configuration"));
+            knownCves.add(cve("CVE-2022-34917", "Unauthenticated memory exhaustion", "HIGH",
+                    "2.8.0", "3.2.3", "Memory exhaustion via allocating large buffers on unauthenticated connections"));
+            knownCves.add(cve("CVE-2021-38153", "Timing attack on SASL/SCRAM", "MEDIUM",
+                    "2.0.0", "3.0.0", "Timing side-channel leak in SCRAM authentication"));
+
+            List<Map<String, Object>> applicable = new ArrayList<>();
+            List<Map<String, Object>> patched = new ArrayList<>();
+
+            for (Map<String, Object> c : knownCves) {
+                String affectedUpTo = (String) c.get("affectedUpTo");
+                if (compareVersions(kafkaVersion, affectedUpTo) <= 0) {
+                    c.put("status", "VULNERABLE");
+                    applicable.add(c);
+                } else {
+                    c.put("status", "PATCHED");
+                    patched.add(c);
+                }
+            }
+
+            report.put("kafkaVersion", kafkaVersion);
+            report.put("vulnerabilities", applicable);
+            report.put("patched", patched);
+            report.put("summary", Map.of(
+                    "total", knownCves.size(),
+                    "vulnerable", applicable.size(),
+                    "patched", patched.size()));
+            report.put("grade", applicable.isEmpty() ? "PASS" : "FAIL");
+            report.put("timestamp", Instant.now().toString());
+
+        } catch (Exception e) {
+            LOG.error("CVE check failed", e);
+            report.put("error", "CVE check failed: " + e.getMessage());
+        }
+        return report;
+    }
+
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(60_000)
+    public Map<String, Object> configConsistency() {
+        Map<String, Object> report = new LinkedHashMap<>();
+
+        try {
+            AdminClient client = adminService.getClient();
+            var clusterInfo = clusterHealthService.describeCluster();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> brokers = (List<Map<String, Object>>) clusterInfo.getOrDefault("brokers", List.of());
+
+            String[] securityKeys = {
+                    "ssl.protocol", "ssl.client.auth", "ssl.keystore.location", "ssl.truststore.location",
+                    "ssl.endpoint.identification.algorithm", "ssl.enabled.protocols",
+                    "sasl.enabled.mechanisms", "sasl.mechanism.inter.broker.protocol",
+                    "authorizer.class.name", "super.users",
+                    "security.inter.broker.protocol", "listener.security.protocol.map",
+                    "auto.create.topics.enable", "unclean.leader.election.enable",
+                    "min.insync.replicas", "default.replication.factor",
+                    "log.cleanup.policy", "delete.topic.enable",
+                    "max.connections.per.ip", "max.connections"
+            };
+
+            Map<Integer, Map<String, String>> brokerConfigs = new LinkedHashMap<>();
+            for (Map<String, Object> broker : brokers) {
+                int bId = (int) broker.get("id");
+                Map<String, String> cfg = fetchBrokerConfig(client, bId);
+                Map<String, String> filtered = new LinkedHashMap<>();
+                for (String key : securityKeys) {
+                    filtered.put(key, cfg.getOrDefault(key, "(not set)"));
+                }
+                brokerConfigs.put(bId, filtered);
+            }
+
+            List<Map<String, Object>> mismatches = new ArrayList<>();
+            List<Map<String, Object>> consistent = new ArrayList<>();
+
+            for (String key : securityKeys) {
+                Map<Integer, String> valsByBroker = new LinkedHashMap<>();
+                for (var entry : brokerConfigs.entrySet()) {
+                    valsByBroker.put(entry.getKey(), entry.getValue().getOrDefault(key, "(not set)"));
+                }
+                long distinctValues = valsByBroker.values().stream().distinct().count();
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("key", key);
+                item.put("values", valsByBroker);
+                item.put("consistent", distinctValues <= 1);
+
+                if (distinctValues > 1) {
+                    mismatches.add(item);
+                } else {
+                    String commonValue = valsByBroker.values().iterator().next();
+                    item.put("value", commonValue);
+                    consistent.add(item);
+                }
+            }
+
+            report.put("brokerCount", brokers.size());
+            report.put("keysChecked", securityKeys.length);
+            report.put("mismatches", mismatches);
+            report.put("consistent", consistent);
+            report.put("mismatchCount", mismatches.size());
+            report.put("grade", mismatches.isEmpty() ? "PASS" : "WARN");
+            report.put("timestamp", Instant.now().toString());
+
+        } catch (Exception e) {
+            LOG.error("Config consistency check failed", e);
+            report.put("error", "Config consistency check failed: " + e.getMessage());
+        }
+        return report;
+    }
+
+    private Map<String, Object> cve(String id, String title, String severity,
+            String affectedFrom, String affectedUpTo, String description) {
+        Map<String, Object> c = new LinkedHashMap<>();
+        c.put("id", id);
+        c.put("title", title);
+        c.put("severity", severity);
+        c.put("affectedFrom", affectedFrom);
+        c.put("affectedUpTo", affectedUpTo);
+        c.put("description", description);
+        return c;
+    }
+
+    private int compareVersions(String v1, String v2) {
+        try {
+            String[] parts1 = v1.split("\\.");
+            String[] parts2 = v2.split("\\.");
+            int len = Math.max(parts1.length, parts2.length);
+            for (int i = 0; i < len; i++) {
+                int a = i < parts1.length ? Integer.parseInt(parts1[i].replaceAll("[^0-9]", "")) : 0;
+                int b = i < parts2.length ? Integer.parseInt(parts2[i].replaceAll("[^0-9]", "")) : 0;
+                if (a != b) return Integer.compare(a, b);
+            }
+            return 0;
+        } catch (Exception e) {
+            return 1;
+        }
+    }
 }
