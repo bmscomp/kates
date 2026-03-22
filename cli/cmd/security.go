@@ -351,6 +351,12 @@ var securityComplianceCmd = &cobra.Command{
 
 			controls, _ := fwData["controls"].([]interface{})
 			if len(controls) > 0 {
+				tw := output.TermWidth()
+				fixWidth := tw - 42
+				if fixWidth < 30 {
+					fixWidth = 30
+				}
+
 				rows := make([][]string, 0, len(controls))
 				for _, ctrl := range controls {
 					c, ok := ctrl.(map[string]interface{})
@@ -361,7 +367,7 @@ var securityComplianceCmd = &cobra.Command{
 						statusIcon(fmt.Sprintf("%v", c["status"])),
 						fmt.Sprintf("%v", c["controlId"]),
 						fmt.Sprintf("%v", c["check"]),
-						truncate(fmt.Sprintf("%v", c["fix"]), 50),
+						truncate(fmt.Sprintf("%v", c["fix"]), fixWidth),
 					})
 				}
 				output.Table([]string{"", "Control", "Check", "Remediation"}, rows)
