@@ -632,3 +632,15 @@ func (c *Client) SecurityCVE(ctx context.Context) (map[string]interface{}, error
 func (c *Client) SecurityConfigDiff(ctx context.Context) (map[string]interface{}, error) {
 	return get[map[string]interface{}](c, ctx, "/api/security/config-diff")
 }
+
+func (c *Client) SecurityACLMap(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/acl-map")
+}
+
+func (c *Client) SecurityTrend(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/trend")
+}
+
+func (c *Client) SecuritySecrets(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/secrets")
+}

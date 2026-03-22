@@ -6,7 +6,12 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,6 +41,7 @@ public class SecurityService {
 
     private volatile Map<String, Object> savedBaseline;
     private volatile String baselineTimestamp;
+    private final List<Map<String, Object>> scoreHistory = new CopyOnWriteArrayList<>();
 
     @Inject
     public SecurityService(KafkaAdminService adminService, ClusterHealthService clusterHealthService) {
@@ -562,6 +568,15 @@ public class SecurityService {
             LOG.error("Security audit failed", e);
             report.put("error", "Security audit failed: " + e.getMessage());
             report.put("grade", "F");
+        }
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("timestamp", report.getOrDefault("timestamp", Instant.now().toString()));
+        snapshot.put("grade", report.getOrDefault("grade", "F"));
+        snapshot.put("summary", report.get("summary"));
+        scoreHistory.add(snapshot);
+        if (scoreHistory.size() > 100) {
+            scoreHistory.remove(0);
         }
 
         return report;
@@ -1359,5 +1374,175 @@ public class SecurityService {
         } catch (Exception e) {
             return 1;
         }
+    }
+
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(60_000)
+    public Map<String, Object> aclCoverage() {
+        Map<String, Object> report = new LinkedHashMap<>();
+
+        try {
+            AdminClient client = adminService.getClient();
+            List<AclBinding> acls = fetchAcls(client);
+            var topicNames = client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            Set<String> principals = new TreeSet<>();
+            for (AclBinding acl : acls) {
+                principals.add(acl.entry().principal());
+            }
+
+            List<Map<String, Object>> coverage = new ArrayList<>();
+            int uncoveredCount = 0;
+
+            for (String topic : new TreeSet<>(topicNames)) {
+                if (topic.startsWith("__")) continue;
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("topic", topic);
+
+                List<AclBinding> topicAcls = acls.stream()
+                        .filter(a -> a.pattern().resourceType() == ResourceType.TOPIC)
+                        .filter(a -> a.pattern().name().equals(topic)
+                                || (a.pattern().patternType() == PatternType.PREFIXED && topic.startsWith(a.pattern().name()))
+                                || a.pattern().name().equals("*"))
+                        .toList();
+
+                Map<String, List<String>> userOps = new LinkedHashMap<>();
+                for (AclBinding acl : topicAcls) {
+                    String principal = acl.entry().principal();
+                    String perm = acl.entry().permissionType() == AclPermissionType.ALLOW ? "+" : "-";
+                    String op = perm + acl.entry().operation().toString();
+                    userOps.computeIfAbsent(principal, k -> new ArrayList<>()).add(op);
+                }
+
+                entry.put("aclCount", topicAcls.size());
+                entry.put("users", userOps);
+                entry.put("covered", !topicAcls.isEmpty());
+                if (topicAcls.isEmpty()) uncoveredCount++;
+                coverage.add(entry);
+            }
+
+            report.put("topics", coverage);
+            report.put("totalTopics", coverage.size());
+            report.put("uncoveredTopics", uncoveredCount);
+            report.put("principals", principals);
+            report.put("totalAcls", acls.size());
+            report.put("grade", uncoveredCount == 0 ? "PASS" : "WARN");
+            report.put("timestamp", Instant.now().toString());
+
+        } catch (Exception e) {
+            LOG.error("ACL coverage check failed", e);
+            report.put("error", "ACL coverage check failed: " + e.getMessage());
+        }
+        return report;
+    }
+
+    public Map<String, Object> scoreTrend() {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("history", new ArrayList<>(scoreHistory));
+        report.put("totalSnapshots", scoreHistory.size());
+
+        if (!scoreHistory.isEmpty()) {
+            Map<String, Object> latest = scoreHistory.get(scoreHistory.size() - 1);
+            report.put("currentGrade", latest.get("grade"));
+
+            if (scoreHistory.size() >= 2) {
+                Map<String, Object> previous = scoreHistory.get(scoreHistory.size() - 2);
+                String currGrade = String.valueOf(latest.get("grade"));
+                String prevGrade = String.valueOf(previous.get("grade"));
+                int trend = gradeRank(prevGrade) - gradeRank(currGrade);
+                report.put("trend", trend > 0 ? "IMPROVING" : trend < 0 ? "DEGRADING" : "STABLE");
+                report.put("previousGrade", prevGrade);
+            } else {
+                report.put("trend", "BASELINE");
+            }
+        } else {
+            report.put("trend", "NO_DATA");
+            report.put("message", "Run 'kates security audit' first to collect score data");
+        }
+
+        report.put("timestamp", Instant.now().toString());
+        return report;
+    }
+
+    @Retry(maxRetries = 2, delay = 1000)
+    @Timeout(60_000)
+    public Map<String, Object> secretScan() {
+        Map<String, Object> report = new LinkedHashMap<>();
+
+        Pattern[] sensitivePatterns = {
+                Pattern.compile("(?i)(password|passwd|secret|api[_-]?key|token|credential)"),
+                Pattern.compile("(?i)(aws[_-]?access|aws[_-]?secret|AKIA[0-9A-Z])"),
+                Pattern.compile("(?i)(private[_-]?key|ssh[_-]?key|BEGIN.*PRIVATE)"),
+                Pattern.compile("(?i)(jdbc:|mongodb://|redis://|amqp://)"),
+                Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"),
+                Pattern.compile("\\b(?:\\d[ -]*?){13,16}\\b"),
+        };
+        String[] patternNames = {
+                "Credentials/Secrets", "AWS Keys", "Private Keys",
+                "Connection Strings", "Email Addresses", "Credit Card Numbers"
+        };
+
+        try {
+            AdminClient client = adminService.getClient();
+            var topicNames = client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            List<Map<String, Object>> findings = new ArrayList<>();
+
+            for (String topic : topicNames) {
+                if (topic.startsWith("__")) continue;
+
+                for (int i = 0; i < sensitivePatterns.length; i++) {
+                    if (sensitivePatterns[i].matcher(topic).find()) {
+                        Map<String, Object> finding = new LinkedHashMap<>();
+                        finding.put("location", "topic-name");
+                        finding.put("topic", topic);
+                        finding.put("pattern", patternNames[i]);
+                        finding.put("severity", "MEDIUM");
+                        finding.put("detail", "Topic name matches sensitive pattern: " + patternNames[i]);
+                        findings.add(finding);
+                    }
+                }
+            }
+
+            List<ConfigResource> topicConfigs = topicNames.stream()
+                    .map(t -> new ConfigResource(ConfigResource.Type.TOPIC, t))
+                    .toList();
+
+            var configResults = client.describeConfigs(topicConfigs)
+                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            for (var configEntry : configResults.entrySet()) {
+                String topicName = configEntry.getKey().name();
+                if (topicName.startsWith("__")) continue;
+                for (ConfigEntry ce : configEntry.getValue().entries()) {
+                    String val = ce.value();
+                    if (val == null || val.isEmpty()) continue;
+                    for (int i = 0; i < sensitivePatterns.length; i++) {
+                        if (sensitivePatterns[i].matcher(val).find()) {
+                            Map<String, Object> finding = new LinkedHashMap<>();
+                            finding.put("location", "topic-config");
+                            finding.put("topic", topicName);
+                            finding.put("configKey", ce.name());
+                            finding.put("pattern", patternNames[i]);
+                            finding.put("severity", "HIGH");
+                            finding.put("detail", "Config value matches: " + patternNames[i]);
+                            findings.add(finding);
+                        }
+                    }
+                }
+            }
+
+            report.put("findings", findings);
+            report.put("topicsScanned", topicNames.size());
+            report.put("findingsCount", findings.size());
+            report.put("patternsChecked", patternNames.length);
+            report.put("grade", findings.isEmpty() ? "PASS" : "WARN");
+            report.put("timestamp", Instant.now().toString());
+
+        } catch (Exception e) {
+            LOG.error("Secret scan failed", e);
+            report.put("error", "Secret scan failed: " + e.getMessage());
+        }
+        return report;
     }
 }

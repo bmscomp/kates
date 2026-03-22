@@ -208,4 +208,49 @@ public class SecurityResource {
                     .build();
         }
     }
+
+    @GET
+    @Path("/acl-map")
+    @Operation(summary = "ACL coverage map",
+            description = "Matrix showing which users can access which topics and operations")
+    @APIResponse(responseCode = "200", description = "ACL coverage report")
+    public Response aclMap() {
+        try {
+            return Response.ok(securityService.aclCoverage()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "ACL coverage check failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/trend")
+    @Operation(summary = "Security score trend",
+            description = "Shows audit score history and improvement/degradation trend")
+    @APIResponse(responseCode = "200", description = "Score trend report")
+    public Response trend() {
+        try {
+            return Response.ok(securityService.scoreTrend()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Score trend failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/secrets")
+    @Operation(summary = "Secret scanner",
+            description = "Scans topic names and configurations for sensitive patterns like passwords, API keys, and PII")
+    @APIResponse(responseCode = "200", description = "Secret scan report")
+    public Response secrets() {
+        try {
+            return Response.ok(securityService.secretScan()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Secret scan failed: " + e.getMessage()))
+                    .build();
+        }
+    }
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1047,6 +1048,278 @@ func exportAuditPDF(result map[string]interface{}, filePath string) error {
 	return pdf.OutputFileAndClose(filePath)
 }
 
+var securityACLMapCmd = &cobra.Command{
+	Use:     "acl-map",
+	Aliases: []string{"coverage", "acl-coverage"},
+	Short:   "Show ACL coverage matrix — which users can access which topics",
+	Example: "  kates security acl-map",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityACLMap(context.Background())
+		if err != nil {
+			return cmdErr("ACL coverage check failed: " + err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		grade := fmt.Sprintf("%v", result["grade"])
+		gradeStyled := output.SuccessStyle.Render(grade)
+		if grade == "WARN" {
+			gradeStyled = output.WarningStyle.Render(grade)
+		}
+		output.Banner("ACL Coverage Map", fmt.Sprintf("%v Topics  │  %v ACLs  │  %s", result["totalTopics"], result["totalAcls"], gradeStyled))
+
+		tw := output.TermWidth()
+		opsWidth := tw - 44
+		if opsWidth < 30 {
+			opsWidth = 30
+		}
+
+		topics, _ := result["topics"].([]interface{})
+		for _, t := range topics {
+			topic, ok := t.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			covered, _ := topic["covered"].(bool)
+			icon := "✓"
+			if !covered {
+				icon = "✗"
+			}
+			topicName := fmt.Sprintf("%v", topic["topic"])
+			users, _ := topic["users"].(map[string]interface{})
+			if len(users) == 0 {
+				fmt.Printf("  %s  %-35s  %s\n", output.ErrorStyle.Render(icon),
+					topicName, output.ErrorStyle.Render("NO ACL RULES"))
+			} else {
+				fmt.Printf("  %s  %-35s\n", output.SuccessStyle.Render(icon), topicName)
+				for user, ops := range users {
+					opsStr := fmt.Sprintf("%v", ops)
+					fmt.Printf("       %-25s  %s\n", user, truncate(opsStr, opsWidth))
+				}
+			}
+		}
+
+		fmt.Println()
+		uncovered := fmt.Sprintf("%v", result["uncoveredTopics"])
+		if uncovered != "0" {
+			output.KeyValue("Uncovered Topics", output.ErrorStyle.Render(uncovered))
+		} else {
+			output.KeyValue("Uncovered Topics", output.SuccessStyle.Render("0"))
+		}
+		return nil
+	},
+}
+
+var securityTrendCmd = &cobra.Command{
+	Use:     "trend",
+	Aliases: []string{"history", "scores"},
+	Short:   "Show security audit score trend over time",
+	Example: "  kates security trend",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityTrend(context.Background())
+		if err != nil {
+			return cmdErr("Score trend failed: " + err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		trend := fmt.Sprintf("%v", result["trend"])
+		trendStyled := trend
+		switch trend {
+		case "IMPROVING":
+			trendStyled = output.SuccessStyle.Render("↑ IMPROVING")
+		case "DEGRADING":
+			trendStyled = output.ErrorStyle.Render("↓ DEGRADING")
+		case "STABLE":
+			trendStyled = output.WarningStyle.Render("→ STABLE")
+		case "BASELINE":
+			trendStyled = output.DimStyle.Render("● BASELINE")
+		case "NO_DATA":
+			trendStyled = output.DimStyle.Render("○ NO DATA")
+		}
+
+		output.Banner("Security Score Trend", trendStyled)
+
+		history, _ := result["history"].([]interface{})
+		if len(history) == 0 {
+			fmt.Println("  No audit history yet. Run 'kates security audit' to collect data.")
+			return nil
+		}
+
+		rows := make([][]string, 0, len(history))
+		gradeMap := map[string]string{"A": "█████", "B": "████░", "C": "███░░", "D": "██░░░", "F": "█░░░░"}
+		for i, h := range history {
+			snap, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			g := fmt.Sprintf("%v", snap["grade"])
+			bar := gradeMap[g]
+			if bar == "" {
+				bar = "░░░░░"
+			}
+			rows = append(rows, []string{
+				fmt.Sprintf("#%d", i+1),
+				gradeStyle(g),
+				bar,
+				fmt.Sprintf("%v", snap["timestamp"]),
+			})
+		}
+		output.Table([]string{"#", "Grade", "Score", "Timestamp"}, rows)
+
+		fmt.Println()
+		output.KeyValue("Total Snapshots", fmt.Sprintf("%v", result["totalSnapshots"]))
+		if cg, ok := result["currentGrade"]; ok {
+			output.KeyValue("Current Grade", gradeStyle(fmt.Sprintf("%v", cg)))
+		}
+		return nil
+	},
+}
+
+var securitySecretsCmd = &cobra.Command{
+	Use:     "secrets",
+	Aliases: []string{"secret", "scan"},
+	Short:   "Scan topic names and configurations for sensitive patterns",
+	Example: "  kates security secrets",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecuritySecrets(context.Background())
+		if err != nil {
+			return cmdErr("Secret scan failed: " + err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		grade := fmt.Sprintf("%v", result["grade"])
+		gradeStyled := output.SuccessStyle.Render(grade)
+		if grade == "WARN" {
+			gradeStyled = output.WarningStyle.Render(grade)
+		}
+		output.Banner("Secret Scanner", fmt.Sprintf("%v Topics Scanned  │  %s", result["topicsScanned"], gradeStyled))
+
+		tw := output.TermWidth()
+		detailWidth := tw - 55
+		if detailWidth < 30 {
+			detailWidth = 30
+		}
+
+		findings, _ := result["findings"].([]interface{})
+		if len(findings) == 0 {
+			fmt.Println()
+			output.Success("No sensitive patterns detected")
+		} else {
+			rows := make([][]string, 0, len(findings))
+			for _, f := range findings {
+				finding, ok := f.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					"⚠",
+					fmt.Sprintf("%v", finding["location"]),
+					fmt.Sprintf("%v", finding["topic"]),
+					fmt.Sprintf("%v", finding["pattern"]),
+					fmt.Sprintf("%v", finding["severity"]),
+					truncate(fmt.Sprintf("%v", finding["detail"]), detailWidth),
+				})
+			}
+			output.Table([]string{"", "Location", "Topic", "Pattern", "Severity", "Detail"}, rows)
+		}
+
+		fmt.Println()
+		output.KeyValue("Findings", fmt.Sprintf("%v", result["findingsCount"]))
+		output.KeyValue("Patterns Checked", fmt.Sprintf("%v", result["patternsChecked"]))
+		return nil
+	},
+}
+
+var securityNetpolCmd = &cobra.Command{
+	Use:     "netpol",
+	Aliases: []string{"network", "network-policy"},
+	Short:   "Audit Kubernetes NetworkPolicies around Kafka pods",
+	Example: "  kates security netpol",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return cmdErr("JSON mode not supported for netpol — run kubectl directly")
+		}
+
+		output.Banner("Network Policy Audit", "Kubernetes NetworkPolicy Inspection")
+
+		tw := output.TermWidth()
+		nameWidth := tw - 50
+		if nameWidth < 30 {
+			nameWidth = 30
+		}
+
+		namespaces := []string{"kafka", "kates", "strimzi-system"}
+		totalPolicies := 0
+
+		for _, ns := range namespaces {
+			out, err := runKubectl("get", "networkpolicies", "-n", ns, "-o", "jsonpath={range .items[*]}{.metadata.name}:{.spec.podSelector.matchLabels}:{.spec.policyTypes[*]}\n{end}")
+			if err != nil {
+				output.KeyValue(ns, output.DimStyle.Render("namespace not found or no access"))
+				continue
+			}
+			lines := strings.Split(strings.TrimSpace(out), "\n")
+			if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
+				fmt.Println()
+				output.Warn(ns + ": No NetworkPolicies found")
+				continue
+			}
+
+			fmt.Println()
+			output.SubHeader(fmt.Sprintf("%s (%d policies)", ns, len(lines)))
+			rows := make([][]string, 0, len(lines))
+			for _, line := range lines {
+				parts := strings.SplitN(line, ":", 3)
+				name := parts[0]
+				selector := ""
+				types := ""
+				if len(parts) > 1 {
+					selector = parts[1]
+				}
+				if len(parts) > 2 {
+					types = parts[2]
+				}
+				rows = append(rows, []string{
+					"✓",
+					truncate(name, nameWidth),
+					selector,
+					types,
+				})
+			}
+			output.Table([]string{"", "Policy", "Pod Selector", "Types"}, rows)
+			totalPolicies += len(lines)
+		}
+
+		ingress, _ := runKubectl("get", "networkpolicies", "-A", "-o", "jsonpath={range .items[?(@.spec.ingress)]}{.metadata.namespace}/{.metadata.name}\n{end}")
+		ingressCount := 0
+		if ingress != "" {
+			ingressCount = len(strings.Split(strings.TrimSpace(ingress), "\n"))
+		}
+
+		fmt.Println()
+		output.KeyValue("Total Policies", fmt.Sprintf("%d", totalPolicies))
+		output.KeyValue("Policies with Ingress Rules", fmt.Sprintf("%d", ingressCount))
+		if totalPolicies == 0 {
+			output.Warn("No NetworkPolicies found — Kafka pods are exposed to all namespaces")
+		}
+
+		return nil
+	},
+}
+
+func runKubectl(args ...string) (string, error) {
+	cmd := exec.Command("kubectl", args...)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 func init() {
 	securityAuditCmd.Flags().StringVar(&auditExportFile, "export", "", "Export report to file (.html, .md, .txt, .pdf, or .json)")
 	securityAuthTestCmd.Flags().StringVar(&authTestUser, "user", "", "Kafka username to test ACLs for")
@@ -1065,6 +1338,10 @@ func init() {
 	securityCmd.AddCommand(securityCertsCmd)
 	securityCmd.AddCommand(securityCVECmd)
 	securityCmd.AddCommand(securityConfigDiffCmd)
+	securityCmd.AddCommand(securityACLMapCmd)
+	securityCmd.AddCommand(securityTrendCmd)
+	securityCmd.AddCommand(securitySecretsCmd)
+	securityCmd.AddCommand(securityNetpolCmd)
 
 	rootCmd.AddCommand(securityCmd)
 }
