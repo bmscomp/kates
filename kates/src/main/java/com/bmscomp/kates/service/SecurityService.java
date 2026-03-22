@@ -734,7 +734,9 @@ public class SecurityService {
 
             Map<String, String> result = new LinkedHashMap<>();
             for (ConfigEntry entry : config.entries()) {
-                result.put(entry.name(), entry.value());
+                if (entry.value() != null) {
+                    result.put(entry.name(), entry.value());
+                }
             }
             return result;
         } catch (Exception e) {
