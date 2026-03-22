@@ -149,6 +149,12 @@ Disruption & Chaos:
   resilience     Combined performance + chaos resilience testing
   schedule       Automated recurring test schedules
 
+Security:
+  security audit      Full security posture scan with A-F grading
+  security tls        TLS protocol, cipher, and certificate inspection
+  security auth-test  ACL authorization probing per user
+  security pentest    Adversarial penetration tests
+
 Flags:
   -o, --output     Output format: table or json
       --url        Override API URL for a single call

@@ -588,3 +588,19 @@ func (c *Client) Audit(ctx context.Context, limit int, eventType, since string) 
 	}
 	return paged.Items, nil
 }
+
+func (c *Client) SecurityAudit(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/audit")
+}
+
+func (c *Client) SecurityTLS(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/tls")
+}
+
+func (c *Client) SecurityAuthTest(ctx context.Context, username string) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/auth-test?user="+username)
+}
+
+func (c *Client) SecurityPentest(ctx context.Context, testName string) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/pentest?test="+testName)
+}

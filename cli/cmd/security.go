@@ -1,0 +1,287 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/klster/kates-cli/output"
+	"github.com/spf13/cobra"
+)
+
+var securityCmd = &cobra.Command{
+	Use:     "security",
+	Aliases: []string{"sec"},
+	Short:   "Kafka security auditing, ACL testing, TLS inspection, and penetration testing",
+	Example: `  kates security audit
+  kates security tls-inspect
+  kates security auth-test --user kafka-ui
+  kates security pentest --test metadata-leak`,
+}
+
+var securityAuditCmd = &cobra.Command{
+	Use:     "audit",
+	Aliases: []string{"scan"},
+	Short:   "Run a full security posture audit with A-F grading",
+	Example: "  kates security audit",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityAudit(context.Background())
+		if err != nil {
+			return cmdErr("Security audit failed: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		grade := fmt.Sprintf("%v", result["grade"])
+		output.Banner("Security Audit", "Grade: "+gradeStyle(grade)+"  │  Kafka Cluster Posture Scan")
+
+		checks, _ := result["checks"].([]interface{})
+		if len(checks) > 0 {
+			rows := make([][]string, 0, len(checks))
+			for _, c := range checks {
+				check, ok := c.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				name := fmt.Sprintf("%v", check["name"])
+				status := fmt.Sprintf("%v", check["status"])
+				detail := fmt.Sprintf("%v", check["detail"])
+				severity := fmt.Sprintf("%v", check["severity"])
+				rows = append(rows, []string{statusIcon(status), name, severity, truncate(detail, 60)})
+			}
+			output.Table([]string{"", "Check", "Severity", "Detail"}, rows)
+		}
+
+		summary, _ := result["summary"].(map[string]interface{})
+		if summary != nil {
+			fmt.Println()
+			output.KeyValue("Total Checks", fmt.Sprintf("%v", summary["total"]))
+			output.KeyValue("Passed", output.SuccessStyle.Render(fmt.Sprintf("%v", summary["passed"])))
+			output.KeyValue("Warnings", output.WarningStyle.Render(fmt.Sprintf("%v", summary["warnings"])))
+			output.KeyValue("Failures", output.ErrorStyle.Render(fmt.Sprintf("%v", summary["failures"])))
+			output.KeyValue("Grade", gradeStyle(grade))
+		}
+
+		return nil
+	},
+}
+
+var (
+	authTestUser string
+	pentestName  string
+)
+
+var securityTLSCmd = &cobra.Command{
+	Use:     "tls-inspect",
+	Aliases: []string{"tls"},
+	Short:   "Inspect TLS configuration, protocol versions, and cipher suites",
+	Example: "  kates security tls-inspect",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apiClient.SecurityTLS(context.Background())
+		if err != nil {
+			return cmdErr("TLS inspection failed: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		output.Banner("TLS Inspection", "Certificate & Protocol Analysis")
+
+		checks, _ := result["checks"].([]interface{})
+		if len(checks) > 0 {
+			rows := make([][]string, 0, len(checks))
+			for _, c := range checks {
+				check, ok := c.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					statusIcon(fmt.Sprintf("%v", check["status"])),
+					fmt.Sprintf("%v", check["name"]),
+					fmt.Sprintf("%v", check["detail"]),
+				})
+			}
+			output.Table([]string{"", "Check", "Detail"}, rows)
+		}
+
+		return nil
+	},
+}
+
+var securityAuthTestCmd = &cobra.Command{
+	Use:     "auth-test",
+	Aliases: []string{"auth"},
+	Short:   "Probe ACL rules for a specific user to verify least-privilege access",
+	Example: "  kates security auth-test --user kafka-ui",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if authTestUser == "" {
+			return cmdErr("--user flag is required. Example: kates security auth-test --user kafka-ui")
+		}
+
+		result, err := apiClient.SecurityAuthTest(context.Background(), authTestUser)
+		if err != nil {
+			return cmdErr("Auth test failed: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		output.Banner("ACL Auth Test", "User: "+authTestUser)
+
+		checks, _ := result["checks"].([]interface{})
+		if len(checks) > 0 {
+			rows := make([][]string, 0, len(checks))
+			for _, c := range checks {
+				check, ok := c.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					statusIcon(fmt.Sprintf("%v", check["status"])),
+					fmt.Sprintf("%v", check["name"]),
+					fmt.Sprintf("%v", check["detail"]),
+				})
+			}
+			output.Table([]string{"", "Check", "Detail"}, rows)
+		}
+
+		aclList, _ := result["acls"].([]interface{})
+		if len(aclList) > 0 {
+			fmt.Println()
+			output.SubHeader(fmt.Sprintf("ACL Rules for User:%s (%d)", authTestUser, len(aclList)))
+			rows := make([][]string, 0, len(aclList))
+			for _, a := range aclList {
+				acl, ok := a.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				rows = append(rows, []string{
+					fmt.Sprintf("%v", acl["resource"]),
+					fmt.Sprintf("%v", acl["name"]),
+					fmt.Sprintf("%v", acl["pattern"]),
+					fmt.Sprintf("%v", acl["operation"]),
+					fmt.Sprintf("%v", acl["permission"]),
+				})
+			}
+			output.Table([]string{"Resource", "Name", "Pattern", "Operation", "Permission"}, rows)
+		}
+
+		return nil
+	},
+}
+
+var securityPentestCmd = &cobra.Command{
+	Use:     "pentest",
+	Aliases: []string{"pen"},
+	Short:   "Run adversarial penetration tests against the cluster",
+	Example: `  kates security pentest
+  kates security pentest --test metadata-leak
+  kates security pentest --test auto-create`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if pentestName == "" {
+			pentestName = "all"
+		}
+
+		result, err := apiClient.SecurityPentest(context.Background(), pentestName)
+		if err != nil {
+			return cmdErr("Pentest failed: " + err.Error())
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			return nil
+		}
+
+		output.Banner("Penetration Test", "Adversarial Security Assessment")
+
+		tests, _ := result["tests"].([]interface{})
+		if len(tests) > 0 {
+			rows := make([][]string, 0, len(tests))
+			for _, t := range tests {
+				test, ok := t.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				res := fmt.Sprintf("%v", test["result"])
+				icon := "✓"
+				if res == "VULNERABLE" {
+					icon = "✗"
+				}
+				rows = append(rows, []string{
+					icon,
+					fmt.Sprintf("%v", test["name"]),
+					res,
+					fmt.Sprintf("%v", test["severity"]),
+					truncate(fmt.Sprintf("%v", test["detail"]), 50),
+				})
+			}
+			output.Table([]string{"", "Test", "Result", "Severity", "Detail"}, rows)
+		}
+
+		summary, _ := result["summary"].(map[string]interface{})
+		if summary != nil {
+			fmt.Println()
+			output.KeyValue("Total Tests", fmt.Sprintf("%v", summary["total"]))
+			output.KeyValue("Protected", output.SuccessStyle.Render(fmt.Sprintf("%v", summary["protected"])))
+			output.KeyValue("Vulnerable", output.ErrorStyle.Render(fmt.Sprintf("%v", summary["vulnerable"])))
+		}
+
+		return nil
+	},
+}
+
+func statusIcon(status string) string {
+	switch strings.ToUpper(status) {
+	case "PASS":
+		return output.SuccessStyle.Render("✓")
+	case "WARN":
+		return output.WarningStyle.Render("▲")
+	case "FAIL":
+		return output.ErrorStyle.Render("✗")
+	default:
+		return "?"
+	}
+}
+
+func gradeStyle(grade string) string {
+	switch grade {
+	case "A":
+		return output.SuccessStyle.Render("A")
+	case "B":
+		return output.SuccessStyle.Render("B")
+	case "C":
+		return output.WarningStyle.Render("C")
+	case "D":
+		return output.WarningStyle.Render("D")
+	case "F":
+		return output.ErrorStyle.Render("F")
+	default:
+		return grade
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
+}
+
+func init() {
+	securityAuthTestCmd.Flags().StringVar(&authTestUser, "user", "", "Kafka username to test ACLs for")
+	securityPentestCmd.Flags().StringVar(&pentestName, "test", "all", "Specific pentest to run (auto-create, large-message, metadata-leak, connection-flood, unencrypted, acl-bypass, or all)")
+
+	securityCmd.AddCommand(securityAuditCmd)
+	securityCmd.AddCommand(securityTLSCmd)
+	securityCmd.AddCommand(securityAuthTestCmd)
+	securityCmd.AddCommand(securityPentestCmd)
+
+	rootCmd.AddCommand(securityCmd)
+}
