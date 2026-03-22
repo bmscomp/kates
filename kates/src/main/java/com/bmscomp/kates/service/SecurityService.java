@@ -214,6 +214,160 @@ public class SecurityService {
                     "HIGH", "CIS-4.4",
                     "Set ssl.protocol: TLSv1.3 in kafka.config"));
 
+            // 16. Super users audit
+            String superUsers = brokerConfig.getOrDefault("super.users", "");
+            int superUserCount = superUsers.isEmpty() ? 0 : superUsers.split(";").length;
+            checks.add(check("Super Users Audited", "auth",
+                    superUserCount <= 2 ? "PASS" : "WARN",
+                    superUserCount == 0 ? "No super users configured"
+                            : superUserCount + " super users: " + superUsers,
+                    "HIGH", "CIS-5.6",
+                    "Minimize super.users — use ACLs for fine-grained access instead"));
+
+            // 17. SASL mechanism strength
+            String saslMechanisms = brokerConfig.getOrDefault("sasl.enabled.mechanisms", "");
+            boolean weakSasl = saslMechanisms.contains("PLAIN") && !saslMechanisms.contains("SCRAM");
+            checks.add(check("SASL Mechanism Strength", "auth",
+                    saslMechanisms.isEmpty() ? "WARN"
+                            : weakSasl ? "WARN" : "PASS",
+                    saslMechanisms.isEmpty() ? "No SASL mechanisms configured"
+                            : weakSasl ? "PLAIN mechanism only — passwords sent in cleartext"
+                                    : "Mechanisms: " + saslMechanisms,
+                    "HIGH", "CIS-4.10",
+                    "Use SCRAM-SHA-512 instead of PLAIN for password-based auth"));
+
+            // 18. DENY rules exist (defense in depth)
+            long denyRules = acls.stream()
+                    .filter(a -> a.entry().permissionType() == AclPermissionType.DENY)
+                    .count();
+            checks.add(check("DENY Rules Defined", "authz",
+                    denyRules > 0 ? "PASS" : "WARN",
+                    denyRules > 0 ? denyRules + " DENY rules active — defense in depth"
+                            : "No DENY rules — relying solely on ALLOW whitelist",
+                    "LOW", "CIS-5.7",
+                    "Add DENY rules for sensitive topics/operations as defense in depth"));
+
+            // 19. SSL keystore configured
+            String keystoreLocation = brokerConfig.getOrDefault("ssl.keystore.location", "");
+            checks.add(check("SSL Keystore Configured", "transport",
+                    !keystoreLocation.isEmpty() ? "PASS" : "WARN",
+                    !keystoreLocation.isEmpty() ? "Keystore configured" : "No SSL keystore — TLS not available",
+                    "HIGH", "CIS-4.11",
+                    "Configure ssl.keystore.location with broker certificate"));
+
+            // 20. SSL truststore configured
+            String truststoreLocation = brokerConfig.getOrDefault("ssl.truststore.location", "");
+            checks.add(check("SSL Truststore Configured", "transport",
+                    !truststoreLocation.isEmpty() ? "PASS" : "WARN",
+                    !truststoreLocation.isEmpty() ? "Truststore configured" : "No SSL truststore — cannot verify client certs",
+                    "MEDIUM", "CIS-4.12",
+                    "Configure ssl.truststore.location for client certificate validation"));
+
+            // 21. mTLS client authentication
+            String clientAuth = brokerConfig.getOrDefault("ssl.client.auth", "none");
+            checks.add(check("mTLS Enforcement", "transport",
+                    "required".equals(clientAuth) ? "PASS"
+                            : "requested".equals(clientAuth) ? "WARN" : "WARN",
+                    "ssl.client.auth = " + clientAuth
+                            + ("required".equals(clientAuth) ? " — mutual TLS enforced"
+                                    : " — clients not required to present certificates"),
+                    "HIGH", "CIS-4.13",
+                    "Set ssl.client.auth: required for mTLS"));
+
+            // 22. Log retention policy
+            String retentionMs = brokerConfig.getOrDefault("log.retention.ms", "");
+            String retentionHours = brokerConfig.getOrDefault("log.retention.hours", "168");
+            long retentionH = retentionMs.isEmpty() ? Long.parseLong(retentionHours)
+                    : Long.parseLong(retentionMs) / 3_600_000;
+            checks.add(check("Log Retention Configured", "config",
+                    retentionH > 0 && retentionH <= 720 ? "PASS" : "WARN",
+                    "Retention: " + retentionH + "h"
+                            + (retentionH > 720 ? " — over 30 days may waste disk and expose stale data"
+                                    : retentionH <= 0 ? " — infinite retention is risky" : ""),
+                    "MEDIUM", "CIS-3.7",
+                    "Set log.retention.hours between 24 and 720 (1-30 days)"));
+
+            // 23. Controlled shutdown enabled
+            String controlledShutdown = brokerConfig.getOrDefault("controlled.shutdown.enable", "true");
+            checks.add(check("Controlled Shutdown", "config",
+                    "true".equals(controlledShutdown) ? "PASS" : "WARN",
+                    "controlled.shutdown.enable = " + controlledShutdown
+                            + ("true".equals(controlledShutdown) ? "" : " — unclean shutdowns risk data loss"),
+                    "MEDIUM", "CIS-3.8",
+                    "Set controlled.shutdown.enable: true"));
+
+            // 24. Delete topic enabled audit
+            String deleteTopic = brokerConfig.getOrDefault("delete.topic.enable", "true");
+            checks.add(check("Delete Topic Enabled", "config",
+                    "true".equals(deleteTopic) ? "WARN" : "PASS",
+                    "delete.topic.enable = " + deleteTopic
+                            + ("true".equals(deleteTopic) ? " — authorized users can permanently delete topics" : ""),
+                    "MEDIUM", "CIS-3.9",
+                    "Consider delete.topic.enable: false and use ACLs to control deletion"));
+
+            // 25. Transaction ID authorization
+            String transactionalIdAuth = brokerConfig.getOrDefault("transaction.state.log.replication.factor", "1");
+            int txnRf = Integer.parseInt(transactionalIdAuth);
+            checks.add(check("Transaction Log Replication", "durability",
+                    txnRf >= 3 ? "PASS" : "WARN",
+                    "transaction.state.log.replication.factor = " + txnRf
+                            + (txnRf >= 3 ? "" : " — transactional guarantees weakened"),
+                    "HIGH", "CIS-3.10",
+                    "Set transaction.state.log.replication.factor: 3"));
+
+            // 26. Request rate limits
+            String maxRequestSize = brokerConfig.getOrDefault("max.request.size", "");
+            String socketRequestMax = brokerConfig.getOrDefault("socket.request.max.bytes", "");
+            boolean hasRequestLimits = !maxRequestSize.isEmpty() || !socketRequestMax.isEmpty();
+            checks.add(check("Request Size Limits", "dos",
+                    hasRequestLimits ? "PASS" : "WARN",
+                    hasRequestLimits
+                            ? "socket.request.max.bytes = " + (socketRequestMax.isEmpty() ? "default" : formatBytes(Long.parseLong(socketRequestMax)))
+                            : "Using default request size limits — consider tuning for your workload",
+                    "LOW", "CIS-6.3",
+                    "Set socket.request.max.bytes to limit individual request size"));
+
+            // 27. Background threads
+            String bgThreads = brokerConfig.getOrDefault("background.threads", "10");
+            int bgThreadCount = Integer.parseInt(bgThreads);
+            checks.add(check("Background Threads", "config",
+                    bgThreadCount >= 10 ? "PASS" : "WARN",
+                    "background.threads = " + bgThreadCount
+                            + (bgThreadCount >= 10 ? "" : " — low thread count may delay internal tasks"),
+                    "LOW", "CIS-3.11",
+                    "Set background.threads >= 10 for production workloads"));
+
+            // 28. Consumer offset retention
+            String offsetRetention = brokerConfig.getOrDefault("offsets.retention.minutes", "10080");
+            long offsetRetMinutes = Long.parseLong(offsetRetention);
+            checks.add(check("Offset Retention", "config",
+                    offsetRetMinutes >= 10080 ? "PASS" : "WARN",
+                    "offsets.retention.minutes = " + offsetRetMinutes + " (" + (offsetRetMinutes / 1440) + " days)"
+                            + (offsetRetMinutes >= 10080 ? "" : " — short retention may lose consumer group state"),
+                    "MEDIUM", "CIS-3.12",
+                    "Set offsets.retention.minutes >= 10080 (7 days)"));
+
+            // 29. Log segment size
+            String segmentBytes = brokerConfig.getOrDefault("log.segment.bytes", "1073741824");
+            long segBytes = Long.parseLong(segmentBytes);
+            checks.add(check("Log Segment Size", "config",
+                    segBytes >= 104857600 && segBytes <= 1073741824 ? "PASS" : "WARN",
+                    "log.segment.bytes = " + formatBytes(segBytes)
+                            + (segBytes < 104857600 ? " — too small, excessive segment files"
+                                    : segBytes > 1073741824 ? " — very large segments delay compaction" : ""),
+                    "LOW", "CIS-3.13",
+                    "Set log.segment.bytes between 100MB and 1GB"));
+
+            // 30. Compression type
+            String compressionType = brokerConfig.getOrDefault("compression.type", "producer");
+            checks.add(check("Compression Policy", "config",
+                    "producer".equals(compressionType) || "lz4".equals(compressionType)
+                            || "zstd".equals(compressionType) || "snappy".equals(compressionType) ? "PASS" : "WARN",
+                    "compression.type = " + compressionType
+                            + ("none".equals(compressionType) ? " — wasting bandwidth and disk" : ""),
+                    "LOW", "CIS-3.14",
+                    "Set compression.type to lz4 or zstd for bandwidth savings"));
+
             for (Map<String, Object> c : checks) {
                 String status = (String) c.get("status");
                 if ("PASS".equals(status)) passed++;
