@@ -39,6 +39,12 @@ var securityAuditCmd = &cobra.Command{
 		grade := fmt.Sprintf("%v", result["grade"])
 		output.Banner("Security Audit", "Grade: "+gradeStyle(grade)+"  │  Kafka Cluster Posture Scan")
 
+		if errMsg, ok := result["error"].(string); ok {
+			fmt.Println()
+			output.Error(errMsg)
+			return nil
+		}
+
 		checks, _ := result["checks"].([]interface{})
 		if len(checks) > 0 {
 			rows := make([][]string, 0, len(checks))
@@ -51,9 +57,29 @@ var securityAuditCmd = &cobra.Command{
 				status := fmt.Sprintf("%v", check["status"])
 				detail := fmt.Sprintf("%v", check["detail"])
 				severity := fmt.Sprintf("%v", check["severity"])
-				rows = append(rows, []string{statusIcon(status), name, severity, truncate(detail, 60)})
+				cis := fmt.Sprintf("%v", check["compliance"])
+				rows = append(rows, []string{statusIcon(status), cis, name, severity, truncate(detail, 55)})
 			}
-			output.Table([]string{"", "Check", "Severity", "Detail"}, rows)
+			output.Table([]string{"", "CIS", "Check", "Severity", "Detail"}, rows)
+
+			hasIssues := false
+			for _, c := range checks {
+				check, ok := c.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				status := fmt.Sprintf("%v", check["status"])
+				if status != "PASS" {
+					if !hasIssues {
+						fmt.Println()
+						output.SubHeader("Remediation")
+						hasIssues = true
+					}
+					fix := fmt.Sprintf("%v", check["fix"])
+					name := fmt.Sprintf("%v", check["name"])
+					fmt.Printf("  %s  %s\n     %s\n", statusIcon(status), name, fix)
+				}
+			}
 		}
 
 		summary, _ := result["summary"].(map[string]interface{})
