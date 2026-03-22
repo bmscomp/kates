@@ -143,6 +143,14 @@ brokerDefaults:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
       effect: "NoSchedule"
+  topologySpreadConstraints:
+    enabled: true
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+  podAntiAffinity:
+    enabled: true
+    topologyKey: kubernetes.io/hostname
 
 entityOperator:
   topicOperator:

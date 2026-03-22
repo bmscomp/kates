@@ -99,7 +99,23 @@
       "properties": {
         "deleteClaim": { "type": "boolean" },
         "resources": { "$ref": "#/$defs/resources" },
-        "jvmOptions": { "$ref": "#/$defs/jvmOptions" }
+        "jvmOptions": { "$ref": "#/$defs/jvmOptions" },
+        "topologySpreadConstraints": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxSkew": { "type": "integer", "minimum": 1 },
+            "topologyKey": { "type": "string" },
+            "whenUnsatisfiable": { "type": "string", "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+          }
+        },
+        "podAntiAffinity": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "topologyKey": { "type": "string" }
+          }
+        }
       }
     },
     "topics": {

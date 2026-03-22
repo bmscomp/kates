@@ -36,8 +36,17 @@ spec:
       {{- end }}
       securityContext:
         {{- include "kafka-cluster.podSecurityContext" $ | nindent 8 }}
-      {{- if .zone }}
+      {{- if $.Values.brokerDefaults.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ $.Values.brokerDefaults.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ $.Values.brokerDefaults.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ $.Values.brokerDefaults.topologySpreadConstraints.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              strimzi.io/pool-name: {{ .name }}
+      {{- end }}
       affinity:
+        {{- if .zone }}
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -46,9 +55,23 @@ spec:
                     operator: In
                     values:
                       - {{ .zone }}
-      {{- end }}
+        {{- end }}
+        {{- if $.Values.brokerDefaults.podAntiAffinity.enabled }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    strimzi.io/pool-name: {{ .name }}
+                topologyKey: {{ $.Values.brokerDefaults.podAntiAffinity.topologyKey }}
+        {{- end }}
       {{- with $.Values.brokerDefaults.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    kafkaContainer:
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" $ | nindent 8 }}
 {{- end }}
+
