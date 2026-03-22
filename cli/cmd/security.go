@@ -848,7 +848,41 @@ func exportAuditReport(result map[string]interface{}, filePath string) error {
 		return os.WriteFile(filePath, []byte(sb.String()), 0644)
 	}
 
-	// Default: HTML
+	if ext == ".txt" {
+		sb.WriteString(fmt.Sprintf("KAFKA SECURITY AUDIT REPORT\n"))
+		sb.WriteString(fmt.Sprintf("Grade: %s\n", grade))
+		sb.WriteString(fmt.Sprintf("Generated: %v\n\n", result["timestamp"]))
+		if summary != nil {
+			sb.WriteString(fmt.Sprintf("Total: %v  |  Passed: %v  |  Warnings: %v  |  Failures: %v\n\n",
+				summary["total"], summary["passed"], summary["warnings"], summary["failures"]))
+		}
+		for _, c := range checks {
+			chk, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			status := fmt.Sprintf("%v", chk["status"])
+			icon := "[PASS]"
+			if status == "FAIL" {
+				icon = "[FAIL]"
+			} else if status == "WARN" {
+				icon = "[WARN]"
+			}
+			sb.WriteString(fmt.Sprintf("  %s  %-8v  %-28v  %-8v  %v\n",
+				icon, chk["compliance"], chk["name"], chk["severity"], chk["detail"]))
+		}
+		sb.WriteString("\nREMEDIATION\n")
+		for _, c := range checks {
+			chk, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if fmt.Sprintf("%v", chk["status"]) != "PASS" {
+				sb.WriteString(fmt.Sprintf("  - %v: %v\n", chk["name"], chk["fix"]))
+			}
+		}
+		return os.WriteFile(filePath, []byte(sb.String()), 0644)
+	}
 	sb.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Kafka Security Audit</title>
 <style>
