@@ -423,33 +423,57 @@ func (m LabModel) View() string {
 	}
 
 	w := m.width
-	if w < 80 {
-		w = 80
+	if w < 40 {
+		w = 40
 	}
 
-	headerText := "  Kates Lab  ·  Interactive Performance Tuning"
-	if m.apiURL != "" {
+	headerText := "  Kates Lab"
+	if w >= 60 {
+		headerText += "  ·  Interactive Performance Tuning"
+	}
+	if w >= 100 && m.apiURL != "" {
 		headerText += "  →  " + m.apiURL
 	}
 	header := labHeaderStyle.Width(w - 2).Render(headerText)
 
-	halfW := (w - 4) / 2
-	leftW := halfW
-	rightW := halfW
+	var body string
 
-	leftContent := m.viewParams(leftW)
-	rightContent := m.viewResults(rightW - 6)
+	if w < 80 {
+		// Compact: stack vertically
+		contentW := w - 4
+		leftContent := m.viewParams(contentW)
+		rightContent := m.viewResults(contentW - 4)
+		rightPane := detailBorderStyle.
+			Width(contentW).
+			Render(rightContent)
+		body = leftContent + "\n" + rightPane
+	} else {
+		// Side-by-side: normal (35/65 at 80-119) or wide (50/50 at ≥120)
+		var leftW, rightW int
+		if w >= 120 {
+			halfW := (w - 4) / 2
+			leftW = halfW
+			rightW = halfW
+		} else {
+			usable := w - 4
+			leftW = usable * 35 / 100
+			rightW = usable - leftW
+		}
 
-	leftPane := lipgloss.NewStyle().
-		Width(leftW).
-		Padding(1, 2).
-		Render(leftContent)
+		leftContent := m.viewParams(leftW)
+		rightContent := m.viewResults(rightW - 6)
 
-	rightPane := detailBorderStyle.
-		Width(rightW).
-		Render(rightContent)
+		leftPane := lipgloss.NewStyle().
+			Width(leftW).
+			Padding(1, 2).
+			Render(leftContent)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+		rightPane := detailBorderStyle.
+			Width(rightW).
+			Render(rightContent)
+
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+	}
 
 	statusBar := "\n  " + m.status
 	if m.running {
@@ -463,10 +487,40 @@ func (m LabModel) View() string {
 		}
 	}
 
-	helpKeys := m.helpKeys()
-	help := "\n  " + dimStyle.Render(strings.Join(helpKeys, "  ·  "))
+	help := m.renderHelp(m.helpKeys(), w)
 
 	return header + "\n\n" + body + statusBar + help
+}
+
+func (m LabModel) renderHelp(keys []string, maxWidth int) string {
+	sep := "  ·  "
+	avail := maxWidth - 4
+	var lines []string
+	var line string
+	for i, k := range keys {
+		next := k
+		if line != "" {
+			next = sep + k
+		}
+		if len(line)+len(next) > avail && line != "" {
+			lines = append(lines, line)
+			line = k
+		} else {
+			if i == 0 {
+				line = k
+			} else {
+				line += next
+			}
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	var sb strings.Builder
+	for _, l := range lines {
+		sb.WriteString("\n  " + dimStyle.Render(l))
+	}
+	return sb.String()
 }
 
 func (m LabModel) helpKeys() []string {
@@ -489,7 +543,13 @@ func (m LabModel) helpKeys() []string {
 }
 
 func (m LabModel) viewParams(width int) string {
-	const labelCol = 16
+	compact := width < 50
+	labelCol := 16
+	valPad := 8
+	if compact {
+		labelCol = 10
+		valPad = 6
+	}
 
 	var b strings.Builder
 
@@ -503,7 +563,11 @@ func (m LabModel) viewParams(width int) string {
 			prefix = "▸ "
 		}
 
-		paddedLabel := p.Label
+		label := p.Label
+		if compact {
+			label = compactLabel(label)
+		}
+		paddedLabel := label
 		for len(paddedLabel) < labelCol {
 			paddedLabel += " "
 		}
@@ -515,12 +579,37 @@ func (m LabModel) viewParams(width int) string {
 		}
 
 		if i == m.cursor {
-			for vi, v := range p.Values {
-				padded := fmt.Sprintf(" %-8s", v)
-				if vi == p.Current {
-					b.WriteString(selectedValueStyle.Render(padded))
-				} else {
-					b.WriteString(dimStyle.Render(padded))
+			maxVals := len(p.Values)
+			if compact && maxVals > 4 {
+				// Show a window of 4 values centered on current
+				start := p.Current - 1
+				if start < 0 {
+					start = 0
+				}
+				end := start + 4
+				if end > len(p.Values) {
+					end = len(p.Values)
+					start = end - 4
+					if start < 0 {
+						start = 0
+					}
+				}
+				for vi := start; vi < end; vi++ {
+					padded := fmt.Sprintf(" %-*s", valPad, p.Values[vi])
+					if vi == p.Current {
+						b.WriteString(selectedValueStyle.Render(padded))
+					} else {
+						b.WriteString(dimStyle.Render(padded))
+					}
+				}
+			} else {
+				for vi, v := range p.Values {
+					padded := fmt.Sprintf(" %-*s", valPad, v)
+					if vi == p.Current {
+						b.WriteString(selectedValueStyle.Render(padded))
+					} else {
+						b.WriteString(dimStyle.Render(padded))
+					}
 				}
 			}
 		} else {
@@ -536,9 +625,35 @@ func (m LabModel) viewParams(width int) string {
 	return b.String()
 }
 
+func compactLabel(label string) string {
+	switch label {
+	case "Compression":
+		return "Comp"
+	case "Replication":
+		return "Repl"
+	case "Partitions":
+		return "Parts"
+	case "Test Type":
+		return "Type"
+	case "Record Size":
+		return "RecSize"
+	case "Batch Size":
+		return "Batch"
+	case "Producers":
+		return "Prod"
+	case "Linger ms":
+		return "Linger"
+	default:
+		if len(label) > 8 {
+			return label[:8]
+		}
+		return label
+	}
+}
+
 func (m LabModel) viewResults(width int) string {
 	if m.view == labHistory && len(m.iterations) >= 2 {
-		return m.viewDiff()
+		return m.viewDiff(width)
 	}
 	if m.view == labPinSelect {
 		return m.viewPinSelect()
@@ -553,18 +668,54 @@ func (m LabModel) viewResults(width int) string {
 
 	b.WriteString(detailTitleStyle.Render("Iteration History") + "\n\n")
 
-	b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
-		dimStyle.Render(padRight("#", 6)),
-		dimStyle.Render(padRight("Throughput", 18)),
-		dimStyle.Render(padRight("P99", 14)),
-		dimStyle.Render(padRight("Err Rate", 14)),
-		dimStyle.Render(padRight("Delta", 10)),
-	))
-	b.WriteString(dimStyle.Render("  "+strings.Repeat("─", 60)) + "\n\n")
+	numW := 4
+	deltaW := 8
+	remaining := width - numW - deltaW - 6
+	if remaining < 20 {
+		remaining = 20
+	}
+	thrW := remaining * 40 / 100
+	p99W := remaining * 30 / 100
+	errW := remaining - thrW - p99W
 
+	showErr := width >= 50
+
+	if showErr {
+		b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
+			dimStyle.Render(padRight("#", numW)),
+			dimStyle.Render(padRight("Throughput", thrW)),
+			dimStyle.Render(padRight("P99", p99W)),
+			dimStyle.Render(padRight("Err", errW)),
+			dimStyle.Render(padRight("Δ", deltaW)),
+		))
+	} else {
+		b.WriteString(fmt.Sprintf("  %s%s%s%s\n",
+			dimStyle.Render(padRight("#", numW)),
+			dimStyle.Render(padRight("Throughput", thrW+errW)),
+			dimStyle.Render(padRight("P99", p99W)),
+			dimStyle.Render(padRight("Δ", deltaW)),
+		))
+	}
+
+	sepW := width - 4
+	if sepW < 10 {
+		sepW = 10
+	}
+	b.WriteString(dimStyle.Render("  "+strings.Repeat("─", sepW)) + "\n\n")
+
+	maxVisible := 10
+	if m.height > 0 {
+		maxVisible = (m.height - 14) / 2
+		if maxVisible < 3 {
+			maxVisible = 3
+		}
+		if maxVisible > 20 {
+			maxVisible = 20
+		}
+	}
 	start := 0
-	if len(m.iterations) > 10 {
-		start = len(m.iterations) - 10
+	if len(m.iterations) > maxVisible {
+		start = len(m.iterations) - maxVisible
 	}
 
 	for _, iter := range m.iterations[start:] {
@@ -573,18 +724,28 @@ func (m LabModel) viewResults(width int) string {
 			delta = dimStyle.Render("—")
 		}
 
-		numStr := padRight(fmt.Sprintf("%d", iter.Number), 6)
-		thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", 18)
-		p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", 14)
-		errStr := padRight(fmtLabFloat(iter.ErrorRate), 14)
-
-		b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
-			numStr,
-			healthyStyle.Render(thrStr),
-			warnStyle.Render(p99Str),
-			dimStyle.Render(errStr),
-			delta,
-		))
+		numStr := padRight(fmt.Sprintf("%d", iter.Number), numW)
+		if showErr {
+			thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", thrW)
+			p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", p99W)
+			errStr := padRight(fmtLabFloat(iter.ErrorRate), errW)
+			b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
+				numStr,
+				healthyStyle.Render(thrStr),
+				warnStyle.Render(p99Str),
+				dimStyle.Render(errStr),
+				delta,
+			))
+		} else {
+			thrStr := padRight(fmtLabNum(iter.Throughput), thrW+errW)
+			p99Str := padRight(fmtLabFloat(iter.P99Ms), p99W)
+			b.WriteString(fmt.Sprintf("  %s%s%s%s\n",
+				numStr,
+				healthyStyle.Render(thrStr),
+				warnStyle.Render(p99Str),
+				delta,
+			))
+		}
 	}
 
 	if len(m.iterations) > 1 {
@@ -595,13 +756,13 @@ func (m LabModel) viewResults(width int) string {
 
 	if len(m.iterations) > 0 {
 		last := m.iterations[len(m.iterations)-1]
-		b.WriteString("\n" + m.latencyHistogram(last.P99Ms))
+		b.WriteString("\n" + m.latencyHistogram(last.P99Ms, width))
 	}
 
 	return b.String()
 }
 
-func (m LabModel) latencyHistogram(p99 float64) string {
+func (m LabModel) latencyHistogram(p99 float64, width int) string {
 	if p99 <= 0 {
 		return ""
 	}
@@ -633,8 +794,16 @@ func (m LabModel) latencyHistogram(p99 float64) string {
 		buckets[4].pct = 0.40
 	}
 
+	maxBar := width - 16
+	if maxBar < 8 {
+		maxBar = 8
+	}
+	if maxBar > 40 {
+		maxBar = 40
+	}
+
 	for _, bk := range buckets {
-		barLen := int(bk.pct * 30)
+		barLen := int(bk.pct * float64(maxBar))
 		if barLen < 1 {
 			barLen = 1
 		}
@@ -677,7 +846,7 @@ func (m LabModel) viewPinSelect() string {
 	return sb.String()
 }
 
-func (m LabModel) viewDiff() string {
+func (m LabModel) viewDiff(width int) string {
 	if len(m.iterations) < 2 {
 		return dimStyle.Render("Need at least 2 iterations to diff")
 	}
@@ -699,16 +868,25 @@ func (m LabModel) viewDiff() string {
 	a := m.iterations[idxA]
 	b := m.iterations[idxB]
 
+	colW := (width - 8) / 4
+	if colW < 8 {
+		colW = 8
+	}
+
 	var sb strings.Builder
 	sb.WriteString(detailTitleStyle.Render(fmt.Sprintf("Diff: #%d vs #%d", a.Number, b.Number)) + "\n\n")
 
-	sb.WriteString(fmt.Sprintf("  %-16s %-14s %-14s %-10s\n",
-		dimStyle.Render("Metric"),
-		dimStyle.Render(fmt.Sprintf("#%d", a.Number)),
-		dimStyle.Render(fmt.Sprintf("#%d", b.Number)),
-		dimStyle.Render("Change"),
+	sb.WriteString(fmt.Sprintf("  %-*s %-*s %-*s %-*s\n",
+		colW, dimStyle.Render("Metric"),
+		colW, dimStyle.Render(fmt.Sprintf("#%d", a.Number)),
+		colW, dimStyle.Render(fmt.Sprintf("#%d", b.Number)),
+		colW, dimStyle.Render("Change"),
 	))
-	sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", 54)) + "\n")
+	sepW := width - 4
+	if sepW < 10 {
+		sepW = 10
+	}
+	sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", sepW)) + "\n")
 
 	writeDiffRow := func(label string, aVal, bVal float64, unit string, higherIsBetter bool) {
 		delta := bVal - aVal
@@ -733,10 +911,10 @@ func (m LabModel) viewDiff() string {
 			changeStr = dimStyle.Render("≈")
 		}
 
-		sb.WriteString(fmt.Sprintf("  %-16s %-14s %-14s %s\n",
-			label,
-			fmtLabNum(aVal)+unit,
-			fmtLabNum(bVal)+unit,
+		sb.WriteString(fmt.Sprintf("  %-*s %-*s %-*s %s\n",
+			colW, label,
+			colW, fmtLabNum(aVal)+unit,
+			colW, fmtLabNum(bVal)+unit,
 			changeStr,
 		))
 	}
@@ -747,11 +925,16 @@ func (m LabModel) viewDiff() string {
 
 	if a.Params != nil && b.Params != nil {
 		sb.WriteString("\n" + dimStyle.Render("  Parameter Changes") + "\n")
-		sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", 40)) + "\n")
+		paramSepW := width - 8
+		if paramSepW < 10 {
+			paramSepW = 10
+		}
+		sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", paramSepW)) + "\n")
 		for key, aVal := range a.Params {
 			bVal := b.Params[key]
 			if aVal != bVal {
-				sb.WriteString(fmt.Sprintf("  %-16s %s → %s\n",
+				sb.WriteString(fmt.Sprintf("  %-*s %s → %s\n",
+					colW,
 					dimStyle.Render(key),
 					warnStyle.Render(aVal),
 					healthyStyle.Render(bVal),
