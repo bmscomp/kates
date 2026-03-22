@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/mattn/go-runewidth v0.0.21
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.40.0
