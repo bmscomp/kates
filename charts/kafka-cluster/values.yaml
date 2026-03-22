@@ -515,3 +515,62 @@ rbac:
 
 serviceAccount:
   annotations: {}
+
+externalSecrets:
+  enabled: false
+  secretStore:
+    create: false
+    provider: {}
+    # Example: Kubernetes provider (read secrets from another namespace)
+    # provider:
+    #   kubernetes:
+    #     remoteNamespace: kafka
+    #     server:
+    #       caProvider:
+    #         type: ConfigMap
+    #         name: kube-root-ca.crt
+    #         key: ca.crt
+    #     auth:
+    #       serviceAccount:
+    #         name: krafter-admin
+    # Example: HashiCorp Vault
+    # provider:
+    #   vault:
+    #     server: "https://vault.example.com"
+    #     path: "secret"
+    #     auth:
+    #       kubernetes:
+    #         mountPath: "kubernetes"
+    #         role: "kafka"
+  push: []
+  # Push Strimzi user secrets to an external vault:
+  # push:
+  #   - sourceSecret: kates-backend
+  #     refreshInterval: 1h
+  #     data:
+  #       - secretKey: password
+  #         remoteKey: kafka/kates-backend
+  #         property: password
+  #       - secretKey: sasl.jaas.config
+  #         remoteKey: kafka/kates-backend
+  #         property: jaas
+  pull: []
+  # Pull credentials from vault into kafka namespace:
+  # pull:
+  #   - targetSecret: kafka-tiered-storage-credentials
+  #     refreshInterval: 1h
+  #     data:
+  #       - secretKey: AWS_ACCESS_KEY_ID
+  #         remoteKey: cloud/aws
+  #         property: access_key
+  #       - secretKey: AWS_SECRET_ACCESS_KEY
+  #         remoteKey: cloud/aws
+  #         property: secret_key
+  sync: []
+  # Sync Strimzi user secrets to other namespaces:
+  # sync:
+  #   - name: kates-backend-to-kates
+  #     sourceSecret: kates-backend
+  #     targetNamespace: kates
+  #     refreshInterval: 30s
+  #     secretStoreKind: ClusterSecretStore

@@ -262,6 +262,22 @@
       "properties": {
         "annotations": { "type": "object" }
       }
+    },
+    "externalSecrets": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "secretStore": {
+          "type": "object",
+          "properties": {
+            "create": { "type": "boolean" },
+            "provider": { "type": "object" }
+          }
+        },
+        "push": { "type": "array" },
+        "pull": { "type": "array" },
+        "sync": { "type": "array" }
+      }
     }
   },
   "$defs": {
