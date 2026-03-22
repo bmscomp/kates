@@ -279,6 +279,12 @@ var securityPentestCmd = &cobra.Command{
 
 		tests, _ := result["tests"].([]interface{})
 		if len(tests) > 0 {
+			tw := output.TermWidth()
+			detailWidth := tw - 56
+			if detailWidth < 30 {
+				detailWidth = 30
+			}
+
 			rows := make([][]string, 0, len(tests))
 			for _, t := range tests {
 				test, ok := t.(map[string]interface{})
@@ -295,7 +301,7 @@ var securityPentestCmd = &cobra.Command{
 					fmt.Sprintf("%v", test["name"]),
 					res,
 					fmt.Sprintf("%v", test["severity"]),
-					truncate(fmt.Sprintf("%v", test["detail"]), 50),
+					truncate(fmt.Sprintf("%v", test["detail"]), detailWidth),
 				})
 			}
 			output.Table([]string{"", "Test", "Result", "Severity", "Detail"}, rows)
