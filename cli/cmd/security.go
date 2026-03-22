@@ -47,6 +47,12 @@ var securityAuditCmd = &cobra.Command{
 
 		checks, _ := result["checks"].([]interface{})
 		if len(checks) > 0 {
+			tw := output.TermWidth()
+			detailWidth := tw - 62
+			if detailWidth < 30 {
+				detailWidth = 30
+			}
+
 			rows := make([][]string, 0, len(checks))
 			for _, c := range checks {
 				check, ok := c.(map[string]interface{})
@@ -58,7 +64,7 @@ var securityAuditCmd = &cobra.Command{
 				detail := fmt.Sprintf("%v", check["detail"])
 				severity := fmt.Sprintf("%v", check["severity"])
 				cis := fmt.Sprintf("%v", check["compliance"])
-				rows = append(rows, []string{statusIcon(status), cis, name, severity, truncate(detail, 55)})
+				rows = append(rows, []string{statusIcon(status), cis, name, severity, truncate(detail, detailWidth)})
 			}
 			output.Table([]string{"", "CIS", "Check", "Severity", "Detail"}, rows)
 

@@ -10,7 +10,15 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 )
+
+func TermWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 120
+}
 
 var (
 	// Out is the standard output writer, defaulting to os.Stdout.
