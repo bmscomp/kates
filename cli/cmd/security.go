@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/klster/kates-cli/output"
@@ -53,20 +54,58 @@ var securityAuditCmd = &cobra.Command{
 				detailWidth = 30
 			}
 
-			rows := make([][]string, 0, len(checks))
+			parsed := make([]map[string]interface{}, 0, len(checks))
 			for _, c := range checks {
 				check, ok := c.(map[string]interface{})
-				if !ok {
+				if ok {
+					parsed = append(parsed, check)
+				}
+			}
+
+			sort.Slice(parsed, func(i, j int) bool {
+				return severityRank(fmt.Sprintf("%v", parsed[i]["severity"])) <
+					severityRank(fmt.Sprintf("%v", parsed[j]["severity"]))
+			})
+
+			categoryOrder := []string{"auth", "authz", "transport", "config", "durability", "dos", "limits"}
+			categoryLabel := map[string]string{
+				"auth":       "Authentication",
+				"authz":      "Authorization",
+				"transport":  "Transport Security",
+				"config":     "Broker Configuration",
+				"durability": "Data Durability",
+				"dos":        "DoS Protection",
+				"limits":     "Resource Limits",
+			}
+
+			grouped := make(map[string][]map[string]interface{})
+			for _, check := range parsed {
+				cat := fmt.Sprintf("%v", check["category"])
+				grouped[cat] = append(grouped[cat], check)
+			}
+
+			for _, cat := range categoryOrder {
+				group := grouped[cat]
+				if len(group) == 0 {
 					continue
 				}
-				name := fmt.Sprintf("%v", check["name"])
-				status := fmt.Sprintf("%v", check["status"])
-				detail := fmt.Sprintf("%v", check["detail"])
-				severity := fmt.Sprintf("%v", check["severity"])
-				cis := fmt.Sprintf("%v", check["compliance"])
-				rows = append(rows, []string{statusIcon(status), cis, name, severity, truncate(detail, detailWidth)})
+				label := categoryLabel[cat]
+				if label == "" {
+					label = strings.Title(cat)
+				}
+				output.SubHeader(label)
+
+				rows := make([][]string, 0, len(group))
+				for _, check := range group {
+					name := fmt.Sprintf("%v", check["name"])
+					status := fmt.Sprintf("%v", check["status"])
+					detail := fmt.Sprintf("%v", check["detail"])
+					severity := fmt.Sprintf("%v", check["severity"])
+					cis := fmt.Sprintf("%v", check["compliance"])
+					rows = append(rows, []string{statusIcon(status), cis, name, severity, truncate(detail, detailWidth)})
+				}
+				output.Table([]string{"", "CIS", "Check", "Severity", "Detail"}, rows)
 			}
-			output.Table([]string{"", "CIS", "Check", "Severity", "Detail"}, rows)
 
 			hasIssues := false
 			for _, c := range checks {
@@ -516,6 +555,21 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+func severityRank(sev string) int {
+	switch sev {
+	case "CRITICAL":
+		return 0
+	case "HIGH":
+		return 1
+	case "MEDIUM":
+		return 2
+	case "LOW":
+		return 3
+	default:
+		return 4
+	}
 }
 
 func init() {
