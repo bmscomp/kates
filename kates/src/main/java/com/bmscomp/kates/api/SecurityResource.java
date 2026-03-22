@@ -5,6 +5,7 @@ package com.bmscomp.kates.api;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
@@ -97,6 +98,68 @@ public class SecurityResource {
         } catch (Exception e) {
             return Response.serverError()
                     .entity(ApiError.of(500, "Internal Server Error", "Pentest failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/compliance")
+    @Operation(summary = "Compliance report",
+            description = "Maps security checks to CIS Kafka Benchmark, SOC2, and PCI-DSS frameworks")
+    @APIResponse(responseCode = "200", description = "Compliance report")
+    public Response compliance() {
+        try {
+            return Response.ok(securityService.securityCompliance()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Compliance report failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @POST
+    @Path("/baseline")
+    @Operation(summary = "Save security baseline",
+            description = "Captures current security posture as baseline for drift detection")
+    @APIResponse(responseCode = "200", description = "Baseline saved")
+    public Response saveBaseline() {
+        try {
+            return Response.ok(securityService.saveBaseline()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Baseline save failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/drift")
+    @Operation(summary = "Security drift detection",
+            description = "Compares current security posture against saved baseline")
+    @APIResponse(responseCode = "200", description = "Drift report")
+    public Response drift() {
+        try {
+            return Response.ok(securityService.securityDrift()).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Drift detection failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/gate")
+    @Operation(summary = "Security quality gate",
+            description = "CI/CD gate that exits non-zero if security grade is below threshold")
+    @APIResponse(responseCode = "200", description = "Gate result")
+    public Response gate(
+            @Parameter(description = "Minimum passing grade (A, B, C, D, F)")
+            @QueryParam("min-grade") @DefaultValue("B") String minGrade) {
+        try {
+            return Response.ok(securityService.securityGate(minGrade.toUpperCase())).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(ApiError.of(500, "Internal Server Error", "Security gate failed: " + e.getMessage()))
                     .build();
         }
     }

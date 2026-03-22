@@ -604,3 +604,19 @@ func (c *Client) SecurityAuthTest(ctx context.Context, username string) (map[str
 func (c *Client) SecurityPentest(ctx context.Context, testName string) (map[string]interface{}, error) {
 	return get[map[string]interface{}](c, ctx, "/api/security/pentest?test="+testName)
 }
+
+func (c *Client) SecurityCompliance(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/compliance")
+}
+
+func (c *Client) SecurityBaselineSave(ctx context.Context) (map[string]interface{}, error) {
+	return postJSON[map[string]interface{}](c, ctx, "/api/security/baseline", nil)
+}
+
+func (c *Client) SecurityDrift(ctx context.Context) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/drift")
+}
+
+func (c *Client) SecurityGate(ctx context.Context, minGrade string) (map[string]interface{}, error) {
+	return get[map[string]interface{}](c, ctx, "/api/security/gate?min-grade="+minGrade)
+}

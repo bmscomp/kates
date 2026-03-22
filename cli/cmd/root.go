@@ -154,6 +154,10 @@ Security:
   security tls        TLS protocol, cipher, and certificate inspection
   security auth-test  ACL authorization probing per user
   security pentest    Adversarial penetration tests
+  security compliance CIS Kafka, SOC2, PCI-DSS compliance report
+  security baseline   Save security snapshot for drift detection
+  security drift      Compare posture against saved baseline
+  security gate       CI/CD gate — exit non-zero if below grade
 
 Flags:
   -o, --output     Output format: table or json
