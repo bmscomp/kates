@@ -16,6 +16,7 @@ type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
 	MaxRetries int
+	APIKey     string
 }
 
 func New(baseURL string) *Client {
@@ -26,6 +27,12 @@ func New(baseURL string) *Client {
 		},
 		MaxRetries: 3,
 	}
+}
+
+func NewWithAPIKey(baseURL, apiKey string) *Client {
+	c := New(baseURL)
+	c.APIKey = apiKey
+	return c
 }
 
 type APIError struct {
@@ -55,6 +62,9 @@ func (c *Client) doRequest(ctx context.Context, req *http.Request, retryable boo
 			}
 		}
 
+		if c.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		}
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("connection failed: %w", err)

@@ -6,10 +6,9 @@ source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../images.env"
 
 MAX_PARALLEL="${PULL_PARALLEL:-4}"
+PLATFORM="--platform linux/arm64"
 
-require_registry
-
-bold "Pulling Images to Local Registry"
+bold "Pulling Images"
 echo ""
 
 TOTAL=0
@@ -17,23 +16,20 @@ SKIPPED=0
 PULLED=0
 FAILED=0
 
-push_to_local_registry() {
+pull_image() {
     local image=$1
-    local local_image="${REGISTRY}/${image}"
     TOTAL=$((TOTAL + 1))
 
     step "[${TOTAL}] ${image}"
 
-    if curl -s "http://${REGISTRY}/v2/${image%:*}/tags/list" | grep -q "\"${image##*:}\""; then
-        warn "  already in registry, skipping"
+    if docker image inspect "${image}" >/dev/null 2>&1; then
+        warn "  already pulled, skipping"
         SKIPPED=$((SKIPPED + 1))
         return 0
     fi
 
     if docker pull ${PLATFORM} "${image}"; then
-        docker tag "${image}" "${local_image}"
-        docker push "${local_image}"
-        info "  ✓ pushed"
+        info "  ✓ pulled"
         PULLED=$((PULLED + 1))
     else
         error "  ✗ failed to pull"
@@ -42,44 +38,44 @@ push_to_local_registry() {
     fi
 }
 
-push_scarf_image() {
+pull_scarf_image() {
     local entry=$1
     local scarf_src="${entry%%|*}"
     local canonical="${entry##*|}"
-    local local_image="${REGISTRY}/${canonical}"
     TOTAL=$((TOTAL + 1))
 
-    step "[${TOTAL}] ${scarf_src} → ${canonical}"
+    step "[${TOTAL}] ${scarf_src}"
 
-    if curl -s "http://${REGISTRY}/v2/${canonical%:*}/tags/list" | grep -q "\"${canonical##*:}\""; then
-        warn "  already in registry, skipping"
+    if docker image inspect "${scarf_src}" >/dev/null 2>&1; then
+        warn "  already pulled, skipping"
         SKIPPED=$((SKIPPED + 1))
         return 0
     fi
 
     if docker pull ${PLATFORM} "${scarf_src}"; then
-        docker tag "${scarf_src}" "${local_image}"
-        docker push "${local_image}"
-        info "  ✓ pushed as ${canonical}"
+        info "  ✓ pulled"
         PULLED=$((PULLED + 1))
     else
-        error "  ✗ failed to pull"
-        FAILED=$((FAILED + 1))
-        return 1
+        echo "  trying canonical name: ${canonical}..."
+        if docker pull ${PLATFORM} "${canonical}"; then
+            docker tag "${canonical}" "${scarf_src}"
+            info "  ✓ pulled (via canonical)"
+            PULLED=$((PULLED + 1))
+        else
+            error "  ✗ failed to pull"
+            FAILED=$((FAILED + 1))
+            return 1
+        fi
     fi
 }
 
-# Pull standard images with parallelism for images not yet in registry
 pull_single() {
     local image=$1
-    local local_image="${REGISTRY}/${image}"
-    if curl -s "http://${REGISTRY}/v2/${image%:*}/tags/list" | grep -q "\"${image##*:}\"" 2>/dev/null; then
+    if docker image inspect "${image}" >/dev/null 2>&1; then
         echo "SKIP ${image}"
         return 0
     fi
     if docker pull ${PLATFORM} "${image}" >/dev/null 2>&1; then
-        docker tag "${image}" "${local_image}" 2>/dev/null
-        docker push "${local_image}" >/dev/null 2>&1
         echo "OK   ${image}"
     else
         echo "FAIL ${image}"
@@ -87,7 +83,7 @@ pull_single() {
     fi
 }
 export -f pull_single
-export REGISTRY PLATFORM
+export PLATFORM
 
 info "--- Standard Images (up to ${MAX_PARALLEL} in parallel) ---"
 TMPFILE=$(mktemp)
@@ -101,16 +97,16 @@ rm -f "${TMPFILE}"
 echo ""
 info "--- LitmusChaos Portal Images (scarf.sh) ---"
 for entry in "${LITMUS_SCARF_IMAGES[@]}"; do
-    push_scarf_image "${entry}" || true
+    pull_scarf_image "${entry}" || true
 done
 
 echo ""
-bold "Pull Complete!"
+bold "✅ Pull Complete!"
 echo ""
 echo "Total: ${TOTAL}  Pulled: ${PULLED}  Skipped: ${SKIPPED}  Failed: ${FAILED}"
 echo ""
-echo "Registry contents:"
-curl -s http://${REGISTRY}/v2/_catalog | jq '.repositories | length' 2>/dev/null || echo "(jq not installed)"
+echo "Verify local images:"
+echo "  docker images | head -30"
 
 if [ "${FAILED}" -gt 0 ]; then
     warn "Re-run this script to retry the ${FAILED} failed image(s)."

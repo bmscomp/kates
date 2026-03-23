@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "headlamp.fullname" . }}-test
+  labels:
+    {{- include "headlamp.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    fsGroup: 100
+  containers:
+  - name: connection-test
+    image: {{ .Values.test.image }}
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "25m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+    command:
+      - sh
+      - -c
+      - |
+        echo "Testing Headlamp connectivity..."
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://{{ include "headlamp.fullname" . }}:{{ .Values.service.port }}/)
+        if [ "$STATUS" = "200" ]; then
+          echo "Headlamp is reachable (HTTP $STATUS)"
+          exit 0
+        else
+          echo "Headlamp unreachable (HTTP $STATUS)"
+          exit 1
+        fi

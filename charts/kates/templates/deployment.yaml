@@ -122,6 +122,13 @@ spec:
         - name: JAVA_TOOL_OPTIONS
           value: {{ .Values.jvm.options | quote }}
         {{- end }}
+        {{- if .Values.apiKey.enabled }}
+        - name: KATES_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.apiKey.existingSecret | default (printf "%s-api-key" (include "kates.fullname" .)) }}
+              key: {{ .Values.apiKey.secretKey | default "api-key" }}
+        {{- end }}
         {{- with .Values.extraEnv }}
           {{- toYaml . | nindent 8 }}
         {{- end }}

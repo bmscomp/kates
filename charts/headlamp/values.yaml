@@ -1,0 +1,158 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/headlamp-k8s/headlamp
+  tag: "v0.40.1"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+config:
+  inCluster: true
+  baseURL: ""
+  pluginsDir: "/headlamp/plugins"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  automount: true
+
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources:
+        - pods
+        - pods/log
+        - services
+        - configmaps
+        - secrets
+        - namespaces
+        - nodes
+        - persistentvolumeclaims
+        - persistentvolumes
+        - events
+        - endpoints
+        - serviceaccounts
+        - resourcequotas
+        - limitranges
+        - replicationcontrollers
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources:
+        - deployments
+        - statefulsets
+        - replicasets
+        - daemonsets
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["batch"]
+      resources:
+        - jobs
+        - cronjobs
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["networking.k8s.io"]
+      resources:
+        - networkpolicies
+        - ingresses
+        - ingressclasses
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["rbac.authorization.k8s.io"]
+      resources:
+        - roles
+        - rolebindings
+        - clusterroles
+        - clusterrolebindings
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["policy"]
+      resources:
+        - poddisruptionbudgets
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["autoscaling"]
+      resources:
+        - horizontalpodautoscalers
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["storage.k8s.io"]
+      resources:
+        - storageclasses
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["metrics.k8s.io"]
+      resources:
+        - pods
+        - nodes
+      verbs: ["get", "list"]
+    - apiGroups: ["apiextensions.k8s.io"]
+      resources:
+        - customresourcedefinitions
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["kafka.strimzi.io"]
+      resources: ["*"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["core.strimzi.io"]
+      resources: ["*"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["litmuschaos.io"]
+      resources: ["*"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["monitoring.coreos.com"]
+      resources: ["*"]
+      verbs: ["get", "list", "watch"]
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+containerPort: 4466
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+  fsGroup: 101
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 100
+  runAsGroup: 101
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "50m"
+  limits:
+    memory: "128Mi"
+    cpu: "200m"
+
+probes:
+  liveness:
+    path: /
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  readiness:
+    path: /
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+networkPolicy:
+  enabled: true
+  apiServer:
+    port: 6443
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+test:
+  image: curlimages/curl:8.7.1

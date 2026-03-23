@@ -1,0 +1,20 @@
+apiVersion: v2
+name: headlamp
+description: Headlamp — Kubernetes Dashboard for cluster visualization and management
+type: application
+version: 0.1.0
+appVersion: "0.40.1"
+keywords:
+  - kubernetes
+  - dashboard
+  - headlamp
+  - visualization
+  - cncf
+home: https://headlamp.dev
+sources:
+  - https://github.com/headlamp-k8s/headlamp
+maintainers:
+  - name: klster
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0

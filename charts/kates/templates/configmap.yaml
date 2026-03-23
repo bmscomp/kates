@@ -33,6 +33,7 @@ data:
   {{- end }}
   KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
   KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}
+  KATES_API_SECURITY_ENABLED: {{ .Values.apiKey.enabled | default false | quote }}
 
   {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
   QUARKUS_DATASOURCE_DB_KIND: "postgresql"

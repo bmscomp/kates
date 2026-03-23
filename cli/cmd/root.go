@@ -14,12 +14,14 @@ var (
 	apiURL      string
 	outputMode  string
 	contextFlag string
+	apiKeyFlag  string
 	apiClient   *client.Client
 )
 
 type Context struct {
 	URL    string `yaml:"url"`
 	Output string `yaml:"output,omitempty"`
+	APIKey string `yaml:"api-key,omitempty"`
 }
 
 type Config struct {
@@ -163,12 +165,14 @@ Flags:
   -o, --output     Output format: table or json
       --url        Override API URL for a single call
       --context    Use a named context for a single call
+      --api-key    API key for authenticating with the server
   -h, --help       Show this help
 
 Environment Variables:
   KATES_URL        Override API URL (lower priority than --url)
   KATES_OUTPUT     Override output format (lower priority than -o)
   KATES_CONTEXT    Override context (lower priority than --context)
+  KATES_API_KEY    API key for authentication (lower priority than --api-key)
 
 Examples:
   $ kates health
@@ -213,7 +217,18 @@ var rootCmd = &cobra.Command{
 		if outputMode == "" {
 			outputMode = "table"
 		}
-		apiClient = client.New(apiURL)
+		if apiKeyFlag == "" {
+			if envKey := os.Getenv("KATES_API_KEY"); envKey != "" {
+				apiKeyFlag = envKey
+			} else if ctx.APIKey != "" {
+				apiKeyFlag = ctx.APIKey
+			}
+		}
+		if apiKeyFlag != "" {
+			apiClient = client.NewWithAPIKey(apiURL, apiKeyFlag)
+		} else {
+			apiClient = client.New(apiURL)
+		}
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -232,6 +247,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&apiURL, "url", "", "Override API URL for this call")
 	rootCmd.PersistentFlags().StringVarP(&outputMode, "output", "o", "", "Output format: table or json")
 	rootCmd.PersistentFlags().StringVar(&contextFlag, "context", "", "Use a specific context instead of current")
+	rootCmd.PersistentFlags().StringVar(&apiKeyFlag, "api-key", "", "API key for authenticating with the server")
 	rootCmd.AddCommand(docsCmd)
 
 	defaultHelp := rootCmd.HelpFunc()

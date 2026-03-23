@@ -199,6 +199,17 @@ extraVolumes: []
 # -- Extra volume mounts
 extraVolumeMounts: []
 
+# -- API key authentication
+apiKey:
+  # -- Enable API key authentication
+  enabled: true
+  # -- API key value (auto-generated 32-char key if empty)
+  value: ""
+  # -- Use an existing Secret instead of creating one
+  existingSecret: ""
+  # -- Key in the existing Secret
+  secretKey: "api-key"
+
 # -- Health probe configuration
 probes:
   # -- Startup probe (gates readiness/liveness probes)

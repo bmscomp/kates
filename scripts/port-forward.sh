@@ -38,6 +38,7 @@ forward "Kates API"         "🧪" kates                                      30
 forward "Prometheus"        "🔥" monitoring-kube-prometheus-prometheus       30090 9090 monitoring
 forward "Jaeger UI"         "🔍" jaeger-query                               30086 16686 monitoring
 forward "Litmus UI"         "⚡" chaos-litmus-frontend-service              9091  9091 litmus
+forward "Headlamp"          "🔭" headlamp                                   30084 80   headlamp
 
 echo ""
 info "✅ Port forwarding: ${FORWARDED} active, ${SKIPPED} skipped"

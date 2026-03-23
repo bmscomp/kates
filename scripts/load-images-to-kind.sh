@@ -5,8 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../images.env"
 
+PLATFORM="--platform linux/arm64"
+
 require_cluster
-require_registry
 
 bold "Loading Images into Kind Cluster"
 echo ""
@@ -18,7 +19,6 @@ FAILED=0
 
 load_image() {
     local image=$1
-    local local_image="${REGISTRY}/${image}"
     TOTAL=$((TOTAL + 1))
 
     step "[${TOTAL}] ${image}"
@@ -31,14 +31,14 @@ load_image() {
         return 0
     fi
 
-    echo "  pulling from local registry..."
-    if ! docker pull ${PLATFORM} "${local_image}"; then
-        error "  ✗ NOT in local registry — run ./pull-images.sh first"
-        FAILED=$((FAILED + 1))
-        return 1
+    if ! docker image inspect "${image}" >/dev/null 2>&1; then
+        echo "  pulling image..."
+        if ! docker pull ${PLATFORM} "${image}"; then
+            error "  ✗ failed to pull — check network or image name"
+            FAILED=$((FAILED + 1))
+            return 1
+        fi
     fi
-
-    docker tag "${local_image}" "${image}"
 
     echo "  loading into Kind..."
     kind load docker-image "${image}" --name "${KIND_CLUSTER_NAME}"
@@ -50,7 +50,6 @@ load_scarf_image() {
     local entry=$1
     local scarf_src="${entry%%|*}"
     local canonical="${entry##*|}"
-    local registry_image="${REGISTRY}/${canonical}"
     TOTAL=$((TOTAL + 1))
 
     step "[${TOTAL}] ${scarf_src}"
@@ -63,14 +62,18 @@ load_scarf_image() {
         return 0
     fi
 
-    echo "  pulling canonical name from local registry..."
-    if ! docker pull ${PLATFORM} "${registry_image}" 2>/dev/null; then
-        error "  ✗ NOT in local registry — run ./pull-images.sh first"
-        FAILED=$((FAILED + 1))
-        return 1
+    if ! docker image inspect "${scarf_src}" >/dev/null 2>&1; then
+        echo "  pulling from scarf.sh..."
+        if ! docker pull ${PLATFORM} "${scarf_src}" 2>/dev/null; then
+            echo "  trying canonical name..."
+            if ! docker pull ${PLATFORM} "${canonical}" 2>/dev/null; then
+                error "  ✗ failed to pull from both sources"
+                FAILED=$((FAILED + 1))
+                return 1
+            fi
+            docker tag "${canonical}" "${scarf_src}"
+        fi
     fi
-
-    docker tag "${registry_image}" "${scarf_src}"
 
     echo "  loading into Kind..."
     kind load docker-image "${scarf_src}" --name "${KIND_CLUSTER_NAME}"

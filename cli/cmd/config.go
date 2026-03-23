@@ -49,14 +49,19 @@ var ctxShowCmd = &cobra.Command{
 			if out == "" {
 				out = "table"
 			}
-			rows = append(rows, []string{marker, name, ctx.URL, out})
+			key := "—"
+			if ctx.APIKey != "" {
+				key = ctx.APIKey[:4] + "****"
+			}
+			rows = append(rows, []string{marker, name, ctx.URL, out, key})
 		}
-		output.Table([]string{"", "Name", "URL", "Output"}, rows)
+		output.Table([]string{"", "Name", "URL", "Output", "API Key"}, rows)
 	},
 }
 
 var ctxSetURL string
 var ctxSetOutput string
+var ctxSetAPIKey string
 
 var ctxSetCmd = &cobra.Command{
 	Use:   "set <name>",
@@ -64,7 +69,7 @@ var ctxSetCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Example: `  kates ctx set local    --url http://localhost:30083
   kates ctx set staging  --url https://kates-staging.company.com
-  kates ctx set prod     --url https://kates.company.com --output json`,
+  kates ctx set prod     --url https://kates.company.com --output json --api-key mykey`,
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
 		if ctxSetURL == "" {
@@ -76,7 +81,7 @@ var ctxSetCmd = &cobra.Command{
 		if out == "" {
 			out = "table"
 		}
-		cfg.Contexts[name] = Context{URL: ctxSetURL, Output: out}
+		cfg.Contexts[name] = Context{URL: ctxSetURL, Output: out, APIKey: ctxSetAPIKey}
 
 		// Auto-select if first context
 		if len(cfg.Contexts) == 1 {
@@ -88,6 +93,9 @@ var ctxSetCmd = &cobra.Command{
 			return
 		}
 		output.Success(fmt.Sprintf("Context '%s' → %s", name, ctxSetURL))
+		if ctxSetAPIKey != "" {
+			output.Hint("  API key configured ✓")
+		}
 		if cfg.CurrentContext == name {
 			output.Hint("  (active)")
 		} else {
@@ -241,6 +249,7 @@ var ctxImportCmd = &cobra.Command{
 func init() {
 	ctxSetCmd.Flags().StringVar(&ctxSetURL, "url", "", "Kates API base URL (required)")
 	ctxSetCmd.Flags().StringVar(&ctxSetOutput, "output", "", "Default output format for this context")
+	ctxSetCmd.Flags().StringVar(&ctxSetAPIKey, "api-key", "", "API key for authentication")
 
 	ctxExportCmd.Flags().StringVar(&ctxExportFlag, "name", "", "Export only a specific context")
 	ctxImportCmd.Flags().StringVar(&ctxImportFile, "file", "", "YAML file to import (reads stdin if omitted)")
