@@ -205,3 +205,430 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-kraft-quorum"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: kraft-quorum
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 4: KRaft Controller Quorum ==="
+
+          echo "Checking controller node pool CR..."
+          POOL_STATUS=$(kubectl get kafkanodepool controllers -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          if [ "$POOL_STATUS" = "True" ]; then
+            echo "  ✓ KafkaNodePool 'controllers' Ready=True"
+          else
+            echo "  ✗ KafkaNodePool 'controllers' not ready: $POOL_STATUS" && exit 1
+          fi
+
+          echo ""
+          echo "Checking controller pods..."
+          EXPECTED={{ .Values.controllers.replicas }}
+          RUNNING=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
+            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/pool-name=controllers \
+            --no-headers | grep "Running" | wc -l | tr -d ' ')
+          echo "  Controller pods running: $RUNNING/$EXPECTED"
+          if [ "$RUNNING" -lt "$EXPECTED" ]; then
+            echo "  ✗ Expected $EXPECTED controllers, only $RUNNING running" && exit 1
+          fi
+          echo "  ✓ All $EXPECTED controller pods running"
+
+          echo ""
+          echo "Verifying KRaft mode annotation..."
+          KRAFT=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.metadata.annotations.strimzi\.io/kraft}')
+          if [ "$KRAFT" = "enabled" ]; then
+            echo "  ✓ KRaft mode enabled"
+          else
+            echo "  ⚠ KRaft annotation: $KRAFT"
+          fi
+
+          echo "✓ Tier 4 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- if .Values.topics.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-topics"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: topic-check
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 5: Topic Provisioning ==="
+
+          echo "Checking KafkaTopic CRs for cluster {{ include "kafka-cluster.clusterName" . }}..."
+          TOPICS=$(kubectl get kafkatopics -n {{ include "kafka-cluster.namespace" . }} \
+            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} \
+            -o jsonpath='{.items[*].metadata.name}')
+          FAIL=0
+          COUNT=0
+          for t in $TOPICS; do
+            COUNT=$((COUNT + 1))
+            STATUS=$(kubectl get kafkatopic $t -n {{ include "kafka-cluster.namespace" . }} \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+            if [ "$STATUS" = "True" ]; then
+              echo "  ✓ Topic $t: Ready"
+            else
+              echo "  ✗ Topic $t: NOT Ready ($STATUS)"
+              FAIL=1
+            fi
+          done
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "  ⚠ No KafkaTopic CRs found (topics may be managed externally)"
+          fi
+
+          {{- with (index .Values.topics.items 0) }}
+          echo ""
+          echo "Validating first topic '{{ .name }}' spec..."
+          PARTITIONS=$(kubectl get kafkatopic {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} \
+            -o jsonpath='{.spec.partitions}')
+          REPLICAS=$(kubectl get kafkatopic {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} \
+            -o jsonpath='{.spec.replicas}')
+          echo "  Partitions: $PARTITIONS (expected {{ .partitions }})"
+          echo "  Replicas:   $REPLICAS (expected {{ .replicas }})"
+          if [ "$PARTITIONS" != "{{ .partitions }}" ] || [ "$REPLICAS" != "{{ .replicas }}" ]; then
+            echo "  ✗ Spec mismatch" && FAIL=1
+          else
+            echo "  ✓ Spec matches declared values"
+          fi
+          {{- end }}
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "✗ Topic validation failed" && exit 1
+          fi
+          echo "✓ Tier 5 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-listeners"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "6"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: listener-check
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 6: Listener & TLS Configuration ==="
+
+          FAIL=0
+          {{- range .Values.kafka.listeners }}
+          echo "Checking listener '{{ .name }}' (port {{ .port }})..."
+          BOOTSTRAP=$(kubectl get kafka {{ include "kafka-cluster.clusterName" $ }} -n {{ include "kafka-cluster.namespace" $ }} \
+            -o jsonpath='{.status.listeners[?(@.name=="{{ .name }}")].bootstrapServers}')
+          if [ -n "$BOOTSTRAP" ]; then
+            echo "  ✓ Listener '{{ .name }}': $BOOTSTRAP"
+          else
+            echo "  ✗ Listener '{{ .name }}': no bootstrapServers in status"
+            FAIL=1
+          fi
+          {{- if .tls }}
+
+          echo "  Verifying TLS CA secret..."
+          if kubectl get secret {{ include "kafka-cluster.clusterName" $ }}-cluster-ca-cert -n {{ include "kafka-cluster.namespace" $ }} > /dev/null 2>&1; then
+            echo "  ✓ Cluster CA cert secret exists"
+          else
+            echo "  ⚠ Cluster CA cert secret not found"
+          fi
+          {{- end }}
+          {{- end }}
+
+          echo ""
+          echo "Checking listener count..."
+          CONFIGURED={{ len .Values.kafka.listeners }}
+          ACTUAL=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} \
+            -o jsonpath='{.status.listeners}' | grep -o '"name"' | wc -l | tr -d ' ')
+          echo "  Configured: $CONFIGURED, Active: $ACTUAL"
+          if [ "$ACTUAL" -lt "$CONFIGURED" ]; then
+            echo "  ✗ Some listeners not active" && FAIL=1
+          else
+            echo "  ✓ All listeners active"
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "✗ Listener validation failed" && exit 1
+          fi
+          echo "✓ Tier 6 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-nodepools"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "7"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: nodepool-check
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 7: Node Pool Topology ==="
+
+          FAIL=0
+          TOTAL_EXPECTED=0
+          {{- range .Values.brokerPools }}
+          echo "Checking broker pool '{{ .name }}'..."
+          POOL_STATUS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          if [ "$POOL_STATUS" = "True" ]; then
+            echo "  ✓ KafkaNodePool '{{ .name }}' Ready"
+          else
+            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: $POOL_STATUS"
+            FAIL=1
+          fi
+          TOTAL_EXPECTED=$((TOTAL_EXPECTED + {{ .replicas }}))
+          {{- end }}
+
+          echo ""
+          echo "Checking total broker pods..."
+          RUNNING=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
+            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka \
+            --no-headers | grep "Running" | wc -l | tr -d ' ')
+          echo "  Total broker pods running: $RUNNING (expected >= $TOTAL_EXPECTED)"
+          if [ "$RUNNING" -lt "$TOTAL_EXPECTED" ]; then
+            echo "  ✗ Insufficient broker pods" && FAIL=1
+          else
+            echo "  ✓ Broker pod count meets expectations"
+          fi
+
+          echo ""
+          echo "Checking node distribution..."
+          NODES=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
+            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka \
+            -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')
+          echo "  Broker pods spread across $NODES unique node(s)"
+          if [ "$NODES" -ge 2 ]; then
+            echo "  ✓ Pods distributed across multiple nodes"
+          elif [ "$NODES" -eq 1 ]; then
+            echo "  ⚠ All pods on a single node (acceptable for dev/Kind)"
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "✗ Node pool validation failed" && exit 1
+          fi
+          echo "✓ Tier 7 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- if .Values.cruiseControl.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-cruise-control"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "8"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: cruise-control-check
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 8: CruiseControl Readiness ==="
+
+          echo "Checking CruiseControl pod..."
+          CC_PODS=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
+            -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-cruise-control \
+            --no-headers 2>/dev/null)
+          if [ -z "$CC_PODS" ]; then
+            echo "  ✗ No CruiseControl pod found" && exit 1
+          fi
+
+          CC_RUNNING=$(echo "$CC_PODS" | grep "Running" | wc -l | tr -d ' ')
+          if [ "$CC_RUNNING" -ge 1 ]; then
+            echo "  ✓ CruiseControl pod is Running"
+          else
+            echo "  ✗ CruiseControl pod not in Running state" && exit 1
+          fi
+
+          echo ""
+          echo "Checking KafkaRebalance CRD availability..."
+          if kubectl api-resources --api-group=kafka.strimzi.io 2>/dev/null | grep -q kafkarebalances; then
+            echo "  ✓ KafkaRebalance CRD is registered"
+          else
+            echo "  ⚠ KafkaRebalance CRD not found (Strimzi may not include it)"
+          fi
+
+          echo ""
+          echo "Checking CruiseControl configuration in Kafka CR..."
+          CC_SPEC=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} \
+            -o jsonpath='{.spec.cruiseControl}')
+          if [ -n "$CC_SPEC" ]; then
+            echo "  ✓ CruiseControl section present in Kafka CR"
+          else
+            echo "  ✗ CruiseControl not configured in Kafka CR" && exit 1
+          fi
+          echo "✓ Tier 8 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-metrics"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "9"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: metrics-check
+      image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== Tier 9: Metrics & Exporter Pipeline ==="
+
+          echo "Checking kafka-metrics ConfigMap..."
+          if kubectl get configmap kafka-metrics -n {{ include "kafka-cluster.namespace" . }} > /dev/null 2>&1; then
+            KEYS=$(kubectl get configmap kafka-metrics -n {{ include "kafka-cluster.namespace" . }} \
+              -o jsonpath='{.data}' | grep -o '"[^"]*":' | tr -d '":' | tr '\n' ', ')
+            echo "  ✓ ConfigMap 'kafka-metrics' exists (keys: ${KEYS%,})"
+          else
+            echo "  ✗ ConfigMap 'kafka-metrics' not found" && exit 1
+          fi
+
+          {{- if .Values.kafkaExporter.enabled }}
+          echo ""
+          echo "Checking Kafka Exporter pod..."
+          EXPORTER_PODS=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
+            -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-kafka-exporter \
+            --no-headers 2>/dev/null)
+          if [ -z "$EXPORTER_PODS" ]; then
+            echo "  ✗ No Kafka Exporter pod found" && exit 1
+          fi
+          EXPORTER_RUNNING=$(echo "$EXPORTER_PODS" | grep "Running" | wc -l | tr -d ' ')
+          if [ "$EXPORTER_RUNNING" -ge 1 ]; then
+            echo "  ✓ Kafka Exporter pod is Running"
+          else
+            echo "  ✗ Kafka Exporter pod not running" && exit 1
+          fi
+          {{- end }}
+
+          {{- if .Values.podMonitors.enabled }}
+          echo ""
+          echo "Checking PodMonitor resources..."
+          PM_COUNT=$(kubectl get podmonitors -n {{ include "kafka-cluster.namespace" . }} \
+            --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$PM_COUNT" -ge 1 ]; then
+            echo "  ✓ Found $PM_COUNT PodMonitor(s)"
+          else
+            echo "  ⚠ No PodMonitors found (monitoring may be configured externally)"
+          fi
+          {{- end }}
+
+          echo "✓ Tier 9 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
