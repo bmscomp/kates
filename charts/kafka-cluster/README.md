@@ -122,30 +122,94 @@ The **Kind** overlay (`values-kind.yaml`) layers on top of `values-dev.yaml` and
 
 ## Architecture
 
+### Cluster Components
+
+```mermaid
+graph TB
+    subgraph kafka["kafka namespace"]
+        subgraph controllers["KRaft Controllers"]
+            C0["controller-0"]
+            C1["controller-1"]
+            C2["controller-2"]
+        end
+
+        subgraph brokers["Broker Pools"]
+            B_A["broker-α-0<br/>zone: alpha"]
+            B_S["broker-σ-0<br/>zone: sigma"]
+            B_G["broker-γ-0<br/>zone: gamma"]
+        end
+
+        EO["Entity Operator<br/>├ TopicOperator<br/>└ UserOperator"]
+        CC["Cruise Control"]
+        KE["Kafka Exporter"]
+        DC["Drain Cleaner"]
+    end
+
+    P1["port 9092<br/>SASL_PLAINTEXT"] --> brokers
+    P2["port 9093<br/>SASL_TLS"] --> brokers
+    P3["port 9094<br/>NodePort + TLS"] --> brokers
+    controllers <--> |"KRaft<br/>consensus"| brokers
+    EO --> brokers
+    CC --> brokers
+
+    style kafka fill:#1a1a2e,stroke:#16213e,color:#e8e8e8
+    style controllers fill:#0f3460,stroke:#533483,color:#e8e8e8
+    style brokers fill:#0f3460,stroke:#533483,color:#e8e8e8
 ```
-┌─────────────────────────────────────────────────────┐
-│                    kafka namespace                   │
-│                                                     │
-│  ┌─────────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ controller-0│  │broker-α-0│  │broker-σ-0│       │
-│  │ controller-1│  │  zone:α  │  │  zone:σ  │       │
-│  │ controller-2│  └──────────┘  └──────────┘       │
-│  │  (KRaft)    │  ┌──────────┐                      │
-│  └─────────────┘  │broker-γ-0│                      │
-│                   │  zone:γ  │                      │
-│  ┌──────────────┐ └──────────┘                      │
-│  │Entity Operator│                                  │
-│  │ ├─ TopicOp   │  ┌──────────────┐                 │
-│  │ └─ UserOp    │  │Cruise Control│                 │
-│  └──────────────┘  └──────────────┘                 │
-│                                                     │
-│  ┌──────────────┐  ┌──────────────┐                 │
-│  │Kafka Exporter│  │Drain Cleaner │                 │
-│  └──────────────┘  └──────────────┘                 │
-└─────────────────────────────────────────────────────┘
-         ▲               ▲               ▲
-    port 9092        port 9093       port 9094
-   SASL_PLAINTEXT    SASL_TLS      NodePort+TLS
+
+### Deployment Flow
+
+```mermaid
+flowchart LR
+    A["make kafka-deploy<br/>ENV=kind|dev|staging|prod"] --> B["helm upgrade --install"]
+    B --> C["Strimzi Operator<br/>(subchart)"]
+    C --> D["Kafka CR"]
+    D --> E["KafkaNodePool<br/>controllers"]
+    D --> F["KafkaNodePool<br/>broker pools"]
+    D --> G["Entity Operator"]
+    G --> H["KafkaTopic CRs"]
+    G --> I["KafkaUser CRs"]
+
+    B --> |"Kind only"| J["StorageClasses<br/>alpha / sigma / gamma"]
+
+    style A fill:#e94560,stroke:#1a1a2e,color:#fff
+    style B fill:#533483,stroke:#1a1a2e,color:#fff
+    style C fill:#0f3460,stroke:#1a1a2e,color:#e8e8e8
+```
+
+### Network Topology
+
+```mermaid
+graph LR
+    subgraph clients["Client Namespaces"]
+        K["kates"]
+        L["litmus"]
+    end
+
+    subgraph kafka["kafka namespace"]
+        BR["Brokers<br/>9092 / 9093 / 9094"]
+        CT["Controllers<br/>9090 / 9091"]
+        OP["Strimzi Operator"]
+        EO2["Entity Operator"]
+        CC2["Cruise Control"]
+        UI["Kafka UI<br/>8080"]
+    end
+
+    MON["monitoring namespace<br/>Prometheus"]
+
+    clients -->|"9092 / 9093"| BR
+    OP --> BR
+    OP --> CT
+    EO2 -->|"9091 / 9092"| BR
+    CC2 --> BR
+    UI -->|"9092"| BR
+    MON -->|"9404 metrics"| BR
+    MON -->|"9404 metrics"| CC2
+    MON -->|"8080"| OP
+    BR <-->|"inter-broker"| CT
+
+    style kafka fill:#1a1a2e,stroke:#16213e,color:#e8e8e8
+    style clients fill:#16213e,stroke:#533483,color:#e8e8e8
 ```
 
 ## Configuration Reference
