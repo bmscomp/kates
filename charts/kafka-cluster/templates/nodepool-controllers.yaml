@@ -54,6 +54,22 @@ spec:
       {{- if .Values.controllers.priorityClassName }}
       priorityClassName: {{ .Values.controllers.priorityClassName }}
       {{- end }}
+      {{- if .Values.controllers.sysctl.enabled }}
+      initContainers:
+        - name: sysctl-tuner
+          image: {{ .Values.controllers.sysctl.image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              {{- range $key, $value := .Values.controllers.sysctl.params }}
+              sysctl -w {{ $key }}={{ $value }}
+              {{- end }}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+      {{- end }}
     kafkaContainer:
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}

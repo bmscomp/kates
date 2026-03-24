@@ -106,6 +106,13 @@ controllers:
     topologyKey: topology.kubernetes.io/zone
   tolerations: []
   priorityClassName: ""
+  sysctl:
+    enabled: false
+    image: busybox:1.37
+    params:
+      vm.max_map_count: "262144"
+      net.core.somaxconn: "16384"
+      vm.swappiness: "1"
 
 brokerPools:
   - name: brokers-az1
@@ -139,6 +146,13 @@ brokerDefaults:
       cpu: 2000m
   tolerations: []
   priorityClassName: ""
+  sysctl:
+    enabled: false
+    image: busybox:1.37
+    params:
+      vm.max_map_count: "262144"
+      net.core.somaxconn: "16384"
+      vm.swappiness: "1"
   topologySpreadConstraints:
     enabled: true
     maxSkew: 1

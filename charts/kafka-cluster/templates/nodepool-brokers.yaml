@@ -73,6 +73,22 @@ spec:
       {{- if $.Values.brokerDefaults.priorityClassName }}
       priorityClassName: {{ $.Values.brokerDefaults.priorityClassName }}
       {{- end }}
+      {{- if $.Values.brokerDefaults.sysctl.enabled }}
+      initContainers:
+        - name: sysctl-tuner
+          image: {{ $.Values.brokerDefaults.sysctl.image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              {{- range $key, $value := $.Values.brokerDefaults.sysctl.params }}
+              sysctl -w {{ $key }}={{ $value }}
+              {{- end }}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+      {{- end }}
     kafkaContainer:
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" $ | nindent 8 }}

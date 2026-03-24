@@ -408,6 +408,39 @@ brokerDefaults:
   priorityClassName: kafka-critical
 ```
 
+### Kernel Tuning (sysctl)
+
+A privileged init container can tune kernel parameters before Kafka starts:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `controllers.sysctl.enabled` | Enable sysctl init container for controllers | `false` |
+| `brokerDefaults.sysctl.enabled` | Enable sysctl init container for brokers | `false` |
+| `*.sysctl.image` | Init container image | `busybox:1.37` |
+| `*.sysctl.params` | Map of sysctl key-value pairs | See below |
+
+Default parameters (when enabled):
+
+| Sysctl Key | Value | Purpose |
+|------------|-------|---------|
+| `vm.max_map_count` | `262144` | Required for Kafka's memory-mapped files |
+| `net.core.somaxconn` | `16384` | Higher socket backlog for connection-heavy brokers |
+| `vm.swappiness` | `1` | Minimize swapping to prevent latency spikes |
+
+```yaml
+brokerDefaults:
+  sysctl:
+    enabled: true
+    image: busybox:1.37
+    params:
+      vm.max_map_count: "262144"
+      net.core.somaxconn: "16384"
+      vm.swappiness: "1"
+      net.ipv4.tcp_tw_reuse: "1"    # add custom params
+```
+
+> **Note:** The init container runs as `privileged: true` with `runAsUser: 0`. The host kernel must allow these sysctl writes (most cloud providers do by default). In Kind clusters, these sysctls may already be set at the node level.
+
 ### Lifecycle & Graceful Shutdown
 
 | Parameter | Description | Default |
