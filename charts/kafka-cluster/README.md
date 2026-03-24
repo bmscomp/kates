@@ -289,11 +289,12 @@ kafka:
 |-----------|-------------|---------|
 | `controllers.replicas` | Number of KRaft controllers (1-9) | `3` |
 | `controllers.storage.size` | PVC size per controller | `5Gi` |
-| `controllers.storage.class` | StorageClass name | `""` |
+| `controllers.storage.class` | StorageClass name (per-environment) | `""` |
 | `controllers.jvmOptions.-Xms` | JVM initial heap | `512m` |
 | `controllers.jvmOptions.-Xmx` | JVM max heap | `512m` |
 | `controllers.resources.requests.memory` | Memory request | `1Gi` |
 | `controllers.resources.limits.cpu` | CPU limit | `1000m` |
+| `controllers.priorityClassName` | PriorityClass for controller pods | `""` |
 
 ### Zone-Aware Broker Pools
 
@@ -322,6 +323,7 @@ Shared defaults for all pools are in `brokerDefaults`:
 | `brokerDefaults.resources.requests.memory` | Memory request | `4Gi` |
 | `brokerDefaults.resources.limits.cpu` | CPU limit | `2000m` |
 | `brokerDefaults.deleteClaim` | Delete PVC on pool removal | `false` |
+| `brokerDefaults.priorityClassName` | PriorityClass for broker pods | `""` |
 
 ### Topics
 
@@ -385,6 +387,26 @@ Automated partition rebalancing:
 | `cruiseControl.brokerCapacity.cpu` | Broker CPU capacity | `2000m` |
 | `cruiseControl.brokerCapacity.inboundNetwork` | Network capacity | `50MiB/s` |
 | `cruiseControl.autoRebalance` | Auto-rebalance triggers | `add-brokers`, `remove-brokers` |
+
+### Pod Scheduling & Priority
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `controllers.priorityClassName` | PriorityClass for controllers | `""` |
+| `brokerDefaults.priorityClassName` | PriorityClass for all broker pools | `""` |
+| `controllers.topologySpreadConstraints.enabled` | Spread controllers across zones | `true` |
+| `brokerDefaults.topologySpreadConstraints.enabled` | Spread brokers across zones | `true` |
+| `controllers.podAntiAffinity.enabled` | Anti-affinity for controllers | `true` |
+| `brokerDefaults.podAntiAffinity.enabled` | Anti-affinity for brokers | `true` |
+
+Example for production with a custom PriorityClass:
+
+```yaml
+controllers:
+  priorityClassName: kafka-critical
+brokerDefaults:
+  priorityClassName: kafka-critical
+```
 
 ### Lifecycle & Graceful Shutdown
 
@@ -717,14 +739,27 @@ kubectl describe pdb <clusterName>-kafka -n kafka
 
 ## Schema Validation
 
-The chart includes `values.schema.json` for install-time validation:
+The chart includes `values.schema.json` for install-time validation. Coverage includes:
+
+| Section | Validated Fields |
+|---------|------------------|
+| `clusterName` | Pattern (`^[a-z0-9]`), length 1–63 |
+| `controllers` | Replicas 1–9, storage size pattern, JVM options, priorityClassName |
+| `brokerPools` | Required name/replicas/storageSize, replicas 1–100 |
+| `brokerDefaults` | Resources, JVM, topology, anti-affinity, priorityClassName |
+| `kafkaConnect` | JVM, config (converters, replication), logging, TLS, rack, autoRestart, probes, connectors (name+class required), build |
+| `tieredStorage` | Enabled flag, credentials |
+| `backup` | Schedule pattern, TTL pattern, snapshot, persistence |
+| `lifecycle` | preStopSleepSeconds 0–120 |
 
 ```bash
-# This will fail with a clear error:
 helm install kafka-cluster charts/kafka-cluster --set controllers.replicas=-1
-# Error: values don't meet the specifications of the schema:
-# - at '/controllers/replicas': minimum: got -1, want 1
+# Error: at '/controllers/replicas': minimum: got -1, want 1
 
 helm install kafka-cluster charts/kafka-cluster --set lifecycle.preStopSleepSeconds=999
 # Error: at '/lifecycle/preStopSleepSeconds': maximum: got 999, want 120
+
+helm install kafka-cluster charts/kafka-cluster \
+  --set 'kafkaConnect.connectors[0].tasksMax=1'
+# Error: at '/kafkaConnect/connectors/0': missing required: name, class
 ```
