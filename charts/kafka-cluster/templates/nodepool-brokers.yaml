@@ -70,6 +70,9 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $.Values.brokerDefaults.priorityClassName }}
+      priorityClassName: {{ $.Values.brokerDefaults.priorityClassName }}
+      {{- end }}
     kafkaContainer:
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" $ | nindent 8 }}

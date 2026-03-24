@@ -1,35 +1,101 @@
-Kafka cluster "{{ include "kafka-cluster.clusterName" . }}" deployed to namespace {{ .Release.Namespace }}.
+┌──────────────────────────────────────────────────────────────────┐
+│  Kafka cluster "{{ include "kafka-cluster.clusterName" . }}" deployed to namespace {{ .Release.Namespace }}
+└──────────────────────────────────────────────────────────────────┘
 
-  Version:    Kafka {{ .Values.kafkaVersion }} / Strimzi {{ .Values.strimziVersion }}
-  Mode:       KRaft (node pools enabled)
-  Brokers:    {{ len .Values.brokerPools }} zone-aware pool(s)
+  Version:     Kafka {{ .Values.kafkaVersion }} / Strimzi {{ .Values.strimziVersion }}
+  Mode:        KRaft (node pools enabled)
+  Brokers:     {{ len .Values.brokerPools }} zone-aware pool(s)
   Controllers: {{ .Values.controllers.replicas }} replica(s)
 {{- if .Values.topics.enabled }}
-  Topics:     {{ len .Values.topics.items }} managed topic(s)
+  Topics:      {{ len .Values.topics.items }} managed topic(s)
 {{- end }}
 {{- if .Values.users.enabled }}
-  Users:      {{ len .Values.users.items }} managed user(s)
+  Users:       {{ len .Values.users.items }} managed user(s)
+{{- end }}
+{{- if .Values.kafkaConnect.enabled }}
+  Connect:     {{ .Values.kafkaConnect.replicas }} worker(s)
 {{- end }}
 
 Listeners:
 {{- range .Values.kafka.listeners }}
-  • {{ .name }} — port {{ .port }} ({{ .type }}{{ if .tls }}, TLS{{ end }})
+  • {{ .name }} — port {{ .port }} ({{ .type }}{{ if .tls }}, TLS{{ end }}{{ if .authentication }}, {{ .authentication.type }}{{ end }})
 {{- end }}
 
 Components:
-  Kafka Exporter:  {{ if .Values.kafkaExporter.enabled }}enabled{{ else }}disabled{{ end }}
-  Cruise Control:  {{ if .Values.cruiseControl.enabled }}enabled{{ else }}disabled{{ end }}
-  Drain Cleaner:   {{ if .Values.drainCleaner.enabled }}enabled{{ else }}disabled{{ end }}
+  Kafka Exporter:   {{ if .Values.kafkaExporter.enabled }}enabled{{ else }}disabled{{ end }}
+  Cruise Control:   {{ if .Values.cruiseControl.enabled }}enabled{{ else }}disabled{{ end }}
+  Drain Cleaner:    {{ if .Values.drainCleaner.enabled }}enabled{{ else }}disabled{{ end }}
   Network Policies: {{ if .Values.networkPolicies.enabled }}enabled{{ else }}disabled{{ end }}
-  Alerts:          {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
-  Tiered Storage:  {{ if .Values.tieredStorage.enabled }}enabled{{ else }}disabled{{ end }}
-  Backup:          {{ if .Values.backup.enabled }}enabled{{ else }}disabled{{ end }}
+  Alerts:           {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
+  Tiered Storage:   {{ if .Values.tieredStorage.enabled }}enabled{{ else }}disabled{{ end }}
+  Backup:           {{ if .Values.backup.enabled }}enabled{{ else }}disabled{{ end }}
+  Kafka Connect:    {{ if .Values.kafkaConnect.enabled }}enabled{{ else }}disabled{{ end }}
 
-Commands:
-  kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
-  kubectl get kafkanodepools -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
-  kubectl get kafkatopics -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
+────────────────────────────────────────────
+  Getting Started
+────────────────────────────────────────────
 
-Verify zone distribution:
-  kubectl get pods -n {{ .Release.Namespace }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} \
-    -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,ZONE:.metadata.labels.zone
+1. Wait for the cluster to become ready:
+
+  kubectl wait kafka/{{ include "kafka-cluster.clusterName" . }} \
+    --for=condition=Ready -n {{ .Release.Namespace }} --timeout=300s
+
+2. Check pods and node distribution:
+
+  kubectl get pods -n {{ .Release.Namespace }} \
+    -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} \
+    -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,NODE:.spec.nodeName
+
+3. Run the Helm test suite (9 tiers):
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }} --timeout 5m
+
+{{- if .Values.users.enabled }}
+
+────────────────────────────────────────────
+  Connecting to Kafka
+────────────────────────────────────────────
+
+Internal SCRAM (port 9092):
+
+  bootstrap.servers={{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap.{{ .Release.Namespace }}.svc:9092
+  security.protocol=SASL_PLAINTEXT
+  sasl.mechanism=SCRAM-SHA-512
+
+Retrieve a user password:
+
+  kubectl get secret {{ (index .Values.users.items 0).name }} -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.password}' | base64 -d
+
+{{- range .Values.kafka.listeners }}
+{{- if and (eq .type "internal") .tls }}
+
+Internal TLS (port {{ .port }}):
+
+  kubectl get secret {{ include "kafka-cluster.clusterName" $ }}-cluster-ca-cert \
+    -n {{ $.Release.Namespace }} -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+{{- end }}
+{{- if eq .type "nodeport" }}
+
+External NodePort (port {{ .port }}):
+
+  NODE_PORT=$(kubectl get svc {{ include "kafka-cluster.clusterName" $ }}-kafka-external-bootstrap \
+    -n {{ $.Release.Namespace }} -o jsonpath='{.spec.ports[0].nodePort}')
+  NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  echo "Bootstrap: $NODE_IP:$NODE_PORT"
+{{- end }}
+{{- end }}
+{{- end }}
+
+────────────────────────────────────────────
+  Useful Commands
+────────────────────────────────────────────
+
+  kubectl get kafka,kafkanodepools,kafkatopics,kafkausers -n {{ .Release.Namespace }}
+  kubectl logs -n {{ .Release.Namespace }} -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-kafka --tail=50
+{{- if .Values.cruiseControl.enabled }}
+  kubectl get kafkarebalance -n {{ .Release.Namespace }}
+{{- end }}
+{{- if .Values.kafkaConnect.enabled }}
+  kubectl get kafkaconnect,kafkaconnector -n {{ .Release.Namespace }}
+{{- end }}

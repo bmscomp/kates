@@ -105,6 +105,7 @@ controllers:
     enabled: true
     topologyKey: topology.kubernetes.io/zone
   tolerations: []
+  priorityClassName: ""
 
 brokerPools:
   - name: brokers-az1
@@ -137,6 +138,7 @@ brokerDefaults:
       memory: 4Gi
       cpu: 2000m
   tolerations: []
+  priorityClassName: ""
   topologySpreadConstraints:
     enabled: true
     maxSkew: 1
