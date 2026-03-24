@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
 
 resources:
   requests:

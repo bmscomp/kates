@@ -1,0 +1,42 @@
+# Kind cluster overlay — layers on top of values-dev.yaml
+# Usage: helm upgrade --install ... -f values-dev.yaml -f values-kind.yaml
+
+image:
+  # Kind requires pre-loaded images, so Never pull from registry
+  pullPolicy: IfNotPresent
+
+service:
+  type: NodePort
+  nodePort: "30083"
+
+grpc:
+  nodePort: "30084"
+
+tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+# Disable production features not needed locally
+networkPolicy:
+  enabled: false
+
+metrics:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  grafanaDashboard:
+    enabled: false
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+backup:
+  enabled: false
+
+cleanup:
+  enabled: false

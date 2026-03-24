@@ -1,11 +1,8 @@
+# Development overrides — single-replica, minimal resources
 replicaCount: 1
 
 image:
-  pullPolicy: Never
-
-service:
-  type: NodePort
-  nodePort: "30083"
+  pullPolicy: IfNotPresent
 
 resources:
   requests:
