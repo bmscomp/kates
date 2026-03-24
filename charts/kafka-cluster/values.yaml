@@ -24,7 +24,7 @@ kafka:
         type: scram-sha-512
       configuration:
         bootstrap:
-          nodePort: 32100
+          nodePort: null
 
   authorization:
     type: simple
@@ -104,27 +104,24 @@ controllers:
   podAntiAffinity:
     enabled: true
     topologyKey: topology.kubernetes.io/zone
-  tolerations:
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
+  tolerations: []
 
 brokerPools:
-  - name: brokers-alpha
-    zone: alpha
+  - name: brokers-az1
+    zone: ""
     replicas: 1
     storageSize: 50Gi
-    storageClass: local-storage-alpha
-  - name: brokers-sigma
-    zone: sigma
+    storageClass: ""
+  - name: brokers-az2
+    zone: ""
     replicas: 1
     storageSize: 50Gi
-    storageClass: local-storage-sigma
-  - name: brokers-gamma
-    zone: gamma
+    storageClass: ""
+  - name: brokers-az3
+    zone: ""
     replicas: 1
     storageSize: 50Gi
-    storageClass: local-storage-gamma
+    storageClass: ""
 
 brokerDefaults:
   deleteClaim: false
@@ -139,10 +136,7 @@ brokerDefaults:
     limits:
       memory: 4Gi
       cpu: 2000m
-  tolerations:
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
+  tolerations: []
   topologySpreadConstraints:
     enabled: true
     maxSkew: 1
@@ -208,152 +202,160 @@ cruiseControl:
       cpu: 500m
 
 topics:
-  - name: kates-events
-    partitions: 6
-    replicas: 3
-    config:
-      retention.ms: "172800000"
-      min.insync.replicas: "2"
-      cleanup.policy: delete
-      segment.bytes: "1073741824"
-  - name: kates-results
-    partitions: 12
-    replicas: 3
-    config:
-      retention.ms: "604800000"
-      min.insync.replicas: "2"
-      cleanup.policy: delete
-      segment.bytes: "1073741824"
-      compression.type: lz4
-  - name: kates-metrics
-    partitions: 6
-    replicas: 3
-    config:
-      retention.ms: "86400000"
-      min.insync.replicas: "2"
-      cleanup.policy: delete
-      compression.type: lz4
-  - name: kates-audit
-    partitions: 3
-    replicas: 3
-    config:
-      retention.ms: "2592000000"
-      min.insync.replicas: "2"
-      cleanup.policy: delete
-  - name: kates-dlq
-    partitions: 3
-    replicas: 3
-    config:
-      retention.ms: "-1"
-      min.insync.replicas: "2"
-      cleanup.policy: compact
+  # -- Enable managed topic provisioning
+  enabled: true
+  # -- Topic definitions
+  items:
+    - name: kates-events
+      partitions: 6
+      replicas: 3
+      config:
+        retention.ms: "172800000"
+        min.insync.replicas: "2"
+        cleanup.policy: delete
+        segment.bytes: "1073741824"
+    - name: kates-results
+      partitions: 12
+      replicas: 3
+      config:
+        retention.ms: "604800000"
+        min.insync.replicas: "2"
+        cleanup.policy: delete
+        segment.bytes: "1073741824"
+        compression.type: lz4
+    - name: kates-metrics
+      partitions: 6
+      replicas: 3
+      config:
+        retention.ms: "86400000"
+        min.insync.replicas: "2"
+        cleanup.policy: delete
+        compression.type: lz4
+    - name: kates-audit
+      partitions: 3
+      replicas: 3
+      config:
+        retention.ms: "2592000000"
+        min.insync.replicas: "2"
+        cleanup.policy: delete
+    - name: kates-dlq
+      partitions: 3
+      replicas: 3
+      config:
+        retention.ms: "-1"
+        min.insync.replicas: "2"
+        cleanup.policy: compact
 
 users:
-  - name: kates-backend
-    authentication:
-      type: scram-sha-512
-  - name: kafka-ui
-    authentication:
-      type: scram-sha-512
-    quotas:
-      producerByteRate: 1048576
-      consumerByteRate: 52428800
-      requestPercentage: 10
-    authorization:
-      type: simple
-      acls:
-        - resource:
-            type: topic
-            name: "*"
-            patternType: literal
-          operations: ["Describe", "Read"]
-          host: "*"
-        - resource:
-            type: group
-            name: "*"
-            patternType: literal
-          operations: ["Describe", "Read"]
-          host: "*"
-        - resource:
-            type: cluster
-          operations: ["Describe"]
-          host: "*"
-  - name: apicurio-registry
-    authentication:
-      type: scram-sha-512
-    quotas:
-      producerByteRate: 10485760
-      consumerByteRate: 20971520
-      requestPercentage: 15
-    authorization:
-      type: simple
-      acls:
-        - resource:
-            type: topic
-            name: "__apicurio"
-            patternType: prefix
-          operations: ["Read", "Write", "Create", "Describe"]
-          host: "*"
-        - resource:
-            type: group
-            name: "apicurio"
-            patternType: prefix
-          operations: ["Read", "Describe"]
-          host: "*"
-  - name: litmus-chaos
-    authentication:
-      type: scram-sha-512
-    authorization:
-      type: simple
-      acls:
-        - resource:
-            type: topic
-            name: "*"
-            patternType: literal
-          operations: ["Read", "Write", "Create", "Delete", "Describe", "Alter"]
-          host: "*"
-        - resource:
-            type: group
-            name: "litmus"
-            patternType: prefix
-          operations: ["Read", "Describe"]
-          host: "*"
-        - resource:
-            type: cluster
-          operations: ["Describe"]
-          host: "*"
-  - name: kates-connect
-    authentication:
-      type: scram-sha-512
-    quotas:
-      producerByteRate: 52428800
-      consumerByteRate: 52428800
-      requestPercentage: 25
-    authorization:
-      type: simple
-      acls:
-        - resource:
-            type: topic
-            name: "kates-connect-"
-            patternType: prefix
-          operations: ["Read", "Write", "Create", "Describe"]
-          host: "*"
-        - resource:
-            type: topic
-            name: "kates-"
-            patternType: prefix
-          operations: ["Read", "Write", "Create", "Describe"]
-          host: "*"
-        - resource:
-            type: group
-            name: "kates-connect"
-            patternType: prefix
-          operations: ["Read", "Describe"]
-          host: "*"
-        - resource:
-            type: cluster
-          operations: ["Describe"]
-          host: "*"
+  # -- Enable managed user provisioning
+  enabled: true
+  # -- User definitions
+  items:
+    - name: kates-backend
+      authentication:
+        type: scram-sha-512
+    - name: kafka-ui
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 1048576
+        consumerByteRate: 52428800
+        requestPercentage: 10
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "*"
+              patternType: literal
+            operations: ["Describe", "Read"]
+            host: "*"
+          - resource:
+              type: group
+              name: "*"
+              patternType: literal
+            operations: ["Describe", "Read"]
+            host: "*"
+          - resource:
+              type: cluster
+            operations: ["Describe"]
+            host: "*"
+    - name: apicurio-registry
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 10485760
+        consumerByteRate: 20971520
+        requestPercentage: 15
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "__apicurio"
+              patternType: prefix
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource:
+              type: group
+              name: "apicurio"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
+    - name: litmus-chaos
+      authentication:
+        type: scram-sha-512
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "*"
+              patternType: literal
+            operations: ["Read", "Write", "Create", "Delete", "Describe", "Alter"]
+            host: "*"
+          - resource:
+              type: group
+              name: "litmus"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource:
+              type: cluster
+            operations: ["Describe"]
+            host: "*"
+    - name: kates-connect
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 52428800
+        consumerByteRate: 52428800
+        requestPercentage: 25
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "kates-connect-"
+              patternType: prefix
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource:
+              type: topic
+              name: "kates-"
+              patternType: prefix
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource:
+              type: group
+              name: "kates-connect"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource:
+              type: cluster
+            operations: ["Describe"]
+            host: "*"
 
 alerts:
   enabled: true

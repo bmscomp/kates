@@ -1,5 +1,5 @@
+# Staging overrides — production-like topology, moderate resources
 clusterName: krafter
-kafkaVersion: "4.1.1"
 
 controllers:
   replicas: 3
@@ -7,21 +7,21 @@ controllers:
     size: 10Gi
 
 brokerPools:
-  - name: brokers-alpha
-    zone: alpha
+  - name: brokers-az1
+    zone: ""
     replicas: 1
     storageSize: 100Gi
-    storageClass: local-storage-alpha
-  - name: brokers-sigma
-    zone: sigma
+    storageClass: ""
+  - name: brokers-az2
+    zone: ""
     replicas: 1
     storageSize: 100Gi
-    storageClass: local-storage-sigma
-  - name: brokers-gamma
-    zone: gamma
+    storageClass: ""
+  - name: brokers-az3
+    zone: ""
     replicas: 1
     storageSize: 100Gi
-    storageClass: local-storage-gamma
+    storageClass: ""
 
 brokerDefaults:
   jvmOptions:
@@ -52,7 +52,7 @@ backup:
   persistence:
     enabled: true
     size: 50Gi
-    storageClass: standard
+    storageClass: ""
 
 lifecycle:
   preStopSleepSeconds: 15

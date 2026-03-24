@@ -1,4 +1,5 @@
-{{- range .Values.users }}
+{{- if .Values.users.enabled }}
+{{- range .Values.users.items }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -22,4 +23,5 @@ spec:
     acls:
       {{- toYaml .acls | nindent 6 }}
   {{- end }}
+{{- end }}
 {{- end }}

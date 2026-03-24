@@ -1,4 +1,45 @@
-# Production overrides — full HA, tiered storage, backup enabled
+# Production overrides — full HA, tiered storage, backup, multi-replica pools
+brokerPools:
+  - name: brokers-az1
+    zone: ""
+    replicas: 3
+    storageSize: 200Gi
+    storageClass: ""
+  - name: brokers-az2
+    zone: ""
+    replicas: 3
+    storageSize: 200Gi
+    storageClass: ""
+  - name: brokers-az3
+    zone: ""
+    replicas: 3
+    storageSize: 200Gi
+    storageClass: ""
+
+brokerDefaults:
+  jvmOptions:
+    -Xms: 4096m
+    -Xmx: 4096m
+  resources:
+    requests:
+      memory: 8Gi
+      cpu: 2000m
+    limits:
+      memory: 8Gi
+      cpu: 4000m
+
+controllers:
+  replicas: 3
+  storage:
+    size: 20Gi
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 1000m
+    limits:
+      memory: 2Gi
+      cpu: 2000m
+
 tieredStorage:
   enabled: true
 
@@ -7,3 +48,13 @@ backup:
   schedule: "0 2 * * *"
   ttl: 336h0m0s
   snapshotVolumes: true
+
+drainCleaner:
+  enabled: true
+
+networkPolicies:
+  enabled: true
+
+podSecurityPolicy:
+  enabled: true
+  action: Enforce

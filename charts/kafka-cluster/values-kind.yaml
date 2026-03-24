@@ -1,0 +1,29 @@
+# Kind cluster overlay — maps pools to Kind node names as zones
+brokerPools:
+  - name: brokers-alpha
+    zone: alpha
+    replicas: 1
+    storageSize: 50Gi
+    storageClass: local-storage-alpha
+  - name: brokers-sigma
+    zone: sigma
+    replicas: 1
+    storageSize: 50Gi
+    storageClass: local-storage-sigma
+  - name: brokers-gamma
+    zone: gamma
+    replicas: 1
+    storageSize: 50Gi
+    storageClass: local-storage-gamma
+
+controllers:
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+
+brokerDefaults:
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"

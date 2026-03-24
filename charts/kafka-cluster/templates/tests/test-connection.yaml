@@ -122,7 +122,7 @@ spec:
       volumeMounts:
         - name: tmp
           mountPath: /tmp
-        {{- if (index (default (list) .Values.users) 0) }}
+        {{- if and .Values.users.enabled (gt (len (default (list) .Values.users.items)) 0) }}
         - name: connect-password
           mountPath: /opt/kafka/connect-password
           readOnly: true
@@ -130,10 +130,10 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-    {{- if (index (default (list) .Values.users) 0) }}
+    {{- if and .Values.users.enabled (gt (len (default (list) .Values.users.items)) 0) }}
     - name: connect-password
       secret:
-        secretName: {{ (index .Values.users 0).name }}
+        secretName: {{ (index .Values.users.items 0).name }}
     {{- end }}
 ---
 apiVersion: v1

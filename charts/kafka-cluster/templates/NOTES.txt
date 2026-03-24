@@ -4,8 +4,12 @@ Kafka cluster "{{ include "kafka-cluster.clusterName" . }}" deployed to namespac
   Mode:       KRaft (node pools enabled)
   Brokers:    {{ len .Values.brokerPools }} zone-aware pool(s)
   Controllers: {{ .Values.controllers.replicas }} replica(s)
-  Topics:     {{ len .Values.topics }} managed topic(s)
-  Users:      {{ len .Values.users }} managed user(s)
+{{- if .Values.topics.enabled }}
+  Topics:     {{ len .Values.topics.items }} managed topic(s)
+{{- end }}
+{{- if .Values.users.enabled }}
+  Users:      {{ len .Values.users.items }} managed user(s)
+{{- end }}
 
 Listeners:
 {{- range .Values.kafka.listeners }}
@@ -25,3 +29,7 @@ Commands:
   kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
   kubectl get kafkanodepools -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
   kubectl get kafkatopics -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -n {{ .Release.Namespace }}
+
+Verify zone distribution:
+  kubectl get pods -n {{ .Release.Namespace }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} \
+    -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,ZONE:.metadata.labels.zone

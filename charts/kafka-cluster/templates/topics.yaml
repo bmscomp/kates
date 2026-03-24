@@ -1,4 +1,5 @@
-{{- range .Values.topics }}
+{{- if .Values.topics.enabled }}
+{{- range .Values.topics.items }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -7,7 +8,6 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" $ }}
   labels:
     {{- include "kafka-cluster.labels" $ | nindent 4 }}
-    app.kubernetes.io/part-of: kates
   annotations:
     helm.sh/resource-policy: keep
 spec:
@@ -17,4 +17,5 @@ spec:
   config:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+{{- end }}
 {{- end }}
