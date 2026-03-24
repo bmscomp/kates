@@ -22,18 +22,33 @@ Production-ready Apache Kafka deployment on Kubernetes using the [Strimzi](https
 
 ## Quick Start
 
-### 1. Install with the bundled Strimzi operator
+### 1. Deploy on a local Kind cluster
 
 ```bash
-helm install kafka-cluster charts/kafka-cluster \
+make kafka-deploy              # ENV=kind (default)
+```
+
+### 2. Deploy to any Kubernetes cluster
+
+```bash
+make kafka-deploy ENV=dev      # minimal single-replica
+make kafka-deploy ENV=staging  # production-like topology
+make kafka-deploy ENV=prod     # full HA, tiered storage, backup
+```
+
+Or use Helm directly:
+
+```bash
+helm upgrade --install kafka-cluster charts/kafka-cluster \
   --namespace kafka --create-namespace \
+  -f charts/kafka-cluster/values-staging.yaml \
   --wait --timeout 600s
 ```
 
-### 2. Install without the operator (already deployed)
+To skip the bundled Strimzi operator (already deployed):
 
 ```bash
-helm install kafka-cluster charts/kafka-cluster \
+helm upgrade --install kafka-cluster charts/kafka-cluster \
   --namespace kafka --create-namespace \
   --set strimziOperator.enabled=false \
   --wait --timeout 600s
@@ -42,8 +57,8 @@ helm install kafka-cluster charts/kafka-cluster \
 ### 3. Upgrade
 
 ```bash
-helm upgrade kafka-cluster charts/kafka-cluster \
-  --namespace kafka --reuse-values
+make kafka-upgrade             # ENV=kind (default)
+make kafka-upgrade ENV=prod    # upgrade production
 ```
 
 ### 4. Run tests
@@ -52,44 +67,58 @@ helm upgrade kafka-cluster charts/kafka-cluster \
 helm test kafka-cluster --namespace kafka
 ```
 
-Tests run in 3 tiers:
-1. **Connectivity** — Bootstrap TCP + Kafka CR Ready + broker pod health
-2. **Produce/Consume** — Round-trip with SCRAM authentication
-3. **Authorization** — KafkaUser readiness + SCRAM secret verification
+Tests run in 9 tiers:
+
+| Tier | Pod | Validates |
+|------|-----|-----------|
+| 1 | `*-test-connectivity` | Bootstrap TCP, Kafka CR Ready, broker pod health |
+| 2 | `*-test-produce-consume` | Round-trip with SCRAM authentication |
+| 3 | `*-test-authorization` | KafkaUser readiness, SCRAM secret verification |
+| 4 | `*-test-kraft-quorum` | Controller node pool, pod count, KRaft annotation |
+| 5 | `*-test-topics` | KafkaTopic CRs ready, partition/replica spec *(gated: `topics.enabled`)* |
+| 6 | `*-test-listeners` | Listener bootstrap addresses, TLS CA secrets |
+| 7 | `*-test-nodepools` | Broker pool readiness, pod count, node distribution |
+| 8 | `*-test-cruise-control` | CruiseControl pod, KafkaRebalance CRD *(gated: `cruiseControl.enabled`)* |
+| 9 | `*-test-metrics` | Metrics ConfigMap, exporter pod, PodMonitors |
 
 ### 5. Uninstall
 
 ```bash
-helm uninstall kafka-cluster --namespace kafka
+make kafka-undeploy            # helm uninstall + PVC cleanup
 ```
 
 > **Note:** Resources annotated with `helm.sh/resource-policy: keep` (Kafka CR, NodePools, Topics, Users) are preserved after uninstall to prevent data loss. Delete them manually if needed.
 
 ## Environment Overlays
 
-The chart ships with 3 environment-specific overlays:
+The chart ships with 4 environment-specific overlays, selectable via `ENV`:
 
 ```bash
-# Development (minimal resources, single replicas)
-helm install kafka-cluster charts/kafka-cluster -f charts/kafka-cluster/values-dev.yaml
-
-# Staging (production security, moderate resources)
-helm install kafka-cluster charts/kafka-cluster -f charts/kafka-cluster/values-staging.yaml
-
-# Production (full HA, enforced PSP, backup with PVC)
-helm install kafka-cluster charts/kafka-cluster -f charts/kafka-cluster/values-prod.yaml
+make kafka-deploy              # Kind (default) — layers values-dev + values-kind
+make kafka-deploy ENV=dev      # Development
+make kafka-deploy ENV=staging  # Staging
+make kafka-deploy ENV=prod     # Production
 ```
 
-| Setting | Dev | Staging | Prod |
-|---------|-----|---------|------|
-| Controller replicas | 1 | 3 | 3 |
-| Controller storage | 1Gi | 10Gi | 10Gi |
-| Broker storage | 10Gi | 100Gi | 100Gi |
-| NetworkPolicies | ❌ | ✅ | ✅ |
-| Pod Security | ❌ | Enforce | Enforce |
-| RBAC | ❌ | ✅ | ✅ |
-| Backup persistence | ❌ | ✅ (20Gi) | ✅ (50Gi) |
-| PreStop hook | 5s | 15s | 15s |
+| Setting | Kind | Dev | Staging | Prod |
+|---------|------|-----|---------|------|
+| Controller replicas | 1 | 1 | 3 | 3 |
+| Broker pools | 3 (zone-pinned) | 1 | 3 | 3×3 |
+| Broker storage | 50Gi | 5Gi | 100Gi | 200Gi |
+| Listeners | plain, tls | plain, tls, external | plain, tls, external | plain, tls, external |
+| NetworkPolicies | ❌ | ❌ | ✅ | ✅ |
+| CruiseControl | ❌ | ❌ | ✅ | ✅ |
+| Kafka Exporter | ❌ | ❌ | ✅ | ✅ |
+| Tiered Storage | ❌ | ❌ | ❌ | ✅ |
+| Backup | ❌ | ❌ | ✅ | ✅ |
+| Pod Security | ❌ | ❌ | Enforce | Enforce |
+| Tolerations | control-plane | — | — | — |
+
+The **Kind** overlay (`values-kind.yaml`) layers on top of `values-dev.yaml` and adds:
+- Zone-specific broker pools with `local-storage-*` StorageClasses
+- Control-plane node tolerations
+- Simplified listeners (no external NodePort)
+- All cloud/production features disabled
 
 ## Architecture
 
@@ -126,7 +155,7 @@ helm install kafka-cluster charts/kafka-cluster -f charts/kafka-cluster/values-p
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `clusterName` | Kafka cluster name (Kubernetes resource name) | `krafter` |
-| `kafkaVersion` | Apache Kafka version | `4.1.1` |
+| `kafkaVersion` | Apache Kafka version | `4.2.0` |
 | `strimziVersion` | Strimzi operator version | `0.51.0` |
 
 ### Listeners
@@ -434,6 +463,18 @@ Set `strimziOperator.enabled: false` if the operator is already installed in the
 | `podSecurityPolicy.action` | `Audit` or `Enforce` | `Audit` |
 
 ## Makefile Targets
+
+### Deployment
+
+```bash
+make kafka-deploy              # Deploy to Kind (default)
+make kafka-deploy ENV=staging  # Deploy with staging overlay
+make kafka-deploy ENV=prod     # Deploy with production overlay
+make kafka-upgrade             # Upgrade existing release (ENV=kind default)
+make kafka-undeploy            # Uninstall + PVC cleanup
+```
+
+### Chart Development
 
 ```bash
 make kafka-chart-deps       # Download dependencies
