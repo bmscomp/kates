@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -147,10 +147,10 @@ deploy-all:
 	./scripts/port-forward.sh
 	@echo "✅ Full stack deployed!"
 
-# Deploy Kafka only (from local chart)
-kafka:
-	@echo "📦 Deploying Kafka from local chart..."
-	./scripts/deploy-kafka.sh
+ENV ?= kind
+
+# Deploy Kafka (shorthand for kafka-deploy)
+kafka: kafka-deploy
 
 # Deploy Kafka UI only
 ui:
@@ -365,6 +365,21 @@ kafka-chart-test:
 kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package
 	@echo "✅ All kafka chart checks passed: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
 
+kafka-deploy: kafka-chart-deps
+	@echo "📦 Deploying Kafka cluster (ENV=$(ENV))..."
+	ENV=$(ENV) ./scripts/deploy-kafka.sh
+
+kafka-upgrade: kafka-chart-deps
+	@echo "🔄 Upgrading Kafka cluster (ENV=$(ENV))..."
+	ENV=$(ENV) ./scripts/deploy-kafka.sh
+
+kafka-undeploy:
+	@echo "🗑️  Removing Kafka cluster..."
+	helm uninstall kafka-cluster -n kafka 2>/dev/null || true
+	@echo "Cleaning up PVCs..."
+	kubectl delete pvc -l strimzi.io/cluster=krafter -n kafka --ignore-not-found
+	@echo "✅ Kafka cluster removed"
+
 # Port Forwarding
 ports:
 	@echo "🔌 Starting Port Forwarding..."
@@ -492,7 +507,10 @@ help:
 	@echo "  cluster          - Start Kind cluster only"
 	@echo "  monitoring       - Deploy Prometheus & Grafana"
 	@echo "  cert-manager     - Deploy cert-manager"
-	@echo "  kafka            - Deploy Kafka (Strimzi)"
+	@echo "  kafka            - Deploy Kafka (shorthand for kafka-deploy)"
+	@echo "  kafka-deploy     - Deploy Kafka via Helm (ENV=kind|dev|staging|prod)"
+	@echo "  kafka-upgrade    - Upgrade existing Kafka release (ENV=kind|dev|staging|prod)"
+	@echo "  kafka-undeploy   - Remove Kafka Helm release + PVCs"
 	@echo "  ui               - Deploy Kafka UI"
 	@echo "  apicurio         - Deploy Apicurio Registry"
 	@echo "  jaeger           - Deploy Jaeger (distributed tracing)"

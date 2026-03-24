@@ -2,76 +2,79 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="${SCRIPT_DIR}/.."
 source "${SCRIPT_DIR}/common.sh"
 source "${SCRIPT_DIR}/../versions.env"
 
-info "Deploying Kafka Strimzi Cluster..."
+ENV="${ENV:-kind}"
+CHART_DIR="${ROOT_DIR}/charts/kafka-cluster"
+RELEASE_NAME="kafka-cluster"
+NAMESPACE="kafka"
 
-ensure_namespace kafka
+info "Deploying Kafka cluster (env=${ENV})..."
 
-# Skip if Kafka cluster is already running and healthy
-if kubectl get kafka krafter -n kafka &>/dev/null && \
-   kubectl wait kafka/krafter --for=condition=Ready --timeout=5s -n kafka &>/dev/null; then
-    warn "Kafka cluster 'krafter' is already running and ready — skipping deploy"
-    echo "To force redeploy, run: kubectl delete kafka krafter -n kafka"
-    exit 0
+ensure_namespace "${NAMESPACE}"
+
+# Build Helm dependencies (Strimzi operator subchart)
+info "Building Helm chart dependencies..."
+helm dependency build "${CHART_DIR}" 2>/dev/null || true
+
+# Kind-specific prerequisites: storage classes for zone-aware pools
+if [ "${ENV}" = "kind" ]; then
+    info "Applying Kind storage classes..."
+    kubectl apply -f "${ROOT_DIR}/config/storage/storage-classes.yaml"
 fi
 
-info "Installing Strimzi Operator from remote chart (v${STRIMZI_VERSION})..."
-helm repo add strimzi https://strimzi.io/charts/ 2>/dev/null || true
-helm repo update strimzi
-helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
-  --version "${STRIMZI_VERSION}" \
-  --namespace kafka \
-  -f config/kafka/strimzi-values.yaml \
-  --timeout 10m \
-  --wait
+# Build the values file chain based on environment
+VALUES_ARGS=()
+case "${ENV}" in
+    kind)
+        VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml" -f "${CHART_DIR}/values-kind.yaml")
+        ;;
+    dev)
+        VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
+        ;;
+    staging)
+        VALUES_ARGS+=(-f "${CHART_DIR}/values-staging.yaml")
+        ;;
+    prod)
+        VALUES_ARGS+=(-f "${CHART_DIR}/values-prod.yaml")
+        ;;
+    *)
+        if [ -f "${CHART_DIR}/values-${ENV}.yaml" ]; then
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-${ENV}.yaml")
+        else
+            error "Unknown environment '${ENV}' and no values-${ENV}.yaml found"
+            exit 1
+        fi
+        ;;
+esac
 
-info "Installing Strimzi Drain Cleaner..."
-helm upgrade --install strimzi-drain-cleaner strimzi/strimzi-drain-cleaner \
-  --version 1.5.0 \
-  --namespace strimzi-drain-cleaner \
-  --create-namespace \
-  --set certManager.create=true \
-  --set image.imagePullPolicy=IfNotPresent \
-  --wait
+info "Installing/upgrading Kafka cluster with Helm..."
+info "  Chart:       ${CHART_DIR}"
+info "  Release:     ${RELEASE_NAME}"
+info "  Namespace:   ${NAMESPACE}"
+info "  Environment: ${ENV}"
+info "  Values:      ${VALUES_ARGS[*]}"
 
-info "Applying Metrics Configuration..."
-kubectl apply -f config/kafka/kafka-metrics.yaml
+helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
+    --namespace "${NAMESPACE}" \
+    "${VALUES_ARGS[@]}" \
+    --timeout 10m \
+    --wait
 
-info "Creating Zone-Specific Storage Classes..."
-kubectl apply -f config/storage/storage-classes.yaml
-
-# Cleanup old cluster if exists (before applying new one)
-kubectl delete kafka my-cluster -n kafka --ignore-not-found
-kubectl delete kafkanodepool dual-role -n kafka --ignore-not-found
-kubectl delete pvc -l strimzi.io/cluster=krafter -n kafka --ignore-not-found
-kubectl delete pvc -l strimzi.io/cluster=my-cluster -n kafka --ignore-not-found
-
-info "Deploying Kafka Cluster (KRaft)..."
-kubectl apply -f config/kafka/kafka.yaml
-
-info "Applying Kafka Dashboards..."
-kubectl apply -f config/monitoring/kafka-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-performance-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-jvm-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-perf-test-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-working-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-comprehensive-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-all-metrics-dashboard.yaml
-kubectl apply -f config/monitoring/kafka-perf-global-dashboard.yaml
-
-info "Waiting for Kafka cluster to be ready (this may take a few minutes)..."
-kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n kafka 
-
-info "Applying Kafka Users (SCRAM credentials)..."
-kubectl apply -f config/kafka/kafka-users.yaml
-
-info "Applying Kafka Topics..."
-kubectl apply -f config/kafka/kafka-topics.yaml
+info "Waiting for Kafka cluster to be ready..."
+kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n "${NAMESPACE}" || {
+    warn "Kafka not ready within timeout — check pod status:"
+    kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter
+    exit 1
+}
 
 info "Waiting for user secrets to be created..."
-kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka
+kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n "${NAMESPACE}" 2>/dev/null || true
 
-info "✅ Kafka deployment complete!"
-echo "Check the 'Kafka Cluster Health' dashboard in Grafana."
+info "✅ Kafka deployment complete (env=${ENV})!"
+echo ""
+echo "  Run Helm tests:    helm test ${RELEASE_NAME} -n ${NAMESPACE}"
+echo "  Check cluster:     kubectl get kafka -n ${NAMESPACE}"
+echo "  Check pods:        kubectl get pods -n ${NAMESPACE}"

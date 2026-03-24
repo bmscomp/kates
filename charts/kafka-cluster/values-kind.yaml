@@ -1,4 +1,7 @@
-# Kind cluster overlay — maps pools to Kind node names as zones
+# Kind cluster overlay — layers on top of values-dev.yaml
+# Usage: helm upgrade --install ... -f values-dev.yaml -f values-kind.yaml
+
+# Zone-specific broker pools mapped to Kind node labels
 brokerPools:
   - name: brokers-alpha
     zone: alpha
@@ -17,13 +20,73 @@ brokerPools:
     storageClass: local-storage-gamma
 
 controllers:
+  storage:
+    size: 1Gi
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
   tolerations:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
       effect: "NoSchedule"
 
 brokerDefaults:
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
   tolerations:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
       effect: "NoSchedule"
+
+# Simplify listeners for local access — drop external nodeport
+kafka:
+  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+      authentication:
+        type: scram-sha-512
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:
+        type: tls
+
+# Disable cloud/production features not needed locally
+kafkaExporter:
+  enabled: false
+
+cruiseControl:
+  enabled: false
+
+networkPolicies:
+  enabled: false
+
+tieredStorage:
+  enabled: false
+
+backup:
+  enabled: false
+
+drainCleaner:
+  enabled: false
+
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+rebalance:
+  enabled: false
+
+podSecurityPolicy:
+  enabled: false
