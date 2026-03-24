@@ -471,23 +471,114 @@ tieredStorage:
 
 ### Kafka Connect
 
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `kafkaConnect.enabled` | Deploy KafkaConnect CR | `false` |
+| `kafkaConnect.replicas` | Worker replicas | `1` |
+| `kafkaConnect.version` | Kafka version (defaults to `kafkaVersion`) | `""` |
+| `kafkaConnect.groupId` | Connect cluster group ID | `kates-connect-cluster` |
+
+#### JVM Tuning
+
 ```yaml
 kafkaConnect:
-  enabled: true
-  replicas: 2
-  groupId: my-connect-cluster
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 512m
+    gcLoggingEnabled: true
+    javaSystemProperties:
+      - name: com.sun.management.jmxremote
+        value: "true"
+```
+
+#### Converters & Extra Config
+
+```yaml
+kafkaConnect:
   config:
-    replicationFactor: 3
-  resources:
-    requests:
-      memory: 512Mi
-    limits:
-      memory: 1Gi
+    keyConverter: io.apicurio.registry.utils.converter.AvroConverter
+    valueConverter: io.apicurio.registry.utils.converter.AvroConverter
+    keyConverterSchemasEnable: false
+    valueConverterSchemasEnable: false
+  extraConfig:
+    schema.registry.url: http://apicurio-registry:8080/apis/ccompat/v7
+    producer.acks: "all"
+    consumer.auto.offset.reset: earliest
+```
+
+#### Logging
+
+```yaml
+kafkaConnect:
+  logging:
+    type: inline
+    loggers:
+      connect.root.logger.level: INFO
+      log4j.logger.org.apache.kafka.connect.runtime.WorkerSourceTask: TRACE
+```
+
+#### TLS & Rack Awareness
+
+```yaml
+kafkaConnect:
+  tls:
+    enabled: true
+    trustedCertificates:
+      - secretName: krafter-cluster-ca-cert
+        certificate: ca.crt
+  rack:
+    enabled: true
+    topologyKey: topology.kubernetes.io/zone
+```
+
+#### Scheduling & Probes
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `kafkaConnect.tolerations` | Pod tolerations | `[]` |
+| `kafkaConnect.topologySpreadConstraints.enabled` | Enable topology spread | `false` |
+| `kafkaConnect.podAntiAffinity.enabled` | Enable pod anti-affinity | `false` |
+| `kafkaConnect.readinessProbe.initialDelaySeconds` | Readiness probe delay | `60` |
+| `kafkaConnect.livenessProbe.initialDelaySeconds` | Liveness probe delay | `60` |
+| `kafkaConnect.autoRestart.enabled` | Auto-restart failed tasks | `true` |
+| `kafkaConnect.autoRestart.maxRestarts` | Max restart attempts | `10` |
+
+#### Build (Custom Plugins)
+
+```yaml
+kafkaConnect:
   build:
     output:
       type: docker
       image: my-registry/my-connect:latest
-    plugins: []
+      pushSecret: my-registry-credentials
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-postgres
+            version: 2.5.0.Final
+```
+
+#### Declarative Connectors
+
+Define `KafkaConnector` CRs directly in values:
+
+```yaml
+kafkaConnect:
+  connectors:
+    - name: my-source-connector
+      class: io.debezium.connector.postgresql.PostgresConnector
+      tasksMax: 1
+      autoRestart:
+        enabled: true
+        maxRestarts: 5
+      config:
+        database.hostname: postgres.default.svc
+        database.port: "5432"
+        database.dbname: mydb
+        topic.prefix: cdc
 ```
 
 ### Backup (Velero)

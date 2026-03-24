@@ -12,13 +12,18 @@ metadata:
 spec:
   version: {{ .Values.kafkaConnect.version | default .Values.kafkaVersion }}
   replicas: {{ .Values.kafkaConnect.replicas }}
-  bootstrapServers: {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092
+  bootstrapServers: {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:{{ if .Values.kafkaConnect.tls.enabled }}9093{{ else }}9092{{ end }}
   authentication:
     type: scram-sha-512
     username: kates-connect
     passwordSecret:
       secretName: kates-connect
       password: password
+  {{- if .Values.kafkaConnect.tls.enabled }}
+  tls:
+    trustedCertificates:
+      {{- toYaml .Values.kafkaConnect.tls.trustedCertificates | nindent 6 }}
+  {{- end }}
   config:
     group.id: {{ .Values.kafkaConnect.groupId | default "kates-connect-cluster" }}
     offset.storage.topic: kates-connect-offsets
@@ -27,12 +32,23 @@ spec:
     offset.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
     config.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
     status.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
-    key.converter: org.apache.kafka.connect.json.JsonConverter
-    value.converter: org.apache.kafka.connect.json.JsonConverter
-    key.converter.schemas.enable: true
-    value.converter.schemas.enable: true
+    key.converter: {{ .Values.kafkaConnect.config.keyConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
+    value.converter: {{ .Values.kafkaConnect.config.valueConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
+    key.converter.schemas.enable: {{ .Values.kafkaConnect.config.keyConverterSchemasEnable | default true }}
+    value.converter.schemas.enable: {{ .Values.kafkaConnect.config.valueConverterSchemasEnable | default true }}
+    {{- range $key, $value := .Values.kafkaConnect.extraConfig }}
+    {{ $key }}: {{ $value | toJson }}
+    {{- end }}
+  jvmOptions:
+    {{- toYaml .Values.kafkaConnect.jvmOptions | nindent 4 }}
   resources:
     {{- toYaml .Values.kafkaConnect.resources | nindent 4 }}
+  logging:
+    {{- toYaml .Values.kafkaConnect.logging | nindent 4 }}
+  {{- if .Values.kafkaConnect.rack.enabled }}
+  rack:
+    topologyKey: {{ .Values.kafkaConnect.rack.topologyKey }}
+  {{- end }}
   {{- if .Values.kafkaConnect.build }}
   build:
     {{- toYaml .Values.kafkaConnect.build | nindent 4 }}
@@ -43,10 +59,43 @@ spec:
       configMapKeyRef:
         name: kafka-metrics
         key: kafka-metrics-config.yml
+  {{- if .Values.kafkaConnect.autoRestart.enabled }}
+  autoRestart:
+    enabled: true
+    maxRestarts: {{ .Values.kafkaConnect.autoRestart.maxRestarts | default 10 }}
+  {{- end }}
+  readinessProbe:
+    {{- toYaml .Values.kafkaConnect.readinessProbe | nindent 4 }}
+  livenessProbe:
+    {{- toYaml .Values.kafkaConnect.livenessProbe | nindent 4 }}
   template:
     pod:
       securityContext:
         {{- include "kafka-cluster.podSecurityContext" . | nindent 8 }}
+      {{- if .Values.kafkaConnect.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.kafkaConnect.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.kafkaConnect.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ .Values.kafkaConnect.topologySpreadConstraints.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: {{ include "kafka-cluster.clusterName" . }}-connect
+      {{- end }}
+      {{- if .Values.kafkaConnect.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    strimzi.io/name: {{ include "kafka-cluster.clusterName" . }}-connect
+                topologyKey: {{ .Values.kafkaConnect.podAntiAffinity.topologyKey }}
+      {{- end }}
+      {{- with .Values.kafkaConnect.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     connectContainer:
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}

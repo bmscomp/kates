@@ -395,8 +395,15 @@ kafkaConnect:
   replicas: 1
   version: ""
   groupId: kates-connect-cluster
-  config:
-    replicationFactor: 3
+
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 512m
+    gcLoggingEnabled: true
+    javaSystemProperties: []
+    # - name: com.sun.management.jmxremote
+    #   value: "true"
+
   resources:
     requests:
       memory: 512Mi
@@ -404,7 +411,85 @@ kafkaConnect:
     limits:
       memory: 1Gi
       cpu: 1000m
+
+  config:
+    replicationFactor: 3
+    # Converter defaults — override for Avro/Protobuf
+    keyConverter: org.apache.kafka.connect.json.JsonConverter
+    valueConverter: org.apache.kafka.connect.json.JsonConverter
+    keyConverterSchemasEnable: true
+    valueConverterSchemasEnable: true
+  # Arbitrary extra Kafka Connect config (merged into spec.config)
+  extraConfig: {}
+    # producer.acks: "all"
+    # consumer.auto.offset.reset: earliest
+    # schema.registry.url: http://apicurio-registry:8080/apis/ccompat/v7
+
+  logging:
+    type: inline
+    loggers:
+      connect.root.logger.level: INFO
+      # log4j.logger.org.apache.kafka.connect: DEBUG
+      # log4j.logger.org.apache.kafka.connect.runtime.WorkerSourceTask: TRACE
+
+  tls:
+    enabled: false
+    # trustedCertificates:
+    #   - secretName: krafter-cluster-ca-cert
+    #     certificate: ca.crt
+
+  rack:
+    enabled: false
+    topologyKey: topology.kubernetes.io/zone
+
+  tolerations: []
+  topologySpreadConstraints:
+    enabled: false
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+  podAntiAffinity:
+    enabled: false
+    topologyKey: kubernetes.io/hostname
+
+  readinessProbe:
+    initialDelaySeconds: 60
+    timeoutSeconds: 5
+  livenessProbe:
+    initialDelaySeconds: 60
+    timeoutSeconds: 5
+
+  autoRestart:
+    enabled: true
+    maxRestarts: 10
+
   build: {}
+    # output:
+    #   type: docker
+    #   image: my-registry/my-connect:latest
+    #   pushSecret: my-registry-credentials
+    # plugins:
+    #   - name: debezium-postgres
+    #     artifacts:
+    #       - type: maven
+    #         group: io.debezium
+    #         artifact: debezium-connector-postgres
+    #         version: 2.5.0.Final
+
+  connectors: []
+    # - name: my-source-connector
+    #   class: io.debezium.connector.postgresql.PostgresConnector
+    #   tasksMax: 1
+    #   autoRestart:
+    #     enabled: true
+    #     maxRestarts: 5
+    #   config:
+    #     database.hostname: postgres.default.svc
+    #     database.port: "5432"
+    #     database.user: replicator
+    #     database.password: "${file:/opt/kafka/external-configuration/pg-credentials/password}"
+    #     database.dbname: mydb
+    #     topic.prefix: cdc
 
 crdUpgrade:
   enabled: true

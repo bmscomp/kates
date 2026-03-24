@@ -1,0 +1,31 @@
+{{- if and .Values.kafkaConnect.enabled (gt (len (default (list) .Values.kafkaConnect.connectors)) 0) }}
+{{- range .Values.kafkaConnect.connectors }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "kafka-cluster.namespace" $ }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" $ }}-connect
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  class: {{ .class }}
+  tasksMax: {{ .tasksMax | default 1 }}
+  {{- if .autoRestart }}
+  autoRestart:
+    enabled: {{ .autoRestart.enabled | default true }}
+    maxRestarts: {{ .autoRestart.maxRestarts | default 5 }}
+  {{- else }}
+  autoRestart:
+    enabled: true
+    maxRestarts: 5
+  {{- end }}
+  {{- with .config }}
+  config:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
