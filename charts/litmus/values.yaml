@@ -3,6 +3,31 @@
 # Declare variables to be passed into your templates.
 nameOverride: ""
 
+# CRD installation via pre-install hook
+crds:
+  install: false
+  image: bitnami/kubectl:latest
+
+# RBAC for chaos experiments in target namespaces
+rbac:
+  enabled: false
+  kafkaNamespace: kafka
+  katesNamespace: kates
+
+# Prometheus monitoring
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+    additionalNamespaces: []
+
+# Chaos experiment definitions
+experiments:
+  enabled: false
+  definitions: []
+
+
 # -- Additional annotations
 customPodAnnotations: {}
 # -- Additional labels

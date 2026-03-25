@@ -1,5 +1,46 @@
-Thank you for installing {{ .Chart.Name }} 😀
+Thank you for installing {{ .Chart.Name }} v{{ .Chart.Version }} 😀
 
-Your release is named {{ .Release.Name }} and it's installed to namespace: {{ .Release.Namespace }}.
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
 
-Visit https://docs.litmuschaos.io to find more info.
+LitmusChaos Portal:
+{{- if eq (include "litmus-portal.frontend.serviceType" .) "NodePort" }}
+  UI:     http://localhost:{{ .Values.portal.frontend.service.nodePort | default 30091 }}
+{{- else }}
+  UI:     kubectl port-forward svc/{{ include "litmus-portal.fullname" . }}-frontend-service -n {{ .Release.Namespace }} 9091:9091
+{{- end }}
+  Login:  admin / litmus
+
+Components:
+  ✓ Portal Server    → {{ include "litmus-portal.fullname" . }}-server-service:9002
+  ✓ Auth Server      → {{ include "litmus-portal.fullname" . }}-auth-server-service:9003
+  ✓ Frontend         → {{ include "litmus-portal.fullname" . }}-frontend-service:9091
+  ✓ MongoDB          → {{ .Release.Name }}-mongodb:27017
+
+{{- if .Values.crds.install }}
+CRDs:
+  ✓ Installed via pre-install hook (ChaosEngine, ChaosResult, ChaosExperiment)
+  Run: kubectl get crds | grep litmus
+{{- end }}
+
+{{- if .Values.rbac.enabled }}
+RBAC:
+  ✓ kafka namespace  → litmus-admin service account
+  ✓ kates namespace  → chaos coordinator role
+{{- end }}
+
+{{- if .Values.experiments.enabled }}
+Experiments:
+  ✓ {{ len .Values.experiments.definitions }} ChaosExperiment definitions deployed
+  Run: kubectl get chaosexperiments -n {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- end }}
+
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+Monitoring:
+  ✓ ServiceMonitor created for chaos-exporter
+{{- end }}
+
+Verify:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Docs: https://docs.litmuschaos.io

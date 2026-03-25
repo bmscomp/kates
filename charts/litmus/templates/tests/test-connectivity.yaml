@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "litmus-portal.fullname" . }}-test-portal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litmus-portal.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-portal
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing Litmus portal connectivity..."
+          PORTAL_HOST="{{ include "litmus-portal.fullname" . }}-server-service"
+          PORTAL_PORT="9002"
+          
+          echo "Checking server at $PORTAL_HOST:$PORTAL_PORT..."
+          for i in $(seq 1 10); do
+            if wget -q --spider --timeout=5 "http://$PORTAL_HOST:$PORTAL_PORT/status" 2>/dev/null; then
+              echo "✅ Portal server is reachable"
+              exit 0
+            fi
+            echo "Attempt $i/10 — waiting..."
+            sleep 3
+          done
+          echo "❌ Portal server is not reachable"
+          exit 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "litmus-portal.fullname" . }}-test-mongodb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litmus-portal.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-mongodb
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing MongoDB connectivity..."
+          MONGO_HOST="{{ .Release.Name }}-mongodb-0.{{ .Release.Name }}-mongodb-headless"
+          MONGO_PORT="27017"
+          
+          echo "Checking MongoDB at $MONGO_HOST:$MONGO_PORT..."
+          for i in $(seq 1 10); do
+            if nc -z -w3 "$MONGO_HOST" "$MONGO_PORT" 2>/dev/null; then
+              echo "✅ MongoDB is reachable"
+              exit 0
+            fi
+            echo "Attempt $i/10 — waiting..."
+            sleep 3
+          done
+          echo "❌ MongoDB is not reachable"
+          exit 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "litmus-portal.fullname" . }}-test-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litmus-portal.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-frontend
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing Litmus frontend connectivity..."
+          FRONTEND_HOST="{{ include "litmus-portal.fullname" . }}-frontend-service"
+          FRONTEND_PORT="9091"
+          
+          echo "Checking frontend at $FRONTEND_HOST:$FRONTEND_PORT..."
+          for i in $(seq 1 10); do
+            if wget -q --spider --timeout=5 "http://$FRONTEND_HOST:$FRONTEND_PORT" 2>/dev/null; then
+              echo "✅ Frontend is reachable"
+              exit 0
+            fi
+            echo "Attempt $i/10 — waiting..."
+            sleep 3
+          done
+          echo "❌ Frontend is not reachable"
+          exit 1

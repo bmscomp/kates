@@ -1,0 +1,29 @@
+{{- if .Values.experiments.enabled }}
+{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- range .Values.experiments.definitions }}
+---
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $kafkaNamespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+spec:
+  definition:
+    scope: {{ .scope | default "Namespaced" }}
+    permissions:
+      {{- toYaml .permissions | nindent 6 }}
+    image: {{ .image | default "litmuschaos/go-runner:latest" }}
+    imagePullPolicy: IfNotPresent
+    args:
+      - -name
+      - {{ .name }}
+    command:
+      - /bin/bash
+    env:
+      {{- if .env }}
+      {{- toYaml .env | nindent 6 }}
+      {{- end }}
+{{- end }}
+{{- end }}

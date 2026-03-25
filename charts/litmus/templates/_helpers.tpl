@@ -174,3 +174,7 @@ Return the appropriate apiVersion for HorizontalPodAutoscaler.
 {{- print "autoscaling/v2beta2" }}
 {{- end }}
 {{- end }}
+
+{{- define "litmus-portal.frontend.serviceType" -}}
+{{- .Values.portal.frontend.service.type | default "ClusterIP" -}}
+{{- end -}}
