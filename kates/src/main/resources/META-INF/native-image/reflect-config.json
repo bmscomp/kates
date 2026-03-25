@@ -1,0 +1,57 @@
+[
+  {
+    "name": "com.github.luben.zstd.Zstd",
+    "allDeclaredFields": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdCompressCtx",
+    "allDeclaredFields": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdDecompressCtx",
+    "allDeclaredFields": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.Snappy",
+    "allDeclaredFields": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.SnappyNative",
+    "allDeclaredFields": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.OSInfo",
+    "allPublicMethods": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JNICompressor",
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JNIFastDecompressor",
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JNISafeDecompressor",
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4HCJNICompressor",
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  }
+]

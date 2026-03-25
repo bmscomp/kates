@@ -46,26 +46,26 @@ entityOperator:
   topicOperator:
     resources:
       requests:
-        memory: 128Mi
+        memory: 256Mi
         cpu: 50m
       limits:
-        memory: 128Mi
+        memory: 384Mi
         cpu: 200m
     jvmOptions:
-      -Xms: 64m
-      -Xmx: 128m
+      -Xms: 128m
+      -Xmx: 256m
     reconciliationIntervalMs: 120000
   userOperator:
     resources:
       requests:
-        memory: 128Mi
+        memory: 256Mi
         cpu: 50m
       limits:
-        memory: 128Mi
+        memory: 384Mi
         cpu: 200m
     jvmOptions:
-      -Xms: 64m
-      -Xmx: 128m
+      -Xms: 128m
+      -Xmx: 256m
 
 kafkaExporter:
   enabled: false

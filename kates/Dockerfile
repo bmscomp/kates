@@ -5,7 +5,8 @@ WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
 RUN go mod download
 COPY cli/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build \
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -trimpath \
   -ldflags="-s -w \
   -X github.com/klster/kates-cli/cmd.Version=1.0.0 \

@@ -5,7 +5,8 @@ WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
 RUN go mod download
 COPY cli/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build \
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -trimpath \
   -ldflags="-s -w \
   -X github.com/klster/kates-cli/cmd.Version=1.0.0 \
@@ -25,8 +26,24 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 COPY kates/src src
 RUN --mount=type=cache,target=/root/.m2 \
-  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g,--initialize-at-run-time=com.github.luben.zstd" \
+  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g" \
   && mv target/*-runner target/kates-native
+
+# Extract platform-specific JNI native libraries from Maven JARs
+RUN --mount=type=cache,target=/root/.m2 \
+  ARCH=$(uname -m) && \
+  if [ "$ARCH" = "x86_64" ]; then JNI_ARCH="amd64"; SNAPPY_ARCH="linux/x86_64"; \
+  elif [ "$ARCH" = "aarch64" ]; then JNI_ARCH="aarch64"; SNAPPY_ARCH="linux/aarch64"; \
+  else JNI_ARCH="$ARCH"; SNAPPY_ARCH="linux/$ARCH"; fi && \
+  mkdir -p /build/native-libs && \
+  ZSTD_JAR=$(find /root/.m2/repository/com/github/luben/zstd-jni -name "*.jar" | sort -V | tail -1) && \
+  LZ4_JAR=$(find /root/.m2/repository/net/jpountz/lz4/lz4 -name "*.jar" 2>/dev/null || find /root/.m2/repository/org/lz4/lz4-java -name "*.jar" | sort -V | tail -1) && \
+  SNAPPY_JAR=$(find /root/.m2/repository/org/xerial/snappy/snappy-java -name "*.jar" | sort -V | tail -1) && \
+  echo "=== Extracting native libs (arch=$JNI_ARCH) ===" && \
+  if [ -n "$ZSTD_JAR" ]; then cd /tmp && jar xf "$ZSTD_JAR" "linux/$JNI_ARCH/" && cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
+  if [ -n "$LZ4_JAR" ]; then cd /tmp && jar xf "$LZ4_JAR" "net/jpountz/util/linux/$JNI_ARCH/" && cp -v net/jpountz/util/linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
+  if [ -n "$SNAPPY_JAR" ]; then cd /tmp && jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/$SNAPPY_ARCH/" && cp -v org/xerial/snappy/native/$SNAPPY_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
+  ls -la /build/native-libs/
 
 
 # Stage 3: Minimal runtime
@@ -34,6 +51,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 WORKDIR /app
 
 COPY --from=builder /build/target/kates-native ./kates
+COPY --from=builder /build/native-libs/ ./lib/
 COPY --from=cli-builder /kates-cli /usr/local/bin/kates
 
 RUN chmod +x kates \
@@ -46,6 +64,7 @@ RUN chmod +x kates \
 
 USER kates
 ENV HOME=/home/kates
+ENV LD_LIBRARY_PATH=/app/lib
 
 EXPOSE 8080
 
@@ -53,3 +72,4 @@ HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
   CMD curl -sf http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["./kates"]
+

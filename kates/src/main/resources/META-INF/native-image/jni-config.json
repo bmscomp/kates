@@ -1,17 +1,8 @@
 [
   {
-    "name": "com.github.luben.zstd.ZstdOutputStreamNoFinalizer",
-    "methods": [
-      {"name": "createCStream", "parameterTypes": []},
-      {"name": "freeCStream", "parameterTypes": ["long"]}
-    ]
-  },
-  {
-    "name": "com.github.luben.zstd.ZstdInputStreamNoFinalizer",
-    "methods": [
-      {"name": "createDStream", "parameterTypes": []},
-      {"name": "freeDStream", "parameterTypes": ["long"]}
-    ]
+    "name": "com.github.luben.zstd.Zstd",
+    "allPublicMethods": true,
+    "allPublicFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdCompressCtx",
@@ -19,6 +10,63 @@
   },
   {
     "name": "com.github.luben.zstd.ZstdDecompressCtx",
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdDictCompress",
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdDictDecompress",
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdOutputStreamNoFinalizer",
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdInputStreamNoFinalizer",
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdDirectBufferCompressingStreamNoFinalizer",
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdDirectBufferDecompressingStreamNoFinalizer",
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.github.luben.zstd.ZstdBufferDecompressingStreamNoFinalizer",
+    "allPublicMethods": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JNI",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHashJNI",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.SnappyNative",
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.Snappy",
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.SnappyInputStream",
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.xerial.snappy.SnappyOutputStream",
     "allPublicMethods": true
   }
 ]
