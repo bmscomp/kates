@@ -61,7 +61,10 @@ all: check-prerequisites
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
 		echo "Step 8: Deploying LitmusChaos..."; \
-		./scripts/deploy-litmuschaos.sh; \
+		helm upgrade --install chaos charts/litmus \
+			-n litmus --create-namespace \
+			-f charts/litmus/values-kind.yaml \
+			--timeout 10m --wait; \
 	fi
 	@echo ""
 	@echo "Step 9: Verifying chaos infrastructure..."
@@ -370,7 +373,10 @@ download-charts:
 # LitmusChaos Management
 litmus:
 	@echo "⚡ Installing LitmusChaos..."
-	./scripts/deploy-litmuschaos.sh
+	helm upgrade --install chaos charts/litmus \
+		-n litmus --create-namespace \
+		-f charts/litmus/values-kind.yaml \
+		--timeout 10m --wait
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."
