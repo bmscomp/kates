@@ -1,0 +1,81 @@
+{{- if .Values.gameday.enabled | default false }}
+{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-gameday
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: gameday-runner
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
+      containers:
+        - name: gameday
+          image: {{ .Values.experiments.image | default "bitnami/kubectl:latest" }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh"]
+          args:
+            - -c
+            - |
+              echo "🎮 Starting GameDay Validation..."
+              echo "================================"
+              PASS=0
+              TOTAL=0
+
+              run_check() {
+                local name="$1"
+                local cmd="$2"
+                TOTAL=$((TOTAL + 1))
+                echo ""
+                echo "▶ Check: $name"
+                if eval "$cmd" 2>/dev/null; then
+                  echo "  ✅ PASS"
+                  PASS=$((PASS + 1))
+                else
+                  echo "  ❌ FAIL"
+                fi
+              }
+
+              run_check "CRDs installed" \
+                "kubectl get crd chaosengines.litmuschaos.io"
+
+              run_check "Chaos operator running" \
+                "kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=chaos-operator --no-headers | grep Running"
+
+              run_check "MongoDB responsive" \
+                "kubectl exec {{ .Release.Name }}-mongodb-0 -n {{ .Release.Namespace }} -- mongosh --quiet --eval 'db.adminCommand(\"ping\")' | grep ok"
+
+              run_check "Experiments installed" \
+                "[ $(kubectl get chaosexperiments -n {{ $kafkaNamespace }} --no-headers 2>/dev/null | wc -l) -gt 0 ]"
+
+              run_check "Subscriber connected" \
+                "kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=subscriber --no-headers | grep Running"
+
+              run_check "Kafka namespace accessible" \
+                "kubectl get namespace {{ $kafkaNamespace }}"
+
+              echo ""
+              echo "================================"
+              echo "🎮 GameDay Results: $PASS/$TOTAL passed"
+              echo "================================"
+
+              if [ "$PASS" -ge "$TOTAL" ]; then
+                echo "✅ All checks passed — infra is ready for chaos testing"
+                exit 0
+              else
+                echo "⚠️  Some checks failed — review before running experiments"
+                exit 1
+              fi
+{{- end }}

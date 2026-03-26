@@ -1,70 +1,74 @@
-# Kates Chaos — Kind Cluster Overlay
-# Optimized for single-node Kind with pre-loaded images
+# Kates Chaos — Generic Kubernetes Cluster Overlay
+# Cloud-native defaults for any standard Kubernetes environment
 
 litmus:
   enabled: true
   portal:
     frontend:
-      replicas: 1
+      replicas: 2
       image:
-        pullPolicy: IfNotPresent
+        pullPolicy: Always
       resources:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
-        limits:
           memory: "256Mi"
-          cpu: "300m"
+          cpu: "200m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
       service:
-        type: NodePort
+        type: ClusterIP
         port: 9091
-        nodePort: 30091
     server:
-      replicas: 1
+      replicas: 2
       graphqlServer:
         image:
-          pullPolicy: IfNotPresent
+          pullPolicy: Always
         resources:
           requests:
-            memory: "200Mi"
-            cpu: "150m"
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+      authServer:
+        replicas: 2
+        image:
+          pullPolicy: Always
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
           limits:
             memory: "512Mi"
-            cpu: "400m"
-      authServer:
-        replicas: 1
-        image:
-          pullPolicy: IfNotPresent
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "384Mi"
-            cpu: "300m"
+            cpu: "500m"
   mongodb:
     enabled: true
     image:
       registry: docker.io
       repository: bitnami/mongodb
-      tag: "latest"
-      pullPolicy: IfNotPresent
+      tag: "7.0.28"
+      pullPolicy: Always
     architecture: replicaset
-    replicaCount: 1
+    replicaCount: 3
     arbiter:
-      enabled: false
+      enabled: true
     volumePermissions:
-      enabled: false
+      enabled: true
     persistence:
       enabled: true
-      size: 2Gi
+      size: 10Gi
+      storageClass: ""
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
         cpu: 500m
-        memory: 512Mi
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 2Gi
+
+auth:
+  adminPassword: ""
+  existingSecret: ""
 
 rbac:
   enabled: true
@@ -74,7 +78,7 @@ rbac:
 monitoring:
   serviceMonitor:
     enabled: true
-    interval: 30s
+    interval: 15s
     labels:
       release: monitoring
   grafanaDashboard:
@@ -83,10 +87,10 @@ monitoring:
       grafana_dashboard: "1"
 
 pdb:
-  enabled: false
+  enabled: true
 
 networkPolicies:
-  enabled: false
+  enabled: true
 
 experiments:
   enabled: true

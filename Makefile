@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-undeploy kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-clean chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -416,6 +416,30 @@ chaos-status:
 	@echo "ChaosResults (kafka):"
 	@kubectl get chaosresults -n kafka 2>/dev/null || echo "No results found"
 
+litmus-generic:
+	@echo "⚡ Deploying Kates Chaos (generic Kubernetes)..."
+	@echo "Applying Litmus CRDs..."
+	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
+	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
+	@kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
+	helm upgrade --install chaos charts/kates-chaos \
+		-n litmus --create-namespace \
+		-f charts/kates-chaos/values-generic.yaml \
+		--timeout 10m --wait
+	@echo "✅ Kates Chaos deployed (generic)"
+
+litmus-test:
+	@echo "🧪 Running Helm tests..."
+	helm test chaos -n litmus
+
+litmus-gameday:
+	@echo "🎮 Triggering GameDay validation..."
+	helm upgrade chaos charts/kates-chaos \
+		-n litmus \
+		-f charts/kates-chaos/values-kind.yaml \
+		--set gameday.enabled=true \
+		--timeout 5m --wait
+
 # Velero backup
 velero:
 	@echo "💾 Deploying Velero backup..."
@@ -458,8 +482,11 @@ help:
 	@echo "  ui               - Deploy Kafka UI"
 	@echo "  apicurio         - Deploy Apicurio Registry"
 	@echo "  jaeger           - Deploy Jaeger (distributed tracing)"
-	@echo "  litmus           - Deploy Kates Chaos (LitmusChaos via Helm)"
+	@echo "  litmus           - Deploy Kates Chaos (Kind overlay)"
+	@echo "  litmus-generic   - Deploy Kates Chaos (generic Kubernetes overlay)"
 	@echo "  litmus-undeploy  - Remove Kates Chaos stack completely"
+	@echo "  litmus-test      - Run Helm tests for chaos stack"
+	@echo "  litmus-gameday   - Trigger GameDay validation run"
 	@echo "  velero           - Deploy Velero backup"
 	@echo ""
 	@echo "  Kates CLI"

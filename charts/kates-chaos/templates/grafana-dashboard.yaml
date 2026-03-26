@@ -1,0 +1,128 @@
+{{- if .Values.monitoring.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-grafana-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- range $key, $val := .Values.monitoring.grafanaDashboard.labels }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+data:
+  kates-chaos-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Chaos Experiments — Pass/Fail",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "count(litmuschaos_experiment_verdict{verdict=\"Pass\"})",
+              "legendFormat": "Pass"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 0 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Chaos Experiments — Fail Count",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "targets": [
+            {
+              "expr": "count(litmuschaos_experiment_verdict{verdict=\"Fail\"}) or vector(0)",
+              "legendFormat": "Fail"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Chaos Engine Duration (seconds)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "litmuschaos_engine_experiment_count",
+              "legendFormat": "{{`{{`}} chaosengine_name {{`}}`}}"
+            }
+          ]
+        },
+        {
+          "title": "Experiment Run Count Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            {
+              "expr": "increase(litmuschaos_experiment_verdict[1h])",
+              "legendFormat": "{{`{{`}} experiment_name {{`}}`}} ({{`{{`}} verdict {{`}}`}})"
+            }
+          ]
+        },
+        {
+          "title": "Chaos Infra — Pod Status",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            {
+              "expr": "kube_pod_status_phase{namespace=\"litmus\", phase=\"Running\"} == 1",
+              "legendFormat": "{{`{{`}} pod {{`}}`}}",
+              "instant": true,
+              "format": "table"
+            }
+          ]
+        },
+        {
+          "title": "MongoDB Status",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 14 },
+          "targets": [
+            {
+              "expr": "up{job=~\".*mongodb.*\", namespace=\"litmus\"}",
+              "legendFormat": "MongoDB"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
+              ]
+            }
+          }
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["chaos", "litmus", "kates"],
+      "templating": { "list": [] },
+      "time": { "from": "now-6h", "to": "now" },
+      "title": "Kates Chaos Engineering",
+      "uid": "kates-chaos-overview"
+    }
+{{- end }}

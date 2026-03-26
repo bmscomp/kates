@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "litmus": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "adminPassword": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "secretKey": { "type": "string" }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "required": ["kafkaNamespace", "katesNamespace"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "kafkaNamespace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target namespace where Kafka is deployed"
+        },
+        "katesNamespace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target namespace where Kates is deployed"
+        }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "properties": {
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "pattern": "^[0-9]+[smh]$" },
+            "labels": { "type": "object" }
+          }
+        },
+        "grafanaDashboard": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "labels": { "type": "object" }
+          }
+        }
+      }
+    },
+    "experiments": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": "string" },
+        "definitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "scope"],
+            "properties": {
+              "name": { "type": "string" },
+              "scope": {
+                "type": "string",
+                "enum": ["Namespaced", "Cluster"]
+              },
+              "image": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "engines": { "type": "object" },
+    "pdb": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "networkPolicies": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -57,3 +57,84 @@ spec:
           done
           echo "❌ Frontend unreachable"
           exit 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-test-mongodb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: {{ .Values.experiments.image | default "bitnami/kubectl:latest" }}
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing MongoDB connectivity..."
+          for i in $(seq 1 15); do
+            if kubectl exec {{ .Release.Name }}-mongodb-0 -n {{ .Release.Namespace }} -- \
+              mongosh --quiet --eval "db.adminCommand('ping')" 2>/dev/null | grep -q "ok"; then
+              echo "✅ MongoDB responsive"
+              exit 0
+            fi
+            echo "Attempt $i/15..."
+            sleep 5
+          done
+          echo "❌ MongoDB not responsive"
+          exit 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-test-crds
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  containers:
+    - name: test
+      image: {{ .Values.experiments.image | default "bitnami/kubectl:latest" }}
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Verifying Litmus CRDs..."
+          CRDS="chaosengines chaosexperiments chaosresults"
+          PASS=0
+          TOTAL=0
+          for crd in $CRDS; do
+            TOTAL=$((TOTAL + 1))
+            if kubectl get crd ${crd}.litmuschaos.io >/dev/null 2>&1; then
+              echo "  ✅ ${crd}.litmuschaos.io"
+              PASS=$((PASS + 1))
+            else
+              echo "  ❌ ${crd}.litmuschaos.io missing"
+            fi
+          done
+          echo ""
+          echo "Verifying ChaosExperiments in {{ .Values.rbac.kafkaNamespace }}..."
+          COUNT=$(kubectl get chaosexperiments -n {{ .Values.rbac.kafkaNamespace }} --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$COUNT" -gt "0" ]; then
+            echo "  ✅ $COUNT experiments found"
+            PASS=$((PASS + 1))
+          else
+            echo "  ⚠️  No experiments found (post-install hook may not have run yet)"
+          fi
+          TOTAL=$((TOTAL + 1))
+          echo ""
+          echo "Result: $PASS/$TOTAL checks passed"
+          if [ "$PASS" -ge "$TOTAL" ]; then
+            exit 0
+          else
+            exit 1
+          fi

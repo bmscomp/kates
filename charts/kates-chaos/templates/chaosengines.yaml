@@ -1,0 +1,38 @@
+{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- range $name, $engine := .Values.engines }}
+{{- if $engine.enabled }}
+---
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: {{ $name }}
+  namespace: {{ $engine.appNamespace | default $kafkaNamespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: kates-chaos
+spec:
+  engineState: active
+  appinfo:
+    appns: {{ $engine.appNamespace | default $kafkaNamespace }}
+    applabel: {{ $engine.appLabel | quote }}
+    appkind: {{ $engine.appKind | default "statefulset" }}
+  chaosServiceAccount: litmus-admin
+  experiments:
+    - name: {{ $engine.experiment | default $name }}
+      spec:
+        components:
+          env:
+            - name: TOTAL_CHAOS_DURATION
+              value: {{ $engine.duration | default 30 | quote }}
+            - name: CHAOS_INTERVAL
+              value: {{ $engine.interval | default 10 | quote }}
+            {{- if $engine.force }}
+            - name: FORCE
+              value: "true"
+            {{- end }}
+            {{- range $key, $val := $engine.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+{{- end }}
+{{- end }}

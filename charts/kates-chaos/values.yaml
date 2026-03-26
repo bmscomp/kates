@@ -1,9 +1,35 @@
-# Kates Chaos Engineering — values
+# Kates Chaos Engineering — Default Values
 # Wraps LitmusChaos with Kafka/Kates-specific chaos infrastructure
 
-# Upstream Litmus chart toggle
+# Global settings
+global:
+  imagePullPolicy: IfNotPresent
+
+# Upstream Litmus chart
 litmus:
   enabled: true
+  mongodb:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: bitnami/mongodb
+      tag: "7.0.28"
+    architecture: replicaset
+    replicaCount: 1
+    arbiter:
+      enabled: false
+    volumePermissions:
+      enabled: false
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: ""
+
+# Authentication
+auth:
+  adminPassword: ""
+  existingSecret: ""
+  secretKey: admin-password
 
 # RBAC for chaos experiments in target namespaces
 rbac:
@@ -17,6 +43,10 @@ monitoring:
     enabled: false
     interval: 30s
     labels: {}
+  grafanaDashboard:
+    enabled: false
+    labels:
+      grafana_dashboard: "1"
 
 # ChaosExperiment definitions (deployed via post-install Job)
 experiments:
@@ -37,3 +67,18 @@ experiments:
       scope: Namespaced
     - name: node-drain
       scope: Cluster
+
+# ChaosEngine automation (Phase 3)
+engines: {}
+
+# PodDisruptionBudgets
+pdb:
+  enabled: false
+
+# Network policies
+networkPolicies:
+  enabled: false
+
+# GameDay validation (trigger: --set gameday.enabled=true)
+gameday:
+  enabled: false
