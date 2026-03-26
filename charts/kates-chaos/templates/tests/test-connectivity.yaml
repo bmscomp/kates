@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-test-portal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing Litmus portal server..."
+          for i in $(seq 1 10); do
+            if wget -q --spider --timeout=5 "http://{{ .Release.Name }}-litmus-server-service:9002/status" 2>/dev/null; then
+              echo "✅ Portal server reachable"
+              exit 0
+            fi
+            echo "Attempt $i/10..."
+            sleep 3
+          done
+          echo "❌ Portal server unreachable"
+          exit 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-test-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing Litmus frontend..."
+          for i in $(seq 1 10); do
+            if wget -q --spider --timeout=5 "http://{{ .Release.Name }}-litmus-frontend-service:9091" 2>/dev/null; then
+              echo "✅ Frontend reachable"
+              exit 0
+            fi
+            echo "Attempt $i/10..."
+            sleep 3
+          done
+          echo "❌ Frontend unreachable"
+          exit 1

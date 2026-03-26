@@ -1,0 +1,82 @@
+# Kates Chaos — Kind Cluster Overlay
+
+litmus:
+  enabled: true
+  portal:
+    frontend:
+      replicas: 1
+      image:
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "256Mi"
+          cpu: "300m"
+      service:
+        type: NodePort
+        port: 9091
+        nodePort: 30091
+    server:
+      replicas: 1
+      graphqlServer:
+        image:
+          pullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "200Mi"
+            cpu: "150m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+      authServer:
+        replicas: 1
+        image:
+          pullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "384Mi"
+            cpu: "300m"
+  mongodb:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: bitnami/mongodb
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    architecture: replicaset
+    replicaCount: 1
+    arbiter:
+      enabled: false
+    volumePermissions:
+      enabled: false
+    persistence:
+      enabled: true
+      size: 2Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+rbac:
+  enabled: true
+  kafkaNamespace: kafka
+  katesNamespace: kates
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: monitoring
+
+experiments:
+  enabled: true
+  image: bitnami/kubectl:latest

@@ -1,0 +1,39 @@
+# Kates Chaos Engineering — values
+# Wraps LitmusChaos with Kafka/Kates-specific chaos infrastructure
+
+# Upstream Litmus chart toggle
+litmus:
+  enabled: true
+
+# RBAC for chaos experiments in target namespaces
+rbac:
+  enabled: true
+  kafkaNamespace: kafka
+  katesNamespace: kates
+
+# Prometheus monitoring integration
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# ChaosExperiment definitions (deployed via post-install Job)
+experiments:
+  enabled: true
+  image: bitnami/kubectl:latest
+  definitions:
+    - name: pod-delete
+      scope: Namespaced
+    - name: pod-cpu-hog
+      scope: Namespaced
+    - name: pod-memory-hog
+      scope: Namespaced
+    - name: pod-network-partition
+      scope: Namespaced
+    - name: pod-io-stress
+      scope: Namespaced
+    - name: pod-dns-error
+      scope: Namespaced
+    - name: node-drain
+      scope: Cluster

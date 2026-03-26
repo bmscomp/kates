@@ -1,0 +1,110 @@
+{{- if .Values.rbac.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litmus-admin
+  namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: litmus-admin
+  namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "pods/log", "pods/exec", "pods/eviction"]
+    verbs: ["create", "list", "get", "patch", "update", "delete", "deletecollection"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "list", "get", "patch", "update", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["list", "get", "patch", "update", "delete"]
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosengines", "chaosexperiments", "chaosresults"]
+    verbs: ["create", "list", "get", "patch", "update", "delete"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "list", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: litmus-admin
+  namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: litmus-admin
+subjects:
+  - kind: ServiceAccount
+    name: litmus-admin
+    namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-node-chaos
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/eviction"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["list", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-node-chaos
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kates-chaos.fullname" . }}-node-chaos
+subjects:
+  - kind: ServiceAccount
+    name: litmus-admin
+    namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-kates-coordinator
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosengines", "chaosresults"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-kates-coordinator
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kates-chaos.fullname" . }}-kates-coordinator
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: {{ .Values.rbac.katesNamespace | default "kates" }}
+{{- end }}

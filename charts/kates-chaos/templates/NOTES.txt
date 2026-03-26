@@ -1,0 +1,28 @@
+Kates Chaos Engineering v{{ .Chart.Version }}
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+LitmusChaos Portal:
+  UI:      kubectl port-forward svc/{{ .Release.Name }}-litmus-frontend-service -n {{ .Release.Namespace }} 9091:9091
+  Login:   admin / litmus
+
+{{- if .Values.rbac.enabled }}
+RBAC:
+  ✓ kafka namespace ({{ .Values.rbac.kafkaNamespace }}) → litmus-admin service account
+  ✓ kates namespace ({{ .Values.rbac.katesNamespace }}) → chaos coordinator role
+{{- end }}
+
+{{- if .Values.experiments.enabled }}
+Experiments:
+  ✓ {{ len .Values.experiments.definitions }} ChaosExperiment definitions (post-install hook)
+  Run: kubectl get chaosexperiments -n {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- end }}
+
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+Monitoring:
+  ✓ ServiceMonitor for chaos-exporter
+{{- end }}
+
+Verify:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

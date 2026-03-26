@@ -1,0 +1,97 @@
+{{- if .Values.experiments.enabled }}
+{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-experiments
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: experiment-installer
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
+      containers:
+        - name: install
+          image: {{ .Values.experiments.image | default "bitnami/kubectl:latest" }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh"]
+          args:
+            - -c
+            - |
+              echo "Installing ChaosExperiment definitions in {{ $kafkaNamespace }}..."
+              {{- range .Values.experiments.definitions }}
+              kubectl apply -f - <<'EOF'
+              apiVersion: litmuschaos.io/v1alpha1
+              kind: ChaosExperiment
+              metadata:
+                name: {{ .name }}
+                namespace: {{ $kafkaNamespace }}
+              spec:
+                definition:
+                  scope: {{ .scope | default "Namespaced" }}
+                  image: {{ .image | default "litmuschaos/go-runner:latest" }}
+                  imagePullPolicy: IfNotPresent
+                  args: ["-name", "{{ .name }}"]
+                  command: ["/bin/bash"]
+              EOF
+              echo "  ✓ {{ .name }}"
+              {{- end }}
+              echo "Done — {{ len $.Values.experiments.definitions }} experiments installed"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosexperiments"]
+    verbs: ["create", "get", "list", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates-chaos.fullname" . }}-experiment-installer
+    namespace: {{ .Release.Namespace }}
+{{- end }}

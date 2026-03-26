@@ -61,9 +61,11 @@ all: check-prerequisites
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
 		echo "Step 8: Deploying LitmusChaos..."; \
-		helm upgrade --install chaos charts/litmus \
+		kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true; \
+		kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true; \
+		helm upgrade --install chaos charts/kates-chaos \
 			-n litmus --create-namespace \
-			-f charts/litmus/values-kind.yaml \
+			-f charts/kates-chaos/values-kind.yaml \
 			--timeout 10m --wait; \
 	fi
 	@echo ""
@@ -373,9 +375,13 @@ download-charts:
 # LitmusChaos Management
 litmus:
 	@echo "⚡ Installing LitmusChaos..."
-	helm upgrade --install chaos charts/litmus \
+	@echo "Applying Litmus CRDs..."
+	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
+	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
+	@kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
+	helm upgrade --install chaos charts/kates-chaos \
 		-n litmus --create-namespace \
-		-f charts/litmus/values-kind.yaml \
+		-f charts/kates-chaos/values-kind.yaml \
 		--timeout 10m --wait
 
 chaos-ui:
