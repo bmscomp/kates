@@ -60,13 +60,14 @@ kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
 
 Why `--dry-run=client | apply`? This is an idempotent pattern — it creates the namespace if it doesn't exist and does nothing if it already does. Safe to run multiple times.
 
-### 1.4 Prometheus Stack (Optional but Recommended)
+### 1.4 Monitoring Stack (Optional but Recommended)
 
-If you want metrics, dashboards, and alerts, install the `kube-prometheus-stack` first:
+If you want metrics, dashboards, and alerts, install the local monitoring wrapper chart first:
 
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+helm dependency update charts/monitoring
+helm upgrade --install monitoring charts/monitoring \
+  -f charts/monitoring/values-generic.yaml \
   --namespace monitoring --create-namespace
 ```
 

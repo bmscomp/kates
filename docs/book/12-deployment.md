@@ -75,7 +75,7 @@ make monitoring
 
 Deploys:
 - Prometheus with Kafka JMX scrape targets
-- Grafana with 7 pre-provisioned dashboards
+- Grafana with 13 custom pre-provisioned JSON dashboards
 - NodePort service at port 30080
 
 ### Kafka
@@ -267,7 +267,9 @@ graph TB
 | `make all` | Complete setup (cluster → images → all services) |
 | `make cluster` | Start Kind cluster only |
 | `make images` | Pull and load all images |
-| `make monitoring` | Deploy Prometheus & Grafana |
+| `make monitoring` | Deploy Prometheus & Grafana (Kind overlay) |
+| `make monitoring-generic` | Deploy Prometheus & Grafana (Generic cloud overlay) |
+| `make monitoring-undeploy` | Remove Prometheus & Grafana |
 | `make kafka` | Deploy Strimzi Kafka |
 | `make ui` | Deploy Kafka UI |
 | `make apicurio` | Deploy Apicurio Registry |

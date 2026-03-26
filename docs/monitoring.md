@@ -27,7 +27,7 @@ This commands will:
 
 1. Build chart dependencies (`helm dependency build charts/monitoring`)
 2. Install the local wrapper chart
-3. Automatically deploy the 4 Kates Grafana dashboards (templated as ConfigMaps)
+3. Automatically deploy all 13 Kates and Kafka Grafana dashboards (templated as ConfigMaps)
 
 ### Access
 
@@ -40,7 +40,7 @@ Default Grafana credentials: `admin` / `admin`.
 
 ## Dashboards
 
-Four custom dashboards are deployed as JSON files in `config/monitoring/`:
+Thirteen custom dashboards are deployed natively as JSON files in `charts/monitoring/dashboards/`:
 
 ### Kates Benchmark & Phase
 

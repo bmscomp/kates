@@ -349,7 +349,7 @@ Access the Jaeger UI at http://localhost:30086:
 
 ## Strimzi Operator Dashboard
 
-The **Strimzi Operator & Kafka Connect** Grafana dashboard (`config/monitoring/strimzi-operator-dashboard.yaml`) provides visibility into operator health and Connect workloads:
+The **Strimzi Operator & Kafka Connect** Grafana dashboard (`charts/monitoring/dashboards/strimzi-operator-dashboard.json`) provides visibility into operator health and Connect workloads:
 
 | Panel | Metric | Alert Level |
 |-------|--------|:---:|

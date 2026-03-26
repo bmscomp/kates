@@ -178,17 +178,11 @@ kubectl logs deployment/kates -n kates | head -1
 ## Monitoring Stack Upgrade
 
 ```bash
-helm repo update prometheus-community
+helm dependency update charts/monitoring
 
-helm upgrade monitoring prometheus-community/kube-prometheus-stack \
+helm upgrade monitoring charts/monitoring \
   --namespace monitoring \
   --reuse-values
-```
-
-After upgrading, re-apply custom dashboards:
-
-```bash
-kubectl apply -f config/grafana/
 ```
 
 ## Pre-Upgrade Checklist
