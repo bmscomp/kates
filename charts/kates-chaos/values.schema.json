@@ -20,9 +20,10 @@
     "auth": {
       "type": "object",
       "properties": {
-        "adminPassword": { "type": "string" },
-        "existingSecret": { "type": "string" },
-        "secretKey": { "type": "string" }
+        "adminPassword": { "type": "string", "description": "Litmus admin portal password (auto-generated if empty)" },
+        "dbRootPassword": { "type": "string", "description": "MongoDB root password (auto-generated if empty)" },
+        "jwtSecret": { "type": "string", "description": "JWT signing secret (auto-generated if empty)" },
+        "existingSecret": { "type": "string", "description": "Name of pre-existing K8s Secret to use instead" }
       }
     },
     "rbac": {

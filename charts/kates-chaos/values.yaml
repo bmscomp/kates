@@ -8,6 +8,13 @@ global:
 # Upstream Litmus chart
 litmus:
   enabled: true
+  adminConfig:
+    ADMIN_USERNAME: admin
+    ADMIN_PASSWORD: ""
+    DBUSER: admin
+    DBPASSWORD: ""
+    JWT_SECRET: ""
+  existingSecret: ""
   mongodb:
     enabled: true
     image:
@@ -18,6 +25,9 @@ litmus:
     replicaCount: 1
     arbiter:
       enabled: false
+    auth:
+      enabled: true
+      rootPassword: ""
     volumePermissions:
       enabled: false
     persistence:
@@ -25,11 +35,14 @@ litmus:
       size: 5Gi
       storageClass: ""
 
-# Authentication
+# Authentication — managed by kates-chaos
+# Credentials are auto-generated if left empty and stored in a persistent Secret
+# To use a pre-existing Secret, set auth.existingSecret to its name
 auth:
   adminPassword: ""
+  dbRootPassword: ""
+  jwtSecret: ""
   existingSecret: ""
-  secretKey: admin-password
 
 # RBAC for chaos experiments in target namespaces
 rbac:

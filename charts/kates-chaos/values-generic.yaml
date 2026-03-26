@@ -3,6 +3,12 @@
 
 litmus:
   enabled: true
+  adminConfig:
+    ADMIN_USERNAME: admin
+    ADMIN_PASSWORD: ""
+    DBUSER: admin
+    DBPASSWORD: ""
+    JWT_SECRET: ""
   portal:
     frontend:
       replicas: 2
@@ -52,6 +58,9 @@ litmus:
     replicaCount: 3
     arbiter:
       enabled: true
+    auth:
+      enabled: true
+      rootPassword: ""
     volumePermissions:
       enabled: true
     persistence:
@@ -68,6 +77,8 @@ litmus:
 
 auth:
   adminPassword: ""
+  dbRootPassword: ""
+  jwtSecret: ""
   existingSecret: ""
 
 rbac:

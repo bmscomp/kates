@@ -3,6 +3,12 @@
 
 litmus:
   enabled: true
+  adminConfig:
+    ADMIN_USERNAME: admin
+    ADMIN_PASSWORD: litmus
+    DBUSER: admin
+    DBPASSWORD: ""
+    JWT_SECRET: ""
   portal:
     frontend:
       replicas: 1
