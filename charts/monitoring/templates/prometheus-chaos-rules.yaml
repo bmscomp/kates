@@ -33,8 +33,8 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Kafka broker {{ $labels.pod }} restarted unexpectedly"
-            description: "Broker restarted without any active chaos experiment. Investigate immediately."
+            summary: 'Kafka broker {{ "{{ $labels.pod }}" }} restarted unexpectedly'
+            description: 'Broker restarted without any active chaos experiment. Investigate immediately.'
 
         # High CPU after chaos completed = potential issue
         - alert: KafkaHighCPUPostChaos
@@ -45,8 +45,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Kafka broker {{ $labels.pod }} has high CPU after chaos"
-            description: "CPU usage is above 80% with no active chaos experiment."
+            summary: 'Kafka broker {{ "{{ $labels.pod }}" }} has high CPU after chaos'
+            description: 'CPU usage is above 80% with no active chaos experiment.'
 
         # Kafka cluster not ready after chaos completed
         - alert: KafkaClusterNotReadyPostChaos
@@ -81,8 +81,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Chaos probe success rate is low"
-            description: "Probe success is {{ $value }}%. System may not be resilient."
+            summary: 'Chaos probe success rate is low'
+            description: 'Probe success is {{ "{{ $value }}" }}%. System may not be resilient.'
 
     - name: kafka-gameday
       rules:
@@ -141,8 +141,8 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Kafka RTO exceeds 30s SLA"
-            description: "Max RTO is {{ $value }}s. The cluster did not recover within the SLA window."
+            summary: 'Kafka RTO exceeds 30s SLA'
+            description: 'Max RTO is {{ "{{ $value }}" }}s. The cluster did not recover within the SLA window.'
 
         - alert: KafkaRPOExceedsSLA
           expr: |
@@ -151,8 +151,8 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Kafka RPO exceeds 5s SLA"
-            description: "RPO is {{ $value }}s. Data loss window exceeds the acceptable recovery point."
+            summary: 'Kafka RPO exceeds 5s SLA'
+            description: 'RPO is {{ "{{ $value }}" }}s. Data loss window exceeds the acceptable recovery point.'
 
         - alert: KafkaDataLossDetected
           expr: |
@@ -161,8 +161,8 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Data loss {{ $value }}% exceeds 0.1% SLA"
-            description: "KATES integrity verification detected data loss above the acceptable threshold."
+            summary: 'Data loss {{ "{{ $value }}" }}% exceeds 0.1% SLA'
+            description: 'KATES integrity verification detected data loss above the acceptable threshold.'
 
         - alert: KafkaE2ELatencySpike
           expr: |
@@ -171,5 +171,5 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Kafka E2E latency spike: {{ $value }}ms"
-            description: "End-to-end produce-consume latency exceeds 10s during or after chaos."
+            summary: 'Kafka E2E latency spike: {{ "{{ $value }}" }}ms'
+            description: 'End-to-end produce-consume latency exceeds 10s during or after chaos.'
