@@ -22,35 +22,41 @@ The chart expects these namespaces to exist (or creates them):
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   litmus namespace                       │
-│                                                         │
-│  ┌──────────┐  ┌───────────┐  ┌──────────────────────┐ │
-│  │ Frontend │  │ Auth      │  │ GraphQL Server       │ │
-│  │ (UI)     │  │ Server    │  │ (API)                │ │
-│  │ :9091    │  │           │  │ :9002                │ │
-│  └──────────┘  └───────────┘  └──────────────────────┘ │
-│                                                         │
-│  ┌──────────┐  ┌───────────┐  ┌──────────────────────┐ │
-│  │ MongoDB  │  │ Chaos     │  │ Workflow             │ │
-│  │ (3-node  │  │ Operator  │  │ Controller           │ │
-│  │  RS)     │  │           │  │ (Argo)               │ │
-│  └──────────┘  └───────────┘  └──────────────────────┘ │
-│                                                         │
-│  ┌──────────┐  ┌───────────┐  ┌──────────────────────┐ │
-│  │ Chaos    │  │ Event     │  │ Subscriber           │ │
-│  │ Exporter │  │ Tracker   │  │                      │ │
-│  │ :8080    │  │           │  │                      │ │
-│  └──────────┘  └───────────┘  └──────────────────────┘ │
-└────────────┬──────────────────────────┬─────────────────┘
-             │                          │
-             ▼                          ▼
-      ┌──────────────┐          ┌──────────────┐
-      │ kafka        │          │ kates        │
-      │ namespace    │          │ namespace    │
-      │ (targets)    │          │ (coordinator)│
-      └──────────────┘          └──────────────┘
+```mermaid
+graph TB
+    subgraph litmus["litmus namespace"]
+        direction TB
+        frontend["Frontend UI :9091"]
+        auth["Auth Server"]
+        graphql["GraphQL Server API :9002"]
+        mongo["MongoDB 3-node ReplicaSet"]
+        operator["Chaos Operator"]
+        workflow["Workflow Controller Argo"]
+        exporter["Chaos Exporter :8080"]
+        tracker["Event Tracker"]
+        subscriber["Subscriber"]
+
+        frontend --> graphql
+        frontend --> auth
+        graphql --> mongo
+        auth --> mongo
+        operator --> subscriber
+        subscriber --> graphql
+        tracker --> graphql
+    end
+
+    subgraph kafka["kafka namespace"]
+        brokers["Kafka Brokers"]
+    end
+
+    subgraph kates["kates namespace"]
+        app["Kates Application"]
+    end
+
+    operator -- "chaos injection" --> kafka
+    subscriber -- "experiment status" --> kafka
+    graphql -- "coordination" --> kates
+    exporter -- "metrics" --> prometheus["Prometheus"]
 ```
 
 ## Quick Start
