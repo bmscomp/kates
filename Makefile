@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-kafka-memory-stress chaos-kafka-io-stress chaos-kafka-dns-error chaos-kafka-node-drain chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-undeploy kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-clean chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -148,7 +148,7 @@ deploy-all:
 	./scripts/deploy-kafka-ui.sh
 	./scripts/deploy-apicurio.sh
 	./scripts/deploy-jaeger.sh
-	./scripts/deploy-litmuschaos.sh
+	$(MAKE) litmus
 	./scripts/port-forward.sh
 	@echo "✅ Full stack deployed!"
 
@@ -372,9 +372,9 @@ download-charts:
 	@echo "📦 Downloading all Helm charts..."
 	./scripts/download-charts.sh
 
-# LitmusChaos Management
+# Kates Chaos Management (LitmusChaos via kates-chaos chart)
 litmus:
-	@echo "⚡ Installing LitmusChaos..."
+	@echo "⚡ Deploying Kates Chaos (LitmusChaos)..."
 	@echo "Applying Litmus CRDs..."
 	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
 	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
@@ -383,83 +383,38 @@ litmus:
 		-n litmus --create-namespace \
 		-f charts/kates-chaos/values-kind.yaml \
 		--timeout 10m --wait
+	@echo "✅ Kates Chaos deployed"
+
+litmus-undeploy:
+	@echo "🧹 Removing Kates Chaos (LitmusChaos)..."
+	@helm uninstall chaos -n litmus 2>/dev/null || true
+	@kubectl delete pvc --all -n litmus 2>/dev/null || true
+	@kubectl delete all --all -n litmus 2>/dev/null || true
+	@kubectl delete namespace litmus 2>/dev/null || true
+	@echo "✅ Kates Chaos removed"
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."
 	@echo "Access at: http://localhost:9091 (admin/litmus)"
 	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus
 
-chaos-experiments:
-	@echo "🧪 Deploying chaos experiments..."
-	kubectl apply -f config/litmus/experiments/
-
-# Kafka Chaos Testing
-chaos-kafka:
-	@echo "⚡ Setting up Kafka chaos testing environment..."
-	./scripts/setup-kafka-chaos.sh
-
-chaos-kafka-pod-delete:
-	@echo "💥 Running Kafka broker pod-delete chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-pod-delete.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-network-partition:
-	@echo "🔌 Running Kafka network partition chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-network-partition.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-cpu-stress:
-	@echo "🔥 Running Kafka CPU stress chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-cpu-stress.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-memory-stress:
-	@echo "🧠 Running Kafka memory stress chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-memory-stress.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-io-stress:
-	@echo "💾 Running Kafka disk I/O stress chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-io-stress.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-dns-error:
-	@echo "🌐 Running Kafka DNS error chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-dns-error.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-node-drain:
-	@echo "🚧 Running Kafka node drain chaos..."
-	kubectl apply -f config/litmus/experiments/kafka-node-drain.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-all:
-	@echo "🌪️ Running ALL Kafka chaos experiments..."
-	kubectl apply -f config/litmus/experiments/kafka-pod-delete.yaml
-	kubectl apply -f config/litmus/experiments/kafka-network-partition.yaml
-	kubectl apply -f config/litmus/experiments/kafka-cpu-stress.yaml
-	kubectl apply -f config/litmus/experiments/kafka-memory-stress.yaml
-	kubectl apply -f config/litmus/experiments/kafka-io-stress.yaml
-	kubectl apply -f config/litmus/experiments/kafka-dns-error.yaml
-	kubectl apply -f config/litmus/experiments/kafka-node-drain.yaml
-	@echo "Monitor: kubectl get chaosresults -n kafka -w"
-
-chaos-kafka-status:
-	@echo "📊 Kafka Chaos Status:"
+chaos-status:
+	@echo "📊 Chaos Status:"
 	@echo ""
-	@echo "=== Chaos Engines ==="
+	@echo "Helm Release:"
+	@helm list -n litmus 2>/dev/null || echo "No release found"
+	@echo ""
+	@echo "Pods:"
+	@kubectl get pods -n litmus 2>/dev/null || echo "No pods found"
+	@echo ""
+	@echo "ChaosExperiments (kafka):"
+	@kubectl get chaosexperiments -n kafka 2>/dev/null || echo "No experiments found"
+	@echo ""
+	@echo "ChaosEngines (kafka):"
 	@kubectl get chaosengines -n kafka 2>/dev/null || echo "No engines found"
 	@echo ""
-	@echo "=== Chaos Results ==="
+	@echo "ChaosResults (kafka):"
 	@kubectl get chaosresults -n kafka 2>/dev/null || echo "No results found"
-	@echo ""
-	@echo "=== Infrastructure Pods ==="
-	@kubectl get pods -n litmus -l 'app in (chaos-operator,chaos-exporter,subscriber,workflow-controller,event-tracker)' 2>/dev/null || echo "No infra pods found"
-
-chaos-clean:
-	@echo "🧹 Removing LitmusChaos..."
-	helm uninstall chaos -n litmus || true
-	kubectl delete namespace litmus || true
 
 # Velero backup
 velero:
@@ -503,7 +458,8 @@ help:
 	@echo "  ui               - Deploy Kafka UI"
 	@echo "  apicurio         - Deploy Apicurio Registry"
 	@echo "  jaeger           - Deploy Jaeger (distributed tracing)"
-	@echo "  litmus           - Deploy LitmusChaos (with images)"
+	@echo "  litmus           - Deploy Kates Chaos (LitmusChaos via Helm)"
+	@echo "  litmus-undeploy  - Remove Kates Chaos stack completely"
 	@echo "  velero           - Deploy Velero backup"
 	@echo ""
 	@echo "  Kates CLI"
@@ -542,7 +498,7 @@ help:
 	@echo "  logs             - Stream logs from all services"
 	@echo "  status           - Check cluster status"
 	@echo "  chaos-ui         - Port-forward Litmus UI"
-	@echo "  chaos-experiments- Apply chaos experiments"
+	@echo "  chaos-status     - Show chaos infrastructure status"
 	@echo "  gameday          - Run automated GameDay validation"
 	@echo "  destroy          - Destroy cluster (FORCE=1 to skip prompt)"
 	@echo "  help             - Show this help"
