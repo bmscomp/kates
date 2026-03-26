@@ -133,8 +133,26 @@ cluster:
 
 # Deploy monitoring stack only
 monitoring:
-	@echo "📊 Deploying monitoring stack..."
-	./scripts/deploy-monitoring.sh
+	@echo "📊 Deploying monitoring stack (Kind)..."
+	helm dependency build charts/monitoring
+	helm upgrade --install monitoring charts/monitoring \
+		--namespace monitoring --create-namespace \
+		-f charts/monitoring/values-kind.yaml \
+		--timeout 10m --wait
+
+monitoring-generic:
+	@echo "📊 Deploying monitoring stack (Generic)..."
+	helm dependency build charts/monitoring
+	helm upgrade --install monitoring charts/monitoring \
+		--namespace monitoring --create-namespace \
+		-f charts/monitoring/values-generic.yaml \
+		--timeout 10m --wait
+
+monitoring-undeploy:
+	@echo "🗑️ Undeploying monitoring stack..."
+	helm uninstall monitoring -n monitoring || true
+	kubectl delete pvc --all -n monitoring || true
+	kubectl delete namespace monitoring || true
 
 cert-manager:
 	@echo "🔐 Deploying cert-manager..."
@@ -143,7 +161,7 @@ cert-manager:
 # Deploy full stack (monitoring, Kafka, UI, Litmus) — without cluster/images
 deploy-all:
 	@echo "🚀 Deploying full stack..."
-	./scripts/deploy-monitoring.sh
+	$(MAKE) monitoring
 	./scripts/deploy-kafka.sh
 	./scripts/deploy-kafka-ui.sh
 	./scripts/deploy-apicurio.sh

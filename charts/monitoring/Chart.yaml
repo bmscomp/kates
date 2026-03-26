@@ -1,0 +1,17 @@
+apiVersion: v2
+name: kates-monitoring
+version: 1.0.0
+appVersion: "82.4.3"
+description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
+home: https://github.com/bmscomp/klster
+keywords:
+  - monitoring
+  - prometheus
+  - grafana
+  - kates
+  - kafka
+dependencies:
+  - name: kube-prometheus-stack
+    version: "82.4.3"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: kube-prometheus-stack.enabled

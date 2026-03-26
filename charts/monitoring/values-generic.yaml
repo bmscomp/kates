@@ -1,0 +1,108 @@
+# Kates Monitoring — Generic Kubernetes Cluster Overlay
+# Production-grade defaults for any standard Kubernetes environment
+
+kube-prometheus-stack:
+  grafana:
+    adminPassword: ""
+    image:
+      tag: "12.3.1"
+      pullPolicy: Always
+    service:
+      type: ClusterIP
+    sidecar:
+      image:
+        tag: "2.2.3"
+        pullPolicy: Always
+      imagePullPolicy: Always
+      dashboards:
+        enabled: true
+      datasources:
+        enabled: true
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1
+        memory: 512Mi
+    persistence:
+      enabled: true
+      size: 5Gi
+
+  prometheus:
+    prometheusSpec:
+      image:
+        tag: v3.9.1
+        pullPolicy: Always
+      replicas: 2
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 2
+          memory: 4Gi
+      retention: 30d
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: ""
+            resources:
+              requests:
+                storage: 50Gi
+
+  alertmanager:
+    alertmanagerSpec:
+      image:
+        tag: v0.28.1
+        pullPolicy: Always
+      replicas: 2
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+      storage:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: ""
+            resources:
+              requests:
+                storage: 5Gi
+
+  prometheusOperator:
+    image:
+      tag: v0.79.2
+      pullPolicy: Always
+    prometheusConfigReloader:
+      image:
+        tag: v0.79.2
+        pullPolicy: Always
+
+  kube-state-metrics:
+    image:
+      tag: v2.14.0
+      pullPolicy: Always
+
+  prometheus-node-exporter:
+    image:
+      tag: v1.8.2
+      pullPolicy: Always
+
+  global:
+    imagePullPolicy: Always
+
+  defaultRules:
+    create: true
+
+  kubelet:
+    enabled: true
+
+dashboards:
+  enabled: true
+  labels:
+    grafana_dashboard: "1"

@@ -6,30 +6,34 @@ This document covers the monitoring infrastructure: how it is deployed, what das
 
 | Component | Version | Source |
 |---|---|---|
-| Prometheus | Managed by kube-prometheus-stack | Remote Helm chart (`prometheus-community`) |
+| Monitoring Chart | 1.0.0 | Local wrapper (`charts/monitoring`) |
+| Prometheus | Managed by kube-prometheus-stack | `prometheus-community/kube-prometheus-stack` |
 | Grafana | 12.3.1 | Bundled with kube-prometheus-stack |
-| kube-prometheus-stack | `PROMETHEUS_STACK_VERSION` in `versions.env` | `prometheus-community/kube-prometheus-stack` |
+| kube-prometheus-stack | `82.4.3` | Upstream dependency in `Chart.yaml` |
 
-The monitoring stack is installed from the **remote** `prometheus-community` Helm repository — no local chart is stored in this repo.
+The monitoring stack is installed via a **local wrapper chart** in `charts/monitoring/` that depends on `kube-prometheus-stack` v82.4.3.
 
 ## Deploy
 
 ```bash
+# Kind overlay (NodePort 30080)
 make monitoring
+
+# Generic Kubernetes (ClusterIP)
+make monitoring-generic
 ```
 
-This runs `scripts/deploy-monitoring.sh`, which:
+This commands will:
 
-1. Adds the `prometheus-community` Helm repo
-2. Installs `kube-prometheus-stack` with values from `config/monitoring/monitoring.yaml`
-3. Creates a ConfigMap with all Kates Grafana dashboards
-4. Labels the ConfigMap with `grafana_dashboard=1` so the Grafana sidecar auto-discovers it
+1. Build chart dependencies (`helm dependency build charts/monitoring`)
+2. Install the local wrapper chart
+3. Automatically deploy the 4 Kates Grafana dashboards (templated as ConfigMaps)
 
 ### Access
 
 | Service | URL |
 |---|---|
-| Grafana | `http://localhost:30080` (NodePort) |
+| Grafana | `http://localhost:30080` (NodePort on Kind) |
 | Prometheus | `http://localhost:9090` (port-forward) |
 
 Default Grafana credentials: `admin` / `admin`.
@@ -135,22 +139,25 @@ Registered by `KatesMetrics.java` — persistent across benchmark runs:
 
 ## Configuration
 
-The monitoring values file is `config/monitoring/monitoring.yaml`. Key settings:
+The base monitoring configuration is located in `charts/monitoring/values.yaml`. 
+Cluster-specific overrides live in `values-kind.yaml` and `values-generic.yaml`.
+
+Key settings:
 
 | Setting | Value | Notes |
 |---|---|---|
-| `grafana.adminPassword` | `admin` | Change in production |
-| `grafana.service.type` | `NodePort` | Port `30080` |
+| `grafana.adminPassword` | `admin` | Set empty string to auto-generate |
+| `grafana.service.type` | `NodePort` | Overridden to `NodePort` 30080 in Kind, `ClusterIP` in generic |
 | `grafana.sidecar.dashboards.enabled` | `true` | Auto-discovers ConfigMaps labeled `grafana_dashboard=1` |
-| `grafana.image.tag` | `12.3.1` | Pinned for stability |
-| Image pull policy | `IfNotPresent` | All components |
+| Image pull policy | `IfNotPresent` | In Kind overlay. Overridden to `Always` in generic |
 
 ### Upgrading
 
-To upgrade the monitoring stack, update `PROMETHEUS_STACK_VERSION` in `versions.env` and re-run:
+To upgrade the monitoring stack, update the dependency version in `charts/monitoring/Chart.yaml` and re-run:
 
 ```bash
-make monitoring
+cd charts/monitoring
+helm dependency update
 ```
 
 To check available versions:

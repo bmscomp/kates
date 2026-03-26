@@ -1,0 +1,26 @@
+Kates Monitoring Stack v{{ .Chart.Version }}
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Grafana:
+{{- if eq (toString (index .Values "kube-prometheus-stack" "grafana" "service" "type")) "NodePort" }}
+  URL:   http://localhost:{{ index .Values "kube-prometheus-stack" "grafana" "service" "nodePort" | default 30080 }}
+{{- else }}
+  URL:   kubectl port-forward svc/{{ .Release.Name }}-grafana 3000:80 -n {{ .Release.Namespace }}
+{{- end }}
+  Login: admin / (kubectl get secret {{ .Release.Name }}-grafana -n {{ .Release.Namespace }} -o jsonpath='{.data.admin-password}' | base64 -d)
+
+Prometheus:
+  URL:   kubectl port-forward svc/{{ .Release.Name }}-kube-prometheus-stack-prometheus 9090:9090 -n {{ .Release.Namespace }}
+
+AlertManager:
+  URL:   kubectl port-forward svc/{{ .Release.Name }}-kube-prometheus-stack-alertmanager 9093:9093 -n {{ .Release.Namespace }}
+
+{{- if .Values.dashboards.enabled }}
+Dashboards:
+  ✓ {{ len (list "kates-benchmark" "kates-trend" "kates-application" "grafana-chaos") }} Kates dashboards (auto-discovered by Grafana sidecar)
+{{- end }}
+
+Verify:
+  kubectl get pods -n {{ .Release.Namespace }}

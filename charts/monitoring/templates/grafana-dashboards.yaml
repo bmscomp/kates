@@ -1,0 +1,18 @@
+{{- if .Values.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-kates-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+    {{- range $key, $val := .Values.dashboards.labels }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+data:
+  {{- $files := .Files }}
+  {{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+  {{ base $path }}: |-
+{{ $files.Get $path | indent 4 }}
+  {{- end }}
+{{- end }}

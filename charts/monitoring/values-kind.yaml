@@ -1,0 +1,100 @@
+# Kates Monitoring — Kind Cluster Overlay
+# Optimized for single-node Kind with pre-loaded images
+
+kube-prometheus-stack:
+  grafana:
+    adminPassword: "admin"
+    image:
+      tag: "12.3.1"
+      pullPolicy: IfNotPresent
+    service:
+      type: NodePort
+      nodePort: 30080
+    sidecar:
+      image:
+        tag: "2.2.3"
+        pullPolicy: IfNotPresent
+      imagePullPolicy: IfNotPresent
+      dashboards:
+        enabled: true
+      datasources:
+        enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  prometheus:
+    prometheusSpec:
+      image:
+        tag: v3.9.1
+        pullPolicy: IfNotPresent
+      replicas: 1
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 1
+          memory: 1Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 1Gi
+
+  alertmanager:
+    alertmanagerSpec:
+      image:
+        tag: v0.28.1
+        pullPolicy: IfNotPresent
+      replicas: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+
+  prometheusOperator:
+    image:
+      tag: v0.79.2
+      pullPolicy: IfNotPresent
+    prometheusConfigReloader:
+      image:
+        tag: v0.79.2
+        pullPolicy: IfNotPresent
+    admissionWebhooks:
+      patch:
+        image:
+          pullPolicy: IfNotPresent
+
+  kube-state-metrics:
+    image:
+      tag: v2.14.0
+      pullPolicy: IfNotPresent
+
+  prometheus-node-exporter:
+    image:
+      tag: v1.8.2
+      pullPolicy: IfNotPresent
+
+  global:
+    imagePullPolicy: IfNotPresent
+
+  defaultRules:
+    create: true
+
+  kubelet:
+    enabled: true
+
+dashboards:
+  enabled: true
+  labels:
+    grafana_dashboard: "1"
