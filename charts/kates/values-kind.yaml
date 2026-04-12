@@ -5,6 +5,14 @@ image:
   # Kind requires pre-loaded images, so Never pull from registry
   pullPolicy: IfNotPresent
 
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
 service:
   type: NodePort
   nodePort: "30083"

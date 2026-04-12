@@ -18,7 +18,7 @@ ensure_namespace headlamp
 info "Installing Headlamp via Helm..."
 helm upgrade --install headlamp "${CHARTS_DIR}/headlamp" \
     --namespace headlamp \
-    --wait \
+\
     --timeout 120s
 
 info "Waiting for Headlamp to be ready..."

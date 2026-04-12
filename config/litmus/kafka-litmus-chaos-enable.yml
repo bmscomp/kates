@@ -4215,7 +4215,7 @@ spec:
       #{NODE_SELECTOR}
       containers:
         - name: subscriber
-          image: litmuschaos/litmusportal-subscriber:3.24.0
+          image: litmuschaos/litmusportal-subscriber:3.27.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 2000
@@ -4262,7 +4262,7 @@ spec:
       #{NODE_SELECTOR}
       serviceAccountName: litmus
       containers:
-        - image: litmuschaos/litmusportal-event-tracker:3.24.0
+        - image: litmuschaos/litmusportal-event-tracker:3.27.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 2000

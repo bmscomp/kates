@@ -1,0 +1,89 @@
+{{- if .Values.externalMongodb.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.externalMongodb.serviceName | default "chaos-mongodb-external" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: chaos-mongodb-external
+spec:
+  ports:
+    - port: 27017
+      targetPort: 27017
+  selector:
+    app: chaos-mongodb-external
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chaos-mongodb-external
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: chaos-mongodb-external
+spec:
+  serviceName: {{ .Values.externalMongodb.serviceName | default "chaos-mongodb-external" }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chaos-mongodb-external
+  template:
+    metadata:
+      labels:
+        app: chaos-mongodb-external
+    spec:
+      initContainers:
+        - name: generate-keyfile
+          image: busybox
+          securityContext:
+            runAsUser: 999
+          command: ["/bin/sh", "-c", "echo 'bGl0bXVzLWNoYW9zLWtleWZpbGUtYW5ndWxhci1hcHBsZQ==' > /keyfile/key.txt && chmod 400 /keyfile/key.txt"]
+          volumeMounts:
+            - name: keyfile-volume
+              mountPath: /keyfile
+      containers:
+        - name: mongodb
+          image: "{{ .Values.externalMongodb.image.repository }}:{{ .Values.externalMongodb.image.tag }}"
+          imagePullPolicy: {{ .Values.externalMongodb.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "--replSet"
+            - "rs0"
+            - "--bind_ip_all"
+            - "--keyFile"
+            - "/keyfile/key.txt"
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: {{ .Values.externalMongodb.auth.rootUser | default "root" | quote }}
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              value: {{ .Values.externalMongodb.auth.rootPassword | default "1234" | quote }}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    until mongosh -u {{ .Values.externalMongodb.auth.rootUser | default "root" | quote }} -p {{ .Values.externalMongodb.auth.rootPassword | default "1234" | quote }} --host localhost --eval "print(\"Connected\")" > /dev/null 2>&1; do sleep 2; done; mongosh -u {{ .Values.externalMongodb.auth.rootUser | default "root" | quote }} -p {{ .Values.externalMongodb.auth.rootPassword | default "1234" | quote }} --host localhost --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "chaos-mongodb-external-0.chaos-mongodb-external.litmus.svc.cluster.local:27017"}]})' || true
+          {{- with .Values.externalMongodb.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: keyfile-volume
+              mountPath: /keyfile
+      volumes:
+        - name: keyfile-volume
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.externalMongodb.persistence.size | default "2Gi" }}
+{{- end }}

@@ -28,8 +28,19 @@ helm upgrade --install cert-manager jetstack/cert-manager \
   --set webhook.image.pullPolicy=IfNotPresent \
   --set cainjector.image.pullPolicy=IfNotPresent \
   --set startupapicheck.image.pullPolicy=IfNotPresent \
+  --set resources.requests.cpu=100m \
+  --set resources.requests.memory=256Mi \
+  --set resources.limits.cpu=500m \
+  --set resources.limits.memory=512Mi \
+  --set webhook.resources.requests.cpu=100m \
+  --set webhook.resources.requests.memory=256Mi \
+  --set webhook.resources.limits.cpu=500m \
+  --set webhook.resources.limits.memory=512Mi \
+  --set cainjector.resources.requests.cpu=100m \
+  --set cainjector.resources.requests.memory=256Mi \
+  --set cainjector.resources.limits.cpu=500m \
+  --set cainjector.resources.limits.memory=512Mi \
   --timeout 5m \
-  --wait
 
 info "Waiting for cert-manager webhook to be ready..."
 kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=cert-manager \

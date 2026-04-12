@@ -9,8 +9,10 @@ info "Deploying Jaeger (distributed tracing)..."
 
 ensure_namespace monitoring
 
-if helm status jaeger -n monitoring &>/dev/null; then
-    warn "Jaeger is already deployed — upgrading"
+if helm status jaeger -n monitoring &>/dev/null && \
+   kubectl rollout status deployment/jaeger -n monitoring --timeout=5s &>/dev/null; then
+    warn "Jaeger is already deployed and running — skipping"
+    exit 0
 fi
 
 info "Adding Helm repository..."

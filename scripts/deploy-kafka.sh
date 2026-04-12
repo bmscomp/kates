@@ -57,11 +57,30 @@ info "  Namespace:   ${NAMESPACE}"
 info "  Environment: ${ENV}"
 info "  Values:      ${VALUES_ARGS[*]}"
 
+# Adopt pre-existing KafkaTopics/KafkaUsers into this Helm release.
+# These may have been created by kubectl apply (client-side) in a prior run,
+# which sets a different field manager. Without adoption, Helm's server-side
+# apply will fail with field ownership conflicts on managed labels.
+info "Adopting existing Kafka resources into Helm release..."
+for kind in kafkatopics kafkausers; do
+    for resource in $(kubectl get "${kind}" -n "${NAMESPACE}" -o name 2>/dev/null); do
+        kubectl annotate "${resource}" -n "${NAMESPACE}" \
+            meta.helm.sh/release-name="${RELEASE_NAME}" \
+            meta.helm.sh/release-namespace="${NAMESPACE}" \
+            --overwrite 2>/dev/null || true
+        kubectl label "${resource}" -n "${NAMESPACE}" \
+            app.kubernetes.io/managed-by=Helm \
+            --overwrite 2>/dev/null || true
+        # Transfer field ownership from kubectl-client-side-apply to Helm
+        kubectl get "${resource}" -n "${NAMESPACE}" -o yaml 2>/dev/null \
+            | kubectl apply --server-side --force-conflicts --field-manager=helm -f - 2>/dev/null || true
+    done
+done
+
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
-    --timeout 10m \
-    --wait
+    --timeout 5m
 
 info "Waiting for Kafka cluster to be ready..."
 kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n "${NAMESPACE}" || {

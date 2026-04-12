@@ -75,7 +75,7 @@ helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
     --timeout 5m \
-    --wait
+
 
 info "✅ Kates deployment complete (env=${ENV})!"
 echo ""

@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chaos-mongodb-external
+  namespace: litmus
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: generate-keyfile
+          image: busybox
+          securityContext:
+            runAsUser: 999
+          command:
+            - /bin/sh
+            - -c
+            - "echo 'bGl0bXVzLWNoYW9zLWtleWZpbGUtYW5ndWxhci1hcHBsZQ==' > /keyfile/key.txt && chmod 400 /keyfile/key.txt"
+          volumeMounts:
+            - name: keyfile-volume
+              mountPath: /keyfile
+      volumes:
+        - name: keyfile-volume
+          emptyDir: {}

@@ -105,4 +105,4 @@ networkPolicies:
 
 experiments:
   enabled: true
-  image: bitnami/kubectl:latest
+  image: registry.k8s.io/kubectl:v1.33.0

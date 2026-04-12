@@ -22,6 +22,13 @@ brokerPools:
 controllers:
   storage:
     size: 1Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
   topologySpreadConstraints:
     enabled: false
   podAntiAffinity:
@@ -32,6 +39,13 @@ controllers:
       effect: "NoSchedule"
 
 brokerDefaults:
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
   topologySpreadConstraints:
     enabled: false
   podAntiAffinity:
@@ -90,3 +104,15 @@ rebalance:
 
 podSecurityPolicy:
   enabled: false
+
+# Disable CRD upgrade hook for Kind because we have it in Strimzi operator
+crdUpgrade:
+  enabled: false
+
+# 3 controllers as requested (matching prod, but light resources)
+controllers:
+  replicas: 3
+  storage:
+    size: 1Gi
+  topologySpreadConstraints:
+    enabled: false

@@ -50,23 +50,26 @@ all: check-prerequisites
 		./scripts/deploy-kafka-ui.sh; \
 	fi
 	@echo ""
-	@if kubectl get pods -n kafka -l app=apicurio-registry --no-headers 2>/dev/null | grep -q Running; then \
+	@if kubectl get deployment apicurio-registry -n apicurio --no-headers 2>/dev/null | grep -q '1/1'; then \
 		echo "✅ Apicurio Registry already deployed — skipping"; \
 	else \
 		echo "Step 7: Deploying Apicurio Registry..."; \
 		./scripts/deploy-apicurio.sh; \
 	fi
 	@echo ""
-	@if kubectl get pods -n litmus -l app.kubernetes.io/component=litmus --no-headers 2>/dev/null | grep -q Running; then \
+	@if kubectl get pods -n litmus -l app.kubernetes.io/instance=chaos --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
 		echo "Step 8: Deploying LitmusChaos..."; \
 		kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true; \
 		kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true; \
+		helm dependency build charts/kates-chaos 2>/dev/null || true; \
 		helm upgrade --install chaos charts/kates-chaos \
 			-n litmus --create-namespace \
 			-f charts/kates-chaos/values-kind.yaml \
-			--timeout 10m --wait; \
+			--timeout 10m; \
+		echo "Waiting for Litmus pods to be ready..."; \
+		kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=chaos -n litmus --timeout=300s 2>/dev/null || true; \
 	fi
 	@echo ""
 	@echo "Step 9: Verifying chaos infrastructure..."
@@ -76,12 +79,19 @@ all: check-prerequisites
 		echo "⚠️  Litmus CRDs not found — chaos provider will fall back to noop"; \
 	fi
 	@echo ""
+	@if kubectl get pods -n monitoring -l app=jaeger --no-headers 2>/dev/null | grep -q Running; then \
+		echo "✅ Jaeger already deployed — skipping"; \
+	else \
+		echo "Step 9.5: Deploying Jaeger (distributed tracing)..."; \
+		./scripts/deploy-jaeger.sh || true; \
+	fi
+	@echo ""
 	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping build"; \
 	else \
-		echo "Step 10: Building and deploying Kates (native)..."; \
-		docker build -f kates/Dockerfile.native -t kates:native-v1 .; \
-		kind load docker-image kates:native-v1 --name panda; \
+		echo "Step 10: Building and deploying Kates..."; \
+		docker build -f kates/Dockerfile -t kates:latest .; \
+		kind load docker-image kates:latest --name panda; \
 		kubectl apply -f kates/k8s/namespace.yaml; \
 		kubectl apply -f kates/k8s/rbac.yaml; \
 		kubectl apply -f kates/k8s/configmap.yaml; \
@@ -94,7 +104,7 @@ all: check-prerequisites
 		kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s; \
 		kubectl apply -f kates/k8s/deployment.yaml; \
 		kubectl apply -f kates/k8s/service.yaml; \
-		kubectl rollout status deployment/kates -n kates --timeout=120s; \
+		kubectl rollout status deployment/kates -n kates --timeout=300s; \
 	fi
 	@echo ""
 	@echo "Step 11: Exposing service ports..."
@@ -268,13 +278,13 @@ kates-deploy:
 	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
 	kubectl apply -f kates/k8s/deployment.yaml
 	kubectl apply -f kates/k8s/service.yaml
-	kubectl rollout status deployment/kates -n kates --timeout=120s
+	kubectl rollout status deployment/kates -n kates --timeout=300s
 	@echo "✅ Kates is running"
 
 kates-redeploy:
 	@echo "🔄 Redeploying Kates..."
 	kubectl rollout restart deployment/kates -n kates
-	kubectl rollout status deployment/kates -n kates --timeout=120s
+	kubectl rollout status deployment/kates -n kates --timeout=300s
 
 kates-logs:
 	@echo "📋 Streaming Kates logs..."
@@ -397,6 +407,7 @@ litmus:
 	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
 	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
 	@kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
+	helm dependency build charts/kates-chaos 2>/dev/null || true
 	helm upgrade --install chaos charts/kates-chaos \
 		-n litmus --create-namespace \
 		-f charts/kates-chaos/values-kind.yaml \
@@ -440,6 +451,7 @@ litmus-generic:
 	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
 	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
 	@kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
+	helm dependency build charts/kates-chaos 2>/dev/null || true
 	helm upgrade --install chaos charts/kates-chaos \
 		-n litmus --create-namespace \
 		-f charts/kates-chaos/values-generic.yaml \

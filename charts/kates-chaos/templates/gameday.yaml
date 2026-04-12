@@ -23,7 +23,7 @@ spec:
       serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
       containers:
         - name: gameday
-          image: {{ .Values.experiments.image | default "bitnami/kubectl:latest" }}
+          image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh"]
           args:

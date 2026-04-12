@@ -25,6 +25,5 @@ helm upgrade --install apicurio-registry "${APICURIO_CHART_DIR}" \
   --namespace apicurio \
   --values config/apicurio/apicurio-values.yaml \
   --timeout 10m \
-  --wait
 
 info "✅ Apicurio Registry deployment complete!"

@@ -22,7 +22,6 @@ COPY kates/.mvn .mvn
 COPY kates/mvnw .
 RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
-COPY kates/lib lib
 COPY kates/src src
 RUN ./mvnw package -DskipTests -B
 

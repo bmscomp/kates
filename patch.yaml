@@ -1,0 +1,12 @@
+        - name: mongod-init
+          image: docker.io/library/mongo:6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Waiting for mongo to start..."
+              until mongosh -u root -p 1234 --host localhost --eval "print(\"Connected\")" > /dev/null 2>&1; do sleep 2; done
+              echo "Initializing replica set..."
+              mongosh -u root -p 1234 --host localhost --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})' || true
+              echo "Done"

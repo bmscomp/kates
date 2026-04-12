@@ -7,7 +7,8 @@ litmus:
     ADMIN_USERNAME: admin
     ADMIN_PASSWORD: litmus
     DBUSER: admin
-    DBPASSWORD: ""
+    DBPASSWORD: "1234"
+    DB_SERVER: "mongodb://chaos-mongodb-external.litmus.svc.cluster.local:27017/?authSource=admin"
     JWT_SECRET: ""
   portal:
     frontend:
@@ -16,61 +17,75 @@ litmus:
         pullPolicy: IfNotPresent
       resources:
         requests:
-          memory: "128Mi"
-          cpu: "100m"
-        limits:
           memory: "256Mi"
-          cpu: "300m"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
       service:
         type: NodePort
         port: 9091
         nodePort: 30091
     server:
+      nodeSelector:
+        kubernetes.io/hostname: sigma
       replicas: 1
+      waitForMongodb:
+        image:
+          tag: "6.0"
+          pullPolicy: IfNotPresent
+
       graphqlServer:
         image:
           pullPolicy: IfNotPresent
         resources:
           requests:
-            memory: "200Mi"
-            cpu: "150m"
-          limits:
             memory: "512Mi"
-            cpu: "400m"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
       authServer:
+        nodeSelector:
+          kubernetes.io/hostname: sigma
         replicas: 1
+        waitForMongodb:
+          image:
+            tag: "6.0"
+            pullPolicy: IfNotPresent
+
         image:
           pullPolicy: IfNotPresent
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "512Mi"
+            cpu: "500m"
           limits:
-            memory: "384Mi"
-            cpu: "300m"
+            memory: "1Gi"
+            cpu: "1000m"
   mongodb:
-    enabled: true
-    image:
-      registry: docker.io
-      repository: bitnami/mongodb
-      tag: "latest"
-      pullPolicy: IfNotPresent
-    architecture: replicaset
-    replicaCount: 1
-    arbiter:
-      enabled: false
-    volumePermissions:
-      enabled: false
-    persistence:
-      enabled: true
-      size: 2Gi
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
+    enabled: false
+
+# External MongoDB using official multi-arch image (arm64 + amd64)
+externalMongodb:
+  enabled: true
+  serviceName: chaos-mongodb-external
+  image:
+    repository: docker.io/library/mongo
+    tag: "6.0"
+    pullPolicy: IfNotPresent
+  auth:
+    rootUser: admin
+    rootPassword: "1234"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  persistence:
+    size: 2Gi
 
 rbac:
   enabled: true

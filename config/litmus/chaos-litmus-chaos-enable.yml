@@ -471,7 +471,7 @@ spec:
       #{NODE_SELECTOR}
       containers:
         - name: chaos-operator
-          image: litmuschaos/chaos-operator:3.24.0
+          image: litmuschaos/chaos-operator:3.27.0
           command:
             - chaos-operator
           args:
@@ -482,7 +482,7 @@ spec:
             allowPrivilegeEscalation: false
           env:
             - name: CHAOS_RUNNER_IMAGE
-              value: litmuschaos/chaos-runner:3.24.0
+              value: litmuschaos/chaos-runner:3.27.0
             - name: WATCH_NAMESPACE
               value: ''
             - name: POD_NAME
@@ -528,7 +528,7 @@ spec:
       
       #{NODE_SELECTOR}
       containers:
-        - image: litmuschaos/chaos-exporter:3.24.0
+        - image: litmuschaos/chaos-exporter:3.27.0
           imagePullPolicy: IfNotPresent
           name: chaos-exporter
           securityContext:
@@ -4176,7 +4176,7 @@ metadata:
 data:
   SERVER_ADDR: http://chaos-litmus-server-service.litmus.svc.cluster.local:9002/query
   INFRA_SCOPE: cluster
-  VERSION: 3.24.0
+  VERSION: 3.27.0
   START_TIME: "1765363202836"
   SKIP_SSL_VERIFY: "false"
   CUSTOM_TLS_CERT: ""
@@ -4215,7 +4215,7 @@ spec:
       #{NODE_SELECTOR}
       containers:
         - name: subscriber
-          image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.24.0
+          image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.27.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 2000
@@ -4262,7 +4262,7 @@ spec:
       #{NODE_SELECTOR}
       serviceAccountName: litmus
       containers:
-        - image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.24.0
+        - image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.27.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 2000
