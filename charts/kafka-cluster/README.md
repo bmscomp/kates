@@ -636,16 +636,146 @@ kafkaConnect:
         topic.prefix: cdc
 ```
 
-### Backup (Velero)
+### Backup Strategy
+
+> [!CAUTION]
+> **NetBackup (Veritas) and any block/file-level backup agent MUST NOT be used for this cluster.**
+> See [Why NetBackup is Incompatible with Kafka](#why-netbackup-is-incompatible-with-kafka) below.
+
+Kafka backup is a **two-layer concern** — treating it as a single operation (like backing up a database) leads to data loss, corrupt restores, or impossibly long RTOs.
+
+#### Layer 1 — Topic Data Durability (Kafka Tiered Storage)
+
+Kafka's native **Remote Log Storage (RLS)** API continuously offloads closed log segments to an S3-compatible object store as they are rolled. This happens automatically, inside the broker, with zero RPO for data that has been acknowledged.
+
+- When a broker restarts or is replaced, it re-fetches its log segments from the object store — **no restore operation needed**
+- PVC snapshots of broker data directories become **unnecessary and redundant** once this is enabled
+- Controlled per-topic: set `remote.storage.enable: "true"` and a `retention.ms` longer than `local.retention.ms`
+
+```yaml
+tieredStorage:
+  enabled: true
+  s3:
+    bucketName: kafka-tiered-storage
+    region: us-east-1
+    endpointUrl: "http://seaweedfs-filer.seaweedfs.svc:8333"  # S3-compatible endpoint
+    pathStyleAccessEnabled: true
+  credentials:
+    existingSecret: "kafka-tiered-storage-credentials"
+  retention:
+    localRetentionMs: 86400000      # keep 1 day on local disk
+    # remote retention is controlled per-topic via retention.ms
+```
+
+#### Layer 2 — Cluster Topology Backup (Velero)
+
+Velero captures the **Kubernetes objects** that describe the cluster — the Strimzi CRDs, Secrets, and ConfigMaps. This allows full cluster reconstruction without needing broker PVC snapshots.
+
+```yaml
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  ttl: 336h0m0s          # 14 days
+  snapshotVolumes: false  # broker PVCs are covered by tiered storage — do NOT snapshot them
+```
+
+> [!IMPORTANT]
+> `snapshotVolumes` **must be `false`** in production. With tiered storage enabled, snapshotting broker PVCs is pure waste (3× storage duplication across replica nodes) and produces crash-consistent images that cannot be used for safe incremental restores anyway.
+>
+> Velero only needs to backup the **controller PVCs** (KRaft quorum log, 1 Gi each) and Kubernetes objects. The `backup.yaml` template uses `labelSelector: strimzi.io/pool-name: controllers` to enforce this scope.
+
+Velero backup scope (what is captured):
+
+| Resource | Why |
+|---|---|
+| `kafka.kafka.strimzi.io` | Cluster definition (listeners, auth, config) |
+| `kafkanodepool.kafka.strimzi.io` | Broker pool topology |
+| `kafkatopic.kafka.strimzi.io` | Topic declarations (partitions, replication, config) |
+| `kafkauser.kafka.strimzi.io` | User ACLs and authentication config |
+| `Secret` (SCRAM passwords, TLS certs) | Credential recovery |
+| `ConfigMap` | Cruise Control, metrics configs |
+| Controller PVCs | KRaft quorum metadata |
+
+Broker PVCs are **excluded** — their data lives in the object store via tiered storage.
+
+#### Velero Configuration Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `backup.enabled` | Create Velero Schedule + pre-upgrade Backup | `false` |
-| `backup.schedule` | Cron schedule for daily backups | `0 2 * * *` |
+| `backup.schedule` | Cron schedule | `0 2 * * *` |
 | `backup.ttl` | Backup retention | `168h0m0s` (7 days) |
-| `backup.persistence.enabled` | Create PVC for backup storage | `false` |
+| `backup.snapshotVolumes` | Snapshot PVCs (set `false` with tiered storage) | `false` |
+| `backup.persistence.enabled` | Create PVC for backup scratch storage | `false` |
 | `backup.persistence.size` | PVC size | `20Gi` |
-| `backup.persistence.existingClaim` | Use existing PVC | `""` |
+
+---
+
+### Why NetBackup is Incompatible with Kafka
+
+NetBackup (Veritas) is a **block- and file-level** backup agent designed for traditional storage workloads (databases with point-in-time recovery, filesystems, virtual machine images). Its model conflicts with Kafka's architecture at every level.
+
+#### 1. Snapshots are crash-consistent, not application-consistent
+
+NetBackup (and any PVC snapshot tool without a Kafka-aware pre-freeze hook) captures the broker's data directory **mid-write**. A Kafka log segment being written at snapshot time will be partially flushed to disk. On restore:
+
+- Index files reference offsets that do not exist in the data file
+- The log verifier rejects the segment and truncates it
+- Downstream consumers that already read those offsets receive a gap or duplicate range
+- The replica-set reconciliation protocol treats the divergent broker as corrupted and triggers a full re-fetch — defeating the purpose of the snapshot
+
+Kafka does not expose a filesystem-level quiesce API. There is no equivalent of `FLUSH TABLES WITH READ LOCK` for broker log segments.
+
+#### 2. Replica factor creates false redundancy
+
+Kafka clusters with `replication.factor: 3` store **three identical copies** of every log segment across three brokers. A NetBackup job that snapshots all broker PVCs captures the same data three times with no additional protection. The three replicas fail identically (e.g. corruption of a specific offset range) because they share the same data at snapshot time.
+
+At 200 Gi per broker × 9 brokers (production pool), this is **1.8 Ti of backup data** for 600 Gi of unique content — a 3× amplification with zero RPO improvement.
+
+#### 3. No topic-level or consumer-group granularity
+
+NetBackup restores at the PVC level. A restore operation brings back the **entire cluster**, including all topics, all partitions, and all consumer group offsets — from a point in time that may be hours in the past.
+
+There is no way to:
+- Restore a single topic without restoring the entire broker
+- Restore consumer group offsets independently of topic data
+- Replay only the messages a specific consumer missed
+
+The minimum restore unit is the full cluster, with a guaranteed data gap proportional to the backup interval.
+
+#### 4. Agent installation conflicts with the immutable container model
+
+NetBackup requires a client agent running inside each container (or on the host). The Strimzi operator manages Kafka pod specs directly via `StrimziPodSet`. Any sidecar or init-container injected by NetBackup:
+
+- Is not declared in the `KafkaNodePool` spec and will be removed on the next Strimzi reconciliation
+- Requires a privileged security context that conflicts with `PodSecurityPolicy: Restricted`
+- Cannot be version-controlled alongside the Helm chart
+
+#### 5. RTO is measured in hours, not seconds
+
+A full cluster restore from NetBackup requires:
+1. Provision new PVCs on every broker node
+2. Stream 200 Gi per node from the backup server (network-bound)
+3. Start each broker and wait for it to verify its log segments
+4. Wait for replica sync across the full partition set
+
+In a 9-broker production cluster this takes **4–8 hours** before any consumer can reconnect. With Kafka Tiered Storage, a replacement broker fetches only the hot segments from the local object store and is available for reads **within minutes**.
+
+#### 6. Consumer offset integrity is not preserved
+
+`__consumer_offsets` is itself a Kafka topic. Its content at snapshot time reflects the committed offsets of all consumer groups at that moment. After a restore to a snapshot taken at `T-8h`:
+
+- All consumers that committed offsets between `T-8h` and `T` are reset to `T-8h`
+- Consumers using `auto.offset.reset: latest` will skip the 8-hour gap entirely
+- Consumers using `auto.offset.reset: earliest` will reprocess 8 hours of messages
+
+Neither outcome is acceptable for an event-driven microservices architecture.
+
+#### Correct Alternative
+
+Use the **two-layer strategy** described above:
+- **Tiered Storage** → continuous, zero-RPO, topic-level log durability with no restore operation
+- **Velero** → daily snapshot of Kubernetes objects (CRDs, Secrets) only; no broker PVC snapshots
 
 ### Strimzi Operator (Subchart)
 
