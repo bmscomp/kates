@@ -1,0 +1,595 @@
+{
+  "_comment": [
+    "Kates Resilience Test Examples",
+    "POST http://localhost:8080/api/resilience",
+    "",
+    "Each entry is a ResilienceTestRequest combining:",
+    "  - testRequest : performance benchmark (load / stress / endurance)",
+    "  - chaosSpec   : fault injection (DisruptionType + FaultSpec parameters)",
+    "  - steadyStateSec    : warmup window before chaos is injected",
+    "  - maxRecoveryWaitSec: max time to wait for cluster to return to steady state",
+    "  - probes      : assertions evaluated at baseline, during chaos, and post-recovery",
+    "",
+    "All examples target the 'krafter' cluster in namespace 'kafka'.",
+    "Run kates port-forward first: make kates-ui  (http://localhost:8080)"
+  ],
+
+  "examples": [
+
+    {
+      "_name": "01 — Broker Crash (POD_KILL)",
+      "_description": "Kill a random broker pod without SIGTERM. Validates ISR recovery and zero message loss with acks=all.",
+      "_hypothesis": "Killing one broker triggers leader re-election within 10s. ISR expands back to 3/3 within 120s. Producer sees latency spike but 0 errors.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-events",
+          "numRecords": 500000,
+          "recordSize": 1024,
+          "throughput": 5000,
+          "producers": 3,
+          "acks": "all",
+          "linger": 5,
+          "compressionType": "lz4",
+          "enableIdempotence": true,
+          "maxRetries": 2147483647,
+          "deliveryTimeoutMs": 120000
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "broker-crash",
+        "disruptionType": "POD_KILL",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-alpha",
+        "chaosDurationSec": 30,
+        "delayBeforeSec": 0,
+        "gracePeriodSec": 0
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 120,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "50",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "cluster-ready",
+          "type": "k8sProbe",
+          "mode": "Edge",
+          "command": "kafka Ready",
+          "expectedOutput": "Ready",
+          "comparator": "contains",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "02 — Graceful Broker Shutdown (POD_DELETE)",
+      "_description": "Delete a broker pod with SIGTERM. Kafka controlled-shutdown transfers leadership before pod exits. Expects zero producer errors.",
+      "_hypothesis": "Graceful shutdown gives Kafka time to transfer partition leadership. Producer should see <5s latency spike and 0 errors.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-results",
+          "numRecords": 600000,
+          "recordSize": 1024,
+          "throughput": 2000,
+          "producers": 3,
+          "acks": "all",
+          "enableIdempotence": true,
+          "maxRetries": 2147483647,
+          "deliveryTimeoutMs": 120000
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "graceful-broker-delete",
+        "disruptionType": "POD_DELETE",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-alpha",
+        "chaosDurationSec": 60,
+        "delayBeforeSec": 0,
+        "gracePeriodSec": 30
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 120,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "0",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "cluster-ready",
+          "type": "k8sProbe",
+          "mode": "Edge",
+          "command": "kafka Ready",
+          "expectedOutput": "Ready",
+          "comparator": "contains",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "03 — CPU Exhaustion (CPU_STRESS)",
+      "_description": "Exhaust 1 CPU core at 90% on the gamma broker while 6 parallel producers write 8 KB records. Observes ISR shrink/expand cycle.",
+      "_hypothesis": "CPU-starved follower falls behind replication. If lag > replica.lag.time.max.ms (30s), it is evicted from ISR. ISR recovers fully within 90s of chaos ending.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-results",
+          "numRecords": 300000,
+          "recordSize": 8192,
+          "throughput": 1000,
+          "producers": 6,
+          "acks": "all",
+          "compressionType": "snappy",
+          "enableIdempotence": true,
+          "maxRetries": 2147483647,
+          "deliveryTimeoutMs": 120000
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "cpu-exhaustion",
+        "disruptionType": "CPU_STRESS",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-gamma",
+        "chaosDurationSec": 120,
+        "delayBeforeSec": 0,
+        "cpuCores": 1
+      },
+      "steadyStateSec": 20,
+      "maxRecoveryWaitSec": 90,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "50",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "producer-throughput",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'",
+          "expectedOutput": "0",
+          "comparator": ">",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "04 — Memory Pressure (MEMORY_STRESS)",
+      "_description": "Consume 500 MB on a broker pod to simulate a GC-heavy workload or memory leak. Validates that the JVM does not OOM-kill the broker.",
+      "_hypothesis": "Memory pressure forces more GC cycles and slows request handling. Producer p99 latency rises but the broker does not crash. ISR stays intact.",
+      "testRequest": {
+        "type": "STRESS",
+        "spec": {
+          "topic": "kates-events",
+          "numRecords": 1000000,
+          "recordSize": 1024,
+          "throughputSteps": [5000, 10000, 20000],
+          "producers": 3,
+          "acks": "all",
+          "enableIdempotence": true
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "memory-pressure",
+        "disruptionType": "MEMORY_STRESS",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-sigma",
+        "chaosDurationSec": 60,
+        "delayBeforeSec": 0,
+        "memoryMb": 500
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 90,
+      "probes": [
+        {
+          "name": "producer-throughput",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'",
+          "expectedOutput": "0",
+          "comparator": ">",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        },
+        {
+          "name": "cluster-ready",
+          "type": "k8sProbe",
+          "mode": "Edge",
+          "command": "kafka Ready",
+          "expectedOutput": "Ready",
+          "comparator": "contains",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "05 — Disk Saturation (IO_STRESS)",
+      "_description": "Inject disk I/O pressure (80% FS utilization) on the alpha broker while large uncompressed records are written. Validates log flush latency handling.",
+      "_hypothesis": "Disk saturation delays log segment flushes. Broker falls behind replication, ISR shrinks, leader migrates. Producers stall during re-election. No data loss.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-audit",
+          "numRecords": 200000,
+          "recordSize": 16384,
+          "throughput": 500,
+          "producers": 4,
+          "acks": "all",
+          "compressionType": "none",
+          "enableIdempotence": true,
+          "deliveryTimeoutMs": 120000
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "disk-saturation",
+        "disruptionType": "IO_STRESS",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-alpha",
+        "chaosDurationSec": 90,
+        "delayBeforeSec": 0,
+        "fillPercentage": 80,
+        "ioWorkers": 2
+      },
+      "steadyStateSec": 20,
+      "maxRecoveryWaitSec": 120,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "50",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "producer-throughput",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'",
+          "expectedOutput": "0",
+          "comparator": ">",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "06 — DNS Failure (DNS_ERROR)",
+      "_description": "Inject DNS resolution failures on broker pods. Validates that broker-to-broker and client-to-broker connections survive transient DNS outages.",
+      "_hypothesis": "Kafka connections use cached DNS results. Short DNS outages (<30s) should not disconnect established broker connections. Consumer group coordinators may reassign.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-events",
+          "numRecords": 400000,
+          "recordSize": 512,
+          "throughput": 3000,
+          "producers": 2,
+          "consumers": 2,
+          "consumerGroup": "dns-failure-cg",
+          "acks": "all",
+          "enableIdempotence": true
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "dns-failure",
+        "disruptionType": "DNS_ERROR",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/cluster=krafter",
+        "chaosDurationSec": 30,
+        "delayBeforeSec": 0
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 90,
+      "probes": [
+        {
+          "name": "cluster-ready",
+          "type": "k8sProbe",
+          "mode": "Edge",
+          "command": "kafka Ready",
+          "expectedOutput": "Ready",
+          "comparator": "contains",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        },
+        {
+          "name": "consumer-latency",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group dns-failure-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'",
+          "expectedOutput": "100000",
+          "comparator": "<",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "07 — Network Partition (NETWORK_PARTITION)",
+      "_description": "Isolate the sigma broker from the network. Validates that partition leaders migrate to alpha/gamma and consumer groups rebalance without losing messages.",
+      "_hypothesis": "Network partition fences the sigma broker. Leader elections complete within 30s. Consumer group rebalances within 60s. Producers recover with 0 errors.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-events",
+          "numRecords": 400000,
+          "recordSize": 512,
+          "throughput": 3000,
+          "producers": 3,
+          "consumers": 2,
+          "consumerGroup": "net-split-cg",
+          "acks": "all",
+          "enableIdempotence": true,
+          "maxRetries": 2147483647,
+          "deliveryTimeoutMs": 120000,
+          "requestTimeoutMs": 30000
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "network-split",
+        "disruptionType": "NETWORK_PARTITION",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-sigma",
+        "chaosDurationSec": 60,
+        "delayBeforeSec": 0
+      },
+      "steadyStateSec": 15,
+      "maxRecoveryWaitSec": 120,
+      "probes": [
+        {
+          "name": "min-isr-check",
+          "type": "cmdProbe",
+          "mode": "Edge",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "5",
+          "comparator": "<=",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        },
+        {
+          "name": "consumer-latency",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group net-split-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'",
+          "expectedOutput": "100000",
+          "comparator": "<",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "08 — Node Drain (NODE_DRAIN)",
+      "_description": "Drain the Kubernetes node hosting a broker pod. Validates that the Strimzi Drain Cleaner transfers leadership before eviction and the pod reschedules cleanly.",
+      "_hypothesis": "Drain Cleaner intercepts the eviction, triggers Kafka controlled shutdown, and transfers all partition leaders off the node before the pod is evicted. Zero downtime expected.",
+      "testRequest": {
+        "type": "ENDURANCE",
+        "spec": {
+          "topic": "kates-results",
+          "numRecords": 1000000,
+          "recordSize": 1024,
+          "throughput": 3000,
+          "durationSec": 300,
+          "producers": 3,
+          "consumers": 3,
+          "consumerGroup": "drain-test-cg",
+          "acks": "all",
+          "enableIdempotence": true
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "node-maintenance",
+        "disruptionType": "NODE_DRAIN",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-gamma",
+        "chaosDurationSec": 60,
+        "delayBeforeSec": 0,
+        "gracePeriodSec": 30
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 180,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "50",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "partition-availability",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "0",
+          "comparator": "==",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "09 — Rolling Restart (ROLLING_RESTART)",
+      "_description": "Restart all brokers one at a time with a configurable delay between restarts. Simulates a rolling upgrade or routine maintenance window.",
+      "_hypothesis": "Strimzi's rolling update mechanism ensures controlled shutdown between broker restarts. Producers with acks=all experience <5s latency per restart. No data loss.",
+      "testRequest": {
+        "type": "LOAD",
+        "spec": {
+          "topic": "kates-metrics",
+          "numRecords": 900000,
+          "recordSize": 512,
+          "throughput": 3000,
+          "producers": 3,
+          "acks": "all",
+          "enableIdempotence": true,
+          "maxRetries": 2147483647,
+          "deliveryTimeoutMs": 120000
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "rolling-restart",
+        "disruptionType": "ROLLING_RESTART",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/cluster=krafter",
+        "chaosDurationSec": 180,
+        "delayBeforeSec": 0,
+        "gracePeriodSec": 30,
+        "envOverrides": {
+          "RESTART_INTERVAL_SEC": "30"
+        }
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 120,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "50",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "cluster-ready",
+          "type": "k8sProbe",
+          "mode": "Edge",
+          "command": "kafka Ready",
+          "expectedOutput": "Ready",
+          "comparator": "contains",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    },
+
+    {
+      "_name": "10 — Full Game Day (Multi-Phase Scenario)",
+      "_description": "Three sequential chaos phases with recovery windows: broker crash → CPU saturation → network partition. Sustained multi-topic load throughout. Models a realistic cascading incident.",
+      "_hypothesis": "Cluster survives 3 sequential faults without producer errors. Each phase's fault resolves before the next begins. Final consumer lag = 0.",
+      "testRequest": {
+        "type": "LOAD",
+        "scenario": {
+          "phases": [
+            {
+              "name": "events-load",
+              "topic": "kates-events",
+              "numRecords": 1000000,
+              "recordSize": 1024,
+              "throughput": 2000,
+              "producers": 3,
+              "acks": "all",
+              "enableIdempotence": true
+            },
+            {
+              "name": "results-load",
+              "topic": "kates-results",
+              "numRecords": 500000,
+              "recordSize": 1024,
+              "throughput": 2000,
+              "producers": 2,
+              "acks": "all",
+              "enableIdempotence": true
+            }
+          ]
+        }
+      },
+      "chaosSpec": {
+        "experimentName": "gameday-full",
+        "disruptionType": "POD_DELETE",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/pool-name=brokers-alpha",
+        "chaosDurationSec": 60,
+        "delayBeforeSec": 30,
+        "gracePeriodSec": 0,
+        "_note": "Phase 1 only — submit phases 2/3 as separate requests after phase 1 ChaosResult=Pass"
+      },
+      "steadyStateSec": 30,
+      "maxRecoveryWaitSec": 180,
+      "probes": [
+        {
+          "name": "isr-health-check",
+          "type": "cmdProbe",
+          "mode": "Continuous",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "50",
+          "comparator": "<=",
+          "intervalSec": 10,
+          "timeoutSec": 30
+        },
+        {
+          "name": "cluster-ready",
+          "type": "k8sProbe",
+          "mode": "Edge",
+          "command": "kafka Ready",
+          "expectedOutput": "Ready",
+          "comparator": "contains",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        },
+        {
+          "name": "min-isr-check",
+          "type": "cmdProbe",
+          "mode": "Edge",
+          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "expectedOutput": "5",
+          "comparator": "<=",
+          "intervalSec": 15,
+          "timeoutSec": 30
+        }
+      ]
+    }
+  ],
+
+  "_usage": {
+    "submit_single": "curl -X POST http://localhost:8080/api/resilience -H 'Content-Type: application/json' -d @resilience.json | jq '.runId'",
+    "submit_by_scenario": "curl -X POST 'http://localhost:8080/api/resilience/scenarios/broker-crash/run?topic=kates-events&numRecords=500000' | jq",
+    "list_scenarios": "curl http://localhost:8080/api/resilience/scenarios | jq",
+    "get_report": "curl http://localhost:8080/api/resilience/{runId}/report | jq",
+    "port_forward": "make kates-ui",
+    "script_alternatives": {
+      "broker_delete": "./scripts/test-chaos-broker-delete.sh",
+      "cpu_hog":       "./scripts/test-chaos-broker-cpu-hog.sh",
+      "net_partition": "./scripts/test-chaos-network-partition.sh",
+      "disk_io":       "./scripts/test-chaos-disk-io-stress.sh",
+      "full_gameday":  "./scripts/test-chaos-gameday.sh"
+    }
+  }
+}
