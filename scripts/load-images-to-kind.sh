@@ -76,7 +76,10 @@ load_image() {
     fi
 }
 
-# Scarf images: try scarf URL first, fall back to canonical and tag
+# Scarf images: try scarf URL first, fall back to canonical and retag.
+# FIX #1: _already_in_kind now checks the *canonical* name because containerd
+# stores the image under the canonical ref after a retag, not the scarf URL.
+# Checking the scarf URL always returned false, causing re-pulls on every run.
 load_scarf_image() {
     local entry=$1
     local scarf_src="${entry%%|*}"
@@ -84,20 +87,26 @@ load_scarf_image() {
     TOTAL=$((TOTAL + 1))
     step "[${TOTAL}] ${scarf_src}"
 
-    if _already_in_kind "${scarf_src}"; then
-        warn "  already in Kind, skipping"
+    # Check canonical name — that is what containerd keeps after the tag step
+    if _already_in_kind "${canonical}"; then
+        warn "  already in Kind (as ${canonical}), skipping"
         SKIPPED=$((SKIPPED + 1))
         return 0
     fi
 
     echo "  pulling into Kind nodes (scarf.sh)..."
     if _ctr_pull "${scarf_src}" "--platform ${PLATFORM}"; then
-        info "  ✓ loaded"
+        # Tag scarf URL → canonical so both refs are available
+        for node in "${NODES[@]}"; do
+            docker exec "${node}" ctr --namespace=k8s.io images tag \
+                "${scarf_src}" "${canonical}" 2>/dev/null || true
+        done
+        info "  ✓ loaded (scarf)"
         LOADED=$((LOADED + 1))
     else
         echo "  → retrying via canonical: ${canonical}"
         if _ctr_pull "${canonical}" "--platform ${PLATFORM}"; then
-            # Tag canonical → scarf URL on every node so pod image refs match
+            # Tag canonical → scarf URL so pod image refs using the scarf URL also resolve
             for node in "${NODES[@]}"; do
                 docker exec "${node}" ctr --namespace=k8s.io images tag \
                     "${canonical}" "${scarf_src}" 2>/dev/null || true

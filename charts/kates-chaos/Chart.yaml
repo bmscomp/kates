@@ -1,7 +1,7 @@
 apiVersion: v2
 name: kates-chaos
-version: 1.0.0
-appVersion: "3.27.0"
+version: 1.1.0
+appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps LitmusChaos with Kafka-specific RBAC, experiments, and monitoring
 home: https://github.com/bmscomp/klster
 keywords:
@@ -11,6 +11,6 @@ keywords:
   - litmus
 dependencies:
   - name: litmus
-    version: "3.27.0"
+    version: "3.28.0"
     repository: "https://litmuschaos.github.io/litmus-helm/"
     condition: litmus.enabled

@@ -8,7 +8,9 @@ litmus:
     ADMIN_PASSWORD: litmus
     DBUSER: admin
     DBPASSWORD: "1234"
-    DB_SERVER: "mongodb://chaos-mongodb-external.litmus.svc.cluster.local:27017/?authSource=admin"
+    # 3-node RS connection string — lists all members so the driver can find
+    # the primary even during an election.
+    DB_SERVER: "mongodb://admin:1234@chaos-mongodb-external-0.chaos-mongodb-external.litmus.svc.cluster.local:27017,chaos-mongodb-external-1.chaos-mongodb-external.litmus.svc.cluster.local:27017,chaos-mongodb-external-2.chaos-mongodb-external.litmus.svc.cluster.local:27017/?authSource=admin&replicaSet=rs0"
     JWT_SECRET: ""
   portal:
     frontend:
@@ -27,12 +29,15 @@ litmus:
         port: 9091
         nodePort: 30091
     server:
-      nodeSelector:
-        kubernetes.io/hostname: sigma
+      # FIX #3: nodeSelector removed — pinning to 'sigma' causes outage if that
+      # node is drained or evicted during chaos experiments.
       replicas: 1
       waitForMongodb:
         image:
-          tag: "6.0"
+          # FIX: use upstream default tag '6' — matches the scarf image that is
+          # pre-loaded in Kind. '6.0' caused Init:ImagePullBackOff because the
+          # scarf entry was keyed as mongo:6, not mongo:6.0.
+          tag: "6"
           pullPolicy: IfNotPresent
 
       graphqlServer:
@@ -46,12 +51,12 @@ litmus:
             memory: "1Gi"
             cpu: "1000m"
       authServer:
-        nodeSelector:
-          kubernetes.io/hostname: sigma
+        # FIX #3: nodeSelector removed here too
         replicas: 1
         waitForMongodb:
           image:
-            tag: "6.0"
+            # FIX: same as above — use tag '6' to match pre-loaded scarf image.
+            tag: "6"
             pullPolicy: IfNotPresent
 
         image:
@@ -70,6 +75,7 @@ litmus:
 externalMongodb:
   enabled: true
   serviceName: chaos-mongodb-external
+  replicas: 3
   image:
     repository: docker.io/library/mongo
     tag: "6.0"
@@ -79,11 +85,11 @@ externalMongodb:
     rootPassword: "1234"
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 300m
+      memory: 512Mi
     limits:
       cpu: 1000m
-      memory: 2Gi
+      memory: 1Gi
   persistence:
     size: 2Gi
 
@@ -111,4 +117,5 @@ networkPolicies:
 
 experiments:
   enabled: true
-  image: bitnami/kubectl:latest
+  # FIX #8: pin to the exact same kubectl version used everywhere else in the stack
+  image: registry.k8s.io/kubectl:v1.33.0

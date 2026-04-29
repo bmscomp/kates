@@ -1,45 +1,74 @@
 {{- if .Values.externalMongodb.enabled }}
+{{- $ns         := .Release.Namespace }}
+{{- $svcName    := .Values.externalMongodb.serviceName | default "chaos-mongodb-external" }}
+{{- $replicas   := .Values.externalMongodb.replicas   | default 3 }}
+{{- $rootUser   := .Values.externalMongodb.auth.rootUser     | default "admin" }}
+{{- $rootPass   := .Values.externalMongodb.auth.rootPassword | default "1234" }}
+---
+# Keyfile Secret — shared across all RS members for inter-node auth.
+# Using a deterministic value so all pods mount the same file.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $svcName }}-keyfile
+  namespace: {{ $ns }}
+  labels:
+    app: {{ $svcName }}
+type: Opaque
+data:
+  # Decoded value: "KatesChaosKeyfile2026" — alphanumeric only.
+  # MongoDB keyFile only allows A-Za-z0-9+/= and whitespace. Hyphens are
+  # invalid (UnsupportedFormat). The old value decoded to a hyphenated string.
+  key.txt: "S2F0ZXNDaGFvc0tleWZpbGUyMDI2"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Values.externalMongodb.serviceName | default "chaos-mongodb-external" }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ $svcName }}
+  namespace: {{ $ns }}
   labels:
-    app: chaos-mongodb-external
+    app: {{ $svcName }}
 spec:
+  clusterIP: None       # headless — required for stable pod DNS in RS
   ports:
     - port: 27017
       targetPort: 27017
   selector:
-    app: chaos-mongodb-external
+    app: {{ $svcName }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chaos-mongodb-external
-  namespace: {{ .Release.Namespace }}
+  name: {{ $svcName }}
+  namespace: {{ $ns }}
   labels:
-    app: chaos-mongodb-external
+    app: {{ $svcName }}
 spec:
-  serviceName: {{ .Values.externalMongodb.serviceName | default "chaos-mongodb-external" }}
-  replicas: 1
+  serviceName: {{ $svcName }}
+  replicas: {{ $replicas }}
   selector:
     matchLabels:
-      app: chaos-mongodb-external
+      app: {{ $svcName }}
   template:
     metadata:
       labels:
-        app: chaos-mongodb-external
+        app: {{ $svcName }}
     spec:
       initContainers:
-        - name: generate-keyfile
-          image: busybox
-          securityContext:
-            runAsUser: 999
-          command: ["/bin/sh", "-c", "echo 'bGl0bXVzLWNoYW9zLWtleWZpbGUtYW5ndWxhci1hcHBsZQ==' > /keyfile/key.txt && chmod 400 /keyfile/key.txt"]
+        # Fix keyfile permissions for MongoDB:
+        # - Run as root (no runAsUser) so we can read the source Secret
+        # - chown 999:999 transfers ownership to the mongodb user (uid 999)
+        # - chmod 400 restricts access to owner-only (MongoDB requirement)
+        # Previously: runAsUser 999 + defaultMode 0400 → user 999 couldn't read
+        # the root-owned secret file → exit code 1 → CrashLoopBackOff.
+        - name: keyfile-chmod
+          image: busybox:1.37
+          command: ["sh", "-c", "cp /keyfile-ro/key.txt /keyfile/key.txt && chown 999:999 /keyfile/key.txt && chmod 400 /keyfile/key.txt"]
           volumeMounts:
-            - name: keyfile-volume
+            - name: keyfile-ro
+              mountPath: /keyfile-ro
+              readOnly: true
+            - name: keyfile
               mountPath: /keyfile
       containers:
         - name: mongodb
@@ -55,17 +84,21 @@ spec:
             - containerPort: 27017
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
-              value: {{ .Values.externalMongodb.auth.rootUser | default "root" | quote }}
+              value: {{ $rootUser | quote }}
             - name: MONGO_INITDB_ROOT_PASSWORD
-              value: {{ .Values.externalMongodb.auth.rootPassword | default "1234" | quote }}
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/bash
-                  - -c
-                  - |
-                    until mongosh -u {{ .Values.externalMongodb.auth.rootUser | default "root" | quote }} -p {{ .Values.externalMongodb.auth.rootPassword | default "1234" | quote }} --host localhost --eval "print(\"Connected\")" > /dev/null 2>&1; do sleep 2; done; mongosh -u {{ .Values.externalMongodb.auth.rootUser | default "root" | quote }} -p {{ .Values.externalMongodb.auth.rootPassword | default "1234" | quote }} --host localhost --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "chaos-mongodb-external-0.chaos-mongodb-external.litmus.svc.cluster.local:27017"}]})' || true
+              value: {{ $rootPass | quote }}
+          # Readiness: unauthenticated ping is always allowed by MongoDB.
+          # This is safe AND avoids auth-not-ready failures on startup.
+          readinessProbe:
+            exec:
+              command:
+                - mongosh
+                - --quiet
+                - --eval
+                - "db.adminCommand('ping').ok"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 24
           {{- with .Values.externalMongodb.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -73,10 +106,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data/db
-            - name: keyfile-volume
+            - name: keyfile
               mountPath: /keyfile
       volumes:
-        - name: keyfile-volume
+        - name: keyfile-ro
+          secret:
+            secretName: {{ $svcName }}-keyfile
+            defaultMode: 0444   # world-readable so root (init) and user 999 (mongo) can both read
+        - name: keyfile
           emptyDir: {}
   volumeClaimTemplates:
     - metadata:
@@ -86,4 +123,104 @@ spec:
         resources:
           requests:
             storage: {{ .Values.externalMongodb.persistence.size | default "2Gi" }}
+---
+# Replica-set initialisation Job.
+# Runs once after install/upgrade. Uses a two-phase readiness check:
+#   1. Unauthenticated ping  — confirms mongod is up (no auth needed)
+#   2. Authenticated ping    — confirms the root user is created and auth works
+# Only THEN calls rs.initiate(). No `set -e` so individual failures are handled
+# explicitly instead of killing the whole script.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $svcName }}-rs-init
+  namespace: {{ $ns }}
+  labels:
+    app: {{ $svcName }}-rs-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: {{ $svcName }}-rs-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rs-init
+          image: "{{ .Values.externalMongodb.image.repository }}:{{ .Values.externalMongodb.image.tag }}"
+          imagePullPolicy: {{ .Values.externalMongodb.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # No set -e: handle errors explicitly so a transient mongosh
+              # non-zero exit does not kill the entire script.
+              PREFIX="{{ $svcName }}"
+              NS="{{ $ns }}"
+              USER="{{ $rootUser }}"
+              PASS="{{ $rootPass }}"
+              REPLICAS={{ $replicas }}
+
+              PRIMARY="${PREFIX}-0.${PREFIX}.${NS}.svc.cluster.local"
+
+              # ── Phase 1: wait until mongod accepts connections (no auth) ──────
+              echo "Phase 1: waiting for mongod on ${PRIMARY}..."
+              until mongosh --quiet --host "${PRIMARY}" \
+                  --eval "db.adminCommand('ping').ok" 2>/dev/null | grep -q 1; do
+                echo "  mongod not ready, retrying in 3s..."
+                sleep 3
+              done
+              echo "  mongod is up."
+
+              # ── Phase 2: wait until auth user is created ───────────────────────
+              echo "Phase 2: waiting for auth (root user) to be ready..."
+              until mongosh --quiet -u "$USER" -p "$PASS" \
+                  --host "${PRIMARY}" --authenticationDatabase admin \
+                  --eval "db.adminCommand('ping').ok" 2>/dev/null | grep -q 1; do
+                echo "  auth not ready yet, retrying in 3s..."
+                sleep 3
+              done
+              echo "  auth ready."
+
+              # ── Check if RS is already initiated ──────────────────────────────
+              STATUS=$(mongosh --quiet -u "$USER" -p "$PASS" \
+                  --host "${PRIMARY}" --authenticationDatabase admin \
+                  --eval "try { rs.status().ok } catch(e) { 0 }" 2>/dev/null)
+
+              if [ "$STATUS" = "1" ]; then
+                echo "Replica set already initialized — nothing to do."
+                exit 0
+              fi
+
+              # ── Build member list for rs.initiate() ───────────────────────────
+              echo "Initializing ${REPLICAS}-node replica set rs0..."
+              MEMBERS="["
+              for i in $(seq 0 $((REPLICAS - 1))); do
+                HOST="${PREFIX}-${i}.${PREFIX}.${NS}.svc.cluster.local:27017"
+                MEMBERS="${MEMBERS}{_id: ${i}, host: '${HOST}'},"
+              done
+              MEMBERS="${MEMBERS%,}]"   # strip trailing comma
+
+              mongosh --quiet -u "$USER" -p "$PASS" \
+                --host "${PRIMARY}" --authenticationDatabase admin \
+                --eval "rs.initiate({_id: 'rs0', members: ${MEMBERS}})"
+              RC=$?
+
+              if [ $RC -ne 0 ]; then
+                echo "rs.initiate() returned non-zero (${RC}) — may already be in progress."
+                exit $RC
+              fi
+              echo "Replica set rs0 initialized with ${REPLICAS} members."
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
 {{- end }}

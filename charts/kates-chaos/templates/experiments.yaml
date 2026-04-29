@@ -22,6 +22,27 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
       containers:
+      # FIX #9: wait for the Litmus server GraphQL endpoint before applying CRDs.
+      # Without this, the post-install hook races the Litmus portal startup and
+      # fails when pods are still in Init state.
+      initContainers:
+        - name: wait-for-litmus
+          image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for Litmus chaos-operator to be ready..."
+              kubectl rollout status deployment -n {{ .Release.Namespace }} \
+                -l app.kubernetes.io/component=chaos-operator --timeout=300s || true
+              echo "Waiting for ChaosExperiment CRD to be established..."
+              until kubectl get crd chaosexperiments.litmuschaos.io > /dev/null 2>&1; do
+                echo "  CRD not ready yet, retrying in 5s..."
+                sleep 5
+              done
+              echo "Litmus is ready — proceeding with experiment installation."
+      containers:
         - name: install
           image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
           imagePullPolicy: IfNotPresent
@@ -40,7 +61,9 @@ spec:
               spec:
                 definition:
                   scope: {{ .scope | default "Namespaced" }}
-                  image: {{ .image | default "litmuschaos/go-runner:latest" }}
+                  # pin to versioned tag matching chart appVersion (3.28.0)
+                  # ':latest' is not pre-loaded in Kind offline mode.
+                  image: {{ .image | default "litmuschaos/go-runner:3.28.0" }}
                   imagePullPolicy: IfNotPresent
                   args: ["-name", "{{ .name }}"]
                   command: ["/bin/bash"]

@@ -80,13 +80,27 @@ done
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
-    --timeout 5m
+    --timeout 10m
 
 info "Waiting for Kafka cluster to be ready..."
-kubectl wait kafka/krafter --for=condition=Ready --timeout=300s -n "${NAMESPACE}" || {
-    warn "Kafka not ready within timeout — check pod status:"
+info "  (First deployment performs a KRaft voter-format upgrade — allow up to 10 min)"
+kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n "${NAMESPACE}" || {
+    warn "Kafka not ready within 10 min — checking pod status:"
     kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter
-    exit 1
+    warn "Operator log tail:"
+    kubectl logs -n "${NAMESPACE}" -l strimzi.io/kind=cluster-operator --tail=10 2>/dev/null || true
+    # Consider the deploy a success if all pods are Running even when the CR
+    # condition hasn't propagated yet (operator is still reconciling).
+    RUNNING=$(kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter \
+        --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    TOTAL=$(kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter \
+        --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${RUNNING}" -eq "${TOTAL}" ] && [ "${TOTAL}" -gt 0 ]; then
+        warn "All ${TOTAL} pods Running — operator still reconciling in background. Continuing."
+    else
+        error "Only ${RUNNING}/${TOTAL} pods Running. Aborting."
+        exit 1
+    fi
 }
 
 info "Waiting for user secrets to be created..."

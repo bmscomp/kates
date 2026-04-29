@@ -19,20 +19,34 @@ brokerPools:
     storageSize: 50Gi
     storageClass: local-storage-gamma
 
+# Single controllers block — previously split into two entries which caused
+# the second block to silently overwrite the first (YAML last-value-wins).
+# That removed tolerations, resources, and podAntiAffinity, forcing all 3
+# controllers onto the 2 worker nodes and causing resource contention that
+# made the Strimzi agent on port 8443 unresponsive → operator TimeoutException.
 controllers:
+  replicas: 3
   storage:
     size: 1Gi
   resources:
     requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
       cpu: 500m
       memory: 1Gi
-    limits:
-      cpu: 1000m
-      memory: 2Gi
   topologySpreadConstraints:
-    enabled: false
+    # Ensure one controller per node across all 3 Kind nodes.
+    # Without this, 2 controllers land on gamma causing resource contention
+    # that stalls the Strimzi agent on port 8443 → operator TimeoutException.
+    enabled: true
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
   podAntiAffinity:
     enabled: false
+  # Toleration allows controllers to schedule on the control-plane node (alpha),
+  # so 3 controllers spread across all 3 nodes instead of cramming 2 on gamma.
   tolerations:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
@@ -108,11 +122,3 @@ podSecurityPolicy:
 # Disable CRD upgrade hook for Kind because we have it in Strimzi operator
 crdUpgrade:
   enabled: false
-
-# 3 controllers as requested (matching prod, but light resources)
-controllers:
-  replicas: 3
-  storage:
-    size: 1Gi
-  topologySpreadConstraints:
-    enabled: false

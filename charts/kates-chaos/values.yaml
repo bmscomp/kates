@@ -1,3 +1,4 @@
+
 # Kates Chaos Engineering — Default Values
 # Wraps LitmusChaos with Kafka/Kates-specific chaos infrastructure
 
@@ -102,6 +103,7 @@ gameday:
 externalMongodb:
   enabled: false
   serviceName: chaos-mongodb-external
+  replicas: 3
   image:
     repository: docker.io/library/mongo
     tag: "6.0"
