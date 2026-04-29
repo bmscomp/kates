@@ -1,39 +1,32 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: INTEGRITY — Exactly-Once Delivery Verification
 # ─────────────────────────────────────────────────────────────────────────────
-# Verifies that zero messages are lost or duplicated across a full
-# produce→consume cycle with idempotent/transactional producers.
-# CRC checking is enabled for additional bit-level integrity assurance.
-#
-# Usage:
-#   kates test run -f cli/examples/perf-integrity.yaml
+# Usage:  kates test apply -f cli/examples/perf-integrity.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
-
-type: INTEGRITY
-
-spec:
-  topic: kates-dlq              # DLQ topic — zero-loss requirement is strictest here
-  partitions: 3
-  replicationFactor: 3
-  minInsyncReplicas: 2
-
-  numRecords: 200000
-  recordSize: 512
-  throughput: 2000
-  numProducers: 2
-  numConsumers: 2
-  consumerGroup: integrity-cg
-
-  acks: "all"
-  enableIdempotence: true
-  enableTransactions: true      # transactional producer for exactly-once
-  enableCrc: true               # bit-level payload integrity check
-  batchSize: 65536
-  lingerMs: 5
-  compressionType: lz4
-
-sla:
-  maxDataLossPercent: 0.0       # absolutely no data loss tolerated
-  maxErrorRate: 0.0
-  minRecordsProcessed: 200000   # every record must be consumed exactly once
-  maxP99LatencyMs: 500.0        # transactions add ~10-20ms overhead
+scenarios:
+  - name: "Integrity — transactional EOS, CRC enabled"
+    type: INTEGRITY
+    spec:
+      topic: kates-dlq
+      partitions: 3
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 200000
+      recordSize: 512
+      throughput: 2000
+      numProducers: 2
+      numConsumers: 2
+      consumerGroup: integrity-cg
+      acks: "all"
+      enableIdempotence: true
+      enableTransactions: true  # exactly-once semantics
+      enableCrc: true           # bit-level payload integrity
+      batchSize: 65536
+      lingerMs: 5
+      compressionType: lz4
+    validate:
+      maxDataLossPercent: 0.0
+      maxErrorRate: 0.0
+      maxCrcFailures: 0
+      maxOutOfOrder: 0
+      maxP99LatencyMs: 500      # transactions add ~10-20ms overhead

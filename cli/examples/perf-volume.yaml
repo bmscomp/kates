@@ -1,40 +1,32 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: VOLUME — Large Message Payload Throughput
 # ─────────────────────────────────────────────────────────────────────────────
-# Tests throughput and latency with large record payloads (e.g. binary blobs,
-# Avro-encoded aggregates). Large records stress broker request queue depth,
-# batch sizing logic, and network link utilisation.
-#
-# Usage:
-#   kates test run -f cli/examples/perf-volume.yaml
+# Usage:  kates test apply -f cli/examples/perf-volume.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
-
-type: VOLUME
-
-spec:
-  topic: kates-audit
-  partitions: 3
-  replicationFactor: 3
-  minInsyncReplicas: 2
-
-  numRecords: 100000
-  recordSize: 65536          # 64 KB — simulate large binary payloads
-  throughput: 500            # 500 × 64 KB ≈ 32 MB/s
-  numProducers: 2
-  numConsumers: 1
-  consumerGroup: volume-cg
-
-  acks: "all"
-  enableIdempotence: true
-  batchSize: 1048576         # 1 MB — must be ≥ recordSize
-  lingerMs: 20               # give batcher more time with large messages
-  compressionType: snappy    # snappy reduces network pressure on large payloads
-  fetchMinBytes: 1048576
-  fetchMaxWaitMs: 500
-
-sla:
-  maxP99LatencyMs: 2000.0    # large payloads tolerate higher latency
-  maxAvgLatencyMs: 500.0
-  minThroughputRecPerSec: 400.0
-  maxErrorRate: 0.0
-  maxDataLossPercent: 0.0
+scenarios:
+  - name: "Volume — 64 KB payloads, snappy"
+    type: VOLUME
+    spec:
+      topic: kates-audit
+      partitions: 3
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 100000
+      recordSize: 65536         # 64 KB
+      throughput: 500           # 500 × 64 KB ≈ 32 MB/s
+      numProducers: 2
+      numConsumers: 1
+      consumerGroup: volume-cg
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 1048576        # 1 MB — must be ≥ recordSize
+      lingerMs: 20
+      compressionType: snappy
+      fetchMinBytes: 1048576
+      fetchMaxWaitMs: 500
+    validate:
+      maxP99LatencyMs: 2000
+      maxAvgLatencyMs: 500
+      minThroughputRecPerSec: 400
+      maxErrorRate: 0.0
+      maxDataLossPercent: 0.0

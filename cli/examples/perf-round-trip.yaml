@@ -1,38 +1,31 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Performance Test: ROUND_TRIP — End-to-End Latency (Produce → Consume)
+# Performance Test: ROUND_TRIP — End-to-End Latency Benchmark
 # ─────────────────────────────────────────────────────────────────────────────
-# Measures the full produce→broker→consume round-trip latency at low throughput.
-# Use this to tune fetch settings and consumer group session timeouts.
-#
-# Usage:
-#   kates test run -f cli/examples/perf-round-trip.yaml
+# Usage:  kates test apply -f cli/examples/perf-round-trip.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
-
-type: ROUND_TRIP
-
-spec:
-  topic: kates-metrics
-  partitions: 3
-  replicationFactor: 3
-  minInsyncReplicas: 2
-
-  numRecords: 50000
-  recordSize: 256            # small payloads to isolate latency from serialisation
-  throughput: 1000           # low throughput — latency measurement focus
-  numProducers: 1
-  numConsumers: 1
-  consumerGroup: round-trip-cg
-
-  acks: "all"
-  enableIdempotence: true
-  batchSize: 16384           # small batch to reduce buffering latency
-  lingerMs: 0                # no artificial delay
-  compressionType: none      # no serialisation overhead
-  fetchMinBytes: 1           # return immediately, no wait for batch fill
-  fetchMaxWaitMs: 0
-
-sla:
-  maxP99LatencyMs: 50.0     # tight — this is a latency benchmark
-  maxAvgLatencyMs: 10.0
-  maxErrorRate: 0.0
-  minThroughputRecPerSec: 900.0
+scenarios:
+  - name: "Round-trip latency — linger=0, no compression"
+    type: ROUND_TRIP
+    spec:
+      topic: kates-metrics
+      partitions: 3
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 50000
+      recordSize: 256
+      throughput: 1000
+      numProducers: 1
+      numConsumers: 1
+      consumerGroup: round-trip-cg
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 16384          # small batch — reduce buffering latency
+      lingerMs: 0               # no artificial delay
+      compressionType: none
+      fetchMinBytes: 1          # return immediately
+      fetchMaxWaitMs: 0
+    validate:
+      maxP99LatencyMs: 50
+      maxAvgLatencyMs: 10
+      maxErrorRate: 0.0
+      minThroughputRecPerSec: 900

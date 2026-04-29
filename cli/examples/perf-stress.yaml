@@ -1,68 +1,88 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: STRESS — Throughput Saturation Curve
 # ─────────────────────────────────────────────────────────────────────────────
-# Ramps throughput through a sequence of steps to find the cluster's saturation
-# point. Each phase increases load until latency or error-rate SLA is breached.
-# Useful for capacity planning and tuning batch/linger before production sizing.
+# Runs 4 sequential scenarios at increasing throughput to find the knee of the
+# latency curve. Each step increases load until SLA is breached.
 #
-# Usage:
-#   kates test run -f cli/examples/perf-stress.yaml
+# Usage:  kates test apply -f cli/examples/perf-stress.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
+scenarios:
+  - name: "Stress — 5k msg/s"
+    type: STRESS
+    spec:
+      topic: kates-results
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 500000
+      recordSize: 1024
+      throughput: 5000
+      numProducers: 3
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: snappy
+    validate:
+      maxP99LatencyMs: 200
+      maxErrorRate: 1.0
 
-type: STRESS
+  - name: "Stress — 15k msg/s"
+    type: STRESS
+    spec:
+      topic: kates-results
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 500000
+      recordSize: 1024
+      throughput: 15000
+      numProducers: 3
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: snappy
+    validate:
+      maxP99LatencyMs: 300
+      maxErrorRate: 1.0
 
-scenario:
-  name: "Throughput Saturation Curve"
-  description: "Ramp from 5k to unlimited msg/s in 4 steps to locate the knee of the latency curve"
+  - name: "Stress — 30k msg/s"
+    type: STRESS
+    spec:
+      topic: kates-results
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 500000
+      recordSize: 1024
+      throughput: 30000
+      numProducers: 4
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: snappy
+    validate:
+      maxP99LatencyMs: 500
+      maxErrorRate: 1.0
 
-  baseSpec:
-    topic: kates-results
-    partitions: 6
-    replicationFactor: 3
-    minInsyncReplicas: 2
-    numRecords: 500000
-    recordSize: 1024
-    numProducers: 3
-    acks: "all"
-    enableIdempotence: true
-    batchSize: 131072        # 128 KB — larger batch absorbs more at high throughput
-    lingerMs: 10
-    compressionType: snappy
-
-  phases:
-    - name: "warm-up"
-      phaseType: WARMUP
-      durationMs: 30000      # 30s
-      targetThroughput: 2000
-
-    - name: "step-5k"
-      phaseType: STEADY
-      durationMs: 60000
-      targetThroughput: 5000
-
-    - name: "step-15k"
-      phaseType: RAMP
-      durationMs: 60000
-      targetThroughput: 15000
-      rampSteps: 3           # ramp in 3 increments over 60s
-
-    - name: "step-30k"
-      phaseType: STEADY
-      durationMs: 60000
-      targetThroughput: 30000
-
-    - name: "unlimited"
-      phaseType: SPIKE
-      durationMs: 30000
-      targetThroughput: -1   # no cap — find the hard ceiling
-
-    - name: "cooldown"
-      phaseType: COOLDOWN
-      durationMs: 30000
-      targetThroughput: 2000
-
-  sla:
-    maxP99LatencyMs: 500.0
-    maxAvgLatencyMs: 100.0
-    minThroughputRecPerSec: 5000.0
-    maxErrorRate: 1.0
+  - name: "Stress — unlimited (find ceiling)"
+    type: STRESS
+    spec:
+      topic: kates-results
+      partitions: 6
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 500000
+      recordSize: 1024
+      throughput: -1            # no cap — saturate the cluster
+      numProducers: 6
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: snappy
+    validate:
+      minThroughputRecPerSec: 5000  # fail only if below 5k even uncapped
+      maxErrorRate: 5.0

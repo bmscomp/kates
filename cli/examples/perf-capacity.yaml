@@ -1,54 +1,75 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: CAPACITY — Maximum Sustainable Throughput Discovery
 # ─────────────────────────────────────────────────────────────────────────────
-# Finds the maximum sustainable throughput before p99 latency or error-rate SLA
-# is breached. Uses ramp phases with no cap, then backs off to validate stability
-# at the discovered ceiling.
+# Runs 3 sequential scenarios stepping from a known-safe load to unlimited,
+# then backs off to confirm stability at the observed ceiling.
 #
-# Usage:
-#   kates test run -f cli/examples/perf-capacity.yaml
+# Usage:  kates test apply -f cli/examples/perf-capacity.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
+scenarios:
+  - name: "Capacity — ramp 10k msg/s"
+    type: CAPACITY
+    spec:
+      topic: kates-events
+      partitions: 12
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 600000
+      recordSize: 1024
+      throughput: 10000
+      numProducers: 6
+      numConsumers: 3
+      consumerGroup: capacity-cg
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: lz4
+    validate:
+      maxP99LatencyMs: 500
+      maxErrorRate: 1.0
 
-type: CAPACITY
+  - name: "Capacity — unlimited (find ceiling)"
+    type: CAPACITY
+    spec:
+      topic: kates-events
+      partitions: 12
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 600000
+      recordSize: 1024
+      throughput: -1            # no cap
+      numProducers: 6
+      numConsumers: 3
+      consumerGroup: capacity-cg
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: lz4
+    validate:
+      minThroughputRecPerSec: 10000   # fail if ceiling < 10k msg/s
+      maxErrorRate: 1.0
 
-scenario:
-  name: "Maximum Sustainable Throughput"
-  description: "Binary-search-like ramp to find the throughput ceiling within SLA"
-
-  baseSpec:
-    topic: kates-events
-    partitions: 12           # more partitions = higher parallelism ceiling
-    replicationFactor: 3
-    minInsyncReplicas: 2
-    recordSize: 1024
-    numProducers: 6
-    numConsumers: 3
-    consumerGroup: capacity-cg
-    acks: "all"
-    enableIdempotence: true
-    batchSize: 131072
-    lingerMs: 10
-    compressionType: lz4
-
-  phases:
-    - name: "ramp-to-ceiling"
-      phaseType: RAMP
-      durationMs: 120000     # 2 min to ramp through all steps
-      targetThroughput: -1   # unlimited
-      rampSteps: 6           # 6 increments of 20s each
-
-    - name: "hold-at-ceiling"
-      phaseType: STEADY
-      durationMs: 60000
-      targetThroughput: -1
-
-    - name: "back-off-validation"
-      phaseType: COOLDOWN
-      durationMs: 60000
-      targetThroughput: 20000  # back off to a known-safe level
-
-  sla:
-    maxP99LatencyMs: 500.0
-    maxErrorRate: 1.0
-    minThroughputRecPerSec: 10000.0  # fail if ceiling is below 10k msg/s
-    maxDataLossPercent: 0.0
+  - name: "Capacity — back-off validation at 20k msg/s"
+    type: CAPACITY
+    spec:
+      topic: kates-events
+      partitions: 12
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numRecords: 300000
+      recordSize: 1024
+      throughput: 20000
+      numProducers: 6
+      numConsumers: 3
+      consumerGroup: capacity-cg
+      acks: "all"
+      enableIdempotence: true
+      batchSize: 131072
+      lingerMs: 10
+      compressionType: lz4
+    validate:
+      maxP99LatencyMs: 500
+      minThroughputRecPerSec: 18000   # must sustain 90% of target
+      maxErrorRate: 0.5
