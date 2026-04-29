@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Resilience Test: DNS_ERROR — DNS Resolution Failures on Broker Pods
+# ─────────────────────────────────────────────────────────────────────────────
+# Injects DNS failures on all broker pods to simulate CoreDNS degradation or
+# a misconfigured network policy blocking UDP/53. Established TCP connections
+# use cached DNS, so short outages should be transparent to producers.
+#
+# Hypothesis:
+#   Kafka clients cache resolved broker addresses. DNS failures < session timeout
+#   do not affect established connections. Consumer group coordinator discovery
+#   may fail for new consumers joining during the outage.
+#
+# Usage:
+#   kates resilience run -f cli/examples/resilience-dns-error.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+testRequest:
+  type: LOAD
+  spec:
+    topic: kates-events
+    partitions: 6
+    replicationFactor: 3
+    minInsyncReplicas: 2
+    numRecords: 400000
+    recordSize: 512
+    throughput: 3000
+    numProducers: 2
+    numConsumers: 2
+    consumerGroup: dns-error-cg
+    acks: "all"
+    enableIdempotence: true
+    batchSize: 65536
+    lingerMs: 5
+    compressionType: lz4
+
+chaosSpec:
+  experimentName: dns-resolution-failure
+  disruptionType: DNS_ERROR
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/cluster=krafter"   # all broker pods
+  chaosDurationSec: 30
+  delayBeforeSec: 0
+
+steadyStateSec: 30
+maxRecoveryWaitSec: 90
+
+probes:
+  - name: cluster-ready
+    type: k8sProbe
+    mode: Edge
+    command: "kafka Ready"
+    expectedOutput: "Ready"
+    comparator: contains
+    intervalSec: 15
+    timeoutSec: 30
+
+  - name: consumer-lag
+    type: cmdProbe
+    mode: Continuous
+    command: "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group dns-error-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'"
+    expectedOutput: "100000"
+    comparator: "<"
+    intervalSec: 15
+    timeoutSec: 30

@@ -1,36 +1,30 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
+# Resilience Test: MEMORY_STRESS — Broker JVM Memory Pressure
 # ─────────────────────────────────────────────────────────────────────────────
-# Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# Consumes 500 MB of native memory on a broker pod to simulate GC pressure
+# from a memory leak or a badly-tuned heap. Tests whether the broker OOM-kills
+# or degrades gracefully under sustained memory contention.
 #
 # Hypothesis:
-#   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
-#   Idempotent producer with acks=all stalls, then retries successfully.
-#   ISR recovers to 3/3 within 120s. Zero data loss.
-#
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+#   Memory pressure triggers more frequent GC pauses. Request handling slows.
+#   Producer p99 latency rises but the broker does not crash (OOM-kill would
+#   require >100% of the pod memory limit). ISR stays intact.
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-memory-stress.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
-  type: LOAD
+  type: STRESS
   spec:
     topic: kates-events
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    numRecords: 500000
+    numRecords: 1000000
     recordSize: 1024
     throughput: 5000
     numProducers: 3
-    numConsumers: 2
-    consumerGroup: resilience-pod-kill-cg
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -38,25 +32,25 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: broker-hard-crash
-  disruptionType: POD_KILL
+  experimentName: broker-memory-pressure
+  disruptionType: MEMORY_STRESS
   targetNamespace: kafka
-  targetLabel: "strimzi.io/pool-name=brokers-alpha"
-  chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
+  targetLabel: "strimzi.io/pool-name=brokers-sigma"
+  chaosDurationSec: 60
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
+  memoryMb: 500             # consume 500 MB of native memory
 
 steadyStateSec: 30
-maxRecoveryWaitSec: 120
+maxRecoveryWaitSec: 90
 
 probes:
-  - name: isr-health-check
+  - name: producer-throughput
     type: cmdProbe
     mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
-    expectedOutput: "50"
-    comparator: "<="
-    intervalSec: 10
+    command: "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'"
+    expectedOutput: "0"
+    comparator: ">"
+    intervalSec: 15
     timeoutSec: 30
 
   - name: cluster-ready

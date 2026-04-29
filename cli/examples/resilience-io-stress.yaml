@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Resilience Test: IO_STRESS — Broker Disk I/O Saturation
+# ─────────────────────────────────────────────────────────────────────────────
+# Saturates broker disk I/O at 80% filesystem utilisation using background
+# dd workers. Simulates a slow NVMe, a shared disk under compaction load,
+# or a log retention cleanup storm running in parallel with production traffic.
+#
+# Hypothesis:
+#   Disk saturation delays log segment flushing (log.flush.interval.ms).
+#   The broker falls behind replication → ISR shrinks → leader migrates.
+#   Producers stall until the new leader is elected. No data loss.
+#
+# Usage:
+#   kates resilience run -f cli/examples/resilience-io-stress.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+testRequest:
+  type: LOAD
+  spec:
+    topic: kates-audit
+    partitions: 3
+    replicationFactor: 3
+    minInsyncReplicas: 2
+    numRecords: 200000
+    recordSize: 16384         # 16 KB — large records amplify I/O pressure
+    throughput: 500
+    numProducers: 4
+    acks: "all"
+    enableIdempotence: true
+    batchSize: 1048576         # 1 MB batch — maximum I/O per flush
+    lingerMs: 20
+    compressionType: none      # raw bytes — maximum disk write volume
+
+chaosSpec:
+  experimentName: disk-io-saturation-alpha
+  disruptionType: IO_STRESS
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/pool-name=brokers-alpha"
+  chaosDurationSec: 90
+  delayBeforeSec: 0
+  fillPercentage: 80           # saturate to 80% filesystem utilisation
+  ioWorkers: 2                 # 2 dd workers writing simultaneously
+
+steadyStateSec: 20
+maxRecoveryWaitSec: 120
+
+probes:
+  - name: isr-health-check
+    type: cmdProbe
+    mode: Continuous
+    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    expectedOutput: "50"
+    comparator: "<="
+    intervalSec: 10
+    timeoutSec: 30
+
+  - name: producer-throughput
+    type: cmdProbe
+    mode: Continuous
+    command: "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'"
+    expectedOutput: "0"
+    comparator: ">"
+    intervalSec: 15
+    timeoutSec: 30

@@ -1,36 +1,34 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
+# Resilience Test: SCALE_DOWN — Broker Pool Contraction
 # ─────────────────────────────────────────────────────────────────────────────
-# Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# Scales the sigma broker pool from 1 replica to 0, simulating an emergency
+# cordon or a planned capacity reduction. Verifies that Strimzi rebalances
+# partition leaders off sigma before the pod is terminated.
 #
 # Hypothesis:
-#   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
-#   Idempotent producer with acks=all stalls, then retries successfully.
-#   ISR recovers to 3/3 within 120s. Zero data loss.
-#
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+#   Strimzi refuses to scale down a broker with active partition assignments
+#   until all partitions are reassigned. Kates SCALE_DOWN disruption performs
+#   the reassignment before scaling. With RF=3 and 2 remaining brokers,
+#   min.isr=2 is still satisfied. Producers see no errors.
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-scale-down.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
-  type: LOAD
+  type: ENDURANCE
   spec:
-    topic: kates-events
+    topic: kates-metrics
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    numRecords: 500000
+    durationMs: 180000        # 3 min — covers the full scale-down + recovery
+    numRecords: 540000
     recordSize: 1024
-    throughput: 5000
+    throughput: 3000
     numProducers: 3
     numConsumers: 2
-    consumerGroup: resilience-pod-kill-cg
+    consumerGroup: scale-down-cg
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -38,13 +36,13 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: broker-hard-crash
-  disruptionType: POD_KILL
+  experimentName: scale-down-sigma
+  disruptionType: SCALE_DOWN
   targetNamespace: kafka
-  targetLabel: "strimzi.io/pool-name=brokers-alpha"
-  chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
+  targetLabel: "strimzi.io/pool-name=brokers-sigma"
+  chaosDurationSec: 60
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
+  gracePeriodSec: 30
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 120

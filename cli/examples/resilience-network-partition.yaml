@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Resilience Test: NETWORK_PARTITION — Zone Isolation
+# ─────────────────────────────────────────────────────────────────────────────
+# Blocks all ingress/egress on the sigma broker pool, isolating it from both
+# clients and other brokers. Tests leader migration, consumer rebalance, and
+# recovery when the partition heals.
+#
+# Hypothesis:
+#   Partitioned broker is fenced by KRaft controller within 30s.
+#   Partition leaders on sigma migrate to alpha/gamma.
+#   Consumer group rebalances within 60s of the partition.
+#   Producers with acks=all recover with 0 errors after ISR restores.
+#
+# Usage:
+#   kates resilience run -f cli/examples/resilience-network-partition.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+testRequest:
+  type: LOAD
+  spec:
+    topic: kates-events
+    partitions: 6
+    replicationFactor: 3
+    minInsyncReplicas: 2
+    numRecords: 400000
+    recordSize: 512
+    throughput: 3000
+    numProducers: 3
+    numConsumers: 2
+    consumerGroup: net-partition-cg
+    acks: "all"
+    enableIdempotence: true
+    batchSize: 65536
+    lingerMs: 5
+    compressionType: lz4
+
+chaosSpec:
+  experimentName: network-split-sigma
+  disruptionType: NETWORK_PARTITION
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/pool-name=brokers-sigma"
+  chaosDurationSec: 60
+  delayBeforeSec: 0
+
+steadyStateSec: 15
+maxRecoveryWaitSec: 120
+
+probes:
+  - name: min-isr-check
+    type: cmdProbe
+    mode: Edge
+    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    expectedOutput: "5"
+    comparator: "<="
+    intervalSec: 15
+    timeoutSec: 30
+
+  - name: consumer-lag
+    type: cmdProbe
+    mode: Continuous
+    command: "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group net-partition-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'"
+    expectedOutput: "100000"
+    comparator: "<"
+    intervalSec: 15
+    timeoutSec: 30

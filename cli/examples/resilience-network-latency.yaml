@@ -1,36 +1,32 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
+# Resilience Test: NETWORK_LATENCY — Broker Egress Latency Injection
 # ─────────────────────────────────────────────────────────────────────────────
-# Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# Adds 200ms artificial latency to all egress packets from the alpha broker
+# using tc netem. Simulates a degraded cross-AZ link or WAN replication delay.
 #
 # Hypothesis:
-#   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
-#   Idempotent producer with acks=all stalls, then retries successfully.
-#   ISR recovers to 3/3 within 120s. Zero data loss.
-#
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+#   Replication lag increases proportionally to injected latency.
+#   With replica.lag.time.max.ms=30s and 200ms latency, the broker stays in ISR.
+#   Producer p99 latency rises by ~networkLatencyMs × round-trips.
+#   Consumer fetch latency increases. No data loss.
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-network-latency.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
   type: LOAD
   spec:
-    topic: kates-events
+    topic: kates-metrics
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    numRecords: 500000
+    numRecords: 300000
     recordSize: 1024
-    throughput: 5000
+    throughput: 3000
     numProducers: 3
     numConsumers: 2
-    consumerGroup: resilience-pod-kill-cg
+    consumerGroup: latency-inject-cg
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -38,16 +34,16 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: broker-hard-crash
-  disruptionType: POD_KILL
+  experimentName: network-latency-alpha
+  disruptionType: NETWORK_LATENCY
   targetNamespace: kafka
   targetLabel: "strimzi.io/pool-name=brokers-alpha"
-  chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
+  chaosDurationSec: 90
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
+  networkLatencyMs: 200     # inject 200ms round-trip on all egress
 
-steadyStateSec: 30
-maxRecoveryWaitSec: 120
+steadyStateSec: 20
+maxRecoveryWaitSec: 90
 
 probes:
   - name: isr-health-check
@@ -59,11 +55,11 @@ probes:
     intervalSec: 10
     timeoutSec: 30
 
-  - name: cluster-ready
-    type: k8sProbe
-    mode: Edge
-    command: "kafka Ready"
-    expectedOutput: "Ready"
-    comparator: contains
-    intervalSec: 15
+  - name: partition-availability
+    type: cmdProbe
+    mode: Continuous
+    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    expectedOutput: "0"
+    comparator: "=="
+    intervalSec: 10
     timeoutSec: 30

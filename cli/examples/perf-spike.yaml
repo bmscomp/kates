@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Performance Test: SPIKE — Sudden Burst After Idle
+# ─────────────────────────────────────────────────────────────────────────────
+# Simulates a traffic burst (e.g. event storm after a batch job or market open).
+# Quiet period → spike → return to normal. Validates that producer quotas,
+# broker request queues, and consumer fetch backlog recover cleanly.
+#
+# Usage:
+#   kates test run -f cli/examples/perf-spike.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+type: SPIKE
+
+scenario:
+  name: "Event Storm Spike"
+  description: "30s idle → 30s unlimited burst → 60s recovery — validates quota and queue recovery"
+
+  baseSpec:
+    topic: kates-events
+    partitions: 6
+    replicationFactor: 3
+    minInsyncReplicas: 2
+    recordSize: 512
+    numProducers: 4
+    numConsumers: 2
+    consumerGroup: spike-cg
+    acks: "all"
+    enableIdempotence: true
+    batchSize: 65536
+    lingerMs: 5
+    compressionType: lz4
+    fetchMinBytes: 65536
+    fetchMaxWaitMs: 250
+
+  phases:
+    - name: "idle"
+      phaseType: WARMUP
+      durationMs: 30000
+      targetThroughput: 500
+
+    - name: "burst"
+      phaseType: SPIKE
+      durationMs: 30000
+      targetThroughput: -1   # unlimited — saturate as hard as possible
+
+    - name: "recovery"
+      phaseType: COOLDOWN
+      durationMs: 60000
+      targetThroughput: 3000
+
+  sla:
+    maxP99LatencyMs: 1000.0  # spikes allowed higher latency
+    maxErrorRate: 0.5         # allow brief quota rejections during burst
+    minThroughputRecPerSec: 500.0
+    maxDataLossPercent: 0.0   # zero data loss required even during burst

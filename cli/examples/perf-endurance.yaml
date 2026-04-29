@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Performance Test: ENDURANCE — Long-Running Soak Test
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs at steady production-like load for 10 minutes to surface memory leaks,
+# log compaction pressure, ISR drift, and GC pauses that only appear over time.
+#
+# Usage:
+#   kates test run -f cli/examples/perf-endurance.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+type: ENDURANCE
+
+spec:
+  topic: kates-metrics
+  partitions: 6
+  replicationFactor: 3
+  minInsyncReplicas: 2
+
+  durationMs: 600000         # 10 min soak
+  numRecords: 3600000        # ~6000 msg/s over 600s
+  recordSize: 1024
+  throughput: 6000
+  numProducers: 3
+  numConsumers: 3
+  consumerGroup: soak-cg
+
+  acks: "all"
+  enableIdempotence: true
+  batchSize: 65536
+  lingerMs: 5
+  compressionType: lz4
+  fetchMinBytes: 65536
+  fetchMaxWaitMs: 500
+
+sla:
+  maxP99LatencyMs: 300.0
+  maxAvgLatencyMs: 75.0
+  minThroughputRecPerSec: 5500.0   # allow some degradation over time
+  minRecordsProcessed: 3400000      # expect at least 94% delivery
+  maxErrorRate: 0.1
+  maxDataLossPercent: 0.0

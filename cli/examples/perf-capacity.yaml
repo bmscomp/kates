@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Performance Test: CAPACITY — Maximum Sustainable Throughput Discovery
+# ─────────────────────────────────────────────────────────────────────────────
+# Finds the maximum sustainable throughput before p99 latency or error-rate SLA
+# is breached. Uses ramp phases with no cap, then backs off to validate stability
+# at the discovered ceiling.
+#
+# Usage:
+#   kates test run -f cli/examples/perf-capacity.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+type: CAPACITY
+
+scenario:
+  name: "Maximum Sustainable Throughput"
+  description: "Binary-search-like ramp to find the throughput ceiling within SLA"
+
+  baseSpec:
+    topic: kates-events
+    partitions: 12           # more partitions = higher parallelism ceiling
+    replicationFactor: 3
+    minInsyncReplicas: 2
+    recordSize: 1024
+    numProducers: 6
+    numConsumers: 3
+    consumerGroup: capacity-cg
+    acks: "all"
+    enableIdempotence: true
+    batchSize: 131072
+    lingerMs: 10
+    compressionType: lz4
+
+  phases:
+    - name: "ramp-to-ceiling"
+      phaseType: RAMP
+      durationMs: 120000     # 2 min to ramp through all steps
+      targetThroughput: -1   # unlimited
+      rampSteps: 6           # 6 increments of 20s each
+
+    - name: "hold-at-ceiling"
+      phaseType: STEADY
+      durationMs: 60000
+      targetThroughput: -1
+
+    - name: "back-off-validation"
+      phaseType: COOLDOWN
+      durationMs: 60000
+      targetThroughput: 20000  # back off to a known-safe level
+
+  sla:
+    maxP99LatencyMs: 500.0
+    maxErrorRate: 1.0
+    minThroughputRecPerSec: 10000.0  # fail if ceiling is below 10k msg/s
+    maxDataLossPercent: 0.0

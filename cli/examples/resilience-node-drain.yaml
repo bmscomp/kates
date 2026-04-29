@@ -1,36 +1,34 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
+# Resilience Test: NODE_DRAIN — Kubernetes Node Maintenance
 # ─────────────────────────────────────────────────────────────────────────────
-# Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# Drains the Kubernetes node hosting the gamma broker pool.
+# The Strimzi Drain Cleaner intercepts the eviction webhook and triggers
+# a controlled Kafka shutdown before the pod is evicted, ensuring zero
+# partition downtime during node maintenance windows.
 #
 # Hypothesis:
-#   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
-#   Idempotent producer with acks=all stalls, then retries successfully.
-#   ISR recovers to 3/3 within 120s. Zero data loss.
-#
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+#   Drain Cleaner intercepts eviction → triggers controlled shutdown →
+#   partition leaders transferred off gamma → pod evicted → rescheduled.
+#   Zero partition unavailability. Producer errors = 0.
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-node-drain.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
-  type: LOAD
+  type: ENDURANCE
   spec:
-    topic: kates-events
+    topic: kates-results
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    numRecords: 500000
+    durationMs: 300000
+    numRecords: 900000
     recordSize: 1024
-    throughput: 5000
+    throughput: 3000
     numProducers: 3
-    numConsumers: 2
-    consumerGroup: resilience-pod-kill-cg
+    numConsumers: 3
+    consumerGroup: drain-test-cg
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -38,16 +36,16 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: broker-hard-crash
-  disruptionType: POD_KILL
+  experimentName: node-drain-gamma
+  disruptionType: NODE_DRAIN
   targetNamespace: kafka
-  targetLabel: "strimzi.io/pool-name=brokers-alpha"
-  chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
+  targetLabel: "strimzi.io/pool-name=brokers-gamma"
+  chaosDurationSec: 60
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
+  gracePeriodSec: 30
 
 steadyStateSec: 30
-maxRecoveryWaitSec: 120
+maxRecoveryWaitSec: 180      # rescheduling takes longer than pod restart
 
 probes:
   - name: isr-health-check
@@ -59,11 +57,11 @@ probes:
     intervalSec: 10
     timeoutSec: 30
 
-  - name: cluster-ready
-    type: k8sProbe
-    mode: Edge
-    command: "kafka Ready"
-    expectedOutput: "Ready"
-    comparator: contains
-    intervalSec: 15
+  - name: partition-availability
+    type: cmdProbe
+    mode: Continuous
+    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    expectedOutput: "0"
+    comparator: "=="
+    intervalSec: 10
     timeoutSec: 30

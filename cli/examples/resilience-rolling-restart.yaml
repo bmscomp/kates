@@ -1,36 +1,33 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
+# Resilience Test: ROLLING_RESTART — Simulated Rolling Upgrade
 # ─────────────────────────────────────────────────────────────────────────────
-# Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# Restarts all 3 broker pools one pod at a time with a 30s inter-restart delay,
+# mimicking Strimzi's rolling update during a version upgrade or config change.
+# The drain-cleaner path ensures controlled shutdown between restarts.
 #
 # Hypothesis:
-#   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
-#   Idempotent producer with acks=all stalls, then retries successfully.
-#   ISR recovers to 3/3 within 120s. Zero data loss.
-#
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+#   Each broker restart triggers a brief leader transfer. With 30s between
+#   restarts and acks=all, producers survive the full rolling restart with
+#   0 errors. ISR never drops below 2/3 (min.insync.replicas satisfied).
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-rolling-restart.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
-  type: LOAD
+  type: ENDURANCE
   spec:
-    topic: kates-events
+    topic: kates-results
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    numRecords: 500000
+    durationMs: 300000        # 5 min — covers the full 3-broker rolling restart
+    numRecords: 900000
     recordSize: 1024
-    throughput: 5000
+    throughput: 3000
     numProducers: 3
-    numConsumers: 2
-    consumerGroup: resilience-pod-kill-cg
+    numConsumers: 3
+    consumerGroup: rolling-restart-cg
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -38,13 +35,15 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: broker-hard-crash
-  disruptionType: POD_KILL
+  experimentName: rolling-restart-all-pools
+  disruptionType: ROLLING_RESTART
   targetNamespace: kafka
-  targetLabel: "strimzi.io/pool-name=brokers-alpha"
-  chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
+  targetLabel: "strimzi.io/cluster=krafter"
+  chaosDurationSec: 180      # 3 brokers × ~60s each
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
+  gracePeriodSec: 30         # 30s between each broker restart
+  envOverrides:
+    RESTART_INTERVAL_SEC: "30"
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 120

@@ -1,36 +1,30 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
+# Resilience Test: POD_DELETE — Graceful Broker Shutdown (SIGTERM)
 # ─────────────────────────────────────────────────────────────────────────────
-# Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# Respects terminationGracePeriodSeconds. Kafka's controlled-shutdown protocol
+# transfers partition leaders before the pod exits, so clients should see
+# near-zero disruption.
 #
 # Hypothesis:
-#   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
-#   Idempotent producer with acks=all stalls, then retries successfully.
-#   ISR recovers to 3/3 within 120s. Zero data loss.
-#
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+#   Controlled shutdown completes within gracePeriodSec.
+#   Producer sees <5s latency spike during leader transfer.
+#   ISR stays at 3/3 throughout (no shrink expected).
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-pod-delete.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
   type: LOAD
   spec:
-    topic: kates-events
+    topic: kates-results
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    numRecords: 500000
+    numRecords: 600000
     recordSize: 1024
-    throughput: 5000
+    throughput: 2000
     numProducers: 3
-    numConsumers: 2
-    consumerGroup: resilience-pod-kill-cg
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -38,24 +32,24 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: broker-hard-crash
-  disruptionType: POD_KILL
+  experimentName: broker-graceful-shutdown
+  disruptionType: POD_DELETE
   targetNamespace: kafka
   targetLabel: "strimzi.io/pool-name=brokers-alpha"
-  chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
+  chaosDurationSec: 60
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
+  gracePeriodSec: 30        # SIGTERM → 30s for controlled shutdown
 
 steadyStateSec: 30
-maxRecoveryWaitSec: 120
+maxRecoveryWaitSec: 90
 
 probes:
   - name: isr-health-check
     type: cmdProbe
     mode: Continuous
     command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
-    expectedOutput: "50"
-    comparator: "<="
+    expectedOutput: "0"    # expect NO shrink during graceful shutdown
+    comparator: "=="
     intervalSec: 10
     timeoutSec: 30
 

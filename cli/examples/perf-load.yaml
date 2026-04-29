@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Performance Test: LOAD — Baseline Throughput
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs 3 parallel producers at a fixed throughput cap to establish a repeatable
+# performance baseline. Compare p99 latency and MB/s before and after cluster
+# configuration changes.
+#
+# Usage:
+#   kates test run -f cli/examples/perf-load.yaml
+#   kates test run -f cli/examples/perf-load.yaml -o json | jq '.runId'
+# ─────────────────────────────────────────────────────────────────────────────
+
+type: LOAD
+
+spec:
+  topic: kates-events
+  partitions: 6
+  replicationFactor: 3
+  minInsyncReplicas: 2
+
+  numRecords: 1000000
+  recordSize: 1024          # 1 KB — representative event payload
+  throughput: 10000         # cap at 10 k msg/s; set -1 for unlimited
+  numProducers: 3
+  numConsumers: 2
+  consumerGroup: load-test-cg
+
+  # Producer durability settings
+  acks: "all"
+  enableIdempotence: true
+  batchSize: 65536           # 64 KB
+  lingerMs: 5
+  compressionType: lz4
+
+  # Consumer fetch tuning
+  fetchMinBytes: 1
+  fetchMaxWaitMs: 500
+
+sla:
+  maxP99LatencyMs: 200.0
+  maxAvgLatencyMs: 50.0
+  minThroughputRecPerSec: 8000.0
+  maxErrorRate: 0.0
