@@ -1,0 +1,43 @@
+{{- if .Values.seaweedfs.enabled }}
+{{/*
+  SeaweedFS object store — shared backend for:
+    - Kafka Tiered Storage (Remote Log Storage API, Layer 1)
+    - Velero backup storage location (cluster topology backup, Layer 2)
+
+  Exposes an S3-compatible endpoint at:
+    http://{{ include "kafka-cluster.clusterName" . }}-seaweedfs-filer.{{ include "kafka-cluster.namespace" . }}.svc:8333
+
+  The credentials Secret below is referenced by:
+    1. tieredStorage.credentials.existingSecret  (tiered-storage.yaml)
+    2. Velero BackupStorageLocation (provisioned externally or via velero CLI)
+*/}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-seaweedfs-credentials
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: object-store
+  annotations:
+    helm.sh/resource-policy: keep   # retain credentials across chart upgrades
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID:     {{ .Values.seaweedfs.s3.accessKeyId | quote }}
+  AWS_SECRET_ACCESS_KEY: {{ .Values.seaweedfs.s3.secretAccessKey | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-seaweedfs-config
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app.kubernetes.io/component: object-store
+data:
+  # Published for use by other charts / operators that need the S3 endpoint.
+  endpoint: "http://{{ include "kafka-cluster.clusterName" . }}-seaweedfs-filer.{{ include "kafka-cluster.namespace" . }}.svc:{{ .Values.seaweedfs.filer.s3.port }}"
+  region:   {{ .Values.seaweedfs.s3.region | quote }}
+  tiered-storage-bucket: {{ .Values.seaweedfs.buckets.tieredStorage | quote }}
+  velero-bucket:         {{ .Values.seaweedfs.buckets.velero | quote }}
+{{- end }}

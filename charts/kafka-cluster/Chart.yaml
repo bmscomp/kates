@@ -21,3 +21,7 @@ dependencies:
     version: "0.51.0"
     repository: "https://strimzi.io/charts/"
     condition: strimziOperator.enabled
+  - name: seaweedfs
+    version: "3.68.0"
+    repository: "https://seaweedfs.github.io/seaweedfs/helm"
+    condition: seaweedfs.enabled

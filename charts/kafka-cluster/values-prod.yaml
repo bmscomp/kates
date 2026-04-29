@@ -42,12 +42,37 @@ controllers:
 
 tieredStorage:
   enabled: true
+  credentials:
+    existingSecret: "kafka-seaweedfs-credentials"
+  s3:
+    endpointUrl: "http://kafka-cluster-seaweedfs-filer.kafka.svc:8333"
 
 backup:
   enabled: true
   schedule: "0 2 * * *"
-  ttl: 336h0m0s
-  snapshotVolumes: true
+  ttl: 336h0m0s          # 14 days
+  snapshotVolumes: false  # broker data lives in SeaweedFS via tiered storage
+  defaultVolumesToFsBackup: false
+  storageLocation: seaweedfs  # Velero BackupStorageLocation pointing to SeaweedFS
+
+seaweedfs:
+  enabled: true
+  s3:
+    accessKeyId:     "kates-kafka"        # override via external secret in prod
+    secretAccessKey: "change-me-in-prod"  # override via external secret in prod
+  buckets:
+    tieredStorage: "kafka-tiered-storage"
+    velero:        "velero-backups"
+  master:
+    replicas: 3
+  volume:
+    replicas: 3
+    storage: 500Gi
+  filer:
+    replicas: 2
+    s3:
+      enabled: true
+      enableAuth: true   # enforce auth in production
 
 drainCleaner:
   enabled: true

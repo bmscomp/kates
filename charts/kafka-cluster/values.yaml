@@ -389,22 +389,27 @@ networkPolicies:
 tieredStorage:
   enabled: false
   credentials:
-    existingSecret: ""
-    accessKeyId: minio
-    secretAccessKey: minio123
+    # When seaweedfs.enabled=true the chart creates 'kafka-seaweedfs-credentials'.
+    # Set existingSecret to that name so the RSM plugin picks up the right creds.
+    existingSecret: "kafka-seaweedfs-credentials"
+    accessKeyId: ""
+    secretAccessKey: ""
     accessKeyIdKey: AWS_ACCESS_KEY_ID
     secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
   s3:
     bucketName: kafka-tiered-storage
     region: us-east-1
-    endpointUrl: "http://minio.velero.svc:9000"
+    # Default endpoint targets SeaweedFS filer S3 gateway.
+    # Change to your cluster's SeaweedFS service address or any S3-compatible URL.
+    # DEPRECATED: do NOT point this at minio.velero.svc — MinIO is removed.
+    endpointUrl: "http://kafka-cluster-seaweedfs-filer.kafka.svc:8333"
     pathStyleAccessEnabled: true
   metadata:
     replicationFactor: 3
     partitions: 50
   retention:
     taskIntervalMs: 30000
-    localRetentionMs: 86400000
+    localRetentionMs: 86400000   # 1 day on local disk; rest lives in SeaweedFS
 
 kafkaConnect:
   enabled: false
@@ -529,7 +534,16 @@ backup:
   enabled: false
   schedule: "0 2 * * *"
   ttl: 168h0m0s
-  snapshotVolumes: true
+  # ── IMPORTANT ─────────────────────────────────────────────────────────────
+  # snapshotVolumes MUST be false when tieredStorage is enabled.
+  # Broker PVC snapshots are crash-consistent and redundant once log segments
+  # are continuously offloaded to SeaweedFS via the Remote Log Storage API.
+  # Only KRaft controller PVCs (1 Gi each) are in scope — see backup.yaml.
+  # See README "Why NetBackup is Incompatible with Kafka" for full rationale.
+  snapshotVolumes: false
+  defaultVolumesToFsBackup: false   # controller PVCs are tiny; fs-backup via Velero
+  storageLocation: default          # Velero BackupStorageLocation name (→ SeaweedFS)
+  volumeSnapshotLocations: []
   persistence:
     enabled: false
     size: 20Gi
@@ -677,3 +691,47 @@ externalSecrets:
   #     targetNamespace: kates
   #     refreshInterval: 30s
   #     secretStoreKind: ClusterSecretStore
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SeaweedFS — S3-compatible object store (replaces deprecated MinIO)
+# Shared backend for:
+#   - Kafka Tiered Storage / Remote Log Storage API  (Layer 1, continuous)
+#   - Velero BackupStorageLocation                   (Layer 2, daily CRD backup)
+# ─────────────────────────────────────────────────────────────────────────────
+seaweedfs:
+  enabled: false   # set true in staging/prod overlays
+
+  # S3 credentials — shared by tiered storage RSM plugin and Velero.
+  # Written to the 'kafka-seaweedfs-credentials' Secret (see seaweedfs.yaml).
+  s3:
+    accessKeyId:     "kates-kafka"
+    secretAccessKey: "change-me-in-prod"
+    region:          "us-east-1"
+
+  # Bucket names — pre-created by the SeaweedFS filer S3 gateway on first use.
+  buckets:
+    tieredStorage: "kafka-tiered-storage"
+    velero:        "velero-backups"
+
+  # Filer S3 gateway port (published in the kafka-seaweedfs-config ConfigMap).
+  filer:
+    s3:
+      port: 8333
+
+  # Pass-through to the seaweedfs subchart.
+  # Full schema: https://github.com/seaweedfs/seaweedfs/tree/master/k8s/charts/seaweedfs
+  master:
+    replicas: 1          # 3 for production HA
+
+  volume:
+    replicas: 1          # 3 for production HA
+    storage: 100Gi       # increase to 500Gi+ in prod
+
+  filer:
+    replicas: 1
+    s3:
+      enabled: true
+      port: 8333
+      httpsPort: 0
+      allowEmptyFolder: false
+      enableAuth: false    # enable in prod with TLS + external cert

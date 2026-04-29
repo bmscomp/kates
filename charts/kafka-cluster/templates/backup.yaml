@@ -1,41 +1,93 @@
 {{- if .Values.backup.enabled }}
+{{/*
+  Backup Strategy — Layer 2: Cluster Topology Backup (Velero)
+  ─────────────────────────────────────────────────────────────
+  This schedule captures Kubernetes objects that describe the cluster —
+  Strimzi CRDs, Secrets, ConfigMaps, and KRaft controller PVCs.
+
+  Broker PVCs are intentionally EXCLUDED. With Kafka Tiered Storage (Layer 1)
+  enabled, broker log data lives in SeaweedFS/S3 and is automatically
+  re-fetched by replacement brokers. Snapshotting broker PVCs would be:
+    - Redundant  (data already in object store)
+    - Wasteful   (3× amplification across replica factor)
+    - Unsafe     (crash-consistent — partially flushed segments corrupt on restore)
+
+  snapshotVolumes is therefore set to false. Only controller PVCs are
+  included via the strimzi.io/pool-name=controllers labelSelector.
+
+  DO NOT set snapshotVolumes: true — see README "Why NetBackup is Incompatible
+  with Kafka" for a full technical explanation.
+*/}}
 apiVersion: velero.io/v1
 kind: Schedule
 metadata:
-  name: kafka-daily-backup
+  name: {{ include "kafka-cluster.clusterName" . }}-daily-backup
   namespace: velero
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    # Layer: topology — CRDs, Secrets, controller PVCs only (NOT broker PVCs)
+    backup.strategy/layer: "2-topology"
 spec:
   schedule: {{ .Values.backup.schedule | quote }}
   template:
+    # ── Namespace scope ───────────────────────────────────────────────────────
     includedNamespaces:
       - {{ include "kafka-cluster.namespace" . }}
+
+    # ── Object types to capture ───────────────────────────────────────────────
     includedResources:
-      - persistentvolumeclaims
+      - persistentvolumeclaims    # controllers only — see labelSelector below
       - persistentvolumes
       - configmaps
       - secrets
+      - kafka.kafka.strimzi.io
+      - kafkanodepool.kafka.strimzi.io
+      - kafkatopic.kafka.strimzi.io
+      - kafkauser.kafka.strimzi.io
+
+    # ── Controller-only PVC filter ────────────────────────────────────────────
+    # strimzi.io/pool-name=controllers matches ONLY the KRaft controller PVCs.
+    # Broker pools (brokers-alpha, brokers-sigma, brokers-gamma) are excluded —
+    # their data is covered by Kafka Tiered Storage (Layer 1).
     labelSelector:
       matchExpressions:
         - key: strimzi.io/cluster
           operator: In
           values: [{{ include "kafka-cluster.clusterName" . | quote }}]
-    storageLocation: default
-    volumeSnapshotLocations:
-      - default
-    ttl: {{ .Values.backup.ttl }}
+        - key: strimzi.io/pool-name
+          operator: In
+          values: ["controllers"]
+
+    # ── Volume snapshot settings ──────────────────────────────────────────────
+    # snapshotVolumes: false — broker PVCs must NOT be snapshotted.
+    # Controller PVCs (1 Gi KRaft logs) are small enough for fs-backup.
     snapshotVolumes: {{ .Values.backup.snapshotVolumes }}
-    defaultVolumesToFsBackup: false
+    defaultVolumesToFsBackup: {{ .Values.backup.defaultVolumesToFsBackup }}
+
+    storageLocation: {{ .Values.backup.storageLocation | default "default" }}
+    {{- if .Values.backup.volumeSnapshotLocations }}
+    volumeSnapshotLocations:
+      {{- toYaml .Values.backup.volumeSnapshotLocations | nindent 6 }}
+    {{- end }}
+    ttl: {{ .Values.backup.ttl }}
   useOwnerReferencesInBackup: false
 ---
+{{/*
+  Pre-upgrade one-shot backup — full CRD + Secret capture before any
+  helm upgrade. Captures ALL object types (no PVC scope restriction)
+  so the topology can be fully reconstructed on a rollback.
+*/}}
 apiVersion: velero.io/v1
 kind: Backup
 metadata:
-  name: kafka-pre-upgrade
+  name: {{ include "kafka-cluster.clusterName" . }}-pre-upgrade
   namespace: velero
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    backup.strategy/layer: "2-topology"
+    backup.strategy/trigger: "pre-upgrade"
 spec:
   includedNamespaces:
     - {{ include "kafka-cluster.namespace" . }}
@@ -53,11 +105,10 @@ spec:
       - key: strimzi.io/cluster
         operator: In
         values: [{{ include "kafka-cluster.clusterName" . | quote }}]
-  storageLocation: default
-  volumeSnapshotLocations:
-    - default
-  ttl: 720h0m0s
-  snapshotVolumes: true
+  storageLocation: {{ .Values.backup.storageLocation | default "default" }}
+  ttl: 720h0m0s        # 30 days — kept longer than daily backups
+  snapshotVolumes: false
+  defaultVolumesToFsBackup: false
 {{- if .Values.backup.persistence.enabled }}
 ---
 apiVersion: v1
