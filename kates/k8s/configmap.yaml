@@ -15,6 +15,12 @@ data:
   KATES_KAFKA_SASL_USERNAME: "kates-backend"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
 
+  # API security
+  # Set KATES_API_SECURITY_ENABLED=false to disable auth entirely (dev only).
+  # Change KATES_API_KEY to a strong random value before exposing externally.
+  KATES_API_SECURITY_ENABLED: "true"
+  KATES_API_KEY: "changeme"
+
   # Benchmark engine (native | trogdor)
   KATES_ENGINE_DEFAULT_BACKEND: "native"
 

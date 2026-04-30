@@ -35,7 +35,11 @@ public class LitmusChaosProvider implements ChaosProvider {
             Map.entry(DisruptionType.DISK_FILL, "disk-fill"),
             Map.entry(DisruptionType.NETWORK_PARTITION, "pod-network-partition"),
             Map.entry(DisruptionType.NETWORK_LATENCY, "pod-network-latency"),
-            Map.entry(DisruptionType.NODE_DRAIN, "node-drain"));
+            Map.entry(DisruptionType.NODE_DRAIN, "node-drain"),
+            // Leader election is triggered by deleting the current partition leader pod
+            Map.entry(DisruptionType.LEADER_ELECTION, "pod-delete"),
+            Map.entry(DisruptionType.SCALE_DOWN, "pod-delete"),
+            Map.entry(DisruptionType.ROLLING_RESTART, "pod-delete"));
 
     @Inject
     KubernetesClient client;
@@ -212,11 +216,10 @@ public class LitmusChaosProvider implements ChaosProvider {
         engineSpec.chaosServiceAccount = "litmus-admin";
         engineSpec.annotationCheck = "false";
 
-        ChaosEngineSpec.AppInfo appinfo = new ChaosEngineSpec.AppInfo();
-        appinfo.appns = spec.targetNamespace();
-        appinfo.applabel = spec.targetLabel();
-        appinfo.appkind = "statefulset";
-        engineSpec.appinfo = appinfo;
+        // For Strimzi 0.30+, there is no StatefulSet. StrimziPodSet is a custom controller
+        // that Litmus chaos-runner doesn't natively support for target resolution.
+        // We omit appinfo completely to run in "infrastructure" mode and rely on TARGET_PODS.
+        // engineSpec.appinfo = appinfo;
 
         ChaosEngineSpec.Experiment experiment = new ChaosEngineSpec.Experiment();
         experiment.name = experimentName;
@@ -227,10 +230,26 @@ public class LitmusChaosProvider implements ChaosProvider {
 
         if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
             envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", spec.targetPod()));
+        } else if (spec.targetLabel() != null && !spec.targetLabel().isEmpty()) {
+            String[] parts = spec.targetLabel().split("=", 2);
+            if (parts.length == 2) {
+                var pods = client.pods()
+                        .inNamespace(spec.targetNamespace())
+                        .withLabel(parts[0], parts[1])
+                        .list()
+                        .getItems();
+                if (!pods.isEmpty()) {
+                    int index = (int) (Math.random() * pods.size());
+                    String podName = pods.get(index).getMetadata().getName();
+                    envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", podName));
+                }
+            }
         }
 
-        for (Map.Entry<String, String> e : spec.envOverrides().entrySet()) {
-            envVars.add(new ChaosEngineSpec.EnvVar(e.getKey(), e.getValue()));
+        if (spec.envOverrides() != null) {
+            for (Map.Entry<String, String> e : spec.envOverrides().entrySet()) {
+                envVars.add(new ChaosEngineSpec.EnvVar(e.getKey(), e.getValue()));
+            }
         }
 
         if (spec.disruptionType() != null) {

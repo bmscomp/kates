@@ -364,7 +364,10 @@ func (c *Client) BrokerTrend(ctx context.Context, testType, metric string, broke
 }
 
 func (c *Client) Resilience(ctx context.Context, request interface{}) (*ResilienceResult, error) {
-	return postJSON[*ResilienceResult](c, ctx, "/api/resilience", request)
+	// Resilience tests are long-running: steady-state + chaos + recovery can
+	// easily exceed the default 60s client timeout. Use the same extended
+	// timeout as disruption tests.
+	return postJSONWithTimeout[*ResilienceResult](c, ctx, "/api/resilience", request, 20*time.Minute)
 }
 
 func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, payload interface{}, timeout time.Duration) (T, error) {
@@ -378,6 +381,9 @@ func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, pay
 		return result, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
 	
 	// Create a custom client with the extended timeout
 	customClient := &http.Client{Timeout: timeout}
