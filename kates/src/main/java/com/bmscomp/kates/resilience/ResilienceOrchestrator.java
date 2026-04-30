@@ -73,7 +73,7 @@ public class ResilienceOrchestrator {
                     .join();
 
             // 3. Snapshot pre-chaos results + evaluate baseline probes
-            testOrchestrator.refreshStatus(run.getId());
+            run = testOrchestrator.refreshStatus(run.getId());
             ReportSummary preChaos = MetricUtils.computeSummary(run.getResults());
             report.setPreChaosSummary(preChaos);
 
@@ -125,7 +125,7 @@ public class ResilienceOrchestrator {
                         .join();
             }
 
-            testOrchestrator.refreshStatus(run.getId());
+            run = testOrchestrator.refreshStatus(run.getId());
 
             // 7. Generate final report
             TestReport perfReport = reportGenerator.generate(run);

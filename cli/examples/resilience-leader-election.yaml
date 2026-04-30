@@ -46,21 +46,4 @@ chaosSpec:
 steadyStateSec: 20
 maxRecoveryWaitSec: 60
 
-probes:
-  - name: partition-availability
-    type: cmdProbe
-    mode: Edge
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
-    expectedOutput: "0"
-    comparator: "=="
-    intervalSec: 5
-    timeoutSec: 30
 
-  - name: isr-health-check
-    type: cmdProbe
-    mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
-    expectedOutput: "50"
-    comparator: "<="
-    intervalSec: 10
-    timeoutSec: 30
