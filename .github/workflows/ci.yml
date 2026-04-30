@@ -19,7 +19,7 @@ permissions:
   checks: write
 
 env:
-  JAVA_VERSION: "21"
+  JAVA_VERSION: "25"
 
 jobs:
   build-and-test:
@@ -55,6 +55,9 @@ jobs:
         with:
           version: v3.17.0
 
+      - name: Fetch chart dependencies
+        run: helm dependency build charts/kates/
+
       - name: Lint kates chart
         run: helm lint charts/kates/
 
@@ -66,6 +69,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
 
       - name: Validate all config YAML files
         run: |
