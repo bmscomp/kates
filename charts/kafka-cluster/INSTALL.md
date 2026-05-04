@@ -120,7 +120,7 @@ helm test kafka-cluster -n kafka --timeout 5m
 
 #### a. StorageClass
 
-Ensure a `StorageClass` exists for persistent volumes. For cloud providers:
+The chart defaults to the `standard` StorageClass. For cloud providers, override with the appropriate class:
 
 ```bash
 # AWS EBS
@@ -141,13 +141,27 @@ brokerPools:
     storageClass: gp3
     storageSize: 200Gi
     replicas: 3
+    zone: us-east-1a
 
 controllers:
   storage:
     class: gp3
 ```
 
-#### b. Namespaces
+#### b. Image Registry (air-gapped / private registries)
+
+By default, images are pulled from `quay.io`. To use a private registry:
+
+```yaml
+global:
+  imageRegistry: "my-registry.example.com"
+  imageRepository: "strimzi"
+images:
+  kafka: "my-registry.example.com/strimzi/kafka:1.0.0-kafka-4.2.0"
+  kubectl: "my-registry.example.com/bitnami/kubectl:1.33.0"
+```
+
+#### c. Namespaces
 
 The chart creates resources in the release namespace. Ensure dependent namespaces exist:
 
@@ -156,7 +170,7 @@ kubectl create namespace kafka 2>/dev/null || true
 kubectl create namespace monitoring 2>/dev/null || true   # if dashboards.enabled
 ```
 
-#### c. Node labels (optional, for zone-awareness)
+#### d. Node labels (optional, for zone-awareness)
 
 If your cluster nodes already have `topology.kubernetes.io/zone` labels (standard on all major cloud providers), zone-aware scheduling works automatically.
 

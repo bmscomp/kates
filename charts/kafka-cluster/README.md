@@ -18,7 +18,7 @@ Production-ready Apache Kafka deployment on Kubernetes using the [Strimzi](https
 |-------------|---------|
 | Kubernetes | ≥ 1.25 |
 | Helm | ≥ 3.12 |
-| Strimzi Operator | 0.51.0 (bundled as subchart) |
+| Strimzi Operator | 1.0.0 (bundled as subchart) |
 
 ## Quick Start
 
@@ -220,7 +220,29 @@ graph LR
 |-----------|-------------|---------|
 | `clusterName` | Kafka cluster name (Kubernetes resource name) | `krafter` |
 | `kafkaVersion` | Apache Kafka version | `4.2.0` |
-| `strimziVersion` | Strimzi operator version | `0.51.0` |
+| `strimziVersion` | Strimzi operator version | `1.0.0` |
+
+### Global Image Configuration
+
+Override these to pull all images from a private or air-gapped registry:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `global.imageRegistry` | Container image registry for all chart images | `quay.io` |
+| `global.imageRepository` | Container image repository (org/project) | `strimzi` |
+| `images.kafka` | Kafka client image (Helm test tier 2) | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` |
+| `images.kubectl` | kubectl image (Helm tests + CRD upgrade hook) | `bitnami/kubectl:1.33.0` |
+
+Example: redirect all images to a private registry:
+
+```yaml
+global:
+  imageRegistry: "my-registry.example.com"
+  imageRepository: "strimzi"
+images:
+  kafka: "my-registry.example.com/strimzi/kafka:1.0.0-kafka-4.2.0"
+  kubectl: "my-registry.example.com/bitnami/kubectl:1.33.0"
+```
 
 ### Listeners
 
@@ -289,7 +311,7 @@ kafka:
 |-----------|-------------|---------|
 | `controllers.replicas` | Number of KRaft controllers (1-9) | `3` |
 | `controllers.storage.size` | PVC size per controller | `5Gi` |
-| `controllers.storage.class` | StorageClass name (per-environment) | `""` |
+| `controllers.storage.class` | StorageClass name | `standard` |
 | `controllers.jvmOptions.-Xms` | JVM initial heap | `512m` |
 | `controllers.jvmOptions.-Xmx` | JVM max heap | `512m` |
 | `controllers.resources.requests.memory` | Memory request | `1Gi` |
@@ -302,18 +324,31 @@ Each pool creates a `KafkaNodePool` CR pinned to an availability zone:
 
 ```yaml
 brokerPools:
-  - name: brokers-alpha
-    zone: alpha
+  - name: brokers-az1
+    zone: us-east-1a           # availability zone label
     replicas: 1
     storageSize: 50Gi
-    storageClass: local-storage-alpha
+    storageClass: standard     # Kubernetes StorageClass
 
-  - name: brokers-sigma
-    zone: sigma
+  - name: brokers-az2
+    zone: us-east-1b
     replicas: 1
     storageSize: 50Gi
-    storageClass: local-storage-sigma
+    storageClass: standard
+
+  - name: brokers-az3
+    zone: us-east-1c
+    replicas: 1
+    storageSize: 50Gi
+    storageClass: standard
 ```
+
+The default configuration provides three broker pools spread across `us-east-1a`, `us-east-1b`, and `us-east-1c` with the `standard` StorageClass. Override per environment:
+
+- **Kind:** `local-storage-alpha`, `local-storage-sigma`, `local-storage-gamma` (see `values-kind.yaml`)
+- **AWS:** `gp3`
+- **GCP:** `standard-rwo`
+- **Azure:** `managed-csi`
 
 Shared defaults for all pools are in `brokerDefaults`:
 
@@ -793,7 +828,7 @@ Set `strimziOperator.enabled: false` if the operator is already installed in the
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `drainCleaner.enabled` | Deploy Strimzi Drain Cleaner | `true` |
-| `drainCleaner.image` | Container image | `quay.io/strimzi/drain-cleaner:0.51.0` |
+| `drainCleaner.image` | Container image | `quay.io/strimzi/drain-cleaner:1.0.0` |
 
 ### Pod Security
 
