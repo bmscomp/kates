@@ -85,7 +85,7 @@ public class ClusterTopologyService {
 
     private static final CustomResourceDefinitionContext STRIMZI_POD_SET_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("core.strimzi.io")
-            .withVersion("v1beta2")
+            .withVersion("v1")
             .withPlural("strimzipodsets")
             .withScope("Namespaced")
             .build();

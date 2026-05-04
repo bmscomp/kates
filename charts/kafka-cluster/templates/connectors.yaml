@@ -1,7 +1,7 @@
 {{- if and .Values.kafkaConnect.enabled (gt (len (default (list) .Values.kafkaConnect.connectors)) 0) }}
 {{- range .Values.kafkaConnect.connectors }}
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
 metadata:
   name: {{ .name }}

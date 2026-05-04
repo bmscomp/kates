@@ -103,7 +103,7 @@ public class ProbeExecutor {
         if (command.contains("kafka") && command.contains("Ready")) {
             try {
                 var kafkas = client.genericKubernetesResources(
-                                "kafka.strimzi.io/v1beta2", "Kafka")
+                                "kafka.strimzi.io/v1", "Kafka")
                         .inNamespace(namespace)
                         .list();
 

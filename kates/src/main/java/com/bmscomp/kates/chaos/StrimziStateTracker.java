@@ -24,7 +24,7 @@ public class StrimziStateTracker {
 
     private static final CustomResourceDefinitionContext KAFKA_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("kafka.strimzi.io")
-            .withVersion("v1beta2")
+            .withVersion("v1")
             .withPlural("kafkas")
             .withScope("Namespaced")
             .build();
