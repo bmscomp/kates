@@ -74,7 +74,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: crd-upgrade
-          image: {{ .Values.crdUpgrade.image | default "bitnami/kubectl:latest" }}
+          image: {{ include "kafka-cluster.kubectlImage" . }}
           command:
             - /bin/sh
             - -c

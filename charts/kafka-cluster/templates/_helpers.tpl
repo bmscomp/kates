@@ -56,3 +56,29 @@ fsGroup: 1001
 seccompProfile:
   type: RuntimeDefault
 {{- end }}
+
+{{/*
+Resolve the Kafka client image used in Helm tests.
+Priority: images.kafka > global.imageRegistry/strimzi/kafka:strimziVersion-kafka-kafkaVersion > default
+*/}}
+{{- define "kafka-cluster.kafkaImage" -}}
+{{- if .Values.images.kafka -}}
+  {{- .Values.images.kafka -}}
+{{- else if .Values.global.imageRegistry -}}
+  {{- printf "%s/strimzi/kafka:%s-kafka-%s" .Values.global.imageRegistry .Values.strimziVersion .Values.kafkaVersion -}}
+{{- else -}}
+  {{- printf "quay.io/strimzi/kafka:%s-kafka-%s" .Values.strimziVersion .Values.kafkaVersion -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the kubectl image used in Helm tests and CRD upgrade hooks.
+Priority: images.kubectl > global.imageRegistry/bitnami/kubectl:latest > default
+*/}}
+{{- define "kafka-cluster.kubectlImage" -}}
+{{- if .Values.global.imageRegistry -}}
+  {{- printf "%s/bitnami/kubectl:latest" .Values.global.imageRegistry -}}
+{{- else -}}
+  {{- .Values.images.kubectl | default "bitnami/kubectl:latest" -}}
+{{- end -}}
+{{- end }}

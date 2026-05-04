@@ -2,6 +2,21 @@ clusterName: krafter
 kafkaVersion: "4.2.0"
 strimziVersion: "1.0.0"
 
+# ── Global Image Configuration ───────────────────────────────────────────────
+# Override these to pull all images from a private or air-gapped registry.
+# Example: global.imageRegistry: "my-registry.example.com"
+global:
+  imageRegistry: ""
+  imageRepository: ""
+
+# ── Image Overrides ──────────────────────────────────────────────────────────
+# Per-component image references for test pods and utilities.
+images:
+  # Kafka client image used in Helm test tier 2 (produce/consume round-trip)
+  kafka: ""
+  # kubectl image used in Helm tests and CRD upgrade hooks
+  kubectl: "bitnami/kubectl:latest"
+
 kafka:
   listeners:
     - name: plain
@@ -585,6 +600,9 @@ strimzi-kafka-operator:
   replicas: 1
   watchAnyNamespace: true
   defaultImageTag: 1.0.0
+  # When global.imageRegistry is set, pass it to the Strimzi subchart
+  # defaultImageRegistry: quay.io
+  # defaultImageRepository: strimzi
   fullReconciliationIntervalMs: 60000
   podSecurityContext:
     runAsNonRoot: true
