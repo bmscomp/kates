@@ -24,7 +24,6 @@ Detailed, step-by-step guide for deploying the kafka-cluster Helm chart on any K
 | `helm` | 3.12+ | `helm version` |
 | `docker` | 24+ (Kind only) | `docker version` |
 | `kind` | 0.20+ (Kind only) | `kind version` |
-| `make` | any | `make --version` |
 
 ### Required Cluster Resources
 
@@ -58,7 +57,7 @@ The fastest way to get a full Kafka cluster running locally.
 ### Step 1 — Create the Kind cluster
 
 ```bash
-make cluster
+kind create cluster --name panda --config kind-config.yaml
 ```
 
 This creates a 4-node Kind cluster named `panda` with 3 worker nodes labeled as zones (`alpha`, `sigma`, `gamma`).
@@ -74,18 +73,29 @@ Pre-pulls and loads Strimzi, Kafka, and exporter images into Kind (required for 
 ### Step 3 — Deploy Kafka
 
 ```bash
-make kafka-deploy
+# Build chart dependencies
+helm dependency build charts/kafka-cluster
+
+# Create namespace and apply Kind-specific StorageClasses
+kubectl create namespace kafka 2>/dev/null || true
+kubectl apply -f config/kind/storage-classes.yaml
+
+# Install with Kind overlays
+helm upgrade --install kafka-cluster charts/kafka-cluster \
+  --namespace kafka \
+  -f charts/kafka-cluster/values-dev.yaml \
+  -f charts/kafka-cluster/values-kind.yaml \
+  --timeout 10m \
+  --wait
 ```
 
-This automatically:
-1. Builds Helm chart dependencies (Strimzi operator subchart)
-2. Creates the `kafka` namespace
-3. Applies Kind-specific `StorageClass` resources (`local-storage-alpha`, `local-storage-sigma`, `local-storage-gamma`)
-4. Runs `helm upgrade --install` with `values-dev.yaml` + `values-kind.yaml` overlays
-5. Waits for `Kafka` CR to reach `Ready` state
-6. Waits for all `KafkaUser` secrets to be created
+### Step 4 — Wait for readiness
 
-### Step 4 — Verify
+```bash
+kubectl wait kafka/krafter --for=condition=Ready -n kafka --timeout=300s
+```
+
+### Step 5 — Verify
 
 ```bash
 kubectl get kafka -n kafka
@@ -109,12 +119,12 @@ helm test kafka-cluster -n kafka --timeout 5m
 
 ### Step 1 — Choose your environment
 
-| Environment | Command | Overlay Files |
-|-------------|---------|---------------|
-| Dev | `make kafka-deploy ENV=dev` | `values-dev.yaml` |
-| Staging | `make kafka-deploy ENV=staging` | `values-staging.yaml` |
-| Production | `make kafka-deploy ENV=prod` | `values-prod.yaml` |
-| Custom | `make kafka-deploy ENV=myenv` | `values-myenv.yaml` |
+| Environment | Overlay Files | Command |
+|-------------|---------------|--------|
+| Dev | `values-dev.yaml` | `helm upgrade --install ... -f values-dev.yaml` |
+| Staging | `values-staging.yaml` | `helm upgrade --install ... -f values-staging.yaml` |
+| Production | `values-prod.yaml` | `helm upgrade --install ... -f values-prod.yaml` |
+| Custom | `values-myenv.yaml` | `helm upgrade --install ... -f values-myenv.yaml` |
 
 ### Step 2 — Prepare the cluster (Production/Staging)
 
@@ -241,7 +251,7 @@ brokerPools:
 
 ##### Kind (Local Development)
 
-Kind clusters use custom zone labels (`alpha`, `sigma`, `gamma`) set by `make cluster`. The Kind overlay (`values-kind.yaml`) maps broker pools to these zones with local StorageClasses:
+Kind clusters use custom zone labels (`alpha`, `sigma`, `gamma`) applied during cluster creation. The Kind overlay (`values-kind.yaml`) maps broker pools to these zones with local StorageClasses:
 
 ```yaml
 brokerPools:
@@ -279,14 +289,6 @@ kubectl get pods -n kafka -l strimzi.io/kind=Kafka \
 ```
 
 ### Step 3 — Deploy with Helm
-
-#### Using Make (recommended)
-
-```bash
-make kafka-deploy ENV=prod
-```
-
-#### Using Helm directly
 
 ```bash
 # Build chart dependencies
@@ -446,12 +448,6 @@ networkPolicies:
 ### Upgrade the chart
 
 ```bash
-make kafka-upgrade ENV=prod
-```
-
-Or with Helm:
-
-```bash
 helm upgrade kafka-cluster charts/kafka-cluster \
   --namespace kafka \
   -f charts/kafka-cluster/values-prod.yaml \
@@ -545,12 +541,6 @@ kubectl wait kafkarebalance/manual-rebalance \
 ## Uninstalling
 
 ### Remove the Helm release
-
-```bash
-make kafka-undeploy
-```
-
-Or manually:
 
 ```bash
 helm uninstall kafka-cluster -n kafka
