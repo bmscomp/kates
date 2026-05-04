@@ -113,7 +113,7 @@ jobs:
           SHA_LINUX_AMD64=$(shasum -a 256 dist/kates-linux-amd64.tar.gz | cut -d' ' -f1)
           SHA_LINUX_ARM64=$(shasum -a 256 dist/kates-linux-arm64.tar.gz | cut -d' ' -f1)
           VERSION="${TAG#v}"
-          REPO="bmscomp/klster"
+          REPO="bmscomp/kates"
 
           cat > kates.rb <<'EOF'
           class Kates < Formula

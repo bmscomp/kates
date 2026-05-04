@@ -1,5 +1,5 @@
 # Stage 1: Build the KATES CLI (Go)
-FROM golang:1.24-alpine AS cli-builder
+FROM golang:1.25-alpine AS cli-builder
 ENV GOTOOLCHAIN=auto
 WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
