@@ -59,26 +59,22 @@ seccompProfile:
 
 {{/*
 Resolve the Kafka client image used in Helm tests.
-Priority: images.kafka > global.imageRegistry/strimzi/kafka:strimziVersion-kafka-kafkaVersion > default
+Default: quay.io/strimzi/kafka:1.0.0-kafka-4.2.0
+Override via: images.kafka or global.imageRegistry + global.imageRepository
 */}}
 {{- define "kafka-cluster.kafkaImage" -}}
 {{- if .Values.images.kafka -}}
   {{- .Values.images.kafka -}}
-{{- else if .Values.global.imageRegistry -}}
-  {{- printf "%s/strimzi/kafka:%s-kafka-%s" .Values.global.imageRegistry .Values.strimziVersion .Values.kafkaVersion -}}
 {{- else -}}
-  {{- printf "quay.io/strimzi/kafka:%s-kafka-%s" .Values.strimziVersion .Values.kafkaVersion -}}
+  {{- printf "%s/%s/kafka:%s-kafka-%s" .Values.global.imageRegistry .Values.global.imageRepository .Values.strimziVersion .Values.kafkaVersion -}}
 {{- end -}}
 {{- end }}
 
 {{/*
 Resolve the kubectl image used in Helm tests and CRD upgrade hooks.
-Priority: images.kubectl > global.imageRegistry/bitnami/kubectl:latest > default
+Default: bitnami/kubectl:1.33.0
+Override via: images.kubectl
 */}}
 {{- define "kafka-cluster.kubectlImage" -}}
-{{- if .Values.global.imageRegistry -}}
-  {{- printf "%s/bitnami/kubectl:latest" .Values.global.imageRegistry -}}
-{{- else -}}
-  {{- .Values.images.kubectl | default "bitnami/kubectl:latest" -}}
-{{- end -}}
+{{- .Values.images.kubectl -}}
 {{- end }}

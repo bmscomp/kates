@@ -6,16 +6,16 @@ strimziVersion: "1.0.0"
 # Override these to pull all images from a private or air-gapped registry.
 # Example: global.imageRegistry: "my-registry.example.com"
 global:
-  imageRegistry: ""
-  imageRepository: ""
+  imageRegistry: "quay.io"
+  imageRepository: "strimzi"
 
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
 images:
   # Kafka client image used in Helm test tier 2 (produce/consume round-trip)
-  kafka: ""
+  kafka: "quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
   # kubectl image used in Helm tests and CRD upgrade hooks
-  kubectl: "bitnami/kubectl:latest"
+  kubectl: "bitnami/kubectl:1.33.0"
 
 kafka:
   listeners:
@@ -98,7 +98,7 @@ controllers:
   replicas: 3
   storage:
     size: 5Gi
-    class: ""
+    class: "standard"
     deleteClaim: false
   jvmOptions:
     -Xms: 512m
@@ -131,20 +131,20 @@ controllers:
 
 brokerPools:
   - name: brokers-az1
-    zone: ""
+    zone: "us-east-1a"
     replicas: 1
     storageSize: 50Gi
-    storageClass: ""
+    storageClass: "standard"
   - name: brokers-az2
-    zone: ""
+    zone: "us-east-1b"
     replicas: 1
     storageSize: 50Gi
-    storageClass: ""
+    storageClass: "standard"
   - name: brokers-az3
-    zone: ""
+    zone: "us-east-1c"
     replicas: 1
     storageSize: 50Gi
-    storageClass: ""
+    storageClass: "standard"
 
 brokerDefaults:
   deleteClaim: false
@@ -579,7 +579,7 @@ rebalance:
 
 drainCleaner:
   enabled: false
-  image: quay.io/strimzi/drain-cleaner:1.2.0
+  image: quay.io/strimzi/drain-cleaner:1.0.0
   resources:
     requests:
       memory: 64Mi
