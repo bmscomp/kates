@@ -40,9 +40,9 @@ Detailed, step-by-step guide for deploying the kafka-cluster Helm chart on any K
 The chart bundles the **Strimzi Operator** as a subchart (`strimziOperator.enabled: true`). If you prefer to manage the operator separately, install it first:
 
 ```bash
-helm repo add strimzi https://strimzi.io/charts/
-helm install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
-  --version 0.51.0 \
+helm install strimzi-kafka-operator \
+  oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  --version 1.0.0 \
   --namespace kafka --create-namespace \
   --wait
 ```
@@ -414,7 +414,7 @@ kubectl get secret krafter-cluster-ca-cert -n kafka \
 
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaRebalance
 metadata:
   name: manual-rebalance
