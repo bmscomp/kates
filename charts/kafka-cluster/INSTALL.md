@@ -170,14 +170,112 @@ kubectl create namespace kafka 2>/dev/null || true
 kubectl create namespace monitoring 2>/dev/null || true   # if dashboards.enabled
 ```
 
-#### d. Node labels (optional, for zone-awareness)
+#### d. Availability Zones
 
-If your cluster nodes already have `topology.kubernetes.io/zone` labels (standard on all major cloud providers), zone-aware scheduling works automatically.
+The chart deploys **three broker pools**, each pinned to an availability zone via Kubernetes node affinity. This ensures rack-aware replication — Kafka distributes partition replicas across zones so that a single zone failure never causes data loss.
 
-Verify:
+**Default zones:**
+
+| Broker Pool | Zone | StorageClass |
+|-------------|------|-------------|
+| `brokers-az1` | `us-east-1a` | `standard` |
+| `brokers-az2` | `us-east-1b` | `standard` |
+| `brokers-az3` | `us-east-1c` | `standard` |
+
+##### Cloud Providers
+
+Cloud providers automatically label nodes with `topology.kubernetes.io/zone`. Override the default zones to match your region:
+
+**AWS:**
+
+```yaml
+brokerPools:
+  - name: brokers-az1
+    zone: eu-west-1a
+    replicas: 3
+    storageSize: 200Gi
+    storageClass: gp3
+  - name: brokers-az2
+    zone: eu-west-1b
+    replicas: 3
+    storageSize: 200Gi
+    storageClass: gp3
+  - name: brokers-az3
+    zone: eu-west-1c
+    replicas: 3
+    storageSize: 200Gi
+    storageClass: gp3
+```
+
+**GCP:**
+
+```yaml
+brokerPools:
+  - name: brokers-az1
+    zone: europe-west1-b
+    storageClass: standard-rwo
+    # ...
+  - name: brokers-az2
+    zone: europe-west1-c
+    storageClass: standard-rwo
+  - name: brokers-az3
+    zone: europe-west1-d
+    storageClass: standard-rwo
+```
+
+**Azure:**
+
+```yaml
+brokerPools:
+  - name: brokers-az1
+    zone: "1"
+    storageClass: managed-csi
+    # ...
+  - name: brokers-az2
+    zone: "2"
+    storageClass: managed-csi
+  - name: brokers-az3
+    zone: "3"
+    storageClass: managed-csi
+```
+
+##### Kind (Local Development)
+
+Kind clusters use custom zone labels (`alpha`, `sigma`, `gamma`) set by `make cluster`. The Kind overlay (`values-kind.yaml`) maps broker pools to these zones with local StorageClasses:
+
+```yaml
+brokerPools:
+  - name: brokers-alpha
+    zone: alpha
+    storageClass: local-storage-alpha
+  - name: brokers-sigma
+    zone: sigma
+    storageClass: local-storage-sigma
+  - name: brokers-gamma
+    zone: gamma
+    storageClass: local-storage-gamma
+```
+
+##### Verify node zone labels
 
 ```bash
 kubectl get nodes -L topology.kubernetes.io/zone
+```
+
+Expected output (cloud provider example):
+
+```
+NAME          STATUS   ROLES    AGE   VERSION   ZONE
+node-1        Ready    <none>   1d    v1.30.0   us-east-1a
+node-2        Ready    <none>   1d    v1.30.0   us-east-1b
+node-3        Ready    <none>   1d    v1.30.0   us-east-1c
+```
+
+After deployment, verify broker placement:
+
+```bash
+kubectl get pods -n kafka -l strimzi.io/kind=Kafka \
+  -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,ZONE:.metadata.labels.zone
 ```
 
 ### Step 3 — Deploy with Helm
