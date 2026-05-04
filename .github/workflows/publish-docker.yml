@@ -71,7 +71,7 @@ jobs:
             p="$(echo "$p" | xargs)"
             case "$p" in
               linux/amd64) RUNNER="ubuntu-latest" ; ARCH="amd64" ;;
-              linux/arm64) RUNNER="ubuntu-latest" ; ARCH="arm64" ;;
+              linux/arm64) RUNNER="ubuntu-24.04-arm" ; ARCH="arm64" ;;
             esac
             if [ "$FIRST" = true ]; then FIRST=false; else MATRIX+=","; fi
             MATRIX+="{\"platform\":\"${p}\",\"runner\":\"${RUNNER}\",\"arch\":\"${ARCH}\"}"
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up QEMU (cross-arch)
-        if: matrix.platform.arch == 'arm64'
+        if: false  # Not needed — arm64 builds run on native ARM runners
         uses: docker/setup-qemu-action@v3
         with:
           platforms: linux/arm64
