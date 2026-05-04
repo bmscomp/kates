@@ -82,11 +82,12 @@ tolerations: []
 affinity: {}
 
 kafka:
-  enabled: true
+  enabled: false
 
 global:
   kafka: ## These values are only used when kafka.enabled is set to false
-    bootstrapServers: []
+    bootstrapServers:
+      - "krafter-kafka-bootstrap.kafka.svc:9092"
     fullname: ~
     port: ~
     name: ~
