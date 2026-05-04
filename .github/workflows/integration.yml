@@ -60,8 +60,13 @@ jobs:
 
       - name: Helm lint — all charts
         run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm repo update
           for chart in charts/*/; do
             if [ -f "${chart}/Chart.yaml" ]; then
+              echo "Building dependencies for ${chart}..."
+              helm dependency build "${chart}" || true
               echo "Linting ${chart}..."
               helm lint "${chart}"
             fi
