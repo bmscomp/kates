@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -383,6 +383,25 @@ kafka-upgrade: kafka-chart-deps
 	@echo "🔄 Upgrading Kafka cluster (ENV=$(ENV))..."
 	ENV=$(ENV) ./scripts/deploy-kafka.sh
 
+kafka-detect:
+	@echo "🔍 Detecting cluster configuration..."
+	@./scripts/detect-cluster-config.sh --dry-run
+
+kafka-deploy-auto: kafka-chart-deps
+	@echo "🔍 Auto-detecting cluster configuration from kubeconfig..."
+	@mkdir -p .build
+	@./scripts/detect-cluster-config.sh -o .build/values-detected.yaml
+	@echo ""
+	@echo "📦 Deploying Kafka cluster with detected configuration..."
+	helm upgrade --install kafka-cluster $(KAFKA_CHART_DIR) \
+		--namespace kafka --create-namespace \
+		-f .build/values-detected.yaml \
+		--timeout 10m --wait
+	@echo ""
+	@echo "✅ Kafka cluster deployed with auto-detected zones and storage!"
+	@echo "  Run tests:     helm test kafka-cluster -n kafka"
+	@echo "  Check status:  kubectl get kafka,kafkanodepools -n kafka"
+
 kafka-undeploy:
 	@echo "🗑️  Removing Kafka cluster..."
 	helm uninstall kafka-cluster -n kafka 2>/dev/null || true
@@ -507,6 +526,8 @@ help:
 	@echo "  cert-manager     - Deploy cert-manager"
 	@echo "  kafka            - Deploy Kafka (shorthand for kafka-deploy)"
 	@echo "  kafka-deploy     - Deploy Kafka via Helm (ENV=kind|dev|staging|prod)"
+	@echo "  kafka-detect     - Detect zones, storage classes from current kubeconfig"
+	@echo "  kafka-deploy-auto - Auto-detect cluster config and deploy Kafka"
 	@echo "  kafka-upgrade    - Upgrade existing Kafka release (ENV=kind|dev|staging|prod)"
 	@echo "  kafka-undeploy   - Remove Kafka Helm release + PVCs"
 	@echo "  ui               - Deploy Kafka UI"
