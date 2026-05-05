@@ -2,14 +2,21 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 )
 
 var detectCmd = &cobra.Command{
@@ -20,29 +27,102 @@ var detectCmd = &cobra.Command{
 	RunE:    runDetect,
 }
 
+var detectValuesFile string
+
 func init() {
+	detectCmd.Flags().StringVarP(&detectValuesFile, "values", "f", "", "Path to custom values.yaml for dynamic resource budgeting")
 	rootCmd.AddCommand(detectCmd)
 }
 
 func runDetect(cmd *cobra.Command, args []string) error {
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		output.Error("kubectl is not installed or not in PATH")
+		return nil
+	}
+	if _, err := exec.LookPath("helm"); err != nil {
+		output.Error("helm is not installed or not in PATH")
+		return nil
+	}
+	if _, err := execCmd("kubectl", "cluster-info"); err != nil {
+		output.Error("Kubernetes cluster is unreachable")
+		return nil
+	}
+
+	if outputMode != "json" {
+		fmt.Println()
+		output.Hint("Introspecting cluster state...")
+	}
+
 	ctxStr := getContext()
 	server := getServer()
 	provider := getProvider(ctxStr)
-	k8sVer, k8sMinor := getK8sVersion()
-	helmVer, helmMajor := getHelmVersion()
+	
+	var k8sVer string
+	var k8sMinor int
+	var helmVer string
+	var helmMajor int
+	var nodes []NodeInfo
+	var scs []SCInfo
+	var existingKafka KafkaResources
+	var strimzi StrimziInfo
+	var monitoring MonitoringInfo
+	var network NetworkInfo
+	var parseErr error
 
-	nodes, err := parseNodes()
-	if err != nil {
-		output.Error(fmt.Sprintf("Failed to get nodes: %v", err))
+	// Run concurrent data collection
+	g, _ := errgroup.WithContext(context.Background())
+
+	g.Go(func() error {
+		k8sVer, k8sMinor = getK8sVersion()
+		return nil
+	})
+	g.Go(func() error {
+		helmVer, helmMajor = getHelmVersion()
+		return nil
+	})
+	g.Go(func() error {
+		nodes, parseErr = parseNodes()
+		return parseErr
+	})
+	g.Go(func() error {
+		scs = getStorageClasses()
+		return nil
+	})
+	g.Go(func() error {
+		existingKafka = getExistingKafkaResources()
+		return nil
+	})
+	g.Go(func() error {
+		strimzi = getStrimziStatus()
+		return nil
+	})
+	g.Go(func() error {
+		monitoring = getMonitoringStatus()
+		return nil
+	})
+	g.Go(func() error {
+		network = getNetworkStatus()
+		return nil
+	})
+
+	// Run a spinner while collecting data (if not JSON)
+	if outputMode != "json" {
+		p := tea.NewProgram(spinnerModel{spinner: spinner.New(spinner.WithSpinner(spinner.Dot))})
+		go func() {
+			g.Wait()
+			p.Quit()
+		}()
+		p.Run()
+	} else {
+		g.Wait()
+	}
+
+	if parseErr != nil {
+		output.Error(fmt.Sprintf("Failed to get nodes: %v", parseErr))
 		return nil
 	}
 
 	zones := groupNodesByZone(nodes)
-	scs := getStorageClasses()
-	existingKafka := getExistingKafkaResources()
-	strimzi := getStrimziStatus()
-	monitoring := getMonitoringStatus()
-	network := getNetworkStatus()
 
 	if outputMode == "json" {
 		report := map[string]interface{}{
@@ -108,6 +188,20 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	ctrlCPU, ctrlMem := 1500, 3
 	brokerCPU, brokerMem := 3000, 12
 	otherCPU, otherMem := 500, 1
+
+	if detectValuesFile != "" {
+		data, err := os.ReadFile(detectValuesFile)
+		if err == nil {
+			reqs := parseResourcesFromYAML(data)
+			if reqs.BrokerCPU > 0 { brokerCPU = reqs.BrokerCPU }
+			if reqs.BrokerMem > 0 { brokerMem = reqs.BrokerMem }
+			if reqs.ControllerCPU > 0 { ctrlCPU = reqs.ControllerCPU }
+			if reqs.ControllerMem > 0 { ctrlMem = reqs.ControllerMem }
+			if reqs.OtherCPU > 0 { otherCPU = reqs.OtherCPU }
+			if reqs.OtherMem > 0 { otherMem = reqs.OtherMem }
+		}
+	}
+
 	needCPU := ctrlCPU + brokerCPU*3 + otherCPU
 	needMem := ctrlMem + brokerMem*3 + otherMem
 
@@ -155,6 +249,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	}
 
 	output.Header("Existing Kafka Resources")
+	warns := 0
 	output.KeyValue("Kafka clusters:", strconv.Itoa(existingKafka.KafkaClusters))
 	output.KeyValue("KafkaNodePools:", strconv.Itoa(existingKafka.KafkaNodePools))
 	output.KeyValue("KafkaTopics:", strconv.Itoa(existingKafka.KafkaTopics))
@@ -214,7 +309,6 @@ func runDetect(cmd *cobra.Command, args []string) error {
 
 	output.Header("3-AZ Kafka Compatibility Verdict")
 	fails := 0
-	warns := 0
 
 	var cRows [][]string
 	addCheck := func(desc string, pass bool, detail string) {
@@ -242,9 +336,12 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	addCheck("Broker resources fit (all zones)", totalCPU >= needCPU && totalMem >= needMem, fmt.Sprintf("%dm total needed", needCPU))
 	addCheck("Replication factor 3 achievable", len(zones) >= 3, fmt.Sprintf("%d zones", len(zones)))
 	addCheck("min.insync.replicas=2 safe", len(zones) >= 3, "can lose 1 zone")
-	hasRbac := false
-	if rbacCheck, _ := execCmd("kubectl", "auth", "can-i", "create", "deployments", "-n", "kafka"); strings.Contains(rbacCheck, "yes") {
-		hasRbac = true
+	hasRbac := true
+	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
+		if check, _ := execCmd("kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
+			hasRbac = false
+			break
+		}
 	}
 	addCheck("RBAC permissions", hasRbac, "kafka namespace")
 	addCheck("Prometheus monitoring", monitoring.PodMonitorCRD, "PodMonitor CRD")
@@ -646,6 +743,127 @@ func getNetworkStatus() NetworkInfo {
 		svcOut = "unknown"
 	}
 	info.ServiceCIDR = svcOut
-
 	return info
+}
+
+type spinnerModel struct {
+	spinner  spinner.Model
+	quitting bool
+}
+
+func (m spinnerModel) Init() tea.Cmd {
+	return m.spinner.Tick
+}
+
+func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m, tea.Quit
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	default:
+		return m, nil
+	}
+}
+
+func (m spinnerModel) View() string {
+	if m.quitting {
+		return ""
+	}
+	return fmt.Sprintf("\n  %s Introspecting cluster state...\n", lipgloss.NewStyle().Foreground(output.Cyan).Render(m.spinner.View()))
+}
+
+type ParsedReqs struct {
+	BrokerCPU     int
+	BrokerMem     int
+	ControllerCPU int
+	ControllerMem int
+	OtherCPU      int
+	OtherMem      int
+}
+
+func parseResourcesFromYAML(data []byte) ParsedReqs {
+	var root map[string]interface{}
+	yaml.Unmarshal(data, &root)
+
+	reqs := ParsedReqs{}
+
+	parseMem := func(s string) int {
+		s = strings.TrimSuffix(s, "i")
+		if strings.HasSuffix(s, "G") {
+			v, _ := strconv.Atoi(strings.TrimSuffix(s, "G"))
+			return v
+		}
+		if strings.HasSuffix(s, "M") {
+			v, _ := strconv.Atoi(strings.TrimSuffix(s, "M"))
+			return v / 1024
+		}
+		return 0
+	}
+	parseCPU := func(s string) int {
+		if strings.HasSuffix(s, "m") {
+			v, _ := strconv.Atoi(strings.TrimSuffix(s, "m"))
+			return v
+		}
+		v, _ := strconv.Atoi(s)
+		return v * 1000
+	}
+
+	extract := func(path ...string) (string, string) {
+		cur := root
+		for i, p := range path {
+			val, ok := cur[p]
+			if !ok {
+				return "", ""
+			}
+			if i == len(path)-1 {
+				m, _ := val.(map[string]interface{})
+				if m == nil {
+					return "", ""
+				}
+				cpu, _ := m["cpu"].(string)
+				mem, _ := m["memory"].(string)
+				if cpu == "" && mem == "" {
+					if cpuInt, ok := m["cpu"].(int); ok {
+						cpu = strconv.Itoa(cpuInt)
+					}
+					if memInt, ok := m["memory"].(int); ok {
+						mem = strconv.Itoa(memInt)
+					}
+				}
+				return cpu, mem
+			}
+			cur, _ = val.(map[string]interface{})
+			if cur == nil {
+				return "", ""
+			}
+		}
+		return "", ""
+	}
+
+	if c, m := extract("kafka", "resources", "requests"); c != "" || m != "" {
+		reqs.BrokerCPU = parseCPU(c)
+		reqs.BrokerMem = parseMem(m)
+	}
+	if c, m := extract("zookeeper", "resources", "requests"); c != "" || m != "" {
+		reqs.ControllerCPU = parseCPU(c)
+		reqs.ControllerMem = parseMem(m)
+	}
+	
+	// approximate other stuff (cruise control, entity operator, exporter)
+	oCpu, oMem := 0, 0
+	if c, m := extract("cruiseControl", "resources", "requests"); c != "" || m != "" {
+		oCpu += parseCPU(c)
+		oMem += parseMem(m)
+	}
+	if c, m := extract("kafkaExporter", "resources", "requests"); c != "" || m != "" {
+		oCpu += parseCPU(c)
+		oMem += parseMem(m)
+	}
+	if oCpu > 0 { reqs.OtherCPU = oCpu }
+	if oMem > 0 { reqs.OtherMem = oMem }
+
+	return reqs
 }
