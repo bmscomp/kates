@@ -85,6 +85,10 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		report.Admission = c.getAdmissionStatus()
 		return nil
 	})
+	g.Go(func() error {
+		report.NetPolAudit = c.getNetworkPolicyAudit()
+		return nil
+	})
 
 	err := g.Wait()
 	return report, err
@@ -432,7 +436,7 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 func (c *Collector) getAdmissionStatus() AdmissionInfo {
 	info := AdmissionInfo{}
 
-	// Kyverno detection
+	// Detect Kyverno and Gatekeeper deployments
 	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
 	var depData struct {
 		Items []struct {
@@ -440,61 +444,270 @@ func (c *Collector) getAdmissionStatus() AdmissionInfo {
 				Name      string `json:"name"`
 				Namespace string `json:"namespace"`
 			} `json:"metadata"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						Containers []struct {
+							Image string `json:"image"`
+						} `json:"containers"`
+					} `json:"spec"`
+				} `json:"template"`
+			} `json:"spec"`
 		} `json:"items"`
 	}
 	if json.Unmarshal([]byte(depOut), &depData) == nil {
 		for _, dep := range depData.Items {
 			name := strings.ToLower(dep.Metadata.Name)
-			if strings.Contains(name, "kyverno") && !info.KyvernoInstalled {
-				info.KyvernoInstalled = true
-				info.KyvernoNamespace = dep.Metadata.Namespace
+			if strings.Contains(name, "kyverno") && !info.Kyverno.Installed {
+				info.Kyverno.Installed = true
+				info.Kyverno.Namespace = dep.Metadata.Namespace
+				if len(dep.Spec.Template.Spec.Containers) > 0 {
+					img := dep.Spec.Template.Spec.Containers[0].Image
+					if parts := strings.Split(img, ":"); len(parts) > 1 {
+						info.Kyverno.Version = parts[len(parts)-1]
+					}
+				}
 			}
-			if strings.Contains(name, "gatekeeper") && !info.GatekeeperInstalled {
-				info.GatekeeperInstalled = true
-				info.GatekeeperNamespace = dep.Metadata.Namespace
+			if strings.Contains(name, "gatekeeper") && !info.Gatekeeper.Installed {
+				info.Gatekeeper.Installed = true
+				info.Gatekeeper.Namespace = dep.Metadata.Namespace
 			}
 		}
 	}
 
-	// Kyverno ClusterPolicies
-	if info.KyvernoInstalled {
-		polOut, _ := c.exec.Exec("kubectl", "get", "clusterpolicy", "-o", "json")
-		var polData struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-			} `json:"items"`
-		}
-		if json.Unmarshal([]byte(polOut), &polData) == nil {
-			for _, p := range polData.Items {
-				info.Policies = append(info.Policies, p.Metadata.Name)
-				name := strings.ToLower(p.Metadata.Name)
-				if strings.Contains(name, "empty") || strings.Contains(name, "podselector") || strings.Contains(name, "netpol") {
-					info.EmptySelectorBlocked = true
-				}
-			}
-			info.PolicyCount = len(polData.Items)
-		}
+	// Deep Kyverno ClusterPolicy parsing
+	if info.Kyverno.Installed {
+		c.parseKyvernoPolicies(&info)
 	}
 
 	// OPA Gatekeeper constraints
-	if info.GatekeeperInstalled {
-		conOut, _ := c.exec.Exec("kubectl", "get", "constraints", "-o", "json")
-		var conData struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-			} `json:"items"`
-		}
-		if json.Unmarshal([]byte(conOut), &conData) == nil {
-			for _, c := range conData.Items {
-				info.Policies = append(info.Policies, c.Metadata.Name)
-			}
-			info.PolicyCount += len(conData.Items)
-		}
+	if info.Gatekeeper.Installed {
+		c.parseGatekeeperConstraints(&info)
 	}
 
 	return info
+}
+
+func (c *Collector) parseKyvernoPolicies(info *AdmissionInfo) {
+	polOut, _ := c.exec.Exec("kubectl", "get", "clusterpolicy", "-o", "json")
+	var polData struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if json.Unmarshal([]byte(polOut), &polData) != nil {
+		return
+	}
+
+	for _, raw := range polData.Items {
+		var pol struct {
+			Metadata struct {
+				Name        string            `json:"name"`
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+			Spec struct {
+				ValidationFailureAction string `json:"validationFailureAction"`
+				Rules []struct {
+					Name  string `json:"name"`
+					Match struct {
+						Any []struct {
+							Resources struct {
+								Kinds      []string `json:"kinds"`
+								Namespaces []string `json:"namespaces"`
+							} `json:"resources"`
+						} `json:"any"`
+						Resources struct {
+							Kinds      []string `json:"kinds"`
+							Namespaces []string `json:"namespaces"`
+						} `json:"resources"`
+					} `json:"match"`
+				} `json:"rules"`
+			} `json:"spec"`
+		}
+		if json.Unmarshal(raw, &pol) != nil {
+			continue
+		}
+
+		action := strings.ToLower(pol.Spec.ValidationFailureAction)
+		if action == "" {
+			action = "audit"
+		}
+
+		category := pol.Metadata.Annotations["policies.kyverno.io/category"]
+		if category == "" {
+			category = pol.Metadata.Annotations["kyverno.io/category"]
+		}
+
+		description := pol.Metadata.Annotations["policies.kyverno.io/description"]
+
+		var ruleNames []string
+		affectsKafka := false
+		for _, r := range pol.Spec.Rules {
+			ruleNames = append(ruleNames, r.Name)
+			// Check if rule targets kafka namespace or all namespaces
+			if len(r.Match.Resources.Namespaces) == 0 && len(r.Match.Any) == 0 {
+				// No namespace filter = applies to all namespaces including kafka
+				affectsKafka = true
+			}
+			for _, ns := range r.Match.Resources.Namespaces {
+				if strings.ToLower(ns) == "kafka" || ns == "*" {
+					affectsKafka = true
+				}
+			}
+			for _, any := range r.Match.Any {
+				if len(any.Resources.Namespaces) == 0 {
+					affectsKafka = true
+				}
+				for _, ns := range any.Resources.Namespaces {
+					if strings.ToLower(ns) == "kafka" || ns == "*" {
+						affectsKafka = true
+					}
+				}
+			}
+		}
+
+		policyInfo := KyvernoPolicyInfo{
+			Name:         pol.Metadata.Name,
+			Action:       action,
+			Category:     category,
+			AffectsKafka: affectsKafka,
+			Rules:        ruleNames,
+			Description:  description,
+		}
+
+		info.Kyverno.ClusterPolicies = append(info.Kyverno.ClusterPolicies, policyInfo)
+		if affectsKafka {
+			info.Kyverno.KafkaRelevant = append(info.Kyverno.KafkaRelevant, policyInfo)
+		}
+
+		// Detect constraint categories from policy name and rule names
+		nameLower := strings.ToLower(pol.Metadata.Name)
+		allNames := nameLower
+		for _, rn := range ruleNames {
+			allNames += " " + strings.ToLower(rn)
+		}
+
+		if action == "enforce" {
+			if strings.Contains(allNames, "empty") && strings.Contains(allNames, "podselector") {
+				info.Kyverno.Constraints.EmptyPodSelectorBlocked = true
+			}
+			if strings.Contains(allNames, "netpol") && strings.Contains(allNames, "podselector") {
+				info.Kyverno.Constraints.EmptyPodSelectorBlocked = true
+			}
+			if strings.Contains(allNames, "host") && strings.Contains(allNames, "network") {
+				info.Kyverno.Constraints.HostNetworkBlocked = true
+			}
+			if strings.Contains(allNames, "privileged") || strings.Contains(allNames, "privilege") {
+				info.Kyverno.Constraints.PrivilegedBlocked = true
+			}
+			if strings.Contains(allNames, "run-as-root") || strings.Contains(allNames, "runasnonroot") || strings.Contains(allNames, "run-as-non-root") {
+				info.Kyverno.Constraints.RunAsRootBlocked = true
+			}
+			if strings.Contains(allNames, "latest") && strings.Contains(allNames, "tag") {
+				info.Kyverno.Constraints.LatestTagBlocked = true
+			}
+			if strings.Contains(allNames, "resource") && (strings.Contains(allNames, "limit") || strings.Contains(allNames, "request")) {
+				info.Kyverno.Constraints.ResourceLimitsRequired = true
+			}
+		}
+	}
+}
+
+func (c *Collector) parseGatekeeperConstraints(info *AdmissionInfo) {
+	conOut, _ := c.exec.Exec("kubectl", "get", "constraints", "-o", "json")
+	var conData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Kind string `json:"kind"`
+			Spec struct {
+				EnforcementAction string `json:"enforcementAction"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(conOut), &conData) == nil {
+		for _, con := range conData.Items {
+			action := con.Spec.EnforcementAction
+			if action == "" {
+				action = "deny"
+			}
+			info.Gatekeeper.Constraints = append(info.Gatekeeper.Constraints, GatekeeperConstraint{
+				Name:   con.Metadata.Name,
+				Kind:   con.Kind,
+				Action: action,
+			})
+		}
+	}
+}
+
+func (c *Collector) getNetworkPolicyAudit() NetworkPolicyAudit {
+	audit := NetworkPolicyAudit{}
+
+	out, err := c.exec.Exec("kubectl", "get", "networkpolicy", "-n", "kafka", "-o", "json")
+	if err != nil {
+		return audit
+	}
+
+	var data struct {
+		Items []struct {
+			Metadata struct {
+				Name        string            `json:"name"`
+				Namespace   string            `json:"namespace"`
+				Annotations map[string]string `json:"annotations"`
+				Labels      map[string]string `json:"labels"`
+			} `json:"metadata"`
+			Spec struct {
+				PodSelector struct {
+					MatchLabels map[string]string `json:"matchLabels"`
+				} `json:"podSelector"`
+				PolicyTypes []string          `json:"policyTypes"`
+				Ingress     []json.RawMessage `json:"ingress"`
+				Egress      []json.RawMessage `json:"egress"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+
+	if json.Unmarshal([]byte(out), &data) != nil {
+		return audit
+	}
+
+	for _, np := range data.Items {
+		// Build human-readable selector
+		selector := "{}"
+		if len(np.Spec.PodSelector.MatchLabels) > 0 {
+			var parts []string
+			for k, v := range np.Spec.PodSelector.MatchLabels {
+				parts = append(parts, k+"="+v)
+			}
+			selector = strings.Join(parts, ",")
+		}
+
+		// Determine who manages this policy
+		managedBy := "manual"
+		if rel, ok := np.Metadata.Annotations["meta.helm.sh/release-name"]; ok {
+			managedBy = rel
+		}
+
+		npInfo := ExistingNetPol{
+			Name:         np.Metadata.Name,
+			Namespace:    np.Metadata.Namespace,
+			PodSelector:  selector,
+			PolicyTypes:  np.Spec.PolicyTypes,
+			IngressRules: len(np.Spec.Ingress),
+			EgressRules:  len(np.Spec.Egress),
+			ManagedBy:    managedBy,
+		}
+
+		audit.Existing = append(audit.Existing, npInfo)
+
+		nameLower := strings.ToLower(np.Metadata.Name)
+		if strings.Contains(nameLower, "default-deny") || strings.Contains(nameLower, "deny-all") {
+			audit.HasDefaultDeny = true
+		}
+		if strings.Contains(nameLower, "allow-dns") || strings.Contains(nameLower, "dns") {
+			audit.HasDNSAllow = true
+		}
+	}
+
+	audit.TotalCount = len(data.Items)
+	return audit
 }

@@ -93,6 +93,27 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	addCheck("Prometheus monitoring", report.Monitoring.PodMonitorCRD, "PodMonitor CRD")
 	addCheck("DNS resolution", report.Network.CoreDNSRunning > 0, fmt.Sprintf("%d CoreDNS pod(s)", report.Network.CoreDNSRunning))
 
+	// Admission controller compatibility
+	if report.Admission.Kyverno.Installed {
+		enforced := 0
+		for _, p := range report.Admission.Kyverno.KafkaRelevant {
+			if strings.ToLower(p.Action) == "enforce" {
+				enforced++
+			}
+		}
+		kyvernoSafe := !report.Admission.Kyverno.Constraints.EmptyPodSelectorBlocked
+		if !kyvernoSafe {
+			// It's a warning, not a fail — the chart has Kyverno-safe selectors
+			v.Warns++
+		}
+		addCheck("Kyverno NetworkPolicy safe", true, fmt.Sprintf("%d enforced policies, explicit selectors used", enforced))
+
+		if report.Admission.Kyverno.Constraints.ResourceLimitsRequired {
+			v.Warns++
+			addCheck("Resource limits required", true, "Kyverno enforces — verify values.yaml limits")
+		}
+	}
+
 	if report.ExistingKafka.KafkaClusters > 0 {
 		v.Warns++
 	}

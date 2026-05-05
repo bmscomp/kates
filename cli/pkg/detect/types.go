@@ -61,15 +61,73 @@ type NetworkInfo struct {
 	ServiceCIDR    string
 }
 
+// ── Admission Controller Types ───────────────────────────────────────────────
+
 type AdmissionInfo struct {
-	KyvernoInstalled       bool
-	KyvernoNamespace       string
-	GatekeeperInstalled    bool
-	GatekeeperNamespace    string
-	EmptySelectorBlocked   bool
-	PolicyCount            int
-	Policies               []string
+	Kyverno    KyvernoInfo
+	Gatekeeper GatekeeperInfo
 }
+
+type KyvernoInfo struct {
+	Installed       bool
+	Namespace       string
+	Version         string
+	ClusterPolicies []KyvernoPolicyInfo
+	KafkaRelevant   []KyvernoPolicyInfo
+	Constraints     PolicyConstraints
+}
+
+type KyvernoPolicyInfo struct {
+	Name         string
+	Action       string // "enforce" or "audit"
+	Category     string
+	AffectsKafka bool
+	Rules        []string
+	Description  string
+}
+
+type PolicyConstraints struct {
+	EmptyPodSelectorBlocked bool
+	HostNetworkBlocked      bool
+	PrivilegedBlocked       bool
+	RunAsRootBlocked        bool
+	LatestTagBlocked        bool
+	ResourceLimitsRequired  bool
+	CustomConstraints       []string
+}
+
+type GatekeeperInfo struct {
+	Installed   bool
+	Namespace   string
+	Constraints []GatekeeperConstraint
+}
+
+type GatekeeperConstraint struct {
+	Name   string
+	Kind   string
+	Action string
+}
+
+// ── NetworkPolicy Audit Types ────────────────────────────────────────────────
+
+type NetworkPolicyAudit struct {
+	Existing       []ExistingNetPol
+	TotalCount     int
+	HasDefaultDeny bool
+	HasDNSAllow    bool
+}
+
+type ExistingNetPol struct {
+	Name         string
+	Namespace    string
+	PodSelector  string
+	PolicyTypes  []string
+	IngressRules int
+	EgressRules  int
+	ManagedBy    string
+}
+
+// ── Budget & Verdict Types ───────────────────────────────────────────────────
 
 type ParsedReqs struct {
 	BrokerCPU     int
@@ -79,8 +137,6 @@ type ParsedReqs struct {
 	OtherCPU      int
 	OtherMem      int
 }
-
-// Types for the final analyzed report
 
 type BudgetReport struct {
 	CtrlCPU, CtrlMem     int
@@ -120,6 +176,7 @@ type DetectReport struct {
 	Monitoring    MonitoringInfo
 	Network       NetworkInfo
 	Admission     AdmissionInfo
+	NetPolAudit   NetworkPolicyAudit
 	Budget        BudgetReport
 	Verdict       Verdict
 }

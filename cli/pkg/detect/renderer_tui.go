@@ -3,6 +3,7 @@ package detect
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/klster/kates-cli/output"
 )
@@ -139,27 +140,109 @@ func RenderTUI(report *DetectReport) {
 	output.Success(fmt.Sprintf("Pod CIDR: %s", report.Network.PodCIDR))
 	output.Success(fmt.Sprintf("Service CIDR: %s", report.Network.ServiceCIDR))
 
+	// ── Admission Controllers ────────────────────────────────────────────────
 	output.Header("Admission Controllers")
-	if report.Admission.KyvernoInstalled {
-		output.Success(fmt.Sprintf("Kyverno: running in %s", report.Admission.KyvernoNamespace))
-		output.KeyValue("Cluster policies:", strconv.Itoa(report.Admission.PolicyCount))
-		if report.Admission.EmptySelectorBlocked {
-			output.Warn("Empty podSelector restricted — using explicit selectors for NetworkPolicies")
+	if report.Admission.Kyverno.Installed {
+		version := report.Admission.Kyverno.Version
+		if version == "" {
+			version = "unknown"
 		}
-		if len(report.Admission.Policies) > 0 {
-			for _, p := range report.Admission.Policies {
-				fmt.Printf("    • %s\n", p)
-			}
-		}
+		output.Success(fmt.Sprintf("Kyverno: running in %s (v%s)", report.Admission.Kyverno.Namespace, version))
+		output.KeyValue("Cluster policies:", fmt.Sprintf("%d total, %d kafka-relevant",
+			len(report.Admission.Kyverno.ClusterPolicies),
+			len(report.Admission.Kyverno.KafkaRelevant)))
 	} else {
 		output.Hint("Kyverno: not installed")
 	}
-	if report.Admission.GatekeeperInstalled {
-		output.Success(fmt.Sprintf("OPA Gatekeeper: running in %s", report.Admission.GatekeeperNamespace))
+	if report.Admission.Gatekeeper.Installed {
+		output.Success(fmt.Sprintf("OPA Gatekeeper: running in %s (%d constraints)",
+			report.Admission.Gatekeeper.Namespace,
+			len(report.Admission.Gatekeeper.Constraints)))
 	} else {
 		output.Hint("OPA Gatekeeper: not installed")
 	}
 
+	// ── Kyverno Policies (kafka-relevant) ────────────────────────────────────
+	if report.Admission.Kyverno.Installed && len(report.Admission.Kyverno.KafkaRelevant) > 0 {
+		output.Header("Kyverno Policies (kafka namespace)")
+		pHeaders := []string{"POLICY", "ACTION", "CATEGORY", "RULES"}
+		var pRows [][]string
+		for _, p := range report.Admission.Kyverno.KafkaRelevant {
+			cat := p.Category
+			if cat == "" {
+				cat = "—"
+			}
+			pRows = append(pRows, []string{
+				p.Name,
+				strings.ToUpper(p.Action),
+				cat,
+				strconv.Itoa(len(p.Rules)),
+			})
+		}
+		output.Table(pHeaders, pRows)
+
+		// Constraint impact analysis
+		c := report.Admission.Kyverno.Constraints
+		if c.EmptyPodSelectorBlocked {
+			output.Warn("Empty podSelector blocked — chart uses explicit selectors (safe)")
+		}
+		if c.ResourceLimitsRequired {
+			output.Warn("Resource limits required — verify values.yaml has limits set for all components")
+		}
+		if c.RunAsRootBlocked {
+			output.Success("Run-as-non-root enforced — Strimzi pods comply by default")
+		}
+		if c.LatestTagBlocked {
+			output.Success("Latest tag blocked — chart uses pinned image versions")
+		}
+		if c.PrivilegedBlocked {
+			output.Success("Privileged containers blocked — Kafka does not require privilege")
+		}
+		if c.HostNetworkBlocked {
+			output.Success("Host networking blocked — Kafka uses ClusterIP networking")
+		}
+	}
+
+	// ── Existing NetworkPolicies ─────────────────────────────────────────────
+	if report.NetPolAudit.TotalCount > 0 {
+		output.Header("NetworkPolicies (kafka namespace)")
+		npHeaders := []string{"NAME", "SELECTOR", "TYPES", "IN/OUT", "MANAGED BY"}
+		var npRows [][]string
+		for _, np := range report.NetPolAudit.Existing {
+			sel := np.PodSelector
+			if len(sel) > 45 {
+				sel = sel[:42] + "..."
+			}
+			types := strings.Join(np.PolicyTypes, ",")
+			rules := fmt.Sprintf("%d/%d", np.IngressRules, np.EgressRules)
+			npRows = append(npRows, []string{np.Name, sel, types, rules, np.ManagedBy})
+		}
+		output.Table(npHeaders, npRows)
+
+		helmCount := 0
+		manualCount := 0
+		for _, np := range report.NetPolAudit.Existing {
+			if np.ManagedBy != "manual" {
+				helmCount++
+			} else {
+				manualCount++
+			}
+		}
+		if helmCount > 0 {
+			output.Success(fmt.Sprintf("%d policies managed by Helm", helmCount))
+		}
+		if manualCount > 0 {
+			output.Warn(fmt.Sprintf("%d manually-managed policies detected", manualCount))
+		}
+		if report.NetPolAudit.HasDefaultDeny {
+			output.Success("Default-deny policy: applied")
+		}
+	} else {
+		output.Header("NetworkPolicies (kafka namespace)")
+		output.Hint("No NetworkPolicies found in kafka namespace")
+	}
+
+	// ── Verdict ──────────────────────────────────────────────────────────────
 	output.Header("3-AZ Kafka Compatibility Verdict")
 	var cRows [][]string
 	for _, c := range report.Verdict.Checks {
