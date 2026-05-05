@@ -229,6 +229,17 @@ kubectl describe pod <pod-name> -n <namespace> | grep -A5 Events
 
 ### Installation
 
+#### macOS (Recommended)
+
+The easiest way to install the Kates CLI on macOS is using Homebrew:
+
+```bash
+brew tap bmscomp/tap
+brew install kates
+```
+
+#### From Source (All Platforms)
+
 ```bash
 cd cli
 go build -o kates .
