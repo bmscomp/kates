@@ -390,8 +390,25 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		info.CNI = "Flannel"
 	}
 
-	dnsOut, _ := c.exec.Exec("kubectl", "get", "pods", "-n", "kube-system", "-l", "k8s-app=kube-dns", "--no-headers")
-	info.CoreDNSRunning = strings.Count(dnsOut, "Running")
+	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	var depData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Status struct {
+				ReadyReplicas int `json:"readyReplicas"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(depOut), &depData) == nil {
+		for _, dep := range depData.Items {
+			name := strings.ToLower(dep.Metadata.Name)
+			if strings.Contains(name, "coredns") || strings.Contains(name, "kube-dns") {
+				info.CoreDNSRunning += dep.Status.ReadyReplicas
+			}
+		}
+	}
 
 	info.PodCIDR, _ = c.exec.Exec("kubectl", "get", "nodes", "-o", "jsonpath={.items[0].spec.podCIDR}")
 	if info.PodCIDR == "" {
