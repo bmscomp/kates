@@ -107,9 +107,9 @@ fi
 
 # Strimzi operator deployment
 STRIMZI_DEPLOYED=false
-if kubectl get deployment -A -l app.kubernetes.io/name=strimzi-cluster-operator --no-headers 2>/dev/null | grep -q .; then
+if kubectl get deployment -A -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | grep -q "strimzi-cluster-operator"; then
     STRIMZI_DEPLOYED=true
-    STRIMZI_NS=$(kubectl get deployment -A -l app.kubernetes.io/name=strimzi-cluster-operator -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null)
+    STRIMZI_NS=$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi-cluster-operator/ {print $1}' | head -n1)
     ok "Strimzi operator: running in ${STRIMZI_NS}"
 else
     info "Strimzi operator: not deployed — chart will install it"
@@ -316,6 +316,10 @@ elif kubectl get pods -n kube-system -l app.kubernetes.io/name=cilium-agent --no
      kubectl get pods -n kube-system -l k8s-app=cilium --no-headers 2>/dev/null | grep -q .; then
     NP_SUPPORTED=true; CNI_NAME="Cilium"
     ok "CNI: Cilium (NetworkPolicies supported)"
+elif kubectl get daemonset -n kube-system kindnet --no-headers 2>/dev/null | grep -q . || \
+     kubectl get pods -n kube-system -l app=kindnet --no-headers 2>/dev/null | grep -q .; then
+    NP_SUPPORTED=true; CNI_NAME="kindnet"
+    ok "CNI: kindnet (NetworkPolicies supported)"
 elif kubectl get daemonset -n kube-system weave-net --no-headers 2>/dev/null | grep -q .; then
     NP_SUPPORTED=true; CNI_NAME="Weave Net"
     ok "CNI: Weave Net (NetworkPolicies supported)"
