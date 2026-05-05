@@ -384,8 +384,7 @@ kafka-upgrade: kafka-chart-deps
 	ENV=$(ENV) ./scripts/deploy-kafka.sh
 
 kafka-detect:
-	@echo "🔍 Detecting cluster configuration..."
-	@./scripts/detect-cluster-config.sh --dry-run
+	@./scripts/kafka-cluster-report.sh
 
 kafka-deploy-auto: kafka-chart-deps
 	@echo "🔍 Auto-detecting cluster configuration from kubeconfig..."
@@ -540,7 +539,7 @@ help:
 	@echo "  cert-manager                       - Deploy cert-manager"
 	@echo "  kafka                              - Deploy Kafka (shorthand for kafka-deploy)"
 	@echo "  kafka-deploy                       - Deploy Kafka via Helm (ENV=kind|dev|staging|prod)"
-	@echo "  kafka-detect                       - Detect zones, storage classes from kubeconfig"
+	@echo "  kafka-detect                       - Deep cluster compatibility report for Kafka"
 	@echo "  kafka-deploy-auto                  - Auto-detect cluster config and deploy Kafka"
 	@echo "  kafka-deploy-generic               - Full pipeline: detect → deploy → wait → verify"
 	@echo "  kafka-deploy-generic-interactive   - Same but prompts before deploy"
