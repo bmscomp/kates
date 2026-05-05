@@ -217,6 +217,7 @@ credentials.json
 service-account.json
 
 # Build artifacts
+.build/
 dist/
 build/
 *.o

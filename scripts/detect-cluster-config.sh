@@ -74,6 +74,54 @@ kubectl cluster-info &>/dev/null || {
     exit 1
 }
 
+# ── Pre-flight Checks ─────────────────────────────────────────────────────────
+header "Pre-flight Checks"
+
+# Kubernetes version
+K8S_VERSION=$(kubectl version -o json 2>/dev/null | grep -o '"minor": *"[^"]*"' | head -1 | grep -o '[0-9]*' || echo "0")
+if [ "${K8S_VERSION}" -lt 25 ] 2>/dev/null; then
+    error "Kubernetes ≥ 1.25 required (found 1.${K8S_VERSION})"
+    exit 1
+fi
+ok "Kubernetes:  1.${K8S_VERSION}"
+
+# Helm version
+HELM_VER=$(helm version --short 2>/dev/null | sed 's/v//' | cut -d. -f1-2)
+HELM_MAJOR=$(echo "${HELM_VER}" | cut -d. -f1)
+HELM_MINOR=$(echo "${HELM_VER}" | cut -d. -f2)
+if [ "${HELM_MAJOR}" -lt 3 ] 2>/dev/null || { [ "${HELM_MAJOR}" -eq 3 ] && [ "${HELM_MINOR}" -lt 12 ]; } 2>/dev/null; then
+    error "Helm ≥ 3.12 required (found ${HELM_VER})"
+    exit 1
+fi
+ok "Helm:        v${HELM_VER}"
+
+# Strimzi CRDs
+STRIMZI_OPERATOR_EXISTS=false
+if kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
+    STRIMZI_CRD_VER=$(kubectl get crd kafkas.kafka.strimzi.io -o jsonpath='{.spec.versions[-1:].name}' 2>/dev/null || echo "unknown")
+    ok "Strimzi CRDs: present (${STRIMZI_CRD_VER})"
+    STRIMZI_OPERATOR_EXISTS=true
+else
+    info "Strimzi CRDs: not found — will install operator as subchart"
+fi
+
+# Strimzi operator deployment
+STRIMZI_DEPLOYED=false
+if kubectl get deployment -A -l app.kubernetes.io/name=strimzi-cluster-operator --no-headers 2>/dev/null | grep -q .; then
+    STRIMZI_DEPLOYED=true
+    STRIMZI_NS=$(kubectl get deployment -A -l app.kubernetes.io/name=strimzi-cluster-operator -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null)
+    ok "Strimzi operator: running in ${STRIMZI_NS}"
+else
+    info "Strimzi operator: not deployed — chart will install it"
+fi
+
+# RBAC
+if kubectl auth can-i create deployments -n kafka &>/dev/null; then
+    ok "RBAC: sufficient permissions for kafka namespace"
+else
+    warn "RBAC: cannot create resources in kafka namespace — deployment may fail"
+fi
+
 # ── Detect provider ───────────────────────────────────────────────────────────
 header "Cluster Provider Detection"
 PROVIDER="generic"
@@ -223,16 +271,75 @@ else
 fi
 ok "Profile:     ${PROFILE} (${TOTAL_CPU} CPU / ${TOTAL_MEM_GI} GiB)"
 
+# ── Monitoring & Observability Detection ──────────────────────────────────────
+header "Monitoring Detection"
+
+PROMETHEUS_INSTALLED=false
+GRAFANA_INSTALLED=false
+MONITORING_NS="monitoring"
+PROM_RELEASE_LABEL="monitoring"
+
+if kubectl get crd podmonitors.monitoring.coreos.com &>/dev/null; then
+    PROMETHEUS_INSTALLED=true
+    ok "Prometheus:   PodMonitor CRD present"
+    EXISTING_LABEL=$(kubectl get podmonitors -A -o jsonpath='{.items[0].metadata.labels.release}' 2>/dev/null || true)
+    if [ -n "${EXISTING_LABEL}" ]; then
+        PROM_RELEASE_LABEL="${EXISTING_LABEL}"
+    fi
+    ok "Release label: ${PROM_RELEASE_LABEL}"
+else
+    warn "PodMonitor CRD not found — disabling podMonitors and alerts"
+fi
+
+PROM_RULES_AVAILABLE=false
+if kubectl get crd prometheusrules.monitoring.coreos.com &>/dev/null; then
+    PROM_RULES_AVAILABLE=true
+    ok "PrometheusRule CRD: present"
+fi
+
+if kubectl get deployment -n "${MONITORING_NS}" -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q .; then
+    GRAFANA_INSTALLED=true
+    ok "Grafana:      deployed in ${MONITORING_NS}"
+else
+    warn "Grafana not found — disabling dashboard ConfigMaps"
+fi
+
+# ── Network Policy Detection ─────────────────────────────────────────────────
+header "Network Policy Support"
+
+NP_SUPPORTED=false
+CNI_NAME="unknown"
+if kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers 2>/dev/null | grep -q .; then
+    NP_SUPPORTED=true; CNI_NAME="Calico"
+    ok "CNI: Calico (NetworkPolicies supported)"
+elif kubectl get pods -n kube-system -l app.kubernetes.io/name=cilium-agent --no-headers 2>/dev/null | grep -q . || \
+     kubectl get pods -n kube-system -l k8s-app=cilium --no-headers 2>/dev/null | grep -q .; then
+    NP_SUPPORTED=true; CNI_NAME="Cilium"
+    ok "CNI: Cilium (NetworkPolicies supported)"
+elif kubectl get daemonset -n kube-system weave-net --no-headers 2>/dev/null | grep -q .; then
+    NP_SUPPORTED=true; CNI_NAME="Weave Net"
+    ok "CNI: Weave Net (NetworkPolicies supported)"
+elif [ "${PROVIDER}" = "eks" ] || [ "${PROVIDER}" = "gke" ] || [ "${PROVIDER}" = "aks" ]; then
+    NP_SUPPORTED=true; CNI_NAME="cloud-native"
+    ok "CNI: cloud-native (NetworkPolicies supported)"
+else
+    warn "CNI not detected — disabling NetworkPolicies (can be enabled manually)"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 header "Configuration Summary"
 echo ""
-echo -e "  ${BOLD}Provider:${NC}      ${PROVIDER}"
-echo -e "  ${BOLD}Context:${NC}       ${CONTEXT}"
-echo -e "  ${BOLD}Zones:${NC}         ${ZONE_COUNT} (${ZONES[*]:-none})"
-echo -e "  ${BOLD}StorageClass:${NC}  ${DEFAULT_SC}"
-echo -e "  ${BOLD}Profile:${NC}       ${PROFILE}"
-echo -e "  ${BOLD}Controllers:${NC}   ${CONTROLLER_REPLICAS} × ${CONTROLLER_STORAGE}"
-echo -e "  ${BOLD}Brokers:${NC}       ${BROKER_REPLICAS} per zone × ${BROKER_STORAGE}"
+echo -e "  ${BOLD}Provider:${NC}       ${PROVIDER}"
+echo -e "  ${BOLD}Context:${NC}        ${CONTEXT}"
+echo -e "  ${BOLD}Zones:${NC}          ${ZONE_COUNT} (${ZONES[*]:-none})"
+echo -e "  ${BOLD}StorageClass:${NC}   ${DEFAULT_SC}"
+echo -e "  ${BOLD}Profile:${NC}        ${PROFILE}"
+echo -e "  ${BOLD}Controllers:${NC}    ${CONTROLLER_REPLICAS} × ${CONTROLLER_STORAGE}"
+echo -e "  ${BOLD}Brokers:${NC}        ${BROKER_REPLICAS} per zone × ${BROKER_STORAGE}"
+echo -e "  ${BOLD}Strimzi:${NC}        $([ "${STRIMZI_DEPLOYED}" = true ] && echo 'already deployed (subchart disabled)' || echo 'will install subchart')"
+echo -e "  ${BOLD}Prometheus:${NC}     $([ "${PROMETHEUS_INSTALLED}" = true ] && echo 'detected' || echo 'not found')"
+echo -e "  ${BOLD}Grafana:${NC}        $([ "${GRAFANA_INSTALLED}" = true ] && echo 'detected' || echo 'not found')"
+echo -e "  ${BOLD}NetworkPolicy:${NC}  $([ "${NP_SUPPORTED}" = true ] && echo "enabled (${CNI_NAME})" || echo 'disabled')"
 echo ""
 
 if [ "${DRY_RUN}" = true ]; then
@@ -310,6 +417,78 @@ if [ "${ZONE_COUNT}" -eq 0 ]; then
     TOPOLOGY_KEY="kubernetes.io/hostname"
 fi
 
+# Build external listener YAML based on provider
+EXTERNAL_LISTENER_YAML=""
+case "${PROVIDER}" in
+    eks)
+        EXTERNAL_LISTENER_YAML="    - name: external
+      port: 9094
+      type: loadbalancer
+      tls: true
+      authentication:
+        type: scram-sha-512
+      configuration:
+        bootstrap:
+          annotations:
+            service.beta.kubernetes.io/aws-load-balancer-type: nlb"
+        ;;
+    gke)
+        EXTERNAL_LISTENER_YAML="    - name: external
+      port: 9094
+      type: loadbalancer
+      tls: true
+      authentication:
+        type: scram-sha-512
+      configuration:
+        bootstrap:
+          annotations:
+            cloud.google.com/l4-rbs: enabled"
+        ;;
+    aks)
+        EXTERNAL_LISTENER_YAML="    - name: external
+      port: 9094
+      type: loadbalancer
+      tls: true
+      authentication:
+        type: scram-sha-512
+      configuration:
+        bootstrap:
+          annotations:
+            service.beta.kubernetes.io/azure-load-balancer-internal: \"true\""
+        ;;
+    kind)
+        # Kind: no external listener
+        EXTERNAL_LISTENER_YAML=""
+        ;;
+    *)
+        EXTERNAL_LISTENER_YAML="    - name: external
+      port: 9094
+      type: nodeport
+      tls: true
+      authentication:
+        type: scram-sha-512"
+        ;;
+esac
+
+# Build listeners section
+LISTENERS_YAML="  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+      authentication:
+        type: scram-sha-512
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:
+        type: tls"
+if [ -n "${EXTERNAL_LISTENER_YAML}" ]; then
+    LISTENERS_YAML+="
+${EXTERNAL_LISTENER_YAML}"
+fi
+
 VALUES_CONTENT="# Auto-generated by detect-cluster-config.sh
 # Provider: ${PROVIDER}
 # Context:  ${CONTEXT}
@@ -318,6 +497,13 @@ VALUES_CONTENT="# Auto-generated by detect-cluster-config.sh
 #
 # Detected: ${ZONE_COUNT} zone(s), ${NODE_COUNT} node(s), ${TOTAL_CPU} CPU, ${TOTAL_MEM_GI} GiB RAM
 # StorageClass: ${DEFAULT_SC}
+# Monitoring: prometheus=${PROMETHEUS_INSTALLED} grafana=${GRAFANA_INSTALLED}
+# NetworkPolicy: ${NP_SUPPORTED} (${CNI_NAME})
+# Strimzi: deployed=${STRIMZI_DEPLOYED}
+
+# ── Strimzi Operator ──
+strimziOperator:
+  enabled: $([ "${STRIMZI_DEPLOYED}" = true ] && echo 'false' || echo 'true')
 
 controllers:
   replicas: ${CONTROLLER_REPLICAS}
@@ -346,8 +532,28 @@ brokerDefaults:
     topologyKey: ${TOPOLOGY_KEY}
 
 kafka:
+${LISTENERS_YAML}
   rack:
     topologyKey: ${TOPOLOGY_KEY}
+
+# ── Monitoring & Observability ──
+dashboards:
+  enabled: ${GRAFANA_INSTALLED}
+  namespace: ${MONITORING_NS}
+
+podMonitors:
+  enabled: ${PROMETHEUS_INSTALLED}
+  labels:
+    release: ${PROM_RELEASE_LABEL}
+
+alerts:
+  enabled: $([ "${PROMETHEUS_INSTALLED}" = true ] && [ "${PROM_RULES_AVAILABLE}" = true ] && echo 'true' || echo 'false')
+  labels:
+    release: ${PROM_RELEASE_LABEL}
+
+# ── Network Policies ──
+networkPolicies:
+  enabled: ${NP_SUPPORTED}
 "
 
 if [ -n "${OUTPUT}" ]; then

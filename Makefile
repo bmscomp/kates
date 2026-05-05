@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -402,6 +402,20 @@ kafka-deploy-auto: kafka-chart-deps
 	@echo "  Run tests:     helm test kafka-cluster -n kafka"
 	@echo "  Check status:  kubectl get kafka,kafkanodepools -n kafka"
 
+VALUES_FILE ?=
+kafka-deploy-generic: kafka-chart-deps
+	@./scripts/deploy-kafka-generic.sh --yes
+
+kafka-deploy-generic-interactive: kafka-chart-deps
+	@./scripts/deploy-kafka-generic.sh
+
+kafka-deploy-generic-custom: kafka-chart-deps
+	@if [ -z "$(VALUES_FILE)" ]; then \
+		echo "❌ VALUES_FILE is required. Usage: make kafka-deploy-generic-custom VALUES_FILE=my-values.yaml"; \
+		exit 1; \
+	fi
+	@./scripts/deploy-kafka-generic.sh --yes -f $(VALUES_FILE)
+
 kafka-undeploy:
 	@echo "🗑️  Removing Kafka cluster..."
 	helm uninstall kafka-cluster -n kafka 2>/dev/null || true
@@ -528,6 +542,9 @@ help:
 	@echo "  kafka-deploy     - Deploy Kafka via Helm (ENV=kind|dev|staging|prod)"
 	@echo "  kafka-detect     - Detect zones, storage classes from current kubeconfig"
 	@echo "  kafka-deploy-auto - Auto-detect cluster config and deploy Kafka"
+	@echo "  kafka-deploy-generic - Full pipeline: detect → deploy → wait → verify"
+	@echo "  kafka-deploy-generic-interactive - Same but prompts before deploy"
+	@echo "  kafka-deploy-generic-custom - Generic + extra overlay (VALUES_FILE=...)"
 	@echo "  kafka-upgrade    - Upgrade existing Kafka release (ENV=kind|dev|staging|prod)"
 	@echo "  kafka-undeploy   - Remove Kafka Helm release + PVCs"
 	@echo "  ui               - Deploy Kafka UI"
