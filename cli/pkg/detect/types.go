@@ -21,11 +21,20 @@ type ZoneInfo struct {
 }
 
 type SCInfo struct {
-	Name          string
-	Provisioner   string
-	BindingMode   string
-	ReclaimPolicy string
-	IsDefault     bool
+	Name           string
+	Provisioner    string
+	BindingMode    string
+	ReclaimPolicy  string
+	IsDefault      bool
+	AllowExpansion bool
+}
+
+type StorageAudit struct {
+	PVCount         int
+	PVTotalCapacity string
+	PVBoundCount    int
+	PVAvailable     int
+	CSIDrivers      []string
 }
 
 type KafkaResources struct {
@@ -36,6 +45,30 @@ type KafkaResources struct {
 	PVCs           int
 	BoundPVCs      int
 	HelmRelease    string
+	Health         KafkaClusterHealth
+}
+
+type KafkaClusterHealth struct {
+	Name          string
+	Version       string
+	Replicas      int
+	ReadyReplicas int
+	Listeners     []KafkaListener
+	Conditions    []KafkaCondition
+}
+
+type KafkaListener struct {
+	Name string
+	Type string
+	Port int
+	TLS  bool
+}
+
+type KafkaCondition struct {
+	Type    string
+	Status  string
+	Reason  string
+	Message string
 }
 
 type StrimziInfo struct {
@@ -171,6 +204,7 @@ type DetectReport struct {
 	Nodes         []NodeInfo
 	Zones         []ZoneInfo
 	Storage       []SCInfo
+	StorageAudit  StorageAudit
 	ExistingKafka KafkaResources
 	Strimzi       StrimziInfo
 	Monitoring    MonitoringInfo

@@ -67,19 +67,32 @@ func RenderTUI(report *DetectReport) {
 
 	output.Header("Storage Compatibility")
 	if len(report.Storage) > 0 {
-		sHeaders := []string{"NAME", "PROVISIONER", "BINDING", "RECLAIM", "DEFAULT"}
+		sHeaders := []string{"NAME", "PROVISIONER", "BINDING", "RECLAIM", "DEFAULT", "EXPAND"}
 		var sRows [][]string
 		for _, sc := range report.Storage {
 			def := "✗"
 			if sc.IsDefault {
 				def = "PASS"
 			}
+			expand := "✗"
+			if sc.AllowExpansion {
+				expand = "✓"
+			}
 			sRows = append(sRows, []string{
-				sc.Name, sc.Provisioner, sc.BindingMode, sc.ReclaimPolicy, def,
+				sc.Name, sc.Provisioner, sc.BindingMode, sc.ReclaimPolicy, def, expand,
 			})
 		}
 		output.Table(sHeaders, sRows)
 		output.Success(fmt.Sprintf("StorageClasses: %d available", len(report.Storage)))
+
+		// PV summary
+		if report.StorageAudit.PVCount > 0 {
+			output.Success(fmt.Sprintf("PersistentVolumes: %d total (%d bound, %s capacity)",
+				report.StorageAudit.PVCount, report.StorageAudit.PVBoundCount, report.StorageAudit.PVTotalCapacity))
+		}
+		if len(report.StorageAudit.CSIDrivers) > 0 {
+			output.Success(fmt.Sprintf("CSI Drivers: %s", strings.Join(report.StorageAudit.CSIDrivers, ", ")))
+		}
 	} else {
 		output.Error("No StorageClasses found")
 	}
@@ -94,6 +107,41 @@ func RenderTUI(report *DetectReport) {
 
 	if report.ExistingKafka.KafkaClusters > 0 {
 		output.Warn("Existing Kafka deployment detected — upgrade mode recommended")
+
+		// Kafka Cluster Health
+		h := report.ExistingKafka.Health
+		if h.Name != "" {
+			output.Header("Kafka Cluster Health")
+			version := h.Version
+			if version == "" {
+				version = "unknown"
+			}
+			output.KeyValue("Cluster:", fmt.Sprintf("%s (Kafka %s)", h.Name, version))
+			output.KeyValue("Replicas:", fmt.Sprintf("%d/%d ready", h.ReadyReplicas, h.Replicas))
+
+			// Conditions
+			for _, c := range h.Conditions {
+				if c.Type == "Ready" && c.Status == "True" {
+					output.Success(fmt.Sprintf("Condition: %s=%s", c.Type, c.Status))
+				} else if c.Type == "Ready" {
+					output.Error(fmt.Sprintf("Condition: %s=%s (%s)", c.Type, c.Status, c.Reason))
+				}
+			}
+
+			// Listeners table
+			if len(h.Listeners) > 0 {
+				lHeaders := []string{"LISTENER", "TYPE", "PORT", "TLS"}
+				var lRows [][]string
+				for _, l := range h.Listeners {
+					tls := "✗"
+					if l.TLS {
+						tls = "✓"
+					}
+					lRows = append(lRows, []string{l.Name, l.Type, strconv.Itoa(l.Port), tls})
+				}
+				output.Table(lHeaders, lRows)
+			}
+		}
 	} else {
 		output.Success("No existing Kafka deployment — clean install")
 	}
@@ -260,5 +308,28 @@ func RenderTUI(report *DetectReport) {
 		output.Banner("RESULT: PARTIAL", fmt.Sprintf("Compatible with %d warning(s)", report.Verdict.Warns))
 	} else {
 		output.Banner("RESULT: INCOMPATIBLE", fmt.Sprintf("%d check(s) failed", report.Verdict.Fails))
+	}
+
+	// ── Remediation Hints ────────────────────────────────────────────────
+	hints := GenerateRemediation(report)
+	if len(hints) > 0 {
+		output.Header("Remediation Hints")
+		for _, h := range hints {
+			switch h.Severity {
+			case "critical":
+				output.Error(h.Summary)
+			case "warning":
+				output.Warn(h.Summary)
+			default:
+				output.Hint(h.Summary)
+			}
+			for _, cmd := range h.Commands {
+				fmt.Printf("    → %s\n", cmd)
+			}
+			if h.DocURL != "" {
+				fmt.Printf("    📖 %s\n", h.DocURL)
+			}
+			fmt.Println()
+		}
 	}
 }
