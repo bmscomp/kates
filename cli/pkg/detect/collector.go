@@ -316,7 +316,7 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 	crdOut, _ := c.exec.Exec("kubectl", "get", "crd", "kafkas.kafka.strimzi.io")
 	info.CRDsPresent = !strings.Contains(crdOut, "NotFound")
 
-	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-l", "app.kubernetes.io/name=strimzi-cluster-operator", "-o", "json")
+	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-l", "name=strimzi-cluster-operator", "-o", "json")
 	var data struct {
 		Items []struct {
 			Metadata struct {
