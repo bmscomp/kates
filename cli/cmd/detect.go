@@ -27,7 +27,10 @@ Exit codes:
   kates detect -f values.yaml
   kates detect --output json
   kates detect --fail-on-warning          # CI/CD gate: exit 1 on warnings
-  kates detect --fail-on-error --quiet    # CI/CD gate: minimal output`,
+  kates detect --fail-on-error --quiet    # CI/CD gate: minimal output
+  kates detect --generate-values          # print generated values.yaml to stdout
+  kates detect --generate-values --values-output values.yaml
+  kates detect --generate-values -f base.yaml --values-output values.yaml`,
 	RunE: runDetect,
 }
 
@@ -37,14 +40,22 @@ var (
 	failOnError      bool
 	quietMode        bool
 	outputFile       string
+	generateValues   bool
+	valuesOutput     string
+	clusterName      string
+	dryRun           bool
 )
 
 func init() {
-	detectCmd.Flags().StringVarP(&detectValuesFile, "values", "f", "", "Path to custom values.yaml for dynamic resource budgeting")
+	detectCmd.Flags().StringVarP(&detectValuesFile, "values", "f", "", "Path to custom/base values.yaml (for budgeting or merge base)")
 	detectCmd.Flags().BoolVar(&failOnWarning, "fail-on-warning", false, "Exit with code 1 if warnings are detected (for CI/CD)")
 	detectCmd.Flags().BoolVar(&failOnError, "fail-on-error", false, "Exit with code 2 if compatibility checks fail (for CI/CD)")
 	detectCmd.Flags().BoolVar(&quietMode, "quiet", false, "Only print the verdict, not the full report")
 	detectCmd.Flags().StringVar(&outputFile, "output-file", "", "Write report to file (supports .md, .json)")
+	detectCmd.Flags().BoolVar(&generateValues, "generate-values", false, "Generate a Helm values.yaml from detected cluster config")
+	detectCmd.Flags().StringVar(&valuesOutput, "values-output", "", "Write generated values to file (default: stdout)")
+	detectCmd.Flags().StringVar(&clusterName, "cluster-name", "krafter", "Kafka cluster name for generated values")
+	detectCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview values to stdout without writing a file")
 	rootCmd.AddCommand(detectCmd)
 }
 
@@ -106,14 +117,53 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	// Analyze raw data into final report
 	analyzer.Analyze(report, reqs)
 
-	// Render output
+	// ── Generate values mode ────────────────────────────────────────────────
+	if generateValues {
+		if dryRun || valuesOutput == "" {
+			// Dry-run or no output file: print to stdout
+			if detectValuesFile != "" {
+				baseData, err := os.ReadFile(detectValuesFile)
+				if err != nil {
+					output.Error(fmt.Sprintf("Failed to read base values: %v", err))
+					return nil
+				}
+				detect.RenderValuesFromBase(report, clusterName, baseData, os.Stdout)
+			} else {
+				detect.RenderValues(report, clusterName, os.Stdout)
+			}
+			return nil
+		}
+
+		// Write to file
+		f, err := os.Create(valuesOutput)
+		if err != nil {
+			output.Error(fmt.Sprintf("Failed to create values file: %v", err))
+			return nil
+		}
+		defer f.Close()
+
+		if detectValuesFile != "" {
+			baseData, err := os.ReadFile(detectValuesFile)
+			if err != nil {
+				output.Error(fmt.Sprintf("Failed to read base values: %v", err))
+				return nil
+			}
+			detect.RenderValuesFromBase(report, clusterName, baseData, f)
+		} else {
+			detect.RenderValues(report, clusterName, f)
+		}
+		output.Success(fmt.Sprintf("Values written to %s", valuesOutput))
+		output.Hint(fmt.Sprintf("Deploy with: helm upgrade --install %s charts/kafka-cluster -n kafka -f %s --timeout 10m --wait", clusterName, valuesOutput))
+		return nil
+	}
+
+	// ── Standard report mode ────────────────────────────────────────────────
 	switch {
 	case outputMode == "json":
 		detect.RenderJSON(report)
 	case outputMode == "markdown" || outputMode == "md":
 		detect.RenderMarkdown(report, os.Stdout)
 	case quietMode:
-		// Quiet mode: only print verdict summary
 		if report.Verdict.Fails > 0 {
 			output.Error(fmt.Sprintf("INCOMPATIBLE: %d check(s) failed, %d warning(s)", report.Verdict.Fails, report.Verdict.Warns))
 		} else if report.Verdict.Warns > 0 {
@@ -125,7 +175,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		detect.RenderTUI(report)
 	}
 
-	// Write to file if requested
+	// Write report to file if requested
 	if outputFile != "" {
 		f, err := os.Create(outputFile)
 		if err != nil {
