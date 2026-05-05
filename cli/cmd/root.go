@@ -86,6 +86,7 @@ Health & Status:
   health         System health, Kafka connectivity, engine status
   status         Quick one-line system status
   doctor         Pre-flight cluster readiness checklist
+  detect         Deep cluster compatibility report for Kafka
   version        CLI, API, and runtime version info
   cluster        Kafka cluster metadata and topic listing
   test list      List test runs with optional filters
