@@ -214,3 +214,125 @@ type DetectReport struct {
 	Budget        BudgetReport
 	Verdict       Verdict
 }
+
+// ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
+
+type GeneratedValues struct {
+	ClusterName    string                `yaml:"clusterName"`
+	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
+	CRDUpgrade     GenCRDUpgrade         `yaml:"crdUpgrade"`
+	Controllers    GenControllers        `yaml:"controllers"`
+	BrokerPools    []GenBrokerPool       `yaml:"brokerPools"`
+	BrokerDefaults GenBrokerDefaults     `yaml:"brokerDefaults"`
+	Kafka          GenKafka              `yaml:"kafka"`
+	Dashboards     GenDashboards         `yaml:"dashboards"`
+	PodMonitors    GenPodMonitors        `yaml:"podMonitors"`
+	Alerts         GenAlerts             `yaml:"alerts"`
+	NetPolicies    GenNetPolicies        `yaml:"networkPolicies"`
+}
+
+type GenStrimziOp struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+type GenCRDUpgrade struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+type GenControllers struct {
+	Replicas    int                    `yaml:"replicas"`
+	Storage     GenStorage             `yaml:"storage"`
+	TopologyTSC GenTopologyConstraints `yaml:"topologySpreadConstraints"`
+	AntiAffinity GenAntiAffinity       `yaml:"podAntiAffinity"`
+}
+
+type GenStorage struct {
+	Size  string `yaml:"size"`
+	Class string `yaml:"class"`
+}
+
+type GenBrokerPool struct {
+	Name         string `yaml:"name"`
+	Zone         string `yaml:"zone"`
+	Replicas     int    `yaml:"replicas"`
+	StorageSize  string `yaml:"storageSize"`
+	StorageClass string `yaml:"storageClass"`
+}
+
+type GenBrokerDefaults struct {
+	Resources    GenResources           `yaml:"resources"`
+	TopologyTSC  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
+	AntiAffinity GenAntiAffinity       `yaml:"podAntiAffinity"`
+}
+
+type GenResources struct {
+	Requests GenResourceValues `yaml:"requests"`
+}
+
+type GenResourceValues struct {
+	Memory string `yaml:"memory"`
+	CPU    string `yaml:"cpu"`
+}
+
+type GenTopologyConstraints struct {
+	Enabled     bool   `yaml:"enabled"`
+	TopologyKey string `yaml:"topologyKey"`
+}
+
+type GenAntiAffinity struct {
+	Enabled     bool   `yaml:"enabled"`
+	TopologyKey string `yaml:"topologyKey"`
+}
+
+type GenKafka struct {
+	Listeners []GenListener `yaml:"listeners"`
+	Rack      GenRack       `yaml:"rack"`
+}
+
+type GenListener struct {
+	Name           string               `yaml:"name"`
+	Port           int                  `yaml:"port"`
+	Type           string               `yaml:"type"`
+	TLS            bool                 `yaml:"tls"`
+	Authentication *GenAuth             `yaml:"authentication,omitempty"`
+	Configuration  *GenListenerConfig   `yaml:"configuration,omitempty"`
+}
+
+type GenAuth struct {
+	Type string `yaml:"type"`
+}
+
+type GenListenerConfig struct {
+	Bootstrap GenBootstrapConfig `yaml:"bootstrap"`
+}
+
+type GenBootstrapConfig struct {
+	Annotations map[string]string `yaml:"annotations"`
+}
+
+type GenRack struct {
+	TopologyKey string `yaml:"topologyKey"`
+}
+
+type GenDashboards struct {
+	Enabled   bool   `yaml:"enabled"`
+	Namespace string `yaml:"namespace,omitempty"`
+}
+
+type GenPodMonitors struct {
+	Enabled bool              `yaml:"enabled"`
+	Labels  map[string]string `yaml:"labels,omitempty"`
+}
+
+type GenAlerts struct {
+	Enabled bool              `yaml:"enabled"`
+	Labels  map[string]string `yaml:"labels,omitempty"`
+}
+
+type GenNetPolicies struct {
+	Enabled          bool              `yaml:"enabled"`
+	DefaultDeny      bool              `yaml:"defaultDeny"`
+	DefaultSelector  map[string]string `yaml:"defaultDenySelector,omitempty"`
+	AllowDNS         bool              `yaml:"allowDNS"`
+	AllowDNSSelector map[string]string `yaml:"allowDNSSelector,omitempty"`
+}
