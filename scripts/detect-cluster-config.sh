@@ -330,6 +330,43 @@ else
     warn "CNI not detected — disabling NetworkPolicies (can be enabled manually)"
 fi
 
+# ── Admission Controller / Policy Engine Detection ────────────────────────────
+header "Admission Controllers"
+
+KYVERNO_INSTALLED=false
+GATEKEEPER_INSTALLED=false
+EMPTY_SELECTOR_BLOCKED=false
+
+# Kyverno
+if kubectl get deployment -A -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | grep -Eq "kyverno"; then
+    KYVERNO_INSTALLED=true
+    KYVERNO_NS=$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/kyverno/ {print $1}' | head -n1)
+    ok "Kyverno: running in ${KYVERNO_NS}"
+    # Check for empty-podSelector restriction
+    if kubectl get clusterpolicy -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | grep -qi "empty.*podselector\|restrict.*empty\|netpol"; then
+        EMPTY_SELECTOR_BLOCKED=true
+        warn "Kyverno policy restricts empty podSelector in NetworkPolicies"
+    fi
+else
+    info "Kyverno: not installed"
+fi
+
+# OPA Gatekeeper
+if kubectl get deployment -A -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | grep -Eq "gatekeeper"; then
+    GATEKEEPER_INSTALLED=true
+    GATEKEEPER_NS=$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/gatekeeper/ {print $1}' | head -n1)
+    ok "OPA Gatekeeper: running in ${GATEKEEPER_NS}"
+else
+    info "OPA Gatekeeper: not installed"
+fi
+
+# Determine network policy mode
+NP_DEFAULT_DENY=true
+NP_ALLOW_DNS=true
+if [ "${EMPTY_SELECTOR_BLOCKED}" = true ]; then
+    info "Using explicit podSelector for default-deny / allow-dns (Kyverno-safe)"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 header "Configuration Summary"
 echo ""
@@ -344,6 +381,8 @@ echo -e "  ${BOLD}Strimzi:${NC}        $([ "${STRIMZI_DEPLOYED}" = true ] && ech
 echo -e "  ${BOLD}Prometheus:${NC}     $([ "${PROMETHEUS_INSTALLED}" = true ] && echo 'detected' || echo 'not found')"
 echo -e "  ${BOLD}Grafana:${NC}        $([ "${GRAFANA_INSTALLED}" = true ] && echo 'detected' || echo 'not found')"
 echo -e "  ${BOLD}NetworkPolicy:${NC}  $([ "${NP_SUPPORTED}" = true ] && echo "enabled (${CNI_NAME})" || echo 'disabled')"
+echo -e "  ${BOLD}Kyverno:${NC}        $([ "${KYVERNO_INSTALLED}" = true ] && echo "detected (empty-selector blocked: ${EMPTY_SELECTOR_BLOCKED})" || echo 'not installed')"
+echo -e "  ${BOLD}Gatekeeper:${NC}     $([ "${GATEKEEPER_INSTALLED}" = true ] && echo 'detected' || echo 'not installed')"
 echo ""
 
 if [ "${DRY_RUN}" = true ]; then
@@ -561,6 +600,12 @@ alerts:
 # ── Network Policies ──
 networkPolicies:
   enabled: ${NP_SUPPORTED}
+  defaultDeny: ${NP_DEFAULT_DENY}
+  defaultDenySelector:
+    app.kubernetes.io/part-of: strimzi-krafter
+  allowDNS: ${NP_ALLOW_DNS}
+  allowDNSSelector:
+    app.kubernetes.io/part-of: strimzi-krafter
 "
 
 if [ -n "${OUTPUT}" ]; then

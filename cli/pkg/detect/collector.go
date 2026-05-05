@@ -81,6 +81,10 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		report.Network = c.getNetworkStatus()
 		return nil
 	})
+	g.Go(func() error {
+		report.Admission = c.getAdmissionStatus()
+		return nil
+	})
 
 	err := g.Wait()
 	return report, err
@@ -421,6 +425,76 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		svcOut = "unknown"
 	}
 	info.ServiceCIDR = svcOut
+
+	return info
+}
+
+func (c *Collector) getAdmissionStatus() AdmissionInfo {
+	info := AdmissionInfo{}
+
+	// Kyverno detection
+	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	var depData struct {
+		Items []struct {
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(depOut), &depData) == nil {
+		for _, dep := range depData.Items {
+			name := strings.ToLower(dep.Metadata.Name)
+			if strings.Contains(name, "kyverno") && !info.KyvernoInstalled {
+				info.KyvernoInstalled = true
+				info.KyvernoNamespace = dep.Metadata.Namespace
+			}
+			if strings.Contains(name, "gatekeeper") && !info.GatekeeperInstalled {
+				info.GatekeeperInstalled = true
+				info.GatekeeperNamespace = dep.Metadata.Namespace
+			}
+		}
+	}
+
+	// Kyverno ClusterPolicies
+	if info.KyvernoInstalled {
+		polOut, _ := c.exec.Exec("kubectl", "get", "clusterpolicy", "-o", "json")
+		var polData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(polOut), &polData) == nil {
+			for _, p := range polData.Items {
+				info.Policies = append(info.Policies, p.Metadata.Name)
+				name := strings.ToLower(p.Metadata.Name)
+				if strings.Contains(name, "empty") || strings.Contains(name, "podselector") || strings.Contains(name, "netpol") {
+					info.EmptySelectorBlocked = true
+				}
+			}
+			info.PolicyCount = len(polData.Items)
+		}
+	}
+
+	// OPA Gatekeeper constraints
+	if info.GatekeeperInstalled {
+		conOut, _ := c.exec.Exec("kubectl", "get", "constraints", "-o", "json")
+		var conData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(conOut), &conData) == nil {
+			for _, c := range conData.Items {
+				info.Policies = append(info.Policies, c.Metadata.Name)
+			}
+			info.PolicyCount += len(conData.Items)
+		}
+	}
 
 	return info
 }

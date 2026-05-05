@@ -396,6 +396,17 @@ alerts:
 
 networkPolicies:
   enabled: true
+  # default-deny: blocks all traffic to/from pods matching selector
+  defaultDeny: true
+  # Selector for default-deny policy. Use explicit labels to avoid Kyverno
+  # "empty podSelector" violations. Set to {} for standard k8s behavior.
+  defaultDenySelector:
+    app.kubernetes.io/part-of: strimzi-krafter
+  # allow-dns: permits DNS egress for pods matching selector
+  allowDNS: true
+  # Selector for allow-dns policy
+  allowDNSSelector:
+    app.kubernetes.io/part-of: strimzi-krafter
   allowedClientNamespaces:
     - kates
     - litmus

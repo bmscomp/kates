@@ -2,6 +2,7 @@
 {{- $clusterName := include "kafka-cluster.clusterName" . -}}
 {{- $namespace := include "kafka-cluster.namespace" . -}}
 {{- $monitoringNs := .Values.networkPolicies.monitoringNamespace -}}
+{{- if .Values.networkPolicies.defaultDeny }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -10,11 +11,15 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchLabels:
+      {{- .Values.networkPolicies.defaultDenySelector | toYaml | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
 ---
+{{- end }}
+{{- if .Values.networkPolicies.allowDNS }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -23,7 +28,9 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
 spec:
-  podSelector: {}
+  podSelector:
+    matchLabels:
+      {{- .Values.networkPolicies.allowDNSSelector | toYaml | nindent 6 }}
   policyTypes:
     - Egress
   egress:
@@ -34,6 +41,7 @@ spec:
         - port: 53
           protocol: TCP
 ---
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

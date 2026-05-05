@@ -61,6 +61,16 @@ type NetworkInfo struct {
 	ServiceCIDR    string
 }
 
+type AdmissionInfo struct {
+	KyvernoInstalled       bool
+	KyvernoNamespace       string
+	GatekeeperInstalled    bool
+	GatekeeperNamespace    string
+	EmptySelectorBlocked   bool
+	PolicyCount            int
+	Policies               []string
+}
+
 type ParsedReqs struct {
 	BrokerCPU     int
 	BrokerMem     int
@@ -109,6 +119,7 @@ type DetectReport struct {
 	Strimzi       StrimziInfo
 	Monitoring    MonitoringInfo
 	Network       NetworkInfo
+	Admission     AdmissionInfo
 	Budget        BudgetReport
 	Verdict       Verdict
 }

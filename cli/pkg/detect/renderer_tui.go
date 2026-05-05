@@ -139,6 +139,27 @@ func RenderTUI(report *DetectReport) {
 	output.Success(fmt.Sprintf("Pod CIDR: %s", report.Network.PodCIDR))
 	output.Success(fmt.Sprintf("Service CIDR: %s", report.Network.ServiceCIDR))
 
+	output.Header("Admission Controllers")
+	if report.Admission.KyvernoInstalled {
+		output.Success(fmt.Sprintf("Kyverno: running in %s", report.Admission.KyvernoNamespace))
+		output.KeyValue("Cluster policies:", strconv.Itoa(report.Admission.PolicyCount))
+		if report.Admission.EmptySelectorBlocked {
+			output.Warn("Empty podSelector restricted — using explicit selectors for NetworkPolicies")
+		}
+		if len(report.Admission.Policies) > 0 {
+			for _, p := range report.Admission.Policies {
+				fmt.Printf("    • %s\n", p)
+			}
+		}
+	} else {
+		output.Hint("Kyverno: not installed")
+	}
+	if report.Admission.GatekeeperInstalled {
+		output.Success(fmt.Sprintf("OPA Gatekeeper: running in %s", report.Admission.GatekeeperNamespace))
+	} else {
+		output.Hint("OPA Gatekeeper: not installed")
+	}
+
 	output.Header("3-AZ Kafka Compatibility Verdict")
 	var cRows [][]string
 	for _, c := range report.Verdict.Checks {
