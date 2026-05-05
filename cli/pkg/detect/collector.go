@@ -316,10 +316,11 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 	crdOut, _ := c.exec.Exec("kubectl", "get", "crd", "kafkas.kafka.strimzi.io")
 	info.CRDsPresent = !strings.Contains(crdOut, "NotFound")
 
-	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-l", "name=strimzi-cluster-operator", "-o", "json")
+	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
 	var data struct {
 		Items []struct {
 			Metadata struct {
+				Name      string `json:"name"`
 				Namespace string `json:"namespace"`
 			} `json:"metadata"`
 			Spec struct {
@@ -337,14 +338,20 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 			} `json:"status"`
 		} `json:"items"`
 	}
-	if json.Unmarshal([]byte(depOut), &data) == nil && len(data.Items) > 0 {
-		info.Running = true
-		info.Namespace = data.Items[0].Metadata.Namespace
-		if len(data.Items[0].Spec.Template.Spec.Containers) > 0 {
-			info.Image = data.Items[0].Spec.Template.Spec.Containers[0].Image
+	
+	if json.Unmarshal([]byte(depOut), &data) == nil {
+		for _, dep := range data.Items {
+			if strings.Contains(dep.Metadata.Name, "strimzi-cluster-operator") {
+				info.Running = true
+				info.Namespace = dep.Metadata.Namespace
+				if len(dep.Spec.Template.Spec.Containers) > 0 {
+					info.Image = dep.Spec.Template.Spec.Containers[0].Image
+				}
+				info.ReadyReplicas = dep.Status.ReadyReplicas
+				info.TotalReplicas = dep.Status.Replicas
+				break
+			}
 		}
-		info.ReadyReplicas = data.Items[0].Status.ReadyReplicas
-		info.TotalReplicas = data.Items[0].Status.Replicas
 	}
 	return info
 }
