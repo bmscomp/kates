@@ -282,10 +282,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		CRDUpgrade:  g.buildCRDUpgrade(),
 		Controllers: GenControllers{
 			Replicas: cb.ControllerReplicas,
-			Storage: GenStorage{
-				Size:  cb.ControllerStorage,
-				Class: g.selectDefaultSC(),
-			},
+			Storage:  g.buildControllerStorage(cb),
 			TopologyTSC: GenTopologyConstraints{
 				Enabled:           zoneScheduling,
 				TopologyKey:       topologyKey,
@@ -407,6 +404,49 @@ func (g *ValuesGenerator) buildBrokerPools() []GenBrokerPool {
 			},
 		}
 	}
+}
+
+// ── Controller Storage ──────────────────────────────────────────────────────
+
+// buildControllerStorage creates storage config for controllers.
+// When multiple zones have dedicated storage classes, it generates per-controller
+// overrides so each controller ID maps to its zone's storage class. This prevents
+// PV node affinity deadlocks when topology spread distributes controllers across zones.
+func (g *ValuesGenerator) buildControllerStorage(cb CapacityBudget) GenStorage {
+	zones := g.Report.Zones
+	defaultSC := g.selectDefaultSC()
+
+	storage := GenStorage{
+		Size:  cb.ControllerStorage,
+		Class: defaultSC,
+	}
+
+	// If we have ≥3 zones, assign each controller ID to a zone-specific SC
+	if len(zones) >= 3 {
+		// Controller node IDs start at the number of broker nodes
+		// For a 3-zone cluster with 1 broker per zone: IDs 0,1,2 are brokers → controllers start at 3
+		brokerCount := 0
+		for _, z := range zones {
+			brokerCount += cb.BrokerReplicas
+			_ = z // count per zone
+		}
+
+		var overrides []GenStorageOverride
+		for i := 0; i < cb.ControllerReplicas && i < len(zones); i++ {
+			zoneSC := g.matchStorageClass(zones[i].Name)
+			if zoneSC != defaultSC {
+				overrides = append(overrides, GenStorageOverride{
+					Broker: brokerCount + i,
+					Class:  zoneSC,
+				})
+			}
+		}
+		if len(overrides) > 0 {
+			storage.Overrides = overrides
+		}
+	}
+
+	return storage
 }
 
 // ── StorageClass Matching ────────────────────────────────────────────────────

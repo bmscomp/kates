@@ -386,16 +386,9 @@ kafka-upgrade: kafka-chart-deps
 kafka-detect:
 	@./scripts/kafka-cluster-report.sh
 
-kafka-deploy-auto: kafka-chart-deps
-	@echo "🔍 Auto-detecting cluster configuration from kubeconfig..."
-	@mkdir -p .build
-	@./scripts/detect-cluster-config.sh -o .build/values-detected.yaml
-	@echo ""
-	@echo "📦 Deploying Kafka cluster with detected configuration..."
-	helm upgrade --install kafka-cluster $(KAFKA_CHART_DIR) \
-		--namespace kafka --create-namespace \
-		-f .build/values-detected.yaml \
-		--timeout 10m --wait
+kafka-deploy-auto:
+	@echo "🤖 Starting Kates Auto-Deploy..."
+	cd cli && go run . auto --chart-dir ../$(KAFKA_CHART_DIR)
 	@echo ""
 	@echo "✅ Kafka cluster deployed with auto-detected zones and storage!"
 	@echo "  Run tests:     helm test kafka-cluster -n kafka"
