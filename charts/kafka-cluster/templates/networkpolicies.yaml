@@ -66,26 +66,34 @@ spec:
         - port: 9091
           protocol: TCP
     - from:
-        {{- range .Values.networkPolicies.allowedClientNamespaces }}
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ . }}
-        {{- end }}
-        - podSelector:
+              app.kubernetes.io/name: kates
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litmus
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
               app: kafka-ui
-        - podSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
               app: apicurio-registry
       ports:
         - port: 9092
           protocol: TCP
     - from:
-        {{- range .Values.networkPolicies.allowedClientNamespaces }}
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ . }}
-        {{- end }}
+              app.kubernetes.io/name: kates
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litmus
       ports:
         - port: 9093
           protocol: TCP
