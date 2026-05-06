@@ -6,63 +6,267 @@ import (
 	"strings"
 )
 
-// SizingProfile determines resource allocation based on cluster capacity.
-type SizingProfile struct {
-	Name              string
-	BrokerReplicas    int
-	ControllerReplicas int
-	BrokerStorage     string
-	ControllerStorage string
-	BrokerMemReq      string
-	BrokerCPUReq      string
-}
+const (
+	// Component distribution percentages of total Kafka budget
+	controllerCPUShare = 0.15
+	controllerMemShare = 0.10
+	brokerCPUShare     = 0.70
+	brokerMemShare     = 0.75
+	// remaining 15% CPU + 15% mem for operators, exporters, cruise control
 
-var (
-	profileProduction = SizingProfile{"production", 3, 3, "200Gi", "20Gi", "4Gi", "1000m"}
-	profileStaging    = SizingProfile{"staging", 1, 3, "100Gi", "10Gi", "2Gi", "500m"}
-	profileDev        = SizingProfile{"development", 1, 1, "50Gi", "5Gi", "1Gi", "500m"}
-	profileMinimal    = SizingProfile{"minimal", 1, 1, "10Gi", "1Gi", "512Mi", "250m"}
+	// Resource bounds
+	minControllerCPU = 250  // millicores
+	maxControllerCPU = 4000
+	minControllerMem = 1    // GiB
+	maxControllerMem = 4
+	minBrokerCPU     = 250
+	maxBrokerCPU     = 8000
+	minBrokerMem     = 1
+	maxBrokerMem     = 16
+
+	// Storage bounds (GiB)
+	minControllerStorage = 1
+	maxControllerStorage = 50
+	minBrokerStorage     = 10
+	maxBrokerStorage     = 2048
 )
 
 // ValuesGenerator builds a GeneratedValues from a DetectReport.
 type ValuesGenerator struct {
 	Report      *DetectReport
 	ClusterName string
-	Profile     SizingProfile
+	ReservePct  float64 // 0.0-1.0, default 0.30 = 30% reserved
+	Cap         CapacityBudget
 }
 
-// NewValuesGenerator creates a generator and selects the sizing profile.
+// NewValuesGenerator creates a generator and computes the capacity budget.
 func NewValuesGenerator(report *DetectReport, clusterName string) *ValuesGenerator {
+	return NewValuesGeneratorWithReserve(report, clusterName, 0.30)
+}
+
+// NewValuesGeneratorWithReserve creates a generator with a custom reserve percentage.
+func NewValuesGeneratorWithReserve(report *DetectReport, clusterName string, reserve float64) *ValuesGenerator {
 	g := &ValuesGenerator{
 		Report:      report,
 		ClusterName: clusterName,
+		ReservePct:  reserve,
 	}
-	g.Profile = g.selectProfile()
+	g.Cap = g.computeCapacityBudget()
 	return g
 }
 
-func (g *ValuesGenerator) selectProfile() SizingProfile {
+// ── Capacity Budget Computation ──────────────────────────────────────────────
+
+func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
+	cb := CapacityBudget{
+		ReservePct: g.ReservePct,
+	}
+
+	// Step 1: Total allocatable capacity
+	for _, n := range g.Report.Nodes {
+		cb.TotalCPU += n.CPU
+		cb.TotalMem += n.MemoryGi
+	}
+
+	// Step 2: Existing workload consumption
+	cb.UsedCPU = g.Report.Workload.TotalCPURequests
+	cb.UsedMem = g.Report.Workload.TotalMemRequests
+
+	// Step 3: Available = total - used
+	cb.AvailableCPU = cb.TotalCPU - cb.UsedCPU
+	cb.AvailableMem = cb.TotalMem - cb.UsedMem
+	if cb.AvailableCPU < 0 {
+		cb.AvailableCPU = 0
+	}
+	if cb.AvailableMem < 0 {
+		cb.AvailableMem = 0
+	}
+
+	// Utilization percentage
+	if cb.TotalCPU > 0 {
+		cb.UtilizationPct = float64(cb.UsedCPU) / float64(cb.TotalCPU)
+	}
+
+	// Step 4: Apply reserve — Kafka gets (1 - reserve) of available
+	usable := 1.0 - g.ReservePct
+	cb.KafkaCPU = int(float64(cb.AvailableCPU) * usable)
+	cb.KafkaMem = int(float64(cb.AvailableMem) * usable)
+
+	// Step 5: Per-zone analysis — find weakest zone
+	zones := g.Report.Zones
+	if len(zones) > 0 {
+		cb.WeakestZoneCPU = int(^uint(0) >> 1) // MaxInt
+		cb.WeakestZoneMem = int(^uint(0) >> 1)
+		for _, z := range zones {
+			zoneCPU := int(float64(z.CPUAllocatable) * usable)
+			zoneMem := int(float64(z.MemAllocatableGi) * usable)
+			// Subtract per-zone workload pressure if available
+			for _, zp := range g.Report.Workload.PerZone {
+				if zp.Name == z.Name {
+					zoneCPU -= zp.CPUAvailable // already net
+					zoneMem -= zp.MemAvailable
+				}
+			}
+			if zoneCPU < cb.WeakestZoneCPU {
+				cb.WeakestZoneCPU = zoneCPU
+				cb.WeakestZone = z.Name
+			}
+			if zoneMem < cb.WeakestZoneMem {
+				cb.WeakestZoneMem = zoneMem
+			}
+		}
+	}
+
+	// Step 6: Determine replicas
+	cb.ControllerReplicas = g.selectControllerReplicas()
+	cb.BrokerReplicas = g.selectBrokerReplicas()
+
+	// Step 7: Distribute across components
+	totalBrokers := cb.BrokerReplicas * max(len(zones), 1)
+
+	// Controller distribution
+	if cb.ControllerReplicas > 0 {
+		cb.ControllerCPU = clamp(
+			int(float64(cb.KafkaCPU)*controllerCPUShare)/cb.ControllerReplicas,
+			minControllerCPU, maxControllerCPU,
+		)
+		cb.ControllerMem = clamp(
+			int(float64(cb.KafkaMem)*controllerMemShare)/cb.ControllerReplicas,
+			minControllerMem, maxControllerMem,
+		)
+	}
+
+	// Broker distribution
+	if totalBrokers > 0 {
+		cb.BrokerCPU = clamp(
+			int(float64(cb.KafkaCPU)*brokerCPUShare)/totalBrokers,
+			minBrokerCPU, maxBrokerCPU,
+		)
+		cb.BrokerMem = clamp(
+			int(float64(cb.KafkaMem)*brokerMemShare)/totalBrokers,
+			minBrokerMem, maxBrokerMem,
+		)
+	}
+
+	// Step 8: Storage budget
+	cb.BrokerStorage, cb.ControllerStorage = g.computeStorageBudget(totalBrokers, cb.ControllerReplicas)
+
+	// Step 9: Derive profile label
+	cb.Profile = g.deriveProfile(cb)
+
+	return cb
+}
+
+func (g *ValuesGenerator) selectControllerReplicas() int {
+	cpuCores := 0
+	totalMem := 0
+	for _, n := range g.Report.Nodes {
+		cpuCores += n.CPU
+		totalMem += n.MemoryGi
+	}
+	cpuCores /= 1000
+	if cpuCores >= 12 && totalMem >= 24 {
+		return 3
+	}
+	return 1
+}
+
+func (g *ValuesGenerator) selectBrokerReplicas() int {
+	cpuCores := 0
+	totalMem := 0
+	for _, n := range g.Report.Nodes {
+		cpuCores += n.CPU
+		totalMem += n.MemoryGi
+	}
+	cpuCores /= 1000
+	if cpuCores >= 24 && totalMem >= 48 {
+		return 3
+	}
+	return 1
+}
+
+func (g *ValuesGenerator) computeStorageBudget(totalBrokers, totalControllers int) (brokerSt, ctrlSt string) {
+	usable := 1.0 - g.ReservePct
+
+	// Try to derive from PV inventory
+	audit := g.Report.StorageAudit
+	if audit.PVCount > 0 && audit.PVTotalCapacity != "" {
+		totalGi := 0
+		cap := audit.PVTotalCapacity
+		if strings.HasSuffix(cap, "Gi") {
+			totalGi, _ = fmt.Sscan(strings.TrimSuffix(cap, "Gi"))
+			// fmt.Sscan returns count not value, use Atoi
+		}
+		if totalGi == 0 {
+			// parse manually
+			fmt.Sscanf(cap, "%dGi", &totalGi)
+		}
+		if totalGi > 0 {
+			kafkaStorageGi := int(float64(totalGi) * usable)
+			if totalBrokers > 0 {
+				perBroker := clamp(kafkaStorageGi*80/100/totalBrokers, minBrokerStorage, maxBrokerStorage)
+				brokerSt = fmt.Sprintf("%dGi", perBroker)
+			}
+			if totalControllers > 0 {
+				perCtrl := clamp(kafkaStorageGi*20/100/totalControllers, minControllerStorage, maxControllerStorage)
+				ctrlSt = fmt.Sprintf("%dGi", perCtrl)
+			}
+			if brokerSt != "" && ctrlSt != "" {
+				return
+			}
+		}
+	}
+
+	// Fallback to profile-based defaults
+	profile := g.deriveProfileFromResources()
+	switch profile {
+	case "production":
+		return "200Gi", "20Gi"
+	case "staging":
+		return "100Gi", "10Gi"
+	case "development":
+		return "50Gi", "5Gi"
+	default:
+		return "10Gi", "1Gi"
+	}
+}
+
+func (g *ValuesGenerator) deriveProfile(cb CapacityBudget) string {
+	if cb.BrokerCPU >= 1000 && cb.BrokerMem >= 4 {
+		return "production"
+	}
+	if cb.BrokerCPU >= 500 && cb.BrokerMem >= 2 {
+		return "staging"
+	}
+	if cb.BrokerCPU > 250 && cb.BrokerMem > 1 {
+		return "development"
+	}
+	return "minimal"
+}
+
+func (g *ValuesGenerator) deriveProfileFromResources() string {
 	totalCPU := 0
 	totalMem := 0
 	for _, n := range g.Report.Nodes {
 		totalCPU += n.CPU
 		totalMem += n.MemoryGi
 	}
-	cpuCores := totalCPU / 1000 // convert millicores to cores
-
+	cpuCores := totalCPU / 1000
 	if cpuCores >= 24 && totalMem >= 48 {
-		return profileProduction
+		return "production"
 	}
 	if cpuCores >= 12 && totalMem >= 24 {
-		return profileStaging
+		return "staging"
 	}
 	if cpuCores >= 4 && totalMem >= 8 {
-		return profileDev
+		return "development"
 	}
-	return profileMinimal
+	return "minimal"
 }
 
-// Generate produces the complete GeneratedValues.
+// ── Generate ─────────────────────────────────────────────────────────────────
+
+// Generate produces the complete GeneratedValues using capacity-aware distribution.
 func (g *ValuesGenerator) Generate() *GeneratedValues {
 	topologyKey := "topology.kubernetes.io/zone"
 	zoneScheduling := len(g.Report.Zones) > 0
@@ -70,14 +274,16 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		topologyKey = "kubernetes.io/hostname"
 	}
 
+	cb := g.Cap
+
 	return &GeneratedValues{
 		ClusterName: g.ClusterName,
 		StrimziOp:   g.buildStrimziOp(),
 		CRDUpgrade:  g.buildCRDUpgrade(),
 		Controllers: GenControllers{
-			Replicas: g.Profile.ControllerReplicas,
+			Replicas: cb.ControllerReplicas,
 			Storage: GenStorage{
-				Size:  g.Profile.ControllerStorage,
+				Size:  cb.ControllerStorage,
 				Class: g.selectDefaultSC(),
 			},
 			TopologyTSC: GenTopologyConstraints{
@@ -93,8 +299,8 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		BrokerDefaults: GenBrokerDefaults{
 			Resources: GenResources{
 				Requests: GenResourceValues{
-					Memory: g.Profile.BrokerMemReq,
-					CPU:    g.Profile.BrokerCPUReq,
+					Memory: formatMem(cb.BrokerMem),
+					CPU:    fmt.Sprintf("%dm", cb.BrokerCPU),
 				},
 			},
 			TopologyTSC: GenTopologyConstraints{
@@ -118,80 +324,69 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 
 func (g *ValuesGenerator) buildBrokerPools() []GenBrokerPool {
 	zones := g.Report.Zones
+	cb := g.Cap
 
 	switch {
 	case len(zones) >= 3:
-		// Use top 3 zones, name pools after zone names
 		pools := make([]GenBrokerPool, 3)
 		for i := 0; i < 3; i++ {
 			zoneName := zones[i].Name
 			pools[i] = GenBrokerPool{
 				Name:         "brokers-" + sanitizeK8sName(zoneName),
 				Zone:         zoneName,
-				Replicas:     g.Profile.BrokerReplicas,
-				StorageSize:  g.Profile.BrokerStorage,
+				Replicas:     cb.BrokerReplicas,
+				StorageSize:  cb.BrokerStorage,
 				StorageClass: g.matchStorageClass(zoneName),
 			}
 		}
 		return pools
 
 	case len(zones) == 2:
-		// 2 pinned + 1 floating
 		pools := make([]GenBrokerPool, 3)
 		for i := 0; i < 2; i++ {
 			zoneName := zones[i].Name
 			pools[i] = GenBrokerPool{
 				Name:         "brokers-" + sanitizeK8sName(zoneName),
 				Zone:         zoneName,
-				Replicas:     g.Profile.BrokerReplicas,
-				StorageSize:  g.Profile.BrokerStorage,
+				Replicas:     cb.BrokerReplicas,
+				StorageSize:  cb.BrokerStorage,
 				StorageClass: g.matchStorageClass(zoneName),
 			}
 		}
 		pools[2] = GenBrokerPool{
 			Name:         "brokers-float",
 			Zone:         "",
-			Replicas:     g.Profile.BrokerReplicas,
-			StorageSize:  g.Profile.BrokerStorage,
+			Replicas:     cb.BrokerReplicas,
+			StorageSize:  cb.BrokerStorage,
 			StorageClass: g.selectDefaultSC(),
 		}
 		return pools
 
 	case len(zones) == 1:
-		// 1 pinned + 2 floating
 		zoneName := zones[0].Name
 		return []GenBrokerPool{
 			{
-				Name:         "brokers-" + sanitizeK8sName(zoneName),
-				Zone:         zoneName,
-				Replicas:     g.Profile.BrokerReplicas,
-				StorageSize:  g.Profile.BrokerStorage,
+				Name: "brokers-" + sanitizeK8sName(zoneName), Zone: zoneName,
+				Replicas: cb.BrokerReplicas, StorageSize: cb.BrokerStorage,
 				StorageClass: g.matchStorageClass(zoneName),
 			},
 			{
-				Name:         "brokers-float-2",
-				Zone:         "",
-				Replicas:     g.Profile.BrokerReplicas,
-				StorageSize:  g.Profile.BrokerStorage,
+				Name: "brokers-float-2", Zone: "",
+				Replicas: cb.BrokerReplicas, StorageSize: cb.BrokerStorage,
 				StorageClass: g.selectDefaultSC(),
 			},
 			{
-				Name:         "brokers-float-3",
-				Zone:         "",
-				Replicas:     g.Profile.BrokerReplicas,
-				StorageSize:  g.Profile.BrokerStorage,
+				Name: "brokers-float-3", Zone: "",
+				Replicas: cb.BrokerReplicas, StorageSize: cb.BrokerStorage,
 				StorageClass: g.selectDefaultSC(),
 			},
 		}
 
 	default:
-		// No zones — single pool
 		return []GenBrokerPool{
 			{
-				Name:         "brokers",
-				Zone:         "",
-				Replicas:     g.Profile.BrokerReplicas * 3,
-				StorageSize:  g.Profile.BrokerStorage,
+				Name: "brokers", Zone: "",
+				Replicas: cb.BrokerReplicas * 3, StorageSize: cb.BrokerStorage,
 				StorageClass: g.selectDefaultSC(),
 			},
 		}
@@ -200,33 +395,23 @@ func (g *ValuesGenerator) buildBrokerPools() []GenBrokerPool {
 
 // ── StorageClass Matching ────────────────────────────────────────────────────
 
-// matchStorageClass finds a StorageClass whose name contains the zone name.
-// Falls back to the cluster default SC, then to provider-specific preference.
 func (g *ValuesGenerator) matchStorageClass(zone string) string {
 	zoneLower := strings.ToLower(zone)
-
-	// 1. Try exact zone-name match in SC names
 	for _, sc := range g.Report.Storage {
-		scLower := strings.ToLower(sc.Name)
-		if strings.Contains(scLower, zoneLower) {
+		if strings.Contains(strings.ToLower(sc.Name), zoneLower) {
 			return sc.Name
 		}
 	}
-
-	// 2. Fall back to default SC
 	return g.selectDefaultSC()
 }
 
-// selectDefaultSC picks the best default StorageClass.
 func (g *ValuesGenerator) selectDefaultSC() string {
-	// 1. Use the annotated default
 	for _, sc := range g.Report.Storage {
 		if sc.IsDefault {
 			return sc.Name
 		}
 	}
 
-	// 2. Provider-specific preference
 	provider := strings.ToLower(g.Report.Provider)
 	for _, sc := range g.Report.Storage {
 		scLower := strings.ToLower(sc.Name)
@@ -250,7 +435,6 @@ func (g *ValuesGenerator) selectDefaultSC() string {
 		}
 	}
 
-	// 3. Use first available or fallback
 	if len(g.Report.Storage) > 0 {
 		return g.Report.Storage[0].Name
 	}
@@ -281,7 +465,6 @@ func (g *ValuesGenerator) buildKafka(topologyKey string) GenKafka {
 		},
 	}
 
-	// Provider-specific external listener
 	ext := g.buildExternalListener()
 	if ext != nil {
 		listeners = append(listeners, *ext)
@@ -295,7 +478,6 @@ func (g *ValuesGenerator) buildKafka(topologyKey string) GenKafka {
 
 func (g *ValuesGenerator) buildExternalListener() *GenListener {
 	provider := strings.ToLower(g.Report.Provider)
-
 	switch provider {
 	case "eks":
 		return &GenListener{
@@ -303,9 +485,7 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 			Authentication: &GenAuth{Type: "scram-sha-512"},
 			Configuration: &GenListenerConfig{
 				Bootstrap: GenBootstrapConfig{
-					Annotations: map[string]string{
-						"service.beta.kubernetes.io/aws-load-balancer-type": "nlb",
-					},
+					Annotations: map[string]string{"service.beta.kubernetes.io/aws-load-balancer-type": "nlb"},
 				},
 			},
 		}
@@ -315,9 +495,7 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 			Authentication: &GenAuth{Type: "scram-sha-512"},
 			Configuration: &GenListenerConfig{
 				Bootstrap: GenBootstrapConfig{
-					Annotations: map[string]string{
-						"cloud.google.com/l4-rbs": "enabled",
-					},
+					Annotations: map[string]string{"cloud.google.com/l4-rbs": "enabled"},
 				},
 			},
 		}
@@ -327,14 +505,12 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 			Authentication: &GenAuth{Type: "scram-sha-512"},
 			Configuration: &GenListenerConfig{
 				Bootstrap: GenBootstrapConfig{
-					Annotations: map[string]string{
-						"service.beta.kubernetes.io/azure-load-balancer-internal": "true",
-					},
+					Annotations: map[string]string{"service.beta.kubernetes.io/azure-load-balancer-internal": "true"},
 				},
 			},
 		}
 	case "kind":
-		return nil // no external listener for kind
+		return nil
 	default:
 		return &GenListener{
 			Name: "external", Port: 9094, Type: "nodeport", TLS: true,
@@ -346,10 +522,7 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 // ── Monitoring ───────────────────────────────────────────────────────────────
 
 func (g *ValuesGenerator) buildDashboards() GenDashboards {
-	return GenDashboards{
-		Enabled:   g.Report.Monitoring.GrafanaDeployed,
-		Namespace: "monitoring",
-	}
+	return GenDashboards{Enabled: g.Report.Monitoring.GrafanaDeployed, Namespace: "monitoring"}
 }
 
 func (g *ValuesGenerator) buildPodMonitors() GenPodMonitors {
@@ -361,9 +534,7 @@ func (g *ValuesGenerator) buildPodMonitors() GenPodMonitors {
 }
 
 func (g *ValuesGenerator) buildAlerts() GenAlerts {
-	a := GenAlerts{
-		Enabled: g.Report.Monitoring.PodMonitorCRD && g.Report.Monitoring.PrometheusRuleCRD,
-	}
+	a := GenAlerts{Enabled: g.Report.Monitoring.PodMonitorCRD && g.Report.Monitoring.PrometheusRuleCRD}
 	if a.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
 		a.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
 	}
@@ -374,14 +545,12 @@ func (g *ValuesGenerator) buildAlerts() GenAlerts {
 
 func (g *ValuesGenerator) buildNetworkPolicies() GenNetPolicies {
 	cniSupported := g.Report.Network.CNI != "" && g.Report.Network.CNI != "unknown"
-	// Cloud providers always support network policies
 	if !cniSupported {
 		provider := strings.ToLower(g.Report.Provider)
 		if provider == "eks" || provider == "gke" || provider == "aks" {
 			cniSupported = true
 		}
 	}
-
 	if !cniSupported {
 		return GenNetPolicies{Enabled: false}
 	}
@@ -389,13 +558,9 @@ func (g *ValuesGenerator) buildNetworkPolicies() GenNetPolicies {
 	selector := map[string]string{
 		"app.kubernetes.io/part-of": fmt.Sprintf("strimzi-%s", g.ClusterName),
 	}
-
 	return GenNetPolicies{
-		Enabled:          true,
-		DefaultDeny:      true,
-		DefaultSelector:  selector,
-		AllowDNS:         true,
-		AllowDNSSelector: selector,
+		Enabled: true, DefaultDeny: true, DefaultSelector: selector,
+		AllowDNS: true, AllowDNSSelector: selector,
 	}
 }
 
@@ -403,7 +568,6 @@ func (g *ValuesGenerator) buildNetworkPolicies() GenNetPolicies {
 
 var k8sNameRegex = regexp.MustCompile(`[^a-z0-9-]`)
 
-// sanitizeK8sName converts a zone name to a valid Kubernetes resource name component.
 func sanitizeK8sName(name string) string {
 	lower := strings.ToLower(name)
 	sanitized := k8sNameRegex.ReplaceAllString(lower, "-")
@@ -416,3 +580,21 @@ func sanitizeK8sName(name string) string {
 	}
 	return sanitized
 }
+
+func clamp(val, minV, maxV int) int {
+	if val < minV {
+		return minV
+	}
+	if val > maxV {
+		return maxV
+	}
+	return val
+}
+
+func formatMem(gi int) string {
+	if gi <= 0 {
+		return "512Mi"
+	}
+	return fmt.Sprintf("%dGi", gi)
+}
+

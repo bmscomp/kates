@@ -160,6 +160,36 @@ type ExistingNetPol struct {
 	ManagedBy    string
 }
 
+// ── Workload Pressure Types ──────────────────────────────────────────────────
+
+type WorkloadPressure struct {
+	TotalPods          int
+	TotalCPURequests   int // millicores consumed by all running pods
+	TotalMemRequests   int // GiB consumed by all running pods
+	KafkaNamespacePods int
+	PerNode            []NodePressure
+	PerZone            []ZonePressure
+}
+
+type NodePressure struct {
+	Name           string
+	Zone           string
+	CPUAllocatable int // total allocatable millicores
+	CPURequested   int // consumed by existing pods
+	CPUAvailable   int // allocatable - requested
+	MemAllocatable int // GiB
+	MemRequested   int // GiB
+	MemAvailable   int // GiB
+}
+
+type ZonePressure struct {
+	Name           string
+	Nodes          int
+	CPUAvailable   int     // sum of available across nodes in zone
+	MemAvailable   int     // GiB
+	Utilization    float64 // 0.0–1.0 percentage of zone capacity used
+}
+
 // ── Budget & Verdict Types ───────────────────────────────────────────────────
 
 type ParsedReqs struct {
@@ -180,6 +210,40 @@ type BudgetReport struct {
 	Sufficient           bool
 }
 
+type CapacityBudget struct {
+	// Cluster-wide totals
+	TotalCPU     int // total allocatable millicores
+	TotalMem     int // total allocatable GiB
+	UsedCPU      int // consumed by existing workloads
+	UsedMem      int // consumed by existing workloads
+	AvailableCPU int // total - used
+	AvailableMem int // total - used
+
+	// Kafka allocation (after reserve)
+	KafkaCPU int // available × (1 - reserve)
+	KafkaMem int // available × (1 - reserve)
+
+	// Per-zone bottleneck
+	WeakestZone    string
+	WeakestZoneCPU int
+	WeakestZoneMem int
+
+	// Component distribution
+	ControllerCPU     int    // per-controller millicores
+	ControllerMem     int    // per-controller GiB
+	BrokerCPU         int    // per-broker millicores
+	BrokerMem         int    // per-broker GiB
+	BrokerStorage     string // per-broker storage
+	ControllerStorage string // per-controller storage
+	BrokerReplicas    int    // per-zone
+	ControllerReplicas int
+
+	// Metadata
+	UtilizationPct float64 // current cluster utilization
+	ReservePct     float64 // safety margin (default 0.30)
+	Profile        string  // derived: production/staging/dev/minimal
+}
+
 type CheckResult struct {
 	Description string
 	Status      bool
@@ -194,25 +258,27 @@ type Verdict struct {
 }
 
 type DetectReport struct {
-	Context       string
-	Server        string
-	Provider      string
-	K8sVersion    string
-	K8sMinor      int
-	HelmVersion   string
-	HelmMajor     int
-	Nodes         []NodeInfo
-	Zones         []ZoneInfo
-	Storage       []SCInfo
-	StorageAudit  StorageAudit
-	ExistingKafka KafkaResources
-	Strimzi       StrimziInfo
-	Monitoring    MonitoringInfo
-	Network       NetworkInfo
-	Admission     AdmissionInfo
-	NetPolAudit   NetworkPolicyAudit
-	Budget        BudgetReport
-	Verdict       Verdict
+	Context          string
+	Server           string
+	Provider         string
+	K8sVersion       string
+	K8sMinor         int
+	HelmVersion      string
+	HelmMajor        int
+	Nodes            []NodeInfo
+	Zones            []ZoneInfo
+	Storage          []SCInfo
+	StorageAudit     StorageAudit
+	ExistingKafka    KafkaResources
+	Strimzi          StrimziInfo
+	Monitoring       MonitoringInfo
+	Network          NetworkInfo
+	Admission        AdmissionInfo
+	NetPolAudit      NetworkPolicyAudit
+	Workload         WorkloadPressure
+	Budget           BudgetReport
+	Capacity         CapacityBudget
+	Verdict          Verdict
 }
 
 // ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
