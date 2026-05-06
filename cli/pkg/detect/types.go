@@ -304,6 +304,7 @@ type GeneratedValues struct {
 	Rebalance          GenFeature             `yaml:"rebalance"`
 	KafkaConnect       GenFeature             `yaml:"kafkaConnect"`
 	RBAC               GenFeature             `yaml:"rbac"`
+	EntityOperator     map[string]interface{} `yaml:"entityOperator"`
 }
 
 type GenStrimziOp struct {

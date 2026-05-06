@@ -336,6 +336,29 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		Rebalance:     GenFeature{Enabled: true},
 		KafkaConnect:  GenFeature{Enabled: true},
 		RBAC:          GenFeature{Create: true},
+		EntityOperator: map[string]interface{}{
+			"topicOperator": map[string]interface{}{
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{"memory": "256Mi", "cpu": "100m"},
+					"limits":   map[string]interface{}{"memory": "256Mi", "cpu": "500m"},
+				},
+				"jvmOptions": map[string]interface{}{
+					"-Xms": "128m",
+					"-Xmx": "256m",
+				},
+				"reconciliationIntervalMs": 60000,
+			},
+			"userOperator": map[string]interface{}{
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{"memory": "256Mi", "cpu": "100m"},
+					"limits":   map[string]interface{}{"memory": "256Mi", "cpu": "500m"},
+				},
+				"jvmOptions": map[string]interface{}{
+					"-Xms": "128m",
+					"-Xmx": "256m",
+				},
+			},
+		},
 		Users: GenUsers{
 			Enabled: true,
 			Items: []GenUser{

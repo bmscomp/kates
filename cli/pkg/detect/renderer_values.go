@@ -138,15 +138,24 @@ func RenderValuesFromBaseWithReserve(report *DetectReport, clusterName string, b
 	return err
 }
 
-// mergeMaps does a shallow merge of overlay on top of base.
-// For top-level keys that exist in overlay, the overlay value wins.
-// Keys only in base are preserved.
+// mergeMaps does a recursive deep merge of overlay on top of base.
+// For overlapping keys:
+// - If both are maps, they are merged recursively.
+// - Otherwise, the overlay value overwrites the base value.
 func mergeMaps(base, overlay map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	for k, v := range base {
 		result[k] = v
 	}
 	for k, v := range overlay {
+		if vMap, ok := v.(map[string]interface{}); ok {
+			if baseVal, exists := result[k]; exists {
+				if bMap, okBase := baseVal.(map[string]interface{}); okBase {
+					result[k] = mergeMaps(bMap, vMap)
+					continue
+				}
+			}
+		}
 		result[k] = v
 	}
 	return result
