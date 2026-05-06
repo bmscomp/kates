@@ -3,12 +3,14 @@
 
 litmus:
   enabled: true
+  image:
+    imageRegistryName: "docker.io/litmuschaos"
   adminConfig:
     ADMIN_USERNAME: admin
-    ADMIN_PASSWORD: ""
+    ADMIN_PASSWORD: "litmus-admin"
     DBUSER: admin
-    DBPASSWORD: ""
-    JWT_SECRET: ""
+    DBPASSWORD: "litmus-chaos-secret"
+    JWT_SECRET: "litmus-chaos-jwt-12345"
   portal:
     frontend:
       replicas: 2
@@ -52,7 +54,6 @@ litmus:
     image:
       registry: docker.io
       repository: bitnami/mongodb
-      tag: "7.0.28"
       pullPolicy: Always
     architecture: replicaset
     replicaCount: 3
@@ -60,7 +61,8 @@ litmus:
       enabled: true
     auth:
       enabled: true
-      rootPassword: ""
+      rootPassword: "litmus-chaos-secret"
+      replicaSetKey: "litmus-chaos-replicaset-key-1234567890"
     volumePermissions:
       enabled: true
     persistence:
@@ -76,9 +78,9 @@ litmus:
         memory: 2Gi
 
 auth:
-  adminPassword: ""
-  dbRootPassword: ""
-  jwtSecret: ""
+  adminPassword: "litmus-admin"
+  dbRootPassword: "litmus-chaos-secret"
+  jwtSecret: "litmus-chaos-jwt-12345"
   existingSecret: ""
 
 rbac:

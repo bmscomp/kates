@@ -66,6 +66,10 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		return nil
 	})
 	g.Go(func() error {
+		report.StorageAudit = c.getStorageAudit()
+		return nil
+	})
+	g.Go(func() error {
 		report.ExistingKafka = c.getExistingKafkaResources()
 		return nil
 	})
@@ -87,6 +91,10 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	})
 	g.Go(func() error {
 		report.NetPolAudit = c.getNetworkPolicyAudit()
+		return nil
+	})
+	g.Go(func() error {
+		report.Workload = c.getWorkloadPressure()
 		return nil
 	})
 
@@ -262,9 +270,10 @@ func (c *Collector) getStorageClasses() []SCInfo {
 				Name        string            `json:"name"`
 				Annotations map[string]string `json:"annotations"`
 			} `json:"metadata"`
-			Provisioner       string `json:"provisioner"`
-			VolumeBindingMode string `json:"volumeBindingMode"`
-			ReclaimPolicy     string `json:"reclaimPolicy"`
+			Provisioner          string `json:"provisioner"`
+			VolumeBindingMode    string `json:"volumeBindingMode"`
+			ReclaimPolicy        string `json:"reclaimPolicy"`
+			AllowVolumeExpansion *bool  `json:"allowVolumeExpansion"`
 		} `json:"items"`
 	}
 	json.Unmarshal([]byte(out), &data)
@@ -272,15 +281,64 @@ func (c *Collector) getStorageClasses() []SCInfo {
 	for _, sc := range data.Items {
 		isDefault := sc.Metadata.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" ||
 			sc.Metadata.Annotations["storageclass.beta.kubernetes.io/is-default-class"] == "true"
+		allowExpand := false
+		if sc.AllowVolumeExpansion != nil {
+			allowExpand = *sc.AllowVolumeExpansion
+		}
 		scs = append(scs, SCInfo{
-			Name:          sc.Metadata.Name,
-			Provisioner:   sc.Provisioner,
-			BindingMode:   sc.VolumeBindingMode,
-			ReclaimPolicy: sc.ReclaimPolicy,
-			IsDefault:     isDefault,
+			Name:           sc.Metadata.Name,
+			Provisioner:    sc.Provisioner,
+			BindingMode:    sc.VolumeBindingMode,
+			ReclaimPolicy:  sc.ReclaimPolicy,
+			IsDefault:      isDefault,
+			AllowExpansion: allowExpand,
 		})
 	}
 	return scs
+}
+
+func (c *Collector) getStorageAudit() StorageAudit {
+	audit := StorageAudit{}
+
+	// PV inventory
+	pvOut, _ := c.exec.Exec("kubectl", "get", "pv", "-o", "json")
+	var pvData struct {
+		Items []struct {
+			Spec struct {
+				Capacity struct {
+					Storage string `json:"storage"`
+				} `json:"capacity"`
+			} `json:"spec"`
+			Status struct {
+				Phase string `json:"phase"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(pvOut), &pvData) == nil {
+		audit.PVCount = len(pvData.Items)
+		totalGi := 0
+		for _, pv := range pvData.Items {
+			if pv.Status.Phase == "Bound" {
+				audit.PVBoundCount++
+			} else if pv.Status.Phase == "Available" {
+				audit.PVAvailable++
+			}
+			cap := pv.Spec.Capacity.Storage
+			if strings.HasSuffix(cap, "Gi") {
+				val, _ := strconv.Atoi(strings.TrimSuffix(cap, "Gi"))
+				totalGi += val
+			}
+		}
+		audit.PVTotalCapacity = fmt.Sprintf("%dGi", totalGi)
+	}
+
+	// CSI drivers
+	csiOut, _ := c.exec.Exec("kubectl", "get", "csidrivers", "-o", "jsonpath={.items[*].metadata.name}")
+	if csiOut != "" {
+		audit.CSIDrivers = strings.Fields(csiOut)
+	}
+
+	return audit
 }
 
 func (c *Collector) getExistingKafkaResources() KafkaResources {
@@ -314,6 +372,60 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 		res.HelmRelease = fmt.Sprintf("%s (rev %s, %s)", helmData[0].Name, helmData[0].Revision, helmData[0].Status)
 	} else {
 		res.HelmRelease = "none"
+	}
+
+	// Kafka cluster health introspection
+	if res.KafkaClusters > 0 {
+		kafkaOut, _ := c.exec.Exec("kubectl", "get", "kafka", "-n", "kafka", "-o", "json")
+		var kData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Spec struct {
+					Kafka struct {
+						Replicas  int `json:"replicas"`
+						Listeners []struct {
+							Name string `json:"name"`
+							Type string `json:"type"`
+							Port int    `json:"port"`
+							TLS  bool   `json:"tls"`
+						} `json:"listeners"`
+					} `json:"kafka"`
+				} `json:"spec"`
+				Status struct {
+					KafkaVersion string `json:"kafkaVersion"`
+					Conditions   []struct {
+						Type    string `json:"type"`
+						Status  string `json:"status"`
+						Reason  string `json:"reason"`
+						Message string `json:"message"`
+					} `json:"conditions"`
+				} `json:"status"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(kafkaOut), &kData) == nil && len(kData.Items) > 0 {
+			k := kData.Items[0]
+			health := KafkaClusterHealth{
+				Name:     k.Metadata.Name,
+				Version:  k.Status.KafkaVersion,
+				Replicas: k.Spec.Kafka.Replicas,
+			}
+			for _, l := range k.Spec.Kafka.Listeners {
+				health.Listeners = append(health.Listeners, KafkaListener{
+					Name: l.Name, Type: l.Type, Port: l.Port, TLS: l.TLS,
+				})
+			}
+			for _, c := range k.Status.Conditions {
+				health.Conditions = append(health.Conditions, KafkaCondition{
+					Type: c.Type, Status: c.Status, Reason: c.Reason, Message: c.Message,
+				})
+				if c.Type == "Ready" && c.Status == "True" {
+					health.ReadyReplicas = health.Replicas
+				}
+			}
+			res.Health = health
+		}
 	}
 
 	return res
@@ -710,4 +822,80 @@ func (c *Collector) getNetworkPolicyAudit() NetworkPolicyAudit {
 
 	audit.TotalCount = len(data.Items)
 	return audit
+}
+
+// getWorkloadPressure collects resource consumption from all running pods.
+func (c *Collector) getWorkloadPressure() WorkloadPressure {
+	wp := WorkloadPressure{}
+
+	out, err := c.exec.Exec("kubectl", "get", "pods", "-A",
+		"-o", "json", "--field-selector=status.phase=Running")
+	if err != nil {
+		return wp
+	}
+
+	var data struct {
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Spec struct {
+				NodeName   string `json:"nodeName"`
+				Containers []struct {
+					Resources struct {
+						Requests struct {
+							CPU    string `json:"cpu"`
+							Memory string `json:"memory"`
+						} `json:"requests"`
+					} `json:"resources"`
+				} `json:"containers"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(out), &data) != nil {
+		return wp
+	}
+
+	// Per-node accumulation
+	nodeCPU := make(map[string]int)
+	nodeMem := make(map[string]int)
+
+	for _, pod := range data.Items {
+		wp.TotalPods++
+		if pod.Metadata.Namespace == "kafka" {
+			wp.KafkaNamespacePods++
+		}
+		for _, c := range pod.Spec.Containers {
+			cpuStr := c.Resources.Requests.CPU
+			memStr := c.Resources.Requests.Memory
+
+			// Parse CPU
+			cpuM := 0
+			if strings.HasSuffix(cpuStr, "m") {
+				cpuM, _ = strconv.Atoi(strings.TrimSuffix(cpuStr, "m"))
+			} else if cpuStr != "" {
+				cores, _ := strconv.Atoi(cpuStr)
+				cpuM = cores * 1000
+			}
+
+			// Parse Memory (to GiB, approximate)
+			memGi := 0
+			if strings.HasSuffix(memStr, "Gi") {
+				memGi, _ = strconv.Atoi(strings.TrimSuffix(memStr, "Gi"))
+			} else if strings.HasSuffix(memStr, "Mi") {
+				mi, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Mi"))
+				memGi = mi / 1024 // rough conversion
+			} else if strings.HasSuffix(memStr, "Ki") {
+				ki, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Ki"))
+				memGi = ki / 1048576
+			}
+
+			wp.TotalCPURequests += cpuM
+			wp.TotalMemRequests += memGi
+			nodeCPU[pod.Spec.NodeName] += cpuM
+			nodeMem[pod.Spec.NodeName] += memGi
+		}
+	}
+
+	return wp
 }

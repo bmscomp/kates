@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -286,6 +286,26 @@ kates-redeploy:
 	kubectl rollout restart deployment/kates -n kates
 	kubectl rollout status deployment/kates -n kates --timeout=300s
 
+kates-secret:
+	@echo "🔐 Setting up Kafka SASL credentials in kates namespace..."
+	@if kubectl get secret kates-backend -n kafka >/dev/null 2>&1; then \
+		echo "Copying from kafka namespace..."; \
+		kubectl get secret kates-backend -n kafka -o json \
+			| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
+			| kubectl apply -n $(KATES_NS) -f -; \
+		echo "✅ Secret copied successfully"; \
+	else \
+		PWD="$(PASSWORD)"; \
+		if [ -z "$$PWD" ]; then \
+			PWD="changeme"; \
+			echo "⚠️  No password provided. Using default password 'changeme'."; \
+			echo "   To set a custom password, use: make kates-secret PASSWORD=your_password"; \
+		fi; \
+		echo "Creating secret manually..."; \
+		kubectl create secret generic kates-backend -n $(KATES_NS) --from-literal=password="$$PWD" --dry-run=client -o yaml | kubectl apply -f -; \
+		echo "✅ Secret created successfully"; \
+	fi
+
 kates-logs:
 	@echo "📋 Streaming Kates logs..."
 	kubectl logs -f -l app=kates -n kates
@@ -310,6 +330,14 @@ kates-helm-deploy:
 kates-helm-upgrade:
 	@echo "🔄 Upgrading Kates via Helm (ENV=$(ENV))..."
 	ENV=$(ENV) ./scripts/deploy-kates.sh
+
+kates-generic:
+	@echo "📦 Deploying Kates via Helm (generic Kubernetes)..."
+	ENV=generic ./scripts/deploy-kates.sh
+
+kates-prod:
+	@echo "📦 Deploying Kates via Helm (production)..."
+	ENV=prod ./scripts/deploy-kates.sh
 
 kates-helm-undeploy:
 	@echo "🗑️  Removing Kates (Helm release)..."
@@ -386,16 +414,9 @@ kafka-upgrade: kafka-chart-deps
 kafka-detect:
 	@./scripts/kafka-cluster-report.sh
 
-kafka-deploy-auto: kafka-chart-deps
-	@echo "🔍 Auto-detecting cluster configuration from kubeconfig..."
-	@mkdir -p .build
-	@./scripts/detect-cluster-config.sh -o .build/values-detected.yaml
-	@echo ""
-	@echo "📦 Deploying Kafka cluster with detected configuration..."
-	helm upgrade --install kafka-cluster $(KAFKA_CHART_DIR) \
-		--namespace kafka --create-namespace \
-		-f .build/values-detected.yaml \
-		--timeout 10m --wait
+kafka-deploy-auto:
+	@echo "🤖 Starting Kates Auto-Deploy..."
+	cd cli && go run . auto --chart-dir ../$(KAFKA_CHART_DIR)
 	@echo ""
 	@echo "✅ Kafka cluster deployed with auto-detected zones and storage!"
 	@echo "  Run tests:     helm test kafka-cluster -n kafka"

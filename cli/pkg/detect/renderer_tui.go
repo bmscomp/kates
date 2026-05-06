@@ -46,15 +46,45 @@ func RenderTUI(report *DetectReport) {
 		output.Warn("No zone labels found on nodes")
 	}
 
+	// ── Capacity Analysis ────────────────────────────────────────────────
+	cb := report.Capacity
+	if cb.TotalCPU > 0 {
+		output.Header("Cluster Capacity Analysis")
+		utilPct := int(cb.UtilizationPct * 100)
+		output.KeyValue("Total:", fmt.Sprintf("%d CPU, %d GiB", cb.TotalCPU/1000, cb.TotalMem))
+		output.KeyValue("In use:", fmt.Sprintf("%dm CPU (%d%%), %d GiB", cb.UsedCPU, utilPct, cb.UsedMem))
+		output.KeyValue("Available:", fmt.Sprintf("%dm CPU, %d GiB", cb.AvailableCPU, cb.AvailableMem))
+		output.KeyValue("Kafka budget:", fmt.Sprintf("%dm CPU (%d%%), %d GiB (%d%%)",
+			cb.KafkaCPU, int((1.0-cb.ReservePct)*100),
+			cb.KafkaMem, int((1.0-cb.ReservePct)*100)))
+
+		if len(report.Zones) > 0 {
+			zHeaders := []string{"ZONE", "NODES", "AVAIL CPU", "AVAIL MEM"}
+			var zRows [][]string
+			for _, z := range report.Zones {
+				zRows = append(zRows, []string{
+					z.Name, strconv.Itoa(z.Nodes),
+					fmt.Sprintf("%dm", int(float64(z.CPUAllocatable)*(1.0-cb.ReservePct))),
+					fmt.Sprintf("%dGi", int(float64(z.MemAllocatableGi)*(1.0-cb.ReservePct))),
+				})
+			}
+			output.Table(zHeaders, zRows)
+			if cb.WeakestZone != "" {
+				output.Warn(fmt.Sprintf("Bottleneck zone: %s (%dm CPU, %dGi mem)", cb.WeakestZone, cb.WeakestZoneCPU, cb.WeakestZoneMem))
+			}
+		}
+
+		output.Success(fmt.Sprintf("Profile: %s (per-broker: %dm CPU, %s mem, %s storage)",
+			cb.Profile, cb.BrokerCPU, formatMem(cb.BrokerMem), cb.BrokerStorage))
+	}
+
 	output.Header("Resource Budget")
 	bHeaders := []string{"COMPONENT", "PODS", "CPU", "MEMORY"}
 	bRows := [][]string{
-		{"Controllers", "3", fmt.Sprintf("%dm", report.Budget.CtrlCPU), fmt.Sprintf("%dGi", report.Budget.CtrlMem)},
-		{"Brokers (az1)", "3", fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
-		{"Brokers (az2)", "3", fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
-		{"Brokers (az3)", "3", fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
+		{"Controllers", fmt.Sprintf("%d", cb.ControllerReplicas), fmt.Sprintf("%dm", report.Budget.CtrlCPU), fmt.Sprintf("%dGi", report.Budget.CtrlMem)},
+		{"Brokers (×3 zones)", fmt.Sprintf("%d", cb.BrokerReplicas*max(len(report.Zones), 1)), fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
 		{"Operators + Exporter", "3", fmt.Sprintf("%dm", report.Budget.OtherCPU), fmt.Sprintf("%dGi", report.Budget.OtherMem)},
-		{"TOTAL REQUIRED", "15", fmt.Sprintf("%dm", report.Budget.NeedCPU), fmt.Sprintf("%dGi", report.Budget.NeedMem)},
+		{"TOTAL REQUIRED", "", fmt.Sprintf("%dm", report.Budget.NeedCPU), fmt.Sprintf("%dGi", report.Budget.NeedMem)},
 		{"CLUSTER AVAILABLE", strconv.Itoa(len(report.Nodes)), fmt.Sprintf("%dm", report.Budget.TotalCPU), fmt.Sprintf("%dGi", report.Budget.TotalMem)},
 	}
 	output.Table(bHeaders, bRows)
@@ -67,19 +97,32 @@ func RenderTUI(report *DetectReport) {
 
 	output.Header("Storage Compatibility")
 	if len(report.Storage) > 0 {
-		sHeaders := []string{"NAME", "PROVISIONER", "BINDING", "RECLAIM", "DEFAULT"}
+		sHeaders := []string{"NAME", "PROVISIONER", "BINDING", "RECLAIM", "DEFAULT", "EXPAND"}
 		var sRows [][]string
 		for _, sc := range report.Storage {
 			def := "✗"
 			if sc.IsDefault {
 				def = "PASS"
 			}
+			expand := "✗"
+			if sc.AllowExpansion {
+				expand = "✓"
+			}
 			sRows = append(sRows, []string{
-				sc.Name, sc.Provisioner, sc.BindingMode, sc.ReclaimPolicy, def,
+				sc.Name, sc.Provisioner, sc.BindingMode, sc.ReclaimPolicy, def, expand,
 			})
 		}
 		output.Table(sHeaders, sRows)
 		output.Success(fmt.Sprintf("StorageClasses: %d available", len(report.Storage)))
+
+		// PV summary
+		if report.StorageAudit.PVCount > 0 {
+			output.Success(fmt.Sprintf("PersistentVolumes: %d total (%d bound, %s capacity)",
+				report.StorageAudit.PVCount, report.StorageAudit.PVBoundCount, report.StorageAudit.PVTotalCapacity))
+		}
+		if len(report.StorageAudit.CSIDrivers) > 0 {
+			output.Success(fmt.Sprintf("CSI Drivers: %s", strings.Join(report.StorageAudit.CSIDrivers, ", ")))
+		}
 	} else {
 		output.Error("No StorageClasses found")
 	}
@@ -94,6 +137,41 @@ func RenderTUI(report *DetectReport) {
 
 	if report.ExistingKafka.KafkaClusters > 0 {
 		output.Warn("Existing Kafka deployment detected — upgrade mode recommended")
+
+		// Kafka Cluster Health
+		h := report.ExistingKafka.Health
+		if h.Name != "" {
+			output.Header("Kafka Cluster Health")
+			version := h.Version
+			if version == "" {
+				version = "unknown"
+			}
+			output.KeyValue("Cluster:", fmt.Sprintf("%s (Kafka %s)", h.Name, version))
+			output.KeyValue("Replicas:", fmt.Sprintf("%d/%d ready", h.ReadyReplicas, h.Replicas))
+
+			// Conditions
+			for _, c := range h.Conditions {
+				if c.Type == "Ready" && c.Status == "True" {
+					output.Success(fmt.Sprintf("Condition: %s=%s", c.Type, c.Status))
+				} else if c.Type == "Ready" {
+					output.Error(fmt.Sprintf("Condition: %s=%s (%s)", c.Type, c.Status, c.Reason))
+				}
+			}
+
+			// Listeners table
+			if len(h.Listeners) > 0 {
+				lHeaders := []string{"LISTENER", "TYPE", "PORT", "TLS"}
+				var lRows [][]string
+				for _, l := range h.Listeners {
+					tls := "✗"
+					if l.TLS {
+						tls = "✓"
+					}
+					lRows = append(lRows, []string{l.Name, l.Type, strconv.Itoa(l.Port), tls})
+				}
+				output.Table(lHeaders, lRows)
+			}
+		}
 	} else {
 		output.Success("No existing Kafka deployment — clean install")
 	}
@@ -260,5 +338,28 @@ func RenderTUI(report *DetectReport) {
 		output.Banner("RESULT: PARTIAL", fmt.Sprintf("Compatible with %d warning(s)", report.Verdict.Warns))
 	} else {
 		output.Banner("RESULT: INCOMPATIBLE", fmt.Sprintf("%d check(s) failed", report.Verdict.Fails))
+	}
+
+	// ── Remediation Hints ────────────────────────────────────────────────
+	hints := GenerateRemediation(report)
+	if len(hints) > 0 {
+		output.Header("Remediation Hints")
+		for _, h := range hints {
+			switch h.Severity {
+			case "critical":
+				output.Error(h.Summary)
+			case "warning":
+				output.Warn(h.Summary)
+			default:
+				output.Hint(h.Summary)
+			}
+			for _, cmd := range h.Commands {
+				fmt.Printf("    → %s\n", cmd)
+			}
+			if h.DocURL != "" {
+				fmt.Printf("    📖 %s\n", h.DocURL)
+			}
+			fmt.Println()
+		}
 	}
 }

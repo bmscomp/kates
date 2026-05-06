@@ -17,16 +17,17 @@ spec:
     {{- toYaml . | nindent 4 }}
     {{- end }}
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
+    - ports:
         - port: 53
           protocol: UDP
         - port: 53
           protocol: TCP
     {{- if .Values.postgresql.enabled }}
     - to:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "kates.postgresql.fullname" . }}
               app.kubernetes.io/component: database
@@ -59,4 +60,33 @@ spec:
     {{- with .Values.networkPolicy.egressRules }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+{{- end }}
+
+{{- if and .Values.networkPolicy.enabled .Values.postgresql.enabled (not .Values.postgresql.useSubchart) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kates.postgresql.fullname" . }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "kates.postgresql.fullname" . }}
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "kates.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 5432
+          protocol: TCP
 {{- end }}

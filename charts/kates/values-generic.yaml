@@ -1,0 +1,21 @@
+# Kates — Generic Kubernetes Cluster Overlay
+# Cloud-native defaults for any standard Kubernetes environment
+
+image:
+  repository: ghcr.io/bmscomp/kates
+  tag: "1.9"
+  pullPolicy: Always
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "1000m"
+
+jvm:
+  options: "-Xms128m -Xmx256m -XX:+UseZGC"
+
+networkPolicy:
+  enabled: true

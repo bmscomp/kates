@@ -28,10 +28,15 @@ brokerDefaults:
       memory: 8Gi
       cpu: 4000m
 
-controllers:
-  replicas: 3
-  storage:
-    size: 20Gi
+# Controller pools — override with kates detect --generate-values for zone-specific config
+controllerPools:
+  - name: controllers
+    zone: ""
+    replicas: 3
+    storageSize: 20Gi
+    storageClass: ""
+
+controllerDefaults:
   resources:
     requests:
       memory: 2Gi

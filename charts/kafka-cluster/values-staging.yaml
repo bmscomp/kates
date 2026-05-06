@@ -1,10 +1,13 @@
 # Staging overrides — production-like topology, moderate resources
 clusterName: krafter
 
-controllers:
-  replicas: 3
-  storage:
-    size: 10Gi
+# Controller pools — override with kates detect --generate-values for zone-specific config
+controllerPools:
+  - name: controllers
+    zone: ""
+    replicas: 3
+    storageSize: 10Gi
+    storageClass: ""
 
 brokerPools:
   - name: brokers-az1

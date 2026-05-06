@@ -44,7 +44,9 @@ require_chart() {
 }
 
 ensure_namespace() {
-    kubectl create namespace "$1" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
+    if ! kubectl get namespace "$1" > /dev/null 2>&1; then
+        kubectl create namespace "$1"
+    fi
 }
 
 svc_exists() {
