@@ -24,11 +24,11 @@ spec:
     trustedCertificates:
       {{- toYaml .Values.kafkaConnect.tls.trustedCertificates | nindent 6 }}
   {{- end }}
+  groupId: {{ .Values.kafkaConnect.groupId | default "kates-connect-cluster" }}
+  offsetStorageTopic: kates-connect-offsets
+  configStorageTopic: kates-connect-configs
+  statusStorageTopic: kates-connect-status
   config:
-    group.id: {{ .Values.kafkaConnect.groupId | default "kates-connect-cluster" }}
-    offset.storage.topic: kates-connect-offsets
-    config.storage.topic: kates-connect-configs
-    status.storage.topic: kates-connect-status
     offset.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
     config.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
     status.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
