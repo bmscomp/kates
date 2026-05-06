@@ -21,13 +21,6 @@ spec:
         class: {{ .Values.controllers.storage.class }}
         {{- end }}
         deleteClaim: {{ .Values.controllers.storage.deleteClaim }}
-        {{- if .Values.controllers.storage.overrides }}
-        overrides:
-          {{- range .Values.controllers.storage.overrides }}
-          - broker: {{ .broker }}
-            class: {{ .class }}
-          {{- end }}
-        {{- end }}
   jvmOptions:
     {{- toYaml .Values.controllers.jvmOptions | nindent 4 }}
   resources:

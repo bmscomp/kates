@@ -100,9 +100,6 @@ controllers:
     size: 5Gi
     class: ""          # Auto-detected by: kates detect --generate-values
     deleteClaim: false
-    # Per-controller storage class overrides (zone-pinned storage)
-    # Auto-populated by kates detect when zone-specific storage classes are found
-    overrides: []
   jvmOptions:
     -Xms: 512m
     -Xmx: 512m

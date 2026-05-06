@@ -314,14 +314,8 @@ type GenControllers struct {
 }
 
 type GenStorage struct {
-	Size      string               `yaml:"size"`
-	Class     string               `yaml:"class"`
-	Overrides []GenStorageOverride  `yaml:"overrides,omitempty"`
-}
-
-type GenStorageOverride struct {
-	Broker int    `yaml:"broker"`
-	Class  string `yaml:"class"`
+	Size  string `yaml:"size"`
+	Class string `yaml:"class,omitempty"`
 }
 
 type GenBrokerPool struct {
