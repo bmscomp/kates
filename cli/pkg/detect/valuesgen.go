@@ -342,9 +342,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 						Acls: []GenAcl{
 							{
 								Resource: GenAclResource{
-									Type:        "cluster",
-									Name:        "kafka-cluster",
-									PatternType: "literal",
+									Type: "cluster",
 								},
 								Operations: []string{"All"},
 							},

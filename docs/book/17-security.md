@@ -142,8 +142,6 @@ spec:
     acls:
       - resource:
           type: cluster
-          name: "kafka-cluster"
-          patternType: literal
         operations: ["All"]
       - resource:
           type: topic

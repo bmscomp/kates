@@ -441,6 +441,6 @@ type GenAcl struct {
 
 type GenAclResource struct {
 	Type        string `yaml:"type"`
-	Name        string `yaml:"name"`
-	PatternType string `yaml:"patternType"`
+	Name        string `yaml:"name,omitempty"`
+	PatternType string `yaml:"patternType,omitempty"`
 }
