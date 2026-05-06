@@ -341,8 +341,9 @@ type GenResourceValues struct {
 }
 
 type GenTopologyConstraints struct {
-	Enabled     bool   `yaml:"enabled"`
-	TopologyKey string `yaml:"topologyKey"`
+	Enabled           bool   `yaml:"enabled"`
+	TopologyKey       string `yaml:"topologyKey"`
+	WhenUnsatisfiable string `yaml:"whenUnsatisfiable,omitempty"`
 }
 
 type GenAntiAffinity struct {
