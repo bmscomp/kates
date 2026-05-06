@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	autoClusterName   string
-	autoReleaseName   string
-	autoReservePct    float64
-	autoChartDir      string
-	autoDryRun        bool
-	autoBaseValues    string
+	autoClusterName    string
+	autoReleaseName    string
+	autoNamespace      string
+	autoReservePct     float64
+	autoChartDir       string
+	autoDryRun         bool
+	autoBaseValues     string
 	autoSkipMonitoring bool
 )
 
@@ -35,6 +36,7 @@ Helm chart in a single step.`,
 func init() {
 	autoCmd.Flags().StringVar(&autoClusterName, "cluster-name", "krafter", "Kafka cluster name")
 	autoCmd.Flags().StringVar(&autoReleaseName, "release-name", "kafka-cluster", "Helm release name")
+	autoCmd.Flags().StringVarP(&autoNamespace, "namespace", "n", "kafka", "Kubernetes namespace for all deployed charts")
 	autoCmd.Flags().Float64Var(&autoReservePct, "reserve", 0.30, "Reserve percentage of cluster resources (0.30 = 30% reserved, 70% for Kafka)")
 	autoCmd.Flags().StringVar(&autoChartDir, "chart-dir", "./charts/kafka-cluster", "Path to the kafka-cluster Helm chart directory")
 	autoCmd.Flags().BoolVar(&autoDryRun, "dry-run", false, "Preview the Helm installation without executing it")
@@ -114,9 +116,10 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Helm Deploy Phase
+	output.Hint(fmt.Sprintf("📌 Target namespace: %s", autoNamespace))
 	helmArgs := []string{
 		"upgrade", "--install", autoReleaseName, autoChartDir,
-		"--namespace", "kafka", "--create-namespace",
+		"--namespace", autoNamespace, "--create-namespace",
 		"-f", valuesPath,
 		"--force-conflicts",
 		"--timeout", "10m", "--wait",
@@ -162,7 +165,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 			} else {
 				monHelmArgs := []string{
 					"upgrade", "--install", "monitoring", monitoringChartDir,
-					"--namespace", "monitoring", "--create-namespace",
+					"--namespace", autoNamespace, "--create-namespace",
 					"-f", monitoringValues,
 					"--timeout", "10m", "--wait",
 				}
