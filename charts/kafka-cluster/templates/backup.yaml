@@ -47,7 +47,7 @@ spec:
       - kafkauser.kafka.strimzi.io
 
     # ── Controller-only PVC filter ────────────────────────────────────────────
-    # strimzi.io/pool-name=controllers matches ONLY the KRaft controller PVCs.
+    # strimzi.io/controller-role="true" matches ONLY the KRaft controller PVCs.
     # Broker pools (brokers-alpha, brokers-sigma, brokers-gamma) are excluded —
     # their data is covered by Kafka Tiered Storage (Layer 1).
     labelSelector:
@@ -55,9 +55,9 @@ spec:
         - key: strimzi.io/cluster
           operator: In
           values: [{{ include "kafka-cluster.clusterName" . | quote }}]
-        - key: strimzi.io/pool-name
+        - key: strimzi.io/controller-role
           operator: In
-          values: ["controllers"]
+          values: ["true"]
 
     # ── Volume snapshot settings ──────────────────────────────────────────────
     # snapshotVolumes: false — broker PVCs must NOT be snapshotted.

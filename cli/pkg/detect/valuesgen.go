@@ -280,18 +280,8 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		ClusterName: g.ClusterName,
 		StrimziOp:   g.buildStrimziOp(),
 		CRDUpgrade:  g.buildCRDUpgrade(),
-		Controllers: GenControllers{
-			Replicas: cb.ControllerReplicas,
-			Storage:  g.buildControllerStorage(cb),
-			TopologyTSC: GenTopologyConstraints{
-				Enabled:           zoneScheduling,
-				TopologyKey:       topologyKey,
-				WhenUnsatisfiable: "ScheduleAnyway",
-			},
-			AntiAffinity: GenAntiAffinity{
-				Enabled:     zoneScheduling,
-				TopologyKey: topologyKey,
-			},
+		ControllerPools: g.buildControllerPools(),
+		ControllerDefaults: GenControllerDefaults{
 			Resources: GenResources{
 				Requests: GenResourceValues{
 					Memory: formatMem(cb.ControllerMem),
@@ -301,6 +291,15 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 					Memory: formatMem(cb.ControllerMem),
 					CPU:    fmt.Sprintf("%dm", cb.ControllerCPU),
 				},
+			},
+			TopologyTSC: GenTopologyConstraints{
+				Enabled:           zoneScheduling,
+				TopologyKey:       topologyKey,
+				WhenUnsatisfiable: "ScheduleAnyway",
+			},
+			AntiAffinity: GenAntiAffinity{
+				Enabled:     zoneScheduling,
+				TopologyKey: "kubernetes.io/hostname",
 			},
 		},
 		BrokerPools: g.buildBrokerPools(),
@@ -406,55 +405,59 @@ func (g *ValuesGenerator) buildBrokerPools() []GenBrokerPool {
 	}
 }
 
-// ── Controller Storage ──────────────────────────────────────────────────────
+// ── Controller Pools ────────────────────────────────────────────────────────
 
-// buildControllerStorage creates storage config for controllers.
-// Controllers are spread across zones via topology constraints, so the storage
-// class must NOT be zone-pinned. This function:
-//  1. Prefers the cluster default SC (usually cross-zone with WaitForFirstConsumer)
-//  2. Falls back to any SC whose name does NOT match a zone name
-//  3. If ALL SCs are zone-specific, omits the class entirely so the cluster
-//     default provisioner handles zone-local provisioning automatically
-func (g *ValuesGenerator) buildControllerStorage(cb CapacityBudget) GenStorage {
-	storage := GenStorage{
-		Size:  cb.ControllerStorage,
-		Class: g.selectControllerSC(),
-	}
-	return storage
-}
-
-// selectControllerSC picks a storage class suitable for cross-zone controllers.
-func (g *ValuesGenerator) selectControllerSC() string {
+// buildControllerPools creates one controller pool per detected zone,
+// each pinned to its zone's storage class via node affinity.
+// This mirrors the broker pool pattern and ensures each controller gets
+// a PV provisioned in its own zone.
+func (g *ValuesGenerator) buildControllerPools() []GenControllerPool {
+	cb := g.Cap
 	zones := g.Report.Zones
-	zoneNames := make(map[string]bool, len(zones))
-	for _, z := range zones {
-		zoneNames[strings.ToLower(z.Name)] = true
-	}
 
-	// 1. Prefer the cluster-marked default SC
-	for _, sc := range g.Report.Storage {
-		if sc.IsDefault {
-			return sc.Name
+	switch {
+	case len(zones) >= 3:
+		pools := make([]GenControllerPool, 0, len(zones))
+		for _, z := range zones {
+			pools = append(pools, GenControllerPool{
+				Name:         "controllers-" + sanitizeK8sName(z.Name),
+				Zone:         z.Name,
+				Replicas:     1,
+				StorageSize:  cb.ControllerStorage,
+				StorageClass: g.matchStorageClass(z.Name),
+			})
+		}
+		return pools
+
+	case len(zones) == 1:
+		zoneName := zones[0].Name
+		return []GenControllerPool{
+			{
+				Name: "controllers-" + sanitizeK8sName(zoneName), Zone: zoneName,
+				Replicas: 1, StorageSize: cb.ControllerStorage,
+				StorageClass: g.matchStorageClass(zoneName),
+			},
+			{
+				Name: "controllers-float-2", Zone: "",
+				Replicas: 1, StorageSize: cb.ControllerStorage,
+				StorageClass: g.selectDefaultSC(),
+			},
+			{
+				Name: "controllers-float-3", Zone: "",
+				Replicas: 1, StorageSize: cb.ControllerStorage,
+				StorageClass: g.selectDefaultSC(),
+			},
+		}
+
+	default:
+		return []GenControllerPool{
+			{
+				Name: "controllers", Zone: "",
+				Replicas: cb.ControllerReplicas, StorageSize: cb.ControllerStorage,
+				StorageClass: g.selectDefaultSC(),
+			},
 		}
 	}
-
-	// 2. Pick the first SC whose name does NOT contain any zone name
-	for _, sc := range g.Report.Storage {
-		scLower := strings.ToLower(sc.Name)
-		isZoneSpecific := false
-		for zn := range zoneNames {
-			if strings.Contains(scLower, zn) {
-				isZoneSpecific = true
-				break
-			}
-		}
-		if !isZoneSpecific {
-			return sc.Name
-		}
-	}
-
-	// 3. All SCs are zone-specific — omit class, let the cluster default handle it
-	return ""
 }
 
 // ── StorageClass Matching ────────────────────────────────────────────────────

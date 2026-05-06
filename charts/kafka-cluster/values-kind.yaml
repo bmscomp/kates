@@ -19,15 +19,25 @@ brokerPools:
     storageSize: 50Gi
     storageClass: local-storage-gamma
 
-# Single controllers block — previously split into two entries which caused
-# the second block to silently overwrite the first (YAML last-value-wins).
-# That removed tolerations, resources, and podAntiAffinity, forcing all 3
-# controllers onto the 2 worker nodes and causing resource contention that
-# made the Strimzi agent on port 8443 unresponsive → operator TimeoutException.
-controllers:
-  replicas: 3
-  storage:
-    size: 1Gi
+# Per-zone controller pools — one per Kind node zone
+controllerPools:
+  - name: controllers-alpha
+    zone: alpha
+    replicas: 1
+    storageSize: 1Gi
+    storageClass: local-storage-alpha
+  - name: controllers-gamma
+    zone: gamma
+    replicas: 1
+    storageSize: 1Gi
+    storageClass: local-storage-gamma
+  - name: controllers-sigma
+    zone: sigma
+    replicas: 1
+    storageSize: 1Gi
+    storageClass: local-storage-sigma
+
+controllerDefaults:
   resources:
     requests:
       cpu: 250m
@@ -36,17 +46,12 @@ controllers:
       cpu: 500m
       memory: 1Gi
   topologySpreadConstraints:
-    # Ensure one controller per node across all 3 Kind nodes.
-    # Without this, 2 controllers land on gamma causing resource contention
-    # that stalls the Strimzi agent on port 8443 → operator TimeoutException.
     enabled: true
     maxSkew: 1
     topologyKey: kubernetes.io/hostname
     whenUnsatisfiable: DoNotSchedule
   podAntiAffinity:
     enabled: false
-  # Toleration allows controllers to schedule on the control-plane node (alpha),
-  # so 3 controllers spread across all 3 nodes instead of cramming 2 on gamma.
   tolerations:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"

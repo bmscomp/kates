@@ -287,14 +287,15 @@ type GeneratedValues struct {
 	ClusterName    string                `yaml:"clusterName"`
 	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
 	CRDUpgrade     GenCRDUpgrade         `yaml:"crdUpgrade"`
-	Controllers    GenControllers        `yaml:"controllers"`
-	BrokerPools    []GenBrokerPool       `yaml:"brokerPools"`
-	BrokerDefaults GenBrokerDefaults     `yaml:"brokerDefaults"`
-	Kafka          GenKafka              `yaml:"kafka"`
-	Dashboards     GenDashboards         `yaml:"dashboards"`
-	PodMonitors    GenPodMonitors        `yaml:"podMonitors"`
-	Alerts         GenAlerts             `yaml:"alerts"`
-	NetPolicies    GenNetPolicies        `yaml:"networkPolicies"`
+	ControllerPools    []GenControllerPool    `yaml:"controllerPools"`
+	ControllerDefaults GenControllerDefaults  `yaml:"controllerDefaults"`
+	BrokerPools        []GenBrokerPool        `yaml:"brokerPools"`
+	BrokerDefaults     GenBrokerDefaults      `yaml:"brokerDefaults"`
+	Kafka              GenKafka               `yaml:"kafka"`
+	Dashboards         GenDashboards          `yaml:"dashboards"`
+	PodMonitors        GenPodMonitors         `yaml:"podMonitors"`
+	Alerts             GenAlerts              `yaml:"alerts"`
+	NetPolicies        GenNetPolicies         `yaml:"networkPolicies"`
 }
 
 type GenStrimziOp struct {
@@ -305,11 +306,17 @@ type GenCRDUpgrade struct {
 	Enabled bool `yaml:"enabled"`
 }
 
-type GenControllers struct {
-	Replicas    int                    `yaml:"replicas"`
-	Storage     GenStorage             `yaml:"storage"`
-	Resources   GenResources           `yaml:"resources"`
-	TopologyTSC GenTopologyConstraints `yaml:"topologySpreadConstraints"`
+type GenControllerPool struct {
+	Name         string `yaml:"name"`
+	Zone         string `yaml:"zone"`
+	Replicas     int    `yaml:"replicas"`
+	StorageSize  string `yaml:"storageSize"`
+	StorageClass string `yaml:"storageClass"`
+}
+
+type GenControllerDefaults struct {
+	Resources    GenResources           `yaml:"resources"`
+	TopologyTSC  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
 	AntiAffinity GenAntiAffinity       `yaml:"podAntiAffinity"`
 }
 

@@ -1,8 +1,12 @@
 # Development overrides — single-node, minimal resources, relaxed policies
-controllers:
-  replicas: 1
-  storage:
-    size: 1Gi
+controllerPools:
+  - name: controllers-dev
+    zone: ""
+    replicas: 1
+    storageSize: 1Gi
+    storageClass: ""
+
+controllerDefaults:
   resources:
     requests:
       memory: 512Mi

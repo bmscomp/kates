@@ -230,19 +230,23 @@ spec:
           set -e
           echo "=== Tier 4: KRaft Controller Quorum ==="
 
-          echo "Checking controller node pool CR..."
-          POOL_STATUS=$(kubectl get kafkanodepool controllers -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          echo "Checking controller node pool CRs..."
+          {{- $totalControllers := 0 }}
+          {{- range .Values.controllerPools }}
+          {{- $totalControllers = add $totalControllers .replicas }}
+          POOL_STATUS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
           if [ "$POOL_STATUS" = "True" ]; then
-            echo "  ✓ KafkaNodePool 'controllers' Ready=True"
+            echo "  ✓ KafkaNodePool '{{ .name }}' Ready=True"
           else
-            echo "  ✗ KafkaNodePool 'controllers' not ready: $POOL_STATUS" && exit 1
+            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: $POOL_STATUS" && exit 1
           fi
+          {{- end }}
 
           echo ""
           echo "Checking controller pods..."
-          EXPECTED={{ .Values.controllers.replicas }}
+          EXPECTED={{ $totalControllers }}
           RUNNING=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/pool-name=controllers \
+            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/controller-role=true \
             --no-headers | grep "Running" | wc -l | tr -d ' ')
           echo "  Controller pods running: $RUNNING/$EXPECTED"
           if [ "$RUNNING" -lt "$EXPECTED" ]; then

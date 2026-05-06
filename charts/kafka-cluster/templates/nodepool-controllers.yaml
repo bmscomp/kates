@@ -1,14 +1,16 @@
+{{- range .Values.controllerPools }}
+---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
-  name: controllers
-  namespace: {{ include "kafka-cluster.namespace" . }}
+  name: {{ .name }}
+  namespace: {{ include "kafka-cluster.namespace" $ }}
   labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
   annotations:
     helm.sh/resource-policy: keep
 spec:
-  replicas: {{ .Values.controllers.replicas }}
+  replicas: {{ .replicas }}
   roles:
     - controller
   storage:
@@ -16,54 +18,71 @@ spec:
     volumes:
       - id: 0
         type: persistent-claim
-        size: {{ .Values.controllers.storage.size }}
-        {{- if .Values.controllers.storage.class }}
-        class: {{ .Values.controllers.storage.class }}
+        size: {{ .storageSize }}
+        {{- if .storageClass }}
+        class: {{ .storageClass }}
         {{- end }}
-        deleteClaim: {{ .Values.controllers.storage.deleteClaim }}
+        deleteClaim: {{ $.Values.controllerDefaults.deleteClaim }}
   jvmOptions:
-    {{- toYaml .Values.controllers.jvmOptions | nindent 4 }}
+    {{- toYaml $.Values.controllerDefaults.jvmOptions | nindent 4 }}
   resources:
-    {{- toYaml .Values.controllers.resources | nindent 4 }}
+    {{- toYaml $.Values.controllerDefaults.resources | nindent 4 }}
   template:
     pod:
+      {{- if .zone }}
+      metadata:
+        labels:
+          zone: {{ .zone }}
+      {{- end }}
       securityContext:
-        {{- include "kafka-cluster.podSecurityContext" . | nindent 8 }}
-      {{- if .Values.controllers.topologySpreadConstraints.enabled }}
+        {{- include "kafka-cluster.podSecurityContext" $ | nindent 8 }}
+      {{- if $.Values.controllerDefaults.topologySpreadConstraints.enabled }}
       topologySpreadConstraints:
-        - maxSkew: {{ .Values.controllers.topologySpreadConstraints.maxSkew }}
-          topologyKey: {{ .Values.controllers.topologySpreadConstraints.topologyKey }}
-          whenUnsatisfiable: {{ .Values.controllers.topologySpreadConstraints.whenUnsatisfiable }}
+        - maxSkew: {{ $.Values.controllerDefaults.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ $.Values.controllerDefaults.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ $.Values.controllerDefaults.topologySpreadConstraints.whenUnsatisfiable }}
           labelSelector:
             matchLabels:
-              strimzi.io/pool-name: controllers
+              strimzi.io/pool-name: {{ .name }}
       {{- end }}
-      {{- if .Values.controllers.podAntiAffinity.enabled }}
       affinity:
-        podAntiAffinity:
+        {{- if .zone }}
+        nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  strimzi.io/pool-name: controllers
-              topologyKey: {{ .Values.controllers.podAntiAffinity.topologyKey }}
-      {{- end }}
-      {{- with .Values.controllers.tolerations }}
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - {{ .zone }}
+        {{- end }}
+        {{- if $.Values.controllerDefaults.podAntiAffinity.enabled }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    strimzi.io/controller-role: "true"
+                topologyKey: {{ $.Values.controllerDefaults.podAntiAffinity.topologyKey }}
+        {{- end }}
+      {{- with $.Values.controllerDefaults.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.controllers.priorityClassName }}
-      priorityClassName: {{ .Values.controllers.priorityClassName }}
+      {{- if $.Values.controllerDefaults.priorityClassName }}
+      priorityClassName: {{ $.Values.controllerDefaults.priorityClassName }}
       {{- end }}
-      {{- if .Values.controllers.sysctl.enabled }}
+      {{- if $.Values.controllerDefaults.sysctl.enabled }}
       initContainers:
         - name: sysctl-tuner
-          image: {{ .Values.controllers.sysctl.image }}
+          image: {{ $.Values.controllerDefaults.sysctl.image }}
           imagePullPolicy: IfNotPresent
           command:
             - sh
             - -c
             - |
-              {{- range $key, $value := .Values.controllers.sysctl.params }}
+              {{- range $key, $value := $.Values.controllerDefaults.sysctl.params }}
               sysctl -w {{ $key }}={{ $value }}
               {{- end }}
           securityContext:
@@ -72,4 +91,5 @@ spec:
       {{- end }}
     kafkaContainer:
       securityContext:
-        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+        {{- include "kafka-cluster.containerSecurityContext" $ | nindent 8 }}
+{{- end }}
