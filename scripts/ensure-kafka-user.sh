@@ -4,10 +4,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
-USER_NAME="kates-backend"
-KAFKA_NS="kafka"
 CLUSTER_NAME="krafter"
 
+USER_NAME="kates-backend"
+KAFKA_NS="kafka"
 info "Ensuring KafkaUser ${USER_NAME} exists in namespace ${KAFKA_NS}..."
 
 cat <<EOF | kubectl apply -f -
