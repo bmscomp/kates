@@ -287,8 +287,9 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				Class: g.selectDefaultSC(),
 			},
 			TopologyTSC: GenTopologyConstraints{
-				Enabled:     zoneScheduling,
-				TopologyKey: topologyKey,
+				Enabled:           zoneScheduling,
+				TopologyKey:       topologyKey,
+				WhenUnsatisfiable: "ScheduleAnyway",
 			},
 			AntiAffinity: GenAntiAffinity{
 				Enabled:     zoneScheduling,
@@ -304,8 +305,9 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				},
 			},
 			TopologyTSC: GenTopologyConstraints{
-				Enabled:     zoneScheduling,
-				TopologyKey: topologyKey,
+				Enabled:           zoneScheduling,
+				TopologyKey:       topologyKey,
+				WhenUnsatisfiable: "ScheduleAnyway",
 			},
 			AntiAffinity: GenAntiAffinity{
 				Enabled:     zoneScheduling,
