@@ -420,10 +420,27 @@ type GenUsers struct {
 }
 
 type GenUser struct {
-	Name           string      `yaml:"name"`
-	Authentication GenUserAuth `yaml:"authentication"`
+	Name           string       `yaml:"name"`
+	Authentication GenUserAuth  `yaml:"authentication"`
+	Authorization  *GenUserAuthz `yaml:"authorization,omitempty"`
 }
 
 type GenUserAuth struct {
 	Type string `yaml:"type"`
+}
+
+type GenUserAuthz struct {
+	Type string   `yaml:"type"`
+	Acls []GenAcl `yaml:"acls"`
+}
+
+type GenAcl struct {
+	Resource   GenAclResource `yaml:"resource"`
+	Operations []string       `yaml:"operations"`
+}
+
+type GenAclResource struct {
+	Type        string `yaml:"type"`
+	Name        string `yaml:"name"`
+	PatternType string `yaml:"patternType"`
 }
