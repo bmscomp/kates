@@ -191,21 +191,21 @@ func TestSizingProfile_Production(t *testing.T) {
 	r := buildTestReport(3, []string{"standard"})
 	gen := NewValuesGenerator(r, "krafter")
 
-	if gen.Profile.Name != "production" {
-		t.Errorf("expected production profile (54 CPU), got %s", gen.Profile.Name)
+	if gen.Cap.Profile != "production" {
+		t.Errorf("expected production profile (54 CPU), got %s", gen.Cap.Profile)
 	}
 }
 
 func TestSizingProfile_Minimal(t *testing.T) {
 	r := &DetectReport{
-		Nodes:   []NodeInfo{{CPU: 2000, MemoryGi: 4}},
+		Nodes:   []NodeInfo{{CPU: 500, MemoryGi: 1}},
 		Storage: []SCInfo{{Name: "standard", IsDefault: true}},
 		Network: NetworkInfo{CNI: "kindnet"},
 	}
 	gen := NewValuesGenerator(r, "krafter")
 
-	if gen.Profile.Name != "minimal" {
-		t.Errorf("expected minimal profile (2 CPU), got %s", gen.Profile.Name)
+	if gen.Cap.Profile != "minimal" {
+		t.Errorf("expected minimal profile (2 CPU), got %s", gen.Cap.Profile)
 	}
 }
 

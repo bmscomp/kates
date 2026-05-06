@@ -44,6 +44,7 @@ var (
 	valuesOutput     string
 	clusterName      string
 	dryRun           bool
+	reservePct       float64
 )
 
 func init() {
@@ -56,6 +57,7 @@ func init() {
 	detectCmd.Flags().StringVar(&valuesOutput, "values-output", "", "Write generated values to file (default: stdout)")
 	detectCmd.Flags().StringVar(&clusterName, "cluster-name", "krafter", "Kafka cluster name for generated values")
 	detectCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview values to stdout without writing a file")
+	detectCmd.Flags().Float64Var(&reservePct, "reserve", 0.30, "Reserve percentage of cluster resources (0.30 = 30% reserved, 70% for Kafka)")
 	rootCmd.AddCommand(detectCmd)
 }
 
@@ -117,19 +119,22 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	// Analyze raw data into final report
 	analyzer.Analyze(report, reqs)
 
+	// Compute capacity budget for TUI display and values generation
+	capGen := detect.NewValuesGeneratorWithReserve(report, clusterName, reservePct)
+	report.Capacity = capGen.Cap
+
 	// ── Generate values mode ────────────────────────────────────────────────
 	if generateValues {
 		if dryRun || valuesOutput == "" {
-			// Dry-run or no output file: print to stdout
 			if detectValuesFile != "" {
 				baseData, err := os.ReadFile(detectValuesFile)
 				if err != nil {
 					output.Error(fmt.Sprintf("Failed to read base values: %v", err))
 					return nil
 				}
-				detect.RenderValuesFromBase(report, clusterName, baseData, os.Stdout)
+				detect.RenderValuesFromBaseWithReserve(report, clusterName, baseData, reservePct, os.Stdout)
 			} else {
-				detect.RenderValues(report, clusterName, os.Stdout)
+				detect.RenderValuesWithReserve(report, clusterName, reservePct, os.Stdout)
 			}
 			return nil
 		}
@@ -148,9 +153,9 @@ func runDetect(cmd *cobra.Command, args []string) error {
 				output.Error(fmt.Sprintf("Failed to read base values: %v", err))
 				return nil
 			}
-			detect.RenderValuesFromBase(report, clusterName, baseData, f)
+			detect.RenderValuesFromBaseWithReserve(report, clusterName, baseData, reservePct, f)
 		} else {
-			detect.RenderValues(report, clusterName, f)
+			detect.RenderValuesWithReserve(report, clusterName, reservePct, f)
 		}
 		output.Success(fmt.Sprintf("Values written to %s", valuesOutput))
 		output.Hint(fmt.Sprintf("Deploy with: helm upgrade --install %s charts/kafka-cluster -n kafka -f %s --timeout 10m --wait", clusterName, valuesOutput))

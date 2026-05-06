@@ -93,6 +93,10 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		report.NetPolAudit = c.getNetworkPolicyAudit()
 		return nil
 	})
+	g.Go(func() error {
+		report.Workload = c.getWorkloadPressure()
+		return nil
+	})
 
 	err := g.Wait()
 	return report, err
@@ -818,4 +822,80 @@ func (c *Collector) getNetworkPolicyAudit() NetworkPolicyAudit {
 
 	audit.TotalCount = len(data.Items)
 	return audit
+}
+
+// getWorkloadPressure collects resource consumption from all running pods.
+func (c *Collector) getWorkloadPressure() WorkloadPressure {
+	wp := WorkloadPressure{}
+
+	out, err := c.exec.Exec("kubectl", "get", "pods", "-A",
+		"-o", "json", "--field-selector=status.phase=Running")
+	if err != nil {
+		return wp
+	}
+
+	var data struct {
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Spec struct {
+				NodeName   string `json:"nodeName"`
+				Containers []struct {
+					Resources struct {
+						Requests struct {
+							CPU    string `json:"cpu"`
+							Memory string `json:"memory"`
+						} `json:"requests"`
+					} `json:"resources"`
+				} `json:"containers"`
+			} `json:"spec"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(out), &data) != nil {
+		return wp
+	}
+
+	// Per-node accumulation
+	nodeCPU := make(map[string]int)
+	nodeMem := make(map[string]int)
+
+	for _, pod := range data.Items {
+		wp.TotalPods++
+		if pod.Metadata.Namespace == "kafka" {
+			wp.KafkaNamespacePods++
+		}
+		for _, c := range pod.Spec.Containers {
+			cpuStr := c.Resources.Requests.CPU
+			memStr := c.Resources.Requests.Memory
+
+			// Parse CPU
+			cpuM := 0
+			if strings.HasSuffix(cpuStr, "m") {
+				cpuM, _ = strconv.Atoi(strings.TrimSuffix(cpuStr, "m"))
+			} else if cpuStr != "" {
+				cores, _ := strconv.Atoi(cpuStr)
+				cpuM = cores * 1000
+			}
+
+			// Parse Memory (to GiB, approximate)
+			memGi := 0
+			if strings.HasSuffix(memStr, "Gi") {
+				memGi, _ = strconv.Atoi(strings.TrimSuffix(memStr, "Gi"))
+			} else if strings.HasSuffix(memStr, "Mi") {
+				mi, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Mi"))
+				memGi = mi / 1024 // rough conversion
+			} else if strings.HasSuffix(memStr, "Ki") {
+				ki, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Ki"))
+				memGi = ki / 1048576
+			}
+
+			wp.TotalCPURequests += cpuM
+			wp.TotalMemRequests += memGi
+			nodeCPU[pod.Spec.NodeName] += cpuM
+			nodeMem[pod.Spec.NodeName] += memGi
+		}
+	}
+
+	return wp
 }

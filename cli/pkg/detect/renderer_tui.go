@@ -46,15 +46,45 @@ func RenderTUI(report *DetectReport) {
 		output.Warn("No zone labels found on nodes")
 	}
 
+	// ── Capacity Analysis ────────────────────────────────────────────────
+	cb := report.Capacity
+	if cb.TotalCPU > 0 {
+		output.Header("Cluster Capacity Analysis")
+		utilPct := int(cb.UtilizationPct * 100)
+		output.KeyValue("Total:", fmt.Sprintf("%d CPU, %d GiB", cb.TotalCPU/1000, cb.TotalMem))
+		output.KeyValue("In use:", fmt.Sprintf("%dm CPU (%d%%), %d GiB", cb.UsedCPU, utilPct, cb.UsedMem))
+		output.KeyValue("Available:", fmt.Sprintf("%dm CPU, %d GiB", cb.AvailableCPU, cb.AvailableMem))
+		output.KeyValue("Kafka budget:", fmt.Sprintf("%dm CPU (%d%%), %d GiB (%d%%)",
+			cb.KafkaCPU, int((1.0-cb.ReservePct)*100),
+			cb.KafkaMem, int((1.0-cb.ReservePct)*100)))
+
+		if len(report.Zones) > 0 {
+			zHeaders := []string{"ZONE", "NODES", "AVAIL CPU", "AVAIL MEM"}
+			var zRows [][]string
+			for _, z := range report.Zones {
+				zRows = append(zRows, []string{
+					z.Name, strconv.Itoa(z.Nodes),
+					fmt.Sprintf("%dm", int(float64(z.CPUAllocatable)*(1.0-cb.ReservePct))),
+					fmt.Sprintf("%dGi", int(float64(z.MemAllocatableGi)*(1.0-cb.ReservePct))),
+				})
+			}
+			output.Table(zHeaders, zRows)
+			if cb.WeakestZone != "" {
+				output.Warn(fmt.Sprintf("Bottleneck zone: %s (%dm CPU, %dGi mem)", cb.WeakestZone, cb.WeakestZoneCPU, cb.WeakestZoneMem))
+			}
+		}
+
+		output.Success(fmt.Sprintf("Profile: %s (per-broker: %dm CPU, %s mem, %s storage)",
+			cb.Profile, cb.BrokerCPU, formatMem(cb.BrokerMem), cb.BrokerStorage))
+	}
+
 	output.Header("Resource Budget")
 	bHeaders := []string{"COMPONENT", "PODS", "CPU", "MEMORY"}
 	bRows := [][]string{
-		{"Controllers", "3", fmt.Sprintf("%dm", report.Budget.CtrlCPU), fmt.Sprintf("%dGi", report.Budget.CtrlMem)},
-		{"Brokers (az1)", "3", fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
-		{"Brokers (az2)", "3", fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
-		{"Brokers (az3)", "3", fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
+		{"Controllers", fmt.Sprintf("%d", cb.ControllerReplicas), fmt.Sprintf("%dm", report.Budget.CtrlCPU), fmt.Sprintf("%dGi", report.Budget.CtrlMem)},
+		{"Brokers (×3 zones)", fmt.Sprintf("%d", cb.BrokerReplicas*max(len(report.Zones), 1)), fmt.Sprintf("%dm", report.Budget.BrokerCPU), fmt.Sprintf("%dGi", report.Budget.BrokerMem)},
 		{"Operators + Exporter", "3", fmt.Sprintf("%dm", report.Budget.OtherCPU), fmt.Sprintf("%dGi", report.Budget.OtherMem)},
-		{"TOTAL REQUIRED", "15", fmt.Sprintf("%dm", report.Budget.NeedCPU), fmt.Sprintf("%dGi", report.Budget.NeedMem)},
+		{"TOTAL REQUIRED", "", fmt.Sprintf("%dm", report.Budget.NeedCPU), fmt.Sprintf("%dGi", report.Budget.NeedMem)},
 		{"CLUSTER AVAILABLE", strconv.Itoa(len(report.Nodes)), fmt.Sprintf("%dm", report.Budget.TotalCPU), fmt.Sprintf("%dGi", report.Budget.TotalMem)},
 	}
 	output.Table(bHeaders, bRows)
