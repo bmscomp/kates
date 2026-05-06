@@ -172,16 +172,8 @@ func (g *ValuesGenerator) selectControllerReplicas() int {
 }
 
 func (g *ValuesGenerator) selectBrokerReplicas() int {
-	cpuCores := 0
-	totalMem := 0
-	for _, n := range g.Report.Nodes {
-		cpuCores += n.CPU
-		totalMem += n.MemoryGi
-	}
-	cpuCores /= 1000
-	if cpuCores >= 24 && totalMem >= 48 {
-		return 3
-	}
+	// Kates currently provisions 3 Broker Pools (one for each availability zone).
+	// To deploy a standard 3-broker topology, we set the replicas per pool to 1.
 	return 1
 }
 
