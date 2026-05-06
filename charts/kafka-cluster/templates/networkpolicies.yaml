@@ -131,7 +131,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      strimzi.io/pool-name: controllers
+      strimzi.io/controller-role: "true"
   policyTypes:
     - Ingress
     - Egress

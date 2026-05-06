@@ -5,7 +5,7 @@
   Version:     Kafka {{ .Values.kafkaVersion }} / Strimzi {{ .Values.strimziVersion }}
   Mode:        KRaft (node pools enabled)
   Brokers:     {{ len .Values.brokerPools }} zone-aware pool(s)
-  Controllers: {{ .Values.controllers.replicas }} replica(s)
+  Controllers: {{ len .Values.controllerPools }} zone-aware pool(s)
 {{- if .Values.topics.enabled }}
   Topics:      {{ len .Values.topics.items }} managed topic(s)
 {{- end }}
