@@ -59,11 +59,7 @@ spec:
       configMapKeyRef:
         name: kafka-metrics
         key: kafka-metrics-config.yml
-  {{- if .Values.kafkaConnect.autoRestart.enabled }}
-  autoRestart:
-    enabled: true
-    maxRestarts: {{ .Values.kafkaConnect.autoRestart.maxRestarts | default 10 }}
-  {{- end }}
+
   readinessProbe:
     {{- toYaml .Values.kafkaConnect.readinessProbe | nindent 4 }}
   livenessProbe:

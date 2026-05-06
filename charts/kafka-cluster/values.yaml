@@ -507,9 +507,6 @@ kafkaConnect:
     initialDelaySeconds: 60
     timeoutSeconds: 5
 
-  autoRestart:
-    enabled: true
-    maxRestarts: 10
 
   build: {}
     # output:
