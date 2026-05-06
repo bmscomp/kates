@@ -337,6 +337,35 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 					Authentication: GenUserAuth{
 						Type: "scram-sha-512",
 					},
+					Authorization: &GenUserAuthz{
+						Type: "simple",
+						Acls: []GenAcl{
+							{
+								Resource: GenAclResource{
+									Type:        "cluster",
+									Name:        "kafka-cluster",
+									PatternType: "literal",
+								},
+								Operations: []string{"All"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "*",
+									PatternType: "literal",
+								},
+								Operations: []string{"All"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "group",
+									Name:        "*",
+									PatternType: "literal",
+								},
+								Operations: []string{"All"},
+							},
+						},
+					},
 				},
 				{
 					Name: "kafka-ui",
