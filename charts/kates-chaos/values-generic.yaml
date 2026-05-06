@@ -59,10 +59,24 @@ litmus:
     replicaCount: 3
     arbiter:
       enabled: true
+      podSecurityContext:
+        enabled: true
+        fsGroup: 1001
+      containerSecurityContext:
+        enabled: true
+        runAsUser: 1001
+        runAsNonRoot: true
     auth:
       enabled: true
       rootPassword: "litmus-chaos-secret"
       replicaSetKey: "litmus-chaos-replicaset-key-1234567890"
+    podSecurityContext:
+      enabled: true
+      fsGroup: 1001
+    containerSecurityContext:
+      enabled: true
+      runAsUser: 1001
+      runAsNonRoot: true
     volumePermissions:
       enabled: false
     persistence:
