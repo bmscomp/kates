@@ -297,6 +297,13 @@ type GeneratedValues struct {
 	Alerts             GenAlerts              `yaml:"alerts"`
 	NetPolicies        GenNetPolicies         `yaml:"networkPolicies"`
 	Users              GenUsers               `yaml:"users"`
+	Topics             GenFeature             `yaml:"topics"`
+	CruiseControl      GenFeature             `yaml:"cruiseControl"`
+	KafkaExporter      GenFeature             `yaml:"kafkaExporter"`
+	DrainCleaner       GenFeature             `yaml:"drainCleaner"`
+	Rebalance          GenFeature             `yaml:"rebalance"`
+	KafkaConnect       GenFeature             `yaml:"kafkaConnect"`
+	RBAC               GenFeature             `yaml:"rbac"`
 }
 
 type GenStrimziOp struct {
@@ -443,4 +450,9 @@ type GenAclResource struct {
 	Type        string `yaml:"type"`
 	Name        string `yaml:"name,omitempty"`
 	PatternType string `yaml:"patternType,omitempty"`
+}
+
+type GenFeature struct {
+	Enabled bool `yaml:"enabled"`
+	Create  bool `yaml:"create,omitempty"`
 }

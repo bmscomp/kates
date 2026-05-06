@@ -329,6 +329,13 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		PodMonitors: g.buildPodMonitors(),
 		Alerts:      g.buildAlerts(),
 		NetPolicies: g.buildNetworkPolicies(),
+		Topics:        GenFeature{Enabled: true},
+		CruiseControl: GenFeature{Enabled: true},
+		KafkaExporter: GenFeature{Enabled: true},
+		DrainCleaner:  GenFeature{Enabled: true},
+		Rebalance:     GenFeature{Enabled: true},
+		KafkaConnect:  GenFeature{Enabled: true},
+		RBAC:          GenFeature{Create: true},
 		Users: GenUsers{
 			Enabled: true,
 			Items: []GenUser{
