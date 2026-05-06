@@ -18,6 +18,8 @@ metadata:
   namespace: ${KAFKA_NS}
   labels:
     strimzi.io/cluster: ${CLUSTER_NAME}
+  annotations:
+    kates.io/reconcile-trigger: "$(date +%s)"
 spec:
   authentication:
     type: scram-sha-512
@@ -40,7 +42,7 @@ info "Waiting for Strimzi to generate the secret ${USER_NAME}..."
 # Wait up to 30 seconds for the secret to be created
 for i in {1..15}; do
     if kubectl get secret "${USER_NAME}" -n "${KAFKA_NS}" &>/dev/null; then
-        success "KafkaUser secret generated successfully!"
+        info "KafkaUser secret generated successfully!"
         exit 0
     fi
     sleep 2
