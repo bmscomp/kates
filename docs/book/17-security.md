@@ -120,6 +120,53 @@ spec:
         host: "*"
 ```
 
+### Granting Full Cluster Rights (Super-User)
+
+If you need to create a service account (like an administrator or automated testing tool) that has **full rights** across the entire Kafka cluster, you must explicitly grant it `All` operations on the `cluster`, `topic`, and `group` resources. 
+
+Create a file named `kafka-admin-user.yaml` with the following content:
+
+```yaml
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: admin-user
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: cluster
+          name: "kafka-cluster"
+          patternType: literal
+        operations: ["All"]
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: ["All"]
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: ["All"]
+```
+
+Apply this file to your cluster:
+```bash
+kubectl apply -f kafka-admin-user.yaml
+```
+
+Once the Strimzi Operator processes the resource, it will automatically generate a Kubernetes Secret in the `kafka` namespace with the credentials. You can retrieve the generated SCRAM password using:
+```bash
+kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -d
+```
+
 ## Certificate Management
 
 Strimzi manages two independent CA hierarchies:
