@@ -288,6 +288,7 @@ kates-redeploy:
 
 kates-secret:
 	@echo "🔐 Setting up Kafka SASL credentials in kates namespace..."
+	@./scripts/ensure-kafka-user.sh || true
 	@if kubectl get secret kates-backend -n kafka >/dev/null 2>&1; then \
 		echo "Copying from kafka namespace..."; \
 		kubectl get secret kates-backend -n kafka -o json \

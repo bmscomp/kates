@@ -18,6 +18,9 @@ ensure_namespace "${NAMESPACE}"
 info "Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
 
+# Ensure KafkaUser exists before attempting to copy secret
+"${SCRIPT_DIR}/ensure-kafka-user.sh" || warn "Could not ensure KafkaUser — copying secret may fail"
+
 # Copy Kafka SASL credentials from kafka namespace
 if kubectl get secret kates-backend -n kafka &>/dev/null; then
     info "Copying Kafka SASL credentials to ${NAMESPACE}..."
