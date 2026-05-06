@@ -296,6 +296,7 @@ type GeneratedValues struct {
 	PodMonitors        GenPodMonitors         `yaml:"podMonitors"`
 	Alerts             GenAlerts              `yaml:"alerts"`
 	NetPolicies        GenNetPolicies         `yaml:"networkPolicies"`
+	Users              GenUsers               `yaml:"users"`
 }
 
 type GenStrimziOp struct {
@@ -411,4 +412,18 @@ type GenNetPolicies struct {
 	DefaultSelector  map[string]string `yaml:"defaultDenySelector,omitempty"`
 	AllowDNS         bool              `yaml:"allowDNS"`
 	AllowDNSSelector map[string]string `yaml:"allowDNSSelector,omitempty"`
+}
+
+type GenUsers struct {
+	Enabled bool      `yaml:"enabled"`
+	Items   []GenUser `yaml:"items"`
+}
+
+type GenUser struct {
+	Name           string      `yaml:"name"`
+	Authentication GenUserAuth `yaml:"authentication"`
+}
+
+type GenUserAuth struct {
+	Type string `yaml:"type"`
 }

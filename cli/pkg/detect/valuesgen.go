@@ -329,6 +329,23 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		PodMonitors: g.buildPodMonitors(),
 		Alerts:      g.buildAlerts(),
 		NetPolicies: g.buildNetworkPolicies(),
+		Users: GenUsers{
+			Enabled: true,
+			Items: []GenUser{
+				{
+					Name: "kates-backend",
+					Authentication: GenUserAuth{
+						Type: "scram-sha-512",
+					},
+				},
+				{
+					Name: "kafka-ui",
+					Authentication: GenUserAuth{
+						Type: "scram-sha-512",
+					},
+				},
+			},
+		},
 	}
 }
 
