@@ -308,6 +308,7 @@ type GenCRDUpgrade struct {
 type GenControllers struct {
 	Replicas    int                    `yaml:"replicas"`
 	Storage     GenStorage             `yaml:"storage"`
+	Resources   GenResources           `yaml:"resources"`
 	TopologyTSC GenTopologyConstraints `yaml:"topologySpreadConstraints"`
 	AntiAffinity GenAntiAffinity       `yaml:"podAntiAffinity"`
 }
@@ -333,6 +334,7 @@ type GenBrokerDefaults struct {
 
 type GenResources struct {
 	Requests GenResourceValues `yaml:"requests"`
+	Limits   GenResourceValues `yaml:"limits"`
 }
 
 type GenResourceValues struct {

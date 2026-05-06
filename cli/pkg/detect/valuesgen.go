@@ -295,11 +295,25 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				Enabled:     zoneScheduling,
 				TopologyKey: topologyKey,
 			},
+			Resources: GenResources{
+				Requests: GenResourceValues{
+					Memory: formatMem(cb.ControllerMem),
+					CPU:    fmt.Sprintf("%dm", cb.ControllerCPU),
+				},
+				Limits: GenResourceValues{
+					Memory: formatMem(cb.ControllerMem),
+					CPU:    fmt.Sprintf("%dm", cb.ControllerCPU),
+				},
+			},
 		},
 		BrokerPools: g.buildBrokerPools(),
 		BrokerDefaults: GenBrokerDefaults{
 			Resources: GenResources{
 				Requests: GenResourceValues{
+					Memory: formatMem(cb.BrokerMem),
+					CPU:    fmt.Sprintf("%dm", cb.BrokerCPU),
+				},
+				Limits: GenResourceValues{
 					Memory: formatMem(cb.BrokerMem),
 					CPU:    fmt.Sprintf("%dm", cb.BrokerCPU),
 				},
