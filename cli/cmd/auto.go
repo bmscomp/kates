@@ -97,6 +97,15 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	f.Close()
 	output.Success(fmt.Sprintf("Configuration generated: %s", valuesPath))
 
+	// Check if controller SC is missing (all SCs zone-specific, no default)
+	genVals := capGen.Generate()
+	if genVals.Controllers.Storage.Class == "" {
+		output.Warn("⚠ No cross-zone StorageClass found for controllers!")
+		output.Warn("  All detected StorageClasses are zone-specific.")
+		output.Warn("  Controllers need a StorageClass that provisions PVs in any zone.")
+		output.Warn("  → Create a default StorageClass or pass --values with controllers.storage.class set.")
+	}
+
 	// 3. Helm Build Dependencies Phase
 	output.Header("Helm Deployment")
 	if _, err := os.Stat(filepath.Join(autoChartDir, "Chart.yaml")); os.IsNotExist(err) {

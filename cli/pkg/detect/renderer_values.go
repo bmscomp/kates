@@ -80,6 +80,14 @@ func RenderValuesWithReserve(report *DetectReport, clusterName string, reserve f
 		report.Network.CNI, report.Admission.Kyverno.Installed,
 	)
 
+	// Warn if no cross-zone SC was found for controllers
+	if vals.Controllers.Storage.Class == "" {
+		header += "# ⚠ WARNING: No cross-zone StorageClass found for controllers!\n"
+		header += "#   All StorageClasses are zone-specific. Controllers spread across zones\n"
+		header += "#   need a StorageClass that can provision PVs in any zone.\n"
+		header += "#   Create a default StorageClass or set controllers.storage.class manually.\n#\n"
+	}
+
 	if _, err := fmt.Fprint(w, header); err != nil {
 		return err
 	}
