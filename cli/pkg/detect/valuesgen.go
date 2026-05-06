@@ -409,44 +409,52 @@ func (g *ValuesGenerator) buildBrokerPools() []GenBrokerPool {
 // ── Controller Storage ──────────────────────────────────────────────────────
 
 // buildControllerStorage creates storage config for controllers.
-// When multiple zones have dedicated storage classes, it generates per-controller
-// overrides so each controller ID maps to its zone's storage class. This prevents
-// PV node affinity deadlocks when topology spread distributes controllers across zones.
+// Controllers are spread across zones via topology constraints, so the storage
+// class must NOT be zone-pinned. This function:
+//  1. Prefers the cluster default SC (usually cross-zone with WaitForFirstConsumer)
+//  2. Falls back to any SC whose name does NOT match a zone name
+//  3. If ALL SCs are zone-specific, omits the class entirely so the cluster
+//     default provisioner handles zone-local provisioning automatically
 func (g *ValuesGenerator) buildControllerStorage(cb CapacityBudget) GenStorage {
-	zones := g.Report.Zones
-	defaultSC := g.selectDefaultSC()
-
 	storage := GenStorage{
 		Size:  cb.ControllerStorage,
-		Class: defaultSC,
+		Class: g.selectControllerSC(),
+	}
+	return storage
+}
+
+// selectControllerSC picks a storage class suitable for cross-zone controllers.
+func (g *ValuesGenerator) selectControllerSC() string {
+	zones := g.Report.Zones
+	zoneNames := make(map[string]bool, len(zones))
+	for _, z := range zones {
+		zoneNames[strings.ToLower(z.Name)] = true
 	}
 
-	// If we have ≥3 zones, assign each controller ID to a zone-specific SC
-	if len(zones) >= 3 {
-		// Controller node IDs start at the number of broker nodes
-		// For a 3-zone cluster with 1 broker per zone: IDs 0,1,2 are brokers → controllers start at 3
-		brokerCount := 0
-		for _, z := range zones {
-			brokerCount += cb.BrokerReplicas
-			_ = z // count per zone
+	// 1. Prefer the cluster-marked default SC
+	for _, sc := range g.Report.Storage {
+		if sc.IsDefault {
+			return sc.Name
 		}
+	}
 
-		var overrides []GenStorageOverride
-		for i := 0; i < cb.ControllerReplicas && i < len(zones); i++ {
-			zoneSC := g.matchStorageClass(zones[i].Name)
-			if zoneSC != defaultSC {
-				overrides = append(overrides, GenStorageOverride{
-					Broker: brokerCount + i,
-					Class:  zoneSC,
-				})
+	// 2. Pick the first SC whose name does NOT contain any zone name
+	for _, sc := range g.Report.Storage {
+		scLower := strings.ToLower(sc.Name)
+		isZoneSpecific := false
+		for zn := range zoneNames {
+			if strings.Contains(scLower, zn) {
+				isZoneSpecific = true
+				break
 			}
 		}
-		if len(overrides) > 0 {
-			storage.Overrides = overrides
+		if !isZoneSpecific {
+			return sc.Name
 		}
 	}
 
-	return storage
+	// 3. All SCs are zone-specific — omit class, let the cluster default handle it
+	return ""
 }
 
 // ── StorageClass Matching ────────────────────────────────────────────────────
