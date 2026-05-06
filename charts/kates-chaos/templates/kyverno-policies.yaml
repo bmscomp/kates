@@ -1,0 +1,136 @@
+{{- if .Values.kyvernoPolicy.enabled }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: chaos-pod-security-standards
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Chaos Pod Security Standards
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Enforces and auto-patches restricted pod security standards for all
+      LitmusChaos and MongoDB pods: non-root containers, dropped capabilities,
+      seccomp profiles, and no privilege escalation.
+spec:
+  validationFailureAction: {{ .Values.kyvernoPolicy.action | default "Audit" }}
+  background: true
+  rules:
+    {{- if .Values.kyvernoPolicy.mutate }}
+    # ── Mutate: auto-inject pod-level security context ────────────────────────
+    - name: mutate-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(runAsNonRoot): true
+              +(runAsUser): 1001
+              +(fsGroup): 1001
+
+    # ── Mutate: auto-inject container-level security context ──────────────────
+    - name: mutate-drop-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      {{- if .Values.kyvernoPolicy.excludeContainers }}
+      exclude:
+        any:
+          {{- range .Values.kyvernoPolicy.excludeContainers }}
+          - resources:
+              kinds: ["Pod"]
+            preconditions:
+              any:
+                - key: "{{`{{ request.object.spec.containers[].name }}`}}"
+                  operator: Equals
+                  value: {{ . | quote }}
+          {{- end }}
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(capabilities):
+                    +(drop):
+                      - "ALL"
+
+    - name: mutate-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                +(type): RuntimeDefault
+
+    - name: mutate-disable-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(allowPrivilegeEscalation): false
+    {{- end }}
+
+    # ── Validate: enforce standards ───────────────────────────────────────────
+    - name: validate-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Chaos pods must run as non-root (spec.securityContext.runAsNonRoot: true)."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+
+    - name: validate-drop-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Containers must drop ALL capabilities."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop: ["ALL"]
+
+    - name: validate-no-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Containers must not allow privilege escalation."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+{{- end }}

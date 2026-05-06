@@ -116,6 +116,11 @@ monitoring:
 pdb:
   enabled: true
 
+kyvernoPolicy:
+  enabled: true
+  action: Audit
+  mutate: true
+
 networkPolicies:
   enabled: true
 

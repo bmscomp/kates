@@ -89,6 +89,13 @@ engines: {}
 pdb:
   enabled: false
 
+# Kyverno pod security policies (requires Kyverno controller in cluster)
+kyvernoPolicy:
+  enabled: false          # opt-in by default
+  action: Audit           # Audit | Enforce
+  mutate: true            # auto-inject security contexts on pod admission
+  excludeContainers: []   # container names to skip during mutation
+
 # Network policies
 networkPolicies:
   enabled: false
