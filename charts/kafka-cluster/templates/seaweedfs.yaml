@@ -5,7 +5,7 @@
     - Velero backup storage location (cluster topology backup, Layer 2)
 
   Exposes an S3-compatible endpoint at:
-    http://{{ include "kafka-cluster.clusterName" . }}-seaweedfs-filer.{{ include "kafka-cluster.namespace" . }}.svc:8333
+    http://{{ include "kafka-cluster.clusterName" . }}-seaweedfs-filer.{{ include "kafka-cluster.namespace" . }}.svc.{{ include "kafka-cluster.clusterDomain" . }}:8333
 
   The credentials Secret below is referenced by:
     1. tieredStorage.credentials.existingSecret  (tiered-storage.yaml)

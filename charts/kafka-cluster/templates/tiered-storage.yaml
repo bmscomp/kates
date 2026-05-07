@@ -29,7 +29,7 @@ data:
     remote.log.storage.manager.impl.prefix=rsm.config.
     rsm.config.s3.bucket.name={{ .Values.tieredStorage.s3.bucketName }}
     rsm.config.s3.region={{ .Values.tieredStorage.s3.region }}
-    rsm.config.s3.endpoint.url={{ .Values.tieredStorage.s3.endpointUrl }}
+    rsm.config.s3.endpoint.url={{ .Values.tieredStorage.s3.endpointUrl | default (printf "http://%s:%s" (include "kafka-cluster.serviceFQDN" (dict "service" (printf "%s-seaweedfs-filer" (include "kafka-cluster.clusterName" .)) "namespace" (include "kafka-cluster.namespace" .) "root" .)) (toString (.Values.seaweedfs.filer.s3.port | default 8333))) }}
     rsm.config.s3.path.style.access.enabled={{ .Values.tieredStorage.s3.pathStyleAccessEnabled }}
 
     remote.log.metadata.manager.class.name=org.apache.kafka.server.log.remote.metadata.storage.TopicBasedRemoteLogMetadataManager

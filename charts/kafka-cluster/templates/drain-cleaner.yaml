@@ -131,7 +131,7 @@ metadata:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     app: strimzi-drain-cleaner
 webhooks:
-  - name: strimzi-drain-cleaner.{{ $namespace }}.svc.cluster.local
+  - name: strimzi-drain-cleaner.{{ $namespace }}.svc.{{ include "kafka-cluster.clusterDomain" . }}
     rules:
       - apiGroups: [""]
         apiVersions: ["v1"]

@@ -8,8 +8,6 @@ strimziVersion: "1.0.0"
 global:
   imageRegistry: "quay.io"
   imageRepository: "strimzi"
-  # Kubernetes cluster DNS domain — override for custom CoreDNS configurations
-  clusterDomain: "cluster.local"
 
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
@@ -428,10 +426,9 @@ tieredStorage:
   s3:
     bucketName: kafka-tiered-storage
     region: us-east-1
-    # Default endpoint targets SeaweedFS filer S3 gateway.
-    # Change to your cluster's SeaweedFS service address or any S3-compatible URL.
-    # DEPRECATED: do NOT point this at minio.velero.svc — MinIO is removed.
-    endpointUrl: "http://kafka-cluster-seaweedfs-filer.kafka.svc:8333"
+    # Default endpoint auto-resolves to SeaweedFS filer using global.clusterDomain.
+    # Override with a full URL to point at an external S3-compatible store.
+    endpointUrl: ""
     pathStyleAccessEnabled: true
   metadata:
     replicationFactor: 3
