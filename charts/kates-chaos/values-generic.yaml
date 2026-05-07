@@ -1,101 +1,14 @@
 # Kates Chaos — Generic Kubernetes Cluster Overlay
 # Cloud-native defaults for any standard Kubernetes environment
 
-litmus:
+litmus-core:
   enabled: true
-  image:
-    imageRegistryName: "docker.io/litmuschaos"
-  adminConfig:
-    ADMIN_USERNAME: admin
-    ADMIN_PASSWORD: "litmus-admin"
-    DBUSER: admin
-    DBPASSWORD: "litmus-chaos-secret"
-    JWT_SECRET: "litmus-chaos-jwt-12345"
-  portal:
-    frontend:
-      replicas: 2
-      image:
-        pullPolicy: Always
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "200m"
-        limits:
-          memory: "512Mi"
-          cpu: "500m"
-      service:
-        type: ClusterIP
-        port: 9091
-    server:
-      replicas: 2
-      graphqlServer:
-        image:
-          pullPolicy: Always
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "300m"
-          limits:
-            memory: "1Gi"
-            cpu: "1"
-      authServer:
-        replicas: 2
-        image:
-          pullPolicy: Always
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "200m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-  mongodb:
-    enabled: true
+  operator:
     image:
-      registry: docker.io
-      repository: bitnami/mongodb
       pullPolicy: Always
-    architecture: replicaset
-    replicaCount: 3
-    arbiter:
-      enabled: true
-      podSecurityContext:
-        enabled: true
-        fsGroup: 1001
-      containerSecurityContext:
-        enabled: true
-        runAsUser: 1001
-        runAsNonRoot: true
-    auth:
-      enabled: true
-      rootPassword: "litmus-chaos-secret"
-      replicaSetKey: "litmus-chaos-replicaset-key-1234567890"
-    podSecurityContext:
-      enabled: true
-      fsGroup: 1001
-    containerSecurityContext:
-      enabled: true
-      runAsUser: 1001
-      runAsNonRoot: true
-    volumePermissions:
-      enabled: false
-    persistence:
-      enabled: true
-      size: 10Gi
-      storageClass: ""
-    resources:
-      requests:
-        cpu: 500m
-        memory: 1Gi
-      limits:
-        cpu: 2
-        memory: 2Gi
-
-auth:
-  adminPassword: "litmus-admin"
-  dbRootPassword: "litmus-chaos-secret"
-  jwtSecret: "litmus-chaos-jwt-12345"
-  existingSecret: ""
+  runner:
+    image:
+      pullPolicy: Always
 
 rbac:
   enabled: true

@@ -10,7 +10,7 @@ keywords:
   - kates
   - litmus
 dependencies:
-  - name: litmus
-    version: "3.28.0"
-    repository: "https://litmuschaos.github.io/litmus-helm/"
-    condition: litmus.enabled
+  - name: litmus-core
+    version: 3.28.1
+    repository: https://litmuschaos.github.io/litmus-helm/
+    condition: litmus-core.enabled

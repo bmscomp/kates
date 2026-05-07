@@ -6,44 +6,17 @@
 global:
   imagePullPolicy: IfNotPresent
 
-# Upstream Litmus chart
-litmus:
+# Upstream Litmus execution plane (Chaos Operator + CRDs)
+litmus-core:
   enabled: true
-  adminConfig:
-    ADMIN_USERNAME: admin
-    ADMIN_PASSWORD: ""
-    DBUSER: admin
-    DBPASSWORD: ""
-    JWT_SECRET: ""
-  existingSecret: ""
-  mongodb:
-    enabled: true
+  operator:
     image:
-      registry: docker.io
-      repository: bitnamilegacy/mongodb
-      tag: "8.0.13-debian-12-r0"
-    architecture: replicaset
-    replicaCount: 1
-    arbiter:
-      enabled: false
-    auth:
-      enabled: true
-      rootPassword: ""
-    volumePermissions:
-      enabled: false
-    persistence:
-      enabled: true
-      size: 5Gi
-      storageClass: ""
-
-# Authentication — managed by kates-chaos
-# Credentials are auto-generated if left empty and stored in a persistent Secret
-# To use a pre-existing Secret, set auth.existingSecret to its name
-auth:
-  adminPassword: ""
-  dbRootPassword: ""
-  jwtSecret: ""
-  existingSecret: ""
+      repository: litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator
+      tag: 3.28.0
+  runner:
+    image:
+      repository: litmuschaos.docker.scarf.sh/litmuschaos/chaos-runner
+      tag: 3.28.0
 
 # RBAC for chaos experiments in target namespaces
 rbac:
@@ -104,20 +77,4 @@ networkPolicies:
 gameday:
   enabled: false
 
-# External MongoDB for arm64 environments (Apple Silicon / Graviton)
-# Enable this and disable litmus.mongodb when bitnamilegacy/mongodb (amd64-only)
-# is not available for your architecture.
-externalMongodb:
-  enabled: false
-  serviceName: chaos-mongodb-external
-  replicas: 3
-  image:
-    repository: docker.io/library/mongo
-    tag: "6.0"
-    pullPolicy: IfNotPresent
-  auth:
-    rootUser: root
-    rootPassword: "1234"
-  resources: {}
-  persistence:
-    size: 2Gi
+

@@ -1,97 +1,14 @@
 # Kates Chaos — Kind Cluster Overlay
 # Optimized for single-node Kind with pre-loaded images
 
-litmus:
+litmus-core:
   enabled: true
-  adminConfig:
-    ADMIN_USERNAME: admin
-    ADMIN_PASSWORD: litmus
-    DBUSER: admin
-    DBPASSWORD: "1234"
-    # 3-node RS connection string — lists all members so the driver can find
-    # the primary even during an election.
-    DB_SERVER: "mongodb://admin:1234@chaos-mongodb-external-0.chaos-mongodb-external.litmus.svc.cluster.local:27017,chaos-mongodb-external-1.chaos-mongodb-external.litmus.svc.cluster.local:27017,chaos-mongodb-external-2.chaos-mongodb-external.litmus.svc.cluster.local:27017/?authSource=admin&replicaSet=rs0"
-    JWT_SECRET: ""
-  portal:
-    frontend:
-      replicas: 1
-      image:
-        pullPolicy: IfNotPresent
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "250m"
-        limits:
-          memory: "512Mi"
-          cpu: "500m"
-      service:
-        type: NodePort
-        port: 9091
-        nodePort: 30091
-    server:
-      # FIX #3: nodeSelector removed — pinning to 'sigma' causes outage if that
-      # node is drained or evicted during chaos experiments.
-      replicas: 1
-      waitForMongodb:
-        image:
-          # FIX: use upstream default tag '6' — matches the scarf image that is
-          # pre-loaded in Kind. '6.0' caused Init:ImagePullBackOff because the
-          # scarf entry was keyed as mongo:6, not mongo:6.0.
-          tag: "6"
-          pullPolicy: IfNotPresent
-
-      graphqlServer:
-        image:
-          pullPolicy: IfNotPresent
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "1Gi"
-            cpu: "1000m"
-      authServer:
-        # FIX #3: nodeSelector removed here too
-        replicas: 1
-        waitForMongodb:
-          image:
-            # FIX: same as above — use tag '6' to match pre-loaded scarf image.
-            tag: "6"
-            pullPolicy: IfNotPresent
-
-        image:
-          pullPolicy: IfNotPresent
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "1Gi"
-            cpu: "1000m"
-  mongodb:
-    enabled: false
-
-# External MongoDB using official multi-arch image (arm64 + amd64)
-externalMongodb:
-  enabled: true
-  serviceName: chaos-mongodb-external
-  replicas: 3
-  image:
-    repository: docker.io/library/mongo
-    tag: "6.0"
-    pullPolicy: IfNotPresent
-  auth:
-    rootUser: admin
-    rootPassword: "1234"
-  resources:
-    requests:
-      cpu: 300m
-      memory: 512Mi
-    limits:
-      cpu: 1000m
-      memory: 1Gi
-  persistence:
-    size: 2Gi
+  operator:
+    image:
+      pullPolicy: IfNotPresent
+  runner:
+    image:
+      pullPolicy: IfNotPresent
 
 rbac:
   enabled: true
