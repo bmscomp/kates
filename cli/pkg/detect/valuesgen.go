@@ -270,6 +270,9 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 
 	return &GeneratedValues{
 		ClusterName: g.ClusterName,
+		Global: GenGlobal{
+			ClusterDomain: g.Report.Network.ClusterDomain,
+		},
 		StrimziOp:   g.buildStrimziOp(),
 		CRDUpgrade:  g.buildCRDUpgrade(),
 		ControllerPools: g.buildControllerPools(),

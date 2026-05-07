@@ -90,6 +90,7 @@ type MonitoringInfo struct {
 type NetworkInfo struct {
 	CNI            string
 	CoreDNSRunning int
+	ClusterDomain  string
 	PodCIDR        string
 	ServiceCIDR    string
 }
@@ -285,6 +286,7 @@ type DetectReport struct {
 
 type GeneratedValues struct {
 	ClusterName    string                `yaml:"clusterName"`
+	Global         GenGlobal             `yaml:"global"`
 	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
 	CRDUpgrade     GenCRDUpgrade         `yaml:"crdUpgrade"`
 	ControllerPools    []GenControllerPool    `yaml:"controllerPools"`
@@ -305,6 +307,10 @@ type GeneratedValues struct {
 	KafkaConnect       GenFeature             `yaml:"kafkaConnect"`
 	RBAC               GenFeature             `yaml:"rbac"`
 	EntityOperator     map[string]interface{} `yaml:"entityOperator"`
+}
+
+type GenGlobal struct {
+	ClusterDomain string `yaml:"clusterDomain"`
 }
 
 type GenStrimziOp struct {

@@ -535,6 +535,27 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		info.PodCIDR = "unknown"
 	}
 
+	// Detect cluster DNS domain from CoreDNS Corefile
+	corefileOut, _ := c.exec.Exec("kubectl", "get", "configmap", "coredns", "-n", "kube-system", "-o", "jsonpath={.data.Corefile}")
+	info.ClusterDomain = "cluster.local"
+	if corefileOut != "" {
+		// Look for "kubernetes <domain>" directive in Corefile
+		for _, line := range strings.Split(corefileOut, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "kubernetes ") {
+				parts := strings.Fields(trimmed)
+				if len(parts) >= 2 {
+					domain := parts[1]
+					// Filter out placeholder values
+					if domain != "{" && !strings.HasPrefix(domain, "{") && domain != "" {
+						info.ClusterDomain = domain
+					}
+				}
+				break
+			}
+		}
+	}
+
 	// For bash pipe commands, we use sh -c 
 	svcOut, _ := c.exec.Exec("sh", "-c", "kubectl get pod -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].spec.containers[0].command}' 2>/dev/null | grep -oE 'service-cluster-ip-range=[^\\\",]+' | cut -d= -f2 | head -1")
 	if svcOut == "" {
