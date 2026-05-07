@@ -78,3 +78,37 @@ Override via: images.kubectl
 {{- define "kafka-cluster.kubectlImage" -}}
 {{- .Values.images.kubectl -}}
 {{- end }}
+
+{{/*
+Cluster DNS domain (e.g. cluster.local).
+*/}}
+{{- define "kafka-cluster.clusterDomain" -}}
+{{- .Values.global.clusterDomain | default "cluster.local" -}}
+{{- end }}
+
+{{/*
+Build a fully qualified service name:
+  <service>.<namespace>.svc.<clusterDomain>
+Usage: {{ include "kafka-cluster.serviceFQDN" (dict "service" "my-svc" "namespace" .Release.Namespace "root" .) }}
+*/}}
+{{- define "kafka-cluster.serviceFQDN" -}}
+{{- printf "%s.%s.svc.%s" .service .namespace (include "kafka-cluster.clusterDomain" .root) -}}
+{{- end }}
+
+{{/*
+Kafka bootstrap servers FQDN (SASL_PLAINTEXT port 9092).
+Usage: {{ include "kafka-cluster.bootstrapServers" . }}
+*/}}
+{{- define "kafka-cluster.bootstrapServers" -}}
+{{- $svc := printf "%s-kafka-bootstrap" (include "kafka-cluster.clusterName" .) -}}
+{{- printf "%s.%s.svc.%s:9092" $svc (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) -}}
+{{- end }}
+
+{{/*
+Kafka bootstrap servers FQDN (TLS port 9093).
+Usage: {{ include "kafka-cluster.bootstrapServersTLS" . }}
+*/}}
+{{- define "kafka-cluster.bootstrapServersTLS" -}}
+{{- $svc := printf "%s-kafka-bootstrap" (include "kafka-cluster.clusterName" .) -}}
+{{- printf "%s.%s.svc.%s:9093" $svc (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) -}}
+{{- end }}

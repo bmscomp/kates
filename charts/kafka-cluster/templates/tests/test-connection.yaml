@@ -21,7 +21,7 @@ spec:
         - |
           set -e
           echo "=== Tier 1: Bootstrap Connectivity ==="
-          BOOTSTRAP="{{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap.{{ include "kafka-cluster.namespace" . }}.svc:9092"
+          BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
           echo "Testing TCP connection to ${BOOTSTRAP}..."
           timeout 10 sh -c "echo > /dev/tcp/$(echo $BOOTSTRAP | cut -d: -f1)/$(echo $BOOTSTRAP | cut -d: -f2)" 2>/dev/null
           echo "✓ Bootstrap connectivity OK"
@@ -75,7 +75,7 @@ spec:
       args:
         - |
           set -e
-          BOOTSTRAP="{{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:9092"
+          BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
           TOPIC="__helm-test-$(date +%s)"
           MSG="helm-test-roundtrip-$(date +%s)"
 

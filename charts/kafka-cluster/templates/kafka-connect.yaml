@@ -12,7 +12,7 @@ metadata:
 spec:
   version: {{ .Values.kafkaConnect.version | default .Values.kafkaVersion }}
   replicas: {{ .Values.kafkaConnect.replicas }}
-  bootstrapServers: {{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap:{{ if .Values.kafkaConnect.tls.enabled }}9093{{ else }}9092{{ end }}
+  bootstrapServers: {{ if .Values.kafkaConnect.tls.enabled }}{{ include "kafka-cluster.bootstrapServersTLS" . }}{{ else }}{{ include "kafka-cluster.bootstrapServers" . }}{{ end }}
   authentication:
     type: scram-sha-512
     username: kates-connect

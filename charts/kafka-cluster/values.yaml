@@ -8,6 +8,8 @@ strimziVersion: "1.0.0"
 global:
   imageRegistry: "quay.io"
   imageRepository: "strimzi"
+  # Kubernetes cluster DNS domain — override for custom CoreDNS configurations
+  clusterDomain: "cluster.local"
 
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
