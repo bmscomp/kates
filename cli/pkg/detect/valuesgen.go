@@ -270,9 +270,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 
 	return &GeneratedValues{
 		ClusterName: g.ClusterName,
-		Global: GenGlobal{
-			ClusterDomain: g.Report.Network.ClusterDomain,
-		},
+
 		StrimziOp:   g.buildStrimziOp(),
 		CRDUpgrade:  g.buildCRDUpgrade(),
 		ControllerPools: g.buildControllerPools(),
@@ -325,8 +323,8 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		Alerts:      g.buildAlerts(),
 		NetPolicies: g.buildNetworkPolicies(),
 		Topics:        GenFeature{Enabled: true},
-		CruiseControl: GenFeature{Enabled: true},
-		KafkaExporter: GenFeature{Enabled: true},
+		CruiseControl: GenFeature{Enabled: false},
+		KafkaExporter: GenFeature{Enabled: false},
 		DrainCleaner:  GenFeature{Enabled: false},
 		Rebalance:     GenFeature{Enabled: true},
 		KafkaConnect:  GenFeature{Enabled: false},
@@ -661,11 +659,11 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 // ── Monitoring ───────────────────────────────────────────────────────────────
 
 func (g *ValuesGenerator) buildDashboards() GenDashboards {
-	return GenDashboards{Enabled: g.Report.Monitoring.GrafanaDeployed, Namespace: "monitoring"}
+	return GenDashboards{Enabled: false, Namespace: "monitoring"}
 }
 
 func (g *ValuesGenerator) buildPodMonitors() GenPodMonitors {
-	pm := GenPodMonitors{Enabled: g.Report.Monitoring.PodMonitorCRD}
+	pm := GenPodMonitors{Enabled: false}
 	if pm.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
 		pm.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
 	}
@@ -673,7 +671,7 @@ func (g *ValuesGenerator) buildPodMonitors() GenPodMonitors {
 }
 
 func (g *ValuesGenerator) buildAlerts() GenAlerts {
-	a := GenAlerts{Enabled: g.Report.Monitoring.PodMonitorCRD && g.Report.Monitoring.PrometheusRuleCRD}
+	a := GenAlerts{Enabled: false}
 	if a.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
 		a.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
 	}
