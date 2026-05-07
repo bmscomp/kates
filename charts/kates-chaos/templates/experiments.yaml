@@ -1,5 +1,34 @@
 {{- if .Values.experiments.enabled }}
 {{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-experiments-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  experiments.yaml: |
+    {{- range .Values.experiments.definitions }}
+    ---
+    apiVersion: litmuschaos.io/v1alpha1
+    kind: ChaosExperiment
+    metadata:
+      name: {{ .name }}
+      namespace: {{ $kafkaNamespace }}
+    spec:
+      definition:
+        scope: {{ .scope | default "Namespaced" }}
+        image: {{ .image | default "litmuschaos/go-runner:3.28.0" }}
+        imagePullPolicy: IfNotPresent
+        args: ["-name", "{{ .name }}"]
+        command: ["/bin/bash"]
+    {{- end }}
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,56 +50,45 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
-      containers:
-      # FIX #9: wait for the Litmus server GraphQL endpoint before applying CRDs.
-      # Without this, the post-install hook races the Litmus portal startup and
-      # fails when pods are still in Init state.
+      volumes:
+        - name: experiments-data
+          configMap:
+            name: {{ include "kates-chaos.fullname" . }}-experiments-data
       initContainers:
-        - name: wait-for-litmus
+        - name: wait-for-operator
           image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
           imagePullPolicy: IfNotPresent
           command:
-            - /bin/sh
-            - -c
-            - |
-              echo "Waiting for Litmus chaos-operator to be ready..."
-              kubectl rollout status deployment -n {{ .Release.Namespace }} \
-                -l app.kubernetes.io/component=chaos-operator --timeout=300s || true
-              echo "Waiting for ChaosExperiment CRD to be established..."
-              until kubectl get crd chaosexperiments.litmuschaos.io > /dev/null 2>&1; do
-                echo "  CRD not ready yet, retrying in 5s..."
-                sleep 5
-              done
-              echo "Litmus is ready — proceeding with experiment installation."
+            - "kubectl"
+            - "wait"
+            - "--for=condition=Available"
+            - "deployment"
+            - "-l"
+            - "app.kubernetes.io/name=litmus"
+            - "-n"
+            - "{{ .Release.Namespace }}"
+            - "--timeout=300s"
+        - name: wait-for-crd
+          image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - "kubectl"
+            - "wait"
+            - "--for=condition=Established"
+            - "crd/chaosexperiments.litmuschaos.io"
+            - "--timeout=300s"
       containers:
         - name: install
           image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
           imagePullPolicy: IfNotPresent
-          command: ["/bin/sh"]
-          args:
-            - -c
-            - |
-              echo "Installing ChaosExperiment definitions in {{ $kafkaNamespace }}..."
-              {{- range .Values.experiments.definitions }}
-              kubectl apply -f - <<'EOF'
-              apiVersion: litmuschaos.io/v1alpha1
-              kind: ChaosExperiment
-              metadata:
-                name: {{ .name }}
-                namespace: {{ $kafkaNamespace }}
-              spec:
-                definition:
-                  scope: {{ .scope | default "Namespaced" }}
-                  # pin to versioned tag matching chart appVersion (3.28.0)
-                  # ':latest' is not pre-loaded in Kind offline mode.
-                  image: {{ .image | default "litmuschaos/go-runner:3.28.0" }}
-                  imagePullPolicy: IfNotPresent
-                  args: ["-name", "{{ .name }}"]
-                  command: ["/bin/bash"]
-              EOF
-              echo "  ✓ {{ .name }}"
-              {{- end }}
-              echo "Done — {{ len $.Values.experiments.definitions }} experiments installed"
+          command:
+            - "kubectl"
+            - "apply"
+            - "-f"
+            - "/experiments/experiments.yaml"
+          volumeMounts:
+            - name: experiments-data
+              mountPath: /experiments
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -98,6 +116,12 @@ rules:
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosexperiments"]
     verbs: ["create", "get", "list", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
