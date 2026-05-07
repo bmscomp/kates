@@ -233,8 +233,5 @@ func TestRenderValues_WritesYAML(t *testing.T) {
 	if !strings.Contains(content, "clusterName: krafter") {
 		t.Error("expected clusterName in YAML")
 	}
-	// Check global.clusterDomain is present
-	if !strings.Contains(content, "clusterDomain: cluster.local") {
-		t.Error("expected global.clusterDomain in YAML")
-	}
+
 }

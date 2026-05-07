@@ -286,7 +286,7 @@ type DetectReport struct {
 
 type GeneratedValues struct {
 	ClusterName    string                `yaml:"clusterName"`
-	Global         GenGlobal             `yaml:"global"`
+
 	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
 	CRDUpgrade     GenCRDUpgrade         `yaml:"crdUpgrade"`
 	ControllerPools    []GenControllerPool    `yaml:"controllerPools"`
@@ -310,9 +310,7 @@ type GeneratedValues struct {
 	StrimziSubchart    GenStrimziSubchart     `yaml:"strimzi-kafka-operator"`
 }
 
-type GenGlobal struct {
-	ClusterDomain string `yaml:"clusterDomain"`
-}
+
 
 type GenStrimziOp struct {
 	Enabled bool `yaml:"enabled"`

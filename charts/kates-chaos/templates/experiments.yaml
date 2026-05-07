@@ -28,6 +28,13 @@ data:
         scope: {{ .scope | default "Namespaced" }}
         image: {{ .image | default "litmuschaos/go-runner:3.28.0" }}
         imagePullPolicy: IfNotPresent
+        # NOTE(Backend-Upgrade): The Litmus Chaos Engine orchestrator explicitly validates 
+        # the ChaosExperiment definition and fails with "nil command" if the command field is omitted. 
+        # Additionally, since `litmuschaos/go-runner:3.x` uses a distroless container architecture 
+        # without standard shells like `/bin/bash`, we cannot use standard `/bin/bash -c` wrappers.
+        # Instead, we directly invoke the `experiments` binary at its absolute path `/litmus/experiments`
+        # and pass the experiment name argument to execute the targeted chaos fault natively.
+        command: ["/litmus/experiments"]
         args: ["-name", "{{ .name }}"]
         labels:
           name: {{ .name }}
