@@ -20,7 +20,7 @@ spec:
       serviceAccountName: kates
       containers:
       - name: kates
-        image: kates:latest
+        image: ghcr.io/bmscomp/kates:1.10.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
