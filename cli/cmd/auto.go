@@ -123,6 +123,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		"-f", valuesPath,
 		"--force-conflicts",
 		"--timeout", "10m", "--wait",
+		"--debug",
 	}
 
 	if autoDryRun {
