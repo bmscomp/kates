@@ -64,7 +64,7 @@
     },
     "controllerPools": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "required": ["name", "replicas", "storageSize"],
@@ -104,7 +104,7 @@
     },
     "brokerPools": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "required": ["name", "replicas", "storageSize"],
