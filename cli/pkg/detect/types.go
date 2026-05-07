@@ -307,6 +307,7 @@ type GeneratedValues struct {
 	KafkaConnect       GenFeature             `yaml:"kafkaConnect"`
 	RBAC               GenFeature             `yaml:"rbac"`
 	EntityOperator     map[string]interface{} `yaml:"entityOperator"`
+	StrimziSubchart    GenStrimziSubchart     `yaml:"strimzi-kafka-operator"`
 }
 
 type GenGlobal struct {
@@ -315,6 +316,10 @@ type GenGlobal struct {
 
 type GenStrimziOp struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+type GenStrimziSubchart struct {
+	KubernetesServiceDnsDomain string `yaml:"kubernetesServiceDnsDomain"`
 }
 
 type GenCRDUpgrade struct {

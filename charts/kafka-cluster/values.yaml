@@ -608,6 +608,8 @@ strimzi-kafka-operator:
   replicas: 1
   watchAnyNamespace: true
   defaultImageTag: 1.0.0
+  # Cluster DNS domain — must match global.clusterDomain for correct FQDN resolution
+  kubernetesServiceDnsDomain: cluster.local
   # When global.imageRegistry is set, pass it to the Strimzi subchart
   # defaultImageRegistry: quay.io
   # defaultImageRepository: strimzi
