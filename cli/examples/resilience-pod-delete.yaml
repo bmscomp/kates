@@ -35,7 +35,7 @@ chaosSpec:
   experimentName: broker-graceful-shutdown
   disruptionType: POD_DELETE
   targetNamespace: kafka
-  targetLabel: "strimzi.io/pool-name=brokers-alpha"
+  targetLabel: "strimzi.io/pool-name=brokers-gamma"
   chaosDurationSec: 60
   delayBeforeSec: 0
   gracePeriodSec: 30        # SIGTERM → 30s for controlled shutdown

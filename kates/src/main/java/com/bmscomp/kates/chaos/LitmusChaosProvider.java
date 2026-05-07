@@ -254,6 +254,17 @@ public class LitmusChaosProvider implements ChaosProvider {
 
         if (spec.disruptionType() != null) {
             switch (spec.disruptionType()) {
+                // Strimzi uses StrimziPodSet (a custom CRD controller) instead of StatefulSet.
+                // Litmus go-runner does not recognise StrimziPodSet as a workload type, so
+                // after deleting the target pod it fails during recovery verification with:
+                //   "TARGET_SELECTION_ERROR: no pod found for specified target {kind: strimzipodset}"
+                // Setting FORCE=true performs an immediate delete (skip graceful termination)
+                // and SEQUENCE=serial avoids the parallel-mode workload-based pod status check
+                // that triggers the StrimziPodSet lookup failure.
+                case POD_KILL, POD_DELETE, LEADER_ELECTION, SCALE_DOWN, ROLLING_RESTART -> {
+                    envVars.add(new ChaosEngineSpec.EnvVar("FORCE", "true"));
+                    envVars.add(new ChaosEngineSpec.EnvVar("SEQUENCE", "serial"));
+                }
                 case CPU_STRESS -> envVars.add(new ChaosEngineSpec.EnvVar("CPU_CORES", String.valueOf(spec.cpuCores())));
                 case MEMORY_STRESS -> {
                     envVars.add(new ChaosEngineSpec.EnvVar("MEMORY_CONSUMPTION", String.valueOf(spec.memoryMb())));
