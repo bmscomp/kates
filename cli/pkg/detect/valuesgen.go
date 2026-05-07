@@ -324,9 +324,9 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		Topics:        GenFeature{Enabled: true},
 		CruiseControl: GenFeature{Enabled: true},
 		KafkaExporter: GenFeature{Enabled: true},
-		DrainCleaner:  GenFeature{Enabled: true},
+		DrainCleaner:  GenFeature{Enabled: false},
 		Rebalance:     GenFeature{Enabled: true},
-		KafkaConnect:  GenFeature{Enabled: true},
+		KafkaConnect:  GenFeature{Enabled: false},
 		RBAC:          GenFeature{Create: true},
 		EntityOperator: map[string]interface{}{
 			"topicOperator": map[string]interface{}{
