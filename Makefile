@@ -85,11 +85,13 @@ all: check-prerequisites
 	fi
 	@echo ""
 	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kates already deployed — skipping build"; \
+		echo "✅ Kates already deployed — skipping"; \
 	else \
-		echo "Step 10: Building and deploying Kates..."; \
-		docker build -f kates/Dockerfile -t kates:latest .; \
-		kind load docker-image kates:latest --name panda; \
+		echo "Step 10: Deploying Kates (using released image)..."; \
+		KATES_IMAGE="$${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.10.0}"; \
+		echo "  Pulling $${KATES_IMAGE}..."; \
+		docker pull "$${KATES_IMAGE}" 2>/dev/null || true; \
+		kind load docker-image "$${KATES_IMAGE}" --name panda 2>/dev/null || true; \
 		kubectl apply -f kates/k8s/namespace.yaml; \
 		kubectl apply -f kates/k8s/rbac.yaml; \
 		kubectl apply -f kates/k8s/configmap.yaml; \

@@ -31,15 +31,15 @@ else
     warn "Secret kates-backend not found in kafka namespace — Kafka auth may fail"
 fi
 
-# Kind-specific: ensure image is loaded
+# Kind-specific: ensure released image is available in the cluster
 if [ "${ENV}" = "kind" ]; then
-    KATES_IMAGE="${KATES_IMAGE:-kates:latest}"
-    if docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
-        info "Loading ${KATES_IMAGE} into Kind..."
-        kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
-    else
-        warn "Image ${KATES_IMAGE} not found locally — will use existing image in cluster"
+    KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.10.0}"
+    info "Ensuring ${KATES_IMAGE} is available in Kind..."
+    if ! docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
+        info "Pulling ${KATES_IMAGE} from registry..."
+        docker pull "${KATES_IMAGE}"
     fi
+    kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
 fi
 
 # Build the values file chain based on environment
