@@ -61,8 +61,6 @@ all: check-prerequisites
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
 		echo "Step 8: Deploying LitmusChaos..."; \
-		kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true; \
-		kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true; \
 		helm dependency update charts/kates-chaos; \
 		helm upgrade --install chaos charts/kates-chaos \
 			-n litmus --create-namespace \
@@ -457,10 +455,6 @@ download-charts:
 # Kates Chaos Management (LitmusChaos via kates-chaos chart)
 litmus:
 	@echo "⚡ Deploying Kates Chaos (LitmusChaos)..."
-	@echo "Applying Litmus CRDs..."
-	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
-	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
-	@kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
 		-n litmus --create-namespace \
@@ -501,10 +495,6 @@ chaos-status:
 
 litmus-generic:
 	@echo "⚡ Deploying Kates Chaos (generic Kubernetes)..."
-	@echo "Applying Litmus CRDs..."
-	@kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml 2>/dev/null || true
-	@kubectl apply -f config/litmus/kafka-litmus-chaos-enable.yml 2>/dev/null || true
-	@kubectl wait --for=condition=Established crd/chaosengines.litmuschaos.io --timeout=60s 2>/dev/null || true
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
 		-n litmus --create-namespace \
