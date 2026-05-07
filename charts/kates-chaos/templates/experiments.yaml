@@ -29,7 +29,6 @@ data:
         image: {{ .image | default "litmuschaos/go-runner:3.28.0" }}
         imagePullPolicy: IfNotPresent
         args: ["-name", "{{ .name }}"]
-        command: ["/bin/bash"]
         labels:
           name: {{ .name }}
           experiment: {{ .name }}
