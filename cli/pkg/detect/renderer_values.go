@@ -54,10 +54,17 @@ func RenderValuesWithReserve(report *DetectReport, clusterName string, reserve f
 # Brokers (×%d):     %dm CPU, %s each
 # Storage/broker:    %s
 #
+# ── Network & DNS ──
+# CNI:              %s
+# Cluster domain:   %s
+# Local DNS suffix: svc.%s
+# Pod CIDR:         %s
+# Service CIDR:     %s
+#
 # Zones: %s
 # StorageClasses: %s
 # Strimzi: deployed=%v | Monitoring: prometheus=%v grafana=%v
-# NetworkPolicy: CNI=%s | Kyverno=%v
+# Kyverno=%v
 
 `,
 		report.Provider, report.Context,
@@ -73,11 +80,16 @@ func RenderValuesWithReserve(report *DetectReport, clusterName string, reserve f
 		gen.Cap.ControllerReplicas, gen.Cap.ControllerCPU, gen.Cap.ControllerStorage,
 		gen.Cap.BrokerReplicas*max(len(report.Zones), 1), gen.Cap.BrokerCPU, formatMem(gen.Cap.BrokerMem),
 		gen.Cap.BrokerStorage,
+		report.Network.CNI,
+		report.Network.ClusterDomain,
+		report.Network.ClusterDomain,
+		report.Network.PodCIDR,
+		report.Network.ServiceCIDR,
 		strings.Join(zoneNames, ", "),
 		strings.Join(scNames, ", "),
 		report.Strimzi.Running,
 		report.Monitoring.PodMonitorCRD, report.Monitoring.GrafanaDeployed,
-		report.Network.CNI, report.Admission.Kyverno.Installed,
+		report.Admission.Kyverno.Installed,
 	)
 
 

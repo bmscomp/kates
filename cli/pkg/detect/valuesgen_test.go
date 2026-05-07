@@ -13,7 +13,7 @@ func buildTestReport(zones int, scNames []string) *DetectReport {
 		K8sVersion: "1.31",
 		Strimzi:    StrimziInfo{Running: true, CRDsPresent: true, Namespace: "kafka"},
 		Monitoring: MonitoringInfo{PodMonitorCRD: true, PrometheusRuleCRD: true, GrafanaDeployed: true, ReleaseLabel: "monitoring"},
-		Network:    NetworkInfo{CNI: "kindnet"},
+		Network:    NetworkInfo{CNI: "kindnet", ClusterDomain: "cluster.local"},
 	}
 	zoneNames := []string{"alpha", "gamma", "sigma", "delta"}
 	for i := 0; i < zones && i < len(zoneNames); i++ {
@@ -200,7 +200,7 @@ func TestSizingProfile_Minimal(t *testing.T) {
 	r := &DetectReport{
 		Nodes:   []NodeInfo{{CPU: 500, MemoryGi: 1}},
 		Storage: []SCInfo{{Name: "standard", IsDefault: true}},
-		Network: NetworkInfo{CNI: "kindnet"},
+		Network: NetworkInfo{CNI: "kindnet", ClusterDomain: "cluster.local"},
 	}
 	gen := NewValuesGenerator(r, "krafter")
 
@@ -232,5 +232,9 @@ func TestRenderValues_WritesYAML(t *testing.T) {
 	// Check YAML is parseable
 	if !strings.Contains(content, "clusterName: krafter") {
 		t.Error("expected clusterName in YAML")
+	}
+	// Check global.clusterDomain is present
+	if !strings.Contains(content, "clusterDomain: cluster.local") {
+		t.Error("expected global.clusterDomain in YAML")
 	}
 }
