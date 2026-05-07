@@ -20,6 +20,9 @@ data:
     metadata:
       name: {{ .name }}
       namespace: {{ $kafkaNamespace }}
+      labels:
+        name: {{ .name }}
+        app.kubernetes.io/part-of: litmus
     spec:
       definition:
         scope: {{ .scope | default "Namespaced" }}
@@ -27,6 +30,9 @@ data:
         imagePullPolicy: IfNotPresent
         args: ["-name", "{{ .name }}"]
         command: ["/bin/bash"]
+        labels:
+          name: {{ .name }}
+          experiment: {{ .name }}
     {{- end }}
 ---
 apiVersion: batch/v1
