@@ -216,6 +216,7 @@ func RenderTUI(report *DetectReport) {
 		output.Warn("CoreDNS: not detected")
 	}
 	output.Success(fmt.Sprintf("Cluster domain: %s", report.Network.ClusterDomain))
+	output.Success(fmt.Sprintf("Local DNS suffix: svc.%s", report.Network.ClusterDomain))
 	output.Success(fmt.Sprintf("Pod CIDR: %s", report.Network.PodCIDR))
 	output.Success(fmt.Sprintf("Service CIDR: %s", report.Network.ServiceCIDR))
 
