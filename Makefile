@@ -88,7 +88,7 @@ all: check-prerequisites
 		echo "✅ Kates already deployed — skipping"; \
 	else \
 		echo "Step 10: Deploying Kates (using released image)..."; \
-		KATES_IMAGE="$${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.10.0}"; \
+		KATES_IMAGE="$${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"; \
 		echo "  Pulling $${KATES_IMAGE}..."; \
 		docker pull "$${KATES_IMAGE}" 2>/dev/null || true; \
 		kind load docker-image "$${KATES_IMAGE}" --name panda 2>/dev/null || true; \

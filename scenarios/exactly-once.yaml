@@ -1,0 +1,19 @@
+scenarios:
+  - name: "Exactly-Once Integrity Check"
+    type: ROUND_TRIP
+    spec:
+      records: 100000
+      parallelProducers: 2
+      recordSizeBytes: 256
+      acks: "all"
+      enableIdempotence: true
+      enableTransactions: true
+      enableCrc: true
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      numConsumers: 2
+    validate:
+      maxDataLossPercent: 0
+      maxOutOfOrder: 0
+      maxCrcFailures: 0
+      maxP99LatencyMs: 200

@@ -33,7 +33,7 @@ fi
 
 # Kind-specific: ensure released image is available in the cluster
 if [ "${ENV}" = "kind" ]; then
-    KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.10.0}"
+    KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"
     info "Ensuring ${KATES_IMAGE} is available in Kind..."
     if ! docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
         info "Pulling ${KATES_IMAGE} from registry..."

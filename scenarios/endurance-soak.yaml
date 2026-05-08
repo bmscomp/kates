@@ -1,0 +1,18 @@
+scenarios:
+  - name: "Endurance / Soak Test"
+    type: ENDURANCE
+    spec:
+      records: 10000000
+      parallelProducers: 4
+      recordSizeBytes: 1024
+      durationSeconds: 3600
+      acks: "all"
+      compressionType: "zstd"
+      replicationFactor: 3
+      partitions: 6
+      minInsyncReplicas: 2
+      targetThroughput: 5000
+    validate:
+      maxP99LatencyMs: 100
+      maxAvgLatencyMs: 20
+      maxErrorRate: 0.0001

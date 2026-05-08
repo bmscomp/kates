@@ -1,0 +1,15 @@
+scenarios:
+  - name: "Spike Test — Burst Traffic"
+    type: SPIKE
+    spec:
+      records: 500000
+      parallelProducers: 32
+      recordSizeBytes: 1024
+      durationSeconds: 60
+      acks: "1"
+      batchSize: 32768
+      lingerMs: 0
+      partitions: 12
+    validate:
+      maxP99LatencyMs: 500
+      maxErrorRate: 0.01

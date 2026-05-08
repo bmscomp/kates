@@ -1,0 +1,16 @@
+scenarios:
+  - name: "CI Pipeline Gate — Fast Validation"
+    type: LOAD
+    spec:
+      records: 10000
+      parallelProducers: 1
+      recordSizeBytes: 512
+      acks: "all"
+      replicationFactor: 3
+      minInsyncReplicas: 2
+      enableIdempotence: true
+    validate:
+      maxP99LatencyMs: 100
+      minThroughputRecPerSec: 1000
+      maxErrorRate: 0
+      maxDataLossPercent: 0
