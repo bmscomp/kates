@@ -8,9 +8,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.Watch;
-import io.fabric8.kubernetes.client.Watcher;
-import io.fabric8.kubernetes.client.WatcherException;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.litmus.*;
@@ -61,103 +58,77 @@ public class LitmusChaosProvider implements ChaosProvider {
             String experimentName = resolveExperiment(spec);
 
             ChaosEngine engine = buildChaosEngine(spec, engineName, experimentName);
+            String resultName = engineName + "-" + experimentName;
 
-            // Create engine using strongly typed POJO
+            // NOW create the engine
             client.resources(ChaosEngine.class)
                     .inNamespace(spec.targetNamespace())
                     .resource(engine)
                     .create();
 
             LOG.info("Created ChaosEngine: " + engineName);
+            LOG.info("Polling ChaosResult: " + resultName + " in ns=" + spec.targetNamespace());
 
-            String resultName = engineName + "-" + experimentName;
+            // Simple polling loop — more reliable than Fabric8 watchers on CRDs
+            int timeoutSec = spec.chaosDurationSec() + 120;
+            int pollIntervalMs = 5_000;
+            int maxPolls = (timeoutSec * 1000) / pollIntervalMs;
 
-            Watch watch = client.resources(ChaosResult.class)
-                    .inNamespace(spec.targetNamespace())
-                    .withName(resultName)
-                    .watch(new Watcher<>() {
-                        @Override
-                        @SuppressWarnings("null")
-                        public void eventReceived(Action action, ChaosResult result) {
-                            if (result == null
-                                    || result.getStatus() == null
-                                    || result.getStatus().experimentStatus == null) {
-                                return;
-                            }
+            CompletableFuture.runAsync(() -> {
+                for (int i = 0; i < maxPolls && !future.isDone(); i++) {
+                    try {
+                        Thread.sleep(pollIntervalMs);
+                        if (future.isDone()) break;
 
-                            ChaosResultStatus.ExperimentStatus status = result.getStatus().experimentStatus;
-                            String verdict = status.verdict;
+                        var existing = client.resources(ChaosResult.class)
+                                .inNamespace(spec.targetNamespace())
+                                .withName(resultName)
+                                .get();
 
-                            if (verdict != null && !verdict.equalsIgnoreCase("Awaited")) {
-                                String failStep = status.failStep;
-                                String probSuccess = status.probeSuccessPercentage;
-
-                                String details = "";
-                                if (failStep != null && !failStep.isEmpty()) details += "FailStep: " + failStep;
-                                if (probSuccess != null && !probSuccess.isEmpty()) {
-                                    details += (details.isEmpty() ? "" : ", ") + "ProbeSuccess: " + probSuccess + "%";
-                                }
-
-                                if ("Pass".equalsIgnoreCase(verdict)) {
-                                    future.complete(ChaosOutcome.success(
-                                            engineName,
-                                            experimentName,
-                                            start,
-                                            Instant.now(),
-                                            startNanos,
-                                            probSuccess,
-                                            failStep,
-                                            status.phase));
-                                } else {
-                                    future.complete(ChaosOutcome.failure(
-                                            engineName,
-                                            experimentName,
-                                            start,
-                                            Instant.now(),
-                                            startNanos,
-                                            "ChaosResult verdict: " + verdict
-                                                    + (details.isEmpty() ? "" : " (" + details + ")"),
-                                            probSuccess,
-                                            failStep,
-                                            status.phase));
-                                }
-                            }
+                        if (existing == null) {
+                            LOG.debugf("Poll %d: ChaosResult '%s' not found yet", i + 1, resultName);
+                            continue;
                         }
 
-                        @Override
-                        public void onClose(WatcherException cause) {
-                            if (!future.isDone()) {
-                                if (cause != null) {
-                                    LOG.warn("Watcher closed with error", cause);
-                                }
-                                future.completeExceptionally(
-                                        cause != null
-                                                ? cause
-                                                : new RuntimeException(
-                                                        "Watcher closed unexpectedly without providing a verdict"));
+                        if (existing.getStatus() == null
+                                || existing.getStatus().experimentStatus == null) {
+                            LOG.debugf("Poll %d: ChaosResult exists but no status yet", i + 1);
+                            continue;
+                        }
+
+                        String v = existing.getStatus().experimentStatus.verdict;
+                        LOG.infof("Poll %d: ChaosResult verdict=%s", i + 1, v);
+
+                        if (v != null && !v.equalsIgnoreCase("Awaited")) {
+                            var s = existing.getStatus().experimentStatus;
+                            if ("Pass".equalsIgnoreCase(v)) {
+                                future.complete(ChaosOutcome.success(
+                                        engineName, experimentName, start, Instant.now(),
+                                        startNanos, s.probeSuccessPercentage, s.failStep, s.phase));
+                            } else {
+                                future.complete(ChaosOutcome.failure(
+                                        engineName, experimentName, start, Instant.now(),
+                                        startNanos, "ChaosResult verdict: " + v,
+                                        s.probeSuccessPercentage, s.failStep, s.phase));
                             }
+                            return;
                         }
-                    });
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    } catch (Exception e) {
+                        LOG.warnf("Poll error: %s", e.getMessage());
+                    }
+                }
 
-            // Clean up the watcher when the future completes (success, failure, or timeout)
-            future.whenComplete((res, err) -> watch.close());
-
-            // Fallback timeout execution since we removed Thread.sleep
-            CompletableFuture.delayedExecutor(spec.chaosDurationSec() + 120, java.util.concurrent.TimeUnit.SECONDS)
-                    .execute(() -> {
-                        if (!future.isDone()) {
-                            future.complete(ChaosOutcome.failure(
-                                    engineName,
-                                    experimentName,
-                                    start,
-                                    Instant.now(),
-                                    startNanos,
-                                    "Timeout polling for ChaosResult via Watcher",
-                                    null,
-                                    null,
-                                    null));
-                        }
-                    });
+                // Timeout — no result received
+                if (!future.isDone()) {
+                    future.complete(ChaosOutcome.failure(
+                            engineName, experimentName, start, Instant.now(),
+                            startNanos, "Timeout polling for ChaosResult after " + timeoutSec + "s",
+                            null, null, null));
+                }
+            });
 
         } catch (Exception e) {
             LOG.error("Litmus fault injection failed", e);
