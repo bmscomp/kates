@@ -107,6 +107,7 @@ jobs:
 
       - name: Validate kafka policies
         run: |
+          helm dependency build charts/kafka-cluster/ 2>/dev/null || true
           helm template kafka charts/kafka-cluster/ \
             --set podSecurityPolicy.enabled=true \
             --set strimziOperator.enabled=false \
