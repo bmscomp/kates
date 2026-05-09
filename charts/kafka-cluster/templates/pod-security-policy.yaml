@@ -12,17 +12,132 @@ metadata:
     policies.kyverno.io/description: >-
       Enforces restricted pod security standards for all pods in the Kafka
       namespace: non-root containers, read-only root filesystem, dropped
-      capabilities, and seccomp profile.
+      capabilities, and seccomp profile. Strimzi-managed pods are excluded
+      from mutation and capability validation to avoid operator conflicts.
 spec:
   validationFailureAction: {{ .Values.podSecurityPolicy.action | default "Audit" }}
   background: true
   rules:
+    {{- if .Values.podSecurityPolicy.mutate }}
+    # ── Mutate: auto-inject pod-level security context ────────────────────────
+    - name: mutate-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(runAsNonRoot): true
+
+    - name: mutate-drop-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(capabilities):
+                    +(drop):
+                      - "ALL"
+
+    - name: mutate-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                +(type): RuntimeDefault
+
+    - name: mutate-disable-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(allowPrivilegeEscalation): false
+    {{- end }}
+
+    # ── Validate: enforce standards ───────────────────────────────────────────
     - name: require-non-root
       match:
         any:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
       validate:
         message: "Kafka pods must run as non-root."
         pattern:
@@ -36,6 +151,17 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
       validate:
         message: "Containers must drop ALL capabilities."
         pattern:
@@ -65,6 +191,17 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      {{- if .Values.podSecurityPolicy.excludeStrimziPods }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
       validate:
         message: "Containers must not allow privilege escalation."
         pattern:
@@ -72,4 +209,18 @@ spec:
             containers:
               - securityContext:
                   allowPrivilegeEscalation: false
+
+    - name: restrict-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ include "kafka-cluster.namespace" . | quote }}]
+      validate:
+        message: "Pods must not use host network, PID, or IPC namespaces."
+        pattern:
+          spec:
+            =(hostNetwork): false
+            =(hostPID): false
+            =(hostIPC): false
 {{- end }}

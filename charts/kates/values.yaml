@@ -120,6 +120,10 @@ securityContext:
 # -- Container-level security context
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
@@ -605,3 +609,59 @@ cleanup:
   retentionDays: 30
   # -- Curl image for API calls
   image: curlimages/curl:8.7.1
+
+# -- Kyverno pod security policies (requires Kyverno controller in cluster)
+kyvernoPolicy:
+  # -- Enable Kyverno ClusterPolicy for the kates namespace
+  enabled: false
+  # -- Policy action: Audit (observe only) or Enforce (block non-compliant)
+  action: Audit
+  # -- Enable mutation rules to auto-inject security contexts
+  mutate: true
+  # -- Enable image registry restriction
+  restrictRegistries: false
+  # -- Allowed image registries (when restrictRegistries is true)
+  allowedRegistries:
+    - ghcr.io/bmscomp/
+    - docker.io/bitnami/
+    - registry.k8s.io/
+    - quay.io/strimzi/
+    - curlimages/
+  # -- Deploy Kyverno Grafana dashboard ConfigMap
+  grafanaDashboard: false
+  # -- Target namespace for the dashboard ConfigMap (must match Grafana sidecar namespace)
+  grafanaDashboardNamespace: monitoring
+  # -- Cosign image signature verification
+  cosign:
+    # -- Enable image signature verification via Cosign
+    enabled: false
+    # -- Image patterns requiring valid signatures
+    imagePatterns:
+      - "ghcr.io/bmscomp/*"
+    # -- Cosign public key (PEM format) — set via --set-file or Secrets
+    publicKey: ""
+  # -- Auto-generate default-deny NetworkPolicies for new namespaces
+  networkPolicyGeneration:
+    enabled: false
+    # -- Namespaces to exclude from default-deny generation
+    excludeNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - kyverno
+  # -- PolicyExceptions for dev/test namespaces
+  policyExceptions:
+    # -- Enable PolicyException resources
+    enabled: false
+    # -- Dev namespaces where policies are relaxed
+    namespaces:
+      - kates-dev
+      - kates-staging
+    # -- Policies to create exceptions for
+    exemptPolicies:
+      - kates-pod-security-standards
+    # -- Rules to exempt in dev namespaces
+    exemptRules:
+      - validate-readonly-rootfs
+      - require-resource-limits
+      - disallow-latest-tag

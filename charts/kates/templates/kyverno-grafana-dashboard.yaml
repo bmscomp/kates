@@ -1,0 +1,226 @@
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.grafanaDashboard (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kates.fullname" . }}-kyverno-dashboard
+  namespace: {{ .Values.kyvernoPolicy.grafanaDashboardNamespace | default "monitoring" }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  kyverno-security.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Admission Requests — Total",
+          "type": "stat",
+          "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(increase(kyverno_admission_requests_total[1h]))",
+              "legendFormat": "Total"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "#73BF69", "value": null }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Admission — Allowed",
+          "type": "stat",
+          "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(increase(kyverno_admission_requests_total{resource_request_operation=\"CREATE\",request_allowed=\"true\"}[1h]))",
+              "legendFormat": "Allowed"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "#73BF69", "value": null }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Admission — Blocked",
+          "type": "stat",
+          "gridPos": { "h": 5, "w": 4, "x": 8, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(increase(kyverno_admission_requests_total{request_allowed=\"false\"}[1h])) or vector(0)",
+              "legendFormat": "Blocked"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "#73BF69", "value": null },
+                  { "color": "#FF6347", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Policy Results — Pass vs Fail",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(kyverno_policy_results_total{rule_result=\"pass\"})",
+              "legendFormat": "Pass"
+            },
+            {
+              "expr": "sum(kyverno_policy_results_total{rule_result=\"fail\"})",
+              "legendFormat": "Fail"
+            },
+            {
+              "expr": "sum(kyverno_policy_results_total{rule_result=\"warn\"})",
+              "legendFormat": "Warn"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }
+            },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "Pass" }, "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+              { "matcher": { "id": "byName", "options": "Fail" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FF6347", "mode": "fixed" } }] },
+              { "matcher": { "id": "byName", "options": "Warn" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }] }
+            ]
+          }
+        },
+        {
+          "title": "Admission Webhook Latency (p99)",
+          "type": "stat",
+          "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(kyverno_admission_review_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "#73BF69", "value": null },
+                  { "color": "#FADE2A", "value": 0.5 },
+                  { "color": "#FF6347", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Policy Violations Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+          "targets": [
+            {
+              "expr": "sum by (policy) (increase(kyverno_policy_results_total{rule_result=\"fail\"}[5m]))",
+              "legendFormat": "{{`{{ policy }}`}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "fillOpacity": 20, "lineWidth": 2, "drawStyle": "line", "gradientMode": "scheme" },
+              "color": { "mode": "palette-classic" }
+            }
+          }
+        },
+        {
+          "title": "Violations by Rule",
+          "type": "barchart",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            {
+              "expr": "sum by (rule) (kyverno_policy_results_total{rule_result=\"fail\"})",
+              "legendFormat": "{{`{{ rule }}`}}",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 80 }
+            }
+          },
+          "options": {
+            "orientation": "horizontal"
+          }
+        },
+        {
+          "title": "Admission Review Duration (histogram)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(kyverno_admission_review_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.90, sum(rate(kyverno_admission_review_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p90"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(kyverno_admission_review_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "fillOpacity": 10, "lineWidth": 2 },
+              "color": { "mode": "palette-classic" }
+            }
+          }
+        },
+        {
+          "title": "Controller Pods — Status",
+          "type": "table",
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+          "targets": [
+            {
+              "expr": "kube_pod_status_phase{namespace=\"kyverno\", phase=\"Running\"} == 1",
+              "legendFormat": "{{`{{ pod }}`}}",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "container": true, "endpoint": true, "instance": true, "job": true, "namespace": true, "service": true, "uid": true } } }
+          ]
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["kyverno", "security", "policy", "kates"],
+      "templating": { "list": [] },
+      "time": { "from": "now-6h", "to": "now" },
+      "title": "Kyverno Security Policies",
+      "uid": "kyverno-security-overview"
+    }
+{{- end }}
