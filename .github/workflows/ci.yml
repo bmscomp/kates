@@ -88,6 +88,7 @@ jobs:
         run: |
           helm template kates charts/kates/ \
             --set kyvernoPolicy.enabled=true \
+            --api-versions kyverno.io/v1 \
             --show-only templates/kyverno-policies.yaml \
             > /tmp/kates-policies.yaml
           echo "--- Rendered kates policies ---"
@@ -99,6 +100,7 @@ jobs:
         run: |
           helm template kates charts/kates/ \
             --set kyvernoPolicy.enabled=true \
+            --api-versions kyverno.io/v1 \
             --show-only templates/kyverno-policies.yaml \
             > /tmp/kates-workload-policies.yaml
           echo "✅ Kates workload policies render successfully"
@@ -108,6 +110,7 @@ jobs:
           helm template kafka charts/kafka-cluster/ \
             --set podSecurityPolicy.enabled=true \
             --set strimziOperator.enabled=false \
+            --api-versions kyverno.io/v1 \
             --show-only templates/pod-security-policy.yaml \
             > /tmp/kafka-policies.yaml
           echo "✅ Kafka policies render successfully"
