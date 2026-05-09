@@ -120,6 +120,7 @@ securityContext:
 # -- Container-level security context
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
@@ -617,3 +618,16 @@ kyvernoPolicy:
   action: Audit
   # -- Enable mutation rules to auto-inject security contexts
   mutate: true
+  # -- Enable image registry restriction
+  restrictRegistries: false
+  # -- Allowed image registries (when restrictRegistries is true)
+  allowedRegistries:
+    - ghcr.io/bmscomp/
+    - docker.io/bitnami/
+    - registry.k8s.io/
+    - quay.io/strimzi/
+    - curlimages/
+  # -- Deploy Kyverno Grafana dashboard ConfigMap
+  grafanaDashboard: false
+  # -- Target namespace for the dashboard ConfigMap (must match Grafana sidecar namespace)
+  grafanaDashboardNamespace: monitoring

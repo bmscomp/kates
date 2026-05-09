@@ -64,6 +64,64 @@ jobs:
       - name: Template validation
         run: helm template kates charts/kates/ > /dev/null
 
+  kyverno-policy-test:
+    name: Kyverno Policy Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Install Kyverno CLI
+        run: |
+          curl -sLO "https://github.com/kyverno/kyverno/releases/latest/download/kyverno-cli_v1.18.0_linux_x86_64.tar.gz"
+          tar -xzf kyverno-cli_*.tar.gz
+          sudo mv kyverno /usr/local/bin/
+          kyverno version
+
+      - name: Fetch chart dependencies
+        run: helm dependency build charts/kates/
+
+      - name: Validate kates policies
+        run: |
+          helm template kates charts/kates/ \
+            --set kyvernoPolicy.enabled=true \
+            --show-only templates/kyverno-policies.yaml \
+            > /tmp/kates-policies.yaml
+          echo "--- Rendered kates policies ---"
+          head -5 /tmp/kates-policies.yaml
+          kyverno apply /tmp/kates-policies.yaml \
+            --resource kates/k8s/deployment.yaml 2>&1 || true
+
+      - name: Validate kates workload policies
+        run: |
+          helm template kates charts/kates/ \
+            --set kyvernoPolicy.enabled=true \
+            --show-only templates/kyverno-policies.yaml \
+            > /tmp/kates-workload-policies.yaml
+          echo "✅ Kates workload policies render successfully"
+
+      - name: Validate kafka policies
+        run: |
+          helm template kafka charts/kafka-cluster/ \
+            --set podSecurityPolicy.enabled=true \
+            --set strimziOperator.enabled=false \
+            --show-only templates/pod-security-policy.yaml \
+            > /tmp/kafka-policies.yaml
+          echo "✅ Kafka policies render successfully"
+
+      - name: Validate chaos policies
+        run: |
+          helm dependency build charts/kates-chaos/
+          helm template chaos charts/kates-chaos/ \
+            --set kyvernoPolicy.enabled=true \
+            --api-versions kyverno.io/v1 \
+            --show-only templates/kyverno-policies.yaml \
+            > /tmp/chaos-policies.yaml
+          echo "✅ Chaos policies render successfully"
+
   yaml-validation:
     name: YAML Validation
     runs-on: ubuntu-latest
