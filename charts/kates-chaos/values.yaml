@@ -67,7 +67,10 @@ kyvernoPolicy:
   enabled: false          # opt-in by default
   action: Audit           # Audit | Enforce
   mutate: true            # auto-inject security contexts on pod admission
-  excludeContainers: []   # container names to skip during mutation
+  excludeContainers:       # container names to skip during mutation
+    - chaos-runner
+    - go-runner
+    - experiment
 
 # Network policies
 networkPolicies:
