@@ -101,7 +101,7 @@ public class ResilienceOrchestrator {
             CompletableFuture<ChaosOutcome> chaosFuture = chaosCoordinator.triggerFault(request.getChaosSpec());
 
             // 5. Wait for chaos to complete
-            ChaosOutcome outcome = chaosFuture.get(request.getChaosSpec().chaosDurationSec() + 60, TimeUnit.SECONDS);
+            ChaosOutcome outcome = chaosFuture.get(request.getChaosSpec().chaosDurationSec() + 120, TimeUnit.SECONDS);
             chaosActive.set(false);
             report.setChaosOutcome(outcome);
             report.setDuringChaosProbes(List.copyOf(duringChaosResults));
