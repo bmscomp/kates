@@ -163,6 +163,12 @@ Security:
   security drift      Compare posture against saved baseline
   security gate       CI/CD gate — exit non-zero if below grade
 
+Policy Engine (Kyverno):
+  kyverno status      Show all ClusterPolicies with mode and rule counts
+  kyverno violations  Pretty-print policy violations by namespace
+  kyverno enforce     Switch a policy from Audit to Enforce mode
+  kyverno audit       Switch a policy from Enforce to Audit mode
+
 Flags:
   -o, --output     Output format: table or json
       --url        Override API URL for a single call

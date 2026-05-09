@@ -1,0 +1,37 @@
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.policyExceptions.enabled (.Capabilities.APIVersions.Has "kyverno.io/v2") }}
+{{- range $ns := .Values.kyvernoPolicy.policyExceptions.namespaces }}
+{{- range $policy := $.Values.kyvernoPolicy.policyExceptions.exemptPolicies }}
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: {{ $ns }}-{{ $policy }}-exception
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates.labels" $ | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: "Dev exception for {{ $policy }} in {{ $ns }}"
+    policies.kyverno.io/description: >-
+      Relaxes specific validation rules from {{ $policy }} in the
+      {{ $ns }} namespace to enable development workflows that require
+      more flexible security constraints.
+spec:
+  exceptions:
+    - policyName: {{ $policy }}
+      ruleNames:
+        {{- range $.Values.kyvernoPolicy.policyExceptions.exemptRules }}
+        - {{ . }}
+        {{- end }}
+  match:
+    any:
+      - resources:
+          namespaces:
+            - {{ $ns }}
+          kinds:
+            - Pod
+            - Deployment
+            - StatefulSet
+            - ReplicaSet
+{{- end }}
+{{- end }}
+{{- end }}
