@@ -30,10 +30,11 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -51,23 +52,13 @@ spec:
               namespaces: [{{ .Release.Namespace | quote }}]
       exclude:
         any:
-          {{- if .Values.kyvernoPolicy.excludeContainers }}
-          {{- range .Values.kyvernoPolicy.excludeContainers }}
           - resources:
               kinds: ["Pod"]
-            preconditions:
-              any:
-                - key: "{{`{{ request.object.spec.containers[].name }}`}}"
-                  operator: Equals
-                  value: {{ . | quote }}
-          {{- end }}
-          {{- end }}
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -88,10 +79,11 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -109,10 +101,11 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -135,10 +128,11 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       validate:
         message: "Chaos pods must run as non-root (spec.securityContext.runAsNonRoot: true)."
         pattern:
@@ -156,10 +150,11 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       validate:
         message: "Containers must drop ALL capabilities."
         pattern:
@@ -179,10 +174,11 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
+              namespaces: [{{ .Release.Namespace | quote }}]
+              selector:
+                matchExpressions:
+                  - key: chaosUID
+                    operator: Exists
       validate:
         message: "Containers must not allow privilege escalation."
         pattern:
