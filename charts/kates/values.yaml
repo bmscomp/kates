@@ -120,6 +120,9 @@ securityContext:
 # -- Container-level security context
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
@@ -605,3 +608,12 @@ cleanup:
   retentionDays: 30
   # -- Curl image for API calls
   image: curlimages/curl:8.7.1
+
+# -- Kyverno pod security policies (requires Kyverno controller in cluster)
+kyvernoPolicy:
+  # -- Enable Kyverno ClusterPolicy for the kates namespace
+  enabled: false
+  # -- Policy action: Audit (observe only) or Enforce (block non-compliant)
+  action: Audit
+  # -- Enable mutation rules to auto-inject security contexts
+  mutate: true

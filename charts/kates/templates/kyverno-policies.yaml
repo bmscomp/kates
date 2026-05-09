@@ -2,18 +2,17 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: chaos-pod-security-standards
+  name: kates-pod-security-standards
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates.labels" . | nindent 4 }}
   annotations:
-    policies.kyverno.io/title: Chaos Pod Security Standards
+    policies.kyverno.io/title: Kates Pod Security Standards
     policies.kyverno.io/category: Pod Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
       Enforces and auto-patches restricted pod security standards for all
-      LitmusChaos and MongoDB pods: non-root containers, dropped capabilities,
-      seccomp profiles, and no privilege escalation. Chaos-runner and experiment
-      pods are excluded because they require elevated privileges for fault injection.
+      Kates application pods: non-root containers, dropped capabilities,
+      seccomp profiles, and no privilege escalation.
 spec:
   validationFailureAction: {{ .Values.kyvernoPolicy.action | default "Audit" }}
   background: true
@@ -26,21 +25,13 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
             securityContext:
               +(runAsNonRoot): true
-              +(runAsUser): 1001
-              +(fsGroup): 1001
+              +(runAsUser): 1000
+              +(fsGroup): 1000
 
     # ── Mutate: auto-inject container-level security context ──────────────────
     - name: mutate-drop-capabilities
@@ -49,25 +40,6 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          {{- if .Values.kyvernoPolicy.excludeContainers }}
-          {{- range .Values.kyvernoPolicy.excludeContainers }}
-          - resources:
-              kinds: ["Pod"]
-            preconditions:
-              any:
-                - key: "{{`{{ request.object.spec.containers[].name }}`}}"
-                  operator: Equals
-                  value: {{ . | quote }}
-          {{- end }}
-          {{- end }}
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -84,14 +56,6 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -105,14 +69,6 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       mutate:
         patchStrategicMerge:
           spec:
@@ -123,24 +79,14 @@ spec:
     {{- end }}
 
     # ── Validate: enforce standards ───────────────────────────────────────────
-    # Chaos experiment pods (labeled with chaosUID) are excluded from validation
-    # because they inherently need elevated privileges for fault injection.
     - name: validate-non-root
       match:
         any:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       validate:
-        message: "Chaos pods must run as non-root (spec.securityContext.runAsNonRoot: true)."
+        message: "Kates pods must run as non-root (spec.securityContext.runAsNonRoot: true)."
         pattern:
           spec:
             securityContext:
@@ -152,14 +98,6 @@ spec:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       validate:
         message: "Containers must drop ALL capabilities."
         pattern:
@@ -169,20 +107,26 @@ spec:
                   capabilities:
                     drop: ["ALL"]
 
+    - name: validate-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Pods must use RuntimeDefault or Localhost seccomp profile."
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: "RuntimeDefault | Localhost"
+
     - name: validate-no-privilege-escalation
       match:
         any:
           - resources:
               kinds: ["Pod"]
               namespaces: [{{ .Release.Namespace | quote }}]
-      exclude:
-        any:
-          - resources:
-              kinds: ["Pod"]
-            selector:
-              matchExpressions:
-                - key: chaosUID
-                  operator: Exists
       validate:
         message: "Containers must not allow privilege escalation."
         pattern:
