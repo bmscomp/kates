@@ -15,7 +15,18 @@ info "Deploying Kafka cluster (env=${ENV})..."
 
 ensure_namespace "${NAMESPACE}"
 
-# Build Helm dependencies (Strimzi operator subchart)
+# Install Strimzi Operator if not present (separate release required to avoid CRD chicken-and-egg)
+if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
+    info "Strimzi CRDs not found. Installing Strimzi Kafka Operator..."
+    helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+        --version 1.0.0 \
+        --namespace "${NAMESPACE}" \
+        --set watchAnyNamespace=true \
+        --set replicas=1 \
+        --timeout 5m --wait
+fi
+
+# Build Helm dependencies (SeaweedFS subchart)
 info "Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
 
