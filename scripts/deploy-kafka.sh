@@ -77,6 +77,12 @@ for kind in kafkatopics kafkausers; do
     done
 done
 
+# Layer standalone overlay if provided (disables monitoring/operator subchart)
+if [ -n "${STANDALONE_OVERLAY:-}" ] && [ -f "${STANDALONE_OVERLAY}" ]; then
+    info "Layering standalone overlay: ${STANDALONE_OVERLAY}"
+    VALUES_ARGS+=(-f "${STANDALONE_OVERLAY}")
+fi
+
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \

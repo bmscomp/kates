@@ -149,19 +149,26 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		"--debug",
 	}
 
-	// Standalone mode: inject overrides to disable operator subchart and monitoring
+	// Standalone mode: layer the standalone overlay to disable monitoring
 	if autoStandalone {
-		helmArgs = append(helmArgs,
-			"--set", "strimziOperator.enabled=false",
-			"--set", "kafka.metricsConfig.enabled=false",
-			"--set", "kafkaExporter.enabled=false",
-			"--set", "cruiseControl.enabled=false",
-			"--set", "alerts.enabled=false",
-			"--set", "podMonitors.enabled=false",
-			"--set", "dashboards.enabled=false",
-			"--set", "networkPolicies.enabled=false",
-			"--set", "crdUpgrade.enabled=false",
-		)
+		standaloneOverlay := filepath.Join(autoChartDir, "values-standalone.yaml")
+		if _, err := os.Stat(standaloneOverlay); err == nil {
+			helmArgs = append(helmArgs, "-f", standaloneOverlay)
+			output.Hint(fmt.Sprintf("📄 Layering standalone overlay: %s", standaloneOverlay))
+		} else {
+			// Fallback: inject overrides directly
+			output.Warn("values-standalone.yaml not found — injecting overrides via --set")
+			helmArgs = append(helmArgs,
+				"--set", "strimziOperator.enabled=false",
+				"--set", "kafka.metricsConfig.enabled=false",
+				"--set", "kafkaExporter.enabled=false",
+				"--set", "cruiseControl.enabled=false",
+				"--set", "alerts.enabled=false",
+				"--set", "podMonitors.enabled=false",
+				"--set", "dashboards.enabled=false",
+				"--set", "crdUpgrade.enabled=false",
+			)
+		}
 	}
 
 	if autoDryRun {
