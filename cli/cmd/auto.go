@@ -22,6 +22,7 @@ var (
 	autoDryRun         bool
 	autoBaseValues     string
 	autoSkipMonitoring bool
+	autoStandalone     bool
 )
 
 var autoCmd = &cobra.Command{
@@ -29,7 +30,10 @@ var autoCmd = &cobra.Command{
 	Short: "Auto-detect cluster configuration and deploy Kafka",
 	Long: `Auto-detects the Kubernetes cluster configuration, generates optimal
 values.yaml based on capacity and topology, and deploys the kafka-cluster
-Helm chart in a single step.`,
+Helm chart in a single step.
+
+Use --standalone to deploy on a cluster where the Strimzi operator is
+already installed (skips operator subchart and monitoring dependencies).`,
 	RunE: runAuto,
 }
 
@@ -42,11 +46,30 @@ func init() {
 	autoCmd.Flags().BoolVar(&autoDryRun, "dry-run", false, "Preview the Helm installation without executing it")
 	autoCmd.Flags().StringVarP(&autoBaseValues, "values", "f", "", "Path to base values.yaml to merge with detected values")
 	autoCmd.Flags().BoolVar(&autoSkipMonitoring, "skip-monitoring", false, "Skip deploying the monitoring stack (Prometheus + Grafana)")
+	autoCmd.Flags().BoolVar(&autoStandalone, "standalone", false, "Standalone mode: no operator subchart, no monitoring (operator must be pre-installed)")
 	rootCmd.AddCommand(autoCmd)
 }
 
 func runAuto(cmd *cobra.Command, args []string) error {
 	output.Header("Kates Auto-Deploy")
+
+	// Standalone mode implies skip-monitoring
+	if autoStandalone {
+		autoSkipMonitoring = true
+		output.Hint("🔧 Standalone mode: operator subchart disabled, monitoring disabled")
+
+		// Verify Strimzi operator is pre-installed
+		checkCmd := exec.Command("kubectl", "get", "pods", "-n", autoNamespace,
+			"-l", "strimzi.io/kind=cluster-operator", "--no-headers")
+		out, err := checkCmd.Output()
+		if err != nil || !strings.Contains(string(out), "Running") {
+			output.Error("Strimzi operator is not running in namespace " + autoNamespace)
+			output.Hint("Install it first: make strimzi-install")
+			output.Hint(fmt.Sprintf("Or: helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator --version 1.0.0 --namespace %s --wait", autoNamespace))
+			os.Exit(1)
+		}
+		output.Success("Strimzi operator is running")
+	}
 	
 	executor := detect.NewOSExecutor()
 	collector := detect.NewCollector(executor)
@@ -124,6 +147,21 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		"--force-conflicts",
 		"--timeout", "10m", "--wait",
 		"--debug",
+	}
+
+	// Standalone mode: inject overrides to disable operator subchart and monitoring
+	if autoStandalone {
+		helmArgs = append(helmArgs,
+			"--set", "strimziOperator.enabled=false",
+			"--set", "kafka.metricsConfig.enabled=false",
+			"--set", "kafkaExporter.enabled=false",
+			"--set", "cruiseControl.enabled=false",
+			"--set", "alerts.enabled=false",
+			"--set", "podMonitors.enabled=false",
+			"--set", "dashboards.enabled=false",
+			"--set", "networkPolicies.enabled=false",
+			"--set", "crdUpgrade.enabled=false",
+		)
 	}
 
 	if autoDryRun {

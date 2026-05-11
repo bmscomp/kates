@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-standalone kafka-standalone-undeploy strimzi-install kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-standalone kafka-standalone-auto kafka-standalone-undeploy strimzi-install kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -462,9 +462,9 @@ strimzi-install:
 # Prerequisites:
 #   1. Strimzi operator must be pre-installed (run: make strimzi-install)
 #   2. No Prometheus/Grafana required
-# This is the minimal deployment target for Kafka-only environments.
+# Deploys on any standard Kubernetes cluster using the default StorageClass.
 kafka-standalone:
-	@echo "📦 Deploying standalone Kafka cluster (no monitoring)..."
+	@echo "📦 Deploying standalone Kafka cluster (generic Kubernetes)..."
 	@echo ""
 	@echo "  Checking Strimzi operator..."
 	@if kubectl get pods -n kafka -l strimzi.io/kind=cluster-operator --no-headers 2>/dev/null | grep -q Running; then \
@@ -478,16 +478,7 @@ kafka-standalone:
 	helm dependency build $(KAFKA_CHART_DIR) 2>/dev/null || true
 	helm upgrade --install kafka-cluster $(KAFKA_CHART_DIR) \
 		--namespace kafka --create-namespace \
-		--set strimziOperator.enabled=false \
-		--set kafka.metricsConfig.enabled=false \
-		--set kafkaExporter.enabled=false \
-		--set cruiseControl.enabled=false \
-		--set alerts.enabled=false \
-		--set podMonitors.enabled=false \
-		--set dashboards.enabled=false \
-		--set networkPolicies.enabled=false \
-		--set crdUpgrade.enabled=false \
-		-f $(KAFKA_CHART_DIR)/values-dev.yaml \
+		-f $(KAFKA_CHART_DIR)/values-generic.yaml \
 		--timeout 10m
 	@echo ""
 	@echo "⏳ Waiting for Kafka cluster to be ready..."
@@ -515,6 +506,15 @@ kafka-standalone:
 	@echo "  Pods:          kubectl get pods -n kafka"
 	@echo "  Helm tests:    helm test kafka-cluster -n kafka"
 	@echo "  Add UI:        make ui"
+
+# Auto-detect cluster and deploy Kafka standalone (no monitoring, operator pre-installed)
+kafka-standalone-auto:
+	@echo "🤖 Starting Kates Auto-Deploy (standalone mode)..."
+	cd cli && go run . auto --standalone --chart-dir ../$(KAFKA_CHART_DIR)
+	@echo ""
+	@echo "✅ Kafka cluster deployed with auto-detected configuration (standalone)!"
+	@echo "  Run tests:     helm test kafka-cluster -n kafka"
+	@echo "  Check status:  kubectl get kafka,kafkanodepools -n kafka"
 
 kafka-standalone-undeploy:
 	@echo "🗑️  Removing standalone Kafka..."
@@ -645,6 +645,7 @@ help:
 	@echo "  kafka-undeploy                     - Remove Kafka Helm release + PVCs"
 	@echo "  strimzi-install                    - Install Strimzi operator v1.0.0 standalone"
 	@echo "  kafka-standalone                   - Deploy Kafka (no monitoring, operator pre-installed)"
+	@echo "  kafka-standalone-auto              - Auto-detect cluster + deploy standalone Kafka"
 	@echo "  kafka-standalone-undeploy          - Remove standalone Kafka (keeps operator)"
 	@echo "  ui                                 - Deploy Kafka UI"
 	@echo "  apicurio                           - Deploy Apicurio Registry"
