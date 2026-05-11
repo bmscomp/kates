@@ -72,13 +72,13 @@ spec:
             - --configmap
             - workflow-controller-configmap
             - --executor-image
-            -  litmuschaos.docker.scarf.sh/litmuschaos/argoexec:v3.3.1
+            -  docker.io/litmuschaos/argoexec:v3.3.1
             - --namespaced
             - --container-runtime-executor
             -  k8sapi
           command:
             - workflow-controller
-          image: litmuschaos.docker.scarf.sh/litmuschaos/workflow-controller:v3.3.1
+          image: docker.io/litmuschaos/workflow-controller:v3.3.1
           name: workflow-controller
           securityContext:
             runAsUser: 2000
@@ -4228,7 +4228,7 @@ spec:
       #{NODE_SELECTOR}
       containers:
         - name: subscriber
-          image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-subscriber:3.27.0
+          image: docker.io/litmuschaos/litmusportal-subscriber:3.27.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 2000
@@ -4275,7 +4275,7 @@ spec:
       #{NODE_SELECTOR}
       serviceAccountName: litmus
       containers:
-        - image: litmuschaos.docker.scarf.sh/litmuschaos/litmusportal-event-tracker:3.27.0
+        - image: docker.io/litmuschaos/litmusportal-event-tracker:3.27.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 2000

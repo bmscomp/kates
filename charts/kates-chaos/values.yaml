@@ -11,11 +11,11 @@ litmus-core:
   enabled: true
   operator:
     image:
-      repository: litmuschaos.docker.scarf.sh/litmuschaos/chaos-operator
+      repository: docker.io/litmuschaos/chaos-operator
       tag: 3.28.0
   runner:
     image:
-      repository: litmuschaos.docker.scarf.sh/litmuschaos/chaos-runner
+      repository: docker.io/litmuschaos/chaos-runner
       tag: 3.28.0
 
 # RBAC for chaos experiments in target namespaces
