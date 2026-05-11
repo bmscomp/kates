@@ -150,11 +150,11 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	}
 
 	output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", autoChartDir))
-	depCmd := exec.Command("helm", "dependency", "build", autoChartDir)
+	depCmd := exec.Command("helm", "dependency", "update", autoChartDir)
 	depCmd.Stdout = os.Stdout
 	depCmd.Stderr = os.Stderr
 	if err := depCmd.Run(); err != nil {
-		return fmt.Errorf("helm dependency build failed: %w", err)
+		return fmt.Errorf("helm dependency update failed: %w", err)
 	}
 
 	// 4. Helm Deploy Phase
@@ -221,11 +221,11 @@ func runAuto(cmd *cobra.Command, args []string) error {
 			}
 
 			output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", monitoringChartDir))
-			monDepCmd := exec.Command("helm", "dependency", "build", monitoringChartDir)
+			monDepCmd := exec.Command("helm", "dependency", "update", monitoringChartDir)
 			monDepCmd.Stdout = os.Stdout
 			monDepCmd.Stderr = os.Stderr
 			if err := monDepCmd.Run(); err != nil {
-				output.Error(fmt.Sprintf("Monitoring helm dependency build failed: %v", err))
+				output.Error(fmt.Sprintf("Monitoring helm dependency update failed: %v", err))
 				output.Warn("Continuing without monitoring — Kafka cluster is deployed successfully")
 			} else {
 				monHelmArgs := []string{
