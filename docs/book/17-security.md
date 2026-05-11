@@ -58,6 +58,42 @@ Strimzi generates SCRAM credentials automatically when you create a `KafkaUser` 
 kubectl get secret kafka-ui -n kafka -o jsonpath='{.data.password}' | base64 -d
 ```
 
+### Cross-Namespace Credential Synchronization
+
+When a `KafkaUser` is created, Strimzi generates the credential Secret only in the namespace where the Strimzi operator and Kafka cluster reside (usually `kafka`). 
+
+If your application runs in a different namespace (e.g., `kates`), you must securely synchronize this Secret. **Do not copy it manually**, as Strimzi may rotate the password. Instead, use a Kyverno `ClusterPolicy` to automatically clone and synchronize the Secret:
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sync-kates-backend-secret
+  annotations:
+    policies.kyverno.io/title: Sync Kafka Credentials
+    policies.kyverno.io/category: Secrets Management
+spec:
+  generateExisting: true
+  rules:
+  - name: clone-kafka-secret
+    match:
+      any:
+      - resources:
+          kinds:
+          - Namespace
+          names:
+          - kates
+    generate:
+      apiVersion: v1
+      kind: Secret
+      name: kates-backend
+      namespace: "{{request.object.metadata.name}}"
+      synchronize: true # Keeps the cloned secret updated if Strimzi rotates the original
+      clone:
+        namespace: kafka
+        name: kates-backend
+```
+
 ### mTLS (Mutual TLS)
 
 The TLS listener requires both server and client certificates. Strimzi issues client certificates via the Clients CA when a `KafkaUser` uses `authentication.type: tls`.
