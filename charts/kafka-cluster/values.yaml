@@ -80,6 +80,7 @@ kafka:
       maxUnavailable: 1
 
   metricsConfig:
+    enabled: false
     type: jmxPrometheusExporter
 
   clusterCa:
@@ -204,7 +205,7 @@ entityOperator:
       -Xmx: 256m
 
 kafkaExporter:
-  enabled: true
+  enabled: false
   topicRegex: ".*"
   groupRegex: ".*"
   resources:
@@ -216,7 +217,7 @@ kafkaExporter:
       cpu: 200m
 
 cruiseControl:
-  enabled: true
+  enabled: false
   brokerCapacity:
     cpu: "2000m"
     inboundNetwork: 50MiB/s
@@ -390,7 +391,7 @@ users:
             host: "*"
 
 alerts:
-  enabled: true
+  enabled: false
   labels:
     release: monitoring
     prometheus: kube-prometheus
@@ -540,7 +541,7 @@ crdUpgrade:
   image: "bitnami/kubectl:latest"
 
 dashboards:
-  enabled: true
+  enabled: false
   namespace: monitoring
   label: grafana_dashboard
   labelValue: "1"
@@ -597,12 +598,12 @@ drainCleaner:
       cpu: 100m
 
 podMonitors:
-  enabled: true
+  enabled: false
   labels:
     release: monitoring
 
 strimziOperator:
-  enabled: true
+  enabled: false
 
 strimzi-kafka-operator:
   replicas: 1

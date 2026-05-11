@@ -1,0 +1,35 @@
+# Kafka Cluster — Standalone Overlay
+# Disables monitoring dependencies only. All other settings (pools, zones,
+# storage classes, listeners, etc.) are inherited from the base values.yaml
+# or auto-detected by 'kates auto --standalone'.
+#
+# Usage:
+#   make kafka-standalone                      # uses ENV deploy script
+#   kates auto --standalone                    # auto-detect + standalone
+
+# ── Monitoring — all disabled ─────────────────────────────────────────────────
+kafka:
+  metricsConfig:
+    enabled: false
+
+kafkaExporter:
+  enabled: false
+
+cruiseControl:
+  enabled: false
+
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+# ── Operator — pre-installed externally ───────────────────────────────────────
+strimziOperator:
+  enabled: false
+
+crdUpgrade:
+  enabled: false

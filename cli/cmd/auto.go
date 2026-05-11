@@ -22,6 +22,7 @@ var (
 	autoDryRun         bool
 	autoBaseValues     string
 	autoSkipMonitoring bool
+	autoStandalone     bool
 )
 
 var autoCmd = &cobra.Command{
@@ -29,7 +30,10 @@ var autoCmd = &cobra.Command{
 	Short: "Auto-detect cluster configuration and deploy Kafka",
 	Long: `Auto-detects the Kubernetes cluster configuration, generates optimal
 values.yaml based on capacity and topology, and deploys the kafka-cluster
-Helm chart in a single step.`,
+Helm chart in a single step.
+
+Use --standalone to deploy on a cluster where the Strimzi operator is
+already installed (skips operator subchart and monitoring dependencies).`,
 	RunE: runAuto,
 }
 
@@ -42,11 +46,49 @@ func init() {
 	autoCmd.Flags().BoolVar(&autoDryRun, "dry-run", false, "Preview the Helm installation without executing it")
 	autoCmd.Flags().StringVarP(&autoBaseValues, "values", "f", "", "Path to base values.yaml to merge with detected values")
 	autoCmd.Flags().BoolVar(&autoSkipMonitoring, "skip-monitoring", false, "Skip deploying the monitoring stack (Prometheus + Grafana)")
+	autoCmd.Flags().BoolVar(&autoStandalone, "standalone", false, "Standalone mode: no operator subchart, no monitoring (operator must be pre-installed)")
 	rootCmd.AddCommand(autoCmd)
 }
 
 func runAuto(cmd *cobra.Command, args []string) error {
 	output.Header("Kates Auto-Deploy")
+
+	// Standalone mode implies skip-monitoring
+	if autoStandalone {
+		autoSkipMonitoring = true
+		output.Hint("🔧 Standalone mode: operator subchart disabled, monitoring disabled")
+
+		// Verify Strimzi operator is pre-installed (check all namespaces)
+		operatorFound := false
+
+		// Check 1: look for running operator pod across all namespaces
+		checkCmd := exec.Command("kubectl", "get", "pods", "-A",
+			"-l", "strimzi.io/kind=cluster-operator", "--no-headers")
+		out, err := checkCmd.Output()
+		if err == nil && strings.Contains(string(out), "Running") {
+			operatorFound = true
+			// Extract the namespace from the first column
+			fields := strings.Fields(strings.Split(string(out), "\n")[0])
+			if len(fields) > 0 {
+				output.Success(fmt.Sprintf("Strimzi operator is running (namespace: %s)", fields[0]))
+			}
+		}
+
+		// Check 2: fallback — verify the Kafka CRD exists (operator installed but pod label may differ)
+		if !operatorFound {
+			crdCmd := exec.Command("kubectl", "get", "crd", "kafkas.kafka.strimzi.io", "--no-headers")
+			if crdOut, crdErr := crdCmd.Output(); crdErr == nil && len(crdOut) > 0 {
+				operatorFound = true
+				output.Success("Strimzi CRDs detected — operator is installed")
+			}
+		}
+
+		if !operatorFound {
+			output.Error("Strimzi operator not found in any namespace")
+			output.Hint("Install it: make strimzi-install")
+			os.Exit(1)
+		}
+	}
 	
 	executor := detect.NewOSExecutor()
 	collector := detect.NewCollector(executor)
@@ -108,11 +150,11 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	}
 
 	output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", autoChartDir))
-	depCmd := exec.Command("helm", "dependency", "build", autoChartDir)
+	depCmd := exec.Command("helm", "dependency", "update", autoChartDir)
 	depCmd.Stdout = os.Stdout
 	depCmd.Stderr = os.Stderr
 	if err := depCmd.Run(); err != nil {
-		return fmt.Errorf("helm dependency build failed: %w", err)
+		return fmt.Errorf("helm dependency update failed: %w", err)
 	}
 
 	// 4. Helm Deploy Phase
@@ -124,6 +166,28 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		"--force-conflicts",
 		"--timeout", "10m", "--wait",
 		"--debug",
+	}
+
+	// Standalone mode: layer the standalone overlay to disable monitoring
+	if autoStandalone {
+		standaloneOverlay := filepath.Join(autoChartDir, "values-standalone.yaml")
+		if _, err := os.Stat(standaloneOverlay); err == nil {
+			helmArgs = append(helmArgs, "-f", standaloneOverlay)
+			output.Hint(fmt.Sprintf("📄 Layering standalone overlay: %s", standaloneOverlay))
+		} else {
+			// Fallback: inject overrides directly
+			output.Warn("values-standalone.yaml not found — injecting overrides via --set")
+			helmArgs = append(helmArgs,
+				"--set", "strimziOperator.enabled=false",
+				"--set", "kafka.metricsConfig.enabled=false",
+				"--set", "kafkaExporter.enabled=false",
+				"--set", "cruiseControl.enabled=false",
+				"--set", "alerts.enabled=false",
+				"--set", "podMonitors.enabled=false",
+				"--set", "dashboards.enabled=false",
+				"--set", "crdUpgrade.enabled=false",
+			)
+		}
 	}
 
 	if autoDryRun {
@@ -157,11 +221,11 @@ func runAuto(cmd *cobra.Command, args []string) error {
 			}
 
 			output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", monitoringChartDir))
-			monDepCmd := exec.Command("helm", "dependency", "build", monitoringChartDir)
+			monDepCmd := exec.Command("helm", "dependency", "update", monitoringChartDir)
 			monDepCmd.Stdout = os.Stdout
 			monDepCmd.Stderr = os.Stderr
 			if err := monDepCmd.Run(); err != nil {
-				output.Error(fmt.Sprintf("Monitoring helm dependency build failed: %v", err))
+				output.Error(fmt.Sprintf("Monitoring helm dependency update failed: %v", err))
 				output.Warn("Continuing without monitoring — Kafka cluster is deployed successfully")
 			} else {
 				monHelmArgs := []string{
