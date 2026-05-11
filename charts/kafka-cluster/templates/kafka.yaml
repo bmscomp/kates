@@ -20,12 +20,14 @@ spec:
       {{- range $key, $value := .Values.kafka.config }}
       {{ $key }}: {{ $value | toJson }}
       {{- end }}
+    {{- if .Values.kafka.metricsConfig.enabled }}
     metricsConfig:
       type: {{ .Values.kafka.metricsConfig.type }}
       valueFrom:
         configMapKeyRef:
           name: kafka-metrics
           key: kafka-metrics-config.yml
+    {{- end }}
     {{- with .Values.kafka.rack }}
     rack:
       {{- toYaml . | nindent 6 }}
@@ -65,10 +67,12 @@ spec:
     config: {{ .Values.cruiseControl.config | toYaml | nindent 6 }}
     resources:
       {{- toYaml .Values.cruiseControl.resources | nindent 6 }}
+    {{- if .Values.kafka.metricsConfig.enabled }}
     metricsConfig:
       type: {{ .Values.kafka.metricsConfig.type }}
       valueFrom:
         configMapKeyRef:
           name: kafka-metrics
           key: kafka-metrics-config.yml
+    {{- end }}
   {{- end }}

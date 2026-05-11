@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-standalone kafka-standalone-undeploy strimzi-install kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -444,6 +444,89 @@ kafka-undeploy:
 	kubectl delete pvc -l strimzi.io/cluster=krafter -n kafka --ignore-not-found
 	@echo "✅ Kafka cluster removed"
 
+# Install Strimzi Kafka Operator v1.0.0 standalone (prerequisite for kafka-standalone)
+STRIMZI_VERSION ?= 1.0.0
+strimzi-install:
+	@echo "📦 Installing Strimzi Kafka Operator v$(STRIMZI_VERSION)..."
+	@kubectl create namespace kafka 2>/dev/null || true
+	helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+		--version $(STRIMZI_VERSION) \
+		--namespace kafka \
+		--set watchAnyNamespace=true \
+		--set replicas=1 \
+		--timeout 5m --wait
+	@echo "✅ Strimzi Operator v$(STRIMZI_VERSION) installed"
+	@echo "  Verify: kubectl get pods -n kafka -l strimzi.io/kind=cluster-operator"
+
+# Deploy Kafka cluster standalone — no monitoring, no operator subchart.
+# Prerequisites:
+#   1. Strimzi operator must be pre-installed (run: make strimzi-install)
+#   2. No Prometheus/Grafana required
+# This is the minimal deployment target for Kafka-only environments.
+kafka-standalone:
+	@echo "📦 Deploying standalone Kafka cluster (no monitoring)..."
+	@echo ""
+	@echo "  Checking Strimzi operator..."
+	@if kubectl get pods -n kafka -l strimzi.io/kind=cluster-operator --no-headers 2>/dev/null | grep -q Running; then \
+		echo "  ✅ Strimzi operator is running"; \
+	else \
+		echo "  ❌ Strimzi operator not found. Install it first:"; \
+		echo "     make strimzi-install"; \
+		exit 1; \
+	fi
+	@echo ""
+	helm dependency build $(KAFKA_CHART_DIR) 2>/dev/null || true
+	helm upgrade --install kafka-cluster $(KAFKA_CHART_DIR) \
+		--namespace kafka --create-namespace \
+		--set strimziOperator.enabled=false \
+		--set kafka.metricsConfig.enabled=false \
+		--set kafkaExporter.enabled=false \
+		--set cruiseControl.enabled=false \
+		--set alerts.enabled=false \
+		--set podMonitors.enabled=false \
+		--set dashboards.enabled=false \
+		--set networkPolicies.enabled=false \
+		--set crdUpgrade.enabled=false \
+		-f $(KAFKA_CHART_DIR)/values-dev.yaml \
+		--timeout 10m
+	@echo ""
+	@echo "⏳ Waiting for Kafka cluster to be ready..."
+	kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n kafka || { \
+		echo "⚠️  Kafka CR not Ready yet — checking pods:"; \
+		kubectl get pods -n kafka -l strimzi.io/cluster=krafter; \
+		RUNNING=$$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter \
+			--field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' '); \
+		TOTAL=$$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter \
+			--no-headers 2>/dev/null | wc -l | tr -d ' '); \
+		if [ "$$RUNNING" -eq "$$TOTAL" ] && [ "$$TOTAL" -gt 0 ]; then \
+			echo "  All $$TOTAL pods Running — operator still reconciling."; \
+		else \
+			echo "  ❌ Only $$RUNNING/$$TOTAL pods Running."; \
+			exit 1; \
+		fi; \
+	}
+	@echo ""
+	@echo "⏳ Waiting for user secrets..."
+	kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
+	@echo ""
+	@echo "✅ Standalone Kafka deployment complete!"
+	@echo ""
+	@echo "  Cluster:       kubectl get kafka -n kafka"
+	@echo "  Pods:          kubectl get pods -n kafka"
+	@echo "  Helm tests:    helm test kafka-cluster -n kafka"
+	@echo "  Add UI:        make ui"
+
+kafka-standalone-undeploy:
+	@echo "🗑️  Removing standalone Kafka..."
+	helm uninstall kafka-cluster -n kafka 2>/dev/null || true
+	@echo "Cleaning up PVCs..."
+	kubectl delete pvc -l strimzi.io/cluster=krafter -n kafka --ignore-not-found
+	@echo ""
+	@echo "Note: Strimzi operator is NOT removed. To remove:"
+	@echo "  helm uninstall strimzi-operator -n kafka"
+	@echo "✅ Standalone Kafka removed"
+
+
 # Port Forwarding
 ports:
 	@echo "🔌 Starting Port Forwarding..."
@@ -560,6 +643,9 @@ help:
 	@echo "  kafka-deploy-generic-custom        - Generic + extra overlay (VALUES_FILE=...)"
 	@echo "  kafka-upgrade                      - Upgrade existing Kafka release (ENV=...)"
 	@echo "  kafka-undeploy                     - Remove Kafka Helm release + PVCs"
+	@echo "  strimzi-install                    - Install Strimzi operator v1.0.0 standalone"
+	@echo "  kafka-standalone                   - Deploy Kafka (no monitoring, operator pre-installed)"
+	@echo "  kafka-standalone-undeploy          - Remove standalone Kafka (keeps operator)"
 	@echo "  ui                                 - Deploy Kafka UI"
 	@echo "  apicurio                           - Deploy Apicurio Registry"
 	@echo "  jaeger                             - Deploy Jaeger (distributed tracing)"

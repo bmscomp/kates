@@ -17,10 +17,6 @@ maintainers:
 sources:
   - https://github.com/strimzi/strimzi-kafka-operator
 dependencies:
-  - name: strimzi-kafka-operator
-    version: "1.0.0"
-    repository: "oci://quay.io/strimzi-helm"
-    condition: strimziOperator.enabled
   - name: seaweedfs
     version: "3.68.0"
     repository: "https://seaweedfs.github.io/seaweedfs/helm"

@@ -1,3 +1,4 @@
+{{- if .Values.kafka.metricsConfig.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -82,3 +83,4 @@ data:
     - pattern: java.lang<type=(.+)><>(.+)
       name: java_lang_$1_$2
       type: GAUGE
+{{- end }}
