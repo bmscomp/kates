@@ -458,13 +458,14 @@ strimzi-install:
 	@echo "✅ Strimzi Operator v$(STRIMZI_VERSION) installed"
 	@echo "  Verify: kubectl get pods -n kafka -l strimzi.io/kind=cluster-operator"
 
-# Deploy Kafka cluster standalone — no monitoring, no operator subchart.
+# Deploy Kafka cluster standalone — same configuration as a normal deploy but
+# without monitoring dependencies or the operator subchart.
 # Prerequisites:
 #   1. Strimzi operator must be pre-installed (run: make strimzi-install)
-#   2. No Prometheus/Grafana required
-# Deploys on any standard Kubernetes cluster using the default StorageClass.
+# Keeps all existing pools, zones, storage classes, listeners, and resource
+# allocations — only strips Prometheus, Grafana, and PodMonitors.
 kafka-standalone:
-	@echo "📦 Deploying standalone Kafka cluster (generic Kubernetes)..."
+	@echo "📦 Deploying standalone Kafka cluster (ENV=$(ENV), no monitoring)..."
 	@echo ""
 	@echo "  Checking Strimzi operator..."
 	@if kubectl get pods -n kafka -l strimzi.io/kind=cluster-operator --no-headers 2>/dev/null | grep -q Running; then \
@@ -475,32 +476,9 @@ kafka-standalone:
 		exit 1; \
 	fi
 	@echo ""
-	helm dependency build $(KAFKA_CHART_DIR) 2>/dev/null || true
-	helm upgrade --install kafka-cluster $(KAFKA_CHART_DIR) \
-		--namespace kafka --create-namespace \
-		-f $(KAFKA_CHART_DIR)/values-generic.yaml \
-		--timeout 10m
+	STANDALONE_OVERLAY=$(KAFKA_CHART_DIR)/values-standalone.yaml ENV=$(ENV) ./scripts/deploy-kafka.sh
 	@echo ""
-	@echo "⏳ Waiting for Kafka cluster to be ready..."
-	kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n kafka || { \
-		echo "⚠️  Kafka CR not Ready yet — checking pods:"; \
-		kubectl get pods -n kafka -l strimzi.io/cluster=krafter; \
-		RUNNING=$$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter \
-			--field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' '); \
-		TOTAL=$$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter \
-			--no-headers 2>/dev/null | wc -l | tr -d ' '); \
-		if [ "$$RUNNING" -eq "$$TOTAL" ] && [ "$$TOTAL" -gt 0 ]; then \
-			echo "  All $$TOTAL pods Running — operator still reconciling."; \
-		else \
-			echo "  ❌ Only $$RUNNING/$$TOTAL pods Running."; \
-			exit 1; \
-		fi; \
-	}
-	@echo ""
-	@echo "⏳ Waiting for user secrets..."
-	kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
-	@echo ""
-	@echo "✅ Standalone Kafka deployment complete!"
+	@echo "✅ Standalone Kafka deployment complete (ENV=$(ENV))!"
 	@echo ""
 	@echo "  Cluster:       kubectl get kafka -n kafka"
 	@echo "  Pods:          kubectl get pods -n kafka"
