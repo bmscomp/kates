@@ -339,4 +339,18 @@ Use this checklist when auditing your deployment:
 - [ ] `deleteClaim: false` on all PVCs (data survives pod deletion)
 - [ ] Secrets are not committed to source control (Strimzi auto-generates)
 
+### Validating Policy Compliance
+
+To automate the verification of Kyverno policies, Strimzi operator health, and NetworkPolicy connectivity, you can use the built-in `make` target. This script will ensure your generic cluster is not blocking the Kafka deployment:
+
+```bash
+make kafka-verify-policies
+```
+
+This script will:
+1. Scan the `kafka` namespace events for any Kyverno rejections.
+2. Verify the Strimzi Operator is `Running`.
+3. Check the Kafka cluster CR status to ensure it successfully reached the `Ready` state.
+4. Spawn temporary pods in both the `default` and `kates` namespaces to verify NetworkPolicies (default-deny enforcement and explicitly allowed traffic).
+
 For deployment-level security details (Drain Cleaner, backup encryption), see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).

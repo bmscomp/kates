@@ -1,4 +1,4 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -415,6 +415,9 @@ kafka-upgrade: kafka-chart-deps
 kafka-detect:
 	@./scripts/kafka-cluster-report.sh
 
+kafka-verify-policies:
+	@./scripts/verify-kafka-policies.sh
+
 kafka-deploy-auto:
 	@echo "🤖 Starting Kates Auto-Deploy..."
 	cd cli && go run . auto --chart-dir ../$(KAFKA_CHART_DIR)
@@ -554,6 +557,7 @@ help:
 	@echo "  kafka                              - Deploy Kafka (shorthand for kafka-deploy)"
 	@echo "  kafka-deploy                       - Deploy Kafka via Helm (ENV=kind|dev|staging|prod)"
 	@echo "  kafka-detect                       - Deep cluster compatibility report for Kafka"
+	@echo "  kafka-verify-policies              - Verify Kyverno/network policy compliance for generic cluster"
 	@echo "  kafka-deploy-auto                  - Auto-detect cluster config and deploy Kafka"
 	@echo "  kafka-deploy-generic               - Full pipeline: detect → deploy → wait → verify"
 	@echo "  kafka-deploy-generic-interactive   - Same but prompts before deploy"
