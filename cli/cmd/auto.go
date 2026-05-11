@@ -58,17 +58,36 @@ func runAuto(cmd *cobra.Command, args []string) error {
 		autoSkipMonitoring = true
 		output.Hint("🔧 Standalone mode: operator subchart disabled, monitoring disabled")
 
-		// Verify Strimzi operator is pre-installed
-		checkCmd := exec.Command("kubectl", "get", "pods", "-n", autoNamespace,
+		// Verify Strimzi operator is pre-installed (check all namespaces)
+		operatorFound := false
+
+		// Check 1: look for running operator pod across all namespaces
+		checkCmd := exec.Command("kubectl", "get", "pods", "-A",
 			"-l", "strimzi.io/kind=cluster-operator", "--no-headers")
 		out, err := checkCmd.Output()
-		if err != nil || !strings.Contains(string(out), "Running") {
-			output.Error("Strimzi operator is not running in namespace " + autoNamespace)
-			output.Hint("Install it first: make strimzi-install")
-			output.Hint(fmt.Sprintf("Or: helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator --version 1.0.0 --namespace %s --wait", autoNamespace))
+		if err == nil && strings.Contains(string(out), "Running") {
+			operatorFound = true
+			// Extract the namespace from the first column
+			fields := strings.Fields(strings.Split(string(out), "\n")[0])
+			if len(fields) > 0 {
+				output.Success(fmt.Sprintf("Strimzi operator is running (namespace: %s)", fields[0]))
+			}
+		}
+
+		// Check 2: fallback — verify the Kafka CRD exists (operator installed but pod label may differ)
+		if !operatorFound {
+			crdCmd := exec.Command("kubectl", "get", "crd", "kafkas.kafka.strimzi.io", "--no-headers")
+			if crdOut, crdErr := crdCmd.Output(); crdErr == nil && len(crdOut) > 0 {
+				operatorFound = true
+				output.Success("Strimzi CRDs detected — operator is installed")
+			}
+		}
+
+		if !operatorFound {
+			output.Error("Strimzi operator not found in any namespace")
+			output.Hint("Install it: make strimzi-install")
 			os.Exit(1)
 		}
-		output.Success("Strimzi operator is running")
 	}
 	
 	executor := detect.NewOSExecutor()

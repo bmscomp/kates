@@ -468,8 +468,11 @@ kafka-standalone:
 	@echo "📦 Deploying standalone Kafka cluster (ENV=$(ENV), no monitoring)..."
 	@echo ""
 	@echo "  Checking Strimzi operator..."
-	@if kubectl get pods -n kafka -l strimzi.io/kind=cluster-operator --no-headers 2>/dev/null | grep -q Running; then \
-		echo "  ✅ Strimzi operator is running"; \
+	@if kubectl get pods -A -l strimzi.io/kind=cluster-operator --no-headers 2>/dev/null | grep -q Running; then \
+		NS=$$(kubectl get pods -A -l strimzi.io/kind=cluster-operator --no-headers 2>/dev/null | head -1 | awk '{print $$1}'); \
+		echo "  ✅ Strimzi operator is running (namespace: $$NS)"; \
+	elif kubectl get crd kafkas.kafka.strimzi.io --no-headers 2>/dev/null | grep -q kafkas; then \
+		echo "  ✅ Strimzi CRDs detected — operator is installed"; \
 	else \
 		echo "  ❌ Strimzi operator not found. Install it first:"; \
 		echo "     make strimzi-install"; \
