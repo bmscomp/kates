@@ -80,7 +80,16 @@ all: check-prerequisites
 	@# ── Step 5: Wait for Kafka CR Ready (handles KRaft voter-format upgrade) ──
 	@echo "Step 5: Waiting for Kafka cluster to be ready..."
 	@echo "  (First deploy may take up to 10 min for KRaft voter-format upgrade)"
-	@kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n kafka || \
+	@for i in $$(seq 1 60); do \
+		if kubectl get kafka/krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True"; then \
+			echo "  ✅ Kafka cluster is Ready!"; \
+			break; \
+		fi; \
+		echo "  ⏳ [$$i/60] Waiting 10s... Current Pod Status:"; \
+		kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:'.status.containerStatuses[*].ready' | sed 's/^/     /'; \
+		sleep 10; \
+	done
+	@kubectl wait kafka/krafter --for=condition=Ready --timeout=30s -n kafka || \
 		{ echo "❌ Kafka cluster did not reach Ready state:"; \
 		  kubectl get pods -n kafka -l strimzi.io/cluster=krafter; \
 		  kubectl get kafka -n kafka -o wide; exit 1; }
