@@ -22,8 +22,8 @@ kates detect --cluster-name "${CLUSTER_NAME}" --generate-values --values-output 
 
 # 2. Build dependencies
 info "Building Helm chart dependencies..."
-rm -rf "${CHART_DIR}/charts/"*.tgz "${CHART_DIR}/Chart.lock" 2>/dev/null || true
-helm dependency build "${CHART_DIR}" 2>/dev/null || true
+rm -f "${CHART_DIR}/charts/strimzi-kafka-operator"*.tgz 2>/dev/null || true
+helm dependency update "${CHART_DIR}" 2>/dev/null || helm dependency build "${CHART_DIR}"
 helm dependency build "${ROOT_DIR}/charts/kates" 2>/dev/null || true
 
 # 3. Adopt existing resources
