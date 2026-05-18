@@ -9,8 +9,8 @@ info "Deploying cert-manager ${CERT_MANAGER_VERSION}..."
 
 ensure_namespace kafka
 
-if kubectl get deployment cert-manager -n cert-manager &>/dev/null && \
-   kubectl rollout status deployment/cert-manager -n cert-manager --timeout=5s &>/dev/null; then
+if kubectl get deployment cert-manager -n kafka &>/dev/null && \
+   kubectl rollout status deployment/cert-manager -n kafka --timeout=5s &>/dev/null; then
     warn "cert-manager is already running — skipping deploy"
     exit 0
 fi
@@ -44,7 +44,7 @@ helm upgrade --install cert-manager jetstack/cert-manager \
 
 info "Waiting for cert-manager webhook to be ready..."
 kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=cert-manager \
-  -n cert-manager --timeout=120s
+  -n kafka --timeout=120s
 
 info "Creating self-signed ClusterIssuer..."
 kubectl apply -f - <<'EOF'
