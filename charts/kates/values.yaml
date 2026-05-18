@@ -243,7 +243,7 @@ initContainers:
 # -- Kafka connection configuration
 kafka:
   # -- Kafka bootstrap servers
-  bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  bootstrapServers: ""
   # -- Client rack ID for rack-aware consumption
   clientRack: ""
   # -- Security protocol

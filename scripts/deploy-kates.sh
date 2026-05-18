@@ -8,7 +8,8 @@ source "${SCRIPT_DIR}/common.sh"
 ENV="${ENV:-kind}"
 CHART_DIR="${ROOT_DIR}/charts/kates"
 RELEASE_NAME="kates"
-NAMESPACE="kafka"
+NAMESPACE="${NAMESPACE:-kafka}"
+CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
 
 info "Deploying Kates (env=${ENV})..."
 
@@ -74,10 +75,15 @@ info "  Namespace:   ${NAMESPACE}"
 info "  Environment: ${ENV}"
 info "  Values:      ${VALUES_ARGS[*]}"
 
+# Customize the Kates backend connection URL based on cluster config
+KAFKA_BOOTSTRAP="${CLUSTER_NAME}-kafka-bootstrap.${NAMESPACE}.svc:9092"
+info "  Bootstrap:   ${KAFKA_BOOTSTRAP}"
+
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
-    --timeout 5m \
+    --set kafka.bootstrapServers="${KAFKA_BOOTSTRAP}" \
+    --timeout 5m
 
 
 info "✅ Kates deployment complete (env=${ENV})!"

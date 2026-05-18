@@ -32,7 +32,12 @@ while ! kubectl get secret kafka-ui -n kafka &>/dev/null; do
 done
 info "Secret kafka-ui found"
 
-kubectl apply -f config/kafka-ui/kafka-ui.yaml
+CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
+KAFKA_BOOTSTRAP="${CLUSTER_NAME}-kafka-bootstrap:9092"
+
+sed -e "s/name: krafter/name: ${CLUSTER_NAME}/g" \
+    -e "s/bootstrapServers: krafter-kafka-bootstrap:9092/bootstrapServers: ${KAFKA_BOOTSTRAP}/g" \
+    config/kafka-ui/kafka-ui.yaml | kubectl apply -n kafka -f -
 
 info "Waiting for Kafka UI to be ready..."
 kubectl wait --for=condition=available --timeout=120s deployment/kafka-ui -n kafka
