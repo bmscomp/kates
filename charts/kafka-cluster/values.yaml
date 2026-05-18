@@ -13,9 +13,9 @@ global:
 # Per-component image references for test pods and utilities.
 images:
   # Tester image used in Helm test tier 2 (produce/consume round-trip) and kubectl tests
-  kafka: "ghcr.io/bmscomp/kates-tester:latest"
+  kafka: "ghcr.io/bmscomp/kates-tester:sha-ada3b78"
   # kubectl image used in Helm tests and CRD upgrade hooks
-  kubectl: "ghcr.io/bmscomp/kates-tester:latest"
+  kubectl: "ghcr.io/bmscomp/kates-tester:sha-ada3b78"
 
 kafka:
   listeners:
