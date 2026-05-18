@@ -27,15 +27,7 @@ all: check-prerequisites
 			--timeout 5m --wait; \
 	fi
 	@echo ""
-	@if kubectl get pods -n kafka -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Monitoring already deployed — skipping"; \
-	else \
-		echo "Step 2: Deploying Monitoring (Prometheus & Grafana)..."; \
-		./scripts/deploy-monitoring.sh; \
-		echo "Step 3: Waiting for monitoring to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n kafka --timeout=120s || true; \
-	fi
-	@echo ""
+
 	@if kubectl get deployment cert-manager -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
 		echo "✅ cert-manager already deployed — skipping"; \
 	else \
@@ -126,7 +118,6 @@ all: check-prerequisites
 	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
 	@echo ""
 	@echo "📊 Services deployed:"
-	@echo "  ✓ Prometheus & Grafana (Monitoring)"
 	@echo "  ✓ Kafka Cluster (Strimzi KRaft mode)"
 	@echo "  ✓ Kafka UI"
 	@echo "  ✓ Apicurio Registry"
@@ -134,11 +125,9 @@ all: check-prerequisites
 	@echo "  ✓ Kates"
 	@echo ""
 	@echo "🔗 Access points:"
-	@echo "  - Grafana:          http://localhost:30080 (admin/admin)"
 	@echo "  - Kafka UI:         http://localhost:30081"
 	@echo "  - Apicurio Registry:http://localhost:30082"
 	@echo "  - Kates:            http://localhost:30083"
-	@echo "  - Prometheus:       http://localhost:30090"
 	@echo "  - Jaeger UI:        http://localhost:30086"
 	@echo "  - Litmus UI:        http://localhost:9091  (admin/litmus)"
 	@echo ""
