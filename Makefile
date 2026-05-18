@@ -311,6 +311,8 @@ test-capacity:
 
 # Kates CLI (standalone install)
 cli-build:
+	@echo "🔨 Building Kates CLI locally..."
+	cd cli && go build -ldflags="-s -w" -o dist/kates .
 	@echo "🔨 Cross-compiling Kates CLI for all platforms..."
 	cd cli && bash build.sh
 
