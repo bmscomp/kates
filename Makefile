@@ -27,15 +27,13 @@ detect: check-prerequisites
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
-	@# ── Step 1: Cluster connectivity ──
+	@# ── Step 1: Cluster connectivity (auto-create Kind if none found) ──
 	@if kubectl cluster-info >/dev/null 2>&1; then \
 		CONTEXT=$$(kubectl config current-context); \
 		echo "✅ Kubernetes cluster reachable (context: $$CONTEXT)"; \
 	else \
-		echo "❌ No Kubernetes cluster reachable."; \
-		echo "   For Kind: run 'make cluster' first."; \
-		echo "   For other providers: ensure kubectl is configured."; \
-		exit 1; \
+		echo "⚠️  No Kubernetes cluster reachable — creating Kind cluster..."; \
+		$(MAKE) cluster; \
 	fi
 	@echo ""
 	@# ── Step 2: Detect cluster configuration ──
@@ -80,11 +78,13 @@ all: check-prerequisites
 		echo "Step 4: Deploying Kafka (Strimzi)..."; \
 		./scripts/deploy-kafka-generic.sh --yes; \
 	fi
-	@# ── Step 5: Wait for Kafka ──
-	@echo "Step 5: Waiting for Kafka to be ready..."
-	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || \
-		{ echo "❌ Kafka pods did not reach Ready state:"; \
-		  kubectl get pods -n kafka -l strimzi.io/cluster=krafter; exit 1; }
+	@# ── Step 5: Wait for Kafka CR Ready (handles KRaft voter-format upgrade) ──
+	@echo "Step 5: Waiting for Kafka cluster to be ready..."
+	@echo "  (First deploy may take up to 10 min for KRaft voter-format upgrade)"
+	@kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n kafka || \
+		{ echo "❌ Kafka cluster did not reach Ready state:"; \
+		  kubectl get pods -n kafka -l strimzi.io/cluster=krafter; \
+		  kubectl get kafka -n kafka -o wide; exit 1; }
 	@echo ""
 	@# ── Step 6: Wait for Entity Operator (HARD GATE) ──
 	@echo "Step 6: Waiting for Entity Operator..."
@@ -100,6 +100,15 @@ all: check-prerequisites
 	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || \
 		{ echo "⚠️  Some KafkaUsers did not reach Ready:"; \
 		  kubectl get kafkauser -n kafka -o wide; }
+	@echo ""
+	@# ── Step 7.5: Network Policies (if CNI supports them) ──
+	@if grep -A1 'networkPolicies:' $(DETECTED_VALUES) | grep -q 'enabled: true'; then \
+		echo "Step 7.5: Applying Kafka network policies..."; \
+		kubectl apply -f config/kafka/kafka-networkpolicies.yaml; \
+		echo "✅ NetworkPolicies applied"; \
+	else \
+		echo "⏭️  NetworkPolicies skipped (CNI does not support them)"; \
+	fi
 	@echo ""
 	@# ── Step 8: Apicurio Registry ──
 	@if kubectl get deployment apicurio-registry -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
@@ -204,14 +213,24 @@ cluster:
 	@echo "🎯 Starting Kind cluster..."
 	./scripts/start-cluster.sh
 
-# Deploy monitoring stack only
+# Deploy monitoring stack (auto-detect provider)
 monitoring:
-	@echo "📊 Deploying monitoring stack (Kind)..."
-	helm dependency build charts/monitoring
+	@echo "📊 Deploying monitoring stack..."
+	@helm dependency build charts/monitoring 2>/dev/null || true
+	@PROVIDER="generic"; \
+	if [ -f "$(DETECTED_VALUES)" ]; then \
+		PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
+	fi; \
+	MON_VALUES="charts/monitoring/values-generic.yaml"; \
+	if [ "$$PROVIDER" = "kind" ] && [ -f "charts/monitoring/values-kind.yaml" ]; then \
+		MON_VALUES="charts/monitoring/values-kind.yaml"; \
+	fi; \
+	echo "  Provider: $$PROVIDER → $$MON_VALUES"; \
 	helm upgrade --install monitoring charts/monitoring \
 		--namespace kafka --create-namespace \
-		-f charts/monitoring/values-kind.yaml \
+		-f "$$MON_VALUES" \
 		--timeout 10m --wait
+	@echo "✅ Monitoring stack deployed"
 
 monitoring-generic:
 	@echo "📊 Deploying monitoring stack (Generic)..."

@@ -7,6 +7,7 @@ on:
       - "config/**"
       - "scripts/**"
       - "charts/**"
+      - "cli/**"
       - "Makefile"
   workflow_dispatch:
 
@@ -57,6 +58,21 @@ jobs:
               echo "❌ Zone ${zone} node missing" && exit 1
             fi
           done
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: cli/go.sum
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      - name: "CI Gate: kates detect --fail-on-error"
+        run: |
+          echo "Running cluster compatibility check..."
+          ./build/kates detect --fail-on-error --quiet
+          echo "✅ Cluster is compatible with Kafka deployment"
 
       - name: Helm lint — all charts
         run: |
@@ -130,6 +146,7 @@ jobs:
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Kind cluster creation | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| 3-zone topology | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| kates detect gate | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Helm lint | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| YAML validation | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Storage classes | ✅ |" >> $GITHUB_STEP_SUMMARY
