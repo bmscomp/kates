@@ -14,6 +14,19 @@ all: check-prerequisites
 		./scripts/start-cluster.sh; \
 	fi
 	@echo ""
+	@if kubectl get deployment strimzi-cluster-operator -n strimzi-operator --no-headers 2>/dev/null | grep -q '1/1'; then \
+		echo "✅ Strimzi Operator already deployed — skipping"; \
+	else \
+		echo "Step 1.5: Installing Strimzi Operator (cluster-wide)..."; \
+		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
+		helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+			--version 1.0.0 \
+			--namespace strimzi-operator \
+			--set watchAnyNamespace=true \
+			--set replicas=1 \
+			--timeout 5m --wait; \
+	fi
+	@echo ""
 	@if kubectl get pods -n kafka -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Monitoring already deployed — skipping"; \
 	else \
