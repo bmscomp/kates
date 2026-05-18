@@ -655,6 +655,12 @@ kyverno-permissive:
 	@kubectl rollout restart deployment -n kyverno -l app.kubernetes.io/name=kyverno 2>/dev/null || true
 	@echo "✅ Kyverno is now in permissive mode."
 
+kyverno-audit:
+	@echo "👁️  Setting all Kyverno policies to Audit mode..."
+	@kubectl get clusterpolicy -o name 2>/dev/null | xargs -I {} kubectl patch {} --type='json' -p='[{"op": "replace", "path": "/spec/validationFailureAction", "value": "Audit"}]' 2>/dev/null || true
+	@kubectl get policy -A -o name 2>/dev/null | xargs -I {} kubectl patch {} --type='json' -p='[{"op": "replace", "path": "/spec/validationFailureAction", "value": "Audit"}]' 2>/dev/null || true
+	@echo "✅ All policies set to Audit mode."
+
 # Help
 help:
 	@echo "Available targets:"
@@ -724,6 +730,7 @@ help:
 	@echo "  chaos-status                       - Show chaos infrastructure status"
 	@echo "  gameday                            - Run automated GameDay validation"
 	@echo "  kyverno-permissive                 - Make Kyverno completely permissive (ignore all)"
+	@echo "  kyverno-audit                      - Set all Kyverno policies to Audit mode"
 	@echo "  destroy                            - Destroy cluster (FORCE=1 to skip prompt)"
 	@echo "  help                               - Show this help"
 
