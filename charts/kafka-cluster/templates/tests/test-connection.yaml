@@ -17,14 +17,17 @@ spec:
   containers:
     - name: kafka-health
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
           set -e
           echo "=== Tier 1: Bootstrap Connectivity ==="
           BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
-          echo "Testing TCP connection to ${BOOTSTRAP}..."
-          timeout 10 sh -c "echo > /dev/tcp/$(echo $BOOTSTRAP | cut -d: -f1)/$(echo $BOOTSTRAP | cut -d: -f2)" 2>/dev/null
+          HOST=$(echo $BOOTSTRAP | cut -d: -f1)
+          PORT=$(echo $BOOTSTRAP | cut -d: -f2)
+          echo "Testing TCP connection to ${HOST}:${PORT}..."
+          nc -zv -w 5 $HOST $PORT
           echo "✓ Bootstrap connectivity OK"
 
           echo ""
@@ -73,12 +76,13 @@ spec:
   containers:
     - name: produce-consume
       image: {{ include "kafka-cluster.kafkaImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
           set -e
           BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
-          TOPIC="__helm-test-$(date +%s)"
+          TOPIC="helm-test-$(date +%s)"
           MSG="helm-test-roundtrip-$(date +%s)"
 
           echo "=== Tier 2: Produce/Consume Round-Trip ==="
@@ -91,31 +95,37 @@ spec:
 
           echo "Creating test topic via CRD: ${TOPIC}..."
           cat <<EOF | kubectl apply -f -
-apiVersion: kafka.strimzi.io/v1beta2
-kind: KafkaTopic
-metadata:
-  name: ${TOPIC}
-  namespace: {{ include "kafka-cluster.namespace" . }}
-  labels:
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 60000
-EOF
+          apiVersion: kafka.strimzi.io/v1
+          kind: KafkaTopic
+          metadata:
+            name: ${TOPIC}
+            namespace: {{ include "kafka-cluster.namespace" . }}
+            labels:
+              strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+          spec:
+            partitions: 1
+            replicas: 1
+            config:
+              retention.ms: 60000
+          EOF
 
           echo "Waiting for topic to be ready..."
           kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=30s -n {{ include "kafka-cluster.namespace" . }}
 
           PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
-          KCAT_OPTS="-b ${BOOTSTRAP} -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=SCRAM-SHA-512 -X sasl.username=kates-backend -X sasl.password=${PASSWORD}"
+          
+          # Create client properties for Java tools (bypassing kcat librdkafka SCRAM-SHA-512 bug with Kafka 4.0+)
+          cat > /tmp/client.properties << EOF
+          security.protocol=SASL_PLAINTEXT
+          sasl.mechanism=SCRAM-SHA-512
+          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="${PASSWORD}";
+          EOF
 
           echo "Producing test record..."
-          echo "${MSG}" | kcat -P ${KCAT_OPTS} -t ${TOPIC} 2>/dev/null
+          echo "${MSG}" | kafka-console-producer.sh --broker-list ${BOOTSTRAP} --topic ${TOPIC} --producer.config /tmp/client.properties 2>/dev/null
 
           echo "Consuming test record..."
-          RECEIVED=$(timeout 15 kcat -C ${KCAT_OPTS} -t ${TOPIC} -c 1 -o beginning 2>/dev/null || true)
+          RECEIVED=$(timeout 15 kafka-console-consumer.sh --bootstrap-server ${BOOTSTRAP} --topic ${TOPIC} --from-beginning --max-messages 1 --consumer.config /tmp/client.properties 2>/dev/null || true)
 
           if echo "${RECEIVED}" | grep -q "${MSG}"; then
             echo "✓ Round-trip OK: produced and consumed '${MSG}'"
@@ -165,6 +175,7 @@ spec:
   containers:
     - name: auth-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -236,6 +247,7 @@ spec:
   containers:
     - name: kraft-quorum
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -306,6 +318,7 @@ spec:
   containers:
     - name: topic-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -383,6 +396,7 @@ spec:
   containers:
     - name: listener-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -455,6 +469,7 @@ spec:
   containers:
     - name: nodepool-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -533,6 +548,7 @@ spec:
   containers:
     - name: cruise-control-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -601,6 +617,7 @@ spec:
   containers:
     - name: metrics-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
