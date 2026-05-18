@@ -7,8 +7,9 @@ TIMER := $(shell date +%s)
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
-	@if kind get clusters 2>/dev/null | grep -q '^panda$$' && kubectl cluster-info --context kind-panda >/dev/null 2>&1; then \
-		echo "✅ Kind cluster 'panda' already running — skipping creation"; \
+	@if kubectl cluster-info >/dev/null 2>&1; then \
+		CONTEXT=$$(kubectl config current-context); \
+		echo "✅ Kubernetes cluster already running (context: $$CONTEXT) — skipping creation"; \
 	else \
 		echo "Step 1: Starting Kind cluster + registry..."; \
 		./scripts/start-cluster.sh; \
