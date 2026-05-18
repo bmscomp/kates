@@ -48,6 +48,9 @@ spec:
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: {{ include "apicurio-registry.kafkaBootstrapServers" . }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

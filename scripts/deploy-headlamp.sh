@@ -13,11 +13,11 @@ if deployment_exists headlamp headlamp; then
     fi
 fi
 
-ensure_namespace headlamp
+ensure_namespace kafka
 
 info "Installing Headlamp via Helm..."
 helm upgrade --install headlamp "${CHARTS_DIR}/headlamp" \
-    --namespace headlamp \
+    --namespace kafka \
 \
     --timeout 120s
 

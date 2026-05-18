@@ -7,7 +7,7 @@ source "${SCRIPT_DIR}/../versions.env"
 
 info "Deploying cert-manager ${CERT_MANAGER_VERSION}..."
 
-ensure_namespace cert-manager
+ensure_namespace kafka
 
 if kubectl get deployment cert-manager -n cert-manager &>/dev/null && \
    kubectl rollout status deployment/cert-manager -n cert-manager --timeout=5s &>/dev/null; then
@@ -22,7 +22,7 @@ helm repo update jetstack
 info "Installing cert-manager..."
 helm upgrade --install cert-manager jetstack/cert-manager \
   --version "${CERT_MANAGER_VERSION}" \
-  --namespace cert-manager \
+  --namespace kafka \
   --set crds.enabled=true \
   --set image.pullPolicy=IfNotPresent \
   --set webhook.image.pullPolicy=IfNotPresent \

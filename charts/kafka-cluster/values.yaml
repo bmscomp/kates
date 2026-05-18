@@ -392,7 +392,7 @@ users:
 alerts:
   enabled: true
   labels:
-    release: monitoring
+    release: kafka
     prometheus: kube-prometheus
 
 networkPolicies:
@@ -411,7 +411,7 @@ networkPolicies:
   allowedClientNamespaces:
     - kates
     - litmus
-  monitoringNamespace: monitoring
+  monitoringNamespace: kafka
 
 tieredStorage:
   enabled: false
@@ -541,7 +541,7 @@ crdUpgrade:
 
 dashboards:
   enabled: true
-  namespace: monitoring
+  namespace: kafka
   label: grafana_dashboard
   labelValue: "1"
   brokerDashboard: true
@@ -599,7 +599,7 @@ drainCleaner:
 podMonitors:
   enabled: true
   labels:
-    release: monitoring
+    release: kafka
 
 strimziOperator:
   enabled: true
@@ -645,7 +645,7 @@ strimzi-kafka-operator:
     periodSeconds: 30
   dashboards:
     enabled: true
-    namespace: monitoring
+    namespace: kafka
     label: grafana_dashboard
     labelValue: "1"
   generateNetworkPolicy: true

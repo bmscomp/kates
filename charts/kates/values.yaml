@@ -334,7 +334,7 @@ networkPolicy:
     port: 9092
   # -- Prometheus egress configuration
   prometheus:
-    namespace: monitoring
+    namespace: kafka
     port: 9090
   # -- Extra egress rules
   egressRules: []
