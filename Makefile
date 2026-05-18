@@ -41,12 +41,8 @@ all: check-prerequisites
 	fi
 	@echo ""
 
-	@if kubectl get deployment cert-manager -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
-		echo "✅ cert-manager already deployed — skipping"; \
-	else \
-		echo "Step 3: Deploying cert-manager..."; \
-		./scripts/deploy-cert-manager.sh; \
-	fi
+	@echo "Step 3: Deploying cert-manager..."
+	@./scripts/deploy-cert-manager.sh
 	@echo ""
 	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kafka already deployed — skipping"; \
