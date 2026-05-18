@@ -16,9 +16,7 @@ data:
               org.apache.kafka.common.security.scram.ScramLoginModule required
               username="kafka-ui"
               password="${KAFKA_UI_PASSWORD}";
-          metrics:
-            port: 9404
-            type: JMX
+
     auth:
       type: DISABLED
     management:
