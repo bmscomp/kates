@@ -52,17 +52,14 @@ all: check-prerequisites
 		echo "Step 5: Waiting for Kafka to be ready..."; \
 		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
 	fi
+	@echo "Ensuring Strimzi Entity Operator is ready..."
+	@kubectl wait deployment -l app.kubernetes.io/name=entity-operator -n kafka --for=condition=Available --timeout=120s 2>/dev/null || true
 	@echo "Ensuring Kafka users and topics are applied..."
 	@kubectl apply -f config/kafka/kafka-users.yaml
 	@kubectl apply -f config/kafka/kafka-topics.yaml
 	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
 	@echo ""
-	@if kubectl get pods -n kafka -l app=kafka-ui --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kafka UI already deployed — skipping"; \
-	else \
-		echo "Step 6: Deploying Kafka UI..."; \
-		./scripts/deploy-kafka-ui.sh; \
-	fi
+	@echo "✅ Skipping Kafka UI deployment as requested"
 	@echo ""
 	@if kubectl get deployment apicurio-registry -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
 		echo "✅ Apicurio Registry already deployed — skipping"; \

@@ -388,12 +388,6 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 						},
 					},
 				},
-				{
-					Name: "kafka-ui",
-					Authentication: GenUserAuth{
-						Type: "scram-sha-512",
-					},
-				},
 			},
 		},
 		StrimziSubchart: GenStrimziSubchart{},
