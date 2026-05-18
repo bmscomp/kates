@@ -14,16 +14,16 @@ all: check-prerequisites
 		./scripts/start-cluster.sh; \
 	fi
 	@echo ""
-	@if kubectl get pods -n monitoring -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
+	@if kubectl get pods -n kafka -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Monitoring already deployed — skipping"; \
 	else \
 		echo "Step 2: Deploying Monitoring (Prometheus & Grafana)..."; \
 		./scripts/deploy-monitoring.sh; \
 		echo "Step 3: Waiting for monitoring to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true; \
+		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n kafka --timeout=120s || true; \
 	fi
 	@echo ""
-	@if kubectl get deployment cert-manager -n cert-manager --no-headers 2>/dev/null | grep -q '1/1'; then \
+	@if kubectl get deployment cert-manager -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
 		echo "✅ cert-manager already deployed — skipping"; \
 	else \
 		echo "Step 3: Deploying cert-manager..."; \
@@ -50,24 +50,24 @@ all: check-prerequisites
 		./scripts/deploy-kafka-ui.sh; \
 	fi
 	@echo ""
-	@if kubectl get deployment apicurio-registry -n apicurio --no-headers 2>/dev/null | grep -q '1/1'; then \
+	@if kubectl get deployment apicurio-registry -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
 		echo "✅ Apicurio Registry already deployed — skipping"; \
 	else \
 		echo "Step 7: Deploying Apicurio Registry..."; \
 		./scripts/deploy-apicurio.sh; \
 	fi
 	@echo ""
-	@if kubectl get pods -n litmus -l app.kubernetes.io/instance=chaos --no-headers 2>/dev/null | grep -q Running; then \
+	@if kubectl get pods -n kafka -l app.kubernetes.io/instance=chaos --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
 		echo "Step 8: Deploying LitmusChaos..."; \
 		helm dependency update charts/kates-chaos; \
 		helm upgrade --install chaos charts/kates-chaos \
-			-n litmus --create-namespace \
+			-n kafka --create-namespace \
 			-f charts/kates-chaos/values-kind.yaml \
 			--timeout 10m; \
 		echo "Waiting for Litmus pods to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=chaos -n litmus --timeout=300s 2>/dev/null || true; \
+		kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=chaos -n kafka --timeout=300s 2>/dev/null || true; \
 	fi
 	@echo ""
 	@echo "Step 9: Verifying chaos infrastructure..."
@@ -77,14 +77,14 @@ all: check-prerequisites
 		echo "⚠️  Litmus CRDs not found — chaos provider will fall back to noop"; \
 	fi
 	@echo ""
-	@if kubectl get pods -n monitoring -l app=jaeger --no-headers 2>/dev/null | grep -q Running; then \
+	@if kubectl get pods -n kafka -l app=jaeger --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Jaeger already deployed — skipping"; \
 	else \
 		echo "Step 9.5: Deploying Jaeger (distributed tracing)..."; \
 		./scripts/deploy-jaeger.sh || true; \
 	fi
 	@echo ""
-	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
+	@if kubectl get pods -n kafka -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping"; \
 	else \
 		echo "Step 10: Deploying Kates (using released image)..."; \
@@ -98,13 +98,13 @@ all: check-prerequisites
 		echo "Copying Kafka SASL credentials to kates namespace..."; \
 		kubectl get secret kates-backend -n kafka -o json \
 			| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-			| kubectl apply -n kates -f -; \
+			| kubectl apply -n kafka -f -; \
 		kubectl apply -f kates/k8s/postgres.yaml; \
 		echo "Waiting for PostgreSQL to be ready..."; \
-		kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s; \
+		kubectl wait --for=condition=Ready pod -l app=postgres -n kafka --timeout=120s; \
 		kubectl apply -f kates/k8s/deployment.yaml; \
 		kubectl apply -f kates/k8s/service.yaml; \
-		kubectl rollout status deployment/kates -n kates --timeout=300s; \
+		kubectl rollout status deployment/kates -n kafka --timeout=300s; \
 	fi
 	@echo ""
 	@echo "Step 11: Exposing service ports..."
@@ -146,7 +146,7 @@ monitoring:
 	@echo "📊 Deploying monitoring stack (Kind)..."
 	helm dependency build charts/monitoring
 	helm upgrade --install monitoring charts/monitoring \
-		--namespace monitoring --create-namespace \
+		--namespace kafka --create-namespace \
 		-f charts/monitoring/values-kind.yaml \
 		--timeout 10m --wait
 
@@ -154,15 +154,15 @@ monitoring-generic:
 	@echo "📊 Deploying monitoring stack (Generic)..."
 	helm dependency build charts/monitoring
 	helm upgrade --install monitoring charts/monitoring \
-		--namespace monitoring --create-namespace \
+		--namespace kafka --create-namespace \
 		-f charts/monitoring/values-generic.yaml \
 		--timeout 10m --wait
 
 monitoring-undeploy:
 	@echo "🗑️ Undeploying monitoring stack..."
-	helm uninstall monitoring -n monitoring || true
-	kubectl delete pvc --all -n monitoring || true
-	kubectl delete namespace monitoring || true
+	helm uninstall monitoring -n kafka || true
+	kubectl delete pvc --all -n kafka || true
+	kubectl # delete namespace monitoring || true
 
 cert-manager:
 	@echo "🔐 Deploying cert-manager..."
@@ -272,19 +272,19 @@ kates-deploy:
 	@echo "Copying Kafka SASL credentials to kates namespace..."
 	@kubectl get secret kates-backend -n kafka -o json \
 		| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-		| kubectl apply -n kates -f -
+		| kubectl apply -n kafka -f -
 	kubectl apply -f kates/k8s/postgres.yaml
 	@echo "Waiting for PostgreSQL to be ready..."
-	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
+	@kubectl wait --for=condition=Ready pod -l app=postgres -n kafka --timeout=120s
 	kubectl apply -f kates/k8s/deployment.yaml
 	kubectl apply -f kates/k8s/service.yaml
-	kubectl rollout status deployment/kates -n kates --timeout=300s
+	kubectl rollout status deployment/kates -n kafka --timeout=300s
 	@echo "✅ Kates is running"
 
 kates-redeploy:
 	@echo "🔄 Redeploying Kates..."
-	kubectl rollout restart deployment/kates -n kates
-	kubectl rollout status deployment/kates -n kates --timeout=300s
+	kubectl rollout restart deployment/kates -n kafka
+	kubectl rollout status deployment/kates -n kafka --timeout=300s
 
 kates-secret:
 	@echo "🔐 Setting up Kafka SASL credentials in kates namespace..."
@@ -309,15 +309,15 @@ kates-secret:
 
 kates-logs:
 	@echo "📋 Streaming Kates logs..."
-	kubectl logs -f -l app=kates -n kates
+	kubectl logs -f -l app=kates -n kafka
 
 kates-undeploy:
 	@echo "🗑️  Removing Kates..."
-	kubectl delete namespace kates --ignore-not-found
+	kubectl # kubectl delete namespace kates --ignore-not-found
 	@echo "✅ Kates removed"
 
 CLUSTER_NAME   ?= panda
-KATES_NS       ?= kates
+KATES_NS       ?= kafka
 KATES_IMAGE    ?= kates:latest
 CHART_REGISTRY ?= oci://ghcr.io/klster/charts
 CHART_DIR      := charts/kates
@@ -462,32 +462,32 @@ litmus:
 	@echo "⚡ Deploying Kates Chaos (LitmusChaos)..."
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
-		-n litmus --create-namespace \
+		-n kafka --create-namespace \
 		-f charts/kates-chaos/values-kind.yaml \
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed"
 
 litmus-undeploy:
 	@echo "🧹 Removing Kates Chaos (LitmusChaos)..."
-	@helm uninstall chaos -n litmus 2>/dev/null || true
-	@kubectl delete pvc --all -n litmus 2>/dev/null || true
-	@kubectl delete all --all -n litmus 2>/dev/null || true
-	@kubectl delete namespace litmus 2>/dev/null || true
+	@helm uninstall chaos -n kafka 2>/dev/null || true
+	@kubectl delete pvc --all -n kafka 2>/dev/null || true
+	@kubectl delete all --all -n kafka 2>/dev/null || true
+	@kubectl # delete namespace litmus 2>/dev/null || true
 	@echo "✅ Kates Chaos removed"
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."
 	@echo "Access at: http://localhost:9091 (admin/litmus)"
-	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus
+	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n kafka
 
 chaos-status:
 	@echo "📊 Chaos Status:"
 	@echo ""
 	@echo "Helm Release:"
-	@helm list -n litmus 2>/dev/null || echo "No release found"
+	@helm list -n kafka 2>/dev/null || echo "No release found"
 	@echo ""
 	@echo "Pods:"
-	@kubectl get pods -n litmus 2>/dev/null || echo "No pods found"
+	@kubectl get pods -n kafka 2>/dev/null || echo "No pods found"
 	@echo ""
 	@echo "ChaosExperiments (kafka):"
 	@kubectl get chaosexperiments -n kafka 2>/dev/null || echo "No experiments found"
@@ -502,19 +502,19 @@ litmus-generic:
 	@echo "⚡ Deploying Kates Chaos (generic Kubernetes)..."
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
-		-n litmus --create-namespace \
+		-n kafka --create-namespace \
 		-f charts/kates-chaos/values-generic.yaml \
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed (generic)"
 
 litmus-test:
 	@echo "🧪 Running Helm tests..."
-	helm test chaos -n litmus
+	helm test chaos -n kafka
 
 litmus-gameday:
 	@echo "🎮 Triggering GameDay validation..."
 	helm upgrade chaos charts/kates-chaos \
-		-n litmus \
+		-n kafka \
 		-f charts/kates-chaos/values-kind.yaml \
 		--set gameday.enabled=true \
 		--timeout 5m --wait
@@ -619,8 +619,8 @@ help:
 logs:
 	@echo "📋 Streaming logs from all services (Ctrl+C to stop)..."
 	@echo ""
-	@kubectl logs -f -l app=kates -n kates --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l app=kates -n kafka --prefix --tail=20 2>/dev/null &
 	@kubectl logs -f -l strimzi.io/cluster=krafter -n kafka --prefix --tail=20 2>/dev/null &
-	@kubectl logs -f -l app.kubernetes.io/name=grafana -n monitoring --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l app.kubernetes.io/name=grafana -n kafka --prefix --tail=20 2>/dev/null &
 	@kubectl logs -f -l app=kafka-ui -n kafka --prefix --tail=20 2>/dev/null &
 	@wait

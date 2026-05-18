@@ -31,14 +31,14 @@ forward() {
     fi
 }
 
-forward "Grafana"           "📊" monitoring-grafana                          30080 80   monitoring
+forward "Grafana"           "📊" monitoring-grafana                          30080 80   kafka
 forward "Kafka UI"          "🖥️ " kafka-ui                                   30081 8080 kafka
-forward "Apicurio Registry" "📚" apicurio-registry                          30082 8080 apicurio
-forward "Kates API"         "🧪" kates                                      30083 8080 kates
-forward "Prometheus"        "🔥" monitoring-kube-prometheus-prometheus       30090 9090 monitoring
-forward "Jaeger UI"         "🔍" jaeger-query                               30086 16686 monitoring
-forward "Litmus UI"         "⚡" chaos-litmus-frontend-service              9091  9091 litmus
-forward "Headlamp"          "🔭" headlamp                                   30084 80   headlamp
+forward "Apicurio Registry" "📚" apicurio-registry                          30082 8080 kafka
+forward "Kates API"         "🧪" kates                                      30083 8080 kafka
+forward "Prometheus"        "🔥" monitoring-kube-prometheus-prometheus       30090 9090 kafka
+forward "Jaeger UI"         "🔍" jaeger-query                               30086 16686 kafka
+forward "Litmus UI"         "⚡" chaos-litmus-frontend-service              9091  9091 kafka
+forward "Headlamp"          "🔭" headlamp                                   30084 80   kafka
 
 echo ""
 info "✅ Port forwarding: ${FORWARDED} active, ${SKIPPED} skipped"
