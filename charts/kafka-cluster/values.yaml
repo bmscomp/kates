@@ -15,7 +15,7 @@ images:
   # Kafka client image used in Helm test tier 2 (produce/consume round-trip)
   kafka: "quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
   # kubectl image used in Helm tests and CRD upgrade hooks
-  kubectl: "bitnami/kubectl:1.33.0"
+  kubectl: "bitnami/kubectl:latest"
 
 kafka:
   listeners:
