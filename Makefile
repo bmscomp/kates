@@ -15,8 +15,9 @@ all: check-prerequisites
 		./scripts/start-cluster.sh; \
 	fi
 	@echo ""
-	@if kubectl get deployment strimzi-cluster-operator -n strimzi-operator --no-headers 2>/dev/null | grep -q '1/1'; then \
-		echo "✅ Strimzi Operator already deployed — skipping"; \
+	@EXISTING_STRIMZI=$$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi.*operator/ {print $$1}' | head -n1); \
+	if [ -n "$$EXISTING_STRIMZI" ]; then \
+		echo "✅ Strimzi Operator already deployed (in namespace: $$EXISTING_STRIMZI) — skipping"; \
 	else \
 		echo "Step 1.5: Installing Strimzi Operator (cluster-wide)..."; \
 		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
