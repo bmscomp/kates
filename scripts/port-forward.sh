@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
@@ -7,7 +7,7 @@ source "${SCRIPT_DIR}/common.sh"
 echo "🔌 Starting Port Forwarding..."
 
 # Kill existing port-forwards
-pkill -f "kubectl port-forward" 2>/dev/null || true
+pkill -f "kubectl port-forward.*-n kafka" 2>/dev/null || true
 sleep 1
 
 FORWARDED=0

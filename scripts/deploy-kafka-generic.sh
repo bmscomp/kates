@@ -104,7 +104,10 @@ info "Step 4/6: Deploying Kafka cluster..."
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
 
 # Install Strimzi Operator if not present (separate release required to avoid CRD chicken-and-egg)
-if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
+# Skip if the detect output already confirmed Strimzi is running
+if grep -A1 'strimziOperator:' "${DETECTED_VALUES}" 2>/dev/null | grep -q 'enabled: false'; then
+    info "  Strimzi Operator already managed by pipeline — skipping"
+elif ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
     info "  Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
     kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
     helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
@@ -113,6 +116,7 @@ if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
         --set watchAnyNamespace=true \
         --set replicas=1 \
         --timeout 5m --wait
+    kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
 fi
 
 # Adopt pre-existing Kafka resources into Helm release
@@ -141,7 +145,8 @@ echo ""
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
-    --timeout 10m
+    --timeout 10m \
+    --force
 
 # ── Step 5: Wait ──────────────────────────────────────────────────────────────
 echo ""

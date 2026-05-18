@@ -4,6 +4,9 @@
 
 TIMER := $(shell date +%s)
 
+# ── Load version pins ─────────────────────────────────────────────────────────
+include versions.env
+
 # ── Resolve kates binary (installed CLI > local build) ────────────────────────
 KATES_BIN := $(shell command -v kates 2>/dev/null || echo "./build/kates")
 DETECTED_VALUES := .build/values-detected.yaml
@@ -53,15 +56,19 @@ all: check-prerequisites
 		echo "Step 2: Installing Strimzi Operator (cluster-wide)..."; \
 		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
 		helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-			--version 1.0.0 \
+			--version $(STRIMZI_VERSION) \
 			--namespace strimzi-operator \
 			--set watchAnyNamespace=true \
 			--set replicas=1 \
 			--timeout 5m --wait; \
+		echo "  Waiting for Strimzi CRDs to be established..."; \
+		kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s; \
 	else \
 		echo "✅ Strimzi Operator already running — skipping"; \
 	fi
 	@echo ""
+	@# ── Ensure kafka namespace exists ──
+	@kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
 	@# ── Step 3: cert-manager ──
 	@echo "Step 3: Deploying cert-manager..."
 	@./scripts/deploy-cert-manager.sh
@@ -75,7 +82,9 @@ all: check-prerequisites
 	fi
 	@# ── Step 5: Wait for Kafka ──
 	@echo "Step 5: Waiting for Kafka to be ready..."
-	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true
+	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || \
+		{ echo "❌ Kafka pods did not reach Ready state:"; \
+		  kubectl get pods -n kafka -l strimzi.io/cluster=krafter; exit 1; }
 	@echo ""
 	@# ── Step 6: Wait for Entity Operator (HARD GATE) ──
 	@echo "Step 6: Waiting for Entity Operator..."
@@ -88,7 +97,9 @@ all: check-prerequisites
 	@echo "Step 7: Applying Kafka users and topics..."
 	@kubectl apply -f config/kafka/kafka-users.yaml
 	@kubectl apply -f config/kafka/kafka-topics.yaml
-	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
+	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || \
+		{ echo "⚠️  Some KafkaUsers did not reach Ready:"; \
+		  kubectl get kafkauser -n kafka -o wide; }
 	@echo ""
 	@# ── Step 8: Apicurio Registry ──
 	@if kubectl get deployment apicurio-registry -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
@@ -142,6 +153,28 @@ all: check-prerequisites
 	@echo ""
 	@echo "Step 12: Exposing service ports..."
 	@./scripts/port-forward.sh
+	@echo ""
+	@# ── Step 13: Post-deploy health check ──
+	@echo "Step 13: Verifying deployment health..."
+	@UNHEALTHY=0; \
+	for dep in kates apicurio-registry jaeger; do \
+		STATUS=$$(kubectl get deployment "$$dep" -n kafka -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null); \
+		if [ -z "$$STATUS" ] || echo "$$STATUS" | grep -qv '^[0-9]*/[0-9]*$$'; then \
+			echo "  ⏭️  $$dep — not deployed"; \
+		elif [ "$$(echo $$STATUS | cut -d/ -f1)" != "$$(echo $$STATUS | cut -d/ -f2)" ]; then \
+			echo "  ⚠️  $$dep — $$STATUS replicas ready"; \
+			UNHEALTHY=$$((UNHEALTHY + 1)); \
+		else \
+			echo "  ✅ $$dep — $$STATUS"; \
+		fi; \
+	done; \
+	if [ "$$UNHEALTHY" -gt 0 ]; then \
+		echo ""; \
+		echo "⚠️  $$UNHEALTHY deployment(s) not fully ready — check 'kubectl get pods -n kafka'"; \
+	else \
+		echo ""; \
+		echo "✅ All deployments healthy"; \
+	fi
 	@echo ""
 	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
 	@echo ""
