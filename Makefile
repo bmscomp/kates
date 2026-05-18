@@ -15,10 +15,21 @@ all: check-prerequisites
 		./scripts/start-cluster.sh; \
 	fi
 	@echo ""
-	@EXISTING_STRIMZI=$$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi.*operator/ {print $$1}' | head -n1); \
-	if [ -n "$$EXISTING_STRIMZI" ]; then \
-		echo "✅ Strimzi Operator already deployed (in namespace: $$EXISTING_STRIMZI) — skipping"; \
+	@EXISTING_STRIMZI_NS=$$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi.*operator/ {print $$1}' | head -n1); \
+	if [ -n "$$EXISTING_STRIMZI_NS" ]; then \
+		EXISTING_STRIMZI_NAME=$$(kubectl get deployment -n "$$EXISTING_STRIMZI_NS" -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi.*operator/ {print $$1}' | head -n1); \
+		WATCH_NS=$$(kubectl get deployment -n "$$EXISTING_STRIMZI_NS" "$$EXISTING_STRIMZI_NAME" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}' 2>/dev/null); \
+		if [[ "$$WATCH_NS" == "*" ]] || [[ "$$WATCH_NS" == *"kafka"* ]] || [[ -z "$$WATCH_NS" && "$$EXISTING_STRIMZI_NS" == "kafka" ]]; then \
+			echo "✅ Strimzi Operator already deployed in $$EXISTING_STRIMZI_NS and fits requirements (watching: $${WATCH_NS:-$$EXISTING_STRIMZI_NS}) — skipping"; \
+			SKIP_STRIMZI="true"; \
+		else \
+			echo "⚠️ Existing Strimzi Operator in $$EXISTING_STRIMZI_NS does not watch the 'kafka' namespace (watches: $$WATCH_NS). Proceeding to install cluster-wide operator..."; \
+			SKIP_STRIMZI="false"; \
+		fi \
 	else \
+		SKIP_STRIMZI="false"; \
+	fi; \
+	if [ "$$SKIP_STRIMZI" = "false" ]; then \
 		echo "Step 1.5: Installing Strimzi Operator (cluster-wide)..."; \
 		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
 		helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
