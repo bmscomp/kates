@@ -334,16 +334,30 @@ kates: kates-build kates-deploy
 	@echo "✅ Kates deployed! Run 'make ports' to access at http://localhost:30083"
 
 kates-build:
-	@echo "🔨 Building Kates (JVM + CLI)..."
-	cd kates && ./mvnw package -DskipTests -B
-	docker build -f kates/Dockerfile -t kates:latest .
-	kind load docker-image kates:latest --name panda
+	@if docker image inspect kates:latest >/dev/null 2>&1; then \
+		echo "✅ Kates image already exists locally (kates:latest)."; \
+	elif docker pull ghcr.io/bmscomp/kates:1.11.0; then \
+		echo "✅ Pulled Kates image from registry."; \
+		docker tag ghcr.io/bmscomp/kates:1.11.0 kates:latest; \
+	else \
+		echo "🔨 Building Kates (JVM + CLI) from source..."; \
+		cd kates && ./mvnw package -DskipTests -B && \
+		cd .. && docker build -f kates/Dockerfile -t kates:latest .; \
+	fi
+	kind load docker-image kates:latest --name $(CLUSTER_NAME)
 	@echo "✅ Kates image loaded into Kind"
 
 kates-native:
-	@echo "🔨 Building Kates (native)..."
-	docker build -f kates/Dockerfile.native -t kates:latest .
-	kind load docker-image kates:latest --name panda
+	@if docker image inspect kates:native >/dev/null 2>&1; then \
+		echo "✅ Kates native image already exists locally (kates:native)."; \
+	elif docker pull ghcr.io/bmscomp/kates:1.11.0-native; then \
+		echo "✅ Pulled Kates native image from registry."; \
+		docker tag ghcr.io/bmscomp/kates:1.11.0-native kates:native; \
+	else \
+		echo "🔨 Building Kates (native) from source..."; \
+		docker build -f kates/Dockerfile.native -t kates:native .; \
+	fi
+	kind load docker-image kates:native --name $(CLUSTER_NAME)
 	@echo "✅ Kates native image loaded into Kind"
 
 kates-deploy:
