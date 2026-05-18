@@ -396,9 +396,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				},
 			},
 		},
-		StrimziSubchart: GenStrimziSubchart{
-			KubernetesServiceDnsDomain: g.Report.Network.ClusterDomain,
-		},
+		StrimziSubchart: GenStrimziSubchart{},
 	}
 }
 

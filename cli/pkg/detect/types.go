@@ -317,7 +317,7 @@ type GenStrimziOp struct {
 }
 
 type GenStrimziSubchart struct {
-	KubernetesServiceDnsDomain string `yaml:"kubernetesServiceDnsDomain"`
+	KubernetesServiceDnsDomain string `yaml:"kubernetesServiceDnsDomain,omitempty"`
 }
 
 type GenCRDUpgrade struct {
