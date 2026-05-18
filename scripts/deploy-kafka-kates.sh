@@ -19,9 +19,14 @@ mkdir -p "${ROOT_DIR}/.build"
 info "Detecting cluster configuration using kates CLI..."
 kates detect --generate-values --values-output "${DETECTED_VALUES}"
 
+# Extract Cluster Name from detected values or use default 'krafter'
+CLUSTER_NAME=$(grep "^clusterName:" "${DETECTED_VALUES}" | awk '{print $2}' || echo "krafter")
+CLUSTER_NAME=${CLUSTER_NAME//\"/} # remove quotes if any
+
 # 2. Build dependencies
 info "Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
+helm dependency build "${ROOT_DIR}/charts/kates" 2>/dev/null || true
 
 # 3. Adopt existing resources
 info "Adopting existing Kafka resources into Helm release..."
@@ -40,6 +45,7 @@ for kind in kafkatopics kafkausers; do
 done
 
 # 4. Deploy using Helm, overriding strimziOperator.enabled=false since operator is already on cluster
+# And explicitly disable monitoring components
 info "Installing/upgrading Kafka cluster with Helm..."
 info "  Release:    ${RELEASE_NAME}"
 info "  Namespace:  ${NAMESPACE}"
@@ -49,19 +55,22 @@ helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     -f "${DETECTED_VALUES}" \
     --set strimziOperator.enabled=false \
+    --set alerts.enabled=false \
+    --set podMonitors.enabled=false \
+    --set dashboards.enabled=false \
     --timeout 10m
 
 # 5. Wait for cluster
 info "Waiting for Kafka cluster to be ready..."
-kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n "${NAMESPACE}" || {
+kubectl wait kafka/"${CLUSTER_NAME}" --for=condition=Ready --timeout=600s -n "${NAMESPACE}" || {
     warn "Kafka not ready within 10 min — checking pod status:"
-    kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter
+    kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster="${CLUSTER_NAME}"
     warn "Operator log tail:"
     kubectl logs -n "${NAMESPACE}" -l strimzi.io/kind=cluster-operator --tail=10 2>/dev/null || true
     
-    RUNNING=$(kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter \
+    RUNNING=$(kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster="${CLUSTER_NAME}" \
         --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    TOTAL=$(kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster=krafter \
+    TOTAL=$(kubectl get pods -n "${NAMESPACE}" -l strimzi.io/cluster="${CLUSTER_NAME}" \
         --no-headers 2>/dev/null | wc -l | tr -d ' ')
     
     if [ "${RUNNING}" -eq "${TOTAL}" ] && [ "${TOTAL}" -gt 0 ]; then
@@ -75,8 +84,27 @@ kubectl wait kafka/krafter --for=condition=Ready --timeout=600s -n "${NAMESPACE}
 info "Waiting for user secrets to be created..."
 kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n "${NAMESPACE}" 2>/dev/null || true
 
-info "✅ Kafka deployment complete using Kates detected values!"
+# 6. Deploy Kates
+info "Deploying Kates..."
+
+# Kates URL values based on detected cluster:
+KAFKA_BOOTSTRAP="${CLUSTER_NAME}-kafka-bootstrap.${NAMESPACE}.svc:9092"
+
+# Ensure KafkaUser exists before attempting to copy secret
+"${SCRIPT_DIR}/ensure-kafka-user.sh" || warn "Could not ensure KafkaUser — copying secret may fail"
+
+info "Installing/upgrading Kates with Helm (bootstrap: ${KAFKA_BOOTSTRAP})..."
+helm upgrade --install kates "${ROOT_DIR}/charts/kates" \
+    --namespace "${NAMESPACE}" \
+    --set kafka.bootstrapServers="${KAFKA_BOOTSTRAP}" \
+    --set metrics.serviceMonitor.enabled=false \
+    --set metrics.prometheusRule.enabled=false \
+    --set metrics.grafanaDashboard.enabled=false \
+    --timeout 5m
+
+info "✅ Kafka and Kates deployment complete!"
 echo ""
-echo "  Run Helm tests:    helm test ${RELEASE_NAME} -n ${NAMESPACE}"
 echo "  Check cluster:     kubectl get kafka -n ${NAMESPACE}"
 echo "  Check pods:        kubectl get pods -n ${NAMESPACE}"
+echo "  API health:        kubectl port-forward svc/kates 8080:8080 -n ${NAMESPACE}"
+echo "                     curl http://localhost:8080/api/health"
