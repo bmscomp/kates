@@ -15,12 +15,12 @@ DETECTED_VALUES := .build/values-detected.yaml
 detect: check-prerequisites
 	@mkdir -p .build
 	@echo "🔍 Detecting cluster configuration..."
-	@if [ -x "$(KATES_BIN)" ]; then \
-		$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet; \
-	else \
-		echo "⚠️  kates binary not found, falling back to detect-cluster-config.sh"; \
-		./scripts/detect-cluster-config.sh -o $(DETECTED_VALUES); \
+	@if [ ! -x "$(KATES_BIN)" ]; then \
+		echo "⚠️  kates binary not found, building it now..."; \
+		$(MAKE) cli-build; \
+		if [ ! -x "$(KATES_BIN)" ]; then cp cli/dist/kates $(KATES_BIN) 2>/dev/null || true; fi; \
 	fi
+	@$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet
 	@echo "✅ Detection complete → $(DETECTED_VALUES)"
 
 # ── Main deployment pipeline ─────────────────────────────────────────────────
@@ -39,12 +39,11 @@ all: check-prerequisites
 	@# ── Step 2: Detect cluster configuration ──
 	@echo "Step 1: Detecting cluster configuration..."
 	@mkdir -p .build
-	@if [ -x "$(KATES_BIN)" ]; then \
-		$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet; \
-	else \
-		echo "  ⚠️  kates binary not found, falling back to detect-cluster-config.sh"; \
-		./scripts/detect-cluster-config.sh -o $(DETECTED_VALUES); \
+	@if [ ! -x "$(KATES_BIN)" ]; then \
+		echo "  ⚠️  kates binary not found, building it now..."; \
+		$(MAKE) cli-build >/dev/null; \
 	fi
+	@$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet
 	@PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
 	echo "  Provider: $${PROVIDER:-unknown}"; \
 	echo "  Values:   $(DETECTED_VALUES)"
@@ -167,7 +166,7 @@ all: check-prerequisites
 	@echo "Step 13: Verifying deployment health..."
 	@UNHEALTHY=0; \
 	for dep in kates apicurio-registry jaeger; do \
-		STATUS=$$(kubectl get deployment "$$dep" -n kafka -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null); \
+		STATUS=$$(kubectl get deployment "$$dep" -n kafka -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null | sed 's|^/|0/|'); \
 		if [ -z "$$STATUS" ] || echo "$$STATUS" | grep -qv '^[0-9]*/[0-9]*$$'; then \
 			echo "  ⏭️  $$dep — not deployed"; \
 		elif [ "$$(echo $$STATUS | cut -d/ -f1)" != "$$(echo $$STATUS | cut -d/ -f2)" ]; then \

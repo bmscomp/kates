@@ -285,6 +285,14 @@ func (c *Collector) getStorageClasses() []SCInfo {
 		if sc.AllowVolumeExpansion != nil {
 			allowExpand = *sc.AllowVolumeExpansion
 		}
+		// Probe the storage class performance
+		iops, latency, err := c.ProbeStorageClass(sc.Metadata.Name)
+		if err != nil {
+			// If probing fails, we just record 0
+			iops = 0
+			latency = 0.0
+		}
+
 		scs = append(scs, SCInfo{
 			Name:           sc.Metadata.Name,
 			Provisioner:    sc.Provisioner,
@@ -292,6 +300,8 @@ func (c *Collector) getStorageClasses() []SCInfo {
 			ReclaimPolicy:  sc.ReclaimPolicy,
 			IsDefault:      isDefault,
 			AllowExpansion: allowExpand,
+			ProbedIOPS:     iops,
+			ProbeLatencyMs: latency,
 		})
 	}
 	return scs

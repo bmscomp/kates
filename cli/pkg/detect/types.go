@@ -27,6 +27,8 @@ type SCInfo struct {
 	ReclaimPolicy  string
 	IsDefault      bool
 	AllowExpansion bool
+	ProbedIOPS     int
+	ProbeLatencyMs float64
 }
 
 type StorageAudit struct {

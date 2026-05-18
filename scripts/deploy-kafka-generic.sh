@@ -62,8 +62,9 @@ elif [ -x "${ROOT_DIR}/build/kates" ]; then
     info "  Using local kates binary for cluster detection"
     "${ROOT_DIR}/build/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
 else
-    info "  Falling back to detect-cluster-config.sh"
-    "${SCRIPT_DIR}/detect-cluster-config.sh" -o "${DETECTED_VALUES}"
+    info "  kates binary not found. Building it now..."
+    cd "${ROOT_DIR}" && make cli-build >/dev/null
+    "${ROOT_DIR}/cli/dist/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
 fi
 
 # ── Step 2: Review ────────────────────────────────────────────────────────────

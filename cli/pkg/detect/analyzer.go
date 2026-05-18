@@ -76,6 +76,22 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	addCheck("≥ 1 node per zone", min1Node, fmt.Sprintf("%d nodes across %d zones", len(report.Nodes), len(report.Zones)))
 	addCheck("StorageClass available", len(report.Storage) > 0, fmt.Sprintf("%d class(es)", len(report.Storage)))
 	
+	// Active Infrastructure Probing Validation
+	minIOPS := 1000 // we want at least 1000 IOPS
+	iopsPass := false
+	maxIOPS := 0
+	for _, sc := range report.Storage {
+		if sc.ProbedIOPS >= minIOPS {
+			iopsPass = true
+		}
+		if sc.ProbedIOPS > maxIOPS {
+			maxIOPS = sc.ProbedIOPS
+		}
+	}
+	if len(report.Storage) > 0 {
+		addCheck("Disk IOPS sufficient (≥ 1000)", iopsPass, fmt.Sprintf("max %d IOPS measured", maxIOPS))
+	}
+	
 	addCheck("Controller resources fit", report.Budget.TotalCPU >= report.Budget.CtrlCPU && report.Budget.TotalMem >= report.Budget.CtrlMem, fmt.Sprintf("%dm needed", report.Budget.CtrlCPU))
 	addCheck("Broker resources fit (all zones)", report.Budget.TotalCPU >= report.Budget.NeedCPU && report.Budget.TotalMem >= report.Budget.NeedMem, fmt.Sprintf("%dm total needed", report.Budget.NeedCPU))
 	
