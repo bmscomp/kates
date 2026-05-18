@@ -367,6 +367,15 @@ tester-build:
 	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
 	@echo "✅ Kates Tester image built and available"
 
+REGISTRY ?= ghcr.io/bmscomp
+push-images:
+	@echo "🚀 Pushing images to $(REGISTRY)..."
+	docker tag kates:latest $(REGISTRY)/kates:latest
+	docker push $(REGISTRY)/kates:latest
+	docker tag kates-tester:latest $(REGISTRY)/kates-tester:latest
+	docker push $(REGISTRY)/kates-tester:latest
+	@echo "✅ Images pushed successfully to $(REGISTRY)!"
+
 kates-deploy:
 	@echo "🚀 Deploying Kates to Kubernetes..."
 	kubectl apply -f kates/k8s/namespace.yaml
@@ -699,6 +708,8 @@ help:
 	@echo "  kates                              - Build + deploy Kates (full pipeline)"
 	@echo "  kates-build                        - Build Kates JVM image and load into Kind"
 	@echo "  kates-native                       - Build Kates native image and load into Kind"
+	@echo "  tester-build                       - Build Kates Tester image and load into Kind"
+	@echo "  push-images                        - Push kates and tester images to remote registry"
 	@echo "  kates-deploy                       - Apply Kates K8s manifests"
 	@echo "  kates-redeploy                     - Restart Kates deployment"
 	@echo "  kates-logs                         - Stream Kates logs"
