@@ -7,7 +7,8 @@ source "${SCRIPT_DIR}/common.sh"
 
 CHART_DIR="${ROOT_DIR}/charts/kafka-cluster"
 RELEASE_NAME="kafka-cluster"
-NAMESPACE="kafka"
+NAMESPACE="${NAMESPACE:-kafka}"
+CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
 DETECTED_VALUES="${ROOT_DIR}/.build/values-detected-kates.yaml"
 
 info "Deploying Kafka cluster using Kates generated values..."
@@ -16,12 +17,8 @@ ensure_namespace "${NAMESPACE}"
 
 # 1. Detect cluster and generate values
 mkdir -p "${ROOT_DIR}/.build"
-info "Detecting cluster configuration using kates CLI..."
-kates detect --generate-values --values-output "${DETECTED_VALUES}"
-
-# Extract Cluster Name from detected values or use default 'krafter'
-CLUSTER_NAME=$(grep "^clusterName:" "${DETECTED_VALUES}" | awk '{print $2}' || echo "krafter")
-CLUSTER_NAME=${CLUSTER_NAME//\"/} # remove quotes if any
+info "Detecting cluster configuration using kates CLI (clusterName: ${CLUSTER_NAME})..."
+kates detect --cluster-name "${CLUSTER_NAME}" --generate-values --values-output "${DETECTED_VALUES}"
 
 # 2. Build dependencies
 info "Building Helm chart dependencies..."
