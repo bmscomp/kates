@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kates-config
-  namespace: kates
+  namespace: kafka
   labels:
     app: kates
     app.kubernetes.io/name: kates

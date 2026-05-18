@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: kates
-  namespace: kates
+  namespace: kafka
   labels:
     app: kates
     app.kubernetes.io/name: kates
@@ -54,4 +54,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: kates
-    namespace: kates
+    namespace: kafka
