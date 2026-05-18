@@ -122,6 +122,17 @@ else
     warn "RBAC: cannot create resources in kafka namespace — deployment may fail"
 fi
 
+# Network Policies
+if kubectl get namespace kafka &>/dev/null; then
+    NP_COUNT=$(kubectl get networkpolicy -n kafka --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${NP_COUNT}" -gt 0 ]; then
+        warn "Network Policies: ${NP_COUNT} detected in 'kafka' namespace."
+        warn "  Ensure these policies allow ingress/egress between Kates and Kafka brokers on port 9092."
+    else
+        ok "Network Policies: None detected in 'kafka' namespace (open communication)"
+    fi
+fi
+
 # ── Detect provider ───────────────────────────────────────────────────────────
 header "Cluster Provider Detection"
 PROVIDER="generic"

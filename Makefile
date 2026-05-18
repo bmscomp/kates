@@ -48,7 +48,7 @@ all: check-prerequisites
 		echo "✅ Kafka already deployed — skipping"; \
 	else \
 		echo "Step 4: Deploying Kafka (Strimzi)..."; \
-		./scripts/deploy-kafka.sh; \
+		./scripts/deploy-kafka-generic.sh --yes; \
 		echo "Step 5: Waiting for Kafka to be ready..."; \
 		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
 	fi
@@ -167,7 +167,7 @@ cert-manager:
 deploy-all:
 	@echo "🚀 Deploying full stack..."
 	$(MAKE) monitoring
-	./scripts/deploy-kafka.sh
+	./scripts/deploy-kafka-generic.sh --yes
 	./scripts/deploy-kafka-ui.sh
 	./scripts/deploy-apicurio.sh
 	./scripts/deploy-jaeger.sh
@@ -401,11 +401,11 @@ kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-ch
 
 kafka-deploy: kafka-chart-deps
 	@echo "📦 Deploying Kafka cluster (ENV=$(ENV))..."
-	ENV=$(ENV) ./scripts/deploy-kafka.sh
+	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
 kafka-upgrade: kafka-chart-deps
 	@echo "🔄 Upgrading Kafka cluster (ENV=$(ENV))..."
-	ENV=$(ENV) ./scripts/deploy-kafka.sh
+	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
 kafka-detect:
 	@./scripts/kafka-cluster-report.sh

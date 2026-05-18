@@ -77,6 +77,23 @@ case "${ENV}" in
         ;;
 esac
 
+# Auto-detect default StorageClass
+DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+if [ -z "${DEFAULT_SC}" ]; then
+    DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+fi
+if [ -z "${DEFAULT_SC}" ]; then
+    # Fallback to the first available StorageClass
+    DEFAULT_SC=$(kubectl get sc --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -n1 || true)
+fi
+
+if [ -n "${DEFAULT_SC}" ]; then
+    info "Auto-detected StorageClass: ${DEFAULT_SC}"
+    VALUES_ARGS+=(--set "postgresql.storage.storageClass=${DEFAULT_SC}")
+else
+    warn "No StorageClass found. PVC provisioning may fail."
+fi
+
 info "Installing/upgrading Kates with Helm..."
 info "  Chart:       ${CHART_DIR}"
 info "  Release:     ${RELEASE_NAME}"
