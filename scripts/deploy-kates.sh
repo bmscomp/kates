@@ -52,46 +52,61 @@ if [ "${ENV}" = "kind" ]; then
     kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
 fi
 
-# Build the values file chain based on environment
+DETECTED_VALUES_FILE="${ROOT_DIR}/.build/values-detected.yaml"
+
+# Build the values file chain based on detection or environment
 VALUES_ARGS=()
-case "${ENV}" in
-    kind)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml" -f "${CHART_DIR}/values-kind.yaml")
-        ;;
-    dev)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
-        ;;
-    staging)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-staging.yaml")
-        ;;
-    prod)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-prod.yaml")
-        ;;
-    *)
-        if [ -f "${CHART_DIR}/values-${ENV}.yaml" ]; then
-            VALUES_ARGS+=(-f "${CHART_DIR}/values-${ENV}.yaml")
-        else
-            error "Unknown environment '${ENV}' and no values-${ENV}.yaml found"
-            exit 1
-        fi
-        ;;
-esac
+if [ -f "${DETECTED_VALUES_FILE}" ]; then
+    # Detect-aware mode: use base dev values + detected StorageClass
+    info "Using detected cluster configuration from ${DETECTED_VALUES_FILE}"
+    VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
 
-# Auto-detect default StorageClass
-DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
-if [ -z "${DEFAULT_SC}" ]; then
-    DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
-fi
-if [ -z "${DEFAULT_SC}" ]; then
-    # Fallback to the first available StorageClass
-    DEFAULT_SC=$(kubectl get sc --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -n1 || true)
-fi
-
-if [ -n "${DEFAULT_SC}" ]; then
-    info "Auto-detected StorageClass: ${DEFAULT_SC}"
-    VALUES_ARGS+=(--set "postgresql.storage.storageClass=${DEFAULT_SC}")
+    # Extract StorageClass from detect output (first brokerPool's storageClass)
+    DETECTED_SC=$(grep 'storageClass:' "${DETECTED_VALUES_FILE}" | head -n1 | awk '{print $2}' | tr -d '"')
+    if [ -n "${DETECTED_SC}" ]; then
+        info "Using detected StorageClass: ${DETECTED_SC}"
+        VALUES_ARGS+=(--set "postgresql.storage.storageClass=${DETECTED_SC}")
+    fi
 else
-    warn "No StorageClass found. PVC provisioning may fail."
+    # Legacy ENV-based mode
+    case "${ENV}" in
+        kind)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml" -f "${CHART_DIR}/values-kind.yaml")
+            ;;
+        dev)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
+            ;;
+        staging)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-staging.yaml")
+            ;;
+        prod)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-prod.yaml")
+            ;;
+        *)
+            if [ -f "${CHART_DIR}/values-${ENV}.yaml" ]; then
+                VALUES_ARGS+=(-f "${CHART_DIR}/values-${ENV}.yaml")
+            else
+                error "Unknown environment '${ENV}' and no values-${ENV}.yaml found"
+                exit 1
+            fi
+            ;;
+    esac
+
+    # Auto-detect default StorageClass (fallback only when detect output absent)
+    DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+    if [ -z "${DEFAULT_SC}" ]; then
+        DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+    fi
+    if [ -z "${DEFAULT_SC}" ]; then
+        DEFAULT_SC=$(kubectl get sc --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -n1 || true)
+    fi
+
+    if [ -n "${DEFAULT_SC}" ]; then
+        info "Auto-detected StorageClass: ${DEFAULT_SC}"
+        VALUES_ARGS+=(--set "postgresql.storage.storageClass=${DEFAULT_SC}")
+    else
+        warn "No StorageClass found. PVC provisioning may fail."
+    fi
 fi
 
 info "Installing/upgrading Kates with Helm..."

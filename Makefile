@@ -1,36 +1,56 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
 TIMER := $(shell date +%s)
 
+# ── Resolve kates binary (installed CLI > local build) ────────────────────────
+KATES_BIN := $(shell command -v kates 2>/dev/null || echo "./build/kates")
+DETECTED_VALUES := .build/values-detected.yaml
+
+# ── Cluster detection (single source of truth) ───────────────────────────────
+detect: check-prerequisites
+	@mkdir -p .build
+	@echo "🔍 Detecting cluster configuration..."
+	@if [ -x "$(KATES_BIN)" ]; then \
+		$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet; \
+	else \
+		echo "⚠️  kates binary not found, falling back to detect-cluster-config.sh"; \
+		./scripts/detect-cluster-config.sh -o $(DETECTED_VALUES); \
+	fi
+	@echo "✅ Detection complete → $(DETECTED_VALUES)"
+
+# ── Main deployment pipeline ─────────────────────────────────────────────────
 all: check-prerequisites
 	@echo "🚀 Launching complete cluster setup..."
 	@echo ""
+	@# ── Step 1: Cluster connectivity ──
 	@if kubectl cluster-info >/dev/null 2>&1; then \
 		CONTEXT=$$(kubectl config current-context); \
-		echo "✅ Kubernetes cluster already running (context: $$CONTEXT) — skipping creation"; \
+		echo "✅ Kubernetes cluster reachable (context: $$CONTEXT)"; \
 	else \
-		echo "Step 1: Starting Kind cluster + registry..."; \
-		./scripts/start-cluster.sh; \
+		echo "❌ No Kubernetes cluster reachable."; \
+		echo "   For Kind: run 'make cluster' first."; \
+		echo "   For other providers: ensure kubectl is configured."; \
+		exit 1; \
 	fi
 	@echo ""
-	@EXISTING_STRIMZI_NS=$$(kubectl get deployment -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi.*operator/ {print $$1}' | head -n1); \
-	if [ -n "$$EXISTING_STRIMZI_NS" ]; then \
-		EXISTING_STRIMZI_NAME=$$(kubectl get deployment -n "$$EXISTING_STRIMZI_NS" -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | awk '/strimzi.*operator/ {print $$1}' | head -n1); \
-		WATCH_NS=$$(kubectl get deployment -n "$$EXISTING_STRIMZI_NS" "$$EXISTING_STRIMZI_NAME" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}' 2>/dev/null); \
-		if [[ "$$WATCH_NS" == "*" ]] || [[ "$$WATCH_NS" == *"kafka"* ]] || [[ -z "$$WATCH_NS" && "$$EXISTING_STRIMZI_NS" == "kafka" ]]; then \
-			echo "✅ Strimzi Operator already deployed in $$EXISTING_STRIMZI_NS and fits requirements (watching: $${WATCH_NS:-$$EXISTING_STRIMZI_NS}) — skipping"; \
-			SKIP_STRIMZI="true"; \
-		else \
-			echo "⚠️ Existing Strimzi Operator in $$EXISTING_STRIMZI_NS does not watch the 'kafka' namespace (watches: $$WATCH_NS). Proceeding to install cluster-wide operator..."; \
-			SKIP_STRIMZI="false"; \
-		fi \
+	@# ── Step 2: Detect cluster configuration ──
+	@echo "Step 1: Detecting cluster configuration..."
+	@mkdir -p .build
+	@if [ -x "$(KATES_BIN)" ]; then \
+		$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet; \
 	else \
-		SKIP_STRIMZI="false"; \
-	fi; \
-	if [ "$$SKIP_STRIMZI" = "false" ]; then \
-		echo "Step 1.5: Installing Strimzi Operator (cluster-wide)..."; \
+		echo "  ⚠️  kates binary not found, falling back to detect-cluster-config.sh"; \
+		./scripts/detect-cluster-config.sh -o $(DETECTED_VALUES); \
+	fi
+	@PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
+	echo "  Provider: $${PROVIDER:-unknown}"; \
+	echo "  Values:   $(DETECTED_VALUES)"
+	@echo ""
+	@# ── Step 2: Strimzi Operator (read from detect output) ──
+	@if grep -A1 'strimziOperator:' $(DETECTED_VALUES) | grep -q 'enabled: true'; then \
+		echo "Step 2: Installing Strimzi Operator (cluster-wide)..."; \
 		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
 		helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
 			--version 1.0.0 \
@@ -38,94 +58,112 @@ all: check-prerequisites
 			--set watchAnyNamespace=true \
 			--set replicas=1 \
 			--timeout 5m --wait; \
+	else \
+		echo "✅ Strimzi Operator already running — skipping"; \
 	fi
 	@echo ""
-
+	@# ── Step 3: cert-manager ──
 	@echo "Step 3: Deploying cert-manager..."
 	@./scripts/deploy-cert-manager.sh
 	@echo ""
+	@# ── Step 4: Kafka cluster ──
 	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kafka already deployed — skipping"; \
 	else \
 		echo "Step 4: Deploying Kafka (Strimzi)..."; \
 		./scripts/deploy-kafka-generic.sh --yes; \
-		echo "Step 5: Waiting for Kafka to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
 	fi
-	@echo "Ensuring Strimzi Entity Operator is ready..."
-	@kubectl wait deployment -l app.kubernetes.io/name=entity-operator -n kafka --for=condition=Available --timeout=120s 2>/dev/null || true
-	@echo "Ensuring Kafka users and topics are applied..."
+	@# ── Step 5: Wait for Kafka ──
+	@echo "Step 5: Waiting for Kafka to be ready..."
+	@kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true
+	@echo ""
+	@# ── Step 6: Wait for Entity Operator (HARD GATE) ──
+	@echo "Step 6: Waiting for Entity Operator..."
+	@kubectl wait deployment -l app.kubernetes.io/name=entity-operator -n kafka \
+		--for=condition=Available --timeout=180s || \
+		{ echo "❌ Entity Operator did not become ready within 180s. Cannot create users/topics."; exit 1; }
+	@echo "✅ Entity Operator is ready"
+	@echo ""
+	@# ── Step 7: Apply users + topics ──
+	@echo "Step 7: Applying Kafka users and topics..."
 	@kubectl apply -f config/kafka/kafka-users.yaml
 	@kubectl apply -f config/kafka/kafka-topics.yaml
 	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
 	@echo ""
-	@echo "✅ Skipping Kafka UI deployment as requested"
-	@echo ""
+	@# ── Step 8: Apicurio Registry ──
 	@if kubectl get deployment apicurio-registry -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
 		echo "✅ Apicurio Registry already deployed — skipping"; \
 	else \
-		echo "Step 7: Deploying Apicurio Registry..."; \
+		echo "Step 8: Deploying Apicurio Registry..."; \
 		./scripts/deploy-apicurio.sh; \
 	fi
 	@echo ""
+	@# ── Step 9: LitmusChaos (provider-aware values) ──
 	@if kubectl get pods -n kafka -l app.kubernetes.io/instance=chaos --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ LitmusChaos already deployed — skipping"; \
 	else \
-		echo "Step 8: Deploying LitmusChaos..."; \
+		echo "Step 9: Deploying LitmusChaos..."; \
+		PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
+		CHAOS_VALUES="charts/kates-chaos/values.yaml"; \
+		if [ "$$PROVIDER" = "kind" ] && [ -f "charts/kates-chaos/values-kind.yaml" ]; then \
+			CHAOS_VALUES="charts/kates-chaos/values-kind.yaml"; \
+		fi; \
 		helm dependency update charts/kates-chaos; \
 		helm upgrade --install chaos charts/kates-chaos \
 			-n kafka --create-namespace \
-			-f charts/kates-chaos/values-kind.yaml \
+			-f "$$CHAOS_VALUES" \
 			--timeout 10m; \
 		echo "Waiting for Litmus pods to be ready..."; \
 		kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=chaos -n kafka --timeout=300s 2>/dev/null || true; \
 	fi
 	@echo ""
-	@echo "Step 9: Verifying chaos infrastructure..."
+	@echo "Step 9.5: Verifying chaos infrastructure..."
 	@if kubectl get crd chaosengines.litmuschaos.io &>/dev/null; then \
 		echo "✅ Litmus CRDs installed"; \
 	else \
 		echo "⚠️  Litmus CRDs not found — chaos provider will fall back to noop"; \
 	fi
 	@echo ""
+	@# ── Step 10: Jaeger ──
 	@if kubectl get pods -n kafka -l app=jaeger --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Jaeger already deployed — skipping"; \
 	else \
-		echo "Step 9.5: Deploying Jaeger (distributed tracing)..."; \
+		echo "Step 10: Deploying Jaeger (distributed tracing)..."; \
 		./scripts/deploy-jaeger.sh || true; \
 	fi
 	@echo ""
+	@# ── Step 11: Kates ──
 	@if kubectl get pods -n kafka -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping"; \
 	else \
-		echo "Step 10: Deploying Kates..."; \
+		echo "Step 11: Deploying Kates..."; \
 		./scripts/deploy-kates.sh; \
 	fi
 	@echo ""
-	@echo "Step 11: Exposing service ports..."
-	./scripts/port-forward.sh
+	@echo "Step 12: Exposing service ports..."
+	@./scripts/port-forward.sh
 	@echo ""
 	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
 	@echo ""
 	@echo "📊 Services deployed:"
 	@echo "  ✓ Kafka Cluster (Strimzi KRaft mode)"
-	@echo "  ✓ Kafka UI"
 	@echo "  ✓ Apicurio Registry"
 	@echo "  ✓ LitmusChaos + Chaos Experiments"
+	@echo "  ✓ Jaeger (distributed tracing)"
 	@echo "  ✓ Kates"
 	@echo ""
 	@echo "🔗 Access points:"
-	@echo "  - Kafka UI:         http://localhost:30081"
-	@echo "  - Apicurio Registry:http://localhost:30082"
-	@echo "  - Kates:            http://localhost:30083"
-	@echo "  - Jaeger UI:        http://localhost:30086"
-	@echo "  - Litmus UI:        http://localhost:9091  (admin/litmus)"
+	@echo "  - Apicurio Registry: http://localhost:30082"
+	@echo "  - Kates:             http://localhost:30083"
+	@echo "  - Jaeger UI:         http://localhost:30086"
+	@echo "  - Litmus UI:         http://localhost:9091  (admin/litmus)"
 	@echo ""
 
-# Check prerequisites
+# Check prerequisites — only kubectl and helm are strictly required for generic clusters
 check-prerequisites:
 	@echo "🔍 Checking prerequisites..."
-	@bash -c 'source scripts/common.sh && require_cmd docker && require_cmd kind && require_cmd kubectl && require_cmd helm'
+	@command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
+	@command -v helm >/dev/null 2>&1 || { echo "❌ helm not found"; exit 1; }
 	@echo "✅ All prerequisites met"
 
 # Start Kind cluster only
