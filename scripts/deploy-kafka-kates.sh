@@ -41,7 +41,22 @@ for kind in kafkatopics kafkausers; do
     done
 done
 
-# 4. Deploy using Helm, overriding strimziOperator.enabled=false since operator is already on cluster
+# 4. Create tolerations overlay for control-plane nodes
+TOLERATIONS_OVERLAY="${ROOT_DIR}/.build/tolerations.yaml"
+cat <<EOF > "${TOLERATIONS_OVERLAY}"
+controllerDefaults:
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+brokerDefaults:
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+EOF
+
+# 5. Deploy using Helm, overriding strimziOperator.enabled=false since operator is already on cluster
 # And explicitly disable monitoring components
 info "Installing/upgrading Kafka cluster with Helm..."
 info "  Release:    ${RELEASE_NAME}"
@@ -51,13 +66,14 @@ info "  Values:     ${DETECTED_VALUES}"
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     -f "${DETECTED_VALUES}" \
+    -f "${TOLERATIONS_OVERLAY}" \
     --set strimziOperator.enabled=false \
     --set alerts.enabled=false \
     --set podMonitors.enabled=false \
     --set dashboards.enabled=false \
     --timeout 10m
 
-# 5. Wait for cluster
+# 6. Wait for cluster
 info "Waiting for Kafka cluster to be ready..."
 kubectl wait kafka/"${CLUSTER_NAME}" --for=condition=Ready --timeout=600s -n "${NAMESPACE}" || {
     warn "Kafka not ready within 10 min — checking pod status:"
@@ -81,7 +97,7 @@ kubectl wait kafka/"${CLUSTER_NAME}" --for=condition=Ready --timeout=600s -n "${
 info "Waiting for user secrets to be created..."
 kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n "${NAMESPACE}" 2>/dev/null || true
 
-# 6. Deploy Kates
+# 7. Deploy Kates
 info "Deploying Kates..."
 
 # Kates URL values based on detected cluster:
