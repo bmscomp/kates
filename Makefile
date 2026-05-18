@@ -648,6 +648,13 @@ destroy:
 # Alias for destroy
 clean: destroy
 
+kyverno-permissive:
+	@echo "🔓 Making Kyverno completely permissive (ignoring all resources)..."
+	@kubectl patch configmap kyverno -n kyverno --type merge -p '{"data":{"resourceFilters":"[*,*,*]"}}' 2>/dev/null || echo "⚠️  Could not patch Kyverno ConfigMap (is it installed?)"
+	@echo "🔄 Restarting Kyverno pods to apply changes..."
+	@kubectl rollout restart deployment -n kyverno -l app.kubernetes.io/name=kyverno 2>/dev/null || true
+	@echo "✅ Kyverno is now in permissive mode."
+
 # Help
 help:
 	@echo "Available targets:"
@@ -716,6 +723,7 @@ help:
 	@echo "  chaos-ui                           - Port-forward Litmus UI"
 	@echo "  chaos-status                       - Show chaos infrastructure status"
 	@echo "  gameday                            - Run automated GameDay validation"
+	@echo "  kyverno-permissive                 - Make Kyverno completely permissive (ignore all)"
 	@echo "  destroy                            - Destroy cluster (FORCE=1 to skip prompt)"
 	@echo "  help                               - Show this help"
 
