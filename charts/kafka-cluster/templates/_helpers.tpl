@@ -101,7 +101,7 @@ Usage: {{ include "kafka-cluster.bootstrapServers" . }}
 */}}
 {{- define "kafka-cluster.bootstrapServers" -}}
 {{- $svc := printf "%s-kafka-bootstrap" (include "kafka-cluster.clusterName" .) -}}
-{{- printf "%s.%s.svc.%s:9092" $svc (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) -}}
+{{- printf "%s.%s.svc:9092" $svc (include "kafka-cluster.namespace" .) -}}
 {{- end }}
 
 {{/*
@@ -110,5 +110,5 @@ Usage: {{ include "kafka-cluster.bootstrapServersTLS" . }}
 */}}
 {{- define "kafka-cluster.bootstrapServersTLS" -}}
 {{- $svc := printf "%s-kafka-bootstrap" (include "kafka-cluster.clusterName" .) -}}
-{{- printf "%s.%s.svc.%s:9093" $svc (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) -}}
+{{- printf "%s.%s.svc:9093" $svc (include "kafka-cluster.namespace" .) -}}
 {{- end }}
