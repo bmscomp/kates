@@ -89,23 +89,33 @@ spec:
           sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')";
           EOF
 
-          echo "Creating test topic: ${TOPIC}..."
-          bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} \
-            --command-config /tmp/client.properties \
-            --create --topic ${TOPIC} --partitions 1 --replication-factor 1 \
-            --config retention.ms=60000 2>&1 || true
+          echo "Creating test topic via CRD: ${TOPIC}..."
+          cat <<EOF | kubectl apply -f -
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: ${TOPIC}
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 60000
+EOF
+
+          echo "Waiting for topic to be ready..."
+          kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=30s -n {{ include "kafka-cluster.namespace" . }}
+
+          PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
+          KCAT_OPTS="-b ${BOOTSTRAP} -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=SCRAM-SHA-512 -X sasl.username=kates-backend -X sasl.password=${PASSWORD}"
 
           echo "Producing test record..."
-          echo "${MSG}" | bin/kafka-console-producer.sh \
-            --bootstrap-server ${BOOTSTRAP} \
-            --command-config /tmp/client.properties \
-            --topic ${TOPIC} 2>/dev/null
+          echo "${MSG}" | kcat -P ${KCAT_OPTS} -t ${TOPIC} 2>/dev/null
 
           echo "Consuming test record..."
-          RECEIVED=$(timeout 15 bin/kafka-console-consumer.sh \
-            --bootstrap-server ${BOOTSTRAP} \
-            --consumer.config /tmp/client.properties \
-            --topic ${TOPIC} --from-beginning --max-messages 1 2>/dev/null || true)
+          RECEIVED=$(timeout 15 kcat -C ${KCAT_OPTS} -t ${TOPIC} -c 1 -o beginning 2>/dev/null || true)
 
           if echo "${RECEIVED}" | grep -q "${MSG}"; then
             echo "✓ Round-trip OK: produced and consumed '${MSG}'"
@@ -114,9 +124,7 @@ spec:
           fi
 
           echo "Cleaning up test topic..."
-          bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} \
-            --command-config /tmp/client.properties \
-            --delete --topic ${TOPIC} 2>/dev/null || true
+          kubectl delete kafkatopic ${TOPIC} -n {{ include "kafka-cluster.namespace" . }} --ignore-not-found
           echo "✓ Tier 2 complete"
       securityContext:
         allowPrivilegeEscalation: false

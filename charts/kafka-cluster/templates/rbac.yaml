@@ -24,11 +24,14 @@ rules:
     resources:
       - kafkas
       - kafkanodepools
-      - kafkatopics
       - kafkausers
       - kafkaconnects
       - kafkarebalances
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources:
+      - kafkatopics
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: [""]
     resources: ["pods", "services", "configmaps", "secrets"]
     verbs: ["get", "list"]

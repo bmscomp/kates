@@ -361,6 +361,12 @@ kates-native:
 	kind load docker-image kates:native --name $(CLUSTER_NAME)
 	@echo "✅ Kates native image loaded into Kind"
 
+tester-build:
+	@echo "🔨 Building Kates Tester image..."
+	docker build -f tester/Dockerfile -t kates-tester:latest tester/
+	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
+	@echo "✅ Kates Tester image built and available"
+
 kates-deploy:
 	@echo "🚀 Deploying Kates to Kubernetes..."
 	kubectl apply -f kates/k8s/namespace.yaml

@@ -12,10 +12,10 @@ global:
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
 images:
-  # Kafka client image used in Helm test tier 2 (produce/consume round-trip)
-  kafka: "quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
+  # Tester image used in Helm test tier 2 (produce/consume round-trip) and kubectl tests
+  kafka: "kates-tester:latest"
   # kubectl image used in Helm tests and CRD upgrade hooks
-  kubectl: "bitnami/kubectl:latest"
+  kubectl: "kates-tester:latest"
 
 kafka:
   listeners:
