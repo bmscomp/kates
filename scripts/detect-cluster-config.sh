@@ -251,8 +251,8 @@ BROKER_CPU_REQ="500m"
 
 if [ "${TOTAL_CPU}" -ge 24 ] && [ "${TOTAL_MEM_GI}" -ge 48 ]; then
     PROFILE="production"
-    BROKER_REPLICAS=3
-    CONTROLLER_REPLICAS=3
+    BROKER_REPLICAS=1
+    CONTROLLER_REPLICAS=1
     BROKER_STORAGE="200Gi"
     CONTROLLER_STORAGE="20Gi"
     BROKER_MEM_REQ="4Gi"
@@ -260,7 +260,7 @@ if [ "${TOTAL_CPU}" -ge 24 ] && [ "${TOTAL_MEM_GI}" -ge 48 ]; then
 elif [ "${TOTAL_CPU}" -ge 12 ] && [ "${TOTAL_MEM_GI}" -ge 24 ]; then
     PROFILE="staging"
     BROKER_REPLICAS=1
-    CONTROLLER_REPLICAS=3
+    CONTROLLER_REPLICAS=1
     BROKER_STORAGE="100Gi"
     CONTROLLER_STORAGE="10Gi"
     BROKER_MEM_REQ="2Gi"
@@ -671,6 +671,10 @@ kafka:
 ${LISTENERS_YAML}
   rack:
     topologyKey: ${TOPOLOGY_KEY}
+
+entityOperator:
+  topicOperator: {}
+  userOperator: {}
 
 # ── Monitoring & Observability ──
 dashboards:
