@@ -30,6 +30,12 @@ else
     kind create cluster --config "${SCRIPT_DIR}/../config/cluster.yaml" --name "${KIND_CLUSTER_NAME}"
 fi
 
+# Untaint control-plane node so Kafka pods can schedule on all AZ nodes
+# (Kind uses one of the 3 worker nodes as control-plane)
+for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+    kubectl taint nodes "${node}" node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+done
+
 echo ""
 info "✅ Kind Cluster Setup Complete!"
 echo ""
