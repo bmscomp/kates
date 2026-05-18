@@ -98,7 +98,7 @@ spec:
           echo "Producing test record..."
           echo "${MSG}" | bin/kafka-console-producer.sh \
             --bootstrap-server ${BOOTSTRAP} \
-            --producer.config /tmp/client.properties \
+            --command-config /tmp/client.properties \
             --topic ${TOPIC} 2>/dev/null
 
           echo "Consuming test record..."
