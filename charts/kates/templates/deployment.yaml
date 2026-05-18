@@ -48,7 +48,7 @@ spec:
       - name: wait-for-postgres
         image: {{ .Values.initContainers.waitForPostgres.image | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
-        command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
+        command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
         {{- with .Values.containerSecurityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
