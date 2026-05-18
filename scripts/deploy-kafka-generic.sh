@@ -55,7 +55,16 @@ bold "════════════════════════�
 echo ""
 
 info "Step 1/6: Detecting cluster configuration..."
-"${SCRIPT_DIR}/detect-cluster-config.sh" -o "${DETECTED_VALUES}"
+if command -v kates &> /dev/null; then
+    info "  Using kates CLI for cluster detection"
+    kates detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
+elif [ -x "${ROOT_DIR}/build/kates" ]; then
+    info "  Using local kates binary for cluster detection"
+    "${ROOT_DIR}/build/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
+else
+    info "  Falling back to detect-cluster-config.sh"
+    "${SCRIPT_DIR}/detect-cluster-config.sh" -o "${DETECTED_VALUES}"
+fi
 
 # ── Step 2: Review ────────────────────────────────────────────────────────────
 echo ""
