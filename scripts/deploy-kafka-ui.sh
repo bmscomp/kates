@@ -14,6 +14,14 @@ if deployment_exists kafka-ui kafka; then
     fi
 fi
 
+CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
+# Auto-detect Kafka cluster name if not explicitly provided (and fallback to krafter)
+DETECTED_CLUSTER=$(kubectl get kafka -n kafka -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | head -n1 || true)
+if [ -n "${DETECTED_CLUSTER}" ] && [ "${DETECTED_CLUSTER}" != "${CLUSTER_NAME}" ]; then
+    CLUSTER_NAME="${DETECTED_CLUSTER}"
+    info "Auto-detected Kafka cluster: ${CLUSTER_NAME}"
+fi
+
 # Wait for Strimzi Entity Operator to create the kafka-ui Secret
 info "Waiting for kafka-ui Secret (created by Strimzi Entity Operator)..."
 MAX_SECRET_WAIT=180
@@ -22,7 +30,7 @@ while ! kubectl get secret kafka-ui -n kafka &>/dev/null; do
     if [ $ELAPSED -ge $MAX_SECRET_WAIT ]; then
         error "Timed out waiting for kafka-ui Secret after ${MAX_SECRET_WAIT}s"
         error "Ensure KafkaUser 'kafka-ui' is applied and the Entity Operator is running:"
-        error "  kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator"
+        error "  kubectl get pods -n kafka -l strimzi.io/name=${CLUSTER_NAME}-entity-operator"
         error "  kubectl get kafkauser kafka-ui -n kafka"
         exit 1
     fi
@@ -32,7 +40,6 @@ while ! kubectl get secret kafka-ui -n kafka &>/dev/null; do
 done
 info "Secret kafka-ui found"
 
-CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
 KAFKA_BOOTSTRAP="${CLUSTER_NAME}-kafka-bootstrap:9092"
 
 sed -e "s/name: krafter/name: ${CLUSTER_NAME}/g" \

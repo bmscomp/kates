@@ -15,6 +15,13 @@ info "Deploying Kates (env=${ENV})..."
 
 ensure_namespace "${NAMESPACE}"
 
+# Auto-detect Kafka cluster name if not explicitly provided (and fallback to krafter)
+DETECTED_CLUSTER=$(kubectl get kafka -n "${NAMESPACE}" -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | head -n1 || true)
+if [ -n "${DETECTED_CLUSTER}" ] && [ "${DETECTED_CLUSTER}" != "${CLUSTER_NAME}" ]; then
+    CLUSTER_NAME="${DETECTED_CLUSTER}"
+    info "Auto-detected Kafka cluster: ${CLUSTER_NAME}"
+fi
+
 # Build Helm dependencies
 info "Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
@@ -22,14 +29,16 @@ helm dependency build "${CHART_DIR}" 2>/dev/null || true
 # Ensure KafkaUser exists before attempting to copy secret
 "${SCRIPT_DIR}/ensure-kafka-user.sh" || warn "Could not ensure KafkaUser — copying secret may fail"
 
-# Copy Kafka SASL credentials from kafka namespace
-if kubectl get secret kates-backend -n kafka &>/dev/null; then
-    info "Copying Kafka SASL credentials to ${NAMESPACE}..."
-    kubectl get secret kates-backend -n kafka -o json \
-        | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-        | kubectl apply -n "${NAMESPACE}" -f -
-else
-    warn "Secret kates-backend not found in kafka namespace — Kafka auth may fail"
+# Copy Kafka SASL credentials if namespaces differ
+if [ "${NAMESPACE}" != "kafka" ]; then
+    if kubectl get secret kates-backend -n kafka &>/dev/null; then
+        info "Copying Kafka SASL credentials to ${NAMESPACE}..."
+        kubectl get secret kates-backend -n kafka -o json \
+            | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
+            | kubectl apply -n "${NAMESPACE}" -f -
+    else
+        warn "Secret kates-backend not found in kafka namespace — Kafka auth may fail"
+    fi
 fi
 
 # Kind-specific: ensure released image is available in the cluster

@@ -92,24 +92,8 @@ all: check-prerequisites
 	@if kubectl get pods -n kafka -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
 		echo "✅ Kates already deployed — skipping"; \
 	else \
-		echo "Step 10: Deploying Kates (using released image)..."; \
-		KATES_IMAGE="$${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"; \
-		echo "  Pulling $${KATES_IMAGE}..."; \
-		docker pull "$${KATES_IMAGE}" 2>/dev/null || true; \
-		kind load docker-image "$${KATES_IMAGE}" --name panda 2>/dev/null || true; \
-		kubectl apply -f kates/k8s/namespace.yaml; \
-		kubectl apply -f kates/k8s/rbac.yaml; \
-		kubectl apply -f kates/k8s/configmap.yaml; \
-		echo "Copying Kafka SASL credentials to kates namespace..."; \
-		kubectl get secret kates-backend -n kafka -o json \
-			| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-			| kubectl apply -n kafka -f -; \
-		kubectl apply -f kates/k8s/postgres.yaml; \
-		echo "Waiting for PostgreSQL to be ready..."; \
-		kubectl wait --for=condition=Ready pod -l app=postgres -n kafka --timeout=120s; \
-		kubectl apply -f kates/k8s/deployment.yaml; \
-		kubectl apply -f kates/k8s/service.yaml; \
-		kubectl rollout status deployment/kates -n kafka --timeout=300s; \
+		echo "Step 10: Deploying Kates..."; \
+		./scripts/deploy-kates.sh; \
 	fi
 	@echo ""
 	@echo "Step 11: Exposing service ports..."
