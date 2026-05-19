@@ -132,6 +132,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("    - Kafka Namespace: %s\n", deployKafkaNS)
 		fmt.Printf("    - Kates App Namespace: %s\n", deployAppNS)
+		fmt.Printf("    - Jaeger Namespace: jaeger\n")
 		fmt.Printf("    - Chaos Namespace: %s\n", deployChaosNS)
 	}
 
@@ -204,11 +205,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// 4. Execution Plan (Helm)
 	fmt.Println("\n[4] Executing Deployment Pipeline...")
 	
-	var kafkaNS, appNS, chaosNS string
+	var kafkaNS, appNS, chaosNS, jaegerNS string
 	if deployTopology == "single" {
-		kafkaNS, appNS, chaosNS = deployNamespace, deployNamespace, deployNamespace
+		kafkaNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
-		kafkaNS, appNS, chaosNS = deployKafkaNS, deployAppNS, deployChaosNS
+		kafkaNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployAppNS, deployChaosNS, "jaeger"
 	}
 	
 	// Create context
@@ -301,18 +302,18 @@ spec:
 	// Deploy Monitoring (Jaeger)
 	if deployWithMonitoring {
 		g2.Go(func() error {
-			if isHelmReleaseDeployedFn(g2Ctx, "jaeger", kafkaNS) {
+			if isHelmReleaseDeployedFn(g2Ctx, "jaeger", jaegerNS) {
 				fmt.Println("⏭️  Jaeger already deployed. Skipping.")
 				return nil
 			}
-			fmt.Printf("\n🚀 Deploying Jaeger (Namespace: %s)...\n", kafkaNS)
+			fmt.Printf("\n🚀 Deploying Jaeger (Namespace: %s)...\n", jaegerNS)
 			runHelmFn(g2Ctx, "repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
 			runHelmFn(g2Ctx, "repo", "update", "jaegertracing")
-			err := runHelmFn(g2Ctx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", kafkaNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
+			err := runHelmFn(g2Ctx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", jaegerNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
 			if err != nil { return err }
 			
 			// Patch health probes natively without exiting on error immediately
-			runExecFn(g2Ctx, "kubectl", "patch", "deployment", "jaeger", "-n", kafkaNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
+			runExecFn(g2Ctx, "kubectl", "patch", "deployment", "jaeger", "-n", jaegerNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
 			return nil
 		})
 	}
