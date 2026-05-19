@@ -242,14 +242,14 @@ metadata:
 	// Deploy Cert-Manager
 	if deployWithCertManager {
 		g.Go(func() error {
-			if isHelmReleaseDeployedFn(gCtx, "cert-manager", kafkaNS) {
+			if isHelmReleaseDeployedFn(gCtx, "cert-manager", "cert-manager") {
 				fmt.Println("⏭️  Cert-Manager already deployed. Skipping.")
 				return nil
 			}
-			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", kafkaNS)
+			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
 			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
 			runHelmFn(gCtx, "repo", "update", "jetstack")
-			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "installCRDs=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
+			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", "cert-manager", "--create-namespace", "--set", "installCRDs=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
 			if err != nil { return err }
 			
 			fmt.Println("    - Waiting for Cert-Manager CRDs to be established...")
