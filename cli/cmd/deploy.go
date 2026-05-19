@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -48,6 +49,7 @@ var (
 	deployWithKyverno        bool
 	deployWithSecretManager  bool
 	deployInteractive        bool
+	deployVerbose            bool
 )
 
 func init() {
@@ -65,6 +67,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithKyverno, "with-kyverno", false, "Deploy Kyverno for cluster policy enforcement")
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
+	deployCmd.Flags().BoolVarP(&deployVerbose, "verbose", "v", false, "Show full Helm/kubectl output during deployment")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -482,8 +485,16 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 	execMutex.Lock()
 	defer execMutex.Unlock()
 	
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if deployVerbose {
+		// Show the command being run
+		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		// Capture output silently; show stderr only on error
+		var errBuf bytes.Buffer
+		cmd.Stderr = &errBuf
+	}
 	return cmd.Run()
 }
 
@@ -503,8 +514,11 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 	execMutex.Lock()
 	defer execMutex.Unlock()
 	
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if deployVerbose {
+		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	return cmd.Run()
 }
 
