@@ -419,7 +419,7 @@ data:
 		if !isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
 			fmt.Printf("\n🚀 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
 			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
-			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait"); err != nil {
+			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--set", "rbac.kafkaNamespace="+kafkaNS, "--timeout", "5m", "--wait"); err != nil {
 				return err
 			}
 		} else {
