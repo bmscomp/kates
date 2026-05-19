@@ -195,6 +195,11 @@ metadata:
 			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
 			if err != nil { return err }
 			
+			fmt.Println("    - Waiting for Cert-Manager CRDs to be established...")
+			if err := runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established", "crd", "clusterissuers.cert-manager.io", "--timeout=60s"); err != nil {
+				return err
+			}
+			
 			clusterIssuer := `apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
