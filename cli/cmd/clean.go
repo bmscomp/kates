@@ -191,12 +191,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 			label := fmt.Sprintf("  Deleting namespace %s", ns)
 			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
 
-			nCtx, nCancel := context.WithTimeout(ctx, 90*time.Second)
+			nCtx, nCancel := context.WithTimeout(ctx, 5*time.Minute)
 			err := exec.CommandContext(nCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found").Run()
 			nCancel()
 
 			if err != nil {
-				fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ timeout"))
+				fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
 			} else {
 				fmt.Println(okStyle.Render("  ✔"))
 			}
