@@ -63,26 +63,76 @@ elapsed() {
 }
 
 get_cluster_domain() {
-    local domain=""
+    local auto_approve="${1:-false}"
+    local resolv_content=""
     
     # Attempt 1: Get from an already running pod in any namespace (fastest, most reliable)
     local pod=$(kubectl get pods --all-namespaces --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.namespace} {.items[0].metadata.name}' 2>/dev/null || true)
     if [ -n "$pod" ]; then
         local ns=$(echo "$pod" | awk '{print $1}')
         local name=$(echo "$pod" | awk '{print $2}')
-        # Extract the search path, take the first entry, and remove the "<namespace>.svc." prefix
-        domain=$(kubectl exec -n "$ns" "$name" -- cat /etc/resolv.conf 2>/dev/null | grep -i "^search" | head -1 | awk '{print $2}' | sed -E 's/^[^\.]+\.svc\.//' || true)
+        resolv_content=$(kubectl exec -n "$ns" "$name" -- cat /etc/resolv.conf 2>/dev/null || true)
     fi
 
     # Attempt 2: If no running pods, spin up a temporary pod
-    if [ -z "$domain" ]; then
-        domain=$(kubectl run --rm -i --image=busybox:1.36 dns-detect --restart=Never -- cat /etc/resolv.conf 2>/dev/null | grep -i "^search" | head -1 | awk '{print $2}' | sed -E 's/^[^\.]+\.svc\.//' || true)
+    if [ -z "$resolv_content" ]; then
+        resolv_content=$(kubectl run --rm -i --image=busybox:1.36 dns-detect --restart=Never -- cat /etc/resolv.conf 2>/dev/null || true)
     fi
     
-    # Fallback if everything fails
-    if [ -z "$domain" ] || [ "$domain" = "search" ]; then
-        domain="cluster.local"
+    local search_line=$(echo "$resolv_content" | grep -i "^search" || true)
+    if [ -z "$search_line" ]; then
+        echo "cluster.local"
+        return
+    fi
+
+    # Print /etc/resolv.conf to stderr so it's visible but doesn't affect the captured return value
+    echo "" >&2
+    echo "${BLUE}--- Cluster DNS Context (/etc/resolv.conf) ---${NC}" >&2
+    echo "$resolv_content" >&2
+    echo "${BLUE}----------------------------------------------${NC}" >&2
+    echo "" >&2
+
+    local domains=($(echo "$search_line" | sed 's/^search//'))
+    local valid_domains=()
+    for d in "${domains[@]}"; do
+        # Clean up the domain: remove namespace.svc. or svc. prefix
+        local clean=$(echo "$d" | sed -E 's/^[^\.]+\.svc\.//' | sed -E 's/^svc\.//')
+        if [ -n "$clean" ] && [[ ! " ${valid_domains[@]} " =~ " ${clean} " ]]; then
+            valid_domains+=("$clean")
+        fi
+    done
+
+    if [ ${#valid_domains[@]} -eq 0 ]; then
+        echo "cluster.local"
+        return
     fi
     
-    echo "$domain"
+    if [ "$auto_approve" = "true" ] || [ ! -t 0 ]; then
+        echo "${valid_domains[0]}"
+        return
+    fi
+
+    echo "${YELLOW}Please select the correct base cluster domain:${NC}" >&2
+    for i in "${!valid_domains[@]}"; do
+        echo "  $((i+1))) ${valid_domains[$i]}" >&2
+    done
+    echo "  $(( ${#valid_domains[@]} + 1 ))) Enter manually..." >&2
+    echo "" >&2
+
+    local choice
+    read -p "Enter choice [1]: " choice < /dev/tty
+    
+    if [ -z "$choice" ]; then
+        choice=1
+    fi
+    
+    if [ "$choice" -eq $(( ${#valid_domains[@]} + 1 )) ]; then
+        local manual_domain
+        read -p "Enter domain: " manual_domain < /dev/tty
+        echo "$manual_domain"
+    elif [ "$choice" -ge 1 ] && [ "$choice" -le ${#valid_domains[@]} ]; then
+        echo "${valid_domains[$((choice-1))]}"
+    else
+        echo "${valid_domains[0]}"
+    fi
 }
