@@ -11,19 +11,18 @@ import (
 )
 
 // ─── Color Palette ──────────────────────────────────────────
-// Uses lipgloss.AdaptiveColor so text is visible on BOTH light
-// and dark terminal backgrounds.
+// Dark, saturated colors visible on light terminal backgrounds.
 
 var (
-	clrAccent = lipgloss.AdaptiveColor{Light: "#7B2FBE", Dark: "#B48EFF"} // purple
-	clrGreen  = lipgloss.AdaptiveColor{Light: "#1A8A3F", Dark: "#5AF78E"} // green
-	clrYellow = lipgloss.AdaptiveColor{Light: "#9B6E00", Dark: "#F3F99D"} // yellow
-	clrRed    = lipgloss.AdaptiveColor{Light: "#CC3333", Dark: "#FF6E6E"} // red
-	clrDim    = lipgloss.AdaptiveColor{Light: "#888888", Dark: "#B0B0B0"} // gray
-	clrCyan   = lipgloss.AdaptiveColor{Light: "#0E7490", Dark: "#9AEDFE"} // cyan
-	clrPink   = lipgloss.AdaptiveColor{Light: "#C2185B", Dark: "#FF92DF"} // pink
-	clrText   = lipgloss.AdaptiveColor{Light: "#1A1A2E", Dark: "#F0F0F0"} // body text
-	clrOrange = lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FFAF5F"} // orange
+	clrAccent = lipgloss.Color("#6D28D9") // deep purple
+	clrGreen  = lipgloss.Color("#16A34A") // forest green
+	clrYellow = lipgloss.Color("#CA8A04") // dark gold
+	clrRed    = lipgloss.Color("#DC2626") // strong red
+	clrDim    = lipgloss.Color("#6B7280") // medium gray
+	clrCyan   = lipgloss.Color("#0891B2") // dark teal
+	clrPink   = lipgloss.Color("#DB2777") // dark pink
+	clrText   = lipgloss.Color("#1E293B") // dark slate
+	clrOrange = lipgloss.Color("#C2410C") // burnt orange
 )
 
 // ─── Dashboard ──────────────────────────────────────────────
@@ -44,7 +43,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	// ── Header ──
 	banner := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#1A1A2E"}).
+		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(clrAccent).
 		Padding(0, 1).
 		Render(" ⎈ Kates Deployment Summary ")
