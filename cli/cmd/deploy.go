@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
 
+	"github.com/klster/kates-cli/output"
+	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
 )
 
@@ -78,16 +83,78 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    - Kyverno: %v\n", deployWithKyverno)
 	fmt.Printf("    - Secret Manager: %v\n", deployWithSecretManager)
 
-	// 3. Cluster Detection (Placeholder for hooking into detect package)
+	// 3. Cluster Detection
 	fmt.Println("\n[3] Running Cluster Introspection (Pre-flight)...")
-	fmt.Println("    - Detecting DNS Domain...")
-	fmt.Println("    - Detecting Default StorageClass...")
-	fmt.Println("    - Detecting Availability Zones...")
+	executor := detect.NewOSExecutor()
+	collector := detect.NewCollector(executor)
+	
+	if err := collector.Preflight(); err != nil {
+		output.Error(fmt.Sprintf("Preflight failed: %v", err))
+		return err
+	}
+	
+	report, err := collector.Collect(context.Background())
+	if err != nil {
+		output.Error(fmt.Sprintf("Introspection failed: %v", err))
+		return err
+	}
+	
+	analyzer := detect.NewAnalyzer(executor)
+	analyzer.Analyze(report, detect.ParsedReqs{})
+	
 	fmt.Println("    - Generating values-detected.yaml...")
+	valuesFile := ".build/values-detected.yaml"
+	os.MkdirAll(".build", 0755)
+	
+	f, err := os.Create(valuesFile)
+	if err != nil {
+		return fmt.Errorf("failed to create values file: %v", err)
+	}
+	defer f.Close()
+	
+	detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
+	
+	// 4. Execution Plan (Helm)
+	fmt.Println("\n[4] Executing Deployment Pipeline...")
+	
+	var kafkaNS, appNS, chaosNS string
+	if deployTopology == "single" {
+		kafkaNS, appNS, chaosNS = deployNamespace, deployNamespace, deployNamespace
+	} else {
+		kafkaNS, appNS, chaosNS = deployKafkaNS, deployAppNS, deployChaosNS
+	}
+	
+	// Deploy Kafka
+	fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
+	runHelm("upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
+	
+	// Deploy Schema Registry (if requested)
+	if deployWithSchemaRegistry == "apicurio" {
+		fmt.Printf("\n🚀 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
+		runHelm("upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m")
+	}
+	
+	// Deploy Kates
+	fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+	runHelm("upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait")
+	
+	// Deploy Chaos
+	if deployWithChaos {
+		fmt.Printf("\n🚀 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
+		runHelm("upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait")
+	}
 
-	// 4. Execution Plan
-	fmt.Println("\n[4] Execution Plan Generated. (Dry-run only for now)")
-	fmt.Println("    - Next step: Implement Helm client logic in Go to apply these charts.")
-
+	fmt.Println("\n✅ Deployment Complete! ⎈ Happy Helming! ⎈")
 	return nil
+}
+
+func runHelm(args ...string) {
+	cmd := exec.Command("helm", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	// Use absolute path for charts if needed, but assuming run from repo root for now
+	if err := cmd.Run(); err != nil {
+		output.Error(fmt.Sprintf("Helm command failed: %v", err))
+		os.Exit(1)
+	}
 }
