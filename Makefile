@@ -318,6 +318,17 @@ test-capacity:
 	@echo "🧪 Running Capacity Test..."
 	./scripts/test-perf-capacity.sh
 
+test-net-kafka:
+	@echo "🌐 Testing TCP connectivity to Kafka from 'default' namespace..."
+	kubectl run -i --tty --rm debug-nc --image=busybox:1.36 --namespace=default --restart=Never -- nc -vz krafter-kafka-bootstrap.kafka.svc.cluster.local 9092
+
+test-net-api:
+	@echo "🌐 Testing HTTP connectivity to Kates API from 'default' namespace..."
+	kubectl run -i --tty --rm debug-curl --image=curlimages/curl:8.7.1 --namespace=default --restart=Never -- curl -sv http://kates.kafka.svc.cluster.local:8080/api/health
+
+test-net: test-net-kafka test-net-api
+	@echo "✅ Cross-namespace network tests complete."
+
 # Kates CLI (standalone install)
 cli-build:
 	@echo "🔨 Building Kates CLI locally..."
@@ -741,6 +752,9 @@ help:
 	@echo "  test-endurance                     - Run endurance/soak test (sustained load)"
 	@echo "  test-volume                        - Run volume test (large data)"
 	@echo "  test-capacity                      - Run capacity test (find max throughput)"
+	@echo "  test-net                           - Run cross-namespace network connectivity tests"
+	@echo "  test-net-kafka                     - Test TCP connectivity to Kafka from default namespace"
+	@echo "  test-net-api                       - Test HTTP connectivity to Kates API from default namespace"
 	@echo ""
 	@echo "  Operations"
 	@echo "  ports                              - Start port forwarding"
