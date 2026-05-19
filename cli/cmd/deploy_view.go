@@ -10,64 +10,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ─── Color Palette (Dracula) ────────────────────────────────
+// ─── Color Palette ──────────────────────────────────────────
+// High-contrast palette tested against both dark and light terminals.
 
 var (
-	colorPrimary = lipgloss.Color("#BD93F9") // purple
-	colorSuccess = lipgloss.Color("#50FA7B") // green
-	colorWarning = lipgloss.Color("#FFB86C") // orange
-	colorError   = lipgloss.Color("#FF5555") // red
-	colorMuted   = lipgloss.Color("#6272A4") // gray-blue
-	colorCyan    = lipgloss.Color("#8BE9FD") // cyan
-	colorPink    = lipgloss.Color("#FF79C6") // pink
-	colorFg      = lipgloss.Color("#F8F8F2") // foreground
+	clrAccent  = lipgloss.Color("99")  // soft purple
+	clrGreen   = lipgloss.Color("78")  // green — readable on dark & light
+	clrYellow  = lipgloss.Color("221") // warm yellow
+	clrRed     = lipgloss.Color("204") // soft red
+	clrDim     = lipgloss.Color("245") // neutral gray
+	clrCyan    = lipgloss.Color("80")  // teal
+	clrMagenta = lipgloss.Color("205") // pink
+	clrWhite   = lipgloss.Color("255") // bright white — maximum contrast
+	clrBold    = lipgloss.Color("231") // pure white
 )
 
-// ─── Styles ─────────────────────────────────────────────────
-
-var (
-	bannerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorFg).
-			Background(colorPrimary).
-			Padding(0, 1)
-
-	groupHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorCyan)
-
-	componentNameStyle = lipgloss.NewStyle().
-				Foreground(colorFg).
-				Width(22)
-
-	namespaceStyle = lipgloss.NewStyle().
-			Foreground(colorMuted).
-			Width(18)
-
-	statusReadyStyle = lipgloss.NewStyle().
-				Foreground(colorSuccess).
-				Bold(true)
-
-	statusSkipStyle = lipgloss.NewStyle().
-			Foreground(colorWarning)
-
-	statusFailStyle = lipgloss.NewStyle().
-			Foreground(colorError).
-			Bold(true)
-
-	separatorStyle = lipgloss.NewStyle().
-			Foreground(colorMuted)
-
-	phaseStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPink)
-
-	elapsedStyle = lipgloss.NewStyle().
-			Foreground(colorMuted).
-			Italic(true)
-)
-
-// ─── Dashboard Rendering ────────────────────────────────────
+// ─── Dashboard ──────────────────────────────────────────────
 
 // DeploySummaryEntry represents a component in the summary dashboard.
 type DeploySummaryEntry struct {
@@ -81,9 +39,19 @@ type DeploySummaryEntry struct {
 // RenderDeployDashboard renders the full deployment summary using lipgloss.
 func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, elapsed time.Duration) {
 	fmt.Println()
-	fmt.Println(bannerStyle.Render(" ⎈ Kates Deployment Summary ") + "  " + elapsedStyle.Render(fmt.Sprintf("(%s)", elapsed.Round(time.Second))))
 
-	// Group entries
+	// ── Header bar ──
+	banner := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("0")).
+		Background(clrAccent).
+		Padding(0, 1).
+		Render(" ⎈ Kates Deployment Summary ")
+	timer := lipgloss.NewStyle().Foreground(clrDim).Italic(true).
+		Render(fmt.Sprintf("  completed in %s", elapsed.Round(time.Second)))
+	fmt.Println(banner + timer)
+
+	// ── Group entries ──
 	groups := map[string][]DeploySummaryEntry{"A": {}, "B": {}, "C": {}}
 	for _, e := range entries {
 		groups[e.Group] = append(groups[e.Group], e)
@@ -94,31 +62,31 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 		"C": "Applications",
 	}
 
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
+	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", 60))
+
 	for _, g := range []string{"A", "B", "C"} {
 		if len(groups[g]) == 0 {
 			continue
 		}
 		fmt.Println()
-		fmt.Println(groupHeaderStyle.Render(fmt.Sprintf("  Group %s — %s", g, groupNames[g])))
-		fmt.Println(separatorStyle.Render("  " + strings.Repeat("─", 58)))
+		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, groupNames[g])))
+		fmt.Println("  " + sepLine)
 		for _, e := range groups[g] {
 			status := getComponentStatus(ctx, e.Release, e.Namespace)
-			renderDashboardRow(e.Icon, e.Name, e.Namespace, status)
+			printRow(e.Icon, e.Name, e.Namespace, status)
 		}
 	}
 
-	// Footer
+	// ── Footer ──
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(colorSuccess).Render("  ✅ All components deployed successfully!"))
-
-	// Hints
-	fmt.Println(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render("  Quick commands:"))
-	for _, h := range []string{
-		"kubectl get pods -A",
-		"helm list -A",
-		"kates health",
-	} {
-		fmt.Println(lipgloss.NewStyle().Foreground(colorCyan).Render("    $ " + h))
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
+		Render("  ✅ All components deployed successfully!"))
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Italic(true).Render("  Quick commands:"))
+	cmdStyle := lipgloss.NewStyle().Foreground(clrCyan)
+	for _, c := range []string{"kubectl get pods -A", "helm list -A", "kates health"} {
+		fmt.Println(cmdStyle.Render("    $ " + c))
 	}
 	fmt.Println()
 }
@@ -133,23 +101,26 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 	return "skip"
 }
 
-func renderDashboardRow(icon, name, namespace, status string) {
-	var statusCell string
+func printRow(icon, name, namespace, status string) {
+	// Fixed-width columns using fmt.Sprintf for pixel-perfect alignment.
+	// Col 1: icon+name (26 chars)   Col 2: namespace (20 chars)   Col 3: status
+	nameStr := fmt.Sprintf("%-24s", icon+" "+name)
+	nsStr := fmt.Sprintf("%-20s", namespace)
+
+	var statusStr string
 	switch status {
 	case "ready":
-		statusCell = statusReadyStyle.Render("✅ Ready")
-	case "skip":
-		statusCell = statusSkipStyle.Render("⏭️  Skipped")
+		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render("✔ Ready")
 	case "fail":
-		statusCell = statusFailStyle.Render("✖  Failed")
+		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render("✖ Failed")
 	default:
-		statusCell = statusSkipStyle.Render("◌ Unknown")
+		statusStr = lipgloss.NewStyle().Foreground(clrYellow).Render("⏭ Skipped")
 	}
 
-	nameCell := componentNameStyle.Render(icon + " " + name)
-	nsCell := namespaceStyle.Render(namespace)
+	nameCol := lipgloss.NewStyle().Foreground(clrWhite).Render(nameStr)
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(nsStr)
 
-	fmt.Println("  " + lipgloss.JoinHorizontal(lipgloss.Top, nameCell, nsCell, statusCell))
+	fmt.Printf("  %s  %s  %s\n", nameCol, nsCol, statusStr)
 }
 
 // ─── Phase Logging ──────────────────────────────────────────
@@ -157,27 +128,30 @@ func renderDashboardRow(icon, name, namespace, status string) {
 // PrintPhaseHeader prints a styled phase header.
 func PrintPhaseHeader(number int, title string) {
 	fmt.Println()
-	fmt.Println(phaseStyle.Render(fmt.Sprintf("[%d] %s", number, title)))
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrMagenta).
+		Render(fmt.Sprintf("[%d] %s", number, title)))
 }
 
 // PrintPhaseItem prints a styled sub-item within a phase.
 func PrintPhaseItem(text string) {
-	fmt.Println(lipgloss.NewStyle().Foreground(colorFg).Render("  • " + text))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrWhite).Render("  • " + text))
 }
 
 // PrintPhaseSuccess prints a styled success message within a phase.
 func PrintPhaseSuccess(text string) {
-	fmt.Println(lipgloss.NewStyle().Foreground(colorSuccess).Render("  ✓ " + text))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Render("  ✓ " + text))
 }
 
 // PrintPhaseWarn prints a styled warning message within a phase.
 func PrintPhaseWarn(text string) {
-	fmt.Println(lipgloss.NewStyle().Foreground(colorWarning).Render("  ⚠ " + text))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrYellow).Render("  ⚠ " + text))
 }
 
 // PrintDeployBanner prints the initial deploy banner.
 func PrintDeployBanner() {
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("⎈ Kates Unified Orchestrator"))
-	fmt.Println(separatorStyle.Render(strings.Repeat("─", 40)))
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrAccent).
+		Render("⎈ Kates Unified Orchestrator"))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
+		Render(strings.Repeat("─", 35)))
 }
