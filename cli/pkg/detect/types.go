@@ -287,6 +287,7 @@ type DetectReport struct {
 // ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
 
 type GeneratedValues struct {
+	Global         GenGlobal             `yaml:"global"`
 	ClusterName    string                `yaml:"clusterName"`
 
 	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
@@ -313,6 +314,11 @@ type GeneratedValues struct {
 }
 
 
+
+type GenGlobal struct {
+	ClusterDomain  string `yaml:"clusterDomain"`
+	StorageClass   string `yaml:"storageClass,omitempty"`
+}
 
 type GenStrimziOp struct {
 	Enabled bool `yaml:"enabled"`

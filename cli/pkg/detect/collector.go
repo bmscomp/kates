@@ -545,21 +545,57 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		info.PodCIDR = "unknown"
 	}
 
-	// Detect cluster DNS domain from CoreDNS Corefile
-	corefileOut, _ := c.exec.Exec("kubectl", "get", "configmap", "coredns", "-n", "kube-system", "-o", "jsonpath={.data.Corefile}")
+	// Detect cluster DNS domain using robust pod-based extraction
 	info.ClusterDomain = "cluster.local"
-	if corefileOut != "" {
-		// Look for "kubernetes <domain>" directive in Corefile
-		for _, line := range strings.Split(corefileOut, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "kubernetes ") {
-				parts := strings.Fields(trimmed)
-				if len(parts) >= 2 {
-					domain := parts[1]
-					// Filter out placeholder values
-					if domain != "{" && !strings.HasPrefix(domain, "{") && domain != "" {
-						info.ClusterDomain = domain
+	
+	// Attempt 1: Get from an already running pod
+	podOut, _ := c.exec.Exec("sh", "-c", "kubectl get pods --all-namespaces --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.namespace} {.items[0].metadata.name}' 2>/dev/null || true")
+	var resolvContent string
+	if podOut != "" {
+		parts := strings.Fields(podOut)
+		if len(parts) == 2 {
+			resolvContent, _ = c.exec.Exec("kubectl", "exec", "-n", parts[0], parts[1], "--", "cat", "/etc/resolv.conf")
+		}
+	}
+	
+	// Attempt 2: If no running pods, spin up a temporary pod
+	if resolvContent == "" {
+		resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image=busybox:1.36", "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
+	}
+	
+	if resolvContent != "" {
+		for _, line := range strings.Split(resolvContent, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(strings.ToLower(line), "search ") {
+				fields := strings.Fields(line)[1:]
+				
+				// Priority: find entry starting exactly with svc.
+				var found string
+				for _, f := range fields {
+					if strings.HasPrefix(f, "svc.") {
+						found = strings.TrimPrefix(f, "svc.")
+						break
 					}
+				}
+				
+				// Fallback: strip namespace.svc. or svc.
+				if found == "" {
+					for _, f := range fields {
+						clean := f
+						idx := strings.Index(clean, ".svc.")
+						if idx != -1 {
+							clean = clean[idx+5:]
+						}
+						clean = strings.TrimPrefix(clean, "svc.")
+						if clean != "" {
+							found = clean
+							break
+						}
+					}
+				}
+				
+				if found != "" && found != "cluster.local" {
+					info.ClusterDomain = found
 				}
 				break
 			}

@@ -269,6 +269,10 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 	cb := g.Cap
 
 	return &GeneratedValues{
+		Global: GenGlobal{
+			ClusterDomain: g.Report.Network.ClusterDomain,
+			StorageClass:  g.selectDefaultSC(),
+		},
 		ClusterName: g.ClusterName,
 
 		StrimziOp:   g.buildStrimziOp(),
