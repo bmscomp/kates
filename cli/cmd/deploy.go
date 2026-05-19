@@ -424,6 +424,8 @@ data:
 	if deployWithChaos {
 		if !isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
 			fmt.Printf("\n🚀 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
+			cleanupStaleClusterResource(ctx, "clusterrole", "litmus", chaosNS)
+			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
 			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
 			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--set", "rbac.kafkaNamespace="+kafkaNS, "--timeout", "5m", "--wait"); err != nil {
 				return err
