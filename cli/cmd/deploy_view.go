@@ -14,12 +14,12 @@ import (
 // Dark, saturated colors visible on light terminal backgrounds.
 
 var (
-	clrAccent = lipgloss.Color("#6D28D9") // deep purple
+	clrAccent = lipgloss.Color("#2563EB") // strong blue
 	clrGreen  = lipgloss.Color("#16A34A") // forest green
 	clrRed    = lipgloss.Color("#DC2626") // strong red
 	clrDim    = lipgloss.Color("#6B7280") // medium gray
 	clrCyan   = lipgloss.Color("#0891B2") // dark teal
-	clrPink   = lipgloss.Color("#DB2777") // dark pink
+	clrPink   = lipgloss.Color("#1D4ED8") // royal blue (phase headers)
 	clrText   = lipgloss.Color("#1E293B") // dark slate
 	clrOrange = lipgloss.Color("#C2410C") // burnt orange
 )
