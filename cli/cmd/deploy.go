@@ -143,7 +143,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		fmt.Println("\n🚀 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
-		runExecFn(gCtx, "kubectl", "create", "namespace", "strimzi-operator", "--dry-run=client", "-o", "yaml") // dry-run to not fail if it exists
 		// Create namespace properly
 		runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
 kind: Namespace
@@ -166,7 +165,7 @@ metadata:
 			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", kafkaNS)
 			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
 			runHelmFn(gCtx, "repo", "update", "jetstack")
-			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--timeout", "5m", "--wait")
+			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
 			if err != nil { return err }
 			
 			clusterIssuer := `apiVersion: cert-manager.io/v1
