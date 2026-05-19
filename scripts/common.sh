@@ -120,32 +120,6 @@ get_cluster_domain() {
         return
     fi
     
-    if [ "$auto_approve" = "true" ] || [ ! -t 0 ]; then
-        echo "${valid_domains[0]}"
-        return
-    fi
-
-    echo "${YELLOW}Please select the correct base cluster domain:${NC}" >&2
-    for i in "${!valid_domains[@]}"; do
-        echo "  $((i+1))) ${valid_domains[$i]}" >&2
-    done
-    echo "  $(( ${#valid_domains[@]} + 1 ))) Enter manually..." >&2
-    echo "" >&2
-
-    local choice
-    read -p "Enter choice [1]: " choice < /dev/tty
-    
-    if [ -z "$choice" ]; then
-        choice=1
-    fi
-    
-    if [ "$choice" -eq $(( ${#valid_domains[@]} + 1 )) ]; then
-        local manual_domain
-        read -p "Enter domain: " manual_domain < /dev/tty
-        echo "$manual_domain"
-    elif [ "$choice" -ge 1 ] && [ "$choice" -le ${#valid_domains[@]} ]; then
-        echo "${valid_domains[$((choice-1))]}"
-    else
-        echo "${valid_domains[0]}"
-    fi
+    # Automatically select the first valid domain (prioritizing the one starting with svc.)
+    echo "${valid_domains[0]}"
 }
