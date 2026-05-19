@@ -132,9 +132,29 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	// ---------------------------------------------------------
-	// GROUP A (Parallel)
+	// GROUP A: Operators & CRDs (Parallel)
 	// ---------------------------------------------------------
 	g, gCtx := errgroup.WithContext(ctx)
+	
+	// Deploy Strimzi Operator
+	g.Go(func() error {
+		if isHelmReleaseDeployedFn(gCtx, "strimzi-operator", "strimzi-operator") {
+			fmt.Println("⏭️  Strimzi Operator already deployed. Skipping.")
+			return nil
+		}
+		fmt.Println("\n🚀 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
+		runExecFn(gCtx, "kubectl", "create", "namespace", "strimzi-operator", "--dry-run=client", "-o", "yaml") // dry-run to not fail if it exists
+		// Create namespace properly
+		runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
+kind: Namespace
+metadata:
+  name: strimzi-operator`)
+		err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "0.40.0", "-n", "strimzi-operator", "--set", "watchAnyNamespace=true", "--set", "replicas=1", "--timeout", "5m", "--wait")
+		if err != nil { return err }
+		
+		fmt.Println("    - Waiting for Strimzi CRDs to be established...")
+		return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established", "crd", "kafkas.kafka.strimzi.io", "--timeout=60s")
+	})
 	
 	// Deploy Cert-Manager
 	if deployWithCertManager {
@@ -173,59 +193,69 @@ spec:
 		})
 	}
 
+	if err := g.Wait(); err != nil {
+		output.Error(fmt.Sprintf("Failed during Group A (Operators) deployments: %v", err))
+		return err
+	}
+
+	// ---------------------------------------------------------
+	// GROUP B: Core Infrastructure (Parallel)
+	// ---------------------------------------------------------
+	g2, g2Ctx := errgroup.WithContext(ctx)
+
 	// Deploy Monitoring (Jaeger)
 	if deployWithMonitoring {
-		g.Go(func() error {
-			if isHelmReleaseDeployedFn(gCtx, "jaeger", kafkaNS) {
+		g2.Go(func() error {
+			if isHelmReleaseDeployedFn(g2Ctx, "jaeger", kafkaNS) {
 				fmt.Println("⏭️  Jaeger already deployed. Skipping.")
 				return nil
 			}
 			fmt.Printf("\n🚀 Deploying Jaeger (Namespace: %s)...\n", kafkaNS)
-			runHelmFn(gCtx, "repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
-			runHelmFn(gCtx, "repo", "update", "jaegertracing")
-			err := runHelmFn(gCtx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", kafkaNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
+			runHelmFn(g2Ctx, "repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
+			runHelmFn(g2Ctx, "repo", "update", "jaegertracing")
+			err := runHelmFn(g2Ctx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", kafkaNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
 			if err != nil { return err }
 			
 			// Patch health probes natively without exiting on error immediately
-			runExecFn(gCtx, "kubectl", "patch", "deployment", "jaeger", "-n", kafkaNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
+			runExecFn(g2Ctx, "kubectl", "patch", "deployment", "jaeger", "-n", kafkaNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
 			return nil
 		})
 	}
 	
 	// Deploy Kafka
-	g.Go(func() error {
-		if !isHelmReleaseDeployedFn(gCtx, "krafter", kafkaNS) {
+	g2.Go(func() error {
+		if !isHelmReleaseDeployedFn(g2Ctx, "krafter", kafkaNS) {
 			fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
-			runHelmFn(gCtx, "dependency", "update", "charts/kafka-cluster")
-			err := runHelmFn(gCtx, "upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
+			runHelmFn(g2Ctx, "dependency", "update", "charts/kafka-cluster")
+			err := runHelmFn(g2Ctx, "upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
 			if err != nil { return err }
 		} else {
 			fmt.Println("⏭️  Kafka chart already deployed. Verifying readiness...")
 		}
 		
 		fmt.Println("    - Waiting for Kafka cluster to be ready...")
-		if err := runExecFn(gCtx, "kubectl", "wait", "kafka/krafter", "--for=condition=Ready", "--timeout=600s", "-n", kafkaNS); err != nil {
+		if err := runExecFn(g2Ctx, "kubectl", "wait", "kafka/krafter", "--for=condition=Ready", "--timeout=600s", "-n", kafkaNS); err != nil {
 			return fmt.Errorf("kafka readiness failed: %w", err)
 		}
 		
 		fmt.Println("    - Waiting for Entity Operator...")
-		if err := runExecFn(gCtx, "kubectl", "wait", "deployment", "-l", "app.kubernetes.io/name=entity-operator", "--for=condition=Available", "--timeout=180s", "-n", kafkaNS); err != nil {
+		if err := runExecFn(g2Ctx, "kubectl", "wait", "deployment", "-l", "app.kubernetes.io/name=entity-operator", "--for=condition=Available", "--timeout=180s", "-n", kafkaNS); err != nil {
 			return fmt.Errorf("entity operator readiness failed: %w", err)
 		}
 		
 		fmt.Println("    - Applying Kafka users and topics...")
-		runExecFn(gCtx, "kubectl", "apply", "-f", "config/kafka/kafka-users.yaml", "-n", kafkaNS)
-		runExecFn(gCtx, "kubectl", "apply", "-f", "config/kafka/kafka-topics.yaml", "-n", kafkaNS)
+		runExecFn(g2Ctx, "kubectl", "apply", "-f", "config/kafka/kafka-users.yaml", "-n", kafkaNS)
+		runExecFn(g2Ctx, "kubectl", "apply", "-f", "config/kafka/kafka-topics.yaml", "-n", kafkaNS)
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		output.Error(fmt.Sprintf("Failed during Group A deployments: %v", err))
+	if err := g2.Wait(); err != nil {
+		output.Error(fmt.Sprintf("Failed during Group B (Core Infra) deployments: %v", err))
 		return err
 	}
 
 	// ---------------------------------------------------------
-	// GROUP B (Sequential/Dependent)
+	// GROUP C (Apps / Sequential)
 	// ---------------------------------------------------------
 	// Deploy Schema Registry (if requested)
 	if deployWithSchemaRegistry == "apicurio" {
