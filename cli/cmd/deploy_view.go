@@ -16,7 +16,6 @@ import (
 var (
 	clrAccent = lipgloss.Color("#6D28D9") // deep purple
 	clrGreen  = lipgloss.Color("#16A34A") // forest green
-	clrYellow = lipgloss.Color("#CA8A04") // dark gold
 	clrRed    = lipgloss.Color("#DC2626") // strong red
 	clrDim    = lipgloss.Color("#6B7280") // medium gray
 	clrCyan   = lipgloss.Color("#0891B2") // dark teal
