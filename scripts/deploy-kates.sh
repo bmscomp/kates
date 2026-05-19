@@ -117,7 +117,13 @@ info "  Environment: ${ENV}"
 info "  Values:      ${VALUES_ARGS[*]}"
 
 # Customize the Kates backend connection URL based on cluster config
-KAFKA_BOOTSTRAP="${CLUSTER_NAME}-kafka-bootstrap.${NAMESPACE}.svc:9092"
+# Dynamically extract the exact service name from the cluster instead of hardcoding
+KAFKA_SVC=$(kubectl get svc -n "${NAMESPACE}" -l strimzi.io/name="${CLUSTER_NAME}-kafka-bootstrap" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "${KAFKA_SVC}" ]; then
+    # Fallback if the cluster isn't up yet
+    KAFKA_SVC="${CLUSTER_NAME}-kafka-bootstrap"
+fi
+KAFKA_BOOTSTRAP="${KAFKA_SVC}.${NAMESPACE}.svc:9092"
 info "  Bootstrap:   ${KAFKA_BOOTSTRAP}"
 
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
