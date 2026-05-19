@@ -60,10 +60,14 @@ spec:
         image: {{ .Values.initContainers.waitForPostgres.image | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
         command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.clusterDomain }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
-        {{- with .Values.containerSecurityContext }}
         securityContext:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+          capabilities:
+            drop:
+              - ALL
         volumeMounts:
         - name: tmp
           mountPath: /tmp
