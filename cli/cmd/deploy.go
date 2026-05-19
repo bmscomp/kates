@@ -88,7 +88,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// 3. Cluster Detection
 	fmt.Println("\n[3] Running Cluster Introspection (Pre-flight)...")
-	executor := detect.NewOSExecutor()
+	executor := defaultExecutor
 	collector := detect.NewCollector(executor)
 	
 	if err := collector.Preflight(); err != nil {
@@ -139,14 +139,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Deploy Cert-Manager
 	if deployWithCertManager {
 		g.Go(func() error {
-			if isHelmReleaseDeployed(gCtx, "cert-manager", kafkaNS) {
+			if isHelmReleaseDeployedFn(gCtx, "cert-manager", kafkaNS) {
 				fmt.Println("⏭️  Cert-Manager already deployed. Skipping.")
 				return nil
 			}
 			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", kafkaNS)
-			runHelm(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
-			runHelm(gCtx, "repo", "update", "jetstack")
-			err := runHelm(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--timeout", "5m", "--wait")
+			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
+			runHelmFn(gCtx, "repo", "update", "jetstack")
+			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--timeout", "5m", "--wait")
 			if err != nil { return err }
 			
 			clusterIssuer := `apiVersion: cert-manager.io/v1
@@ -155,67 +155,67 @@ metadata:
   name: selfsigned-issuer
 spec:
   selfSigned: {}`
-			return runExecStdin(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
+			return runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
 		})
 	}
 	
 	// Deploy Kyverno
 	if deployWithKyverno {
 		g.Go(func() error {
-			if isHelmReleaseDeployed(gCtx, "kyverno", "kyverno") {
+			if isHelmReleaseDeployedFn(gCtx, "kyverno", "kyverno") {
 				fmt.Println("⏭️  Kyverno already deployed. Skipping.")
 				return nil
 			}
 			fmt.Println("\n🚀 Deploying Kyverno (Namespace: kyverno)...")
-			runHelm(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
-			runHelm(gCtx, "repo", "update", "kyverno")
-			return runHelm(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno", "-n", "kyverno", "--create-namespace", "--set", "replicaCount=1", "--timeout", "5m", "--wait")
+			runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
+			runHelmFn(gCtx, "repo", "update", "kyverno")
+			return runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno", "-n", "kyverno", "--create-namespace", "--set", "replicaCount=1", "--timeout", "5m", "--wait")
 		})
 	}
 
 	// Deploy Monitoring (Jaeger)
 	if deployWithMonitoring {
 		g.Go(func() error {
-			if isHelmReleaseDeployed(gCtx, "jaeger", kafkaNS) {
+			if isHelmReleaseDeployedFn(gCtx, "jaeger", kafkaNS) {
 				fmt.Println("⏭️  Jaeger already deployed. Skipping.")
 				return nil
 			}
 			fmt.Printf("\n🚀 Deploying Jaeger (Namespace: %s)...\n", kafkaNS)
-			runHelm(gCtx, "repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
-			runHelm(gCtx, "repo", "update", "jaegertracing")
-			err := runHelm(gCtx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", kafkaNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
+			runHelmFn(gCtx, "repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
+			runHelmFn(gCtx, "repo", "update", "jaegertracing")
+			err := runHelmFn(gCtx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", kafkaNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
 			if err != nil { return err }
 			
 			// Patch health probes natively without exiting on error immediately
-			runExec(gCtx, "kubectl", "patch", "deployment", "jaeger", "-n", kafkaNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
+			runExecFn(gCtx, "kubectl", "patch", "deployment", "jaeger", "-n", kafkaNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
 			return nil
 		})
 	}
 	
 	// Deploy Kafka
 	g.Go(func() error {
-		if !isHelmReleaseDeployed(gCtx, "krafter", kafkaNS) {
+		if !isHelmReleaseDeployedFn(gCtx, "krafter", kafkaNS) {
 			fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
-			runHelm(gCtx, "dependency", "update", "charts/kafka-cluster")
-			err := runHelm(gCtx, "upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
+			runHelmFn(gCtx, "dependency", "update", "charts/kafka-cluster")
+			err := runHelmFn(gCtx, "upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
 			if err != nil { return err }
 		} else {
 			fmt.Println("⏭️  Kafka chart already deployed. Verifying readiness...")
 		}
 		
 		fmt.Println("    - Waiting for Kafka cluster to be ready...")
-		if err := runExec(gCtx, "kubectl", "wait", "kafka/krafter", "--for=condition=Ready", "--timeout=600s", "-n", kafkaNS); err != nil {
+		if err := runExecFn(gCtx, "kubectl", "wait", "kafka/krafter", "--for=condition=Ready", "--timeout=600s", "-n", kafkaNS); err != nil {
 			return fmt.Errorf("kafka readiness failed: %w", err)
 		}
 		
 		fmt.Println("    - Waiting for Entity Operator...")
-		if err := runExec(gCtx, "kubectl", "wait", "deployment", "-l", "app.kubernetes.io/name=entity-operator", "--for=condition=Available", "--timeout=180s", "-n", kafkaNS); err != nil {
+		if err := runExecFn(gCtx, "kubectl", "wait", "deployment", "-l", "app.kubernetes.io/name=entity-operator", "--for=condition=Available", "--timeout=180s", "-n", kafkaNS); err != nil {
 			return fmt.Errorf("entity operator readiness failed: %w", err)
 		}
 		
 		fmt.Println("    - Applying Kafka users and topics...")
-		runExec(gCtx, "kubectl", "apply", "-f", "config/kafka/kafka-users.yaml", "-n", kafkaNS)
-		runExec(gCtx, "kubectl", "apply", "-f", "config/kafka/kafka-topics.yaml", "-n", kafkaNS)
+		runExecFn(gCtx, "kubectl", "apply", "-f", "config/kafka/kafka-users.yaml", "-n", kafkaNS)
+		runExecFn(gCtx, "kubectl", "apply", "-f", "config/kafka/kafka-topics.yaml", "-n", kafkaNS)
 		return nil
 	})
 
@@ -229,9 +229,9 @@ spec:
 	// ---------------------------------------------------------
 	// Deploy Schema Registry (if requested)
 	if deployWithSchemaRegistry == "apicurio" {
-		if !isHelmReleaseDeployed(ctx, "apicurio", kafkaNS) {
+		if !isHelmReleaseDeployedFn(ctx, "apicurio", kafkaNS) {
 			fmt.Printf("\n🚀 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
-			if err := runHelm(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
+			if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
 				return err
 			}
 		} else {
@@ -240,9 +240,9 @@ spec:
 	}
 	
 	// Deploy Kates
-	if !isHelmReleaseDeployed(ctx, "kates", appNS) {
+	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
 		fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
-		if err := runHelm(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait"); err != nil {
+		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait"); err != nil {
 			return err
 		}
 	} else {
@@ -251,10 +251,10 @@ spec:
 	
 	// Deploy Chaos
 	if deployWithChaos {
-		if !isHelmReleaseDeployed(ctx, "chaos", chaosNS) {
+		if !isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
 			fmt.Printf("\n🚀 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
-			runHelm(ctx, "dependency", "update", "charts/kates-chaos")
-			if err := runHelm(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait"); err != nil {
+			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
+			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait"); err != nil {
 				return err
 			}
 		} else {
@@ -268,9 +268,17 @@ spec:
 
 // Helpers
 
+var (
+	runExecFn = runExecDefault
+	runExecStdinFn = runExecStdinDefault
+	runHelmFn = runHelmDefault
+	isHelmReleaseDeployedFn = isHelmReleaseDeployedDefault
+	defaultExecutor detect.CommandExecutor = detect.NewOSExecutor()
+)
+
 var execMutex sync.Mutex
 
-func runExec(ctx context.Context, name string, args ...string) error {
+func runExecDefault(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	
 	// Prevent interwoven output lines for parallel commands
@@ -282,7 +290,7 @@ func runExec(ctx context.Context, name string, args ...string) error {
 	return cmd.Run()
 }
 
-func runExecStdin(ctx context.Context, name string, args []string, stdinData string) error {
+func runExecStdinDefault(ctx context.Context, name string, args []string, stdinData string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	
 	stdin, err := cmd.StdinPipe()
@@ -303,11 +311,11 @@ func runExecStdin(ctx context.Context, name string, args []string, stdinData str
 	return cmd.Run()
 }
 
-func runHelm(ctx context.Context, args ...string) error {
-	return runExec(ctx, "helm", args...)
+func runHelmDefault(ctx context.Context, args ...string) error {
+	return runExecFn(ctx, "helm", args...)
 }
 
-func isHelmReleaseDeployed(ctx context.Context, release, namespace string) bool {
+func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string) bool {
 	// Create context with short timeout
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
