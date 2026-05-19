@@ -19,14 +19,8 @@ var cleanCmd = &cobra.Command{
 and deleting all managed namespaces. This is the inverse of 'kates deploy'.
 
 Examples:
-  # Interactive clean (asks for confirmation)
-  kates clean
-
-  # Force clean without confirmation
-  kates clean --force
-
-  # Clean only specific topology
-  kates clean --topology isolated`,
+  kates clean            # interactive, with confirmation
+  kates clean --force    # skip confirmation prompt`,
 	RunE: runClean,
 }
 
@@ -48,6 +42,7 @@ type helmRelease struct {
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
+	// ── Banner ──
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
 		Render("⎈ Kates Clean — Teardown"))
@@ -56,108 +51,92 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// All possible Helm releases across both topologies.
 	releases := []helmRelease{
-		// Group C (reverse order)
-		{"chaos", "litmus"},
-		{"chaos", "kates-stack"},
-		{"kates", "kates"},
-		{"kates", "kates-stack"},
-		{"apicurio", "kafka"},
-		{"apicurio", "kates-stack"},
-		// Group B
-		{"krafter", "kafka"},
-		{"krafter", "kates-stack"},
-		{"jaeger", "jaeger"},
-		{"jaeger", "kafka"},
-		{"jaeger", "kates-stack"},
-		// Group A
+		{"chaos", "litmus"}, {"chaos", "kates-stack"},
+		{"kates", "kates"}, {"kates", "kates-stack"},
+		{"apicurio", "kafka"}, {"apicurio", "kates-stack"},
+		{"krafter", "kafka"}, {"krafter", "kates-stack"},
+		{"jaeger", "jaeger"}, {"jaeger", "kafka"}, {"jaeger", "kates-stack"},
 		{"cert-manager", "cert-manager"},
 		{"kyverno", "kyverno"},
 		{"strimzi-operator", "strimzi-operator"},
 	}
 
-	// All managed namespaces.
 	managedNamespaces := []string{
-		"kates-stack",
-		"kafka",
-		"kates",
-		"litmus",
-		"jaeger",
-		"strimzi-operator",
-		"cert-manager",
-		"kyverno",
+		"kates-stack", "kafka", "kates", "litmus",
+		"jaeger", "strimzi-operator", "cert-manager", "kyverno",
 	}
 
-	// Cluster-scoped resources that need explicit deletion.
 	clusterResources := []struct{ Kind, Name string }{
-		{"clusterrole", "kates"},
-		{"clusterrolebinding", "kates"},
-		{"clusterrole", "litmus"},
-		{"clusterrolebinding", "litmus"},
+		{"clusterrole", "kates"}, {"clusterrolebinding", "kates"},
+		{"clusterrole", "litmus"}, {"clusterrolebinding", "litmus"},
 	}
 
-	// Discover what's actually installed.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// ── Discovery ──
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Foreground(clrWhite).Render("  Scanning for installed releases..."))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrText).Render("  Scanning cluster..."))
 
-	var installedReleases []helmRelease
+	var installed []helmRelease
 	for _, r := range releases {
-		checkCtx, checkCancel := context.WithTimeout(ctx, 3*time.Second)
-		out := exec.CommandContext(checkCtx, "helm", "status", r.Name, "-n", r.Namespace)
-		if out.Run() == nil {
-			installedReleases = append(installedReleases, r)
+		c, cn := context.WithTimeout(ctx, 3*time.Second)
+		if exec.CommandContext(c, "helm", "status", r.Name, "-n", r.Namespace).Run() == nil {
+			installed = append(installed, r)
 		}
-		checkCancel()
+		cn()
 	}
 
-	var existingNamespaces []string
+	var existingNS []string
 	for _, ns := range managedNamespaces {
-		checkCtx, checkCancel := context.WithTimeout(ctx, 3*time.Second)
-		out := exec.CommandContext(checkCtx, "kubectl", "get", "namespace", ns)
-		if out.Run() == nil {
-			existingNamespaces = append(existingNamespaces, ns)
+		c, cn := context.WithTimeout(ctx, 3*time.Second)
+		if exec.CommandContext(c, "kubectl", "get", "namespace", ns).Run() == nil {
+			existingNS = append(existingNS, ns)
 		}
-		checkCancel()
+		cn()
 	}
 
-	if len(installedReleases) == 0 && len(existingNamespaces) == 0 {
-		fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Render("  ✓ Nothing to clean — cluster is already clean."))
+	if len(installed) == 0 && len(existingNS) == 0 {
+		fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Bold(true).
+			Render("  ✓ Cluster is already clean. Nothing to do."))
 		fmt.Println()
 		return nil
 	}
 
-	// Show what will be removed.
+	// ── Show what will be removed ──
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrYellow).
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrOrange).
 		Render("  The following resources will be removed:"))
-	fmt.Println()
 
-	if len(installedReleases) > 0 {
-		fmt.Println(lipgloss.NewStyle().Foreground(clrWhite).Bold(true).Render("  Helm Releases:"))
-		for _, r := range installedReleases {
-			fmt.Printf("    %s  %s\n",
-				lipgloss.NewStyle().Foreground(clrRed).Render("✖"),
-				lipgloss.NewStyle().Foreground(clrWhite).Render(
-					fmt.Sprintf("%-20s (namespace: %s)", r.Name, r.Namespace)),
-			)
-		}
-	}
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(clrText)
+	dimStyle := lipgloss.NewStyle().Foreground(clrDim)
+	bulletStyle := lipgloss.NewStyle().Foreground(clrRed)
 
-	if len(existingNamespaces) > 0 {
+	if len(installed) > 0 {
 		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Foreground(clrWhite).Bold(true).Render("  Namespaces:"))
-		for _, ns := range existingNamespaces {
-			fmt.Printf("    %s  %s\n",
-				lipgloss.NewStyle().Foreground(clrRed).Render("✖"),
-				lipgloss.NewStyle().Foreground(clrWhite).Render(ns),
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Helm Releases:"))
+		for _, r := range installed {
+			fmt.Printf("  %s %s %s\n",
+				bulletStyle.Render("✖"),
+				nameStyle.Render(fmt.Sprintf("%-20s", r.Name)),
+				dimStyle.Render(fmt.Sprintf("→ %s", r.Namespace)),
+			)
+		}
+	}
+
+	if len(existingNS) > 0 {
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Namespaces:"))
+		for _, ns := range existingNS {
+			fmt.Printf("  %s %s\n",
+				bulletStyle.Render("✖"),
+				nameStyle.Render(ns),
 			)
 		}
 	}
 	fmt.Println()
 
-	// Confirmation.
+	// ── Confirmation ──
 	if !cleanForce {
 		var confirmed bool
 		err := huh.NewConfirm().
@@ -179,47 +158,52 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 
-	// 1. Uninstall Helm releases (reverse deploy order).
-	for _, r := range installedReleases {
-		label := fmt.Sprintf("  Uninstalling %s from %s...", r.Name, r.Namespace)
-		fmt.Print(lipgloss.NewStyle().Foreground(clrWhite).Render(label))
+	// ── 1. Uninstall Helm releases ──
+	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
+	errStyle := lipgloss.NewStyle().Foreground(clrRed)
 
-		unCtx, unCancel := context.WithTimeout(ctx, 2*time.Minute)
-		out, err := exec.CommandContext(unCtx, "helm", "uninstall", r.Name, "-n", r.Namespace).CombinedOutput()
-		unCancel()
+	for _, r := range installed {
+		label := fmt.Sprintf("  Uninstalling %-16s from %s", r.Name, r.Namespace)
+		fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
+
+		uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
+		out, err := exec.CommandContext(uCtx, "helm", "uninstall", r.Name, "-n", r.Namespace).CombinedOutput()
+		uCancel()
 
 		if err != nil {
-			fmt.Println(lipgloss.NewStyle().Foreground(clrRed).Render(" ✖ " + strings.TrimSpace(string(out))))
+			fmt.Println(errStyle.Render("  ✖ " + strings.TrimSpace(string(out))))
 		} else {
-			fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Render(" ✔"))
+			fmt.Println(okStyle.Render("  ✔"))
 		}
 	}
 
-	// 2. Delete cluster-scoped resources.
+	// ── 2. Delete cluster-scoped resources ──
 	for _, cr := range clusterResources {
-		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
-		exec.CommandContext(delCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found").Run()
-		delCancel()
+		dCtx, dCancel := context.WithTimeout(ctx, 10*time.Second)
+		exec.CommandContext(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found").Run()
+		dCancel()
 	}
 
-	// 3. Delete namespaces.
-	fmt.Println()
-	for _, ns := range existingNamespaces {
-		label := fmt.Sprintf("  Deleting namespace %s...", ns)
-		fmt.Print(lipgloss.NewStyle().Foreground(clrWhite).Render(label))
+	// ── 3. Delete namespaces ──
+	if len(existingNS) > 0 {
+		fmt.Println()
+		for _, ns := range existingNS {
+			label := fmt.Sprintf("  Deleting namespace %s", ns)
+			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
 
-		nsCtx, nsCancel := context.WithTimeout(ctx, 90*time.Second)
-		err := exec.CommandContext(nsCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found").Run()
-		nsCancel()
+			nCtx, nCancel := context.WithTimeout(ctx, 90*time.Second)
+			err := exec.CommandContext(nCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found").Run()
+			nCancel()
 
-		if err != nil {
-			fmt.Println(lipgloss.NewStyle().Foreground(clrYellow).Render(" ⚠ timeout (may still be deleting)"))
-		} else {
-			fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Render(" ✔"))
+			if err != nil {
+				fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ timeout"))
+			} else {
+				fmt.Println(okStyle.Render("  ✔"))
+			}
 		}
 	}
 
-	// Done.
+	// ── Done ──
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
 		Render("  ✅ Cluster cleaned successfully."))
