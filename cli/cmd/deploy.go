@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -340,8 +341,8 @@ spec:
 		}
 		
 		fmt.Println("    - Applying Kafka users and topics...")
-		runExecFn(g2Ctx, "kubectl", "apply", "-f", "config/kafka/kafka-users.yaml", "-n", kafkaNS)
-		runExecFn(g2Ctx, "kubectl", "apply", "-f", "config/kafka/kafka-topics.yaml", "-n", kafkaNS)
+		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-users.yaml", kafkaNS)
+		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-topics.yaml", kafkaNS)
 		return nil
 	})
 
@@ -545,4 +546,19 @@ func printDeploySummaryRow(ctx context.Context, label, release, namespace string
 		status = "⚠️  Skip"
 	}
 	fmt.Printf("│ %-20s │ %-16s │ %-8s │\n", label, namespace, status)
+}
+
+// applyManifestWithNamespace reads a YAML file, strips any hardcoded
+// `namespace:` fields from metadata, and applies it to the given namespace.
+// This ensures manifests work correctly regardless of deployment topology.
+var nsLineRegex = regexp.MustCompile(`(?m)^\s+namespace:\s+\S+\s*$`)
+
+func applyManifestWithNamespace(ctx context.Context, file, namespace string) error {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", file, err)
+	}
+	// Strip hardcoded namespace lines so -n flag takes effect
+	stripped := nsLineRegex.ReplaceAllString(string(data), "")
+	return runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-", "-n", namespace}, stripped)
 }
