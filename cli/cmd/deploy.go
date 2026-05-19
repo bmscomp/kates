@@ -144,11 +144,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// 2. Component Selection
 	PrintPhaseHeader(2, "Component Selection")
-	PrintPhaseItem(fmt.Sprintf("Schema Registry: %s", deployWithSchemaRegistry))
-	PrintPhaseItem(fmt.Sprintf("Chaos Engine:    %v", deployWithChaos))
-	PrintPhaseItem(fmt.Sprintf("Monitoring:      %v", deployWithMonitoring))
-	PrintPhaseItem(fmt.Sprintf("Cert-Manager:    %v", deployWithCertManager))
-	PrintPhaseItem(fmt.Sprintf("Kyverno:         %v", deployWithKyverno))
+	if deployWithSchemaRegistry != "none" {
+		PrintPhaseSuccess(fmt.Sprintf("Schema Registry: %s", deployWithSchemaRegistry))
+	}
+	if deployWithChaos {
+		PrintPhaseSuccess("Litmus Chaos Engine")
+	}
+	if deployWithMonitoring {
+		PrintPhaseSuccess("Jaeger (Tracing)")
+	}
+	if deployWithCertManager {
+		PrintPhaseSuccess("Cert-Manager (TLS)")
+	}
+	if deployWithKyverno {
+		PrintPhaseSuccess("Kyverno (Policies)")
+	}
 
 	// 3. Cluster Detection
 	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
