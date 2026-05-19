@@ -11,18 +11,18 @@ import (
 )
 
 // ─── Color Palette ──────────────────────────────────────────
-// High-contrast palette tested against both dark and light terminals.
+// Vivid hex colors for maximum readability on dark terminals.
 
 var (
-	clrAccent  = lipgloss.Color("99")  // soft purple
-	clrGreen   = lipgloss.Color("78")  // green — readable on dark & light
-	clrYellow  = lipgloss.Color("221") // warm yellow
-	clrRed     = lipgloss.Color("204") // soft red
-	clrDim     = lipgloss.Color("245") // neutral gray
-	clrCyan    = lipgloss.Color("80")  // teal
-	clrMagenta = lipgloss.Color("205") // pink
-	clrWhite   = lipgloss.Color("255") // bright white — maximum contrast
-	clrBold    = lipgloss.Color("231") // pure white
+	clrAccent  = lipgloss.Color("#B48EFF") // vivid purple
+	clrGreen   = lipgloss.Color("#5AF78E") // bright green
+	clrYellow  = lipgloss.Color("#F3F99D") // bright yellow
+	clrRed     = lipgloss.Color("#FF6E6E") // bright red
+	clrDim     = lipgloss.Color("#B0B0B0") // light gray (not too dark)
+	clrCyan    = lipgloss.Color("#9AEDFE") // bright cyan
+	clrMagenta = lipgloss.Color("#FF92DF") // bright pink
+	clrWhite   = lipgloss.Color("#FFFFFF") // pure white
+	clrOrange  = lipgloss.Color("#FFAF5F") // warm orange
 )
 
 // ─── Dashboard ──────────────────────────────────────────────
