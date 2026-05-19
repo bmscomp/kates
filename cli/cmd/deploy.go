@@ -70,7 +70,8 @@ func init() {
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
-	fmt.Println("🚀 Initializing Kates Unified Orchestrator...")
+	deployStartTime := time.Now()
+	PrintDeployBanner()
 	
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
 		var components []string
@@ -95,16 +96,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Value(&deployWithSchemaRegistry),
 					
 				huh.NewMultiSelect[string]().
-					Title("Select Additional Components").
-					Options(
-						huh.NewOption("Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
-						huh.NewOption("Monitoring (Prometheus/Jaeger)", "monitoring").Selected(deployWithMonitoring),
-						huh.NewOption("Cert-Manager", "cert-manager").Selected(deployWithCertManager),
-						huh.NewOption("Kyverno", "kyverno").Selected(deployWithKyverno),
-					).
-					Value(&components),
+				Title("Select Additional Components").
+				Description("Use space to toggle, enter to confirm").
+				Options(
+					huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
+					huh.NewOption("📊 Jaeger (Tracing)", "monitoring").Selected(deployWithMonitoring),
+					huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
+					huh.NewOption("🛡️  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
+				).
+				Value(&components),
 			),
-		)
+		).WithTheme(huh.ThemeDracula())
 		
 		err := form.Run()
 		if err != nil {
@@ -127,27 +129,26 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	
 	// 1. Resolve Topology
-	fmt.Printf("\n[1] Resolving Namespace Topology (%s mode)...\n", deployTopology)
+	PrintPhaseHeader(1, fmt.Sprintf("Resolving Namespace Topology (%s mode)", deployTopology))
 	if deployTopology == "single" {
-		fmt.Printf("    - All components will be deployed to namespace: %s\n", deployNamespace)
+		PrintPhaseItem(fmt.Sprintf("All components → %s", deployNamespace))
 	} else {
-		fmt.Printf("    - Kafka Namespace: %s\n", deployKafkaNS)
-		fmt.Printf("    - Kates App Namespace: %s\n", deployAppNS)
-		fmt.Printf("    - Jaeger Namespace: jaeger\n")
-		fmt.Printf("    - Chaos Namespace: %s\n", deployChaosNS)
+		PrintPhaseItem(fmt.Sprintf("Kafka        → %s", deployKafkaNS))
+		PrintPhaseItem(fmt.Sprintf("Kates App    → %s", deployAppNS))
+		PrintPhaseItem(fmt.Sprintf("Jaeger       → jaeger"))
+		PrintPhaseItem(fmt.Sprintf("Chaos        → %s", deployChaosNS))
 	}
 
 	// 2. Component Selection
-	fmt.Println("\n[2] Component Selection...")
-	fmt.Printf("    - Schema Registry: %s\n", deployWithSchemaRegistry)
-	fmt.Printf("    - Chaos Engine: %v\n", deployWithChaos)
-	fmt.Printf("    - Monitoring: %v\n", deployWithMonitoring)
-	fmt.Printf("    - Cert-Manager: %v\n", deployWithCertManager)
-	fmt.Printf("    - Kyverno: %v\n", deployWithKyverno)
-	fmt.Printf("    - Secret Manager: %v\n", deployWithSecretManager)
+	PrintPhaseHeader(2, "Component Selection")
+	PrintPhaseItem(fmt.Sprintf("Schema Registry: %s", deployWithSchemaRegistry))
+	PrintPhaseItem(fmt.Sprintf("Chaos Engine:    %v", deployWithChaos))
+	PrintPhaseItem(fmt.Sprintf("Monitoring:      %v", deployWithMonitoring))
+	PrintPhaseItem(fmt.Sprintf("Cert-Manager:    %v", deployWithCertManager))
+	PrintPhaseItem(fmt.Sprintf("Kyverno:         %v", deployWithKyverno))
 
 	// 3. Cluster Detection
-	fmt.Println("\n[3] Running Cluster Introspection (Pre-flight)...")
+	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
 	executor := defaultExecutor
 	collector := detect.NewCollector(executor)
 	
@@ -191,7 +192,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	analyzer := detect.NewAnalyzer(executor)
 	analyzer.Analyze(report, detect.ParsedReqs{})
 	
-	fmt.Println("    - Generating values-detected.yaml...")
+	PrintPhaseItem("Generating values-detected.yaml...")
 	valuesFile := ".build/values-detected.yaml"
 	os.MkdirAll(".build", 0755)
 	
@@ -204,7 +205,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
 	
 	// 4. Execution Plan (Helm)
-	fmt.Println("\n[4] Executing Deployment Pipeline...")
+	PrintPhaseHeader(4, "Executing Deployment Pipeline")
 	
 	var kafkaNS, appNS, chaosNS, jaegerNS string
 	if deployTopology == "single" {
@@ -435,30 +436,28 @@ data:
 	// ---------------------------------------------------------
 	// Deployment Summary Dashboard
 	// ---------------------------------------------------------
-	fmt.Println("\n✅ Deployment Complete! ⎈ Happy Helming! ⎈")
-	fmt.Println("")
-	fmt.Println("┌──────────────────────┬──────────────────┬──────────┐")
-	fmt.Println("│ Component            │ Namespace        │ Status   │")
-	fmt.Println("├──────────────────────┼──────────────────┼──────────┤")
-	printDeploySummaryRow(ctx, "Strimzi Operator", "strimzi-operator", "strimzi-operator")
+	entries := []DeploySummaryEntry{
+		{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"},
+	}
 	if deployWithCertManager {
-		printDeploySummaryRow(ctx, "Cert-Manager", "cert-manager", "cert-manager")
+		entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
 	}
 	if deployWithKyverno {
-		printDeploySummaryRow(ctx, "Kyverno", "kyverno", "kyverno")
+		entries = append(entries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
 	}
-	printDeploySummaryRow(ctx, "Kafka (krafter)", "krafter", kafkaNS)
+	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
 	if deployWithMonitoring {
-		printDeploySummaryRow(ctx, "Jaeger", "jaeger", jaegerNS)
+		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Jaeger", Release: "jaeger", Namespace: jaegerNS, Group: "B"})
 	}
 	if deployWithSchemaRegistry == "apicurio" {
-		printDeploySummaryRow(ctx, "Apicurio Registry", "apicurio", kafkaNS)
+		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
 	}
-	printDeploySummaryRow(ctx, "Kates Backend", "kates", appNS)
+	entries = append(entries, DeploySummaryEntry{Icon: "🚀", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
 	if deployWithChaos {
-		printDeploySummaryRow(ctx, "Litmus Chaos", "chaos", chaosNS)
+		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
 	}
-	fmt.Println("└──────────────────────┴──────────────────┴──────────┘")
+
+	RenderDeployDashboard(ctx, entries, time.Since(deployStartTime))
 	return nil
 }
 
@@ -537,15 +536,6 @@ func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS str
 		defer delCancel()
 		exec.CommandContext(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found").Run()
 	}
-}
-
-// printDeploySummaryRow prints a formatted row for the deployment summary table.
-func printDeploySummaryRow(ctx context.Context, label, release, namespace string) {
-	status := "✅ Ready"
-	if !isHelmReleaseDeployedFn(ctx, release, namespace) {
-		status = "⚠️  Skip"
-	}
-	fmt.Printf("│ %-20s │ %-16s │ %-8s │\n", label, namespace, status)
 }
 
 // applyManifestWithNamespace reads a YAML file, strips any hardcoded
