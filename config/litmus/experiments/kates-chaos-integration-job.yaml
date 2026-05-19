@@ -22,7 +22,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: KATES_API_URL
-              value: "http://kates.kafka.svc.cluster.local:8080"
+              value: "http://kates.kafka.svc:8080"
             - name: CHAOS_ENGINE_FILE
               value: "/chaos/engine.yaml"
             - name: STEADY_STATE_DURATION
