@@ -369,6 +369,10 @@ spec:
 	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
 		fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
 		
+		// Auto-cleanup stale ClusterRole ownership from previous topology switches
+		cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
+		cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
+		
 		if kafkaNS != appNS {
 			// Ensure app namespace exists before copying secrets into it
 			nsYaml := fmt.Sprintf(`apiVersion: v1
@@ -407,7 +411,7 @@ data:
 		}
 		
 		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--set", "kafka.bootstrapServers="+bootstrap, "--timeout", "5m", "--wait"); err != nil {
+		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--set", "kafka.bootstrapServers="+bootstrap, "--timeout", "8m", "--wait"); err != nil {
 			return err
 		}
 	} else {
@@ -427,7 +431,33 @@ data:
 		}
 	}
 
+	// ---------------------------------------------------------
+	// Deployment Summary Dashboard
+	// ---------------------------------------------------------
 	fmt.Println("\n✅ Deployment Complete! ⎈ Happy Helming! ⎈")
+	fmt.Println("")
+	fmt.Println("┌──────────────────────┬──────────────────┬──────────┐")
+	fmt.Println("│ Component            │ Namespace        │ Status   │")
+	fmt.Println("├──────────────────────┼──────────────────┼──────────┤")
+	printDeploySummaryRow(ctx, "Strimzi Operator", "strimzi-operator", "strimzi-operator")
+	if deployWithCertManager {
+		printDeploySummaryRow(ctx, "Cert-Manager", "cert-manager", "cert-manager")
+	}
+	if deployWithKyverno {
+		printDeploySummaryRow(ctx, "Kyverno", "kyverno", "kyverno")
+	}
+	printDeploySummaryRow(ctx, "Kafka (krafter)", "krafter", kafkaNS)
+	if deployWithMonitoring {
+		printDeploySummaryRow(ctx, "Jaeger", "jaeger", jaegerNS)
+	}
+	if deployWithSchemaRegistry == "apicurio" {
+		printDeploySummaryRow(ctx, "Apicurio Registry", "apicurio", kafkaNS)
+	}
+	printDeploySummaryRow(ctx, "Kates Backend", "kates", appNS)
+	if deployWithChaos {
+		printDeploySummaryRow(ctx, "Litmus Chaos", "chaos", chaosNS)
+	}
+	fmt.Println("└──────────────────────┴──────────────────┴──────────┘")
 	return nil
 }
 
@@ -486,4 +516,33 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	defer cancel()
 	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
 	return cmd.Run() == nil
+}
+
+// cleanupStaleClusterResource removes a cluster-scoped resource if it belongs
+// to a Helm release in a different namespace, preventing ownership conflicts
+// when switching deployment topologies.
+func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS string) {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, name, "-o", "jsonpath={.metadata.annotations.meta\\.helm\\.sh/release-namespace}")
+	out, err := cmd.Output()
+	if err != nil {
+		return // resource doesn't exist, nothing to clean
+	}
+	existingNS := strings.TrimSpace(string(out))
+	if existingNS != "" && existingNS != expectedNS {
+		fmt.Printf("    - Cleaning stale %s/%s (owned by namespace %q, deploying to %q)\n", kind, name, existingNS, expectedNS)
+		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer delCancel()
+		exec.CommandContext(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found").Run()
+	}
+}
+
+// printDeploySummaryRow prints a formatted row for the deployment summary table.
+func printDeploySummaryRow(ctx context.Context, label, release, namespace string) {
+	status := "✅ Ready"
+	if !isHelmReleaseDeployedFn(ctx, release, namespace) {
+		status = "⚠️  Skip"
+	}
+	fmt.Printf("│ %-20s │ %-16s │ %-8s │\n", label, namespace, status)
 }
