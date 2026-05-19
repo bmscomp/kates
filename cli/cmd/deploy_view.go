@@ -101,8 +101,10 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 }
 
 func printRow(icon, name, namespace, status string) {
-	nameStr := fmt.Sprintf("%-24s", icon+" "+name)
-	nsStr := fmt.Sprintf("%-20s", namespace)
+	// Pad name and namespace as plain strings BEFORE styling,
+	// so emoji widths don't break column alignment.
+	paddedName := fmt.Sprintf("%-20s", name)
+	paddedNS := fmt.Sprintf("%-20s", namespace)
 
 	var statusStr string
 	switch status {
@@ -114,10 +116,11 @@ func printRow(icon, name, namespace, status string) {
 		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render("⏭ Skipped")
 	}
 
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr)
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(nsStr)
+	iconStr := icon + " "
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(paddedName)
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(paddedNS)
 
-	fmt.Printf("  %s  %s  %s\n", nameCol, nsCol, statusStr)
+	fmt.Printf("  %s%s  %s  %s\n", iconStr, nameCol, nsCol, statusStr)
 }
 
 // ─── Phase Logging ──────────────────────────────────────────
