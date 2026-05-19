@@ -367,7 +367,8 @@ spec:
 	// Deploy Kates
 	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
 		fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait"); err != nil {
+		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
+		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--set", "kafka.bootstrapServers="+bootstrap, "--timeout", "5m", "--wait"); err != nil {
 			return err
 		}
 	} else {
