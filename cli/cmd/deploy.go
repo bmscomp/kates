@@ -126,7 +126,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	
 	// Deploy Kafka
 	fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
+	runHelm("dependency", "update", "charts/kafka-cluster")
 	runHelm("upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
+	
+	// Wait for Kafka to be Ready
+	fmt.Println("    - Waiting for Kafka cluster to be ready (this may take a few minutes)...")
+	runExec("kubectl", "wait", "kafka/krafter", "--for=condition=Ready", "--timeout=600s", "-n", kafkaNS)
+	
+	// Wait for Entity Operator
+	fmt.Println("    - Waiting for Entity Operator...")
+	runExec("kubectl", "wait", "deployment", "-l", "app.kubernetes.io/name=entity-operator", "--for=condition=Available", "--timeout=180s", "-n", kafkaNS)
+	
+	// Apply Users and Topics
+	fmt.Println("    - Applying Kafka users and topics...")
+	runExec("kubectl", "apply", "-f", "config/kafka/kafka-users.yaml", "-n", kafkaNS)
+	runExec("kubectl", "apply", "-f", "config/kafka/kafka-topics.yaml", "-n", kafkaNS)
 	
 	// Deploy Schema Registry (if requested)
 	if deployWithSchemaRegistry == "apicurio" {
@@ -141,6 +155,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Deploy Chaos
 	if deployWithChaos {
 		fmt.Printf("\n🚀 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
+		runHelm("dependency", "update", "charts/kates-chaos")
 		runHelm("upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait")
 	}
 
@@ -148,13 +163,16 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runHelm(args ...string) {
-	cmd := exec.Command("helm", args...)
+func runExec(name string, args ...string) {
+	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	// Use absolute path for charts if needed, but assuming run from repo root for now
 	if err := cmd.Run(); err != nil {
-		output.Error(fmt.Sprintf("Helm command failed: %v", err))
+		output.Error(fmt.Sprintf("Command failed: %s %v", name, args))
 		os.Exit(1)
 	}
+}
+
+func runHelm(args ...string) {
+	runExec("helm", args...)
 }

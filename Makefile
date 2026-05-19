@@ -25,9 +25,9 @@ detect: check-prerequisites
 
 # ── Main deployment pipeline ─────────────────────────────────────────────────
 all: check-prerequisites
-	@echo "🚀 Launching complete cluster setup..."
+	@echo "🚀 Launching complete cluster setup via Kates Unified Orchestrator..."
 	@echo ""
-	@# ── Step 1: Cluster connectivity (auto-create Kind if none found) ──
+	@# ── Step 1: Cluster connectivity ──
 	@if kubectl cluster-info >/dev/null 2>&1; then \
 		CONTEXT=$$(kubectl config current-context); \
 		echo "✅ Kubernetes cluster reachable (context: $$CONTEXT)"; \
@@ -36,179 +36,28 @@ all: check-prerequisites
 		$(MAKE) cluster; \
 	fi
 	@echo ""
-	@# ── Step 2: Detect cluster configuration ──
-	@echo "Step 1: Detecting cluster configuration..."
-	@mkdir -p .build
 	@if [ ! -x "$(KATES_BIN)" ]; then \
-		echo "  ⚠️  kates binary not found, building it now..."; \
+		echo "⚠️  kates binary not found, building it now..."; \
 		$(MAKE) cli-build >/dev/null; \
 	fi
-	@$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet
-	@PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
-	echo "  Provider: $${PROVIDER:-unknown}"; \
-	echo "  Values:   $(DETECTED_VALUES)"
-	@echo ""
-	@# ── Step 2: Strimzi Operator (read from detect output) ──
-	@if grep -A1 'strimziOperator:' $(DETECTED_VALUES) | grep -q 'enabled: true'; then \
-		echo "Step 2: Installing Strimzi Operator (cluster-wide)..."; \
-		CLUSTER_DOMAIN=$$(source scripts/common.sh && get_cluster_domain); \
-		echo "  Cluster Domain: $${CLUSTER_DOMAIN}"; \
-		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
-		helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-			--version $(STRIMZI_VERSION) \
-			--namespace strimzi-operator \
-			--set watchAnyNamespace=true \
-			--set replicas=1 \
-			--set kubernetesServiceDnsDomain="$${CLUSTER_DOMAIN}" \
-			--timeout 5m --wait; \
-		echo "  Waiting for Strimzi CRDs to be established..."; \
-		kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s; \
+	@echo "Select Deployment Topology:"
+	@echo "  1) Single Namespace (dev mode, everything in 'kates-stack')"
+	@echo "  2) Isolated Namespaces (production mode, separate namespaces for kafka/kates/chaos)"
+	@read -p "Enter choice [1/2]: " choice; \
+	if [ "$$choice" = "1" ]; then \
+		$(KATES_BIN) deploy --topology single --namespace kates-stack --with-schema-registry apicurio; \
 	else \
-		echo "✅ Strimzi Operator already running — skipping"; \
+		$(KATES_BIN) deploy --topology isolated --with-schema-registry apicurio; \
 	fi
 	@echo ""
-	@# ── Ensure kafka namespace exists ──
-	@kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
-	@# ── Step 3: cert-manager ──
-	@echo "Step 3: Deploying cert-manager..."
-	@./scripts/deploy-cert-manager.sh
-	@echo ""
-	@# ── Step 4: Kafka cluster ──
-	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kafka already deployed — skipping"; \
-	else \
-		echo "Step 4: Deploying Kafka (Strimzi)..."; \
-		./scripts/deploy-kafka-generic.sh --yes; \
-	fi
-	@# ── Step 5: Wait for Kafka CR Ready (handles KRaft voter-format upgrade) ──
-	@echo "Step 5: Waiting for Kafka cluster to be ready..."
-	@echo "  (First deploy may take up to 10 min for KRaft voter-format upgrade)"
-	@for i in $$(seq 1 60); do \
-		if kubectl get kafka/krafter -n kafka -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True"; then \
-			echo "  ✅ Kafka cluster is Ready!"; \
-			break; \
-		fi; \
-		echo "  ⏳ [$$i/60] Waiting 10s... Current Pod Status:"; \
-		kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:'.status.containerStatuses[*].ready' | sed 's/^/     /'; \
-		sleep 10; \
-	done
-	@kubectl wait kafka/krafter --for=condition=Ready --timeout=30s -n kafka || \
-		{ echo "❌ Kafka cluster did not reach Ready state:"; \
-		  kubectl get pods -n kafka -l strimzi.io/cluster=krafter; \
-		  kubectl get kafka -n kafka -o wide; exit 1; }
-	@echo ""
-	@# ── Step 6: Wait for Entity Operator (HARD GATE) ──
-	@echo "Step 6: Waiting for Entity Operator..."
-	@kubectl wait deployment -l app.kubernetes.io/name=entity-operator -n kafka \
-		--for=condition=Available --timeout=180s || \
-		{ echo "❌ Entity Operator did not become ready within 180s. Cannot create users/topics."; exit 1; }
-	@echo "✅ Entity Operator is ready"
-	@echo ""
-	@# ── Step 7: Apply users + topics ──
-	@echo "Step 7: Applying Kafka users and topics..."
-	@kubectl apply -f config/kafka/kafka-users.yaml
-	@kubectl apply -f config/kafka/kafka-topics.yaml
-	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || \
-		{ echo "⚠️  Some KafkaUsers did not reach Ready:"; \
-		  kubectl get kafkauser -n kafka -o wide; }
-	@echo ""
-	@# ── Step 7.5: Network Policies (if CNI supports them) ──
-	@if grep -A1 'networkPolicies:' $(DETECTED_VALUES) | grep -q 'enabled: true'; then \
-		echo "Step 7.5: Applying Kafka network policies..."; \
-		kubectl apply -f config/kafka/kafka-networkpolicies.yaml; \
-		echo "✅ NetworkPolicies applied"; \
-	else \
-		echo "⏭️  NetworkPolicies skipped (CNI does not support them)"; \
-	fi
-	@echo ""
-	@# ── Step 8: Apicurio Registry ──
-	@if kubectl get deployment apicurio-registry -n kafka --no-headers 2>/dev/null | grep -q '1/1'; then \
-		echo "✅ Apicurio Registry already deployed — skipping"; \
-	else \
-		echo "Step 8: Deploying Apicurio Registry..."; \
-		./scripts/deploy-apicurio.sh; \
-	fi
-	@echo ""
-	@# ── Step 9: LitmusChaos (provider-aware values) ──
-	@if kubectl get pods -n kafka -l app.kubernetes.io/instance=chaos --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ LitmusChaos already deployed — skipping"; \
-	else \
-		echo "Step 9: Deploying LitmusChaos..."; \
-		PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
-		CHAOS_VALUES="charts/kates-chaos/values.yaml"; \
-		if [ "$$PROVIDER" = "kind" ] && [ -f "charts/kates-chaos/values-kind.yaml" ]; then \
-			CHAOS_VALUES="charts/kates-chaos/values-kind.yaml"; \
-		fi; \
-		helm dependency update charts/kates-chaos; \
-		helm upgrade --install chaos charts/kates-chaos \
-			-n kafka --create-namespace \
-			-f "$$CHAOS_VALUES" \
-			--timeout 10m; \
-		echo "Waiting for Litmus pods to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=chaos -n kafka --timeout=300s 2>/dev/null || true; \
-	fi
-	@echo ""
-	@echo "Step 9.5: Verifying chaos infrastructure..."
-	@if kubectl get crd chaosengines.litmuschaos.io &>/dev/null; then \
-		echo "✅ Litmus CRDs installed"; \
-	else \
-		echo "⚠️  Litmus CRDs not found — chaos provider will fall back to noop"; \
-	fi
-	@echo ""
-	@# ── Step 10: Jaeger ──
-	@if kubectl get pods -n kafka -l app=jaeger --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Jaeger already deployed — skipping"; \
-	else \
-		echo "Step 10: Deploying Jaeger (distributed tracing)..."; \
-		./scripts/deploy-jaeger.sh || true; \
-	fi
-	@echo ""
-	@# ── Step 11: Kates ──
-	@if kubectl get pods -n kafka -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kates already deployed — skipping"; \
-	else \
-		echo "Step 11: Deploying Kates..."; \
-		./scripts/deploy-kates.sh; \
-	fi
-	@echo ""
-	@echo "Step 12: Exposing service ports..."
-	@./scripts/port-forward.sh
-	@echo ""
-	@# ── Step 13: Post-deploy health check ──
-	@echo "Step 13: Verifying deployment health..."
-	@UNHEALTHY=0; \
-	for dep in kates apicurio-registry jaeger; do \
-		STATUS=$$(kubectl get deployment "$$dep" -n kafka -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null | sed 's|^/|0/|'); \
-		if [ -z "$$STATUS" ] || echo "$$STATUS" | grep -qv '^[0-9]*/[0-9]*$$'; then \
-			echo "  ⏭️  $$dep — not deployed"; \
-		elif [ "$$(echo $$STATUS | cut -d/ -f1)" != "$$(echo $$STATUS | cut -d/ -f2)" ]; then \
-			echo "  ⚠️  $$dep — $$STATUS replicas ready"; \
-			UNHEALTHY=$$((UNHEALTHY + 1)); \
-		else \
-			echo "  ✅ $$dep — $$STATUS"; \
-		fi; \
-	done; \
-	if [ "$$UNHEALTHY" -gt 0 ]; then \
-		echo ""; \
-		echo "⚠️  $$UNHEALTHY deployment(s) not fully ready — check 'kubectl get pods -n kafka'"; \
-	else \
-		echo ""; \
-		echo "✅ All deployments healthy"; \
-	fi
+	@echo "Step: Exposing service ports..."
+	@./scripts/port-forward.sh || true
 	@echo ""
 	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
-	@echo ""
-	@echo "📊 Services deployed:"
-	@echo "  ✓ Kafka Cluster (Strimzi KRaft mode)"
-	@echo "  ✓ Apicurio Registry"
-	@echo "  ✓ LitmusChaos + Chaos Experiments"
-	@echo "  ✓ Jaeger (distributed tracing)"
-	@echo "  ✓ Kates"
 	@echo ""
 	@echo "🔗 Access points:"
 	@echo "  - Apicurio Registry: http://localhost:30082"
 	@echo "  - Kates:             http://localhost:30083"
-	@echo "  - Jaeger UI:         http://localhost:30086"
 	@echo "  - Litmus UI:         http://localhost:9091  (admin/litmus)"
 	@echo ""
 
