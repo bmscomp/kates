@@ -94,13 +94,26 @@ get_cluster_domain() {
 
     local domains=($(echo "$search_line" | sed 's/^search//'))
     local valid_domains=()
+    
+    # Priority: Find the entry that starts exactly with "svc."
     for d in "${domains[@]}"; do
-        # Clean up the domain: remove namespace.svc. or svc. prefix
-        local clean=$(echo "$d" | sed -E 's/^[^\.]+\.svc\.//' | sed -E 's/^svc\.//')
-        if [ -n "$clean" ] && [[ ! " ${valid_domains[@]} " =~ " ${clean} " ]]; then
-            valid_domains+=("$clean")
+        if [[ "$d" == svc.* ]]; then
+            local clean="${d#svc.}"
+            if [ -n "$clean" ] && [[ ! " ${valid_domains[@]} " =~ " ${clean} " ]]; then
+                valid_domains+=("$clean")
+            fi
         fi
     done
+
+    # Fallback: if no "svc.*" found, clean up the standard way
+    if [ ${#valid_domains[@]} -eq 0 ]; then
+        for d in "${domains[@]}"; do
+            local clean=$(echo "$d" | sed -E 's/^[^\.]+\.svc\.//' | sed -E 's/^svc\.//')
+            if [ -n "$clean" ] && [[ ! " ${valid_domains[@]} " =~ " ${clean} " ]]; then
+                valid_domains+=("$clean")
+            fi
+        done
+    fi
 
     if [ ${#valid_domains[@]} -eq 0 ]; then
         echo "cluster.local"
