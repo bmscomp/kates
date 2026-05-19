@@ -63,17 +63,26 @@ elapsed() {
 }
 
 get_cluster_domain() {
-    # Attempt 1: CoreDNS config
-    local domain=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -o 'kubernetes [^ ]*' | head -n1 | awk '{print $2}' || true)
+    local domain=""
     
-    # Attempt 2: Temp pod
+    # Attempt 1: Get from an already running pod in any namespace (fastest, most reliable)
+    local pod=$(kubectl get pods --all-namespaces --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.namespace} {.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -n "$pod" ]; then
+        local ns=$(echo "$pod" | awk '{print $1}')
+        local name=$(echo "$pod" | awk '{print $2}')
+        # Extract the search path, take the first entry, and remove the "<namespace>.svc." prefix
+        domain=$(kubectl exec -n "$ns" "$name" -- cat /etc/resolv.conf 2>/dev/null | grep -i "^search" | head -1 | awk '{print $2}' | sed -E 's/^[^\.]+\.svc\.//' || true)
+    fi
+
+    # Attempt 2: If no running pods, spin up a temporary pod
     if [ -z "$domain" ]; then
-        domain=$(kubectl run --rm -i --image=busybox:1.36 dns-detect --restart=Never -- cat /etc/resolv.conf 2>/dev/null | grep "search" | awk '{print $2}' | sed 's/default\.svc\.//' || true)
+        domain=$(kubectl run --rm -i --image=busybox:1.36 dns-detect --restart=Never -- cat /etc/resolv.conf 2>/dev/null | grep -i "^search" | head -1 | awk '{print $2}' | sed -E 's/^[^\.]+\.svc\.//' || true)
     fi
     
-    # Fallback
-    if [ -z "$domain" ]; then
+    # Fallback if everything fails
+    if [ -z "$domain" ] || [ "$domain" = "search" ]; then
         domain="cluster.local"
     fi
+    
     echo "$domain"
 }
