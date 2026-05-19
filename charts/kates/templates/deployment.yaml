@@ -29,10 +29,20 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
       serviceAccountName: {{ include "kates.serviceAccountName" . }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 60 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.dnsPolicy }}
+      dnsPolicy: {{ .Values.dnsPolicy }}
+      {{- end }}
+      {{- with .Values.dnsConfig }}
+      dnsConfig:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.securityContext }}
@@ -43,8 +53,9 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.postgresql.enabled }}
+      {{- if or .Values.postgresql.enabled .Values.extraInitContainers }}
       initContainers:
+      {{- if .Values.postgresql.enabled }}
       - name: wait-for-postgres
         image: {{ .Values.initContainers.waitForPostgres.image | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
@@ -57,9 +68,13 @@ spec:
         - name: tmp
           mountPath: /tmp
       {{- end }}
+      {{- with .Values.extraInitContainers }}
+        {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- end }}
       containers:
       - name: kates
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ include "kates.image" . }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         {{- with .Values.containerSecurityContext }}
         securityContext:

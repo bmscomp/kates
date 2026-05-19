@@ -1,3 +1,11 @@
+# -- Global configuration
+global:
+  # -- Override the image registry for all images in the chart
+  # Useful for air-gapped clusters that mirror images to an internal registry
+  imageRegistry: ""
+  # -- Override image pull secrets globally
+  imagePullSecrets: []
+
 # -- Number of KATES replicas
 replicaCount: 1
 
@@ -18,6 +26,10 @@ nameOverride: ""
 fullnameOverride: ""
 # -- The cluster domain (extracted dynamically during deployment)
 clusterDomain: "cluster.local"
+# -- DNS policy for pods (ClusterFirst, Default, None, ClusterFirstWithHostNet)
+dnsPolicy: ""
+# -- Custom DNS configuration (nameservers, searches, options)
+dnsConfig: {}
 
 # -- Service account configuration
 serviceAccount:
@@ -112,16 +124,24 @@ jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
 # -- Pod-level security context (PSS restricted compliant)
+# NOTE: runAsUser and fsGroup are intentionally unset so that platforms
+# like OpenShift can assign random UIDs via their Security Context Constraints.
+# Set them explicitly in your environment values file if needed.
 securityContext:
   runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
+  # runAsUser: 1000
+  # fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
 
-# -- Container-level security context
+# -- Container-level security context (PSS restricted compliant)
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
 
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
@@ -173,6 +193,9 @@ podDisruptionBudget:
   # -- Unhealthy pod eviction policy
   unhealthyPodEvictionPolicy: IfHealthy
 
+# -- Priority class name for pod scheduling
+priorityClassName: ""
+
 # -- Topology spread constraints for pod scheduling
 topologySpreadConstraints: []
 
@@ -196,6 +219,8 @@ affinity:
 
 # -- Extra environment variables for the KATES container
 extraEnv: []
+# -- Extra init containers (e.g. for Vault secret fetching, schema migration)
+extraInitContainers: []
 # -- Extra volumes
 extraVolumes: []
 # -- Extra volume mounts

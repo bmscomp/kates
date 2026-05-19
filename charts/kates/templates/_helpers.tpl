@@ -44,9 +44,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kates.postgresql.jdbcUrl" -}}
 {{- if .Values.postgresql.useSubchart -}}
-jdbc:postgresql://{{ .Release.Name }}-postgresqlha-postgresql.{{ .Release.Namespace }}.svc:5432/{{ .Values.postgresql.auth.database }}
+jdbc:postgresql://{{ .Release.Name }}-postgresqlha-postgresql.{{ .Release.Namespace }}.svc.{{ .Values.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
 {{- else if .Values.postgresql.enabled -}}
-jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc:5432/{{ .Values.postgresql.auth.database }}
+jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
 {{- else -}}
 jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}
 {{- end -}}
@@ -65,5 +65,17 @@ jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabas
   {{- else -}}
     {{- include "kates.fullname" . -}}-db
   {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the full image reference, prepending global.imageRegistry if set.
+Usage: {{ include "kates.image" . }}
+*/}}
+{{- define "kates.image" -}}
+{{- if and .Values.global .Values.global.imageRegistry -}}
+{{ .Values.global.imageRegistry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{- else -}}
+{{ .Values.image.repository }}:{{ .Values.image.tag }}
 {{- end -}}
 {{- end }}

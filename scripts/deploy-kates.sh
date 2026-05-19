@@ -43,13 +43,19 @@ fi
 
 # Kind-specific: ensure released image is available in the cluster
 if [ "${ENV}" = "kind" ]; then
-    KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"
-    info "Ensuring ${KATES_IMAGE} is available in Kind..."
-    if ! docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
-        info "Pulling ${KATES_IMAGE} from registry..."
-        docker pull "${KATES_IMAGE}"
+    if ! command -v kind &>/dev/null; then
+        warn "ENV=kind but 'kind' CLI not found — skipping local image load"
+    elif ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME:-panda}$"; then
+        warn "Kind cluster '${KIND_CLUSTER_NAME:-panda}' not found — skipping local image load"
+    else
+        KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"
+        info "Ensuring ${KATES_IMAGE} is available in Kind..."
+        if ! docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
+            info "Pulling ${KATES_IMAGE} from registry..."
+            docker pull "${KATES_IMAGE}"
+        fi
+        kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
     fi
-    kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
 fi
 
 DETECTED_VALUES_FILE="${ROOT_DIR}/.build/values-detected.yaml"
@@ -128,6 +134,12 @@ if [ -z "${KAFKA_SVC}" ]; then
 fi
 KAFKA_BOOTSTRAP="${KAFKA_SVC}.${NAMESPACE}.svc:9092"
 info "  Bootstrap:   ${KAFKA_BOOTSTRAP}"
+
+# Inject global image registry if provided
+if [ -n "${IMAGE_REGISTRY:-}" ]; then
+    info "  Registry:    ${IMAGE_REGISTRY}"
+    VALUES_ARGS+=(--set "global.imageRegistry=${IMAGE_REGISTRY}")
+fi
 
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
