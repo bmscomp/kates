@@ -319,12 +319,14 @@ test-capacity:
 	./scripts/test-perf-capacity.sh
 
 test-net-kafka:
-	@echo "🌐 Testing TCP connectivity to Kafka from 'default' namespace..."
-	kubectl run -i --tty --rm debug-nc --image=busybox:1.36 --namespace=default --restart=Never -- nc -vz krafter-kafka-bootstrap.kafka.svc 9092
+	@domain=$$(source scripts/common.sh && get_cluster_domain); \
+	echo "🌐 Testing TCP connectivity to Kafka from 'default' namespace (Domain: $$domain)..."; \
+	kubectl run -i --tty --rm debug-nc --image=busybox:1.36 --namespace=default --restart=Never -- nc -vz krafter-kafka-bootstrap.kafka.svc.$$domain 9092
 
 test-net-api:
-	@echo "🌐 Testing HTTP connectivity to Kates API from 'default' namespace..."
-	kubectl run -i --tty --rm debug-curl --image=curlimages/curl:8.7.1 --namespace=default --restart=Never -- curl -sv http://kates.kafka.svc:8080/api/health
+	@domain=$$(source scripts/common.sh && get_cluster_domain); \
+	echo "🌐 Testing HTTP connectivity to Kates API from 'default' namespace (Domain: $$domain)..."; \
+	kubectl run -i --tty --rm debug-curl --image=curlimages/curl:8.7.1 --namespace=default --restart=Never -- curl -sv http://kates.kafka.svc.$$domain:8080/api/health
 
 test-net: test-net-kafka test-net-api
 	@echo "✅ Cross-namespace network tests complete."

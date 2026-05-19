@@ -61,3 +61,19 @@ elapsed() {
     local secs=$SECONDS
     printf '%dm %ds' $((secs / 60)) $((secs % 60))
 }
+
+get_cluster_domain() {
+    # Attempt 1: CoreDNS config
+    local domain=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -o 'kubernetes [^ ]*' | head -n1 | awk '{print $2}' || true)
+    
+    # Attempt 2: Temp pod
+    if [ -z "$domain" ]; then
+        domain=$(kubectl run --rm -i --image=busybox:1.36 dns-detect --restart=Never -- cat /etc/resolv.conf 2>/dev/null | grep "search" | awk '{print $2}' | sed 's/default\.svc\.//' || true)
+    fi
+    
+    # Fallback
+    if [ -z "$domain" ]; then
+        domain="cluster.local"
+    fi
+    echo "$domain"
+}

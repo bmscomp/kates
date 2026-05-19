@@ -16,6 +16,8 @@ imagePullSecrets: []
 nameOverride: ""
 # -- Override the full release name
 fullnameOverride: ""
+# -- The cluster domain (extracted dynamically during deployment)
+clusterDomain: "cluster.local"
 
 # -- Service account configuration
 serviceAccount:

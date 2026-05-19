@@ -109,6 +109,9 @@ else
     fi
 fi
 
+CLUSTER_DOMAIN=$(get_cluster_domain)
+info "  Cluster Domain: ${CLUSTER_DOMAIN}"
+
 info "Installing/upgrading Kates with Helm..."
 info "  Chart:       ${CHART_DIR}"
 info "  Release:     ${RELEASE_NAME}"
@@ -130,6 +133,7 @@ helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
     --set kafka.bootstrapServers="${KAFKA_BOOTSTRAP}" \
+    --set clusterDomain="${CLUSTER_DOMAIN}" \
     --timeout 5m
 
 
