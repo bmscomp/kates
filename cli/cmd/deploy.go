@@ -285,6 +285,13 @@ spec:
 		output.Error(fmt.Sprintf("Failed during Group A (Operators) deployments: %v", err))
 		return err
 	}
+	
+	// Bust Kubernetes Discovery Cache so Helm knows about the newly created CRDs
+	fmt.Println("    - Refreshing API server schema cache...")
+	if home, err := os.UserHomeDir(); err == nil {
+		os.RemoveAll(fmt.Sprintf("%s/.kube/cache/discovery", home))
+		os.RemoveAll(fmt.Sprintf("%s/.cache/helm", home))
+	}
 
 	// ---------------------------------------------------------
 	// GROUP B: Core Infrastructure (Parallel)
