@@ -334,6 +334,10 @@ test-net-api:
 test-net: test-net-kafka test-net-api
 	@echo "✅ Cross-namespace network tests complete."
 
+cluster-domain:
+	@domain=$$(source scripts/common.sh && get_cluster_domain); \
+	echo "🌐 Cluster domain: $$domain"
+
 # Kates CLI (standalone install)
 cli-build:
 	@echo "🔨 Building Kates CLI locally..."
