@@ -102,11 +102,27 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 }
 
 func printRow(icon, name, namespace, status string) {
-	// Pad name and namespace as plain strings BEFORE styling,
-	// so emoji widths don't break column alignment.
-	paddedName := fmt.Sprintf("%-20s", name)
-	paddedNS := fmt.Sprintf("%-20s", namespace)
+	// Column widths (in terminal cells).
+	const nameColWidth = 22
+	const nsColWidth = 22
+	const statusColWidth = 12
 
+	// Build icon+name string and pad to fixed visual width.
+	// Emojis are typically 2 cells wide, so we account for that.
+	raw := icon + " " + name
+	visualLen := visualWidth(raw)
+	pad := ""
+	if visualLen < nameColWidth {
+		pad = strings.Repeat(" ", nameColWidth-visualLen)
+	}
+
+	// Namespace column, padded.
+	nsPad := ""
+	if len(namespace) < nsColWidth {
+		nsPad = strings.Repeat(" ", nsColWidth-len(namespace))
+	}
+
+	// Status column.
 	var statusStr string
 	switch status {
 	case "ready":
@@ -117,11 +133,24 @@ func printRow(icon, name, namespace, status string) {
 		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render("⏭ Skipped")
 	}
 
-	iconStr := icon + " "
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(paddedName)
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(paddedNS)
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(raw) + pad
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(namespace) + nsPad
 
-	fmt.Printf("  %s%s  %s  %s\n", iconStr, nameCol, nsCol, statusStr)
+	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
+}
+
+// visualWidth estimates the display width of a string in terminal cells.
+// ASCII chars = 1 cell, emoji/CJK = 2 cells.
+func visualWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if r > 0x1F00 { // emoji and symbols above this range are typically 2 cells
+			w += 2
+		} else {
+			w += 1
+		}
+	}
+	return w
 }
 
 // ─── Phase Logging ──────────────────────────────────────────
