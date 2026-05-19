@@ -13,6 +13,7 @@ import (
 	"github.com/klster/kates-cli/output"
 	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
+	"github.com/charmbracelet/huh"
 )
 
 var deployCmd = &cobra.Command{
@@ -45,6 +46,7 @@ var (
 	deployWithCertManager    bool
 	deployWithKyverno        bool
 	deployWithSecretManager  bool
+	deployInteractive        bool
 )
 
 func init() {
@@ -61,12 +63,67 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithCertManager, "with-cert-manager", true, "Deploy Cert-Manager for TLS certificate management")
 	deployCmd.Flags().BoolVar(&deployWithKyverno, "with-kyverno", false, "Deploy Kyverno for cluster policy enforcement")
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
+	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 
 	rootCmd.AddCommand(deployCmd)
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
 	fmt.Println("🚀 Initializing Kates Unified Orchestrator...")
+	
+	if deployInteractive || cmd.Flags().NFlag() == 0 {
+		var components []string
+		
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Choose Namespace Topology").
+					Description("Isolated creates logical boundaries. Single is great for simple local dev.").
+					Options(
+						huh.NewOption("Isolated Namespaces (kafka, kates, litmus)", "isolated"),
+						huh.NewOption("Single Namespace (kates-stack)", "single"),
+					).
+					Value(&deployTopology),
+					
+				huh.NewSelect[string]().
+					Title("Schema Registry").
+					Options(
+						huh.NewOption("None", "none"),
+						huh.NewOption("Apicurio", "apicurio"),
+					).
+					Value(&deployWithSchemaRegistry),
+					
+				huh.NewMultiSelect[string]().
+					Title("Select Additional Components").
+					Options(
+						huh.NewOption("Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
+						huh.NewOption("Monitoring (Prometheus/Jaeger)", "monitoring").Selected(deployWithMonitoring),
+						huh.NewOption("Cert-Manager", "cert-manager").Selected(deployWithCertManager),
+						huh.NewOption("Kyverno", "kyverno").Selected(deployWithKyverno),
+					).
+					Value(&components),
+			),
+		)
+		
+		err := form.Run()
+		if err != nil {
+			return err
+		}
+		
+		deployWithChaos = false
+		deployWithMonitoring = false
+		deployWithCertManager = false
+		deployWithKyverno = false
+		
+		for _, c := range components {
+			switch c {
+			case "chaos": deployWithChaos = true
+			case "monitoring": deployWithMonitoring = true
+			case "cert-manager": deployWithCertManager = true
+			case "kyverno": deployWithKyverno = true
+			}
+		}
+	}
 	
 	// 1. Resolve Topology
 	fmt.Printf("\n[1] Resolving Namespace Topology (%s mode)...\n", deployTopology)
@@ -192,7 +249,7 @@ metadata:
 			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", kafkaNS)
 			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
 			runHelmFn(gCtx, "repo", "update", "jetstack")
-			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
+			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "installCRDs=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
 			if err != nil { return err }
 			
 			fmt.Println("    - Waiting for Cert-Manager CRDs to be established...")
