@@ -5,6 +5,9 @@
 # Global settings
 global:
   imagePullPolicy: IfNotPresent
+  # Standardize DNS/Storage variables (even if not explicitly used by Litmus)
+  clusterDomain: "cluster.local"
+  storageClass: ""
 
 # Upstream Litmus execution plane (Chaos Operator + CRDs)
 litmus-core:

@@ -5,6 +5,8 @@ global:
   imageRegistry: ""
   # -- Override image pull secrets globally
   imagePullSecrets: []
+  # -- Kubernetes cluster DNS domain
+  clusterDomain: "cluster.local"
 
 # -- Number of KATES replicas
 replicaCount: 1
@@ -25,7 +27,6 @@ nameOverride: ""
 # -- Override the full release name
 fullnameOverride: ""
 # -- The cluster domain (extracted dynamically during deployment)
-clusterDomain: "cluster.local"
 # -- DNS policy for pods (ClusterFirst, Default, None, ClusterFirstWithHostNet)
 dnsPolicy: ""
 # -- Custom DNS configuration (nameservers, searches, options)

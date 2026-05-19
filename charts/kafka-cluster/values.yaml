@@ -10,6 +10,8 @@ global:
   imageRepository: "strimzi"
   # -- Kubernetes cluster DNS domain (extracted dynamically by deploy scripts)
   clusterDomain: "cluster.local"
+  # -- Default storage class to use for PVCs (extracted dynamically by deploy scripts)
+  storageClass: ""
 
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
