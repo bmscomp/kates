@@ -124,6 +124,31 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		kafkaNS, appNS, chaosNS = deployKafkaNS, deployAppNS, deployChaosNS
 	}
 	
+	// Deploy Cert-Manager
+	if deployWithCertManager {
+		fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", kafkaNS)
+		runHelm("repo", "add", "jetstack", "https://charts.jetstack.io")
+		runHelm("repo", "update", "jetstack")
+		runHelm("upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", kafkaNS, "--create-namespace", "--set", "crds.enabled=true", "--timeout", "5m", "--wait")
+		
+		fmt.Println("    - Creating self-signed ClusterIssuer...")
+		clusterIssuer := `apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}`
+		runExecStdin("kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
+	}
+	
+	// Deploy Kyverno
+	if deployWithKyverno {
+		fmt.Println("\n🚀 Deploying Kyverno (Namespace: kyverno)...")
+		runHelm("repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
+		runHelm("repo", "update", "kyverno")
+		runHelm("upgrade", "--install", "kyverno", "kyverno/kyverno", "-n", "kyverno", "--create-namespace", "--set", "replicaCount=1", "--timeout", "5m", "--wait")
+	}
+	
 	// Deploy Kafka
 	fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
 	runHelm("dependency", "update", "charts/kafka-cluster")
@@ -148,6 +173,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		runHelm("upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m")
 	}
 	
+	// Deploy Monitoring (Jaeger)
+	if deployWithMonitoring {
+		fmt.Printf("\n🚀 Deploying Jaeger (Namespace: %s)...\n", kafkaNS)
+		runHelm("repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
+		runHelm("repo", "update", "jaegertracing")
+		runHelm("upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", kafkaNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
+		
+		fmt.Println("    - Patching health probes for Jaeger v2...")
+		runExec("kubectl", "patch", "deployment", "jaeger", "-n", kafkaNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
+	}
+	
 	// Deploy Kates
 	fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
 	runHelm("upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--timeout", "5m", "--wait")
@@ -165,6 +201,28 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 func runExec(name string, args ...string) {
 	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		output.Error(fmt.Sprintf("Command failed: %s %v", name, args))
+		os.Exit(1)
+	}
+}
+
+func runExecStdin(name string, args []string, stdinData string) {
+	cmd := exec.Command(name, args...)
+	
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		output.Error(fmt.Sprintf("Failed to get stdin pipe: %v", err))
+		os.Exit(1)
+	}
+	
+	go func() {
+		defer stdin.Close()
+		stdin.Write([]byte(stdinData))
+	}()
+	
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
