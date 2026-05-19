@@ -14,7 +14,7 @@ image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
   # -- Image tag
-  tag: "1636e0d"
+  tag: "1.11.0"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -129,8 +129,8 @@ jvm:
 # Set them explicitly in your environment values file if needed.
 securityContext:
   runAsNonRoot: true
-  # runAsUser: 1000
-  # fsGroup: 1000
+  runAsUser: 100
+  fsGroup: 100
   seccompProfile:
     type: RuntimeDefault
 
