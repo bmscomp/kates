@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -154,4 +155,67 @@ func PrintDeployBanner() {
 		Render("⎈ Kates Unified Orchestrator"))
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 35)))
+}
+
+// ThemeKates returns a custom huh theme using the Kates blue palette,
+// optimized for light terminal backgrounds.
+func ThemeKates() *huh.Theme {
+	t := huh.ThemeBase()
+
+	var (
+		blue      = lipgloss.Color("#2563EB") // our accent
+		navy      = lipgloss.Color("#1D4ED8") // royal blue
+		slate     = lipgloss.Color("#1E293B") // dark text
+		gray      = lipgloss.Color("#6B7280") // descriptions
+		lightGray = lipgloss.Color("#D1D5DB") // borders
+		green     = lipgloss.Color("#16A34A") // selected items
+		red       = lipgloss.Color("#DC2626") // errors
+		white     = lipgloss.Color("#FFFFFF") // button text
+	)
+
+	// Focused field styles.
+	t.Focused.Base = t.Focused.Base.BorderForeground(blue)
+	t.Focused.Card = t.Focused.Base
+	t.Focused.Title = t.Focused.Title.Foreground(navy).Bold(true)
+	t.Focused.NoteTitle = t.Focused.NoteTitle.Foreground(navy).Bold(true).MarginBottom(1)
+	t.Focused.Description = t.Focused.Description.Foreground(gray)
+	t.Focused.ErrorIndicator = t.Focused.ErrorIndicator.Foreground(red)
+	t.Focused.ErrorMessage = t.Focused.ErrorMessage.Foreground(red)
+	t.Focused.Directory = t.Focused.Directory.Foreground(blue)
+
+	// Select styles.
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(blue).SetString("▸ ")
+	t.Focused.NextIndicator = t.Focused.NextIndicator.Foreground(blue)
+	t.Focused.PrevIndicator = t.Focused.PrevIndicator.Foreground(blue)
+	t.Focused.Option = t.Focused.Option.Foreground(slate)
+
+	// Multi-select styles.
+	t.Focused.MultiSelectSelector = t.Focused.MultiSelectSelector.Foreground(blue).SetString("▸ ")
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(green)
+	t.Focused.SelectedPrefix = lipgloss.NewStyle().Foreground(green).SetString("✓ ")
+	t.Focused.UnselectedOption = t.Focused.UnselectedOption.Foreground(slate)
+	t.Focused.UnselectedPrefix = lipgloss.NewStyle().Foreground(lightGray).SetString("○ ")
+
+	// Button styles.
+	t.Focused.FocusedButton = t.Focused.FocusedButton.Foreground(white).Background(blue).Bold(true)
+	t.Focused.Next = t.Focused.FocusedButton
+	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(slate).Background(lightGray)
+
+	// Text input styles.
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(blue)
+	t.Focused.TextInput.Placeholder = t.Focused.TextInput.Placeholder.Foreground(gray)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(blue)
+
+	// Blurred state — dimmed version of focused.
+	t.Blurred = t.Focused
+	t.Blurred.Base = t.Blurred.Base.BorderStyle(lipgloss.HiddenBorder())
+	t.Blurred.Card = t.Blurred.Base
+	t.Blurred.Title = t.Blurred.Title.Foreground(gray)
+	t.Blurred.NextIndicator = lipgloss.NewStyle()
+	t.Blurred.PrevIndicator = lipgloss.NewStyle()
+
+	t.Group.Title = t.Focused.Title
+	t.Group.Description = t.Focused.Description
+
+	return t
 }

@@ -145,7 +145,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			Affirmative("Yes, clean everything").
 			Negative("Cancel").
 			Value(&confirmed).
-			WithTheme(huh.ThemeDracula()).
+			WithTheme(ThemeKates()).
 			Run()
 		if err != nil {
 			return err

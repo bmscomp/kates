@@ -109,7 +109,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				).
 				Value(&components),
 			),
-		).WithTheme(huh.ThemeDracula())
+		).WithTheme(ThemeKates())
 		
 		err := form.Run()
 		if err != nil {
