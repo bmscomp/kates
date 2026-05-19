@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,11 +27,13 @@ Examples:
 
 var (
 	cleanForce    bool
+	cleanVerbose  bool
 	cleanTopology string
 )
 
 func init() {
 	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Skip confirmation prompt")
+	cleanCmd.Flags().BoolVarP(&cleanVerbose, "verbose", "v", false, "Show full command output during cleanup")
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
 	rootCmd.AddCommand(cleanCmd)
 }
@@ -39,6 +42,32 @@ func init() {
 type helmRelease struct {
 	Name      string
 	Namespace string
+}
+
+// cleanRun runs a command, printing it and its output when verbose is on.
+func cleanRun(ctx context.Context, name string, args ...string) error {
+	if cleanVerbose {
+		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	if cleanVerbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
+// cleanRunOutput runs a command and returns its combined output.
+func cleanRunOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if cleanVerbose {
+		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if cleanVerbose && len(out) > 0 {
+		fmt.Print(string(out))
+	}
+	return out, err
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
@@ -184,7 +213,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	for _, crdType := range strimziCRDTypes {
 		for _, ns := range []string{"kafka", "kates-stack"} {
 			dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
-			exec.CommandContext(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found").Run()
+			cleanRun(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found")
 			dCancel()
 		}
 	}
@@ -198,13 +227,13 @@ func runClean(cmd *cobra.Command, args []string) error {
 		for _, ns := range []string{"kafka", "kates-stack"} {
 			pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
 			// Get any remaining resources and patch their finalizers to empty
-			out, _ := exec.CommandContext(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}").Output()
+			out, _ := cleanRunOutput(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
 			pCancel()
 			names := strings.Fields(strings.TrimSpace(string(out)))
 			for _, name := range names {
 				fCtx, fCancel := context.WithTimeout(ctx, 5*time.Second)
-				exec.CommandContext(fCtx, "kubectl", "patch", crdType, name, "-n", ns,
-					"--type", "merge", "-p", `{"metadata":{"finalizers":[]}}`).Run()
+				cleanRun(fCtx, "kubectl", "patch", crdType, name, "-n", ns,
+					"--type", "merge", "-p", `{"metadata":{"finalizers":[]}}`)
 				fCancel()
 			}
 		}
@@ -219,7 +248,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 		fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
 
 		uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
-		out, err := exec.CommandContext(uCtx, "helm", "uninstall", r.Name, "-n", r.Namespace).CombinedOutput()
+		out, err := cleanRunOutput(uCtx, "helm", "uninstall", r.Name, "-n", r.Namespace)
 		uCancel()
 
 		if err != nil {
@@ -232,7 +261,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// ── 4. Delete cluster-scoped resources ──
 	for _, cr := range clusterResources {
 		dCtx, dCancel := context.WithTimeout(ctx, 10*time.Second)
-		exec.CommandContext(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found").Run()
+		cleanRun(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found")
 		dCancel()
 	}
 
@@ -246,7 +275,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
 
 			nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
-			err := exec.CommandContext(nCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found").Run()
+			err := cleanRun(nCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found")
 			nCancel()
 
 			if err != nil {
