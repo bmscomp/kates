@@ -367,6 +367,36 @@ spec:
 	// Deploy Kates
 	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
 		fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+		
+		if kafkaNS != appNS {
+			fmt.Println("    - Waiting for Strimzi to generate Kafka credentials...")
+			var pwBytes []byte
+			for i := 0; i < 30; i++ {
+				pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend", "-n", kafkaNS, "-o", "jsonpath={.data.password}")
+				out, err := pwCmd.Output()
+				if err == nil && len(out) > 0 {
+					pwBytes = out
+					break
+				}
+				time.Sleep(2 * time.Second)
+			}
+			
+			if len(pwBytes) > 0 {
+				fmt.Println("    - Copying Kafka SASL credentials to app namespace...")
+				secretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: kates-backend
+  namespace: %s
+type: Opaque
+data:
+  password: %s`, appNS, string(pwBytes))
+				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
+			} else {
+				fmt.Println("    ⚠️  Warning: Timed out waiting for KafkaUser secret to be generated")
+			}
+		}
+		
 		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
 		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--set", "kafka.bootstrapServers="+bootstrap, "--timeout", "5m", "--wait"); err != nil {
 			return err
