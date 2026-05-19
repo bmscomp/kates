@@ -193,7 +193,7 @@ cd charts/kafka-cluster
 helm dependency update
 ```
 
-This creates a `charts/strimzi-kafka-operator-0.51.0.tgz` file inside the chart directory. Helm will install the operator automatically when you install the chart.
+This creates a `charts/strimzi-kafka-operator-1.0.0.tgz` file inside the chart directory. Helm will install the operator automatically when you install the chart.
 
 ### 3.3 Step 3 — Review and Customize Values
 
@@ -204,7 +204,7 @@ The chart ships with sensible defaults in `values.yaml`, but you should review k
 ```yaml
 clusterName: krafter       # Name of the Kafka cluster
 kafkaVersion: "4.1.1"      # Apache Kafka version
-strimziVersion: "0.51.0"   # Strimzi operator version
+strimziVersion: "1.0.0"   # Strimzi operator version
 ```
 
 **Broker pools — define one pool per availability zone:**

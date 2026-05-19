@@ -308,7 +308,7 @@ sequenceDiagram
 | CLI Framework | Cobra | Latest | Command parsing, help generation |
 | Cluster | Kind | Latest | Local Kubernetes simulation |
 | Kafka | Apache Kafka | 4.1.1 | KRaft mode, Share Groups |
-| Operator | Strimzi | 0.51.0 | Kafka lifecycle management |
+| Operator | Strimzi | 1.0.0 | Kafka lifecycle management |
 | Chaos | LitmusChaos | Latest | Advanced chaos experiments |
 | Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |
 | Tracing | Jaeger (OTLP) | 1.64 | Distributed trace collection |

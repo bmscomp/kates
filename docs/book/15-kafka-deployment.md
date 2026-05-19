@@ -4,12 +4,12 @@ This chapter is the operations manual for the **krafter** Kafka cluster — the 
 
 ## Strimzi Operator
 
-Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`0.51.0`), installed from the remote Helm chart:
+Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.0.0`), installed from the remote Helm chart:
 
 ```bash
 helm repo add strimzi https://strimzi.io/charts/
 helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
-  --version 0.51.0 \
+  --version 1.0.0 \
   --namespace kafka \
   --set watchAnyNamespace=true \
   --set image.imagePullPolicy=IfNotPresent
@@ -527,7 +527,7 @@ graph TD
 
 ```bash
 helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
-  --version 0.51.0
+  --version 1.0.0
 ```
 
 ### Brokers Crash with ConfigException
@@ -632,8 +632,8 @@ goals: >-
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Apache Kafka | 4.1.1 | Highest supported by Strimzi 0.51.0 |
-| Strimzi Operator | 0.51.0 | Remote Helm chart |
+| Apache Kafka | 4.1.1 | Highest supported by Strimzi 1.0.0 |
+| Strimzi Operator | 1.0.0 | Remote Helm chart |
 | Strimzi Drain Cleaner | 1.5.0 | Installed without cert-manager |
 | Cruise Control | 2.5.146 | Bundled with Strimzi |
 | Kafka UI | 0.7.2 | Provectus |

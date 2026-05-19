@@ -232,7 +232,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 kind: Namespace
 metadata:
   name: strimzi-operator`)
-		err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "0.51.0", "-n", "strimzi-operator", "--set", "watchAnyNamespace=true", "--set", "replicas=1", "--timeout", "5m", "--wait")
+		err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator", "--set", "watchAnyNamespace=true", "--set", "replicas=1", "--timeout", "5m", "--wait")
 		if err != nil { return err }
 		
 		fmt.Println("    - Waiting for Strimzi CRDs to be established...")
