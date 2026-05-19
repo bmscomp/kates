@@ -49,21 +49,36 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 35)))
 
-	// All possible Helm releases across both topologies.
-	releases := []helmRelease{
+	// Helm releases ordered for correct teardown:
+	// Apps first → Core infra → Operators LAST (so finalizer controllers can clean up).
+	appReleases := []helmRelease{
 		{"chaos", "litmus"}, {"chaos", "kates-stack"},
 		{"kates", "kates"}, {"kates", "kates-stack"},
 		{"apicurio", "kafka"}, {"apicurio", "kates-stack"},
-		{"krafter", "kafka"}, {"krafter", "kates-stack"},
+	}
+	coreReleases := []helmRelease{
 		{"jaeger", "jaeger"}, {"jaeger", "kafka"}, {"jaeger", "kates-stack"},
+		{"krafter", "kafka"}, {"krafter", "kates-stack"},
+	}
+	operatorReleases := []helmRelease{
 		{"cert-manager", "cert-manager"},
 		{"kyverno", "kyverno"},
 		{"strimzi-operator", "strimzi-operator"},
 	}
+	allReleases := append(append(appReleases, coreReleases...), operatorReleases...)
 
 	managedNamespaces := []string{
 		"kates-stack", "kafka", "kates", "litmus",
 		"jaeger", "strimzi-operator", "cert-manager", "kyverno",
+	}
+
+	// Strimzi CRD resource types that carry finalizers.
+	strimziCRDTypes := []string{
+		"kafkas.kafka.strimzi.io",
+		"kafkatopics.kafka.strimzi.io",
+		"kafkausers.kafka.strimzi.io",
+		"kafkaconnects.kafka.strimzi.io",
+		"kafkabridges.kafka.strimzi.io",
 	}
 
 	clusterResources := []struct{ Kind, Name string }{
@@ -71,7 +86,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 		{"clusterrole", "litmus"}, {"clusterrolebinding", "litmus"},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	// ── Discovery ──
@@ -79,7 +94,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrText).Render("  Scanning cluster..."))
 
 	var installed []helmRelease
-	for _, r := range releases {
+	for _, r := range allReleases {
 		c, cn := context.WithTimeout(ctx, 3*time.Second)
 		if exec.CommandContext(c, "helm", "status", r.Name, "-n", r.Namespace).Run() == nil {
 			installed = append(installed, r)
@@ -158,10 +173,47 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 
-	// ── 1. Uninstall Helm releases ──
 	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
 	errStyle := lipgloss.NewStyle().Foreground(clrRed)
 
+	// ── 1. Delete Strimzi CRs FIRST (while operator is still running) ──
+	// The Strimzi operator handles finalizer removal. If we delete it first,
+	// finalizers become orphaned and namespaces hang in Terminating forever.
+	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+		Render("  Step 1: Removing Strimzi custom resources..."))
+	for _, crdType := range strimziCRDTypes {
+		for _, ns := range []string{"kafka", "kates-stack"} {
+			dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
+			exec.CommandContext(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found").Run()
+			dCancel()
+		}
+	}
+	// Wait briefly for the operator to process finalizer removal.
+	time.Sleep(5 * time.Second)
+
+	// ── 2. Strip orphaned finalizers on any remaining stuck resources ──
+	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+		Render("  Step 2: Stripping orphaned finalizers..."))
+	for _, crdType := range strimziCRDTypes {
+		for _, ns := range []string{"kafka", "kates-stack"} {
+			pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
+			// Get any remaining resources and patch their finalizers to empty
+			out, _ := exec.CommandContext(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}").Output()
+			pCancel()
+			names := strings.Fields(strings.TrimSpace(string(out)))
+			for _, name := range names {
+				fCtx, fCancel := context.WithTimeout(ctx, 5*time.Second)
+				exec.CommandContext(fCtx, "kubectl", "patch", crdType, name, "-n", ns,
+					"--type", "merge", "-p", `{"metadata":{"finalizers":[]}}`).Run()
+				fCancel()
+			}
+		}
+	}
+
+	// ── 3. Uninstall Helm releases (apps → core → operators) ──
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+		Render("  Step 3: Uninstalling Helm releases..."))
 	for _, r := range installed {
 		label := fmt.Sprintf("  Uninstalling %-16s from %s", r.Name, r.Namespace)
 		fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
@@ -177,21 +229,23 @@ func runClean(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// ── 2. Delete cluster-scoped resources ──
+	// ── 4. Delete cluster-scoped resources ──
 	for _, cr := range clusterResources {
 		dCtx, dCancel := context.WithTimeout(ctx, 10*time.Second)
 		exec.CommandContext(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found").Run()
 		dCancel()
 	}
 
-	// ── 3. Delete namespaces ──
+	// ── 5. Delete namespaces ──
 	if len(existingNS) > 0 {
 		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 4: Deleting namespaces..."))
 		for _, ns := range existingNS {
 			label := fmt.Sprintf("  Deleting namespace %s", ns)
 			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
 
-			nCtx, nCancel := context.WithTimeout(ctx, 5*time.Minute)
+			nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
 			err := exec.CommandContext(nCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found").Run()
 			nCancel()
 
@@ -210,3 +264,4 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	return nil
 }
+
