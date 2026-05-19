@@ -78,6 +78,7 @@ spec:
         {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
         - secretRef:
             name: {{ include "kates.dbSecretName" . }}
+            optional: true
         {{- end }}
         env:
         {{- if .Values.kafka.clientRack }}
@@ -91,6 +92,7 @@ spec:
             secretKeyRef:
               name: {{ .Values.kafka.sasl.secretName }}
               key: {{ .Values.kafka.sasl.secretKey }}
+              optional: true
         {{- end }}
         {{- if eq .Values.kafka.sasl.mechanism "OAUTHBEARER" }}
         {{- if .Values.kafka.sasl.oauthbearer.clientSecretName }}
@@ -99,6 +101,7 @@ spec:
             secretKeyRef:
               name: {{ .Values.kafka.sasl.oauthbearer.clientSecretName }}
               key: {{ .Values.kafka.sasl.oauthbearer.clientSecretKey }}
+              optional: true
         {{- end }}
         {{- end }}
         {{- end }}
@@ -109,6 +112,7 @@ spec:
             secretKeyRef:
               name: {{ include "kates.fullname" . }}-kafka-ssl
               key: truststore-password
+              optional: true
         {{- end }}
         {{- if .Values.kafka.ssl.keystore.password }}
         - name: KATES_KAFKA_SSL_KEYSTORE_PASSWORD
@@ -116,6 +120,7 @@ spec:
             secretKeyRef:
               name: {{ include "kates.fullname" . }}-kafka-ssl
               key: keystore-password
+              optional: true
         {{- end }}
         {{- end }}
         {{- if .Values.jvm.options }}
@@ -128,6 +133,7 @@ spec:
             secretKeyRef:
               name: {{ .Values.apiKey.existingSecret | default (printf "%s-api-key" (include "kates.fullname" .)) }}
               key: {{ .Values.apiKey.secretKey | default "api-key" }}
+              optional: true
         {{- end }}
         {{- with .Values.extraEnv }}
           {{- toYaml . | nindent 8 }}
@@ -179,11 +185,13 @@ spec:
       - name: kafka-truststore
         secret:
           secretName: {{ .Values.kafka.ssl.truststore.secretName }}
+          optional: true
       {{- end }}
       {{- if and .Values.kafka.ssl.enabled .Values.kafka.ssl.keystore.secretName }}
       - name: kafka-keystore
         secret:
           secretName: {{ .Values.kafka.ssl.keystore.secretName }}
+          optional: true
       {{- end }}
       {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 6 }}
