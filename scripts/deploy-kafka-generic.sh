@@ -97,6 +97,10 @@ echo ""
 info "Step 3/6: Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
 
+# Extract cluster domain from the Kubernetes environment
+CLUSTER_DOMAIN=$(get_cluster_domain)
+info "  Cluster Domain: ${CLUSTER_DOMAIN}"
+
 # ── Step 4: Deploy ────────────────────────────────────────────────────────────
 echo ""
 info "Step 4/6: Deploying Kafka cluster..."
@@ -116,6 +120,7 @@ elif ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
         --namespace "strimzi-operator" \
         --set watchAnyNamespace=true \
         --set replicas=1 \
+        --set kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}" \
         --timeout 5m --wait
     kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
 fi
@@ -146,6 +151,7 @@ echo ""
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
+    --set global.clusterDomain="${CLUSTER_DOMAIN}" \
     --timeout 10m
 
 # ── Step 5: Wait ──────────────────────────────────────────────────────────────

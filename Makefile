@@ -51,12 +51,15 @@ all: check-prerequisites
 	@# ── Step 2: Strimzi Operator (read from detect output) ──
 	@if grep -A1 'strimziOperator:' $(DETECTED_VALUES) | grep -q 'enabled: true'; then \
 		echo "Step 2: Installing Strimzi Operator (cluster-wide)..."; \
+		CLUSTER_DOMAIN=$$(source scripts/common.sh && get_cluster_domain); \
+		echo "  Cluster Domain: $${CLUSTER_DOMAIN}"; \
 		kubectl create namespace strimzi-operator --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1; \
 		helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
 			--version $(STRIMZI_VERSION) \
 			--namespace strimzi-operator \
 			--set watchAnyNamespace=true \
 			--set replicas=1 \
+			--set kubernetesServiceDnsDomain="$${CLUSTER_DOMAIN}" \
 			--timeout 5m --wait; \
 		echo "  Waiting for Strimzi CRDs to be established..."; \
 		kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s; \
