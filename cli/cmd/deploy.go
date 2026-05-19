@@ -370,6 +370,14 @@ spec:
 		fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
 		
 		if kafkaNS != appNS {
+			// Ensure app namespace exists before copying secrets into it
+			nsYaml := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+spec: {}`, appNS)
+			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+			
 			fmt.Println("    - Waiting for Strimzi to generate Kafka credentials...")
 			var pwBytes []byte
 			for i := 0; i < 30; i++ {
