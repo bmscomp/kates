@@ -146,8 +146,7 @@ echo ""
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
-    --timeout 10m \
-    --force
+    --timeout 10m
 
 # ── Step 5: Wait ──────────────────────────────────────────────────────────────
 echo ""
