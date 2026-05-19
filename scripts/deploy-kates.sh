@@ -132,7 +132,7 @@ if [ -z "${KAFKA_SVC}" ]; then
     # Fallback if the cluster isn't up yet
     KAFKA_SVC="${CLUSTER_NAME}-kafka-bootstrap"
 fi
-KAFKA_BOOTSTRAP="${KAFKA_SVC}.${NAMESPACE}.svc:9092"
+KAFKA_BOOTSTRAP="${KAFKA_SVC}.${NAMESPACE}.svc.${CLUSTER_DOMAIN}:9092"
 info "  Bootstrap:   ${KAFKA_BOOTSTRAP}"
 
 # Inject global image registry if provided
