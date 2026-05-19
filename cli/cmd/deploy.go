@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,8 +93,34 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	collector := detect.NewCollector(executor)
 	
 	if err := collector.Preflight(); err != nil {
-		output.Error(fmt.Sprintf("Preflight failed: %v", err))
-		return err
+		fmt.Println("⚠️  Kubernetes cluster is unreachable.")
+		
+		// Check if docker is running
+		if dockerCheck := exec.Command("docker", "info"); dockerCheck.Run() == nil {
+			fmt.Print("🐳 Docker is running. Would you like to automatically create a local Kind cluster? [y/N]: ")
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+				fmt.Println("🚀 Creating Kind cluster via 'make cluster'...")
+				cmd := exec.Command("make", "cluster")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("failed to create Kind cluster: %w", err)
+				}
+				fmt.Println("✅ Kind cluster created successfully! Retrying preflight...")
+				
+				// Re-run preflight
+				if err := collector.Preflight(); err != nil {
+					return fmt.Errorf("preflight failed even after cluster creation: %w", err)
+				}
+			} else {
+				return fmt.Errorf("cluster is unreachable and user opted out of auto-creation")
+			}
+		} else {
+			output.Error(fmt.Sprintf("Preflight failed: %v", err))
+			return err
+		}
 	}
 	
 	report, err := collector.Collect(context.Background())
