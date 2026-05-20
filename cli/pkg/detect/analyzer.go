@@ -73,6 +73,19 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		addCheck("Strimzi CRDs installed", true, "present")
 	}
 
+	// Strimzi operator readiness
+	if report.Strimzi.CRDsPresent && !report.Strimzi.Running {
+		v.Warns++
+		addCheck("Strimzi operator ready", true, "CRDs present but operator not running")
+	} else if report.Strimzi.Running {
+		if report.Strimzi.ReadyReplicas < report.Strimzi.TotalReplicas {
+			v.Warns++
+			addCheck("Strimzi operator ready", true, fmt.Sprintf("%d/%d replicas ready", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas))
+		} else {
+			addCheck("Strimzi operator ready", true, fmt.Sprintf("%d/%d replicas ready in %s", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas, report.Strimzi.Namespace))
+		}
+	}
+
 	addCheck("≥ 3 availability zones", len(report.Zones) >= 3, fmt.Sprintf("%d zone(s)", len(report.Zones)))
 	
 	min1Node := true
@@ -83,6 +96,22 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	}
 	addCheck("≥ 1 node per zone", min1Node, fmt.Sprintf("%d nodes across %d zones", len(report.Nodes), len(report.Zones)))
 	addCheck("StorageClass available", len(report.Storage) > 0, fmt.Sprintf("%d class(es)", len(report.Storage)))
+
+	// StorageClass volume expansion support
+	expandableCount := 0
+	for _, sc := range report.Storage {
+		if sc.AllowExpansion {
+			expandableCount++
+		}
+	}
+	if len(report.Storage) > 0 {
+		if expandableCount == 0 {
+			v.Warns++
+			addCheck("StorageClass volume expansion", true, "no classes support expansion — PVC resize requires recreation")
+		} else {
+			addCheck("StorageClass volume expansion", true, fmt.Sprintf("%d/%d classes support online resize", expandableCount, len(report.Storage)))
+		}
+	}
 	
 	// Active Infrastructure Probing Validation
 	minIOPS := 1000 // we want at least 1000 IOPS

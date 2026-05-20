@@ -63,6 +63,40 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 				"kubectl get sc  # verify",
 			},
 		})
+	} else {
+		// Check volume expansion
+		expandable := 0
+		for _, sc := range report.Storage {
+			if sc.AllowExpansion {
+				expandable++
+			}
+		}
+		if expandable == 0 {
+			hints = append(hints, Remediation{
+				Check:    "StorageClass volume expansion",
+				Severity: "warning",
+				Summary:  "No StorageClass supports volume expansion — PVC resize will require recreation",
+				Commands: []string{
+					"# Enable volume expansion on an existing StorageClass:",
+					"kubectl patch sc <storage-class-name> -p '{\"allowVolumeExpansion\": true}'",
+					"# Or create a new StorageClass with allowVolumeExpansion: true",
+				},
+			})
+		}
+	}
+
+	// Strimzi operator not fully ready
+	if report.Strimzi.CRDsPresent && report.Strimzi.Running && report.Strimzi.ReadyReplicas < report.Strimzi.TotalReplicas {
+		hints = append(hints, Remediation{
+			Check:    "Strimzi operator ready",
+			Severity: "warning",
+			Summary:  fmt.Sprintf("Strimzi operator has %d/%d replicas ready", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas),
+			Commands: []string{
+				fmt.Sprintf("kubectl get pods -n %s -l strimzi.io/kind=cluster-operator", report.Strimzi.Namespace),
+				fmt.Sprintf("kubectl rollout restart deployment/strimzi-cluster-operator -n %s", report.Strimzi.Namespace),
+			},
+			DocURL: "https://strimzi.io/docs/operators/latest/deploying",
+		})
 	}
 
 	// Insufficient resources
