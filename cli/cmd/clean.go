@@ -26,15 +26,25 @@ Examples:
 }
 
 var (
-	cleanForce    bool
-	cleanVerbose  bool
-	cleanTopology string
+	cleanForce         bool
+	cleanVerbose       bool
+	cleanTopology      string
+	cleanNamespace     string
+	cleanKafkaNS       string
+	cleanAppNS         string
+	cleanChaosNS       string
+	cleanMonitoringNS  string
 )
 
 func init() {
 	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Skip confirmation prompt")
 	cleanCmd.Flags().BoolVarP(&cleanVerbose, "verbose", "v", false, "Show full command output during cleanup")
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
+	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
+	cleanCmd.Flags().StringVar(&cleanKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	cleanCmd.Flags().StringVar(&cleanAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
+	cleanCmd.Flags().StringVar(&cleanChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
+	cleanCmd.Flags().StringVar(&cleanMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
 	rootCmd.AddCommand(cleanCmd)
 }
 
@@ -44,8 +54,13 @@ type helmRelease struct {
 	Namespace string
 }
 
-// cleanRun runs a command, printing it and its output when verbose is on.
-func cleanRun(ctx context.Context, name string, args ...string) error {
+var (
+	cleanRunFn       = cleanRunDefault
+	cleanRunOutputFn = cleanRunOutputDefault
+	cleanSleepFn     = time.Sleep
+)
+
+func cleanRunDefault(ctx context.Context, name string, args ...string) error {
 	if cleanVerbose {
 		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
 	}
@@ -57,8 +72,7 @@ func cleanRun(ctx context.Context, name string, args ...string) error {
 	return cmd.Run()
 }
 
-// cleanRunOutput runs a command and returns its combined output.
-func cleanRunOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+func cleanRunOutputDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if cleanVerbose {
 		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
 	}
@@ -70,6 +84,14 @@ func cleanRunOutput(ctx context.Context, name string, args ...string) ([]byte, e
 	return out, err
 }
 
+func cleanRun(ctx context.Context, name string, args ...string) error {
+	return cleanRunFn(ctx, name, args...)
+}
+
+func cleanRunOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return cleanRunOutputFn(ctx, name, args...)
+}
+
 func runClean(cmd *cobra.Command, args []string) error {
 	// ── Banner ──
 	fmt.Println()
@@ -77,31 +99,6 @@ func runClean(cmd *cobra.Command, args []string) error {
 		Render("⎈ Kates Clean — Teardown"))
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 35)))
-
-	// Helm releases ordered for correct teardown:
-	// Apps first → Core infra → Operators LAST (so finalizer controllers can clean up).
-	appReleases := []helmRelease{
-		{"chaos", "litmus"}, {"chaos", "kates-stack"},
-		{"kates", "kates"}, {"kates", "kates-stack"},
-		{"apicurio", "kafka"}, {"apicurio", "kates-stack"},
-	}
-	coreReleases := []helmRelease{
-		{"jaeger", "jaeger"}, {"jaeger", "kafka"}, {"jaeger", "kates-stack"},
-		{"krafter", "kafka"}, {"krafter", "kates-stack"},
-		{"monitoring", "monitoring"}, {"monitoring", "kafka"}, {"monitoring", "kates-stack"},
-	}
-	operatorReleases := []helmRelease{
-		{"cert-manager", "cert-manager"},
-		{"kyverno", "kyverno"},
-		{"strimzi-operator", "strimzi-operator"},
-	}
-	allReleases := append(append(appReleases, coreReleases...), operatorReleases...)
-
-	managedNamespaces := []string{
-		"kates-stack", "kafka", "kates", "litmus",
-		"jaeger", "strimzi-operator", "cert-manager", "kyverno",
-		"monitoring",
-	}
 
 	// Strimzi CRD resource types that carry finalizers.
 	strimziCRDTypes := []string{
@@ -111,6 +108,55 @@ func runClean(cmd *cobra.Command, args []string) error {
 		"kafkaconnects.kafka.strimzi.io",
 		"kafkabridges.kafka.strimzi.io",
 	}
+
+	var appReleases []helmRelease
+	var coreReleases []helmRelease
+	var managedNamespaces []string
+	var strimziNS []string
+
+	if cleanTopology == "single" || cleanTopology == "" {
+		appReleases = append(appReleases,
+			helmRelease{"chaos", cleanNamespace},
+			helmRelease{"kates", cleanNamespace},
+			helmRelease{"apicurio", cleanNamespace},
+		)
+		coreReleases = append(coreReleases,
+			helmRelease{"jaeger", cleanNamespace},
+			helmRelease{"krafter", cleanNamespace},
+			helmRelease{"monitoring", cleanNamespace},
+		)
+		managedNamespaces = append(managedNamespaces, cleanNamespace)
+		strimziNS = append(strimziNS, cleanNamespace)
+	}
+
+	if cleanTopology == "isolated" || cleanTopology == "" {
+		appReleases = append(appReleases,
+			helmRelease{"chaos", cleanChaosNS},
+			helmRelease{"kates", cleanAppNS},
+			helmRelease{"apicurio", cleanKafkaNS},
+		)
+		coreReleases = append(coreReleases,
+			helmRelease{"jaeger", cleanMonitoringNS},
+			helmRelease{"krafter", cleanKafkaNS},
+			helmRelease{"monitoring", cleanMonitoringNS},
+		)
+		managedNamespaces = append(managedNamespaces,
+			cleanKafkaNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS,
+		)
+		strimziNS = append(strimziNS, cleanKafkaNS)
+	}
+
+	operatorReleases := []helmRelease{
+		{"cert-manager", "cert-manager"},
+		{"kyverno", "kyverno"},
+		{"strimzi-operator", "strimzi-operator"},
+	}
+
+	allReleases := append(append(appReleases, coreReleases...), operatorReleases...)
+
+	managedNamespaces = append(managedNamespaces,
+		"strimzi-operator", "cert-manager", "kyverno",
+	)
 
 	clusterResources := []struct{ Kind, Name string }{
 		{"clusterrole", "kates"}, {"clusterrolebinding", "kates"},
@@ -127,7 +173,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	var installed []helmRelease
 	for _, r := range allReleases {
 		c, cn := context.WithTimeout(ctx, 3*time.Second)
-		if exec.CommandContext(c, "helm", "status", r.Name, "-n", r.Namespace).Run() == nil {
+		if cleanRun(c, "helm", "status", r.Name, "-n", r.Namespace) == nil {
 			installed = append(installed, r)
 		}
 		cn()
@@ -136,7 +182,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	var existingNS []string
 	for _, ns := range managedNamespaces {
 		c, cn := context.WithTimeout(ctx, 3*time.Second)
-		if exec.CommandContext(c, "kubectl", "get", "namespace", ns).Run() == nil {
+		if cleanRun(c, "kubectl", "get", "namespace", ns) == nil {
 			existingNS = append(existingNS, ns)
 		}
 		cn()
@@ -213,20 +259,20 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
 		Render("  Step 1: Removing Strimzi custom resources..."))
 	for _, crdType := range strimziCRDTypes {
-		for _, ns := range []string{"kafka", "kates-stack"} {
+		for _, ns := range strimziNS {
 			dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
 			cleanRun(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found")
 			dCancel()
 		}
 	}
 	// Wait briefly for the operator to process finalizer removal.
-	time.Sleep(5 * time.Second)
+	cleanSleepFn(5 * time.Second)
 
 	// ── 2. Strip orphaned finalizers on any remaining stuck resources ──
 	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
 		Render("  Step 2: Stripping orphaned finalizers..."))
 	for _, crdType := range strimziCRDTypes {
-		for _, ns := range []string{"kafka", "kates-stack"} {
+		for _, ns := range strimziNS {
 			pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
 			// Get any remaining resources and patch their finalizers to empty
 			out, _ := cleanRunOutput(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
