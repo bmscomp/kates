@@ -449,6 +449,24 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Pod Security Admission (PSA) Label: %s", report.Security.PSALabelEnforced), "", 1, "L", false, 0, "")
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Kyverno Enforced: %t", report.Security.KyvernoEnforced), "", 1, "L", false, 0, "")
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Namespace Management Permissions: %t", report.Security.PermissionsOk), "", 1, "L", false, 0, "")
+	
+	rbacText := "✓ Secure (no wildcard rules)"
+	if report.Security.HasExcessivePrivileges {
+		rbacText = "Warning: Wildcard permissions detected in Roles!"
+	}
+	pdf.CellFormat(0, 5, fmt.Sprintf("- Wildcard RBAC Rules avoided: %s", rbacText), "", 1, "L", false, 0, "")
+
+	expCount := 0
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expCount++
+		}
+	}
+	certText := "✓ All certificates valid (>30 days left)"
+	if expCount > 0 {
+		certText = fmt.Sprintf("Warning: %d certificate(s) expiring within 30 days", expCount)
+	}
+	pdf.CellFormat(0, 5, fmt.Sprintf("- TLS Certificate Validity: %s", certText), "", 1, "L", false, 0, "")
 	if report.Admission.Kyverno.Installed {
 		pdf.CellFormat(0, 5, fmt.Sprintf("- Kyverno: Running in '%s' (v%s) with %d policies (%d Kafka-relevant)",
 			report.Admission.Kyverno.Namespace, report.Admission.Kyverno.Version,

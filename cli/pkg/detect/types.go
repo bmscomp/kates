@@ -307,10 +307,19 @@ type SecretCreationAudit struct {
 	PolicyName       string
 }
 
+type CertExpirationInfo struct {
+	SecretName string
+	Subject    string
+	ExpiryDate string
+	DaysLeft   int
+}
+
 type SecurityAudit struct {
-	PSALabelEnforced string // "restricted", "baseline", "privileged" or "none"
-	KyvernoEnforced  bool
-	PermissionsOk    bool
+	PSALabelEnforced       string // "restricted", "baseline", "privileged" or "none"
+	KyvernoEnforced        bool
+	PermissionsOk          bool
+	ExpiringCerts          []CertExpirationInfo
+	HasExcessivePrivileges bool
 }
 
 type DetectReport struct {

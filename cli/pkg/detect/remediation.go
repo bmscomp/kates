@@ -207,6 +207,42 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 		})
 	}
 
+	// Wildcard RBAC roles remediation hints
+	if report.Security.HasExcessivePrivileges {
+		hints = append(hints, Remediation{
+			Check:    "Wildcard RBAC roles avoided",
+			Severity: "warning",
+			Summary:  "Namespace Roles contain wildcard '*' resources or verbs which violates least privilege security standards",
+			Commands: []string{
+				"# Inspect Roles with wildcard permissions in the namespace:",
+				"kubectl get roles -n kafka -o json | jq '.items[] | select(.rules[].verbs[] == \"*\" or .rules[].resources[] == \"*\") | .metadata.name'",
+				"# Scope down rules to explicit apiGroups, resources, and verbs in values.yaml",
+			},
+		})
+	}
+
+	// TLS certificate expiration remediation hints
+	expiringCount := 0
+	var certCmds []string
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expiringCount++
+			certCmds = append(certCmds, fmt.Sprintf("# Cert '%s' (%s) expires in %d days", c.SecretName, c.Subject, c.DaysLeft))
+		}
+	}
+	if expiringCount > 0 {
+		certCmds = append(certCmds,
+			"# Renew expiring TLS secrets or trigger certificate rotation:",
+			"kubectl delete secret <secret-name> -n kafka  # if managed by cert-manager to force renewal",
+		)
+		hints = append(hints, Remediation{
+			Check:    "TLS certificate validity",
+			Severity: "warning",
+			Summary:  fmt.Sprintf("%d TLS certificate(s) in namespace 'kafka' are expiring within 30 days", expiringCount),
+			Commands: certCmds,
+		})
+	}
+
 	return hints
 }
 

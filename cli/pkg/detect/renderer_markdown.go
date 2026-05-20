@@ -133,6 +133,28 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 	p("- **Pod Security Admission (PSA) Label:** `%s`", report.Security.PSALabelEnforced)
 	p("- **Kyverno Installed:** %t", report.Security.KyvernoEnforced)
 	p("- **Permissions Verification:** %t", report.Security.PermissionsOk)
+	if report.Security.HasExcessivePrivileges {
+		p("- **Wildcard RBAC Audits:** ⚠️ Wildcard '*' permissions detected in Roles!")
+	} else {
+		p("- **Wildcard RBAC Audits:** ✅ No wildcard rules (secure)")
+	}
+
+	expAlerts := 0
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expAlerts++
+		}
+	}
+	if expAlerts > 0 {
+		p("- **TLS Certificate Expiration:** ⚠️ %d certificate(s) expiring within 30 days", expAlerts)
+		for _, c := range report.Security.ExpiringCerts {
+			if c.DaysLeft < 30 {
+				p("  - Secret `%s` (%s) expires in %d days (%s)", c.SecretName, c.Subject, c.DaysLeft, c.ExpiryDate)
+			}
+		}
+	} else {
+		p("- **TLS Certificate Expiration:** ✅ All certificates valid")
+	}
 	p("")
 	if report.Admission.Kyverno.Installed {
 		p("- **Kyverno:** ✅ Running in `%s` (v%s)", report.Admission.Kyverno.Namespace, report.Admission.Kyverno.Version)
