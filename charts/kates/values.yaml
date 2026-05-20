@@ -633,3 +633,15 @@ cleanup:
   retentionDays: 30
   # -- Curl image for API calls
   image: curlimages/curl:8.7.1
+
+# -- Helm test suite configuration (used by `helm test kates`)
+helmTest:
+  # -- Container image for Helm test pods (health, API, Kafka checks)
+  image:
+    # -- Image repository (e.g. curlimages/curl or kates-tester)
+    repository: curlimages/curl
+    # -- Image tag
+    tag: "8.7.1"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
