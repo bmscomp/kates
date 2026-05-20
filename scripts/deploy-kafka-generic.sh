@@ -112,17 +112,36 @@ kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply
 # Skip if the detect output already confirmed Strimzi is running
 if grep -A1 'strimziOperator:' "${DETECTED_VALUES}" 2>/dev/null | grep -q 'enabled: false'; then
     info "  Strimzi Operator already managed by pipeline — skipping"
-elif ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
-    info "  Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
-    kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
-    helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-        --version 1.0.0 \
-        --namespace "strimzi-operator" \
-        --set watchAnyNamespace=true \
-        --set replicas=1 \
-        --set kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}" \
-        --timeout 5m --wait
-    kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
+else
+    # Check if Strimzi CRD is missing OR if the operator deployment is missing
+    operator_exists=false
+    if kubectl get deployment -A -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
+        operator_exists=true
+    elif kubectl get deployment -n kafka -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
+        operator_exists=true
+    elif kubectl get deployment -n strimzi-operator -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
+        operator_exists=true
+    fi
+
+    if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null || [ "$operator_exists" = false ]; then
+        if [ "$operator_exists" = false ] && kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
+            warn "  Strimzi CRDs are present, but Strimzi Operator deployment is not running!"
+            info "  Installing Strimzi Kafka Operator to manage existing CRDs..."
+        else
+            info "  Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
+        fi
+        kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
+        helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+            --version 1.0.0 \
+            --namespace "strimzi-operator" \
+            --set watchAnyNamespace=true \
+            --set replicas=1 \
+            --set kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}" \
+            --timeout 5m --wait
+        kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
+    else
+        info "  Strimzi CRDs and Operator deployment already present"
+    fi
 fi
 
 # Adopt pre-existing Kafka resources into Helm release
