@@ -4,14 +4,6 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - "**"
-    paths:
-      - "kates/**"
-      - "cli/**"
-      - "images.env"
-      - "versions.env"
-      - ".github/workflows/publish-docker.yml"
   workflow_dispatch:
     inputs:
       variant:

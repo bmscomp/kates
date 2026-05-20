@@ -4,11 +4,6 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - "**"
-    paths:
-      - "tester/**"
-      - ".github/workflows/publish-tester.yml"
   workflow_dispatch:
 
 permissions:
