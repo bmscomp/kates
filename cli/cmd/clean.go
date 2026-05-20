@@ -88,6 +88,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	coreReleases := []helmRelease{
 		{"jaeger", "jaeger"}, {"jaeger", "kafka"}, {"jaeger", "kates-stack"},
 		{"krafter", "kafka"}, {"krafter", "kates-stack"},
+		{"monitoring", "monitoring"}, {"monitoring", "kafka"},
 	}
 	operatorReleases := []helmRelease{
 		{"cert-manager", "cert-manager"},
@@ -99,6 +100,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	managedNamespaces := []string{
 		"kates-stack", "kafka", "kates", "litmus",
 		"jaeger", "strimzi-operator", "cert-manager", "kyverno",
+		"monitoring",
 	}
 
 	// Strimzi CRD resource types that carry finalizers.
