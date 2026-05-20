@@ -360,6 +360,45 @@ graph LR
 | `cruise-control` | Operator + Prometheus access |
 | `strimzi-drain-cleaner` | Webhook port + K8s API |
 
+### Hardened Strimzi Operator NetworkPolicy (Isolated Topology)
+
+When deploying with `--topology isolated`, the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. This requires a precisely scoped NetworkPolicy to allow the operator to function while maintaining strict network isolation:
+
+```mermaid
+graph LR
+    subgraph "strimzi-operator namespace"
+        OP["Strimzi Operator"]
+    end
+
+    subgraph "kafka namespace"
+        Brokers["Kafka Brokers"]
+        Controllers["Controllers"]
+    end
+
+    subgraph Kubernetes
+        API["API Server :443/:6443"]
+        DNS["CoreDNS :53"]
+        Kubelet["Kubelet health probes"]
+    end
+
+    Kubelet -->|"ingress :8080"| OP
+    OP -->|"egress :53"| DNS
+    OP -->|"egress :443,:6443"| API
+    OP -->|"egress (all ports)"| Brokers
+    OP -->|"egress (all ports)"| Controllers
+```
+
+| Direction | Target | Ports | Purpose |
+|-----------|--------|-------|---------|
+| Ingress | All sources | `8080` TCP | Kubelet health probes + Prometheus metrics scraping |
+| Egress | CoreDNS | `53` UDP/TCP | DNS resolution for service discovery |
+| Egress | API Server | `443`, `6443` TCP | Kubernetes API communication (watch, patch, create) |
+| Egress | Kafka namespace pods | All | Operator → broker/controller admin API and reconciliation |
+| Egress | Own namespace pods | All | Intra-namespace communication |
+
+> [!IMPORTANT]
+> The operator ingress on port `8080` is intentionally open to **all sources** (not scoped to a specific namespace). This is required because Kubelet health probes originate from the node's host network — not from a pod with namespace labels. Restricting ingress to a namespace selector would silently block liveness and readiness checks, causing the operator pod to be restarted by the Kubelet.
+
 > [!CAUTION]
 > **Do not set `generateNetworkPolicy: true` in the Strimzi Helm values** unless you also provide explicit egress rules in `operatorNetworkPolicy.egress`. When enabled with no egress rules, Strimzi creates an operator NetworkPolicy with empty egress — Kubernetes interprets this as "deny all outgoing traffic." The operator cannot reach the Kafka controllers' admin API (port 9090), causing the Kafka CR to remain `NotReady` indefinitely. Set `generateNetworkPolicy: false` and manage operator network policies manually.
 
@@ -575,6 +614,7 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 **Cause:** The Strimzi operator's `describeMetadataQuorum` admin API call to port 9090 times out. Most commonly caused by:
 - `generateNetworkPolicy: true` in Helm values creating an empty-egress NetworkPolicy that blocks all operator outgoing traffic
 - Resource pressure on the active controller pod causing admin API timeouts
+- Under `--topology isolated`, the operator runs in the `strimzi-operator` namespace. If the operator's NetworkPolicy does not include egress rules for DNS (port 53), Kubernetes API server (ports 443/6443), and the target Kafka namespace, the operator cannot resolve service names or communicate with controllers
 
 **Diagnosis:**
 

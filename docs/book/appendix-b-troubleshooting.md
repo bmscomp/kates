@@ -12,7 +12,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Ch 15](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [Ch 3](03-cluster.md#failure-tolerance-matrix) |
 | Cruise Control `unsupported goals` error | Goals list doesn't match Strimzi's default goals | [Ch 15](15-kafka-deployment.md#cruise-control-goal-mismatch) |
-| Kafka CR stuck on `NotReady` with `UnforceableProblem` | Strimzi operator egress blocked by `generateNetworkPolicy` — can't reach controllers | [Ch 15](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
+| Kafka CR stuck on `NotReady` with `UnforceableProblem` | Strimzi operator egress blocked by `generateNetworkPolicy` or isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Ch 15](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 
 ## Kafka Connectivity
 
@@ -42,6 +42,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Kafka pods stuck in `Pending` | StorageClass not created or no available nodes in the zone | [Ch 12](12-deployment.md#kafka-pods-not-starting) |
 | PDB blocks rolling restart | Only 1 pod can be unavailable — intentional safety behavior | [Ch 18](18-upgrade-playbook.md#common-upgrade-issues) |
 | Entity Operator never starts | Kafka CR hasn't reached `Ready` — check operator logs for `UnforceableProblem` | [Ch 15](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
+| PostgreSQL pod `CrashLoopBackOff` with `could not create lock file` | `readOnlyRootFilesystem: true` mutated by Kyverno — mount `emptyDir` at `/var/run/postgresql` and `/tmp` | [Ch 12](12-deployment.md#postgresql-read-only-filesystem-compliance) |
+| Pod admission rejected with Kyverno policy violation | Pod doesn't meet PSS standards — run `kates kyverno violations` to identify failing rules, then fix the manifest or add a `PolicyException` | [Ch 17](17-security.md#kyverno-policy-integration--admission-control) |
 
 ## CLI Issues
 
@@ -89,4 +91,13 @@ kubectl exec <broker-pod> -n kafka -- bin/kafka-metadata.sh --snapshot /var/lib/
 
 # Consumer lag
 kubectl exec <broker-pod> -n kafka -- bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --all-groups --describe
+
+# Kyverno policy status
+kates kyverno status
+
+# Kyverno violations (all namespaces)
+kates kyverno violations
+
+# Kyverno violations (specific namespace)
+kates kyverno violations --namespace kafka
 ```

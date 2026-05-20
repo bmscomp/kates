@@ -363,6 +363,36 @@ ACLs are declared via `KafkaUser` CRs (GitOps):
 - `kafka-ui` — read-only on all topics
 - `apicurio-registry` — read/write on internal topics
 
+### PostgreSQL Read-Only Filesystem Compliance
+
+The bundled PostgreSQL StatefulSet runs under the same strict admission standards enforced by the Kyverno `kates-pod-security-standards` policy. When `readOnlyRootFilesystem: true` is mutated onto the container, PostgreSQL fails to start because it cannot create socket lockfiles at `/var/run/postgresql` or write temporary files to `/tmp`.
+
+The Helm chart mitigates this by mounting two ephemeral `emptyDir` volumes onto the critical writable paths:
+
+```yaml
+volumeMounts:
+  - name: data
+    mountPath: /var/lib/postgresql/data
+  - name: run-postgresql
+    mountPath: /var/run/postgresql    # Socket lockfile
+  - name: tmp
+    mountPath: /tmp                   # Temporary files
+volumes:
+  - name: run-postgresql
+    emptyDir: {}
+  - name: tmp
+    emptyDir: {}
+```
+
+| Path | Purpose | Without emptyDir |
+|------|---------|------------------|
+| `/var/lib/postgresql/data` | Persistent database storage | PVC — always writable |
+| `/var/run/postgresql` | Unix domain socket and `.s.PGSQL.5432.lock` | ❌ `FATAL: could not create lock file` |
+| `/tmp` | Temporary sort files, pg_stat_tmp | ❌ `could not write to file "pg_stat_tmp/global.tmp"` |
+
+> [!NOTE]
+> These `emptyDir` volumes are ephemeral — they do not survive pod restarts. This is safe because `/var/run/postgresql` and `/tmp` contain only runtime artifacts (sockets, lock files, temp data). Persistent data is stored on the PVC-backed `/var/lib/postgresql/data` volume.
+
 ## GameDay Validation
 
 Run an automated 7-phase validation pipeline:
