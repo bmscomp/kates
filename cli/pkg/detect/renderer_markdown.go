@@ -200,6 +200,70 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 		p("")
 	}
 
+	// Active AZ Network Bandwidth Matrix
+	if len(report.Network.BandwidthMatrix) > 0 {
+		p("## Active Zone Network Bandwidth Matrix")
+		p("")
+		zoneMap := make(map[string]bool)
+		for _, r := range report.Network.BandwidthMatrix {
+			zoneMap[r.SourceZone] = true
+			zoneMap[r.TargetZone] = true
+		}
+		var zones []string
+		for z := range zoneMap {
+			zones = append(zones, z)
+		}
+
+		header := "| Source \\ Target | "
+		align := "|---| "
+		for _, z := range zones {
+			header += z + " | "
+			align += "---| "
+		}
+		p(header)
+		p(align)
+
+		for _, src := range zones {
+			row := "| **" + src + "** | "
+			for _, dst := range zones {
+				if src == dst {
+					row += "— | "
+					continue
+				}
+				found := false
+				for _, r := range report.Network.BandwidthMatrix {
+					if r.SourceZone == src && r.TargetZone == dst {
+						if r.Success {
+							row += fmt.Sprintf("%.1f Mbps | ", r.BandwidthMbps)
+						} else {
+							row += "❌ FAIL | "
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					row += "— | "
+				}
+			}
+			p(row)
+		}
+		p("")
+	}
+
+	// Active CoreDNS Latency & Success Audits
+	if len(report.Network.DNSResults) > 0 {
+		p("## Active CoreDNS Latency & Success Audits")
+		p("")
+		p("| Query Type | Queries Run | Success Count | Success Rate | Avg Latency | Max Latency |")
+		p("|---|---|---|---|---|---|")
+		for _, r := range report.Network.DNSResults {
+			p("| %s | %d | %d | %.1f%% | %.2fms | %.2fms |",
+				r.QueryType, r.QueriesRun, r.SuccessCount, r.SuccessRate, r.AvgLatencyMs, r.MaxLatencyMs)
+		}
+		p("")
+	}
+
 	// Secrets Audit
 	p("## Kubernetes Secrets Audit")
 	p("")

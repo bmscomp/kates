@@ -253,3 +253,164 @@ func TestLiveStorageBench_Fallback(t *testing.T) {
 		t.Errorf("Expected fallback to keep 0.5ms latency, got %f", report.Storage[0].ProbeLatencyMs)
 	}
 }
+
+func TestAZBandwidthBench_Success(t *testing.T) {
+	m := NewMockExecutor()
+	m.Responses["kubectl create ns"] = ""
+	m.Responses["kubectl label ns"] = ""
+	m.Responses["kubectl delete ns"] = ""
+	m.Responses["kubectl run prober-"] = ""
+	m.Responses["kubectl wait --for=condition=Ready pod"] = "pod condition met"
+	m.Responses["apk add"] = "installed iperf3"
+	m.Responses["iperf3 -s"] = ""
+
+	// Mock Pod list JSON
+	podListJSON := `{
+  "items": [
+    {
+      "metadata": {
+        "name": "prober-zone-a"
+      },
+      "status": {
+        "podIP": "10.244.1.2"
+      }
+    },
+    {
+      "metadata": {
+        "name": "prober-zone-b"
+      },
+      "status": {
+        "podIP": "10.244.2.3"
+      }
+    }
+  ]
+}`
+	m.Responses["get pods"] = podListJSON
+
+	// Mock iperf3 JSON outputs
+	iperfJSON_ab := `{
+  "end": {
+    "sum_received": {
+      "bits_per_second": 945000000.0
+    }
+  }
+}`
+	iperfJSON_ba := `{
+  "end": {
+    "sum_received": {
+      "bits_per_second": 880000000.0
+    }
+  }
+}`
+	m.Responses["iperf3 -c 10.244.2.3"] = iperfJSON_ab
+	m.Responses["iperf3 -c 10.244.1.2"] = iperfJSON_ba
+
+	collector := NewCollector(m)
+	collector.BenchNetwork = true
+
+	var progressMessages []string
+	collector.OnProgress = func(msg string) {
+		progressMessages = append(progressMessages, msg)
+	}
+
+	report := &DetectReport{
+		Nodes: []NodeInfo{
+			{Name: "node-1", Zone: "zone-a"},
+			{Name: "node-2", Zone: "zone-b"},
+		},
+	}
+
+	collector.runAZBandwidthBench(context.Background(), report)
+
+	if len(report.Network.BandwidthMatrix) != 2 {
+		t.Fatalf("Expected 2 bandwidth sweep results, got %d", len(report.Network.BandwidthMatrix))
+	}
+
+	res1 := report.Network.BandwidthMatrix[0]
+	if res1.SourceZone != "zone-a" || res1.TargetZone != "zone-b" || !res1.Success || res1.BandwidthMbps != 945.0 {
+		t.Errorf("Unexpected result for zone-a -> zone-b: %+v", res1)
+	}
+
+	res2 := report.Network.BandwidthMatrix[1]
+	if res2.SourceZone != "zone-b" || res2.TargetZone != "zone-a" || !res2.Success || res2.BandwidthMbps != 880.0 {
+		t.Errorf("Unexpected result for zone-b -> zone-a: %+v", res2)
+	}
+
+	if len(progressMessages) == 0 {
+		t.Error("Expected progress messages to be sent, but got none")
+	}
+}
+
+func TestDNSResolutionProbe_Success(t *testing.T) {
+	m := NewMockExecutor()
+	m.Responses["kubectl create ns"] = ""
+	m.Responses["kubectl label ns"] = ""
+	m.Responses["kubectl delete ns"] = ""
+	m.Responses["kubectl run dns-prober"] = ""
+	m.Responses["kubectl wait --for=condition=Ready pod/dns-prober"] = "pod condition met"
+	m.Responses["dns-prober -- apk add"] = "installed bind-tools"
+
+	// Mock dig outputs
+	m.Responses["dns-prober -- dig +tries=1 +timeout=2 kubernetes.default.svc.cluster.local"] = `
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345
+;; flags: qr aa rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;kubernetes.default.svc.cluster.local. IN A
+
+;; ANSWER SECTION:
+kubernetes.default.svc.cluster.local. 30 IN A 10.96.0.1
+
+;; Query time: 2 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+`
+	m.Responses["dns-prober -- dig +tries=1 +timeout=2 google.com"] = `
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 54321
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;google.com.			IN	A
+
+;; ANSWER SECTION:
+google.com.		258	IN	A	142.250.74.46
+
+;; Query time: 15 msec
+;; SERVER: 10.96.0.10#53(10.96.0.10)
+`
+
+	collector := NewCollector(m)
+	collector.BenchDNS = true
+
+	var progressMessages []string
+	collector.OnProgress = func(msg string) {
+		progressMessages = append(progressMessages, msg)
+	}
+
+	report := &DetectReport{
+		Nodes: []NodeInfo{
+			{Name: "node-1", Zone: "zone-a"},
+		},
+	}
+
+	collector.runDNSResolutionProbe(context.Background(), report)
+
+	if len(report.Network.DNSResults) != 2 {
+		t.Fatalf("Expected 2 DNS probe results, got %d", len(report.Network.DNSResults))
+	}
+
+	res1 := report.Network.DNSResults[0]
+	if res1.QueryType != "Internal" || res1.QueriesRun != 20 || res1.SuccessCount != 20 || res1.SuccessRate != 100.0 || res1.AvgLatencyMs != 2.0 || res1.MaxLatencyMs != 2.0 {
+		t.Errorf("Unexpected DNS internal result: %+v", res1)
+	}
+
+	res2 := report.Network.DNSResults[1]
+	if res2.QueryType != "External" || res2.QueriesRun != 20 || res2.SuccessCount != 20 || res2.SuccessRate != 100.0 || res2.AvgLatencyMs != 15.0 || res2.MaxLatencyMs != 15.0 {
+		t.Errorf("Unexpected DNS external result: %+v", res2)
+	}
+
+	if len(progressMessages) == 0 {
+		t.Error("Expected progress messages to be sent, but got none")
+	}
+}

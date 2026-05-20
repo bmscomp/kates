@@ -15,6 +15,8 @@ import (
 type Collector struct {
 	exec         CommandExecutor
 	BenchStorage bool
+	BenchNetwork bool
+	BenchDNS     bool
 	OnProgress   func(string)
 }
 
@@ -125,6 +127,18 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	if c.BenchStorage && len(report.Nodes) > 0 {
 		g2.Go(func() error {
 			c.runLiveStorageBench(ctx2, report)
+			return nil
+		})
+	}
+	if c.BenchNetwork && len(report.Nodes) > 0 {
+		g2.Go(func() error {
+			c.runAZBandwidthBench(ctx2, report)
+			return nil
+		})
+	}
+	if c.BenchDNS && len(report.Nodes) > 0 {
+		g2.Go(func() error {
+			c.runDNSResolutionProbe(ctx2, report)
 			return nil
 		})
 	}
@@ -1510,5 +1524,353 @@ EOF`, pvcName, ns, scName)
 				c.progress(fmt.Sprintf("Storage benchmarking: measured 0 IOPS on %q, falling back to heuristics...", scName))
 			}
 		}
+	}
+}
+
+type iperfOutput struct {
+	End struct {
+		SumReceived struct {
+			BitsPerSecond float64 `json:"bits_per_second"`
+		} `json:"sum_received"`
+	} `json:"end"`
+	Error string `json:"error"`
+}
+
+func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectReport) {
+	// Group nodes by zone
+	zoneToNode := make(map[string]string)
+	for _, n := range report.Nodes {
+		if n.Zone == "" || n.Zone == "-" {
+			continue
+		}
+		// Pick the first node in each zone
+		if _, exists := zoneToNode[n.Zone]; !exists {
+			zoneToNode[n.Zone] = n.Name
+		}
+	}
+
+	// If zero or only one zone is detected, cross-AZ bandwidth doesn't apply
+	if len(zoneToNode) <= 1 {
+		return
+	}
+
+	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	ns := fmt.Sprintf("kates-detect-bandwidth-%s", runID)
+
+	c.progress("Auditing inter-AZ network bandwidth: setting up temporary namespace...")
+	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
+	if err != nil {
+		return
+	}
+
+	defer func() {
+		c.progress("Auditing inter-AZ network bandwidth: cleaning up ephemeral resources...")
+		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+	}()
+
+	// Label the namespace
+	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
+
+	c.progress("Auditing inter-AZ network bandwidth: creating iperf3 prober pods...")
+
+	// Spin up a prober pod in each zone
+	g, ctx2 := errgroup.WithContext(ctx)
+	podNames := make(map[string]string)
+	for zone, nodeName := range zoneToNode {
+		zone := zone
+		nodeName := nodeName
+		podName := fmt.Sprintf("prober-%s", sanitizeDNSLabel(zone))
+		podNames[zone] = podName
+
+		g.Go(func() error {
+			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"alpine:3.19","command":["sleep","3600"]}]}}`, nodeName)
+			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image=alpine:3.19", "-n", ns,
+				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
+				"--overrides", overrides, "--restart=Never")
+			return runErr
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		c.progress("Auditing inter-AZ network bandwidth: failed to create prober pods, falling back gracefully...")
+		return
+	}
+
+	c.progress("Auditing inter-AZ network bandwidth: waiting for prober pods to be Ready...")
+	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
+	if waitErr != nil {
+		c.progress("Auditing inter-AZ network bandwidth: pods failed to become ready, falling back gracefully...")
+		return
+	}
+
+	c.progress("Auditing inter-AZ network bandwidth: installing iperf3 on prober pods...")
+	gInstall, _ := errgroup.WithContext(ctx2)
+	for _, podName := range podNames {
+		podName := podName
+		gInstall.Go(func() error {
+			_, installErr := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "iperf3")
+			return installErr
+		})
+	}
+	if err := gInstall.Wait(); err != nil {
+		c.progress("Auditing inter-AZ network bandwidth: failed to install iperf3, falling back gracefully...")
+		return
+	}
+
+	// Fetch Pod IPs
+	podListOut, err := c.exec.Exec("kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
+	if err != nil {
+		return
+	}
+
+	var podData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Status struct {
+				PodIP string `json:"podIP"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(podListOut), &podData) != nil {
+		return
+	}
+
+	podIPs := make(map[string]string)
+	for _, item := range podData.Items {
+		podIPs[item.Metadata.Name] = item.Status.PodIP
+	}
+
+	// Loop over unique source/target zone combinations sequentially to avoid port conflict or saturation
+	var results []BandwidthResult
+	for srcZone := range zoneToNode {
+		for dstZone := range zoneToNode {
+			if srcZone == dstZone {
+				continue
+			}
+
+			srcPod := podNames[srcZone]
+			dstPod := podNames[dstZone]
+			dstIP := podIPs[dstPod]
+
+			if dstIP == "" {
+				continue
+			}
+
+			c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: sweeping %s -> %s...", srcZone, dstZone))
+
+			// Start server on destination pod (runs exactly once and terminates using -1)
+			_, srvErr := c.exec.Exec("kubectl", "exec", "-n", ns, dstPod, "--", "sh", "-c", "iperf3 -s -p 5201 -1 >/dev/null 2>&1 &")
+			if srvErr != nil {
+				results = append(results, BandwidthResult{
+					SourceZone: srcZone,
+					TargetZone: dstZone,
+					Success:    false,
+				})
+				continue
+			}
+
+			// Sleep briefly to let server start
+			time.Sleep(1000 * time.Millisecond)
+
+			// Run client on source pod (runs 5 seconds)
+			clientOut, clientErr := c.exec.Exec("kubectl", "exec", "-n", ns, srcPod, "--", "iperf3", "-c", dstIP, "-p", "5201", "-t", "5", "-J")
+
+			var iperfData iperfOutput
+			var success bool
+			var bandwidthMbps float64
+
+			if clientErr == nil {
+				firstBrace := strings.Index(clientOut, "{")
+				if firstBrace != -1 {
+					jsonStr := clientOut[firstBrace:]
+					if jsonUnmarshalErr := json.Unmarshal([]byte(jsonStr), &iperfData); jsonUnmarshalErr == nil {
+						if iperfData.Error == "" && iperfData.End.SumReceived.BitsPerSecond > 0 {
+							bandwidthMbps = iperfData.End.SumReceived.BitsPerSecond / 1000000.0
+							success = true
+						}
+					}
+				}
+			}
+
+			if success {
+				c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: successfully measured %s -> %s: %.2f Mbps", srcZone, dstZone, bandwidthMbps))
+			} else {
+				c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: failed to sweep %s -> %s, falling back gracefully...", srcZone, dstZone))
+			}
+
+			results = append(results, BandwidthResult{
+				SourceZone:    srcZone,
+				TargetZone:    dstZone,
+				BandwidthMbps: bandwidthMbps,
+				Success:       success,
+			})
+		}
+	}
+
+	report.Network.BandwidthMatrix = results
+}
+
+func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectReport) {
+	if len(report.Nodes) == 0 {
+		return
+	}
+
+	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	ns := fmt.Sprintf("kates-detect-dns-%s", runID)
+
+	c.progress("Auditing CoreDNS performance: setting up temporary namespace...")
+	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
+	if err != nil {
+		return
+	}
+
+	defer func() {
+		c.progress("Auditing CoreDNS performance: cleaning up ephemeral resources...")
+		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+	}()
+
+	// Label the namespace
+	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
+
+	c.progress("Auditing CoreDNS performance: creating prober pod...")
+
+	nodeName := report.Nodes[0].Name
+	podName := "dns-prober"
+	overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"alpine:3.19","command":["sleep","3600"]}]}}`, nodeName)
+	_, runErr := c.exec.Exec("kubectl", "run", podName, "--image=alpine:3.19", "-n", ns,
+		"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
+		"--overrides", overrides, "--restart=Never")
+	if runErr != nil {
+		c.progress("Auditing CoreDNS performance: failed to create prober pod, falling back gracefully...")
+		return
+	}
+
+	c.progress("Auditing CoreDNS performance: waiting for prober pod to be Ready...")
+	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=30s")
+	if waitErr != nil {
+		c.progress("Auditing CoreDNS performance: prober pod failed to become ready, falling back gracefully...")
+		return
+	}
+
+	c.progress("Auditing CoreDNS performance: installing bind-tools...")
+	_, installErr := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "bind-tools")
+	if installErr != nil {
+		c.progress("Auditing CoreDNS performance: failed to install bind-tools, falling back gracefully...")
+		return
+	}
+
+	c.progress("Auditing CoreDNS performance: running rapid parallel DNS queries...")
+
+	var internalTimes []float64
+	var externalTimes []float64
+
+	internalChan := make(chan float64, 20)
+	externalChan := make(chan float64, 20)
+
+	g, _ := errgroup.WithContext(ctx)
+
+	// Internal queries
+	g.Go(func() error {
+		gInt, _ := errgroup.WithContext(ctx)
+		for i := 0; i < 20; i++ {
+			gInt.Go(func() error {
+				out, err := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", "kubernetes.default.svc.cluster.local")
+				if err == nil {
+					if ms, ok := parseDigOutput(out); ok {
+						internalChan <- ms
+					}
+				}
+				return nil
+			})
+		}
+		_ = gInt.Wait()
+		close(internalChan)
+		return nil
+	})
+
+	// External queries
+	g.Go(func() error {
+		gExt, _ := errgroup.WithContext(ctx)
+		for i := 0; i < 20; i++ {
+			gExt.Go(func() error {
+				out, err := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", "google.com")
+				if err == nil {
+					if ms, ok := parseDigOutput(out); ok {
+						externalChan <- ms
+					}
+				}
+				return nil
+			})
+		}
+		_ = gExt.Wait()
+		close(externalChan)
+		return nil
+	})
+
+	_ = g.Wait()
+
+	for ms := range internalChan {
+		internalTimes = append(internalTimes, ms)
+	}
+	for ms := range externalChan {
+		externalTimes = append(externalTimes, ms)
+	}
+
+	c.progress("Auditing CoreDNS performance: compiling results...")
+
+	internalResult := computeDNSProbeResult("Internal", internalTimes, 20)
+	externalResult := computeDNSProbeResult("External", externalTimes, 20)
+
+	report.Network.DNSResults = []DNSProbeResult{internalResult, externalResult}
+}
+
+func parseDigOutput(out string) (float64, bool) {
+	idx := strings.Index(out, ";; Query time:")
+	if idx == -1 {
+		return 0, false
+	}
+	sub := out[idx+len(";; Query time:"):]
+	end := strings.Index(sub, "msec")
+	if end == -1 {
+		return 0, false
+	}
+	valStr := strings.TrimSpace(sub[:end])
+	val, err := strconv.ParseFloat(valStr, 64)
+	if err != nil {
+		return 0, false
+	}
+	return val, true
+}
+
+func computeDNSProbeResult(queryType string, times []float64, totalRun int) DNSProbeResult {
+	if len(times) == 0 {
+		return DNSProbeResult{
+			QueryType:    queryType,
+			QueriesRun:   totalRun,
+			SuccessCount: 0,
+			SuccessRate:  0.0,
+			AvgLatencyMs: 0.0,
+			MaxLatencyMs: 0.0,
+		}
+	}
+	var sum float64
+	var max float64 = -1.0
+	for _, t := range times {
+		sum += t
+		if t > max {
+			max = t
+		}
+	}
+	avg := sum / float64(len(times))
+	successRate := (float64(len(times)) / float64(totalRun)) * 100.0
+	return DNSProbeResult{
+		QueryType:    queryType,
+		QueriesRun:   totalRun,
+		SuccessCount: len(times),
+		SuccessRate:  successRate,
+		AvgLatencyMs: avg,
+		MaxLatencyMs: max,
 	}
 }
