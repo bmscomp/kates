@@ -36,15 +36,18 @@ type kafkaPodStatus struct {
 }
 
 // countPodsByLabel queries pods matching the given label selector and counts
-// how many are Running vs total. Uses separate NAME + PHASE columns to avoid
-// JSONPath escaping issues with label keys that contain dots or slashes.
+// how many are fully Ready (all containers passing readiness probes) vs total.
+//
+// We check the pod-level Ready condition (True only when ALL containers are
+// ready) rather than just the pod phase, because a broker in phase "Running"
+// with 0/1 containers ready is NOT serving traffic.
 func countPodsByLabel(ctx context.Context, namespace, selector string) (running, total int, pending []string) {
 	out, _ := exec.CommandContext(ctx,
 		"kubectl", "get", "pods",
 		"-n", namespace,
 		"-l", selector,
 		"--no-headers",
-		"-o", "custom-columns=NAME:.metadata.name,PHASE:.status.phase",
+		"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[?(@.type==\"Ready\")].status,PHASE:.status.phase",
 	).Output()
 
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -55,12 +58,24 @@ func countPodsByLabel(ctx context.Context, namespace, selector string) (running,
 		if len(fields) < 2 {
 			continue
 		}
-		name, phase := fields[0], fields[1]
+		name := fields[0]
+		readyCond := ""
+		phase := ""
+		if len(fields) >= 3 {
+			readyCond = fields[1] // "True" or "False" or "<none>"
+			phase = fields[2]
+		} else {
+			// Only 2 fields — Ready condition might be missing
+			phase = fields[1]
+		}
+
 		total++
-		switch phase {
-		case "Running":
+		if readyCond == "True" {
 			running++
-		case "Pending", "ContainerCreating":
+		} else if phase == "Pending" || phase == "ContainerCreating" {
+			pending = append(pending, name)
+		} else {
+			// Running but not ready (e.g., 0/1) — still counts as pending
 			pending = append(pending, name)
 		}
 	}
