@@ -1,0 +1,42 @@
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.cosign.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+{{- if .Values.kyvernoPolicy.cosign.publicKey }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kates-image-verification
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Kates Image Signature Verification
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/description: >-
+      Verifies that container images from trusted registries are signed
+      with a valid Cosign signature. Unsigned or tampered images are rejected
+      to prevent supply chain attacks.
+spec:
+  validationFailureAction: {{ .Values.kyvernoPolicy.action | default "Audit" }}
+  webhookTimeoutSeconds: 30
+  background: false
+  rules:
+    - name: verify-image-signature
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      verifyImages:
+        {{- range .Values.kyvernoPolicy.cosign.imagePatterns }}
+        - imageReferences:
+            - {{ . | quote }}
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      {{ $.Values.kyvernoPolicy.cosign.publicKey | nindent 22 }}
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+        {{- end }}
+{{- end }}
+{{- end }}

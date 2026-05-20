@@ -1,0 +1,101 @@
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.networkPolicyGeneration.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kates-generate-network-policies
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Auto-Generate Default-Deny NetworkPolicies
+    policies.kyverno.io/category: Network Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Automatically generates a default-deny NetworkPolicy in every new
+      namespace. This ensures zero-trust network isolation by default —
+      pods must explicitly declare allowed ingress and egress traffic.
+      System namespaces (kube-system, kube-public, kyverno) are excluded.
+spec:
+  background: false
+  rules:
+    - name: generate-default-deny-ingress
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+      exclude:
+        any:
+          {{- range .Values.kyvernoPolicy.networkPolicyGeneration.excludeNamespaces }}
+          - resources:
+              kinds: ["Namespace"]
+              names: [{{ . | quote }}]
+          {{- end }}
+      generate:
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-deny-ingress
+        namespace: "{{ "{{" }}request.object.metadata.name{{ "}}" }}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+
+    - name: generate-default-deny-egress
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+      exclude:
+        any:
+          {{- range .Values.kyvernoPolicy.networkPolicyGeneration.excludeNamespaces }}
+          - resources:
+              kinds: ["Namespace"]
+              names: [{{ . | quote }}]
+          {{- end }}
+      generate:
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-deny-egress
+        namespace: "{{ "{{" }}request.object.metadata.name{{ "}}" }}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Egress
+
+    - name: generate-allow-dns-egress
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+      exclude:
+        any:
+          {{- range .Values.kyvernoPolicy.networkPolicyGeneration.excludeNamespaces }}
+          - resources:
+              kinds: ["Namespace"]
+              names: [{{ . | quote }}]
+          {{- end }}
+      generate:
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: allow-dns-egress
+        namespace: "{{ "{{" }}request.object.metadata.name{{ "}}" }}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Egress
+            egress:
+              - to:
+                  - namespaceSelector:
+                      matchLabels:
+                        kubernetes.io/metadata.name: kube-system
+                ports:
+                  - protocol: UDP
+                    port: 53
+                  - protocol: TCP
+                    port: 53
+{{- end }}
