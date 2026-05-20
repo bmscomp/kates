@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +18,7 @@ import (
 	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var isTesting = false
@@ -821,37 +824,146 @@ data:
 	}
 
 	// ---------------------------------------------------------
-	// Post-Deployment Verification Tests
+	// Post-Deployment Connectivity Verification
 	// ---------------------------------------------------------
+	var testJobName string
 	if deployRunTests {
-		PrintPhaseHeader(5, "Post-Deployment Verification")
+		PrintPhaseHeader(5, "Cluster Connectivity Verification")
 
-		// For Kind clusters, ensure the test image is loaded into the cluster nodes
+		// For Kind clusters, auto-build and load the test image
 		if isKind && deployTestImage != "" {
-			PrintPhaseItem(fmt.Sprintf("Loading test image %s into Kind cluster...", deployTestImage))
-			loadErr := runExecFn(ctx, "kind", "load", "docker-image", deployTestImage, "--name", "panda")
-			if loadErr != nil {
-				PrintPhaseWarn(fmt.Sprintf("Could not load %s into Kind — test pods may fail to pull", deployTestImage))
+			// Check if image exists locally
+			checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", deployTestImage)
+			if checkCmd.Run() != nil {
+				PrintPhaseItem("Building kates-test image from tester/Dockerfile...")
+				if err := runExecFn(ctx, "docker", "build", "-f", "tester/Dockerfile", "-t", deployTestImage, "tester/"); err != nil {
+					PrintPhaseWarn("Failed to build kates-test image — skipping tests")
+					goto skipTests
+				}
+				PrintPhaseSuccess("Image built: " + deployTestImage)
+			}
+
+			PrintPhaseItem(fmt.Sprintf("Loading %s into Kind cluster...", deployTestImage))
+			if err := runExecFn(ctx, "kind", "load", "docker-image", deployTestImage, "--name", "panda"); err != nil {
+				PrintPhaseWarn("Could not load image into Kind — test pods may fail")
 			} else {
-				PrintPhaseSuccess(fmt.Sprintf("Test image %s loaded into Kind", deployTestImage))
+				PrintPhaseSuccess("Test image loaded into Kind")
 			}
 		}
 
-		PrintPhaseItem(fmt.Sprintf("Running Helm tests for release 'kates' in namespace '%s'...", appNS))
+		// Build the connectivity test Job
+		clusterDomain := report.Network.ClusterDomain
+		kafkaBootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, clusterDomain)
+		katesAPI := fmt.Sprintf("kates.%s.svc.%s:8080", appNS, clusterDomain)
+		schemaRegistry := ""
+		if deployWithSchemaRegistry == "apicurio" {
+			schemaRegistry = fmt.Sprintf("http://apicurio.%s.svc.%s:8080", kafkaNS, clusterDomain)
+		}
+
+		testJobName = fmt.Sprintf("kates-connectivity-test-%d", time.Now().Unix())
+		imagePullPolicy := "IfNotPresent"
+		if isKind {
+			imagePullPolicy = "Never"
+		}
+
+		jobYAML := fmt.Sprintf(`apiVersion: batch/v1
+kind: Job
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/name: kates-connectivity-test
+    app.kubernetes.io/managed-by: kates-cli
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kates-connectivity-test
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: connectivity-test
+        image: %s
+        imagePullPolicy: %s
+        command: ["/app/scripts/connectivity-test.sh"]
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "%s"
+        - name: KATES_API
+          value: "%s"
+        - name: CLUSTER_DOMAIN
+          value: "%s"
+        - name: KAFKA_NS
+          value: "%s"
+        - name: APP_NS
+          value: "%s"
+        - name: TOPOLOGY
+          value: "%s"
+        - name: SCHEMA_REGISTRY
+          value: "%s"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+`, testJobName, appNS, deployTestImage, imagePullPolicy,
+			kafkaBootstrap, katesAPI, clusterDomain,
+			kafkaNS, appNS, deployTopology, schemaRegistry)
+
+		// Apply the Job
+		PrintPhaseItem(fmt.Sprintf("Creating verification Job '%s' in namespace '%s'", testJobName, appNS))
 		if deployTestImage != "" {
 			PrintPhaseItem(fmt.Sprintf("Test image: %s", deployTestImage))
 		}
 
-		testErr := runHelmFn(ctx, "test", "kates", "-n", appNS, "--timeout", "5m")
-		if testErr != nil {
-			PrintPhaseWarn("Some verification tests failed — check results above")
+		if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, jobYAML); err != nil {
+			PrintPhaseWarn("Failed to create test Job — " + err.Error())
+			goto skipTests
+		}
+
+		// Wait for the Job pod to start, then stream logs
+		PrintPhaseItem("Waiting for test pod to start...")
+		waitCtx, waitCancel := context.WithTimeout(ctx, 120*time.Second)
+		defer waitCancel()
+		if err := runExecFn(waitCtx, "kubectl", "wait", "--for=condition=ready",
+			"pod", "-l", "app.kubernetes.io/name=kates-connectivity-test",
+			"-n", appNS, "--timeout=120s"); err != nil {
+			// Pod might have already completed; try to get logs anyway
+			PrintPhaseWarn("Test pod did not reach Ready state — attempting to read logs")
+		}
+
+		// Stream and parse the Job logs
+		results := streamAndParseTestLogs(ctx, testJobName, appNS)
+		renderTestDashboard(results)
+
+		// Check final Job status
+		jobStatus := getJobStatus(ctx, testJobName, appNS)
+		if jobStatus == "failed" || results.Summary.Failed > 0 {
+			PrintPhaseWarn("Some connectivity tests failed")
 			fmt.Println()
-			fmt.Printf("    Debug test pods:   kubectl get pods -n %s -l helm.sh/hook=test\n", appNS)
-			fmt.Printf("    View test logs:    kubectl logs -n %s -l helm.sh/hook=test --all-containers\n", appNS)
+			fmt.Printf("    Debug:   kubectl describe job/%s -n %s\n", testJobName, appNS)
+			fmt.Printf("    Logs:    kubectl logs job/%s -n %s\n", testJobName, appNS)
+			fmt.Printf("    Pods:    kubectl get pods -n %s -l app.kubernetes.io/name=kates-connectivity-test\n", appNS)
 		} else {
-			PrintPhaseSuccess("All verification tests passed!")
+			PrintPhaseSuccess("All connectivity tests passed!")
+			// Clean up successful Job
+			runExecFn(ctx, "kubectl", "delete", "job", testJobName, "-n", appNS, "--ignore-not-found")
 		}
 	}
+skipTests:
 
 	// ---------------------------------------------------------
 	// Deployment Summary Dashboard
@@ -876,6 +988,9 @@ data:
 	if deployWithChaos {
 		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
 	}
+	if deployRunTests && testJobName != "" {
+		entries = append(entries, DeploySummaryEntry{Icon: "🔍", Name: "Connectivity Test", Release: testJobName, Namespace: appNS, Group: "D"})
+	}
 
 	RenderDeployDashboard(ctx, entries, time.Since(deployStartTime))
 
@@ -897,6 +1012,193 @@ func parseImageRef(image string) (repo, tag string) {
 		tag = "latest"
 	}
 	return
+}
+
+// ─── Connectivity Test Structures ─────────────────────────────────────────────
+
+type connectivityTestResult struct {
+	Test    string `json:"test"`
+	Status  string `json:"status"`
+	Elapsed string `json:"elapsed"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+type connectivityTestSummary struct {
+	Total   int    `json:"total"`
+	Passed  int    `json:"passed"`
+	Failed  int    `json:"failed"`
+	Elapsed string `json:"elapsed"`
+}
+
+type connectivityTestResults struct {
+	Tests   []connectivityTestResult
+	Summary connectivityTestSummary
+}
+
+// streamAndParseTestLogs streams logs from the test Job and parses JSON-lines output.
+func streamAndParseTestLogs(ctx context.Context, jobName, namespace string) connectivityTestResults {
+	var results connectivityTestResults
+
+	if isTesting {
+		// In test mode, return a synthetic result
+		results.Summary = connectivityTestSummary{Total: 1, Passed: 1, Failed: 0, Elapsed: "0ms"}
+		return results
+	}
+
+	logCtx, logCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer logCancel()
+
+	// Wait briefly for the pod to produce output
+	time.Sleep(2 * time.Second)
+
+	cmd := exec.CommandContext(logCtx, "kubectl", "logs",
+		fmt.Sprintf("job/%s", jobName), "-n", namespace, "-f")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		PrintPhaseWarn("Could not stream test logs: " + err.Error())
+		return results
+	}
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		PrintPhaseWarn("Could not start log stream: " + err.Error())
+		return results
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+
+		// Try to parse as a test result
+		var result connectivityTestResult
+		if err := json.Unmarshal([]byte(line), &result); err == nil && result.Test != "" {
+			results.Tests = append(results.Tests, result)
+			continue
+		}
+
+		// Try to parse as summary
+		var summaryWrapper struct {
+			Summary connectivityTestSummary `json:"summary"`
+		}
+		if err := json.Unmarshal([]byte(line), &summaryWrapper); err == nil && summaryWrapper.Summary.Total > 0 {
+			results.Summary = summaryWrapper.Summary
+		}
+	}
+
+	cmd.Wait()
+	return results
+}
+
+// renderTestDashboard renders the connectivity test results as a styled table.
+func renderTestDashboard(results connectivityTestResults) {
+	if len(results.Tests) == 0 && results.Summary.Total == 0 {
+		PrintPhaseWarn("No test results received")
+		return
+	}
+
+	// Build the table
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
+	sepStyle := lipgloss.NewStyle().Foreground(clrDim)
+	passStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
+	failStyle := lipgloss.NewStyle().Foreground(clrRed).Bold(true)
+	nameStyle := lipgloss.NewStyle().Foreground(clrText)
+	elapsedStyle := lipgloss.NewStyle().Foreground(clrDim)
+
+	fmt.Println()
+	fmt.Println(headerStyle.Render("  ┌──────────────────────────────────────────────────────────────┐"))
+	fmt.Println(headerStyle.Render("  │") + "  " +
+		headerStyle.Render(fmt.Sprintf("%-34s %-10s %s", "Test", "Status", "Elapsed")) +
+		"  " + headerStyle.Render("│"))
+	fmt.Println(headerStyle.Render("  ├──────────────────────────────────────────────────────────────┤"))
+
+	for _, t := range results.Tests {
+		// Map test ID to human-readable name
+		name := humanizeTestName(t.Test)
+		var statusStr string
+		if t.Status == "PASS" {
+			statusStr = passStyle.Render("✔ PASS")
+		} else if t.Status == "SKIP" {
+			statusStr = elapsedStyle.Render("⏭ SKIP")
+		} else {
+			statusStr = failStyle.Render("✖ FAIL")
+		}
+
+		// Pad the name to fixed width
+		if len(name) > 32 {
+			name = name[:32]
+		}
+
+		fmt.Printf("  │  %s  %s  %s  │\n",
+			nameStyle.Render(fmt.Sprintf("%-32s", name)),
+			fmt.Sprintf("%-16s", statusStr),
+			elapsedStyle.Render(fmt.Sprintf("%8s", t.Elapsed)))
+	}
+
+	// Summary row
+	fmt.Println(sepStyle.Render("  ├──────────────────────────────────────────────────────────────┤"))
+	var summaryStatus string
+	if results.Summary.Failed == 0 {
+		summaryStatus = passStyle.Render("✔ ALL OK")
+	} else {
+		summaryStatus = failStyle.Render(fmt.Sprintf("✖ %d FAILED", results.Summary.Failed))
+	}
+	fmt.Printf("  │  %s  %s  %s  │\n",
+		nameStyle.Render(fmt.Sprintf("%-32s",
+			fmt.Sprintf("Summary: %d/%d passed", results.Summary.Passed, results.Summary.Total))),
+		fmt.Sprintf("%-16s", summaryStatus),
+		elapsedStyle.Render(fmt.Sprintf("%8s", results.Summary.Elapsed)))
+	fmt.Println(headerStyle.Render("  └──────────────────────────────────────────────────────────────┘"))
+	fmt.Println()
+}
+
+// humanizeTestName converts test IDs like "dns_kafka_bootstrap" to readable names.
+func humanizeTestName(id string) string {
+	nameMap := map[string]string{
+		"dns_kafka_bootstrap":  "DNS: Kafka bootstrap",
+		"dns_kates_api":        "DNS: Kates API",
+		"dns_cluster_domain":   "DNS: Cluster domain",
+		"tcp_kafka_9092":       "TCP: Kafka 9092",
+		"tcp_kates_api_8080":   "TCP: Kates API 8080",
+		"kafka_broker_metadata": "Kafka: Broker metadata",
+		"kafka_topics_list":    "Kafka: Topics list",
+		"api_health":           "API: /api/health",
+		"api_ready":            "API: /q/health/ready",
+		"api_live":             "API: /q/health/live",
+		"api_cluster":          "API: /api/cluster",
+		"crossns_kafka":        "Network: cross-ns Kafka",
+		"crossns_kates":        "Network: cross-ns Kates",
+		"schema_registry":      "Schema Registry",
+	}
+	if name, ok := nameMap[id]; ok {
+		return name
+	}
+	// Fallback: replace underscores with spaces and title case
+	return strings.ReplaceAll(id, "_", " ")
+}
+
+// getJobStatus checks if a Kubernetes Job completed or failed.
+func getJobStatus(ctx context.Context, jobName, namespace string) string {
+	if isTesting {
+		return "complete"
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(checkCtx, "kubectl", "get", "job", jobName,
+		"-n", namespace, "-o", "jsonpath={.status.conditions[0].type}")
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	result := strings.TrimSpace(strings.ToLower(string(out)))
+	if result == "complete" {
+		return "complete"
+	}
+	return "failed"
 }
 
 // Helpers
