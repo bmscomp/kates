@@ -10,6 +10,15 @@ on:
       - "versions.env"
       - "Makefile"
       - ".github/workflows/integration.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - "kates/**"
+      - "images.env"
+      - "versions.env"
+      - "Makefile"
+      - ".github/workflows/integration.yml"
   workflow_dispatch:
 
 permissions:
