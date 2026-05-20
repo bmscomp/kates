@@ -109,6 +109,38 @@ func runClean(cmd *cobra.Command, args []string) error {
 		"kafkabridges.kafka.strimzi.io",
 	}
 
+	// CustomResourceDefinitions (CRDs) deployed by the Kates stack.
+	allCRDs := []string{
+		// Strimzi CRDs
+		"kafkabridges.kafka.strimzi.io",
+		"kafkaconnectors.kafka.strimzi.io",
+		"kafkaconnects.kafka.strimzi.io",
+		"kafkamirrormaker2s.kafka.strimzi.io",
+		"kafkanodepools.kafka.strimzi.io",
+		"kafkarebalances.kafka.strimzi.io",
+		"kafkas.kafka.strimzi.io",
+		"kafkatopics.kafka.strimzi.io",
+		"kafkausers.kafka.strimzi.io",
+		"strimzipodsets.core.strimzi.io",
+
+		// Litmus Chaos CRDs
+		"chaosengines.litmuschaos.io",
+		"chaosexperiments.litmuschaos.io",
+		"chaosresults.litmuschaos.io",
+
+		// Monitoring (Prometheus) CRDs
+		"alertmanagerconfigs.monitoring.coreos.com",
+		"alertmanagers.monitoring.coreos.com",
+		"podmonitors.monitoring.coreos.com",
+		"probes.monitoring.coreos.com",
+		"prometheusagents.monitoring.coreos.com",
+		"prometheuses.monitoring.coreos.com",
+		"prometheusrules.monitoring.coreos.com",
+		"scrapeconfigs.monitoring.coreos.com",
+		"servicemonitors.monitoring.coreos.com",
+		"thanosrulers.monitoring.coreos.com",
+	}
+
 	var appReleases []helmRelease
 	var coreReleases []helmRelease
 	var managedNamespaces []string
@@ -188,7 +220,16 @@ func runClean(cmd *cobra.Command, args []string) error {
 		cn()
 	}
 
-	if len(installed) == 0 && len(existingNS) == 0 {
+	var existingCRDs []string
+	for _, crd := range allCRDs {
+		c, cn := context.WithTimeout(ctx, 3*time.Second)
+		if cleanRun(c, "kubectl", "get", "crd", crd) == nil {
+			existingCRDs = append(existingCRDs, crd)
+		}
+		cn()
+	}
+
+	if len(installed) == 0 && len(existingNS) == 0 && len(existingCRDs) == 0 {
 		fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Bold(true).
 			Render("  ✓ Cluster is already clean. Nothing to do."))
 		fmt.Println()
@@ -223,6 +264,17 @@ func runClean(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s %s\n",
 				bulletStyle.Render("✖"),
 				nameStyle.Render(ns),
+			)
+		}
+	}
+
+	if len(existingCRDs) > 0 {
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  CustomResourceDefinitions (CRDs):"))
+		for _, crd := range existingCRDs {
+			fmt.Printf("  %s %s\n",
+				bulletStyle.Render("✖"),
+				nameStyle.Render(crd),
 			)
 		}
 	}
@@ -328,6 +380,27 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 			if err != nil {
 				fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
+			} else {
+				fmt.Println(okStyle.Render("  ✔"))
+			}
+		}
+	}
+
+	// ── 6. Delete CustomResourceDefinitions (CRDs) ──
+	if len(existingCRDs) > 0 {
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 5: Deleting CustomResourceDefinitions (CRDs)..."))
+		for _, crd := range existingCRDs {
+			label := fmt.Sprintf("  Deleting CRD %s", crd)
+			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
+
+			cCtx, cCancel := context.WithTimeout(ctx, 30*time.Second)
+			err := cleanRun(cCtx, "kubectl", "delete", "crd", crd, "--ignore-not-found")
+			cCancel()
+
+			if err != nil {
+				fmt.Println(errStyle.Render("  ✖"))
 			} else {
 				fmt.Println(okStyle.Render("  ✔"))
 			}
