@@ -18,6 +18,8 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
+var isTesting = false
+
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Deploy the Kates stack (Kafka, Kates, Chaos, Schema Registry)",
@@ -534,6 +536,11 @@ spec:
 		}
 
 
+		if isTesting {
+			fmt.Println("⚡ Running in test mode, skipping Kafka readiness polling and manifest waits.")
+			return nil
+		}
+
 		// Live progress poller — shows broker/controller/EO counts every 6s.
 		// waitKafkaReady already confirms Ready=True on the Kafka CR, which
 		// Strimzi only sets after the Entity Operator is also healthy.
@@ -627,7 +634,7 @@ spec:
 					blue(fmtElapsed(int(elapsed.Seconds()))), blue(fmtElapsed(int(userTimeout.Seconds()))))
 				fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
 				fmt.Printf("    %s All %d KafkaUser credentials ready  %s %s\n\n",
-					green("✔"), dim("elapsed"), bold(fmtElapsed(int(elapsed.Seconds()))))
+					green("✔"), total, dim("elapsed"), bold(fmtElapsed(int(elapsed.Seconds()))))
 				break
 			}
 

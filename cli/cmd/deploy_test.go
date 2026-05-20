@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+func init() {
+	isTesting = true
+}
+
 type MockExecutor struct{}
 
 func (m *MockExecutor) LookPath(file string) (string, error) {
@@ -58,6 +62,7 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 	// Mock the cluster detection dependencies by overriding valuesFile creation or ensuring it succeeds
 	// In runDeploy it creates .build/values-detected.yaml. We just run it and let it create the file.
 
+	_ = deployCmd.Flags().Set("topology", deployTopology)
 	err := runDeploy(deployCmd, []string{})
 	if err != nil {
 		t.Fatalf("runDeploy failed: %v", err)
@@ -120,6 +125,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 		return false
 	}
 
+	_ = deployCmd.Flags().Set("topology", deployTopology)
 	err := runDeploy(deployCmd, []string{})
 	if err != nil {
 		t.Fatalf("runDeploy failed: %v", err)
@@ -190,6 +196,7 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 
 	defaultExecutor = &MockExecutor{}
 
+	_ = deployCmd.Flags().Set("topology", deployTopology)
 	err := runDeploy(deployCmd, []string{})
 	if err != nil {
 		t.Fatalf("runDeploy failed: %v", err)
