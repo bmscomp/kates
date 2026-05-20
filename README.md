@@ -55,36 +55,36 @@ graph TD
     classDef spi fill:#8957e5,stroke:#a371f7,stroke-width:2px,color:#fff;
     classDef ext fill:#d29922,stroke:#f0883e,stroke-width:2px,color:#fff;
 
-    subgraph User Space
-        CLI[Kates CLI Client]:::cli
-        TUI[Interactive TUI Dashboard]:::cli
+    subgraph "User Space"
+        CLI["Kates CLI Client"]:::cli
+        TUI["Interactive TUI Dashboard"]:::cli
     end
 
-    subgraph Kates Backend Engine (Quarkus App)
-        API[JAX-RS REST Resource Layer]:::core
-        GRPC[gRPC Telemetry Service]:::core
-        Orch[Test & Disruption Orchestrators]:::core
-        Intel[Kafka Intelligence Service]:::core
-        Panache[(PostgreSQL / Panache DB)]:::core
-        MPConfig[MicroProfile Config Engine]:::core
+    subgraph "Kates Backend Engine (Quarkus App)"
+        API["JAX-RS REST Resource Layer"]:::core
+        GRPC["gRPC Telemetry Service"]:::core
+        Orch["Test & Disruption Orchestrators"]:::core
+        Intel["Kafka Intelligence Service"]:::core
+        Panache[("PostgreSQL / Panache DB")]:::core
+        MPConfig["MicroProfile Config Engine"]:::core
     end
 
-    subgraph Service Provider Interfaces
-        BENCH_SPI{BenchmarkBackend SPI}:::spi
-        CHAOS_SPI{ChaosProvider SPI}:::spi
+    subgraph "Service Provider Interfaces"
+        BENCH_SPI{"BenchmarkBackend SPI"}:::spi
+        CHAOS_SPI{"ChaosProvider SPI"}:::spi
     end
 
-    subgraph Concrete Execution Backends
-        NativeEng[Native Loom Workload Engine]:::spi
-        TrogClient[Trogdor Coordinator Adapter]:::spi
-        LitmusEng[LitmusChaos CRD Provider]:::spi
-        DirectK8s[Direct Kubernetes API Provider]:::spi
+    subgraph "Concrete Execution Backends"
+        NativeEng["Native Loom Workload Engine"]:::spi
+        TrogClient["Trogdor Coordinator Adapter"]:::spi
+        LitmusEng["LitmusChaos CRD Provider"]:::spi
+        DirectK8s["Direct Kubernetes API Provider"]:::spi
     end
 
-    subgraph Infrastructure
-        Kafka[Strimzi Apache Kafka Cluster]:::ext
-        Prom[Prometheus Metrics Server]:::ext
-        Litmus[Litmus Operator]:::ext
+    subgraph "Infrastructure"
+        Kafka["Strimzi Apache Kafka Cluster"]:::ext
+        Prom["Prometheus Metrics Server"]:::ext
+        Litmus["Litmus Operator"]:::ext
     end
 
     CLI -->|HTTP/JSON REST| API
@@ -104,7 +104,7 @@ graph TD
     CHAOS_SPI --> DirectK8s
 
     NativeEng -->|Producer/Consumer clients| Kafka
-    TrogClient -->|REST Client| TrogClient
+    TrogClient -->|REST Client requests| Kafka
     LitmusEng -->|Custom Resources| Litmus
     DirectK8s -->|Fabric8 API Restarts| Kafka
     Intel -->|AdminClient Metadata| Kafka
@@ -148,26 +148,26 @@ sequenceDiagram
     participant Chaos as ChaosProvider
     participant Prom as Prometheus Metrics
 
-    Cli->>Orch: POST /api/resilience (DisruptionPlan)
-    Orch->>Guard: Validate Blast Radius & RBAC (maxAffectedBrokers)
+    Cli->>Orch: POST /api/resilience
+    Orch->>Guard: Validate Blast Radius and RBAC
     Guard-->>Orch: Approved (Dry-Run Match)
     Orch->>Intel: Query Partition Leader & Replica ISR
     Intel-->>Orch: Leader Broker ID & Partition Metadata
     Orch->>Prom: Query Baseline "Before" Telemetry Snapshot
     Orch->>Orch: Wait steadyStateSec (Establish Benchmark Baseline)
-    Orch->>Chaos: triggerFault(FaultSpec) Asynchronously
+    Orch->>Chaos: triggerFault Asynchronously
     Note over Orch,Chaos: Fault Injected (e.g. Leader Broker Kill)
-    loop Observation Window (observationWindowSec)
+    loop Observation Window
         Intel->>Intel: Periodically track ISR shrinks/expansions
         Intel->>Intel: Periodically track consumer offset lag spikes
     end
     Orch->>Prom: Query Post-Disruption "After" Telemetry Snapshot
     Orch->>Orch: Compute Impact Delta & SLA Recovery Times
-    alt SLA Verification Fails or Timeout (requireRecovery = true)
+    alt SLA Verification Fails or Timeout
         Orch->>Guard: Trigger Automated Rollback
         Guard->>Chaos: cleanup(engineName)
     end
-    Orch->>Cli: Return DisruptionReport (Grade A-F + Verdicts)
+    Orch->>Cli: Return DisruptionReport with Verdicts
 ```
 
 ---
