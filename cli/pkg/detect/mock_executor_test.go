@@ -25,17 +25,38 @@ func (m *MockExecutor) key(name string, args ...string) string {
 
 func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 	k := m.key(name, args...)
+	
+	var matched bool
+	var resErr error
 	if err, ok := m.Errors[k]; ok {
-		return "", err
-	}
-	if resp, ok := m.Responses[k]; ok {
-		return resp, nil
-	}
-	// Try prefix matching for flexibility
-	for pattern, resp := range m.Responses {
-		if strings.HasPrefix(k, pattern) {
-			return resp, nil
+		resErr = err
+		matched = true
+	} else {
+		for pattern, err := range m.Errors {
+			if strings.HasPrefix(k, pattern) {
+				resErr = err
+				matched = true
+				break
+			}
 		}
+	}
+	
+	var resResp string
+	if resp, ok := m.Responses[k]; ok {
+		resResp = resp
+		matched = true
+	} else {
+		for pattern, resp := range m.Responses {
+			if strings.HasPrefix(k, pattern) {
+				resResp = resp
+				matched = true
+				break
+			}
+		}
+	}
+	
+	if matched {
+		return resResp, resErr
 	}
 	return "", fmt.Errorf("mock: no response for %q", k)
 }

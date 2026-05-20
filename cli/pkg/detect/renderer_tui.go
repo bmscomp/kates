@@ -181,12 +181,34 @@ func RenderTUI(report *DetectReport) {
 		output.KeyValue("Namespace:", report.Strimzi.Namespace)
 		output.KeyValue("Image:", report.Strimzi.Image)
 		output.KeyValue("Replicas:", fmt.Sprintf("%d/%d ready", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas))
-		output.Success("Strimzi operator: running")
+		output.KeyValue("Health status:", report.Strimzi.Health.Status)
+		if report.Strimzi.Health.PodsReady {
+			output.Success("Operator pods: ready")
+		} else {
+			output.Error("Operator pods: not ready")
+		}
+		
+		if len(report.Strimzi.Health.WarningLogs) > 0 {
+			output.Warn("Strimzi Operator Warning/Error log patterns:")
+			for _, log := range report.Strimzi.Health.WarningLogs {
+				fmt.Printf("    ⚠️  %s\n", log)
+			}
+		}
 	} else {
 		if report.Strimzi.CRDsPresent {
 			output.Warn("Strimzi CRDs present but operator not running")
 		} else {
 			output.Warn("Strimzi not installed — chart will install operator subchart")
+		}
+	}
+	if len(report.Strimzi.Health.MissingCRDs) > 0 {
+		output.Warn(fmt.Sprintf("Missing Strimzi CRDs: %s", strings.Join(report.Strimzi.Health.MissingCRDs, ", ")))
+	}
+	if report.Strimzi.CapacityStatus != "" {
+		if report.Strimzi.CapacityStatus == "Sufficient" {
+			output.Success("Strimzi Kafka capacity: Sufficient resources available")
+		} else {
+			output.Warn(fmt.Sprintf("Strimzi Kafka capacity: %s", report.Strimzi.CapacityStatus))
 		}
 	}
 
@@ -220,6 +242,46 @@ func RenderTUI(report *DetectReport) {
 	output.Success(fmt.Sprintf("Pod CIDR: %s", report.Network.PodCIDR))
 	output.Success(fmt.Sprintf("Service CIDR: %s", report.Network.ServiceCIDR))
 
+	// Active AZ network latency matrix
+	if len(report.Network.LatencyMatrix) > 0 {
+		output.Header("Active Zone Network Latency Matrix")
+		
+		zoneMap := make(map[string]bool)
+		for _, r := range report.Network.LatencyMatrix {
+			zoneMap[r.SourceZone] = true
+			zoneMap[r.TargetZone] = true
+		}
+		var zones []string
+		for z := range zoneMap {
+			zones = append(zones, z)
+		}
+		
+		headers := append([]string{"SRC \\ DST"}, zones...)
+		var rows [][]string
+		for _, src := range zones {
+			row := []string{src}
+			for _, dst := range zones {
+				found := false
+				for _, r := range report.Network.LatencyMatrix {
+					if r.SourceZone == src && r.TargetZone == dst {
+						if r.Success {
+							row = append(row, fmt.Sprintf("%.2fms", r.AvgMs))
+						} else {
+							row = append(row, "FAIL")
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					row = append(row, "—")
+				}
+			}
+			rows = append(rows, row)
+		}
+		output.Table(headers, rows)
+	}
+
 	// ── Admission Controllers ────────────────────────────────────────────────
 	output.Header("Admission Controllers")
 	if report.Admission.Kyverno.Installed {
@@ -240,6 +302,25 @@ func RenderTUI(report *DetectReport) {
 			len(report.Admission.Gatekeeper.Constraints)))
 	} else {
 		output.Hint("OPA Gatekeeper: not installed")
+	}
+
+	// Kubernetes Secrets capability check
+	output.Header("Kubernetes Secrets Audit")
+	if report.SecretAudit.NamespaceCreated {
+		if report.SecretAudit.SecretCreated {
+			output.Success("Secrets creation: fully functional in experimental namespace")
+		} else {
+			output.Error("Secrets creation: failed/blocked")
+			if report.SecretAudit.BlockedByPolicy {
+				output.Error(fmt.Sprintf("Blocked by admission policy: %s", report.SecretAudit.PolicyName))
+			} else {
+				output.Error(fmt.Sprintf("Error detail: %s", report.SecretAudit.ErrorMsg))
+			}
+		}
+	} else if report.SecretAudit.ErrorMsg != "" {
+		output.Error(fmt.Sprintf("Experimental namespace creation blocked: %s", report.SecretAudit.ErrorMsg))
+	} else {
+		output.Hint("Secret capability check: skipped")
 	}
 
 	// ── Kyverno Policies (kafka-relevant) ────────────────────────────────────

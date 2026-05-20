@@ -73,13 +73,22 @@ type KafkaCondition struct {
 	Message string
 }
 
+type StrimziHealth struct {
+	Status      string   // "Healthy", "Degraded", "Unhealthy"
+	PodsReady   bool
+	WarningLogs []string
+	MissingCRDs []string
+}
+
 type StrimziInfo struct {
-	CRDsPresent   bool
-	Running       bool
-	Namespace     string
-	Image         string
-	ReadyReplicas int
-	TotalReplicas int
+	CRDsPresent    bool
+	Running        bool
+	Namespace      string
+	Image          string
+	ReadyReplicas  int
+	TotalReplicas  int
+	Health         StrimziHealth
+	CapacityStatus string
 }
 
 type MonitoringInfo struct {
@@ -89,12 +98,23 @@ type MonitoringInfo struct {
 	ReleaseLabel      string
 }
 
+type LatencyResult struct {
+	SourceZone string
+	TargetZone string
+	MinMs      float64
+	MaxMs      float64
+	AvgMs      float64
+	JitterMs   float64
+	Success    bool
+}
+
 type NetworkInfo struct {
 	CNI            string
 	CoreDNSRunning int
 	ClusterDomain  string
 	PodCIDR        string
 	ServiceCIDR    string
+	LatencyMatrix  []LatencyResult
 }
 
 // ── Admission Controller Types ───────────────────────────────────────────────
@@ -260,6 +280,14 @@ type Verdict struct {
 	Compatible bool
 }
 
+type SecretCreationAudit struct {
+	NamespaceCreated bool
+	SecretCreated    bool
+	ErrorMsg         string
+	BlockedByPolicy  bool
+	PolicyName       string
+}
+
 type DetectReport struct {
 	Context          string
 	Server           string
@@ -282,6 +310,7 @@ type DetectReport struct {
 	Budget           BudgetReport
 	Capacity         CapacityBudget
 	Verdict          Verdict
+	SecretAudit      SecretCreationAudit
 }
 
 // ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
