@@ -4,7 +4,7 @@ A terminal-first, enterprise-grade engineering platform for **performance testin
 
 ---
 
-## 🌟 The Vision: Why Kates?
+## The Vision: Why Kates?
 
 In modern cloud-native architectures, Apache Kafka lies at the critical path of data flow. Ensuring its reliability, low latency, security, and schema enforcement requires continuous, active testing. **Kates** was created to democratize advanced chaos testing and performance tuning for Kafka topologies. 
 
@@ -12,7 +12,7 @@ Unlike traditional passive monitoring systems, Kates offers an **active engineer
 
 ---
 
-## 🚀 Key Architectural Features & Capabilities
+## Key Architectural Features & Capabilities
 
 Kates features a robust, comprehensive collection of tools spanning several key engineering domains:
 
@@ -42,7 +42,57 @@ The suite comes fully integrated with **OpenTelemetry (OTLP)**. Auto-instrumente
 
 ---
 
-## 📋 Prerequisites
+## Platform Architecture & Kates Backend
+
+Kates is architected as a decoupled, multi-tier system designed for high performance, swappable testing backends, and low latency:
+
+```
+  ┌─────────────────────────────────────────────────────────┐
+  │                        Kates CLI                        │
+  │     (Interactive TUI Explorer, Contexts, Audit Tools)   │
+  └───────────────────────────┬─────────────────────────────┘
+                              │ gRPC / REST (HTTP/JSON)
+                              ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                 Kates Backend Application               │
+  │  (Quarkus 3.32.1 Engine, Loom Virtual Threads, REST/gRPC)│
+  └─────────────┬─────────────────────────────┬─────────────┘
+                │                             │
+  ┌─────────────▼─────────────┐ ┌─────────────▼─────────────┐
+  │   BenchmarkBackend SPI    │ │     ChaosProvider SPI     │
+  ├───────────────────────────┤ ├───────────────────────────┤
+  │ - Native (Virtual Threads)│ │ - LitmusChaos (CRDs)      │
+  │ - Trogdor (Distributed)   │ │ - Kubernetes (Direct API) │
+  └───────────────────────────┘ └───────────────────────────┘
+```
+
+### The Kates Backend Application
+The Kates backend engine (`/kates`) is a cloud-native Java microservice built on the **Quarkus 3.32.1** framework and optimized for running on **Java 25**.
+* **High-Concurrency Execution**: Utilizes Java 25's **Project Loom virtual threads** to spin up hundreds of concurrent producer/consumer workloads in-process with minimal CPU overhead, making native testing highly efficient.
+* **Unified API Interfaces**: Exposes a reactive **JAX-RS REST API** for standard configurations and context management, alongside a high-performance **gRPC streaming API** to drive the real-time TUI dashboard.
+* **Robust Persistence**: Persists historical test runs, scheduled test configurations, and SLA trends in a **PostgreSQL** database managed via **Hibernate ORM (Panache)** and version-controlled via **Flyway** schema migrations.
+
+### Pluggability via Service Provider Interfaces (SPIs)
+Kates leverages Java's Service Provider Interface (SPI) pattern to decouple the core orchestrator from specific performance or chaos injection engines:
+* **BenchmarkBackend SPI**: Abstracts the workload generator. Implementations include:
+  - `NativeKafkaBackend`: Runs in-process virtual-thread workloads directly using Java Kafka clients.
+  - `TrogdorBackend`: Integrates with Apache Kafka's official `Trogdor` agent/coordinator via REST client mapping.
+* **ChaosProvider SPI**: Abstracts the chaos engine. Implementations include:
+  - `LitmusChaosProvider`: Dispatches and watches complex experiments using Kubernetes Litmus custom resource definitions (CRDs).
+  - `KubernetesChaosProvider`: Interacts directly with the Kubernetes API to perform rapid container restarts and node manipulations.
+  - `NoOpChaosProvider`: Lightweight mock provider for fast offline unit tests.
+
+### Intelligent Disruption Pipeline
+When a resilience test is initiated, the Kates backend drives an automated lifecycle:
+1. **Safety Blast-Radius Check**: The `DisruptionSafetyGuard` ensures the requested chaos plan does not exceed the maximum allowed broker failure count (`maxAffectedBrokers`) and validates Kubernetes RBAC permissions.
+2. **Leader Resolution**: The `KafkaIntelligenceService` dynamically checks the Kafka AdminClient to pinpoint which broker currently leads the target partition.
+3. **Continuous Tracking**: Background threads start tracking topic ISR (In-Sync Replicas) and consumer group lag at sub-second intervals.
+4. **Before/After Metrics Capture**: Integrates with Prometheus to query metrics baseline before the disruption and computes the exact impact delta after chaos injection.
+5. **Auto-Rollback**: On experiment failure or timeout, the safety guard automatically reverses the fault (e.g. scaling back replica counts) to protect the cluster.
+
+---
+
+## Prerequisites
 
 - [Docker](https://www.docker.com/)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
@@ -52,7 +102,7 @@ The suite comes fully integrated with **OpenTelemetry (OTLP)**. Auto-instrumente
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 Bring up the entire production-grade stack with one command:
 ```bash
@@ -93,7 +143,7 @@ make destroy
 
 ---
 
-## 📦 Image Management
+## Image Management
 
 All images are defined in `images.env` — the single source of truth. Both `scripts/pull-images.sh` and `scripts/load-images-to-kind.sh` source this file, eliminating version drift.
 
@@ -121,7 +171,7 @@ docker exec -it panda-control-plane crictl images
 
 ---
 
-## 🛠️ Makefile Targets
+## Makefile Targets
 
 | Target | Description |
 |--------|-------------|
@@ -145,7 +195,7 @@ docker exec -it panda-control-plane crictl images
 
 ---
 
-## 📊 Monitoring & Observability
+## Monitoring & Observability
 
 Custom Grafana dashboards are auto-provisioned upon setup:
 - **Kafka Complete Monitoring** — all metrics, brokers, topics, zones, and JVM.
@@ -165,7 +215,7 @@ Access the Jaeger UI at http://localhost:30086 after deployment.
 
 ---
 
-## 📖 Documentation
+## Documentation
 
 | Resource | Content |
 |----------|---------|
@@ -174,7 +224,7 @@ Access the Jaeger UI at http://localhost:30086 after deployment.
 
 ---
 
-## 💻 Kates CLI
+## Kates CLI
 
 **Kates** is a full-featured terminal client for performance testing, chaos engineering, and cluster administration. It communicates with the Kates backend API.
 
@@ -215,7 +265,7 @@ kates ctx current
 
 ---
 
-## 🎛️ CLI Command Reference
+## CLI Command Reference
 
 ### 1. Setup & Lifecycle Management
 Commands to manage the Kates stack running inside your cluster:
@@ -352,7 +402,7 @@ kates watch <id>     # Real-time streaming of a running test
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 cli/
@@ -387,7 +437,7 @@ cli/
 
 ---
 
-## 🧪 Running Tests
+## Running Tests
 
 Verify everything builds and passes perfectly:
 ```bash
