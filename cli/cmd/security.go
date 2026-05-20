@@ -1262,7 +1262,25 @@ var securityNetpolCmd = &cobra.Command{
 			nameWidth = 30
 		}
 
-		namespaces := []string{"kafka", "kates", "strimzi-system"}
+		seen := make(map[string]bool)
+		defaults := []string{"kafka", "kates", "strimzi-system"}
+		for _, ns := range defaults {
+			seen[ns] = true
+		}
+
+		// Dynamically discover namespaces with Helm releases (owner=helm)
+		if dynamicNSList, err := runKubectl("get", "secrets", "-A", "-l", "owner=helm", "-o", "jsonpath={.items[*].metadata.namespace}"); err == nil {
+			for _, ns := range strings.Fields(dynamicNSList) {
+				seen[ns] = true
+			}
+		}
+
+		var namespaces []string
+		for ns := range seen {
+			namespaces = append(namespaces, ns)
+		}
+		sort.Strings(namespaces)
+
 		totalPolicies := 0
 
 		for _, ns := range namespaces {
@@ -1320,10 +1338,16 @@ var securityNetpolCmd = &cobra.Command{
 	},
 }
 
-func runKubectl(args ...string) (string, error) {
+var runKubectlFn = runKubectlDefault
+
+func runKubectlDefault(args ...string) (string, error) {
 	cmd := exec.Command("kubectl", args...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+func runKubectl(args ...string) (string, error) {
+	return runKubectlFn(args...)
 }
 
 func init() {

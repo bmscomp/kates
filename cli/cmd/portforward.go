@@ -49,9 +49,10 @@ var wellKnownPorts = []struct {
 }
 
 var (
-	portsKafkaNS string
-	portsAppNS   string
-	portsAll     bool
+	portsKafkaNS      string
+	portsAppNS        string
+	portsMonitoringNS string
+	portsAll          bool
 )
 
 var portsCmd = &cobra.Command{
@@ -76,6 +77,7 @@ Examples:
 func init() {
 	portsCmd.Flags().StringVar(&portsKafkaNS, "kafka-ns", "kafka", "Kafka namespace")
 	portsCmd.Flags().StringVar(&portsAppNS, "app-ns", "kates", "Application namespace")
+	portsCmd.Flags().StringVar(&portsMonitoringNS, "monitoring-ns", "monitoring", "Monitoring namespace")
 	portsCmd.Flags().BoolVar(&portsAll, "all", true, "Include monitoring and tracing ports")
 	rootCmd.AddCommand(portsCmd)
 }
@@ -202,28 +204,40 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 			continue
 		}
 
+		parts := strings.Split(wk.Match, "/")
+		defaultNS := parts[0]
+		svc := parts[1]
+
 		// Skip monitoring/tracing unless --all
 		if !portsAll {
-			ns := strings.Split(wk.Match, "/")[0]
-			if ns == "monitoring" || ns == "jaeger" {
+			if defaultNS == "monitoring" || defaultNS == "jaeger" {
 				continue
 			}
 		}
 
-		// Check if service exists
-		if discovered[wk.Match] {
-			// Resolve namespace overrides
-			ns := strings.Split(wk.Match, "/")[0]
-			svc := strings.Split(wk.Match, "/")[1]
-			if ns == "kafka" {
-				ns = portsKafkaNS
-			} else if ns == "kates" {
-				ns = portsAppNS
-			}
+		// Resolve actual namespace
+		var actualNS string
+		switch defaultNS {
+		case "kafka":
+			actualNS = portsKafkaNS
+		case "kates":
+			actualNS = portsAppNS
+		case "monitoring", "jaeger":
+			actualNS = portsMonitoringNS
+		default:
+			actualNS = defaultNS
+		}
+		if actualNS == "" {
+			actualNS = defaultNS
+		}
 
+		actualKey := actualNS + "/" + svc
+
+		// Check if service exists under actual namespace
+		if discovered[actualKey] {
 			specs = append(specs, portForwardSpec{
 				Label:     wk.Label,
-				Namespace: ns,
+				Namespace: actualNS,
 				Resource:  "service/" + svc,
 				Remote:    wk.Remote,
 				Local:     wk.Local,
@@ -308,6 +322,7 @@ func runSinglePortForward(ctx context.Context, spec portForwardSpec) {
 func RunPortForwards(ctx context.Context, kafkaNS, appNS, jaegerNS string) {
 	portsKafkaNS = kafkaNS
 	portsAppNS = appNS
+	portsMonitoringNS = jaegerNS
 	portsAll = true
 	runPorts(ctx)
 }
