@@ -64,7 +64,15 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 	addCheck("Kubernetes version ≥ 1.25", report.K8sMinor >= 25, report.K8sVersion)
 	addCheck("Helm version ≥ 3.12", report.HelmMajor >= 3, report.HelmVersion)
-	addCheck("Strimzi CRDs installed", report.Strimzi.CRDsPresent, "CRDs presence")
+	
+	// Treat absence of Strimzi CRDs as a warning rather than a fatal failure since they are deployed automatically by Kates.
+	if !report.Strimzi.CRDsPresent {
+		v.Warns++
+		addCheck("Strimzi CRDs installed", true, "not present (will be installed by Kates)")
+	} else {
+		addCheck("Strimzi CRDs installed", true, "present")
+	}
+
 	addCheck("≥ 3 availability zones", len(report.Zones) >= 3, fmt.Sprintf("%d zone(s)", len(report.Zones)))
 	
 	min1Node := true
@@ -106,7 +114,15 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		}
 	}
 	addCheck("RBAC permissions", hasRbac, "kafka namespace")
-	addCheck("Prometheus monitoring", report.Monitoring.PodMonitorCRD, "PodMonitor CRD")
+	
+	// Treat absence of Prometheus monitoring CRD as a warning rather than a fatal failure since they are deployed automatically by Kates.
+	if !report.Monitoring.PodMonitorCRD {
+		v.Warns++
+		addCheck("Prometheus monitoring", true, "PodMonitor CRD not present (will be installed by Kates)")
+	} else {
+		addCheck("Prometheus monitoring", true, "PodMonitor CRD present")
+	}
+
 	addCheck("DNS resolution", report.Network.CoreDNSRunning > 0, fmt.Sprintf("%d CoreDNS pod(s)", report.Network.CoreDNSRunning))
 
 	// Admission controller compatibility
