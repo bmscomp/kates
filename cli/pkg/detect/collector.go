@@ -491,25 +491,39 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 func (c *Collector) getStrimziStatus() StrimziInfo {
 	info := StrimziInfo{}
 	
-	// Check CRDs
-	expectedCRDs := []string{
+	// Check CRDs - split into required core CRDs and optional helper CRDs
+	requiredCRDs := []string{
 		"kafkas.kafka.strimzi.io",
-		"kafkanodepools.kafka.strimzi.io",
 		"kafkatopics.kafka.strimzi.io",
 		"kafkausers.kafka.strimzi.io",
 	}
+	optionalCRDs := []string{
+		"kafkanodepools.kafka.strimzi.io",
+	}
+
 	var missingCRDs []string
-	for _, crd := range expectedCRDs {
+	for _, crd := range requiredCRDs {
 		out, _ := c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
 		if out == "" || strings.Contains(out, "NotFound") || strings.Contains(out, "error") {
 			missingCRDs = append(missingCRDs, crd)
 		}
 	}
+
+	// We still check optional CRDs to be thorough, but their absence does not count as a failure
+	for _, crd := range optionalCRDs {
+		_, _ = c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
+	}
+
 	info.CRDsPresent = len(missingCRDs) == 0
 	info.Health.MissingCRDs = missingCRDs
 
-	// Find the deployment for strimzi operator
-	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	// Find the deployment for strimzi operator (with permission-friendly namespace fallback)
+	depOut, err := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	if err != nil || depOut == "" || strings.Contains(depOut, "Forbidden") || strings.Contains(depOut, "error") {
+		// Fallback: check in the kafka namespace
+		depOut, _ = c.exec.Exec("kubectl", "get", "deployment", "-n", "kafka", "-o", "json")
+	}
+
 	var depData struct {
 		Items []struct {
 			Metadata struct {
