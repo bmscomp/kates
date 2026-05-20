@@ -9,20 +9,22 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/pkg/theme"
+	"github.com/mattn/go-runewidth"
 )
 
 // ─── Color Palette ──────────────────────────────────────────
-// Dark, saturated colors visible on light terminal backgrounds.
+// All colors are backed by theme tokens — no hardcoded hex values here.
 
 var (
-	clrAccent = lipgloss.Color("#2563EB") // strong blue
-	clrGreen  = lipgloss.Color("#16A34A") // forest green
-	clrRed    = lipgloss.Color("#DC2626") // strong red
-	clrDim    = lipgloss.Color("#6B7280") // medium gray
-	clrCyan   = lipgloss.Color("#0891B2") // dark teal
-	clrPink   = lipgloss.Color("#1D4ED8") // royal blue (phase headers)
-	clrText   = lipgloss.Color("#1E293B") // dark slate
-	clrOrange = lipgloss.Color("#C2410C") // burnt orange
+	clrAccent = theme.Accent   // interactive blue
+	clrGreen  = theme.Success  // positive / ready
+	clrRed    = theme.Error    // error / danger
+	clrDim    = theme.Muted    // secondary text
+	clrCyan   = theme.Info     // teal / info
+	clrPink   = theme.Primary  // phase headers
+	clrText   = theme.Text     // primary body text
+	clrOrange = theme.Warning  // warnings
 )
 
 // ─── Dashboard ──────────────────────────────────────────────
@@ -139,18 +141,11 @@ func printRow(icon, name, namespace, status string) {
 	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
 }
 
-// visualWidth estimates the display width of a string in terminal cells.
-// ASCII chars = 1 cell, emoji/CJK = 2 cells.
+// visualWidth returns the true terminal display width of a string using
+// go-runewidth, which correctly handles emoji (2 cells), CJK characters,
+// and other wide Unicode code points.
 func visualWidth(s string) int {
-	w := 0
-	for _, r := range s {
-		if r > 0x1F00 { // emoji and symbols above this range are typically 2 cells
-			w += 2
-		} else {
-			w += 1
-		}
-	}
-	return w
+	return runewidth.StringWidth(s)
 }
 
 // ─── Phase Logging ──────────────────────────────────────────
@@ -192,14 +187,14 @@ func ThemeKates() *huh.Theme {
 	t := huh.ThemeBase()
 
 	var (
-		blue      = lipgloss.Color("#2563EB") // our accent
-		navy      = lipgloss.Color("#1D4ED8") // royal blue
-		slate     = lipgloss.Color("#1E293B") // dark text
-		gray      = lipgloss.Color("#6B7280") // descriptions
-		lightGray = lipgloss.Color("#D1D5DB") // borders
-		green     = lipgloss.Color("#16A34A") // selected items
-		red       = lipgloss.Color("#DC2626") // errors
-		white     = lipgloss.Color("#FFFFFF") // button text
+		blue      = theme.Accent     // focused borders, selectors
+		navy      = theme.Primary    // titles
+		slate     = theme.Text       // body text (light on dark, dark on light)
+		gray      = theme.Muted      // descriptions
+		lightGray = theme.Subtle     // borders / unselected prefix
+		green     = theme.Highlight  // selected items
+		red       = theme.Error      // error indicators
+		white     = theme.OnDark     // button text on filled backgrounds
 	)
 
 	// Focused field styles.

@@ -1,80 +1,12 @@
-# Kind cluster overlay — layers on top of values-dev.yaml
-# Usage: helm upgrade --install ... -f values-dev.yaml -f values-kind.yaml
+# Kind cluster overlay — layers on top of values-detected.yaml
+# Usage: helm upgrade --install ... -f .build/values-detected.yaml -f values-kind.yaml
+#
+# This file contains ONLY environment-specific feature flags.
+# Pool definitions, storage classes, and resource sizes are generated
+# by `kates detect` and written to .build/values-detected.yaml — no
+# hardcoding needed here.
 
-# Zone-specific broker pools mapped to Kind node labels
-brokerPools:
-  - name: brokers-alpha
-    zone: alpha
-    replicas: 1
-    storageSize: 50Gi
-    storageClass: local-storage-alpha
-  - name: brokers-sigma
-    zone: sigma
-    replicas: 1
-    storageSize: 50Gi
-    storageClass: local-storage-sigma
-  - name: brokers-gamma
-    zone: gamma
-    replicas: 1
-    storageSize: 50Gi
-    storageClass: local-storage-gamma
-
-# Per-zone controller pools — one per Kind node zone
-controllerPools:
-  - name: controllers-alpha
-    zone: alpha
-    replicas: 1
-    storageSize: 1Gi
-    storageClass: local-storage-alpha
-  - name: controllers-gamma
-    zone: gamma
-    replicas: 1
-    storageSize: 1Gi
-    storageClass: local-storage-gamma
-  - name: controllers-sigma
-    zone: sigma
-    replicas: 1
-    storageSize: 1Gi
-    storageClass: local-storage-sigma
-
-controllerDefaults:
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: 500m
-      memory: 1Gi
-  topologySpreadConstraints:
-    enabled: true
-    maxSkew: 1
-    topologyKey: kubernetes.io/hostname
-    whenUnsatisfiable: DoNotSchedule
-  podAntiAffinity:
-    enabled: false
-  tolerations:
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
-
-brokerDefaults:
-  resources:
-    requests:
-      cpu: 500m
-      memory: 1Gi
-    limits:
-      cpu: 1000m
-      memory: 2Gi
-  topologySpreadConstraints:
-    enabled: false
-  podAntiAffinity:
-    enabled: false
-  tolerations:
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
-
-# Simplify listeners for local access — drop external nodeport
+# Simplify Kafka listeners for local access — no external nodeport
 kafka:
   listeners:
     - name: plain
@@ -90,7 +22,7 @@ kafka:
       authentication:
         type: tls
 
-# Disable cloud/production features not needed locally
+# Disable production features not needed locally
 kafkaExporter:
   enabled: false
 
@@ -124,6 +56,37 @@ rebalance:
 podSecurityPolicy:
   enabled: false
 
-# Disable CRD upgrade hook for Kind because we have it in Strimzi operator
+# Disable CRD upgrade hook — Strimzi operator chart handles this
 crdUpgrade:
   enabled: false
+
+# ── Entity Operator — Kind tuning ────────────────────────────────────────────
+# On Kind all Kafka pods compete for the same node resources.
+# Smaller requests get the EO scheduled faster; 10s reconciliation interval
+# means KafkaTopic/KafkaUser resources are acted on almost immediately
+# instead of waiting up to 60 s (production default).
+entityOperator:
+  topicOperator:
+    reconciliationIntervalMs: 10000
+    jvmOptions:
+      -Xms: 64m
+      -Xmx: 128m
+    resources:
+      requests:
+        memory: 96Mi
+        cpu: 50m
+      limits:
+        memory: 192Mi
+        cpu: 200m
+  userOperator:
+    reconciliationIntervalMs: 10000
+    jvmOptions:
+      -Xms: 64m
+      -Xmx: 128m
+    resources:
+      requests:
+        memory: 96Mi
+        cpu: 50m
+      limits:
+        memory: 192Mi
+        cpu: 200m

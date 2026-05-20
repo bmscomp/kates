@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/client"
+	"github.com/klster/kates-cli/pkg/theme"
 )
 
 type labParam struct {
@@ -1418,19 +1419,22 @@ func stripAnsi(s string) string {
 }
 
 var (
+	// labHeaderStyle is the filled banner at the top of the Lab TUI.
 	labHeaderStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnColor).
+			Background(theme.Secondary).
 			Padding(0, 1)
 
+	// selectedValueStyle highlights the currently active parameter value.
 	selectedValueStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#000000")).
-				Background(lipgloss.Color("#06B6D4")).
+				Foreground(theme.OnColor).
+				Background(theme.Info).
 				Padding(0, 0)
 
+	// activeValueStyle marks the focused (but not selected) parameter value.
 	activeValueStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#06B6D4")).
+				Foreground(theme.Info).
 				Bold(true)
 )

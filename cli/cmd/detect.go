@@ -89,11 +89,13 @@ func runDetect(cmd *cobra.Command, args []string) error {
 
 	var report *detect.DetectReport
 	var collectErr error
+	done := make(chan struct{})
 
 	// Start collection in background
 	go func() {
 		report, collectErr = collector.Collect(ctx)
-		cancel() // signal spinner to stop
+		close(done)  // signal completion — happens-after assignment
+		cancel()     // signal spinner to stop
 	}()
 
 	// Show spinner while collecting (if not JSON or quiet mode)
@@ -108,12 +110,19 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		<-ctx.Done()
 	}
 
+	<-done // ensure assignments to report/collectErr are visible
+
 	if collectErr != nil {
 		output.Error(fmt.Sprintf("Cluster introspection failed: %v", collectErr))
 		if failOnError {
 			os.Exit(2)
 		}
 		return nil
+	}
+
+	if report == nil {
+		output.Error("Cluster introspection returned no data")
+		return fmt.Errorf("nil report from collector")
 	}
 
 	// Analyze raw data into final report

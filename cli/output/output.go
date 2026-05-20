@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
@@ -38,22 +39,24 @@ func ResetForTesting() *bytes.Buffer {
 	return buf
 }
 
+// Exported color aliases — backed by theme tokens so all packages share
+// a single adaptive palette. Use these (not raw lipgloss.Color) everywhere.
 var (
-	Purple  = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#7C3AED"}
-	Indigo  = lipgloss.AdaptiveColor{Light: "#4F46E5", Dark: "#6366F1"}
-	Cyan    = lipgloss.AdaptiveColor{Light: "#0891B2", Dark: "#06B6D4"}
-	Green   = lipgloss.AdaptiveColor{Light: "#059669", Dark: "#10B981"}
-	Red     = lipgloss.AdaptiveColor{Light: "#DC2626", Dark: "#EF4444"}
-	Amber   = lipgloss.AdaptiveColor{Light: "#D97706", Dark: "#F59E0B"}
-	Gray    = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#6B7280"}
-	Light   = lipgloss.AdaptiveColor{Light: "#1F2937", Dark: "#E5E7EB"}
-	Dim     = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#4B5563"}
-	Surface = lipgloss.AdaptiveColor{Light: "#F3F4F6", Dark: "#1F2937"}
+	Purple  = theme.Secondary                                          // violet/purple tones
+	Indigo  = theme.Primary                                            // deep blue headings
+	Cyan    = theme.Info                                               // teal accents
+	Green   = theme.Success                                            // positive states
+	Red     = theme.Error                                              // error / danger
+	Amber   = theme.Warning                                            // warnings
+	Gray    = theme.Muted                                              // secondary text
+	Light   = theme.Text                                               // primary text
+	Dim     = lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"} // truly visible dim
+	Surface = theme.Surface                                            // panel backgrounds
 
-	HeaderColor    = lipgloss.AdaptiveColor{Light: "#6D28D9", Dark: "#C4B5FD"}
-	KeyColor       = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
-	BorderColor    = lipgloss.AdaptiveColor{Light: "#D1D5DB", Dark: "#374151"}
-	SeparatorColor = lipgloss.AdaptiveColor{Light: "#D1D5DB", Dark: "#374151"}
+	HeaderColor    = theme.Secondary
+	KeyColor       = theme.Secondary
+	BorderColor    = theme.Subtle
+	SeparatorColor = theme.Subtle
 
 	HeaderStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -84,13 +87,13 @@ var (
 			Padding(0, 2)
 
 	ActiveBadge = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(theme.OnColor).
 			Background(Green).
 			Bold(true).
 			Padding(0, 1)
 
 	TagStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(theme.OnColor).
 			Background(Cyan).
 			Padding(0, 1)
 )

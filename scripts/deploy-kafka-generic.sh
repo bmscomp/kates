@@ -98,7 +98,7 @@ info "Step 3/6: Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
 
 # Extract cluster domain from the Kubernetes environment
-CLUSTER_DOMAIN=$(get_cluster_domain)
+CLUSTER_DOMAIN=$(get_cluster_domain "$AUTO_APPROVE")
 info "  Cluster Domain: ${CLUSTER_DOMAIN}"
 
 # ── Step 4: Deploy ────────────────────────────────────────────────────────────

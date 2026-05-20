@@ -42,6 +42,7 @@ var (
 	deployKafkaNS            string
 	deployAppNS              string
 	deployChaosNS            string
+	deployMonitoringNS       string
 	deployWithSchemaRegistry string
 	deployWithChaos          bool
 	deployWithMonitoring     bool
@@ -50,6 +51,7 @@ var (
 	deployWithSecretManager  bool
 	deployInteractive        bool
 	deployVerbose            bool
+	deployPortForward        bool
 )
 
 func init() {
@@ -58,6 +60,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
+	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
 	
 	// Component flags
 	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "none", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
@@ -67,7 +70,8 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithKyverno, "with-kyverno", false, "Deploy Kyverno for cluster policy enforcement")
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
-	deployCmd.Flags().BoolVarP(&deployVerbose, "verbose", "v", false, "Show full Helm/kubectl output during deployment")
+	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
+	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -78,18 +82,19 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
 		var components []string
-		
+
 		form := huh.NewForm(
+			// ── Group 1: What to deploy ──────────────────────────────────────────
 			huh.NewGroup(
 				huh.NewSelect[string]().
 					Title("Choose Namespace Topology").
 					Description("Isolated creates logical boundaries. Single is great for simple local dev.").
 					Options(
-						huh.NewOption("Isolated Namespaces (kafka, kates, litmus)", "isolated"),
+						huh.NewOption("Isolated Namespaces (kafka, kates, monitoring, litmus)", "isolated"),
 						huh.NewOption("Single Namespace (kates-stack)", "single"),
 					).
 					Value(&deployTopology),
-					
+
 				huh.NewSelect[string]().
 					Title("Schema Registry").
 					Options(
@@ -97,30 +102,50 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 						huh.NewOption("Apicurio", "apicurio"),
 					).
 					Value(&deployWithSchemaRegistry),
-					
+
 				huh.NewMultiSelect[string]().
-				Title("Select Additional Components").
-				Description("Use space to toggle, enter to confirm").
-				Options(
-					huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
-					huh.NewOption("📊 Jaeger (Tracing)", "monitoring").Selected(deployWithMonitoring),
-					huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
-					huh.NewOption("🛡️  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
-				).
-				Value(&components),
+					Title("Select Additional Components").
+					Description("Use space to toggle, enter to confirm").
+					Options(
+						huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
+						huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
+						huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
+						huh.NewOption("🛡️  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
+					).
+					Value(&components),
 			),
+
+			// ── Group 2: Namespace configuration (isolated topology only) ────────
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Kafka Namespace").
+					Description("Namespace for Strimzi operator and Kafka cluster").
+					Value(&deployKafkaNS),
+				huh.NewInput().
+					Title("Kates App Namespace").
+					Description("Namespace for the Kates backend service").
+					Value(&deployAppNS),
+				huh.NewInput().
+					Title("Monitoring Namespace").
+					Description("Namespace for Jaeger and monitoring components").
+					Value(&deployMonitoringNS),
+				huh.NewInput().
+					Title("Chaos Namespace").
+					Description("Namespace for Litmus Chaos engine").
+					Value(&deployChaosNS),
+			).WithHideFunc(func() bool { return deployTopology == "single" }),
 		).WithTheme(ThemeKates())
-		
+
 		err := form.Run()
 		if err != nil {
 			return err
 		}
-		
+
 		deployWithChaos = false
 		deployWithMonitoring = false
 		deployWithCertManager = false
 		deployWithKyverno = false
-		
+
 		for _, c := range components {
 			switch c {
 			case "chaos": deployWithChaos = true
@@ -138,7 +163,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	} else {
 		PrintPhaseItem(fmt.Sprintf("Kafka        → %s", deployKafkaNS))
 		PrintPhaseItem(fmt.Sprintf("Kates App    → %s", deployAppNS))
-		PrintPhaseItem(fmt.Sprintf("Jaeger       → jaeger"))
+		if deployWithMonitoring {
+			PrintPhaseItem(fmt.Sprintf("Monitoring   → %s", deployMonitoringNS))
+		}
 		PrintPhaseItem(fmt.Sprintf("Chaos        → %s", deployChaosNS))
 	}
 
@@ -196,6 +223,18 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}
 	}
 	
+	// ── Kind storage bootstrap ────────────────────────────────────────────────
+	// Create zone-specific StorageClasses (local-storage-alpha, etc.) BEFORE
+	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
+	// them and writes the correct storageClass names into values-detected.yaml,
+	// so no hardcoded pool overrides are needed in values-kind.yaml.
+	if quickDetectKind() {
+		PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
+		if err := setupKindStorageClasses(context.Background()); err != nil {
+			output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
+		}
+	}
+
 	report, err := collector.Collect(context.Background())
 	if err != nil {
 		output.Error(fmt.Sprintf("Introspection failed: %v", err))
@@ -208,14 +247,28 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	PrintPhaseItem("Generating values-detected.yaml...")
 	valuesFile := ".build/values-detected.yaml"
 	os.MkdirAll(".build", 0755)
-	
+
 	f, err := os.Create(valuesFile)
 	if err != nil {
 		return fmt.Errorf("failed to create values file: %v", err)
 	}
 	defer f.Close()
-	
+
 	detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
+
+	// Detect cluster type once — used by every Helm call below to pick the
+	// right values overlay (values-kind.yaml vs values-generic.yaml).
+	isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
+
+	// chartOverlay returns the path to the appropriate environment values file
+	// for a given chart directory. Falls back to generic when the file doesn't
+	// exist for that chart (e.g. kafka-cluster has no values-generic.yaml).
+	chartOverlay := func(chartDir string) string {
+		if isKind {
+			return chartDir + "/values-kind.yaml"
+		}
+		return chartDir + "/values-generic.yaml"
+	}
 	
 	// 4. Execution Plan (Helm)
 	PrintPhaseHeader(4, "Executing Deployment Pipeline")
@@ -224,7 +277,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployTopology == "single" {
 		kafkaNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
-		kafkaNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployAppNS, deployChaosNS, "jaeger"
+		kafkaNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployAppNS, deployChaosNS, deployMonitoringNS
 	}
 	
 	// Create context
@@ -265,21 +318,108 @@ metadata:
 			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
 			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
 			runHelmFn(gCtx, "repo", "update", "jetstack")
-			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3", "-n", "cert-manager", "--create-namespace", "--set", "installCRDs=true", "--set", "startupapicheck.enabled=false", "--timeout", "10m", "--wait")
-			if err != nil { return err }
-			
-			fmt.Println("    - Waiting for Cert-Manager CRDs to be established...")
-			if err := runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established", "crd", "clusterissuers.cert-manager.io", "--timeout=60s"); err != nil {
+			// global.clusterDomain ensures cert-manager generates webhook TLS certificates
+			// and service references using the actual cluster DNS domain (not always cluster.local).
+			// report.Network.ClusterDomain is detected from the live cluster by kates detect.
+			clusterDomain := report.Network.ClusterDomain
+			if clusterDomain == "" {
+				clusterDomain = "cluster.local"
+			}
+			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager",
+				"--version", "v1.13.3",
+				"-n", "cert-manager", "--create-namespace",
+				"--set", "installCRDs=true",
+				"--set", "startupapicheck.enabled=false",
+				"--set", "global.clusterDomain="+clusterDomain,
+				"--timeout", "10m", "--wait")
+			if err != nil {
 				return err
 			}
-			
+
+			fmt.Println("    - Waiting for Cert-Manager CRDs to be established...")
+			if err := runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
+				"crd", "clusterissuers.cert-manager.io", "--timeout=60s"); err != nil {
+				return err
+			}
+
+			// On re-deploys the cainjector may hold a stale CA from the previous
+			// installation. Restart it to force fresh CA bundle generation and
+			// re-injection into the MutatingWebhookConfiguration.
+			fmt.Println("    - Restarting Cert-Manager CA injector for fresh CA bundle...")
+			runExecFn(gCtx, "kubectl", "rollout", "restart",
+				"deployment/cert-manager-cainjector", "-n", "cert-manager")
+			runExecFn(gCtx, "kubectl", "rollout", "status",
+				"deployment/cert-manager-cainjector", "-n", "cert-manager", "--timeout=90s")
+
+			// The definitive readiness signal: poll the MutatingWebhookConfiguration
+			// until caBundle is non-empty. Only then can the API server verify the
+			// webhook TLS certificate without x509: certificate signed by unknown authority.
+			fmt.Println("    - Polling for Cert-Manager CA bundle injection...")
+			const caTimeout = 120 * time.Second
+			const caPoll = 3 * time.Second
+			caDeadline := time.Now().Add(caTimeout)
+			for {
+				out, err := exec.CommandContext(gCtx,
+					"kubectl", "get",
+					"mutatingwebhookconfiguration", "cert-manager-webhook",
+					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
+				).Output()
+				if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+					fmt.Println("    - CA bundle injected. Applying ClusterIssuer...")
+					break
+				}
+				if time.Now().After(caDeadline) {
+					fmt.Println("    ⚠ CA bundle injection timed out — proceeding with webhook bypass fallback")
+					break
+				}
+				select {
+				case <-gCtx.Done():
+					return gCtx.Err()
+				case <-time.After(caPoll):
+				}
+			}
+
 			clusterIssuer := `apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: selfsigned-issuer
 spec:
   selfSigned: {}`
-			return runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
+
+			// Try applying normally first (3 quick attempts).
+			var lastErr error
+			for attempt := 1; attempt <= 3; attempt++ {
+				if lastErr = runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer); lastErr == nil {
+					return nil
+				}
+				if attempt < 3 {
+					time.Sleep(3 * time.Second)
+				}
+			}
+
+			// Hard fallback: temporarily set failurePolicy: Ignore so the API server
+			// allows the resource creation call through even if webhook TLS is still
+			// not verifiable. cert-manager will reconcile the webhook config shortly.
+			fmt.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
+			runExecFn(gCtx, "kubectl", "patch",
+				"mutatingwebhookconfiguration", "cert-manager-webhook",
+				"--type=json", "-p",
+				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			time.Sleep(2 * time.Second) // let the API server pick up the patch
+
+			applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
+
+			// Always restore failurePolicy: Fail regardless of outcome.
+			runExecFn(gCtx, "kubectl", "patch",
+				"mutatingwebhookconfiguration", "cert-manager-webhook",
+				"--type=json", "-p",
+				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+
+			if applyErr != nil {
+				return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
+			}
+			fmt.Println("    - ClusterIssuer created. Webhook policy restored.")
+			return nil
 		})
 	}
 	
@@ -293,7 +433,34 @@ spec:
 			fmt.Println("\n🚀 Deploying Kyverno (Namespace: kyverno)...")
 			runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
 			runHelmFn(gCtx, "repo", "update", "kyverno")
-			return runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno", "-n", "kyverno", "--create-namespace", "--set", "replicaCount=1", "--timeout", "5m", "--wait")
+
+			// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
+			// Pinned to 3.6.4 — the last stable patch of the 3.6 minor series.
+			// Chart versions: https://kyverno.github.io/kyverno/
+			// global.clusterDomain ensures Kyverno webhook certificates use the
+			// correct cluster DNS domain — same value detected for all other components.
+			kyvernoDomain := report.Network.ClusterDomain
+			if kyvernoDomain == "" {
+				kyvernoDomain = "cluster.local"
+			}
+			err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
+				"--version", "3.6.4",
+				"-n", "kyverno", "--create-namespace",
+				"--set", "admissionController.replicas=1",
+				"--set", "backgroundController.replicas=1",
+				"--set", "cleanupController.replicas=1",
+				"--set", "reportsController.replicas=1",
+				"--set", "global.clusterDomain="+kyvernoDomain,
+				"--timeout", "5m", "--wait")
+			if err != nil {
+				return err
+			}
+
+			// Wait for Kyverno CRDs before anything downstream tries to use them.
+			fmt.Println("    - Waiting for Kyverno CRDs to be established...")
+			return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
+				"crd", "clusterpolicies.kyverno.io",
+				"--timeout=60s")
 		})
 	}
 
@@ -314,51 +481,92 @@ spec:
 	// ---------------------------------------------------------
 	g2, g2Ctx := errgroup.WithContext(ctx)
 
-	// Deploy Monitoring (Jaeger)
+	// Deploy Monitoring (Prometheus + Grafana via charts/monitoring)
 	if deployWithMonitoring {
 		g2.Go(func() error {
-			if isHelmReleaseDeployedFn(g2Ctx, "jaeger", jaegerNS) {
-				fmt.Println("⏭️  Jaeger already deployed. Skipping.")
+			if isHelmReleaseDeployedFn(g2Ctx, "monitoring", jaegerNS) {
+				fmt.Println("⏭️  Monitoring stack already deployed. Skipping.")
 				return nil
 			}
-			fmt.Printf("\n🚀 Deploying Jaeger (Namespace: %s)...\n", jaegerNS)
-			runHelmFn(g2Ctx, "repo", "add", "jaegertracing", "https://jaegertracing.github.io/helm-charts")
-			runHelmFn(g2Ctx, "repo", "update", "jaegertracing")
-			err := runHelmFn(g2Ctx, "upgrade", "--install", "jaeger", "jaegertracing/jaeger", "--version", "3.0.1", "-n", jaegerNS, "--create-namespace", "-f", "config/monitoring/jaeger-values.yaml", "--timeout", "5m")
-			if err != nil { return err }
-			
-			// Patch health probes natively without exiting on error immediately
-			runExecFn(g2Ctx, "kubectl", "patch", "deployment", "jaeger", "-n", jaegerNS, "--type=json", "-p", `[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 10, "periodSeconds": 15, "failureThreshold": 5}},{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe", "value": {"httpGet": {"path": "/", "port": 16686}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]`)
-			return nil
+			fmt.Printf("\n🚀 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
+
+			// Update chart dependencies (kube-prometheus-stack subchart).
+			runHelmFn(g2Ctx, "dependency", "update", "charts/monitoring")
+
+			return runHelmFn(g2Ctx, "upgrade", "--install", "monitoring",
+				"charts/monitoring",
+				"-n", jaegerNS, "--create-namespace",
+				"-f", chartOverlay("charts/monitoring"),
+				"--set", "kube-prometheus-stack.global.clusterDomain="+report.Network.ClusterDomain,
+				"--timeout", "10m", "--wait")
 		})
 	}
+
 	
 	// Deploy Kafka
 	g2.Go(func() error {
 		if !isHelmReleaseDeployedFn(g2Ctx, "krafter", kafkaNS) {
 			fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
+
 			runHelmFn(g2Ctx, "dependency", "update", "charts/kafka-cluster")
-			err := runHelmFn(g2Ctx, "upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace", "-f", valuesFile, "--timeout", "10m", "--wait")
-			if err != nil { return err }
+			// No --wait: Helm only needs to submit the manifests; the Strimzi
+			// operator drives reconciliation asynchronously. waitKafkaReady()
+			// below is the real readiness gate.
+			clusterDomain := report.Network.ClusterDomain
+			if clusterDomain == "" {
+				clusterDomain = "cluster.local"
+			}
+			kafkaArgs := []string{
+				"upgrade", "--install", "krafter", "charts/kafka-cluster",
+				"-n", kafkaNS, "--create-namespace",
+				"-f", valuesFile,
+				"--set", "global.clusterDomain=" + clusterDomain,
+				"--timeout", "10m",
+			}
+			if isKind {
+				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
+			}
+			if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
+				return err
+			}
 		} else {
 			fmt.Println("⏭️  Kafka chart already deployed. Verifying readiness...")
 		}
-		
-		fmt.Println("    - Waiting for Kafka cluster to be ready...")
-		if err := runExecFn(g2Ctx, "kubectl", "wait", "kafka/krafter", "--for=condition=Ready", "--timeout=600s", "-n", kafkaNS); err != nil {
+
+
+		// Live progress poller — shows broker/controller/EO counts every 6s.
+		// waitKafkaReady already confirms Ready=True on the Kafka CR, which
+		// Strimzi only sets after the Entity Operator is also healthy.
+		// No separate EO wait needed.
+		if err := waitKafkaReady(g2Ctx, kafkaNS, 12*time.Minute); err != nil {
 			return fmt.Errorf("kafka readiness failed: %w", err)
 		}
-		
-		fmt.Println("    - Waiting for Entity Operator...")
-		if err := runExecFn(g2Ctx, "kubectl", "wait", "deployment", "-l", "app.kubernetes.io/name=entity-operator", "--for=condition=Available", "--timeout=180s", "-n", kafkaNS); err != nil {
-			return fmt.Errorf("entity operator readiness failed: %w", err)
-		}
-		
+
 		fmt.Println("    - Applying Kafka users and topics...")
 		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-users.yaml", kafkaNS)
 		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-topics.yaml", kafkaNS)
+
+		// Wait here (still inside Group B) for the Entity Operator to process the
+		// KafkaUser and write the SCRAM Secret. The EO finishes its health-check
+		// (making the Kafka CR Ready) before it establishes its admin Kafka
+		// connection, so we give it a generous 5-minute window.
+		// By blocking Group B here, Group C is guaranteed to find the Secret
+		// already populated — no waiting needed in the Kates deploy step.
+		fmt.Println("    - Waiting for all KafkaUsers to be provisioned...")
+		if err := runExecFn(g2Ctx, "kubectl", "wait",
+			"kafkauser", "--all",
+			"--for=condition=Ready",
+			"--timeout=3m",
+			"-n", kafkaNS,
+		); err != nil {
+			// Non-fatal: Group C will attempt a direct secret read and warn if missing.
+			fmt.Printf("    ⚠️  KafkaUsers not all ready after 3m: %v\n", err)
+		} else {
+			fmt.Println("    ✅ All KafkaUser credentials ready")
+		}
 		return nil
 	})
+
 
 	if err := g2.Wait(); err != nil {
 		output.Error(fmt.Sprintf("Failed during Group B (Core Infra) deployments: %v", err))
@@ -389,27 +597,20 @@ spec:
 		cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
 		
 		if kafkaNS != appNS {
-			// Ensure app namespace exists before copying secrets into it
+			// Ensure app namespace exists before copying secrets into it.
 			nsYaml := fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
   name: %s
 spec: {}`, appNS)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
-			
-			fmt.Println("    - Waiting for Strimzi to generate Kafka credentials...")
-			var pwBytes []byte
-			for i := 0; i < 30; i++ {
-				pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend", "-n", kafkaNS, "-o", "jsonpath={.data.password}")
-				out, err := pwCmd.Output()
-				if err == nil && len(out) > 0 {
-					pwBytes = out
-					break
-				}
-				time.Sleep(2 * time.Second)
-			}
-			
-			if len(pwBytes) > 0 {
+
+			// The KafkaUser was already waited on in Group B — just read the Secret.
+			pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend",
+				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
+			pwBytes, pwErr := pwCmd.Output()
+
+			if pwErr == nil && len(pwBytes) > 0 {
 				fmt.Println("    - Copying Kafka SASL credentials to app namespace...")
 				secretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -421,12 +622,17 @@ data:
   password: %s`, appNS, string(pwBytes))
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
 			} else {
-				fmt.Println("    ⚠️  Warning: Timed out waiting for KafkaUser secret to be generated")
+				fmt.Printf("    ⚠️  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 			}
 		}
 		
 		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates", "-n", appNS, "--create-namespace", "-f", valuesFile, "--set", "kafka.bootstrapServers="+bootstrap, "--timeout", "8m", "--wait"); err != nil {
+		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
+			"-n", appNS, "--create-namespace",
+			"-f", valuesFile,
+			"-f", chartOverlay("charts/kates"),
+			"--set", "kafka.bootstrapServers="+bootstrap,
+			"--timeout", "8m", "--wait"); err != nil {
 			return err
 		}
 	} else {
@@ -440,7 +646,12 @@ data:
 			cleanupStaleClusterResource(ctx, "clusterrole", "litmus", chaosNS)
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
 			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
-			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos", "-n", chaosNS, "--create-namespace", "-f", valuesFile, "--set", "rbac.kafkaNamespace="+kafkaNS, "--timeout", "5m", "--wait"); err != nil {
+			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos",
+				"-n", chaosNS, "--create-namespace",
+				"-f", valuesFile,
+				"-f", chartOverlay("charts/kates-chaos"),
+				"--set", "rbac.kafkaNamespace="+kafkaNS,
+				"--timeout", "5m", "--wait"); err != nil {
 				return err
 			}
 		} else {
@@ -462,7 +673,7 @@ data:
 	}
 	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
 	if deployWithMonitoring {
-		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Jaeger", Release: "jaeger", Namespace: jaegerNS, Group: "B"})
+		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring (Prometheus + Grafana)", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
 	}
 	if deployWithSchemaRegistry == "apicurio" {
 		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
@@ -473,6 +684,11 @@ data:
 	}
 
 	RenderDeployDashboard(ctx, entries, time.Since(deployStartTime))
+
+	if deployPortForward {
+		RunPortForwards(ctx, kafkaNS, appNS, jaegerNS)
+	}
+
 	return nil
 }
 
@@ -500,12 +716,25 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-	} else {
-		// Capture output silently; show stderr only on error
-		var errBuf bytes.Buffer
-		cmd.Stderr = &errBuf
+		return cmd.Run()
 	}
-	return cmd.Run()
+	
+	// Non-verbose: capture output, show stderr only on error
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		// Show the error details so failures are never silent
+		errMsg := strings.TrimSpace(errBuf.String())
+		if errMsg == "" {
+			errMsg = strings.TrimSpace(outBuf.String())
+		}
+		if errMsg != "" {
+			fmt.Printf("    \033[31m%s\033[0m\n", errMsg)
+		}
+		return err
+	}
+	return nil
 }
 
 func runExecStdinDefault(ctx context.Context, name string, args []string, stdinData string) error {
@@ -528,8 +757,23 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		return cmd.Run()
 	}
-	return cmd.Run()
+	
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	if runErr := cmd.Run(); runErr != nil {
+		errMsg := strings.TrimSpace(errBuf.String())
+		if errMsg == "" {
+			errMsg = strings.TrimSpace(outBuf.String())
+		}
+		if errMsg != "" {
+			fmt.Printf("    \033[31m%s\033[0m\n", errMsg)
+		}
+		return runErr
+	}
+	return nil
 }
 
 func runHelmDefault(ctx context.Context, args ...string) error {
