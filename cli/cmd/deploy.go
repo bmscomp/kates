@@ -546,23 +546,100 @@ spec:
 		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-users.yaml", kafkaNS)
 		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-topics.yaml", kafkaNS)
 
-		// Wait here (still inside Group B) for the Entity Operator to process the
-		// KafkaUser and write the SCRAM Secret. The EO finishes its health-check
-		// (making the Kafka CR Ready) before it establishes its admin Kafka
-		// connection, so we give it a generous 5-minute window.
-		// By blocking Group B here, Group C is guaranteed to find the Secret
-		// already populated — no waiting needed in the Kates deploy step.
+		// ── Wait for Entity Operator first ────────────────────────────────
+		// The EO only starts after the Kafka CR becomes Ready. It then needs
+		// time to establish its admin Kafka connection before it can process
+		// KafkaUser resources.
+		fmt.Println("    - Waiting for Entity Operator to start...")
+		eoDeadline := time.Now().Add(3 * time.Minute)
+		for time.Now().Before(eoDeadline) {
+			eoOut, _ := exec.CommandContext(g2Ctx,
+				"kubectl", "get", "pods", "-n", kafkaNS,
+				"-l", "app.kubernetes.io/name=entity-operator",
+				"--no-headers",
+				"-o", "custom-columns=PHASE:.status.phase",
+			).Output()
+			if strings.Contains(string(eoOut), "Running") {
+				fmt.Printf("    %s Entity Operator running\n", blue("✔"))
+				break
+			}
+			select {
+			case <-g2Ctx.Done():
+				return g2Ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+		}
+
+		// ── Poll KafkaUsers with progress ─────────────────────────────────
 		fmt.Println("    - Waiting for all KafkaUsers to be provisioned...")
-		if err := runExecFn(g2Ctx, "kubectl", "wait",
-			"kafkauser", "--all",
-			"--for=condition=Ready",
-			"--timeout=3m",
-			"-n", kafkaNS,
-		); err != nil {
-			// Non-fatal: Group C will attempt a direct secret read and warn if missing.
-			fmt.Printf("    ⚠️  KafkaUsers not all ready after 3m: %v\n", err)
-		} else {
-			fmt.Println("    ✅ All KafkaUser credentials ready")
+		userDeadline := time.Now().Add(5 * time.Minute)
+		for time.Now().Before(userDeadline) {
+			out, _ := exec.CommandContext(g2Ctx,
+				"kubectl", "get", "kafkauser",
+				"-n", kafkaNS,
+				"--no-headers",
+				"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status",
+			).Output()
+
+			total, ready := 0, 0
+			var pending []string
+			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				if line == "" {
+					continue
+				}
+				fields := strings.Fields(line)
+				if len(fields) < 1 {
+					continue
+				}
+				total++
+				if len(fields) >= 2 && fields[1] == "True" {
+					ready++
+				} else {
+					pending = append(pending, fields[0])
+				}
+			}
+
+			if total > 0 && ready == total {
+				fmt.Printf("    %s All %d KafkaUser credentials ready\n", blue("✔"), ready)
+				break
+			}
+
+			remaining := time.Until(userDeadline).Round(time.Second)
+			if len(pending) > 0 {
+				fmt.Printf("    %s  KafkaUsers %s%d/%d%s ready  %s  %s%s%s\n",
+					cDim+"│"+cReset,
+					cBlue, ready, total, cReset,
+					dim(remaining.String()+" left"),
+					cRed, strings.Join(pending, ", "), cReset)
+			}
+
+			if time.Now().After(userDeadline) {
+				break
+			}
+
+			select {
+			case <-g2Ctx.Done():
+				return g2Ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+		}
+
+		// Final check — if we exhausted the deadline
+		checkOut, _ := exec.CommandContext(g2Ctx,
+			"kubectl", "get", "kafkauser", "-n", kafkaNS,
+			"--no-headers",
+			"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status",
+		).Output()
+		allReady := true
+		for _, line := range strings.Split(strings.TrimSpace(string(checkOut)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 || fields[1] != "True" {
+				allReady = false
+				break
+			}
+		}
+		if !allReady {
+			fmt.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", amber("⚠"))
 		}
 		return nil
 	})
