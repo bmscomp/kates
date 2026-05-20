@@ -265,7 +265,7 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `recordSizeBytes` | 10240–512000 | Large message sizes |
+| `recordSizeBytes` | 10241.0.000 | Large message sizes |
 | `records` | Variable | Enough to stress storage |
 | `acks` | `all` | Full replication to measure real cost |
 

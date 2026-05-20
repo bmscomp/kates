@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 ENV="${ENV:-kind}"
 CHART_DIR="${ROOT_DIR}/charts/monitoring"
 RELEASE_NAME="monitoring"
-NAMESPACE="monitoring"
+NAMESPACE="kafka"
 
 info "Deploying monitoring stack (env=${ENV})..."
 

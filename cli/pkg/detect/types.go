@@ -27,6 +27,8 @@ type SCInfo struct {
 	ReclaimPolicy  string
 	IsDefault      bool
 	AllowExpansion bool
+	ProbedIOPS     int
+	ProbeLatencyMs float64
 }
 
 type StorageAudit struct {
@@ -285,6 +287,7 @@ type DetectReport struct {
 // ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
 
 type GeneratedValues struct {
+	Global         GenGlobal             `yaml:"global"`
 	ClusterName    string                `yaml:"clusterName"`
 
 	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
@@ -312,12 +315,17 @@ type GeneratedValues struct {
 
 
 
+type GenGlobal struct {
+	ClusterDomain  string `yaml:"clusterDomain"`
+	StorageClass   string `yaml:"storageClass,omitempty"`
+}
+
 type GenStrimziOp struct {
 	Enabled bool `yaml:"enabled"`
 }
 
 type GenStrimziSubchart struct {
-	KubernetesServiceDnsDomain string `yaml:"kubernetesServiceDnsDomain"`
+	KubernetesServiceDnsDomain string `yaml:"kubernetesServiceDnsDomain,omitempty"`
 }
 
 type GenCRDUpgrade struct {

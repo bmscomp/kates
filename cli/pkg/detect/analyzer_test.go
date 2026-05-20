@@ -38,7 +38,10 @@ func buildReport(zones int, strimziCRDs bool, strimziRunning bool, scCount int, 
 	}
 
 	for i := 0; i < scCount; i++ {
-		r.Storage = append(r.Storage, SCInfo{Name: "sc-" + string(rune('a'+i))})
+		r.Storage = append(r.Storage, SCInfo{
+			Name:       "sc-" + string(rune('a'+i)),
+			ProbedIOPS: 2000,
+		})
 	}
 
 	return r

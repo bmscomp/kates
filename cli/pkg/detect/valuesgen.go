@@ -269,6 +269,10 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 	cb := g.Cap
 
 	return &GeneratedValues{
+		Global: GenGlobal{
+			ClusterDomain: g.Report.Network.ClusterDomain,
+			StorageClass:  g.selectDefaultSC(),
+		},
 		ClusterName: g.ClusterName,
 
 		StrimziOp:   g.buildStrimziOp(),
@@ -388,17 +392,9 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 						},
 					},
 				},
-				{
-					Name: "kafka-ui",
-					Authentication: GenUserAuth{
-						Type: "scram-sha-512",
-					},
-				},
 			},
 		},
-		StrimziSubchart: GenStrimziSubchart{
-			KubernetesServiceDnsDomain: g.Report.Network.ClusterDomain,
-		},
+		StrimziSubchart: GenStrimziSubchart{},
 	}
 }
 

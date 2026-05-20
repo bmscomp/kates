@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
+	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -22,25 +23,26 @@ type advisorRule struct {
 var (
 	advisorApply bool
 
+	// advTitleStyle renders the "Configuration Advisor" banner.
 	advTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnColor).
+			Background(theme.Secondary).
 			Padding(0, 1)
 
 	advHighStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#EF4444"))
+			Foreground(theme.Error)
 
 	advMedStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#F59E0B"))
+			Foreground(theme.Warning)
 
 	advOkStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22C55E"))
+			Foreground(theme.Success)
 
 	advDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 )
 
 var advisorCmd = &cobra.Command{

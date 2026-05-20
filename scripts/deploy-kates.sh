@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}/.."
@@ -8,11 +8,19 @@ source "${SCRIPT_DIR}/common.sh"
 ENV="${ENV:-kind}"
 CHART_DIR="${ROOT_DIR}/charts/kates"
 RELEASE_NAME="kates"
-NAMESPACE="kates"
+NAMESPACE="${NAMESPACE:-kafka}"
+CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
 
 info "Deploying Kates (env=${ENV})..."
 
 ensure_namespace "${NAMESPACE}"
+
+# Auto-detect Kafka cluster name if not explicitly provided (and fallback to krafter)
+DETECTED_CLUSTER=$(kubectl get kafka -n "${NAMESPACE}" -o custom-columns=NAME:.metadata.name --no-headers 2>/dev/null | head -n1 || true)
+if [ -n "${DETECTED_CLUSTER}" ] && [ "${DETECTED_CLUSTER}" != "${CLUSTER_NAME}" ]; then
+    CLUSTER_NAME="${DETECTED_CLUSTER}"
+    info "Auto-detected Kafka cluster: ${CLUSTER_NAME}"
+fi
 
 # Build Helm dependencies
 info "Building Helm chart dependencies..."
@@ -21,51 +29,94 @@ helm dependency build "${CHART_DIR}" 2>/dev/null || true
 # Ensure KafkaUser exists before attempting to copy secret
 "${SCRIPT_DIR}/ensure-kafka-user.sh" || warn "Could not ensure KafkaUser — copying secret may fail"
 
-# Copy Kafka SASL credentials from kafka namespace
-if kubectl get secret kates-backend -n kafka &>/dev/null; then
-    info "Copying Kafka SASL credentials to ${NAMESPACE}..."
-    kubectl get secret kates-backend -n kafka -o json \
-        | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-        | kubectl apply -n "${NAMESPACE}" -f -
-else
-    warn "Secret kates-backend not found in kafka namespace — Kafka auth may fail"
+# Copy Kafka SASL credentials if namespaces differ
+if [ "${NAMESPACE}" != "kafka" ]; then
+    if kubectl get secret kates-backend -n kafka &>/dev/null; then
+        info "Copying Kafka SASL credentials to ${NAMESPACE}..."
+        kubectl get secret kates-backend -n kafka -o json \
+            | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
+            | kubectl apply -n "${NAMESPACE}" -f -
+    else
+        warn "Secret kates-backend not found in kafka namespace — Kafka auth may fail"
+    fi
 fi
 
 # Kind-specific: ensure released image is available in the cluster
 if [ "${ENV}" = "kind" ]; then
-    KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"
-    info "Ensuring ${KATES_IMAGE} is available in Kind..."
-    if ! docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
-        info "Pulling ${KATES_IMAGE} from registry..."
-        docker pull "${KATES_IMAGE}"
+    if ! command -v kind &>/dev/null; then
+        warn "ENV=kind but 'kind' CLI not found — skipping local image load"
+    elif ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME:-panda}$"; then
+        warn "Kind cluster '${KIND_CLUSTER_NAME:-panda}' not found — skipping local image load"
+    else
+        KATES_IMAGE="${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"
+        info "Ensuring ${KATES_IMAGE} is available in Kind..."
+        if ! docker image inspect "${KATES_IMAGE}" >/dev/null 2>&1; then
+            info "Pulling ${KATES_IMAGE} from registry..."
+            docker pull "${KATES_IMAGE}"
+        fi
+        kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
     fi
-    kind load docker-image "${KATES_IMAGE}" --name "${KIND_CLUSTER_NAME:-panda}" 2>/dev/null || true
 fi
 
-# Build the values file chain based on environment
+DETECTED_VALUES_FILE="${ROOT_DIR}/.build/values-detected.yaml"
+
+# Build the values file chain based on detection or environment
 VALUES_ARGS=()
-case "${ENV}" in
-    kind)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml" -f "${CHART_DIR}/values-kind.yaml")
-        ;;
-    dev)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
-        ;;
-    staging)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-staging.yaml")
-        ;;
-    prod)
-        VALUES_ARGS+=(-f "${CHART_DIR}/values-prod.yaml")
-        ;;
-    *)
-        if [ -f "${CHART_DIR}/values-${ENV}.yaml" ]; then
-            VALUES_ARGS+=(-f "${CHART_DIR}/values-${ENV}.yaml")
-        else
-            error "Unknown environment '${ENV}' and no values-${ENV}.yaml found"
-            exit 1
-        fi
-        ;;
-esac
+if [ -f "${DETECTED_VALUES_FILE}" ]; then
+    # Detect-aware mode: use base dev values + detected StorageClass
+    info "Using detected cluster configuration from ${DETECTED_VALUES_FILE}"
+    VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
+
+    # Extract StorageClass from detect output (first brokerPool's storageClass)
+    DETECTED_SC=$(grep 'storageClass:' "${DETECTED_VALUES_FILE}" | head -n1 | awk '{print $2}' | tr -d '"')
+    if [ -n "${DETECTED_SC}" ]; then
+        info "Using detected StorageClass: ${DETECTED_SC}"
+        VALUES_ARGS+=(--set "postgresql.storage.storageClass=${DETECTED_SC}")
+    fi
+else
+    # Legacy ENV-based mode
+    case "${ENV}" in
+        kind)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml" -f "${CHART_DIR}/values-kind.yaml")
+            ;;
+        dev)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml")
+            ;;
+        staging)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-staging.yaml")
+            ;;
+        prod)
+            VALUES_ARGS+=(-f "${CHART_DIR}/values-prod.yaml")
+            ;;
+        *)
+            if [ -f "${CHART_DIR}/values-${ENV}.yaml" ]; then
+                VALUES_ARGS+=(-f "${CHART_DIR}/values-${ENV}.yaml")
+            else
+                error "Unknown environment '${ENV}' and no values-${ENV}.yaml found"
+                exit 1
+            fi
+            ;;
+    esac
+
+    # Auto-detect default StorageClass (fallback only when detect output absent)
+    DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+    if [ -z "${DEFAULT_SC}" ]; then
+        DEFAULT_SC=$(kubectl get sc -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}' 2>/dev/null || true)
+    fi
+    if [ -z "${DEFAULT_SC}" ]; then
+        DEFAULT_SC=$(kubectl get sc --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -n1 || true)
+    fi
+
+    if [ -n "${DEFAULT_SC}" ]; then
+        info "Auto-detected StorageClass: ${DEFAULT_SC}"
+        VALUES_ARGS+=(--set "postgresql.storage.storageClass=${DEFAULT_SC}")
+    else
+        warn "No StorageClass found. PVC provisioning may fail."
+    fi
+fi
+
+CLUSTER_DOMAIN=$(get_cluster_domain)
+info "  Cluster Domain: ${CLUSTER_DOMAIN}"
 
 info "Installing/upgrading Kates with Helm..."
 info "  Chart:       ${CHART_DIR}"
@@ -74,10 +125,28 @@ info "  Namespace:   ${NAMESPACE}"
 info "  Environment: ${ENV}"
 info "  Values:      ${VALUES_ARGS[*]}"
 
+# Customize the Kates backend connection URL based on cluster config
+# Dynamically extract the exact service name from the cluster instead of hardcoding
+KAFKA_SVC=$(kubectl get svc -n "${NAMESPACE}" -l strimzi.io/name="${CLUSTER_NAME}-kafka-bootstrap" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "${KAFKA_SVC}" ]; then
+    # Fallback if the cluster isn't up yet
+    KAFKA_SVC="${CLUSTER_NAME}-kafka-bootstrap"
+fi
+KAFKA_BOOTSTRAP="${KAFKA_SVC}.${NAMESPACE}.svc.${CLUSTER_DOMAIN}:9092"
+info "  Bootstrap:   ${KAFKA_BOOTSTRAP}"
+
+# Inject global image registry if provided
+if [ -n "${IMAGE_REGISTRY:-}" ]; then
+    info "  Registry:    ${IMAGE_REGISTRY}"
+    VALUES_ARGS+=(--set "global.imageRegistry=${IMAGE_REGISTRY}")
+fi
+
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
-    --timeout 5m \
+    --set kafka.bootstrapServers="${KAFKA_BOOTSTRAP}" \
+    --set clusterDomain="${CLUSTER_DOMAIN}" \
+    --timeout 5m
 
 
 info "✅ Kates deployment complete (env=${ENV})!"

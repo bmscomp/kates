@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -16,14 +17,14 @@ var (
 
 	clTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7C3AED"))
+			Foreground(theme.Secondary)
 
 	clSecStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(theme.Info)
 
 	clDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 )
 
 var changelogCmd = &cobra.Command{
@@ -98,11 +99,11 @@ Groups events by category with statistics.`,
 				badge := clDimStyle.Render("·")
 				switch strings.ToUpper(action) {
 				case "CREATE":
-					badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("+")
+					badge = lipgloss.NewStyle().Foreground(theme.Success).Render("+")
 				case "DELETE":
-					badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render("-")
+					badge = lipgloss.NewStyle().Foreground(theme.Error).Render("-")
 				case "UPDATE":
-					badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("~")
+					badge = lipgloss.NewStyle().Foreground(theme.Info).Render("~")
 				}
 				fmt.Printf("    %s %d × %s\n", badge, count, action)
 			}

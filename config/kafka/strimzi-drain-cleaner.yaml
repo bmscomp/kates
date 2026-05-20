@@ -129,7 +129,7 @@ metadata:
   labels:
     app: strimzi-drain-cleaner
 webhooks:
-  - name: strimzi-drain-cleaner.kafka.svc.cluster.local
+  - name: strimzi-drain-cleaner.kafka.svc
     rules:
       - apiGroups: [""]
         apiVersions: ["v1"]

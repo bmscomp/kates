@@ -10,20 +10,24 @@ metadata:
     helm.sh/hook-weight: "1"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: kafka-health
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
           set -e
           echo "=== Tier 1: Bootstrap Connectivity ==="
           BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
-          echo "Testing TCP connection to ${BOOTSTRAP}..."
-          timeout 10 sh -c "echo > /dev/tcp/$(echo $BOOTSTRAP | cut -d: -f1)/$(echo $BOOTSTRAP | cut -d: -f2)" 2>/dev/null
+          HOST=$(echo $BOOTSTRAP | cut -d: -f1)
+          PORT=$(echo $BOOTSTRAP | cut -d: -f2)
+          echo "Testing TCP connection to ${HOST}:${PORT}..."
+          nc -zv -w 5 $HOST $PORT
           echo "✓ Bootstrap connectivity OK"
 
           echo ""
@@ -65,18 +69,20 @@ metadata:
     helm.sh/hook-weight: "2"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: produce-consume
       image: {{ include "kafka-cluster.kafkaImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
           set -e
           BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
-          TOPIC="__helm-test-$(date +%s)"
+          TOPIC="helm-test-$(date +%s)"
           MSG="helm-test-roundtrip-$(date +%s)"
 
           echo "=== Tier 2: Produce/Consume Round-Trip ==="
@@ -87,23 +93,39 @@ spec:
           sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')";
           EOF
 
-          echo "Creating test topic: ${TOPIC}..."
-          bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} \
-            --command-config /tmp/client.properties \
-            --create --topic ${TOPIC} --partitions 1 --replication-factor 1 \
-            --config retention.ms=60000 2>&1 || true
+          echo "Creating test topic via CRD: ${TOPIC}..."
+          cat <<EOF | kubectl apply -f -
+          apiVersion: kafka.strimzi.io/v1
+          kind: KafkaTopic
+          metadata:
+            name: ${TOPIC}
+            namespace: {{ include "kafka-cluster.namespace" . }}
+            labels:
+              strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+          spec:
+            partitions: 1
+            replicas: 1
+            config:
+              retention.ms: 60000
+          EOF
+
+          echo "Waiting for topic to be ready..."
+          kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=30s -n {{ include "kafka-cluster.namespace" . }}
+
+          PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
+          
+          # Create client properties for Java tools (bypassing kcat librdkafka SCRAM-SHA-512 bug with Kafka 4.0+)
+          cat > /tmp/client.properties << EOF
+          security.protocol=SASL_PLAINTEXT
+          sasl.mechanism=SCRAM-SHA-512
+          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="${PASSWORD}";
+          EOF
 
           echo "Producing test record..."
-          echo "${MSG}" | bin/kafka-console-producer.sh \
-            --bootstrap-server ${BOOTSTRAP} \
-            --producer.config /tmp/client.properties \
-            --topic ${TOPIC} 2>/dev/null
+          echo "${MSG}" | kafka-console-producer.sh --broker-list ${BOOTSTRAP} --topic ${TOPIC} --producer.config /tmp/client.properties 2>/dev/null
 
           echo "Consuming test record..."
-          RECEIVED=$(timeout 15 bin/kafka-console-consumer.sh \
-            --bootstrap-server ${BOOTSTRAP} \
-            --consumer.config /tmp/client.properties \
-            --topic ${TOPIC} --from-beginning --max-messages 1 2>/dev/null || true)
+          RECEIVED=$(timeout 15 kafka-console-consumer.sh --bootstrap-server ${BOOTSTRAP} --topic ${TOPIC} --from-beginning --max-messages 1 --consumer.config /tmp/client.properties 2>/dev/null || true)
 
           if echo "${RECEIVED}" | grep -q "${MSG}"; then
             echo "✓ Round-trip OK: produced and consumed '${MSG}'"
@@ -112,9 +134,7 @@ spec:
           fi
 
           echo "Cleaning up test topic..."
-          bin/kafka-topics.sh --bootstrap-server ${BOOTSTRAP} \
-            --command-config /tmp/client.properties \
-            --delete --topic ${TOPIC} 2>/dev/null || true
+          kubectl delete kafkatopic ${TOPIC} -n {{ include "kafka-cluster.namespace" . }} --ignore-not-found
           echo "✓ Tier 2 complete"
       securityContext:
         allowPrivilegeEscalation: false
@@ -148,12 +168,14 @@ metadata:
     helm.sh/hook-weight: "3"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: auth-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -218,12 +240,14 @@ metadata:
     helm.sh/hook-weight: "4"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: kraft-quorum
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -234,11 +258,12 @@ spec:
           {{- $totalControllers := 0 }}
           {{- range .Values.controllerPools }}
           {{- $totalControllers = add $totalControllers .replicas }}
-          POOL_STATUS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-          if [ "$POOL_STATUS" = "True" ]; then
-            echo "  ✓ KafkaNodePool '{{ .name }}' Ready=True"
+          POOL_READY_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.status.replicas}')
+          POOL_SPEC_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.spec.replicas}')
+          if [ "$POOL_READY_REPLICAS" = "$POOL_SPEC_REPLICAS" ] || [ "$POOL_READY_REPLICAS" = "{{ .replicas }}" ]; then
+            echo "  ✓ KafkaNodePool '{{ .name }}' Replicas match ($POOL_READY_REPLICAS)"
           else
-            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: $POOL_STATUS" && exit 1
+            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: expected $POOL_SPEC_REPLICAS, got $POOL_READY_REPLICAS" && exit 1
           fi
           {{- end }}
 
@@ -286,12 +311,14 @@ metadata:
     helm.sh/hook-weight: "5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: topic-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -362,12 +389,14 @@ metadata:
     helm.sh/hook-weight: "6"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: listener-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -433,12 +462,14 @@ metadata:
     helm.sh/hook-weight: "7"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: nodepool-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -449,12 +480,12 @@ spec:
           TOTAL_EXPECTED=0
           {{- range .Values.brokerPools }}
           echo "Checking broker pool '{{ .name }}'..."
-          POOL_STATUS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} \
-            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-          if [ "$POOL_STATUS" = "True" ]; then
-            echo "  ✓ KafkaNodePool '{{ .name }}' Ready"
+          POOL_READY_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.status.replicas}')
+          POOL_SPEC_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.spec.replicas}')
+          if [ "$POOL_READY_REPLICAS" = "$POOL_SPEC_REPLICAS" ] || [ "$POOL_READY_REPLICAS" = "{{ .replicas }}" ]; then
+            echo "  ✓ KafkaNodePool '{{ .name }}' Replicas match ($POOL_READY_REPLICAS)"
           else
-            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: $POOL_STATUS"
+            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: expected $POOL_SPEC_REPLICAS, got $POOL_READY_REPLICAS"
             FAIL=1
           fi
           TOTAL_EXPECTED=$((TOTAL_EXPECTED + {{ .replicas }}))
@@ -510,12 +541,14 @@ metadata:
     helm.sh/hook-weight: "8"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: cruise-control-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |
@@ -577,12 +610,14 @@ metadata:
     helm.sh/hook-weight: "9"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
   restartPolicy: Never
   securityContext:
     {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
   containers:
     - name: metrics-check
       image: {{ include "kafka-cluster.kubectlImage" $ }}
+      imagePullPolicy: IfNotPresent
       command: ["sh", "-c"]
       args:
         - |

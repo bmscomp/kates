@@ -1,3 +1,13 @@
+# -- Global configuration
+global:
+  # -- Override the image registry for all images in the chart
+  # Useful for air-gapped clusters that mirror images to an internal registry
+  imageRegistry: ""
+  # -- Override image pull secrets globally
+  imagePullSecrets: []
+  # -- Kubernetes cluster DNS domain
+  clusterDomain: "cluster.local"
+
 # -- Number of KATES replicas
 replicaCount: 1
 
@@ -16,6 +26,11 @@ imagePullSecrets: []
 nameOverride: ""
 # -- Override the full release name
 fullnameOverride: ""
+# -- The cluster domain (extracted dynamically during deployment)
+# -- DNS policy for pods (ClusterFirst, Default, None, ClusterFirstWithHostNet)
+dnsPolicy: ""
+# -- Custom DNS configuration (nameservers, searches, options)
+dnsConfig: {}
 
 # -- Service account configuration
 serviceAccount:
@@ -110,16 +125,24 @@ jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
 # -- Pod-level security context (PSS restricted compliant)
+# NOTE: runAsUser and fsGroup are intentionally unset so that platforms
+# like OpenShift can assign random UIDs via their Security Context Constraints.
+# Set them explicitly in your environment values file if needed.
 securityContext:
   runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
+  runAsUser: 100
+  fsGroup: 100
   seccompProfile:
     type: RuntimeDefault
 
-# -- Container-level security context
+# -- Container-level security context (PSS restricted compliant)
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
 
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
@@ -171,6 +194,9 @@ podDisruptionBudget:
   # -- Unhealthy pod eviction policy
   unhealthyPodEvictionPolicy: IfHealthy
 
+# -- Priority class name for pod scheduling
+priorityClassName: ""
+
 # -- Topology spread constraints for pod scheduling
 topologySpreadConstraints: []
 
@@ -194,6 +220,8 @@ affinity:
 
 # -- Extra environment variables for the KATES container
 extraEnv: []
+# -- Extra init containers (e.g. for Vault secret fetching, schema migration)
+extraInitContainers: []
 # -- Extra volumes
 extraVolumes: []
 # -- Extra volume mounts
@@ -243,7 +271,7 @@ initContainers:
 # -- Kafka connection configuration
 kafka:
   # -- Kafka bootstrap servers
-  bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  bootstrapServers: ""
   # -- Client rack ID for rack-aware consumption
   clientRack: ""
   # -- Security protocol
@@ -334,7 +362,7 @@ networkPolicy:
     port: 9092
   # -- Prometheus egress configuration
   prometheus:
-    namespace: monitoring
+    namespace: kafka
     port: 9090
   # -- Extra egress rules
   egressRules: []

@@ -8,14 +8,18 @@ strimziVersion: "1.0.0"
 global:
   imageRegistry: "quay.io"
   imageRepository: "strimzi"
+  # -- Kubernetes cluster DNS domain (extracted dynamically by deploy scripts)
+  clusterDomain: "cluster.local"
+  # -- Default storage class to use for PVCs (extracted dynamically by deploy scripts)
+  storageClass: ""
 
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
 images:
-  # Kafka client image used in Helm test tier 2 (produce/consume round-trip)
-  kafka: "quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
+  # Tester image used in Helm test tier 2 (produce/consume round-trip) and kubectl tests
+  kafka: "ghcr.io/bmscomp/kates-tester:sha-ada3b78"
   # kubectl image used in Helm tests and CRD upgrade hooks
-  kubectl: "bitnami/kubectl:1.33.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:sha-ada3b78"
 
 kafka:
   listeners:
@@ -392,7 +396,7 @@ users:
 alerts:
   enabled: true
   labels:
-    release: monitoring
+    release: kafka
     prometheus: kube-prometheus
 
 networkPolicies:
@@ -411,7 +415,7 @@ networkPolicies:
   allowedClientNamespaces:
     - kates
     - litmus
-  monitoringNamespace: monitoring
+  monitoringNamespace: kafka
 
 tieredStorage:
   enabled: false
@@ -541,7 +545,7 @@ crdUpgrade:
 
 dashboards:
   enabled: true
-  namespace: monitoring
+  namespace: kafka
   label: grafana_dashboard
   labelValue: "1"
   brokerDashboard: true
@@ -599,7 +603,7 @@ drainCleaner:
 podMonitors:
   enabled: true
   labels:
-    release: monitoring
+    release: kafka
 
 strimziOperator:
   enabled: true
@@ -645,7 +649,7 @@ strimzi-kafka-operator:
     periodSeconds: 30
   dashboards:
     enabled: true
-    namespace: monitoring
+    namespace: kafka
     label: grafana_dashboard
     labelValue: "1"
   generateNetworkPolicy: true

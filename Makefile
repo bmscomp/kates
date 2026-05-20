@@ -1,139 +1,71 @@
-.PHONY: all cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
 TIMER := $(shell date +%s)
 
+# ── Load version pins ─────────────────────────────────────────────────────────
+include versions.env
+
+# ── Resolve kates binary (installed CLI > local build) ────────────────────────
+KATES_BIN := $(shell command -v kates 2>/dev/null || echo "./build/kates")
+DETECTED_VALUES := .build/values-detected.yaml
+
+# ── Cluster detection (single source of truth) ───────────────────────────────
+detect: check-prerequisites
+	@mkdir -p .build
+	@echo "🔍 Detecting cluster configuration..."
+	@if [ ! -x "$(KATES_BIN)" ]; then \
+		echo "⚠️  kates binary not found, building it now..."; \
+		$(MAKE) cli-build; \
+		if [ ! -x "$(KATES_BIN)" ]; then cp cli/dist/kates $(KATES_BIN) 2>/dev/null || true; fi; \
+	fi
+	@$(KATES_BIN) detect --generate-values --values-output $(DETECTED_VALUES) --quiet
+	@echo "✅ Detection complete → $(DETECTED_VALUES)"
+
+# ── Main deployment pipeline ─────────────────────────────────────────────────
 all: check-prerequisites
-	@echo "🚀 Launching complete cluster setup..."
+	@echo "🚀 Launching complete cluster setup via Kates Unified Orchestrator..."
 	@echo ""
-	@if kind get clusters 2>/dev/null | grep -q '^panda$$' && kubectl cluster-info --context kind-panda >/dev/null 2>&1; then \
-		echo "✅ Kind cluster 'panda' already running — skipping creation"; \
+	@# ── Step 1: Cluster connectivity ──
+	@if kubectl cluster-info >/dev/null 2>&1; then \
+		CONTEXT=$$(kubectl config current-context); \
+		echo "✅ Kubernetes cluster reachable (context: $$CONTEXT)"; \
 	else \
-		echo "Step 1: Starting Kind cluster + registry..."; \
-		./scripts/start-cluster.sh; \
+		echo "⚠️  No Kubernetes cluster reachable — creating Kind cluster..."; \
+		$(MAKE) cluster; \
 	fi
 	@echo ""
-	@if kubectl get pods -n monitoring -l "app.kubernetes.io/name=grafana" --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Monitoring already deployed — skipping"; \
+	@if [ ! -x "$(KATES_BIN)" ]; then \
+		echo "⚠️  kates binary not found, building it now..."; \
+		$(MAKE) cli-build >/dev/null; \
+	fi
+	@echo "Select Deployment Topology:"
+	@echo "  1) Single Namespace (dev mode, everything in 'kates-stack')"
+	@echo "  2) Isolated Namespaces (production mode, separate namespaces for kafka/kates/chaos)"
+	@read -p "Enter choice [1/2]: " choice; \
+	if [ "$$choice" = "1" ]; then \
+		$(KATES_BIN) deploy --topology single --namespace kates-stack --with-schema-registry apicurio; \
 	else \
-		echo "Step 2: Deploying Monitoring (Prometheus & Grafana)..."; \
-		./scripts/deploy-monitoring.sh; \
-		echo "Step 3: Waiting for monitoring to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l "app.kubernetes.io/name=grafana" -n monitoring --timeout=120s || true; \
+		$(KATES_BIN) deploy --topology isolated --with-schema-registry apicurio; \
 	fi
 	@echo ""
-	@if kubectl get deployment cert-manager -n cert-manager --no-headers 2>/dev/null | grep -q '1/1'; then \
-		echo "✅ cert-manager already deployed — skipping"; \
-	else \
-		echo "Step 3: Deploying cert-manager..."; \
-		./scripts/deploy-cert-manager.sh; \
-	fi
-	@echo ""
-	@if kubectl get pods -n kafka -l strimzi.io/cluster=krafter --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kafka already deployed — skipping"; \
-	else \
-		echo "Step 4: Deploying Kafka (Strimzi)..."; \
-		./scripts/deploy-kafka.sh; \
-		echo "Step 5: Waiting for Kafka to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l strimzi.io/cluster=krafter -n kafka --timeout=300s || true; \
-	fi
-	@echo "Ensuring Kafka users and topics are applied..."
-	@kubectl apply -f config/kafka/kafka-users.yaml
-	@kubectl apply -f config/kafka/kafka-topics.yaml
-	@kubectl wait kafkauser --all --for=condition=Ready --timeout=60s -n kafka 2>/dev/null || true
-	@echo ""
-	@if kubectl get pods -n kafka -l app=kafka-ui --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kafka UI already deployed — skipping"; \
-	else \
-		echo "Step 6: Deploying Kafka UI..."; \
-		./scripts/deploy-kafka-ui.sh; \
-	fi
-	@echo ""
-	@if kubectl get deployment apicurio-registry -n apicurio --no-headers 2>/dev/null | grep -q '1/1'; then \
-		echo "✅ Apicurio Registry already deployed — skipping"; \
-	else \
-		echo "Step 7: Deploying Apicurio Registry..."; \
-		./scripts/deploy-apicurio.sh; \
-	fi
-	@echo ""
-	@if kubectl get pods -n litmus -l app.kubernetes.io/instance=chaos --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ LitmusChaos already deployed — skipping"; \
-	else \
-		echo "Step 8: Deploying LitmusChaos..."; \
-		helm dependency update charts/kates-chaos; \
-		helm upgrade --install chaos charts/kates-chaos \
-			-n litmus --create-namespace \
-			-f charts/kates-chaos/values-kind.yaml \
-			--timeout 10m; \
-		echo "Waiting for Litmus pods to be ready..."; \
-		kubectl wait --for=condition=Ready pods -l app.kubernetes.io/instance=chaos -n litmus --timeout=300s 2>/dev/null || true; \
-	fi
-	@echo ""
-	@echo "Step 9: Verifying chaos infrastructure..."
-	@if kubectl get crd chaosengines.litmuschaos.io &>/dev/null; then \
-		echo "✅ Litmus CRDs installed"; \
-	else \
-		echo "⚠️  Litmus CRDs not found — chaos provider will fall back to noop"; \
-	fi
-	@echo ""
-	@if kubectl get pods -n monitoring -l app=jaeger --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Jaeger already deployed — skipping"; \
-	else \
-		echo "Step 9.5: Deploying Jaeger (distributed tracing)..."; \
-		./scripts/deploy-jaeger.sh || true; \
-	fi
-	@echo ""
-	@if kubectl get pods -n kates -l app=kates --no-headers 2>/dev/null | grep -q Running; then \
-		echo "✅ Kates already deployed — skipping"; \
-	else \
-		echo "Step 10: Deploying Kates (using released image)..."; \
-		KATES_IMAGE="$${KATES_IMAGE:-ghcr.io/bmscomp/kates:1.11.0}"; \
-		echo "  Pulling $${KATES_IMAGE}..."; \
-		docker pull "$${KATES_IMAGE}" 2>/dev/null || true; \
-		kind load docker-image "$${KATES_IMAGE}" --name panda 2>/dev/null || true; \
-		kubectl apply -f kates/k8s/namespace.yaml; \
-		kubectl apply -f kates/k8s/rbac.yaml; \
-		kubectl apply -f kates/k8s/configmap.yaml; \
-		echo "Copying Kafka SASL credentials to kates namespace..."; \
-		kubectl get secret kates-backend -n kafka -o json \
-			| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-			| kubectl apply -n kates -f -; \
-		kubectl apply -f kates/k8s/postgres.yaml; \
-		echo "Waiting for PostgreSQL to be ready..."; \
-		kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s; \
-		kubectl apply -f kates/k8s/deployment.yaml; \
-		kubectl apply -f kates/k8s/service.yaml; \
-		kubectl rollout status deployment/kates -n kates --timeout=300s; \
-	fi
-	@echo ""
-	@echo "Step 11: Exposing service ports..."
-	./scripts/port-forward.sh
+	@echo "Step: Exposing service ports..."
+	@./scripts/port-forward.sh || true
 	@echo ""
 	@echo "✅ Complete setup finished in $$(( $$(date +%s) - $(TIMER) ))s"
 	@echo ""
-	@echo "📊 Services deployed:"
-	@echo "  ✓ Prometheus & Grafana (Monitoring)"
-	@echo "  ✓ Kafka Cluster (Strimzi KRaft mode)"
-	@echo "  ✓ Kafka UI"
-	@echo "  ✓ Apicurio Registry"
-	@echo "  ✓ LitmusChaos + Chaos Experiments"
-	@echo "  ✓ Kates"
-	@echo ""
 	@echo "🔗 Access points:"
-	@echo "  - Grafana:          http://localhost:30080 (admin/admin)"
-	@echo "  - Kafka UI:         http://localhost:30081"
-	@echo "  - Apicurio Registry:http://localhost:30082"
-	@echo "  - Kates:            http://localhost:30083"
-	@echo "  - Prometheus:       http://localhost:30090"
-	@echo "  - Jaeger UI:        http://localhost:30086"
-	@echo "  - Litmus UI:        http://localhost:9091  (admin/litmus)"
+	@echo "  - Apicurio Registry: http://localhost:30082"
+	@echo "  - Kates:             http://localhost:30083"
+	@echo "  - Litmus UI:         http://localhost:9091  (admin/litmus)"
 	@echo ""
 
-# Check prerequisites
+# Check prerequisites — only kubectl and helm are strictly required for generic clusters
 check-prerequisites:
 	@echo "🔍 Checking prerequisites..."
-	@bash -c 'source scripts/common.sh && require_cmd docker && require_cmd kind && require_cmd kubectl && require_cmd helm'
+	@command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
+	@command -v helm >/dev/null 2>&1 || { echo "❌ helm not found"; exit 1; }
 	@echo "✅ All prerequisites met"
 
 # Start Kind cluster only
@@ -141,28 +73,38 @@ cluster:
 	@echo "🎯 Starting Kind cluster..."
 	./scripts/start-cluster.sh
 
-# Deploy monitoring stack only
+# Deploy monitoring stack (auto-detect provider)
 monitoring:
-	@echo "📊 Deploying monitoring stack (Kind)..."
-	helm dependency build charts/monitoring
+	@echo "📊 Deploying monitoring stack..."
+	@helm dependency build charts/monitoring 2>/dev/null || true
+	@PROVIDER="generic"; \
+	if [ -f "$(DETECTED_VALUES)" ]; then \
+		PROVIDER=$$(grep '^# Provider:' $(DETECTED_VALUES) | awk '{print $$3}'); \
+	fi; \
+	MON_VALUES="charts/monitoring/values-generic.yaml"; \
+	if [ "$$PROVIDER" = "kind" ] && [ -f "charts/monitoring/values-kind.yaml" ]; then \
+		MON_VALUES="charts/monitoring/values-kind.yaml"; \
+	fi; \
+	echo "  Provider: $$PROVIDER → $$MON_VALUES"; \
 	helm upgrade --install monitoring charts/monitoring \
-		--namespace monitoring --create-namespace \
-		-f charts/monitoring/values-kind.yaml \
+		--namespace kafka --create-namespace \
+		-f "$$MON_VALUES" \
 		--timeout 10m --wait
+	@echo "✅ Monitoring stack deployed"
 
 monitoring-generic:
 	@echo "📊 Deploying monitoring stack (Generic)..."
 	helm dependency build charts/monitoring
 	helm upgrade --install monitoring charts/monitoring \
-		--namespace monitoring --create-namespace \
+		--namespace kafka --create-namespace \
 		-f charts/monitoring/values-generic.yaml \
 		--timeout 10m --wait
 
 monitoring-undeploy:
 	@echo "🗑️ Undeploying monitoring stack..."
-	helm uninstall monitoring -n monitoring || true
-	kubectl delete pvc --all -n monitoring || true
-	kubectl delete namespace monitoring || true
+	helm uninstall monitoring -n kafka || true
+	kubectl delete pvc --all -n kafka || true
+	kubectl # delete namespace monitoring || true
 
 cert-manager:
 	@echo "🔐 Deploying cert-manager..."
@@ -172,7 +114,7 @@ cert-manager:
 deploy-all:
 	@echo "🚀 Deploying full stack..."
 	$(MAKE) monitoring
-	./scripts/deploy-kafka.sh
+	./scripts/deploy-kafka-generic.sh --yes
 	./scripts/deploy-kafka-ui.sh
 	./scripts/deploy-apicurio.sh
 	./scripts/deploy-jaeger.sh
@@ -228,8 +170,27 @@ test-capacity:
 	@echo "🧪 Running Capacity Test..."
 	./scripts/test-perf-capacity.sh
 
+test-net-kafka:
+	@domain=$$(source scripts/common.sh && get_cluster_domain); \
+	echo "🌐 Testing TCP connectivity to Kafka from 'default' namespace (Domain: $$domain)..."; \
+	kubectl run -i --tty --rm debug-nc --image=busybox:1.36 --namespace=default --restart=Never -- nc -vz krafter-kafka-bootstrap.kafka.svc.$$domain 9092
+
+test-net-api:
+	@domain=$$(source scripts/common.sh && get_cluster_domain); \
+	echo "🌐 Testing HTTP connectivity to Kates API from 'default' namespace (Domain: $$domain)..."; \
+	kubectl run -i --tty --rm debug-curl --image=curlimages/curl:8.7.1 --namespace=default --restart=Never -- curl -sv http://kates.kafka.svc.$$domain:8080/api/health
+
+test-net: test-net-kafka test-net-api
+	@echo "✅ Cross-namespace network tests complete."
+
+cluster-domain:
+	@domain=$$(source scripts/common.sh && get_cluster_domain); \
+	echo "🌐 Cluster domain: $$domain"
+
 # Kates CLI (standalone install)
 cli-build:
+	@echo "🔨 Building Kates CLI locally..."
+	cd cli && go build -ldflags="-s -w" -o dist/kates .
 	@echo "🔨 Cross-compiling Kates CLI for all platforms..."
 	cd cli && bash build.sh
 
@@ -252,17 +213,46 @@ kates: kates-build kates-deploy
 	@echo "✅ Kates deployed! Run 'make ports' to access at http://localhost:30083"
 
 kates-build:
-	@echo "🔨 Building Kates (JVM + CLI)..."
-	cd kates && ./mvnw package -DskipTests -B
-	docker build -f kates/Dockerfile -t kates:latest .
-	kind load docker-image kates:latest --name panda
+	@if docker image inspect kates:latest >/dev/null 2>&1; then \
+		echo "✅ Kates image already exists locally (kates:latest)."; \
+	elif docker pull ghcr.io/bmscomp/kates:1.11.0; then \
+		echo "✅ Pulled Kates image from registry."; \
+		docker tag ghcr.io/bmscomp/kates:1.11.0 kates:latest; \
+	else \
+		echo "🔨 Building Kates (JVM + CLI) from source..."; \
+		cd kates && ./mvnw package -DskipTests -B && \
+		cd .. && docker build -f kates/Dockerfile -t kates:latest .; \
+	fi
+	kind load docker-image kates:latest --name $(CLUSTER_NAME)
 	@echo "✅ Kates image loaded into Kind"
 
 kates-native:
-	@echo "🔨 Building Kates (native)..."
-	docker build -f kates/Dockerfile.native -t kates:latest .
-	kind load docker-image kates:latest --name panda
+	@if docker image inspect kates:native >/dev/null 2>&1; then \
+		echo "✅ Kates native image already exists locally (kates:native)."; \
+	elif docker pull ghcr.io/bmscomp/kates:1.11.0-native; then \
+		echo "✅ Pulled Kates native image from registry."; \
+		docker tag ghcr.io/bmscomp/kates:1.11.0-native kates:native; \
+	else \
+		echo "🔨 Building Kates (native) from source..."; \
+		docker build -f kates/Dockerfile.native -t kates:native .; \
+	fi
+	kind load docker-image kates:native --name $(CLUSTER_NAME)
 	@echo "✅ Kates native image loaded into Kind"
+
+tester-build:
+	@echo "🔨 Building Kates Tester image..."
+	docker build -f tester/Dockerfile -t kates-tester:latest tester/
+	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
+	@echo "✅ Kates Tester image built and available"
+
+REGISTRY ?= ghcr.io/bmscomp
+push-images:
+	@echo "🚀 Pushing images to $(REGISTRY)..."
+	docker tag kates:latest $(REGISTRY)/kates:latest
+	docker push $(REGISTRY)/kates:latest
+	docker tag kates-tester:latest $(REGISTRY)/kates-tester:latest
+	docker push $(REGISTRY)/kates-tester:latest
+	@echo "✅ Images pushed successfully to $(REGISTRY)!"
 
 kates-deploy:
 	@echo "🚀 Deploying Kates to Kubernetes..."
@@ -272,19 +262,19 @@ kates-deploy:
 	@echo "Copying Kafka SASL credentials to kates namespace..."
 	@kubectl get secret kates-backend -n kafka -o json \
 		| jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields,.metadata.ownerReferences)' \
-		| kubectl apply -n kates -f -
+		| kubectl apply -n kafka -f -
 	kubectl apply -f kates/k8s/postgres.yaml
 	@echo "Waiting for PostgreSQL to be ready..."
-	@kubectl wait --for=condition=Ready pod -l app=postgres -n kates --timeout=120s
+	@kubectl wait --for=condition=Ready pod -l app=postgres -n kafka --timeout=120s
 	kubectl apply -f kates/k8s/deployment.yaml
 	kubectl apply -f kates/k8s/service.yaml
-	kubectl rollout status deployment/kates -n kates --timeout=300s
+	kubectl rollout status deployment/kates -n kafka --timeout=300s
 	@echo "✅ Kates is running"
 
 kates-redeploy:
 	@echo "🔄 Redeploying Kates..."
-	kubectl rollout restart deployment/kates -n kates
-	kubectl rollout status deployment/kates -n kates --timeout=300s
+	kubectl rollout restart deployment/kates -n kafka
+	kubectl rollout status deployment/kates -n kafka --timeout=300s
 
 kates-secret:
 	@echo "🔐 Setting up Kafka SASL credentials in kates namespace..."
@@ -309,15 +299,15 @@ kates-secret:
 
 kates-logs:
 	@echo "📋 Streaming Kates logs..."
-	kubectl logs -f -l app=kates -n kates
+	kubectl logs -f -l app=kates -n kafka
 
 kates-undeploy:
 	@echo "🗑️  Removing Kates..."
-	kubectl delete namespace kates --ignore-not-found
+	kubectl # kubectl delete namespace kates --ignore-not-found
 	@echo "✅ Kates removed"
 
 CLUSTER_NAME   ?= panda
-KATES_NS       ?= kates
+KATES_NS       ?= kafka
 KATES_IMAGE    ?= kates:latest
 CHART_REGISTRY ?= oci://ghcr.io/klster/charts
 CHART_DIR      := charts/kates
@@ -406,11 +396,11 @@ kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-ch
 
 kafka-deploy: kafka-chart-deps
 	@echo "📦 Deploying Kafka cluster (ENV=$(ENV))..."
-	ENV=$(ENV) ./scripts/deploy-kafka.sh
+	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
 kafka-upgrade: kafka-chart-deps
 	@echo "🔄 Upgrading Kafka cluster (ENV=$(ENV))..."
-	ENV=$(ENV) ./scripts/deploy-kafka.sh
+	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
 kafka-detect:
 	@./scripts/kafka-cluster-report.sh
@@ -462,32 +452,32 @@ litmus:
 	@echo "⚡ Deploying Kates Chaos (LitmusChaos)..."
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
-		-n litmus --create-namespace \
+		-n kafka --create-namespace \
 		-f charts/kates-chaos/values-kind.yaml \
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed"
 
 litmus-undeploy:
 	@echo "🧹 Removing Kates Chaos (LitmusChaos)..."
-	@helm uninstall chaos -n litmus 2>/dev/null || true
-	@kubectl delete pvc --all -n litmus 2>/dev/null || true
-	@kubectl delete all --all -n litmus 2>/dev/null || true
-	@kubectl delete namespace litmus 2>/dev/null || true
+	@helm uninstall chaos -n kafka 2>/dev/null || true
+	@kubectl delete pvc --all -n kafka 2>/dev/null || true
+	@kubectl delete all --all -n kafka 2>/dev/null || true
+	@kubectl # delete namespace litmus 2>/dev/null || true
 	@echo "✅ Kates Chaos removed"
 
 chaos-ui:
 	@echo "🌐 Port-forwarding Litmus UI..."
 	@echo "Access at: http://localhost:9091 (admin/litmus)"
-	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus
+	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n kafka
 
 chaos-status:
 	@echo "📊 Chaos Status:"
 	@echo ""
 	@echo "Helm Release:"
-	@helm list -n litmus 2>/dev/null || echo "No release found"
+	@helm list -n kafka 2>/dev/null || echo "No release found"
 	@echo ""
 	@echo "Pods:"
-	@kubectl get pods -n litmus 2>/dev/null || echo "No pods found"
+	@kubectl get pods -n kafka 2>/dev/null || echo "No pods found"
 	@echo ""
 	@echo "ChaosExperiments (kafka):"
 	@kubectl get chaosexperiments -n kafka 2>/dev/null || echo "No experiments found"
@@ -502,19 +492,19 @@ litmus-generic:
 	@echo "⚡ Deploying Kates Chaos (generic Kubernetes)..."
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
-		-n litmus --create-namespace \
+		-n kafka --create-namespace \
 		-f charts/kates-chaos/values-generic.yaml \
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed (generic)"
 
 litmus-test:
 	@echo "🧪 Running Helm tests..."
-	helm test chaos -n litmus
+	helm test chaos -n kafka
 
 litmus-gameday:
 	@echo "🎮 Triggering GameDay validation..."
 	helm upgrade chaos charts/kates-chaos \
-		-n litmus \
+		-n kafka \
 		-f charts/kates-chaos/values-kind.yaml \
 		--set gameday.enabled=true \
 		--timeout 5m --wait
@@ -544,6 +534,19 @@ destroy:
 
 # Alias for destroy
 clean: destroy
+
+kyverno-permissive:
+	@echo "🔓 Making Kyverno completely permissive (ignoring all resources)..."
+	@kubectl patch configmap kyverno -n kyverno --type merge -p '{"data":{"resourceFilters":"[*,*,*]"}}' 2>/dev/null || echo "⚠️  Could not patch Kyverno ConfigMap (is it installed?)"
+	@echo "🔄 Restarting Kyverno pods to apply changes..."
+	@kubectl rollout restart deployment -n kyverno -l app.kubernetes.io/name=kyverno 2>/dev/null || true
+	@echo "✅ Kyverno is now in permissive mode."
+
+kyverno-audit:
+	@echo "👁️  Setting all Kyverno policies to Audit mode..."
+	@kubectl get clusterpolicy -o name 2>/dev/null | xargs -I {} kubectl patch {} --type='json' -p='[{"op": "replace", "path": "/spec/validationFailureAction", "value": "Audit"}]' 2>/dev/null || true
+	@kubectl get policy -A -o name 2>/dev/null | xargs -I {} kubectl patch {} --type='json' -p='[{"op": "replace", "path": "/spec/validationFailureAction", "value": "Audit"}]' 2>/dev/null || true
+	@echo "✅ All policies set to Audit mode."
 
 # Help
 help:
@@ -583,6 +586,8 @@ help:
 	@echo "  kates                              - Build + deploy Kates (full pipeline)"
 	@echo "  kates-build                        - Build Kates JVM image and load into Kind"
 	@echo "  kates-native                       - Build Kates native image and load into Kind"
+	@echo "  tester-build                       - Build Kates Tester image and load into Kind"
+	@echo "  push-images                        - Push kates and tester images to remote registry"
 	@echo "  kates-deploy                       - Apply Kates K8s manifests"
 	@echo "  kates-redeploy                     - Restart Kates deployment"
 	@echo "  kates-logs                         - Stream Kates logs"
@@ -605,6 +610,9 @@ help:
 	@echo "  test-endurance                     - Run endurance/soak test (sustained load)"
 	@echo "  test-volume                        - Run volume test (large data)"
 	@echo "  test-capacity                      - Run capacity test (find max throughput)"
+	@echo "  test-net                           - Run cross-namespace network connectivity tests"
+	@echo "  test-net-kafka                     - Test TCP connectivity to Kafka from default namespace"
+	@echo "  test-net-api                       - Test HTTP connectivity to Kates API from default namespace"
 	@echo ""
 	@echo "  Operations"
 	@echo "  ports                              - Start port forwarding"
@@ -613,14 +621,16 @@ help:
 	@echo "  chaos-ui                           - Port-forward Litmus UI"
 	@echo "  chaos-status                       - Show chaos infrastructure status"
 	@echo "  gameday                            - Run automated GameDay validation"
+	@echo "  kyverno-permissive                 - Make Kyverno completely permissive (ignore all)"
+	@echo "  kyverno-audit                      - Set all Kyverno policies to Audit mode"
 	@echo "  destroy                            - Destroy cluster (FORCE=1 to skip prompt)"
 	@echo "  help                               - Show this help"
 
 logs:
 	@echo "📋 Streaming logs from all services (Ctrl+C to stop)..."
 	@echo ""
-	@kubectl logs -f -l app=kates -n kates --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l app=kates -n kafka --prefix --tail=20 2>/dev/null &
 	@kubectl logs -f -l strimzi.io/cluster=krafter -n kafka --prefix --tail=20 2>/dev/null &
-	@kubectl logs -f -l app.kubernetes.io/name=grafana -n monitoring --prefix --tail=20 2>/dev/null &
+	@kubectl logs -f -l app.kubernetes.io/name=grafana -n kafka --prefix --tail=20 2>/dev/null &
 	@kubectl logs -f -l app=kafka-ui -n kafka --prefix --tail=20 2>/dev/null &
 	@wait

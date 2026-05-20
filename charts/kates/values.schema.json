@@ -320,7 +320,7 @@
             "properties": {
                 "bootstrapServers": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 0
                 },
                 "clientRack": { "type": "string" },
                 "security": {

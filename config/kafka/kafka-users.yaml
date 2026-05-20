@@ -15,41 +15,6 @@ spec:
   authentication:
     type: scram-sha-512
 ---
-# kafka-ui: admin-level read access for monitoring the cluster.
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaUser
-metadata:
-  name: kafka-ui
-  namespace: kafka
-  labels:
-    strimzi.io/cluster: krafter
-spec:
-  authentication:
-    type: scram-sha-512
-  quotas:
-    producerByteRate: 1048576
-    consumerByteRate: 52428800
-    requestPercentage: 10
-  authorization:
-    type: simple
-    acls:
-      - resource:
-          type: topic
-          name: "*"
-          patternType: literal
-        operations: ["Describe", "Read"]
-        host: "*"
-      - resource:
-          type: group
-          name: "*"
-          patternType: literal
-        operations: ["Describe", "Read"]
-        host: "*"
-      - resource:
-          type: cluster
-        operations: ["Describe"]
-        host: "*"
----
 # apicurio-registry: read/write on its internal topics (__apicurio*).
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser

@@ -1,39 +1,46 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/pkg/theme"
+)
 
+// Adaptive palette for the TUI — all values flip between light/dark terminal modes.
 var (
-	purple = lipgloss.Color("#7C3AED")
-	indigo = lipgloss.Color("#6366F1")
-	cyan   = lipgloss.Color("#06B6D4")
-	green  = lipgloss.Color("#22C55E")
-	amber  = lipgloss.Color("#F59E0B")
-	red    = lipgloss.Color("#EF4444")
-	gray   = lipgloss.Color("#6B7280")
-	light  = lipgloss.Color("#E5E7EB")
-	dim    = lipgloss.Color("#4B5563")
+	purple = theme.Secondary // violet headings
+	indigo = theme.Primary   // deep blue accents
+	cyan   = theme.Info      // teal keys / accents
+	green  = theme.Success   // healthy status
+	amber  = theme.Warning   // warn status
+	red    = theme.Error     // error status
+	gray   = theme.Muted     // dim / secondary text
+
+	// Structural TUI colors — background panels always use a dark surface on
+	// dark terminals and a light surface on light terminals.
+	tabBar = lipgloss.AdaptiveColor{Light: "#E5E7EB", Dark: "#1F2937"}
+	tabFg  = lipgloss.AdaptiveColor{Light: "#1E293B", Dark: "#E2E8F0"} // readable body text
 
 	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#000000")).
+			Foreground(theme.OnColor).
 			Background(purple).
 			Padding(0, 2)
 
 	inactiveTabStyle = lipgloss.NewStyle().
-				Foreground(light).
-				Background(dim).
+				Foreground(tabFg).
+				Background(tabBar).
 				Padding(0, 2)
 
 	tabGapStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1F2937")).
+			Background(tabBar).
 			Padding(0, 0)
 
 	listItemStyle = lipgloss.NewStyle().
-			Foreground(light).
+			Foreground(tabFg). // visible on both backgrounds
 			PaddingLeft(2)
 
 	selectedItemStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
+				Foreground(theme.OnColor).
 				Background(indigo).
 				Bold(true).
 				PaddingLeft(1).
@@ -54,7 +61,7 @@ var (
 			Width(20)
 
 	detailValueStyle = lipgloss.NewStyle().
-				Foreground(light)
+				Foreground(tabFg)
 
 	healthyStyle = lipgloss.NewStyle().Foreground(green)
 	warnStyle    = lipgloss.NewStyle().Foreground(amber)
@@ -62,7 +69,7 @@ var (
 	dimStyle     = lipgloss.NewStyle().Foreground(gray)
 
 	statusBarStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1F2937")).
+			Background(tabBar).
 			Foreground(gray).
 			Padding(0, 1)
 

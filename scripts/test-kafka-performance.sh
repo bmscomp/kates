@@ -7,7 +7,7 @@ source "${SCRIPT_DIR}/../versions.env"
 source "${SCRIPT_DIR}/test-common.sh"
 
 TOPIC="perf-test"
-NAMESPACE="performance"
+NAMESPACE="kafka"
 
 bold "Kafka Baseline Performance Test (1M messages)"
 echo ""

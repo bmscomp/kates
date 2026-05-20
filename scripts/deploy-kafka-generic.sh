@@ -55,7 +55,17 @@ bold "════════════════════════�
 echo ""
 
 info "Step 1/6: Detecting cluster configuration..."
-"${SCRIPT_DIR}/detect-cluster-config.sh" -o "${DETECTED_VALUES}"
+if command -v kates &> /dev/null; then
+    info "  Using kates CLI for cluster detection"
+    kates detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
+elif [ -x "${ROOT_DIR}/build/kates" ]; then
+    info "  Using local kates binary for cluster detection"
+    "${ROOT_DIR}/build/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
+else
+    info "  kates binary not found. Building it now..."
+    cd "${ROOT_DIR}" && make cli-build >/dev/null
+    "${ROOT_DIR}/cli/dist/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
+fi
 
 # ── Step 2: Review ────────────────────────────────────────────────────────────
 echo ""
@@ -87,12 +97,33 @@ echo ""
 info "Step 3/6: Building Helm chart dependencies..."
 helm dependency build "${CHART_DIR}" 2>/dev/null || true
 
+# Extract cluster domain from the Kubernetes environment
+CLUSTER_DOMAIN=$(get_cluster_domain "$AUTO_APPROVE")
+info "  Cluster Domain: ${CLUSTER_DOMAIN}"
+
 # ── Step 4: Deploy ────────────────────────────────────────────────────────────
 echo ""
 info "Step 4/6: Deploying Kafka cluster..."
 
 # Ensure namespace exists
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
+
+# Install Strimzi Operator if not present (separate release required to avoid CRD chicken-and-egg)
+# Skip if the detect output already confirmed Strimzi is running
+if grep -A1 'strimziOperator:' "${DETECTED_VALUES}" 2>/dev/null | grep -q 'enabled: false'; then
+    info "  Strimzi Operator already managed by pipeline — skipping"
+elif ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
+    info "  Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
+    kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
+    helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+        --version 1.0.0 \
+        --namespace "strimzi-operator" \
+        --set watchAnyNamespace=true \
+        --set replicas=1 \
+        --set kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}" \
+        --timeout 5m --wait
+    kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
+fi
 
 # Adopt pre-existing Kafka resources into Helm release
 info "  Adopting existing resources into Helm release..."
@@ -120,6 +151,7 @@ echo ""
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     "${VALUES_ARGS[@]}" \
+    --set global.clusterDomain="${CLUSTER_DOMAIN}" \
     --timeout 10m
 
 # ── Step 5: Wait ──────────────────────────────────────────────────────────────

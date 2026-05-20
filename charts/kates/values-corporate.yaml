@@ -1,0 +1,130 @@
+# Corporate Kubernetes Cluster — Override Template
+# Copy this file and customize for your environment.
+# Usage: helm upgrade --install kates charts/kates -f charts/kates/values-corporate.yaml
+
+# ── Global Settings ───────────────────────────────────────────────────────────
+global:
+  # Air-gapped registry mirror (e.g. harbor.corp.internal)
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# ── Security (OpenShift / PSA restricted) ─────────────────────────────────────
+# Let the platform assign UIDs (required for OpenShift SCCs)
+securityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+image:
+  repository: ghcr.io/bmscomp/kates
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+  # - name: corporate-registry-credentials
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+priorityClassName: ""
+  # e.g. "high-priority" or "system-cluster-critical"
+
+tolerations: []
+  # - key: "workload-type"
+  #   operator: "Equal"
+  #   value: "data-platform"
+  #   effect: "NoSchedule"
+
+nodeSelector: {}
+  # workload-type: data-platform
+
+affinity: {}
+
+# ── DNS (for clusters with custom DNS resolvers) ─────────────────────────────
+dnsPolicy: ""
+dnsConfig: {}
+  # nameservers:
+  #   - 10.0.0.10
+  # searches:
+  #   - corp.internal
+  # options:
+  #   - name: ndots
+  #     value: "5"
+
+# ── Database ──────────────────────────────────────────────────────────────────
+# Disable bundled PostgreSQL, use external managed DB
+postgresql:
+  enabled: false
+
+externalDatabase:
+  enabled: true
+  host: ""              # e.g. kates-db.corp-rds.internal
+  port: 5432
+  database: kates
+  username: kates
+  existingSecret: ""    # e.g. "kates-db-credentials"
+  passwordKey: password
+
+# ── Kafka ─────────────────────────────────────────────────────────────────────
+kafka:
+  bootstrapServers: ""  # Will be auto-detected by deploy-kates.sh
+  sasl:
+    enabled: false      # Disable SASL if using mTLS
+  ssl:
+    enabled: true
+    truststore:
+      secretName: ""    # e.g. "kafka-truststore"
+    keystore:
+      secretName: ""    # e.g. "kafka-keystore"
+
+# ── Vault / Sidecar Injection ─────────────────────────────────────────────────
+podAnnotations: {}
+  # vault.hashicorp.com/agent-inject: "true"
+  # vault.hashicorp.com/role: "kates"
+  # vault.hashicorp.com/agent-inject-secret-db-password: "secret/data/kates/db"
+
+# ── Escape Hatches ────────────────────────────────────────────────────────────
+extraEnv: []
+  # - name: KATES_KAFKA_SASL_PASSWORD
+  #   value: "injected-by-pipeline"
+
+extraInitContainers: []
+  # - name: vault-init
+  #   image: vault:1.15
+  #   command: ["vault", "read", "..."]
+
+extraVolumes: []
+  # - name: secrets-store-inline
+  #   csi:
+  #     driver: secrets-store.csi.k8s.io
+  #     readOnly: true
+  #     volumeAttributes:
+  #       secretProviderClass: "corporate-vault-class"
+
+extraVolumeMounts: []
+  # - name: secrets-store-inline
+  #   mountPath: "/mnt/secrets-store"
+  #   readOnly: true
+
+# ── Resources (tune for production) ──────────────────────────────────────────
+resources:
+  requests:
+    memory: "4Gi"
+    cpu: "1"
+  limits:
+    memory: "8Gi"
+    cpu: "4"
+
+# ── Observability ─────────────────────────────────────────────────────────────
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: "30s"
+  prometheusRule:
+    enabled: true

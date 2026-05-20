@@ -9,12 +9,13 @@ import (
 	"text/tabwriter"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 
 var (
-	regressionGreen = lipgloss.NewStyle().Foreground(lipgloss.Color("#00C853"))
-	regressionRed   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF1744"))
+	regressionGreen = lipgloss.NewStyle().Foreground(theme.Success)
+	regressionRed   = lipgloss.NewStyle().Foreground(theme.Error)
 )
 
 var testBaselineCmd = &cobra.Command{
@@ -133,7 +134,7 @@ var reportRegressionCmd = &cobra.Command{
 			return nil
 		}
 
-		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B388FF"))
+		header := lipgloss.NewStyle().Bold(true).Foreground(theme.Secondary)
 		fmt.Println(header.Render("Regression Report"))
 		fmt.Println()
 		fmt.Printf("  Run:      %s\n", report.RunID)
