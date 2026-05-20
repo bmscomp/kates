@@ -73,6 +73,38 @@ helm upgrade --install monitoring charts/monitoring \
 
 The kafka-cluster chart will automatically create `PodMonitor` and `PrometheusRule` resources that the Prometheus operator discovers.
 
+### 1.5 Kyverno (Optional)
+
+If you want admission-control policy enforcement — Pod Security Standards (PSS), automatic NetworkPolicy generation, and optional container image signature verification — install [Kyverno](https://kyverno.io/) before deploying the kafka-cluster chart:
+
+```bash
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+```
+
+**Verify Kyverno is running:**
+
+```bash
+kubectl get pods -n kyverno
+```
+
+You should see the Kyverno admission controller, background controller, cleanup controller, and reports controller pods in `Running` state.
+
+**How Kyverno integrates with Kates:**
+
+When `kyvernoPolicy.enabled=true` is set in the kafka-cluster Helm chart values, the chart deploys four `ClusterPolicy` resources that leverage Kyverno's admission webhooks:
+
+| Policy | What It Does |
+|--------|-------------|
+| `kates-pod-security-standards` | Mutates and validates workloads to enforce restricted PSS — non-root, drop ALL capabilities, seccomp, read-only rootfs |
+| `kates-workload-standards` | Requires standard labels, health probes, and pinned image tags |
+| `kates-image-verification` | Verifies Cosign container image signatures from trusted registries |
+| `kates-generate-network-policies` | Automatically generates default-deny NetworkPolicies in new namespaces |
+
+> [!TIP]
+> Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Chapter 17: Security & Compliance](17-security.md) for details on each policy.
+
 ---
 
 ## 2. Understanding the Chart
