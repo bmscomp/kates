@@ -125,6 +125,75 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 	addCheck("DNS resolution", report.Network.CoreDNSRunning > 0, fmt.Sprintf("%d CoreDNS pod(s)", report.Network.CoreDNSRunning))
 
+	// Active AZ network latency check
+	if len(report.Network.LatencyMatrix) > 0 {
+		maxCrossAzAvg := 0.0
+		hasFailure := false
+		for _, r := range report.Network.LatencyMatrix {
+			if r.SourceZone != r.TargetZone {
+				if !r.Success {
+					hasFailure = true
+				}
+				if r.AvgMs > maxCrossAzAvg {
+					maxCrossAzAvg = r.AvgMs
+				}
+			}
+		}
+		
+		if hasFailure {
+			v.Warns++
+			addCheck("AZ network latency (cross-zone)", true, "some zone probes failed")
+		} else if maxCrossAzAvg == 0.0 {
+			addCheck("AZ network latency (cross-zone)", true, "no cross-zone routes")
+		} else if maxCrossAzAvg > 15.0 {
+			addCheck("AZ network latency (cross-zone)", false, fmt.Sprintf("incompatible: max %.2fms (>15ms)", maxCrossAzAvg))
+		} else if maxCrossAzAvg > 5.0 {
+			v.Warns++
+			addCheck("AZ network latency (cross-zone)", true, fmt.Sprintf("warning: max %.2fms (5-15ms)", maxCrossAzAvg))
+		} else {
+			addCheck("AZ network latency (cross-zone)", true, fmt.Sprintf("optimal: max %.2fms (<5ms)", maxCrossAzAvg))
+		}
+	}
+
+	// Secret creation check
+	if report.SecretAudit.NamespaceCreated {
+		if report.SecretAudit.SecretCreated {
+			addCheck("Kubernetes Secret capability", true, "verified (functional)")
+		} else if report.SecretAudit.BlockedByPolicy {
+			policyName := report.SecretAudit.PolicyName
+			if policyName == "" {
+				policyName = "unknown policy"
+			}
+			addCheck("Kubernetes Secret capability", false, fmt.Sprintf("blocked by admission policy: %s", policyName))
+		} else {
+			addCheck("Kubernetes Secret capability", false, fmt.Sprintf("failed: %s", report.SecretAudit.ErrorMsg))
+		}
+	} else if report.SecretAudit.ErrorMsg != "" {
+		addCheck("Kubernetes Secret capability", false, fmt.Sprintf("namespace blocked: %s", report.SecretAudit.ErrorMsg))
+	}
+
+	// Strimzi Operator health diagnostics
+	if report.Strimzi.Running {
+		healthStatus := report.Strimzi.Health.Status
+		if healthStatus == "Healthy" {
+			addCheck("Strimzi Operator health", true, "healthy")
+		} else if healthStatus == "Degraded" {
+			v.Warns++
+			addCheck("Strimzi Operator health", true, "warning: operator degraded")
+		} else {
+			v.Warns++
+			addCheck("Strimzi Operator health", true, "warning: operator unhealthy")
+		}
+	}
+
+	// Capacity budget audit
+	if report.Strimzi.CapacityStatus != "" && report.Strimzi.CapacityStatus != "Sufficient" {
+		v.Warns++
+		addCheck("Strimzi Kafka capacity", true, report.Strimzi.CapacityStatus)
+	} else if report.Strimzi.CapacityStatus == "Sufficient" {
+		addCheck("Strimzi Kafka capacity", true, "sufficient resources allocated")
+	}
+
 	// Admission controller compatibility
 	if report.Admission.Kyverno.Installed {
 		enforced := 0

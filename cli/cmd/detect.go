@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -45,6 +46,9 @@ var (
 	clusterName      string
 	dryRun           bool
 	reservePct       float64
+	benchStorage     bool
+	benchNetwork     bool
+	benchDNS         bool
 )
 
 func init() {
@@ -52,18 +56,24 @@ func init() {
 	detectCmd.Flags().BoolVar(&failOnWarning, "fail-on-warning", false, "Exit with code 1 if warnings are detected (for CI/CD)")
 	detectCmd.Flags().BoolVar(&failOnError, "fail-on-error", false, "Exit with code 2 if compatibility checks fail (for CI/CD)")
 	detectCmd.Flags().BoolVar(&quietMode, "quiet", false, "Only print the verdict, not the full report")
-	detectCmd.Flags().StringVar(&outputFile, "output-file", "", "Write report to file (supports .md, .json)")
+	detectCmd.Flags().StringVar(&outputFile, "output-file", "", "Write report to file (supports .md, .json, .pdf)")
 	detectCmd.Flags().BoolVar(&generateValues, "generate-values", false, "Generate a Helm values.yaml from detected cluster config")
 	detectCmd.Flags().StringVar(&valuesOutput, "values-output", "", "Write generated values to file (default: stdout)")
 	detectCmd.Flags().StringVar(&clusterName, "cluster-name", "krafter", "Kafka cluster name for generated values")
 	detectCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview values to stdout without writing a file")
 	detectCmd.Flags().Float64Var(&reservePct, "reserve", 0.30, "Reserve percentage of cluster resources (0.30 = 30% reserved, 70% for Kafka)")
+	detectCmd.Flags().BoolVar(&benchStorage, "bench-storage", false, "Run active live storage benchmarking using ephemeral fio pods (takes ~30s)")
+	detectCmd.Flags().BoolVar(&benchNetwork, "bench-network", false, "Run active network throughput sweeps between AZs using iperf3 (~10s)")
+	detectCmd.Flags().BoolVar(&benchDNS, "bench-dns", false, "Run active CoreDNS latency and throttling sweeps using parallel DNS queries (~5s)")
 	rootCmd.AddCommand(detectCmd)
 }
 
 func runDetect(cmd *cobra.Command, args []string) error {
 	executor := detect.NewOSExecutor()
 	collector := detect.NewCollector(executor)
+	collector.BenchStorage = benchStorage
+	collector.BenchNetwork = benchNetwork
+	collector.BenchDNS = benchDNS
 	analyzer := detect.NewAnalyzer(executor)
 
 	if err := collector.Preflight(); err != nil {
@@ -91,6 +101,15 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	var collectErr error
 	done := make(chan struct{})
 
+	var p *tea.Program
+	// Show spinner while collecting (if not JSON or quiet mode)
+	if outputMode != "json" && !quietMode {
+		p = tea.NewProgram(detect.NewSpinnerModel())
+		collector.OnProgress = func(msg string) {
+			p.Send(detect.ProgressMsg(msg))
+		}
+	}
+
 	// Start collection in background
 	go func() {
 		report, collectErr = collector.Collect(ctx)
@@ -98,9 +117,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		cancel()     // signal spinner to stop
 	}()
 
-	// Show spinner while collecting (if not JSON or quiet mode)
-	if outputMode != "json" && !quietMode {
-		p := tea.NewProgram(detect.NewSpinnerModel())
+	if p != nil {
 		go func() {
 			<-ctx.Done()
 			p.Quit()
@@ -191,17 +208,63 @@ func runDetect(cmd *cobra.Command, args []string) error {
 
 	// Write report to file if requested
 	if outputFile != "" {
-		f, err := os.Create(outputFile)
-		if err != nil {
-			output.Error(fmt.Sprintf("Failed to create output file: %v", err))
-		} else {
-			defer f.Close()
-			if strings.HasSuffix(outputFile, ".json") {
+		ext := strings.ToLower(filepath.Ext(outputFile))
+		switch ext {
+		case ".pdf":
+			if err := detect.RenderPDF(report, outputFile); err != nil {
+				output.Error(fmt.Sprintf("Failed to write PDF report: %v", err))
+			} else {
+				output.Success(fmt.Sprintf("Report written to %s", outputFile))
+			}
+		case ".json":
+			f, err := os.Create(outputFile)
+			if err != nil {
+				output.Error(fmt.Sprintf("Failed to create output file: %v", err))
+			} else {
+				defer f.Close()
 				detect.RenderJSONTo(report, f)
+				output.Success(fmt.Sprintf("Report written to %s", outputFile))
+			}
+		case ".md", ".markdown":
+			f, err := os.Create(outputFile)
+			if err != nil {
+				output.Error(fmt.Sprintf("Failed to create output file: %v", err))
+			} else {
+				defer f.Close()
+				detect.RenderMarkdown(report, f)
+				output.Success(fmt.Sprintf("Report written to %s", outputFile))
+			}
+		case "":
+			// Generate both .md and .pdf
+			mdPath := outputFile + ".md"
+			pdfPath := outputFile + ".pdf"
+
+			// 1. Write markdown
+			f, err := os.Create(mdPath)
+			if err != nil {
+				output.Error(fmt.Sprintf("Failed to create markdown report file: %v", err))
 			} else {
 				detect.RenderMarkdown(report, f)
+				f.Close()
+				output.Success(fmt.Sprintf("Report written to %s", mdPath))
 			}
-			output.Success(fmt.Sprintf("Report written to %s", outputFile))
+
+			// 2. Write PDF
+			if err := detect.RenderPDF(report, pdfPath); err != nil {
+				output.Error(fmt.Sprintf("Failed to write PDF report: %v", err))
+			} else {
+				output.Success(fmt.Sprintf("Report written to %s", pdfPath))
+			}
+		default:
+			// Fallback to markdown if unknown extension
+			f, err := os.Create(outputFile)
+			if err != nil {
+				output.Error(fmt.Sprintf("Failed to create output file: %v", err))
+			} else {
+				defer f.Close()
+				detect.RenderMarkdown(report, f)
+				output.Success(fmt.Sprintf("Report written to %s", outputFile))
+			}
 		}
 	}
 

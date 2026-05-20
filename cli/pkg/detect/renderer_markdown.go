@@ -81,10 +81,25 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 		p("- **Status:** ✅ Running in `%s`", report.Strimzi.Namespace)
 		p("- **Image:** `%s`", report.Strimzi.Image)
 		p("- **Replicas:** %d/%d ready", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas)
+		p("- **Health Verdict:** %s", report.Strimzi.Health.Status)
+		if len(report.Strimzi.Health.WarningLogs) > 0 {
+			p("- **Warning Logs:**")
+			p("```")
+			for _, log := range report.Strimzi.Health.WarningLogs {
+				p("%s", log)
+			}
+			p("```")
+		}
 	} else if report.Strimzi.CRDsPresent {
 		p("- **Status:** ⚠️ CRDs present but operator not running")
 	} else {
 		p("- **Status:** ❌ Not installed")
+	}
+	if len(report.Strimzi.Health.MissingCRDs) > 0 {
+		p("- **Missing CRDs:** %s", strings.Join(report.Strimzi.Health.MissingCRDs, ", "))
+	}
+	if report.Strimzi.CapacityStatus != "" {
+		p("- **Kafka Capacity:** %s", report.Strimzi.CapacityStatus)
 	}
 	p("")
 
@@ -137,6 +152,139 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 	if report.Admission.Gatekeeper.Installed {
 		p("- **OPA Gatekeeper:** ✅ Running in `%s` (%d constraints)",
 			report.Admission.Gatekeeper.Namespace, len(report.Admission.Gatekeeper.Constraints))
+	}
+	// Active AZ Network Latency Matrix
+	if len(report.Network.LatencyMatrix) > 0 {
+		p("## Active Zone Network Latency Matrix")
+		p("")
+		zoneMap := make(map[string]bool)
+		for _, r := range report.Network.LatencyMatrix {
+			zoneMap[r.SourceZone] = true
+			zoneMap[r.TargetZone] = true
+		}
+		var zones []string
+		for z := range zoneMap {
+			zones = append(zones, z)
+		}
+
+		header := "| Source \\ Target | "
+		align := "|---| "
+		for _, z := range zones {
+			header += z + " | "
+			align += "---| "
+		}
+		p(header)
+		p(align)
+
+		for _, src := range zones {
+			row := "| **" + src + "** | "
+			for _, dst := range zones {
+				found := false
+				for _, r := range report.Network.LatencyMatrix {
+					if r.SourceZone == src && r.TargetZone == dst {
+						if r.Success {
+							row += fmt.Sprintf("%.2fms | ", r.AvgMs)
+						} else {
+							row += "❌ FAIL | "
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					row += "— | "
+				}
+			}
+			p(row)
+		}
+		p("")
+	}
+
+	// Active AZ Network Bandwidth Matrix
+	if len(report.Network.BandwidthMatrix) > 0 {
+		p("## Active Zone Network Bandwidth Matrix")
+		p("")
+		zoneMap := make(map[string]bool)
+		for _, r := range report.Network.BandwidthMatrix {
+			zoneMap[r.SourceZone] = true
+			zoneMap[r.TargetZone] = true
+		}
+		var zones []string
+		for z := range zoneMap {
+			zones = append(zones, z)
+		}
+
+		header := "| Source \\ Target | "
+		align := "|---| "
+		for _, z := range zones {
+			header += z + " | "
+			align += "---| "
+		}
+		p(header)
+		p(align)
+
+		for _, src := range zones {
+			row := "| **" + src + "** | "
+			for _, dst := range zones {
+				if src == dst {
+					row += "— | "
+					continue
+				}
+				found := false
+				for _, r := range report.Network.BandwidthMatrix {
+					if r.SourceZone == src && r.TargetZone == dst {
+						if r.Success {
+							row += fmt.Sprintf("%.1f Mbps | ", r.BandwidthMbps)
+						} else {
+							row += "❌ FAIL | "
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					row += "— | "
+				}
+			}
+			p(row)
+		}
+		p("")
+	}
+
+	// Active CoreDNS Latency & Success Audits
+	if len(report.Network.DNSResults) > 0 {
+		p("## Active CoreDNS Latency & Success Audits")
+		p("")
+		p("| Query Type | Queries Run | Success Count | Success Rate | Avg Latency | Max Latency |")
+		p("|---|---|---|---|---|---|")
+		for _, r := range report.Network.DNSResults {
+			p("| %s | %d | %d | %.1f%% | %.2fms | %.2fms |",
+				r.QueryType, r.QueriesRun, r.SuccessCount, r.SuccessRate, r.AvgLatencyMs, r.MaxLatencyMs)
+		}
+		p("")
+	}
+
+	// Secrets Audit
+	p("## Kubernetes Secrets Audit")
+	p("")
+	if report.SecretAudit.NamespaceCreated {
+		if report.SecretAudit.SecretCreated {
+			p("- **Namespace creation:** ✅ Succeeded (`kates-detect-secrets-*`)")
+			p("- **Secret provisioning:** ✅ Functional")
+		} else {
+			p("- **Namespace creation:** ✅ Succeeded")
+			p("- **Secret provisioning:** ❌ Failed")
+			if report.SecretAudit.BlockedByPolicy {
+				p("- **Policy blocker:** 🚫 Admission controller policy `%s` blocked secret creation", report.SecretAudit.PolicyName)
+			} else {
+				p("- **Error:** `%s`", report.SecretAudit.ErrorMsg)
+			}
+		}
+	} else if report.SecretAudit.ErrorMsg != "" {
+		p("- **Status:** ❌ Namespace creation failed")
+		p("- **Error:** `%s`", report.SecretAudit.ErrorMsg)
+	} else {
+		p("- **Status:** ℹ️ Secret capability audit not executed")
 	}
 	p("")
 
