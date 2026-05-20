@@ -172,6 +172,70 @@ sequenceDiagram
 
 ---
 
+## Building from Source
+
+You can build both the terminal CLI client and the Quarkus backend microservice directly from source.
+
+### Developer Tooling Prerequisites
+Ensure your local development environment has the following installed:
+* **Go 1.21+** (for building the CLI client)
+* **Java SDK 25** (for compiling and packaging the backend)
+* **Maven 3.9+** (or use the packaged Maven Wrapper `./mvnw`)
+* **Docker / OrbStack** (for container image packaging)
+* **GraalVM** (optional, only required for building native execution binaries)
+
+### 1. Compiling the Kates CLI
+To compile the lightweight terminal CLI client:
+```bash
+# Navigate to the CLI directory
+cd cli
+
+# Build the executable with stripped debug tables for production size optimization
+go build -ldflags="-s -w" -o kates .
+
+# (Optional) Move to system path for global execution
+mv kates /usr/local/bin/
+```
+
+### 2. Building the Kates Backend
+The Java backend application uses Maven and Quarkus. Run compilation and packaging commands from the `/kates` subdirectory:
+
+* **Development (Dev Mode)**:
+  Runs the server locally on port `8080` with hot-reload enabled, exposing a dynamic Swagger UI endpoint at `http://localhost:8080/q/swagger-ui`:
+  ```bash
+  cd kates
+  ./mvnw quarkus:dev
+  ```
+
+* **Build standard JVM Package (JAR)**:
+  Produces a runner JAR inside `kates/target/quarkus-app/`:
+  ```bash
+  cd kates
+  ./mvnw package -DskipTests
+  ```
+
+* **Build GraalVM Native Executable**:
+  Produces an optimized native binary compiled down to machine instructions for sub-millisecond startups and minimal memory overhead:
+  ```bash
+  cd kates
+  ./mvnw package -Dnative -DskipTests
+  ```
+
+### 3. Container Image Building
+Once packaged, you can compile container images to load into Kubernetes or Kind:
+
+* **Build standard JVM Container Image**:
+  ```bash
+  docker build -f kates/Dockerfile -t kates:latest .
+  ```
+
+* **Build Native Container Image (using GraalVM compilation artifacts)**:
+  ```bash
+  docker build -f kates/Dockerfile.native -t kates:latest kates/
+  ```
+
+---
+
 ## Prerequisites
 
 - [Docker](https://www.docker.com/)
@@ -295,12 +359,25 @@ Access the Jaeger UI at http://localhost:30086 after deployment.
 
 ---
 
-## Documentation
+## Remaining Documentation & Core Resources
 
-| Resource | Content |
-|----------|---------|
-| [The Definitive Guide](docs/book/README.md) | 14-chapter book covering architecture, performance theory, test types, chaos engineering, data integrity, observability, CLI/API reference, deployment, scenario files, and recipes |
-| [Tutorials](docs/tutorials/README.md) | 6 hands-on tutorials from first test to CI/CD integration |
+For deeper operational details, configuration schemas, and tutorials, explore the following documentation folders inside this repository:
+
+### Core Documentation Guides
+* **[The Definitive Guide](docs/book/README.md)**: A complete 14-chapter book covering theoretical foundation, workload execution internals, metric descriptions, custom scenario file schemas, and debugging runbooks.
+* **[Getting Started Tutorials](docs/tutorials/README.md)**: Six progressive step-by-step tutorials starting from your first native load test up to advanced GitOps CI/CD resilience validation integration pipelines.
+* **[REST API Reference Manual](kates/docs/api-reference.md)**: Details the JSON schema definitions, gRPC stream properties, and REST resources of the Quarkus application.
+* **[Disruption Catalog Guide](kates/docs/disruption-guide.md)**: Exhaustive guide explaining configuration models and parameters for pod eviction, network delay, disc fill-up, and zone failures.
+* **[Export Formats Documentation](kates/docs/export-formats.md)**: Explains structural formats for metrics diffing, latency heatmap matrices, CSV arrays, and JUnit reports.
+* **[Local and Production Deployments Guide](kates/docs/deployment.md)**: Architectural patterns for deploying Kates to local Kind, managed EKS/GKE, or bare-metal Kubernetes.
+
+---
+
+## Contributing
+
+We welcome contributions from the community to improve the resilience engineering ecosystem! 
+* **Guidelines**: Please read the **[Contribution Guide](CONTRIBUTING.md)** before opening pull requests to align with branch models, pull request formats, and testing expectations.
+* **Conduct**: We adhere to a professional community standard. See the **[Code of Conduct](CODE_OF_CONDUCT.md)** for details.
 
 ---
 
