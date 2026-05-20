@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -44,11 +46,71 @@ func init() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Styles
+// ──────────────────────────────────────────────────────────────────────────────
+
+var (
+	upgBanner = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(theme.Accent).
+			Padding(0, 1)
+
+	upgSectionTitle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(theme.Info)
+
+	upgLabel = lipgloss.NewStyle().
+			Foreground(theme.Muted).
+			Width(14)
+
+	upgValue = lipgloss.NewStyle().
+			Foreground(theme.Text).
+			Bold(true)
+
+	upgDim = lipgloss.NewStyle().
+		Foreground(theme.Muted)
+
+	upgSuccess = lipgloss.NewStyle().
+			Foreground(theme.Success).
+			Bold(true)
+
+	upgWarn = lipgloss.NewStyle().
+		Foreground(theme.Warning)
+
+	upgError = lipgloss.NewStyle().
+			Foreground(theme.Error).
+			Bold(true)
+
+	upgAccent = lipgloss.NewStyle().
+			Foreground(theme.Accent)
+
+	upgHighlight = lipgloss.NewStyle().
+			Foreground(theme.Highlight).
+			Bold(true)
+
+	upgBorder = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(theme.Subtle).
+			Padding(0, 1)
+
+	upgCompleteBorder = lipgloss.NewStyle().
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(theme.Success).
+				Padding(0, 1)
+)
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Core logic
 // ──────────────────────────────────────────────────────────────────────────────
 
 func runUpgrade() error {
 	start := time.Now()
+
+	// ── Banner ───────────────────────────────────────────────────────────────
+	fmt.Println()
+	fmt.Println("  " + upgBanner.Render(" ⬆ Kates Upgrade "))
+	fmt.Println()
 
 	// ── 1. Resolve source directory ──────────────────────────────────────────
 	srcDir, err := resolveSourceDir()
@@ -69,32 +131,39 @@ func runUpgrade() error {
 	gitBranch := gitShort(srcDir, "rev-parse", "--abbrev-ref", "HEAD")
 	gitDirty := ""
 	if out, _ := execOutput(srcDir, "git", "status", "--porcelain"); strings.TrimSpace(out) != "" {
-		gitDirty = " (dirty)"
+		gitDirty = upgWarn.Render(" (dirty)")
 	}
 
 	// ── 5. Display plan ──────────────────────────────────────────────────────
-	fmt.Println()
-	fmt.Println("    ╭─ Kates Upgrade ──────────────────────────────────────────╮")
-	upgradeRow("Source", srcDir)
-	upgradeRow("Branch", gitBranch+gitDirty)
-	upgradeRow("Commit", gitCommit)
-	upgradeRow("Install", installPath)
+	planRows := []string{
+		upgStyledRow("Source", srcDir),
+		upgStyledRow("Branch", upgAccent.Render(gitBranch)+gitDirty),
+		upgStyledRow("Commit", upgAccent.Render(gitCommit)),
+		upgStyledRow("Install", installPath),
+	}
 	if needsSudo {
-		upgradeRow("Sudo", "required")
+		planRows = append(planRows, upgStyledRow("Sudo", upgWarn.Render("required")))
 	}
 	if oldVersion != "" {
-		upgradeRow("Current", oldVersion)
+		planRows = append(planRows, upgStyledRow("Current", upgDim.Render(oldVersion)))
 	}
-	fmt.Println("    ╰──────────────────────────────────────────────────────────╯")
+
+	planContent := strings.Join(planRows, "\n")
+	planBox := upgBorder.Render(planContent)
+	for _, line := range strings.Split(planBox, "\n") {
+		fmt.Println("  " + line)
+	}
 	fmt.Println()
 
 	if upgradeDryRun {
-		fmt.Println("    ⏸  Dry run — no changes made")
+		fmt.Println("  " + upgDim.Render("⏸  Dry run — no changes made"))
 		return nil
 	}
 
 	// ── 6. Build ─────────────────────────────────────────────────────────────
-	fmt.Println("    ⚙  Building from source...")
+	fmt.Println("  " + upgSectionTitle.Render("Building"))
+	fmt.Println("  " + upgDim.Render(strings.Repeat("─", 40)))
+
 	buildDate := time.Now().UTC().Format(time.RFC3339)
 	ldflags := fmt.Sprintf("-s -w -X github.com/klster/kates-cli/cmd.Version=%s -X github.com/klster/kates-cli/cmd.Commit=%s -X github.com/klster/kates-cli/cmd.BuildDate=%s",
 		gitBranch+"-"+gitCommit, gitCommit, buildDate)
@@ -102,43 +171,85 @@ func runUpgrade() error {
 	tmpBin := filepath.Join(srcDir, "dist", "kates")
 	os.MkdirAll(filepath.Join(srcDir, "dist"), 0755)
 
+	fmt.Printf("  %s Compiling %s/%s for %s/%s...\n",
+		upgDim.Render("⚙"),
+		upgAccent.Render(gitBranch),
+		upgAccent.Render(gitCommit),
+		upgDim.Render(runtime.GOOS),
+		upgDim.Render(runtime.GOARCH))
+
+	buildStart := time.Now()
 	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", tmpBin, ".")
 	buildCmd.Dir = srcDir
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	if err := buildCmd.Run(); err != nil {
+		fmt.Println("  " + upgError.Render("✖ Build failed"))
 		return fmt.Errorf("build failed: %w", err)
 	}
+	buildElapsed := time.Since(buildStart).Round(time.Millisecond)
 
 	// Verify the binary exists and is executable
 	info, err := os.Stat(tmpBin)
 	if err != nil || info.IsDir() {
 		return fmt.Errorf("build produced no binary at %s", tmpBin)
 	}
-	fmt.Printf("    ✅ Built  %s  (%s)\n", filepath.Base(tmpBin), humanSize(info.Size()))
+	fmt.Printf("  %s Built %s  %s  %s\n",
+		upgSuccess.Render("✔"),
+		upgValue.Render("kates"),
+		upgDim.Render(humanSize(info.Size())),
+		upgDim.Render(buildElapsed.String()))
 
 	// ── 7. Install ───────────────────────────────────────────────────────────
-	fmt.Printf("    📦 Installing to %s...\n", installPath)
+	fmt.Println()
+	fmt.Println("  " + upgSectionTitle.Render("Installing"))
+	fmt.Println("  " + upgDim.Render(strings.Repeat("─", 40)))
+
+	fmt.Printf("  %s Copying to %s\n",
+		upgDim.Render("📦"),
+		upgAccent.Render(installPath))
+
 	if err := installBinary(tmpBin, installPath, needsSudo); err != nil {
+		fmt.Println("  " + upgError.Render("✖ Installation failed"))
 		return err
 	}
 
 	// ── 8. macOS: clear quarantine + codesign ────────────────────────────────
 	if runtime.GOOS == "darwin" {
+		fmt.Printf("  %s Signing binary (macOS)...\n", upgDim.Render("🔏"))
 		macOSSign(installPath, needsSudo)
 	}
 
-	// ── 9. Verify ────────────────────────────────────────────────────────────
+	fmt.Printf("  %s Installed successfully\n", upgSuccess.Render("✔"))
+
+	// ── 9. Summary ───────────────────────────────────────────────────────────
 	newVersion := captureInstalledVersion(installPath)
+	elapsed := time.Since(start).Round(time.Millisecond)
 
 	fmt.Println()
-	fmt.Println("    ╭─ Upgrade Complete ───────────────────────────────────────╮")
+
+	summaryRows := []string{}
 	if oldVersion != "" {
-		upgradeRow("Previous", oldVersion)
+		summaryRows = append(summaryRows, upgStyledRow("Previous", upgDim.Render(oldVersion)))
 	}
-	upgradeRow("Installed", newVersion)
-	upgradeRow("Elapsed", time.Since(start).Round(time.Millisecond).String())
-	fmt.Println("    ╰──────────────────────────────────────────────────────────╯")
+	summaryRows = append(summaryRows,
+		upgStyledRow("Installed", upgHighlight.Render(newVersion)),
+		upgStyledRow("Binary", installPath),
+		upgStyledRow("Elapsed", upgAccent.Render(elapsed.String())),
+	)
+
+	summaryContent := strings.Join(summaryRows, "\n")
+	summaryBox := upgCompleteBorder.Render(summaryContent)
+
+	fmt.Println("  " + upgSuccess.Render("✔ Upgrade Complete"))
+	fmt.Println()
+	for _, line := range strings.Split(summaryBox, "\n") {
+		fmt.Println("  " + line)
+	}
+
+	fmt.Println()
+	fmt.Println("  " + upgDim.Render("Verify:"))
+	fmt.Println("  " + upgAccent.Render("  $ kates version"))
 	fmt.Println()
 
 	return nil
@@ -147,6 +258,11 @@ func runUpgrade() error {
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
+
+// upgStyledRow renders a styled label: value row for the upgrade panels.
+func upgStyledRow(label, value string) string {
+	return upgLabel.Render(label) + " " + value
+}
 
 // resolveSourceDir finds the CLI source directory. Priority:
 //  1. --source flag
@@ -308,10 +424,6 @@ func execOutput(dir, name string, args ...string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return string(out), err
-}
-
-func upgradeRow(label, value string) {
-	fmt.Printf("    │  %-12s %s\n", label, value)
 }
 
 func humanSize(bytes int64) string {
