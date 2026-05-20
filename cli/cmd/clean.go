@@ -88,7 +88,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	coreReleases := []helmRelease{
 		{"jaeger", "jaeger"}, {"jaeger", "kafka"}, {"jaeger", "kates-stack"},
 		{"krafter", "kafka"}, {"krafter", "kates-stack"},
-		{"monitoring", "monitoring"}, {"monitoring", "kafka"},
+		{"monitoring", "monitoring"}, {"monitoring", "kafka"}, {"monitoring", "kates-stack"},
 	}
 	operatorReleases := []helmRelease{
 		{"cert-manager", "cert-manager"},

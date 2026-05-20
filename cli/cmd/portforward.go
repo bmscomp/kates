@@ -99,8 +99,13 @@ func pGreen(s string) string { return cPGreen + s + cPReset }
 // ──────────────────────────────────────────────────────────────────────────────
 
 func runPorts(ctx context.Context) {
+	// ── 0. Clean up existing port forwards to prevent bind conflicts ───────────
+	fmt.Printf("\n    %s Cleaning up existing port-forwards...\n", pDim("🧹"))
+	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
+	time.Sleep(500 * time.Millisecond)
+
 	// ── 1. Discover services ─────────────────────────────────────────────────
-	fmt.Printf("\n    %s Discovering services... %s\n", pDim("⇄"), pDim(""))
+	fmt.Printf("    %s Discovering services...\n", pDim("⇄"))
 
 	discovered := discoverServices()
 
@@ -247,6 +252,7 @@ func runSinglePortForward(ctx context.Context, spec portForwardSpec) {
 		}
 
 		attempt++
+		var stderrBuf strings.Builder
 		cmd := exec.CommandContext(ctx,
 			"kubectl", "port-forward",
 			spec.Resource,
@@ -254,7 +260,7 @@ func runSinglePortForward(ctx context.Context, spec portForwardSpec) {
 			"-n", spec.Namespace,
 		)
 		cmd.Stdout = nil
-		cmd.Stderr = nil
+		cmd.Stderr = &stderrBuf
 
 		if attempt == 1 {
 			fmt.Printf("    %s  %s  localhost:%d\n",
@@ -270,11 +276,23 @@ func runSinglePortForward(ctx context.Context, spec portForwardSpec) {
 				return
 			default:
 			}
-			fmt.Printf("    %s  %s crashed (attempt %d), restarting in 3s...\n",
-				errStyle.Render("✖"),
-				spec.Label,
-				attempt,
-			)
+			errStr := strings.TrimSpace(stderrBuf.String())
+			errStr = strings.ReplaceAll(errStr, "error: unable to listen on any of the requested ports:", "")
+			errStr = strings.TrimSpace(errStr)
+			if errStr != "" {
+				fmt.Printf("    %s  %s crashed: %s (attempt %d), restarting in 3s...\n",
+					errStyle.Render("✖"),
+					spec.Label,
+					errStr,
+					attempt,
+				)
+			} else {
+				fmt.Printf("    %s  %s crashed (attempt %d), restarting in 3s...\n",
+					errStyle.Render("✖"),
+					spec.Label,
+					attempt,
+				)
+			}
 			select {
 			case <-ctx.Done():
 				return

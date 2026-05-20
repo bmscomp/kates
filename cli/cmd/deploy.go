@@ -571,9 +571,14 @@ spec:
 		}
 
 		// ── Poll KafkaUsers with progress ─────────────────────────────────
-		fmt.Println("    - Waiting for all KafkaUsers to be provisioned...")
-		userDeadline := time.Now().Add(5 * time.Minute)
-		for time.Now().Before(userDeadline) {
+		userTimeout := 5 * time.Minute
+		userDeadline := time.Now().Add(userTimeout)
+		start := time.Now()
+
+		fmt.Printf("\n    %s Kafka Users  %s %s\n",
+			dim("╭─"), bold(fmt.Sprintf("(%s timeout)", fmtRemaining(userTimeout))), dim("─────────────────────────────╮"))
+
+		for {
 			out, _ := exec.CommandContext(g2Ctx,
 				"kubectl", "get", "kafkauser",
 				"-n", kafkaNS,
@@ -599,28 +604,70 @@ spec:
 				}
 			}
 
+			elapsed := time.Since(start)
+			remaining := time.Until(userDeadline)
+			if remaining < 0 {
+				remaining = 0
+			}
+
+			isTimedOut := time.Now().After(userDeadline)
+			isCancelled := g2Ctx.Err() != nil
+			failed := isTimedOut || isCancelled
+
 			if total > 0 && ready == total {
-				fmt.Printf("    %s All %d KafkaUser credentials ready\n", blue("✔"), ready)
+				// Final success UI
+				fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+					dim("│"), dim("KafkaUsers  "),
+					renderProgressBar(ready, total, 15, false),
+					blue(fmt.Sprintf("%d/%d", ready, total)),
+					blue("✔ ready"))
+				fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+					dim("│"), dim("Timeout     "),
+					renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, false),
+					blue(fmtElapsed(int(elapsed.Seconds()))), blue(fmtElapsed(int(userTimeout.Seconds()))))
+				fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
+				fmt.Printf("    %s All %d KafkaUser credentials ready  %s %s\n\n",
+					green("✔"), dim("elapsed"), bold(fmtElapsed(int(elapsed.Seconds()))))
 				break
 			}
 
-			remaining := time.Until(userDeadline).Round(time.Second)
+			// Render active progress
+			userStatus := "⏳ provisioning"
 			if len(pending) > 0 {
-				fmt.Printf("    %s  KafkaUsers %s%d/%d%s ready  %s  %s%s%s\n",
-					cDim+"│"+cReset,
-					cBlue, ready, total, cReset,
-					dim(remaining.String()+" left"),
-					cRed, strings.Join(pending, ", "), cReset)
+				userStatus = fmt.Sprintf("⏳ wait: %s", strings.Join(pending, ", "))
 			}
 
-			if time.Now().After(userDeadline) {
+			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+				dim("│"), dim("KafkaUsers  "),
+				renderProgressBar(ready, total, 15, failed),
+				fmt.Sprintf("%d/%d", ready, total),
+				dim(userStatus))
+
+			fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+				dim("│"), dim("Timeout     "),
+				renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, failed),
+				fmtElapsed(int(elapsed.Seconds())), fmtElapsed(int(userTimeout.Seconds())))
+			fmt.Printf("    %s\n", dim("│"))
+
+			if isTimedOut {
+				// Show final failed state
+				fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+					dim("│"), dim("KafkaUsers  "),
+					renderProgressBar(ready, total, 15, true),
+					red(fmt.Sprintf("%d/%d", ready, total)),
+					red("✖ timed out"))
+				fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+					dim("│"), dim("Timeout     "),
+					renderProgressBar(int(userTimeout.Seconds()), int(userTimeout.Seconds()), 15, true),
+					red(fmtElapsed(int(userTimeout.Seconds()))), red(fmtElapsed(int(userTimeout.Seconds()))))
+				fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
 				break
 			}
 
 			select {
 			case <-g2Ctx.Done():
 				return g2Ctx.Err()
-			case <-time.After(10 * time.Second):
+			case <-time.After(6 * time.Second):
 			}
 		}
 

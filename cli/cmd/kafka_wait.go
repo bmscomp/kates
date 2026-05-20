@@ -99,15 +99,39 @@ func pollKafkaPods(ctx context.Context, namespace string) kafkaPodStatus {
 	return s
 }
 
-// colorProgressBar returns a 10-char Unicode block bar with colors:
-//   - filled blocks in blue, empty blocks in dim red.
-func colorProgressBar(running, total int) string {
-	const width = 10
-	if total == 0 {
-		return red(strings.Repeat("░", width))
+// ── Progress Bar & Display Helpers ──────────────────────────────────────────
+
+const (
+	charFilled   = "▰"
+	charUnfilled = "▱"
+)
+
+// renderProgressBar returns a customizable width Unicode block bar with adaptive colors:
+//   - When not failed, filled blocks are in blue, empty blocks in dim gray.
+//   - When failed, the entire bar is shown in red.
+func renderProgressBar(running, total int, width int, failed bool) string {
+	if total <= 0 {
+		if failed {
+			return red(strings.Repeat(charFilled, width))
+		}
+		return dim(strings.Repeat(charUnfilled, width))
 	}
 	filled := (running * width) / total
-	return blue(strings.Repeat("█", filled)) + red(strings.Repeat("░", width-filled))
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if failed {
+		return red(strings.Repeat(charFilled, filled) + strings.Repeat(charUnfilled, width-filled))
+	}
+	return blue(strings.Repeat(charFilled, filled)) + dim(strings.Repeat(charUnfilled, width-filled))
+}
+
+// colorProgressBar is a backward-compatible wrapper for renderProgressBar.
+func colorProgressBar(running, total int) string {
+	return renderProgressBar(running, total, 15, false)
 }
 
 // fmtElapsed formats seconds as "0:00".
@@ -152,6 +176,7 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 	poll := 6 * time.Second
 	elapsed := 0
 	hintShown := false
+	totalSecs := int(timeout.Seconds())
 
 	fmt.Printf("\n    %s Kafka Cluster  %s %s\n",
 		dim("╭─"), bold(fmt.Sprintf("(%s timeout)", fmtRemaining(timeout))), dim("─────────────────────────╮"))
@@ -184,18 +209,26 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 		allBrokersUp := pods.brokerTotal > 0 && pods.brokerRunning == pods.brokerTotal
 		allCtrlUp := pods.ctrlTotal > 0 && pods.ctrlRunning == pods.ctrlTotal
 
+		isTimedOut := time.Now().After(deadline)
+		isCancelled := ctx.Err() != nil
+		failed := isTimedOut || isCancelled
+
 		if crReady && allBrokersUp && allCtrlUp {
 			// Final success block
 			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
 				dim("│"), dim("Brokers     "),
-				colorProgressBar(pods.brokerRunning, pods.brokerTotal),
+				renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, false),
 				blue(fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal)),
 				blue("✔ running"))
 			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
 				dim("│"), dim("Controllers "),
-				colorProgressBar(pods.ctrlRunning, pods.ctrlTotal),
+				renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, false),
 				blue(fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal)),
 				blue("✔ running"))
+			fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+				dim("│"), dim("Timeout     "),
+				renderProgressBar(totalSecs, totalSecs, 15, false),
+				blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs)))
 			fmt.Printf("    %s  %s  %s\n", dim("│"), dim("Entity Op   "), eoIcon)
 			fmt.Printf("    %s  %s  %s\n", dim("│"), dim("CR status   "), blue("✔ Ready=True"))
 			fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
@@ -206,20 +239,26 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 
 		// ── 5. Progress block ──────────────────────────────────────────────────
 		remaining := time.Until(deadline)
+		if remaining < 0 {
+			remaining = 0
+		}
+		
 		fmt.Printf("    %s  %s  [%s]  %s  %s\n",
 			dim("│"), dim("Brokers     "),
-			colorProgressBar(pods.brokerRunning, pods.brokerTotal),
+			renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, failed),
 			fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal),
 			podPhaseLabel(pods.brokerRunning, pods.brokerTotal))
 		fmt.Printf("    %s  %s  [%s]  %s  %s\n",
 			dim("│"), dim("Controllers "),
-			colorProgressBar(pods.ctrlRunning, pods.ctrlTotal),
+			renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, failed),
 			fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal),
 			podPhaseLabel(pods.ctrlRunning, pods.ctrlTotal))
-		fmt.Printf("    %s  %s  %s          %s %s  %s %s\n",
-			dim("│"), dim("Entity Op   "), eoIcon,
-			dim("elapsed"), fmtElapsed(elapsed),
-			dim("remaining"), fmtRemaining(remaining))
+		fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+			dim("│"), dim("Timeout     "),
+			renderProgressBar(elapsed, totalSecs, 15, failed),
+			fmtElapsed(elapsed), fmtElapsed(totalSecs))
+		fmt.Printf("    %s  %s  %s\n",
+			dim("│"), dim("Entity Op   "), eoIcon)
 		fmt.Printf("    %s\n", dim("│"))
 
 		// ── 6. Pending pods hint (once, after 30 s) ────────────────────────────
@@ -230,8 +269,55 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 			fmt.Printf("    %s\n", dim("│"))
 		}
 
+		// ── 6b. Early exit on unrecoverable storage errors ────────────────────
+		if elapsed > 30 && len(pods.pendingPods) > 0 {
+			evOut, _ := exec.CommandContext(ctx,
+				"kubectl", "get", "events", "-n", namespace,
+				"--field-selector=reason=FailedScheduling",
+				"--no-headers", "-o", "custom-columns=MSG:.message",
+			).Output()
+			if strings.Contains(string(evOut), "unbound immediate PersistentVolumeClaims") {
+				// Show final failed state
+				fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+					dim("│"), dim("Brokers     "),
+					renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, true),
+					red(fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal)),
+					red("✖ failed"))
+				fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+					dim("│"), dim("Controllers "),
+					renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, true),
+					red(fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal)),
+					red("✖ failed"))
+				fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+					dim("│"), dim("Timeout     "),
+					renderProgressBar(elapsed, totalSecs, 15, true),
+					red(fmtElapsed(elapsed)), red(fmtElapsed(totalSecs)))
+				fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
+				return fmt.Errorf(
+					"pods stuck Pending: PVCs unbound (StorageClass likely using Immediate mode — check kind_storage.go)\n" +
+					"Fix: kubectl delete pvc -n %s --all && kubectl delete kafka/krafter -n %s --ignore-not-found",
+					namespace, namespace,
+				)
+			}
+		}
+
 		// ── 7. Timeout ─────────────────────────────────────────────────────────
 		if time.Now().After(deadline) {
+			// Show final failed state
+			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+				dim("│"), dim("Brokers     "),
+				renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, true),
+				red(fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal)),
+				red("✖ timed out"))
+			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+				dim("│"), dim("Controllers "),
+				renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, true),
+				red(fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal)),
+				red("✖ timed out"))
+			fmt.Printf("    %s  %s  [%s]  %s / %s\n",
+				dim("│"), dim("Timeout     "),
+				renderProgressBar(totalSecs, totalSecs, 15, true),
+				red(fmtElapsed(totalSecs)), red(fmtElapsed(totalSecs)))
 			fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
 			return fmt.Errorf("%s kafka not ready after %s (brokers:%d/%d controllers:%d/%d pending:%d)",
 				red("✖"),
