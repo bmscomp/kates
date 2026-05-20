@@ -249,6 +249,7 @@ type BudgetReport struct {
 	NeedCPU, NeedMem     int
 	TotalCPU, TotalMem   int
 	Sufficient           bool
+	RecommendedProfile   string
 }
 
 type CapacityBudget struct {
@@ -306,6 +307,21 @@ type SecretCreationAudit struct {
 	PolicyName       string
 }
 
+type CertExpirationInfo struct {
+	SecretName string
+	Subject    string
+	ExpiryDate string
+	DaysLeft   int
+}
+
+type SecurityAudit struct {
+	PSALabelEnforced       string // "restricted", "baseline", "privileged" or "none"
+	KyvernoEnforced        bool
+	PermissionsOk          bool
+	ExpiringCerts          []CertExpirationInfo
+	HasExcessivePrivileges bool
+}
+
 type DetectReport struct {
 	Context          string
 	Server           string
@@ -329,6 +345,7 @@ type DetectReport struct {
 	Capacity         CapacityBudget
 	Verdict          Verdict
 	SecretAudit      SecretCreationAudit
+	Security         SecurityAudit
 }
 
 // ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────

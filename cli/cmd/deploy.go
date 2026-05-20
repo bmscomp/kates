@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,6 +52,7 @@ var (
 	deployWithCertManager    bool
 	deployWithKyverno        bool
 	deployWithSecretManager  bool
+	deployWithStrimzi        bool
 	deployInteractive        bool
 	deployVerbose            bool
 	deployPortForward        bool
@@ -71,6 +73,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithCertManager, "with-cert-manager", true, "Deploy Cert-Manager for TLS certificate management")
 	deployCmd.Flags().BoolVar(&deployWithKyverno, "with-kyverno", false, "Deploy Kyverno for cluster policy enforcement")
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
+	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
@@ -109,6 +112,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Title("Select Additional Components").
 					Description("Use space to toggle, enter to confirm").
 					Options(
+						huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
 						huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
 						huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
 						huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
@@ -147,9 +151,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		deployWithMonitoring = false
 		deployWithCertManager = false
 		deployWithKyverno = false
+		deployWithStrimzi = false
 
 		for _, c := range components {
 			switch c {
+			case "strimzi": deployWithStrimzi = true
 			case "chaos": deployWithChaos = true
 			case "monitoring": deployWithMonitoring = true
 			case "cert-manager": deployWithCertManager = true
@@ -173,6 +179,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// 2. Component Selection
 	PrintPhaseHeader(2, "Component Selection")
+	if deployWithStrimzi {
+		PrintPhaseSuccess("Strimzi Operator")
+	}
 	if deployWithSchemaRegistry != "none" {
 		PrintPhaseSuccess(fmt.Sprintf("Schema Registry: %s", deployWithSchemaRegistry))
 	}
@@ -292,23 +301,25 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	g, gCtx := errgroup.WithContext(ctx)
 	
 	// Deploy Strimzi Operator
-	g.Go(func() error {
-		if isHelmReleaseDeployedFn(gCtx, "strimzi-operator", "strimzi-operator") {
-			fmt.Println("⏭️  Strimzi Operator already deployed. Skipping.")
-			return nil
-		}
-		fmt.Println("\n🚀 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
-		// Create namespace properly
-		runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
+	if deployWithStrimzi {
+		g.Go(func() error {
+			if isHelmReleaseDeployedFn(gCtx, "strimzi-operator", "strimzi-operator") {
+				fmt.Println("⏭️  Strimzi Operator already deployed. Skipping.")
+				return nil
+			}
+			fmt.Println("\n🚀 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
+			// Create namespace properly
+			runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
 kind: Namespace
 metadata:
   name: strimzi-operator`)
-		err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator", "--set", "watchAnyNamespace=true", "--set", "replicas=1", "--timeout", "5m", "--wait")
-		if err != nil { return err }
-		
-		fmt.Println("    - Waiting for Strimzi CRDs to be established...")
-		return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established", "crd", "kafkas.kafka.strimzi.io", "--timeout=60s")
-	})
+			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator", "--set", "watchAnyNamespace=true", "--set", "replicas=1", "--timeout", "5m", "--wait")
+			if err != nil { return err }
+			
+			fmt.Println("    - Waiting for Strimzi CRDs to be established...")
+			return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established", "crd", "kafkas.kafka.strimzi.io", "--timeout=60s")
+		})
+	}
 	
 	// Deploy Cert-Manager
 	if deployWithCertManager {
@@ -793,8 +804,9 @@ data:
 	// ---------------------------------------------------------
 	// Deployment Summary Dashboard
 	// ---------------------------------------------------------
-	entries := []DeploySummaryEntry{
-		{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"},
+	var entries []DeploySummaryEntry
+	if deployWithStrimzi {
+		entries = append(entries, DeploySummaryEntry{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
 	}
 	if deployWithCertManager {
 		entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
@@ -816,11 +828,41 @@ data:
 
 	RenderDeployDashboard(ctx, entries, time.Since(deployStartTime))
 
+	// Automatically sync API key from deployed cluster to active context
+	updateActiveContextAPIKey(ctx, appNS)
+
 	if deployPortForward {
 		RunPortForwards(ctx, kafkaNS, appNS, jaegerNS)
 	}
 
 	return nil
+}
+
+func updateActiveContextAPIKey(ctx context.Context, appNS string) {
+	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}").Output()
+	if err != nil {
+		return
+	}
+	encoded := strings.TrimSpace(string(out))
+	if encoded == "" {
+		return
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+		apiKey := strings.TrimSpace(string(decoded))
+		if apiKey != "" {
+			cfg := loadConfig()
+			ctxName := cfg.CurrentContext
+			if contextFlag != "" {
+				ctxName = contextFlag
+			}
+			if active, ok := cfg.Contexts[ctxName]; ok {
+				active.APIKey = apiKey
+				cfg.Contexts[ctxName] = active
+				_ = saveConfig(cfg)
+				fmt.Printf("    ✓ Automatically synced API Key to context %q: %s****\n\n", ctxName, apiKey[:4])
+			}
+		}
+	}
 }
 
 // Helpers

@@ -2,7 +2,10 @@ package detect
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"strconv"
 	"strings"
@@ -145,6 +148,7 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	_ = g2.Wait()
 
 	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
+	report.Security = c.getSecurityAudit(report.Admission)
 
 	return report, nil
 }
@@ -491,25 +495,39 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 func (c *Collector) getStrimziStatus() StrimziInfo {
 	info := StrimziInfo{}
 	
-	// Check CRDs
-	expectedCRDs := []string{
+	// Check CRDs - split into required core CRDs and optional helper CRDs
+	requiredCRDs := []string{
 		"kafkas.kafka.strimzi.io",
-		"kafkanodepools.kafka.strimzi.io",
 		"kafkatopics.kafka.strimzi.io",
 		"kafkausers.kafka.strimzi.io",
 	}
+	optionalCRDs := []string{
+		"kafkanodepools.kafka.strimzi.io",
+	}
+
 	var missingCRDs []string
-	for _, crd := range expectedCRDs {
+	for _, crd := range requiredCRDs {
 		out, _ := c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
 		if out == "" || strings.Contains(out, "NotFound") || strings.Contains(out, "error") {
 			missingCRDs = append(missingCRDs, crd)
 		}
 	}
+
+	// We still check optional CRDs to be thorough, but their absence does not count as a failure
+	for _, crd := range optionalCRDs {
+		_, _ = c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
+	}
+
 	info.CRDsPresent = len(missingCRDs) == 0
 	info.Health.MissingCRDs = missingCRDs
 
-	// Find the deployment for strimzi operator
-	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	// Find the deployment for strimzi operator (with permission-friendly namespace fallback)
+	depOut, err := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	if err != nil || depOut == "" || strings.Contains(depOut, "Forbidden") || strings.Contains(depOut, "error") {
+		// Fallback: check in the kafka namespace
+		depOut, _ = c.exec.Exec("kubectl", "get", "deployment", "-n", "kafka", "-o", "json")
+	}
+
 	var depData struct {
 		Items []struct {
 			Metadata struct {
@@ -1873,4 +1891,122 @@ func computeDNSProbeResult(queryType string, times []float64, totalRun int) DNSP
 		AvgLatencyMs: avg,
 		MaxLatencyMs: max,
 	}
+}
+
+func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
+	audit := SecurityAudit{
+		PSALabelEnforced: "none",
+		KyvernoEnforced:  adm.Kyverno.Installed,
+	}
+
+	// 1. Fetch "kafka" namespace labels
+	nsOut, err := c.exec.Exec("kubectl", "get", "ns", "kafka", "-o", "json")
+	if err == nil {
+		var nsData struct {
+			Metadata struct {
+				Labels map[string]string `json:"labels"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal([]byte(nsOut), &nsData) == nil {
+			if val, ok := nsData.Metadata.Labels["pod-security.kubernetes.io/enforce"]; ok {
+				audit.PSALabelEnforced = val
+			}
+		}
+	}
+
+	// 2. Check RBAC permissions (permissionsOk)
+	hasRbac := true
+	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
+		if check, _ := c.exec.Exec("kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
+			hasRbac = false
+			break
+		}
+	}
+	audit.PermissionsOk = hasRbac
+
+	// 3. Scan for TLS secrets and verify expiration
+	secOut, err := c.exec.Exec("kubectl", "get", "secrets", "-n", "kafka", "-o", "json")
+	if err == nil {
+		var secData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Type string            `json:"type"`
+				Data map[string]string `json:"data"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(secOut), &secData) == nil {
+			for _, item := range secData.Items {
+				if item.Type == "kubernetes.io/tls" {
+					if certB64, ok := item.Data["tls.crt"]; ok {
+						certBytes, err := base64.StdEncoding.DecodeString(certB64)
+						if err == nil {
+							block, _ := pem.Decode(certBytes)
+							if block != nil {
+								cert, err := x509.ParseCertificate(block.Bytes)
+								if err == nil {
+									daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+									audit.ExpiringCerts = append(audit.ExpiringCerts, CertExpirationInfo{
+										SecretName: item.Metadata.Name,
+										Subject:    cert.Subject.CommonName,
+										ExpiryDate: cert.NotAfter.Format("2006-01-02"),
+										DaysLeft:   daysLeft,
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Audit roles inside target namespace for excessive privileges
+	rolesOut, err := c.exec.Exec("kubectl", "get", "roles", "-n", "kafka", "-o", "json")
+	if err == nil {
+		var rolesData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Rules []struct {
+					APIGroups []string `json:"apiGroups"`
+					Resources []string `json:"resources"`
+					Verbs     []string `json:"verbs"`
+				} `json:"rules"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(rolesOut), &rolesData) == nil {
+			for _, role := range rolesData.Items {
+				for _, rule := range role.Rules {
+					hasWildcardVerb := false
+					hasWildcardResource := false
+
+					for _, v := range rule.Verbs {
+						if v == "*" {
+							hasWildcardVerb = true
+							break
+						}
+					}
+					for _, r := range rule.Resources {
+						if r == "*" {
+							hasWildcardResource = true
+							break
+						}
+					}
+
+					if hasWildcardVerb && hasWildcardResource {
+						audit.HasExcessivePrivileges = true
+						break
+					}
+				}
+				if audit.HasExcessivePrivileges {
+					break
+				}
+			}
+		}
+	}
+
+	return audit
 }

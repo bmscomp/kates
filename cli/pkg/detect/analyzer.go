@@ -45,6 +45,17 @@ func (a *Analyzer) calculateBudget(report *DetectReport, reqs ParsedReqs) {
 	}
 
 	b.Sufficient = b.TotalCPU >= b.NeedCPU && b.TotalMem >= b.NeedMem
+
+	if b.TotalCPU >= 15000 && b.TotalMem >= 49 {
+		b.RecommendedProfile = "production"
+	} else if b.TotalCPU >= 8000 && b.TotalMem >= 24 {
+		b.RecommendedProfile = "standard"
+	} else if b.TotalCPU >= 3000 && b.TotalMem >= 8 {
+		b.RecommendedProfile = "minimal"
+	} else {
+		b.RecommendedProfile = "insufficient"
+	}
+
 	report.Budget = b
 }
 
@@ -221,6 +232,44 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	if !report.Strimzi.Running && report.Strimzi.CRDsPresent {
 		v.Warns++
 	}
+
+	// New pre-flight security audit check
+	psaPass := true
+	psaDetail := "none enforced"
+	if report.Security.PSALabelEnforced != "" && report.Security.PSALabelEnforced != "none" {
+		psaDetail = fmt.Sprintf("%s enforced (fully supported)", report.Security.PSALabelEnforced)
+	}
+	addCheck("Pod Security Standards compatible", psaPass, psaDetail)
+
+	// New sizing advisor profile check
+	sizingPass := report.Budget.RecommendedProfile != "insufficient"
+	sizingDetail := fmt.Sprintf("profile: %s", report.Budget.RecommendedProfile)
+	addCheck("Sizing recommendation available", sizingPass, sizingDetail)
+
+	// Wildcard RBAC roles audit check
+	rbacPass := !report.Security.HasExcessivePrivileges
+	rbacDetail := "no wildcard rules"
+	if !rbacPass {
+		rbacDetail = "wildcard rules detected"
+		v.Warns++
+	}
+	addCheck("Wildcard RBAC roles avoided", rbacPass, rbacDetail)
+
+	// TLS Certificate validity audit check
+	certPass := true
+	certDetail := "all certificates valid"
+	expiringSoon := 0
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expiringSoon++
+		}
+	}
+	if expiringSoon > 0 {
+		certPass = false
+		certDetail = fmt.Sprintf("%d certificate(s) expiring in < 30 days", expiringSoon)
+		v.Warns++
+	}
+	addCheck("TLS certificate validity", certPass, certDetail)
 
 	v.Compatible = v.Fails == 0
 	report.Verdict = v

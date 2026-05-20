@@ -128,7 +128,33 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 	}
 
 	// Admission
-	p("## Admission Controllers")
+	p("## Admission Controllers & Security")
+	p("")
+	p("- **Pod Security Admission (PSA) Label:** `%s`", report.Security.PSALabelEnforced)
+	p("- **Kyverno Installed:** %t", report.Security.KyvernoEnforced)
+	p("- **Permissions Verification:** %t", report.Security.PermissionsOk)
+	if report.Security.HasExcessivePrivileges {
+		p("- **Wildcard RBAC Audits:** ⚠️ Wildcard '*' permissions detected in Roles!")
+	} else {
+		p("- **Wildcard RBAC Audits:** ✅ No wildcard rules (secure)")
+	}
+
+	expAlerts := 0
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expAlerts++
+		}
+	}
+	if expAlerts > 0 {
+		p("- **TLS Certificate Expiration:** ⚠️ %d certificate(s) expiring within 30 days", expAlerts)
+		for _, c := range report.Security.ExpiringCerts {
+			if c.DaysLeft < 30 {
+				p("  - Secret `%s` (%s) expires in %d days (%s)", c.SecretName, c.Subject, c.DaysLeft, c.ExpiryDate)
+			}
+		}
+	} else {
+		p("- **TLS Certificate Expiration:** ✅ All certificates valid")
+	}
 	p("")
 	if report.Admission.Kyverno.Installed {
 		p("- **Kyverno:** ✅ Running in `%s` (v%s)", report.Admission.Kyverno.Namespace, report.Admission.Kyverno.Version)
@@ -353,6 +379,22 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 			p("")
 		}
 	}
+
+	// Sizing Profile Recommendation
+	p("## Sizing Profile Recommendation")
+	p("")
+	p("- **Recommended Profile:** `%s`", strings.ToUpper(report.Budget.RecommendedProfile))
+	switch report.Budget.RecommendedProfile {
+	case "production":
+		p("- **Description:** Suitable for highly-available, high-throughput production workloads. Spans across at least 3 AZs with dedicated resources.")
+	case "standard":
+		p("- **Description:** Suitable for development, testing, or standard production environments with moderate throughput.")
+	case "minimal":
+		p("- **Description:** Suitable for lightweight/sandbox environments with minimal resource footprint.")
+	default:
+		p("- **Description:** Insufficient resources to recommend a standard profile. Scale up your cluster to at least Minimal levels (>= 3 CPU cores, >= 8Gi Memory).")
+	}
+	p("")
 
 	// Resource Budget
 	p("## Resource Budget")

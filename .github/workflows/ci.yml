@@ -146,4 +146,7 @@ jobs:
 
       - name: Run Go tests
         working-directory: cli
-        run: go test ./... -v -race -count=1
+        run: go test -p 1 ./... -v -race -count=1
+        env:
+          GOMEMLIMIT: 2GiB
+          GOGC: 50

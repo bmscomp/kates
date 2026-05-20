@@ -27,15 +27,24 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 			DocURL: "https://strimzi.io/docs/operators/latest/deploying",
 		})
 	} else if !report.Strimzi.Running {
+		var cmds []string
+		if report.Strimzi.Namespace == "" {
+			cmds = []string{
+				"kates deploy          # deploy the operator",
+				"make kafka-deploy     # alternative helm deployment",
+			}
+		} else {
+			cmds = []string{
+				"kubectl get deployment -A | grep strimzi  # check operator status",
+				"kubectl rollout restart deployment/strimzi-cluster-operator -n " + report.Strimzi.Namespace,
+			}
+		}
 		hints = append(hints, Remediation{
 			Check:    "Strimzi operator running",
 			Severity: "warning",
 			Summary:  "Strimzi CRDs are present but the operator is not running",
-			Commands: []string{
-				"kubectl get deployment -A | grep strimzi  # check operator status",
-				"kubectl rollout restart deployment/strimzi-cluster-operator -n " + report.Strimzi.Namespace,
-			},
-			DocURL: "https://strimzi.io/docs/operators/latest/deploying",
+			Commands: cmds,
+			DocURL:   "https://strimzi.io/docs/operators/latest/deploying",
 		})
 	}
 
@@ -165,6 +174,72 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 			Commands: []string{
 				"helm upgrade kafka-cluster charts/kafka-cluster -n kafka -f values.yaml --timeout 10m --wait",
 			},
+		})
+	}
+
+	// Sizing recommendation failure
+	for _, c := range report.Verdict.Checks {
+		if c.Description == "Sizing recommendation available" && !c.Status {
+			hints = append(hints, Remediation{
+				Check:    "Sizing recommendation available",
+				Severity: "critical",
+				Summary:  "Cluster does not meet the minimum sizing profile requirements (Minimal: >= 3 CPU cores, >= 8Gi Memory)",
+				Commands: []string{
+					"# Check available node resources:",
+					"kubectl top nodes",
+					"kubectl describe nodes | grep -A 5 -E 'Allocatable'",
+				},
+			})
+			break
+		}
+	}
+
+	// PSA security standards details
+	if report.Security.PSALabelEnforced == "restricted" {
+		hints = append(hints, Remediation{
+			Check:    "Pod Security Standards compatible",
+			Severity: "info",
+			Summary:  "Restricted Pod Security Standard is enforced on namespace 'kafka' — Kates is fully compatible",
+			Commands: []string{
+				"# Verify pod security admission label configuration:",
+				"kubectl get ns kafka -o jsonpath='{.metadata.labels}'",
+			},
+		})
+	}
+
+	// Wildcard RBAC roles remediation hints
+	if report.Security.HasExcessivePrivileges {
+		hints = append(hints, Remediation{
+			Check:    "Wildcard RBAC roles avoided",
+			Severity: "warning",
+			Summary:  "Namespace Roles contain wildcard '*' resources or verbs which violates least privilege security standards",
+			Commands: []string{
+				"# Inspect Roles with wildcard permissions in the namespace:",
+				"kubectl get roles -n kafka -o json | jq '.items[] | select(.rules[].verbs[] == \"*\" or .rules[].resources[] == \"*\") | .metadata.name'",
+				"# Scope down rules to explicit apiGroups, resources, and verbs in values.yaml",
+			},
+		})
+	}
+
+	// TLS certificate expiration remediation hints
+	expiringCount := 0
+	var certCmds []string
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expiringCount++
+			certCmds = append(certCmds, fmt.Sprintf("# Cert '%s' (%s) expires in %d days", c.SecretName, c.Subject, c.DaysLeft))
+		}
+	}
+	if expiringCount > 0 {
+		certCmds = append(certCmds,
+			"# Renew expiring TLS secrets or trigger certificate rotation:",
+			"kubectl delete secret <secret-name> -n kafka  # if managed by cert-manager to force renewal",
+		)
+		hints = append(hints, Remediation{
+			Check:    "TLS certificate validity",
+			Severity: "warning",
+			Summary:  fmt.Sprintf("%d TLS certificate(s) in namespace 'kafka' are expiring within 30 days", expiringCount),
+			Commands: certCmds,
 		})
 	}
 

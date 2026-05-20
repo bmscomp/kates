@@ -86,6 +86,16 @@ func TestCleanCommand_SingleTopology(t *testing.T) {
 	if foundIsolatedHelmUninstall {
 		t.Error("Did not expect isolated-topology releases to be uninstalled")
 	}
+
+	foundCRDDelete := false
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "kubectl delete crd kafkas.kafka.strimzi.io") {
+			foundCRDDelete = true
+		}
+	}
+	if !foundCRDDelete {
+		t.Error("Expected kafkas.kafka.strimzi.io CRD to be deleted")
+	}
 }
 
 func TestCleanCommand_IsolatedTopology(t *testing.T) {
