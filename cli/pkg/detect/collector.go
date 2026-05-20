@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -99,7 +100,25 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	})
 
 	err := g.Wait()
-	return report, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Concurrent execution of Stage 2 probes
+	g2, ctx2 := errgroup.WithContext(ctx)
+	g2.Go(func() error {
+		report.SecretAudit = c.checkSecretCreation(ctx2)
+		return nil
+	})
+	g2.Go(func() error {
+		report.Network.LatencyMatrix = c.getAZLatency(ctx2, report.Nodes)
+		return nil
+	})
+	_ = g2.Wait()
+
+	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
+
+	return report, nil
 }
 
 func (c *Collector) getContext() string {
@@ -443,11 +462,27 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 
 func (c *Collector) getStrimziStatus() StrimziInfo {
 	info := StrimziInfo{}
-	crdOut, _ := c.exec.Exec("kubectl", "get", "crd", "kafkas.kafka.strimzi.io")
-	info.CRDsPresent = !strings.Contains(crdOut, "NotFound")
+	
+	// Check CRDs
+	expectedCRDs := []string{
+		"kafkas.kafka.strimzi.io",
+		"kafkanodepools.kafka.strimzi.io",
+		"kafkatopics.kafka.strimzi.io",
+		"kafkausers.kafka.strimzi.io",
+	}
+	var missingCRDs []string
+	for _, crd := range expectedCRDs {
+		out, _ := c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
+		if out == "" || strings.Contains(out, "NotFound") || strings.Contains(out, "error") {
+			missingCRDs = append(missingCRDs, crd)
+		}
+	}
+	info.CRDsPresent = len(missingCRDs) == 0
+	info.Health.MissingCRDs = missingCRDs
 
+	// Find the deployment for strimzi operator
 	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
-	var data struct {
+	var depData struct {
 		Items []struct {
 			Metadata struct {
 				Name      string `json:"name"`
@@ -468,9 +503,9 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 			} `json:"status"`
 		} `json:"items"`
 	}
-	
-	if json.Unmarshal([]byte(depOut), &data) == nil {
-		for _, dep := range data.Items {
+
+	if json.Unmarshal([]byte(depOut), &depData) == nil {
+		for _, dep := range depData.Items {
 			if strings.Contains(dep.Metadata.Name, "strimzi-cluster-operator") {
 				info.Running = true
 				info.Namespace = dep.Metadata.Namespace
@@ -483,7 +518,357 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 			}
 		}
 	}
+
+	// Auditing Strimzi Operator pods and warning logs
+	if info.Running {
+		podOut, _ := c.exec.Exec("kubectl", "get", "pods", "-n", info.Namespace, "-l", "name=strimzi-cluster-operator", "-o", "json")
+		var podData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Status struct {
+					Phase string `json:"phase"`
+					ContainerStatuses []struct {
+						Ready bool `json:"ready"`
+					} `json:"containerStatuses"`
+				} `json:"status"`
+			} `json:"items"`
+		}
+
+		if json.Unmarshal([]byte(podOut), &podData) == nil && len(podData.Items) > 0 {
+			pod := podData.Items[0]
+			podReady := pod.Status.Phase == "Running"
+			for _, cs := range pod.Status.ContainerStatuses {
+				if !cs.Ready {
+					podReady = false
+				}
+			}
+			info.Health.PodsReady = podReady
+
+			// Set health status based on replicas and CRDs
+			if info.ReadyReplicas == info.TotalReplicas && podReady && info.CRDsPresent {
+				info.Health.Status = "Healthy"
+			} else if info.ReadyReplicas > 0 {
+				info.Health.Status = "Degraded"
+			} else {
+				info.Health.Status = "Unhealthy"
+			}
+
+			// Fetch logs
+			logs, _ := c.exec.Exec("kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100")
+			var warningLogs []string
+			for _, line := range strings.Split(logs, "\n") {
+				lineLower := strings.ToLower(line)
+				if strings.Contains(lineLower, "warn") || strings.Contains(lineLower, "error") || 
+					strings.Contains(lineLower, "exception") || strings.Contains(lineLower, "denied") || 
+					strings.Contains(lineLower, "leader election") || strings.Contains(lineLower, "permission") {
+					warningLogs = append(warningLogs, line)
+					if len(warningLogs) >= 10 {
+						break
+					}
+				}
+			}
+			info.Health.WarningLogs = warningLogs
+		} else {
+			info.Health.Status = "Unhealthy"
+		}
+	} else {
+		info.Health.Status = "Unhealthy"
+	}
+
 	return info
+}
+
+func (c *Collector) checkKafkaCapacity(report *DetectReport, reservePct float64) string {
+	var totalCPU, totalMem int
+	for _, n := range report.Nodes {
+		totalCPU += n.CPU
+		totalMem += n.MemoryGi
+	}
+	usedCPU := report.Workload.TotalCPURequests
+	usedMem := report.Workload.TotalMemRequests
+	
+	availCPU := totalCPU - usedCPU
+	availMem := totalMem - usedMem
+	if availCPU < 0 { availCPU = 0 }
+	if availMem < 0 { availMem = 0 }
+	
+	usable := 1.0 - reservePct
+	kafkaCPU := int(float64(availCPU) * usable)
+	kafkaMem := int(float64(availMem) * usable)
+	
+	// A 3-broker, 3-controller standard cluster requires minimum of:
+	// 3 * 250m = 750m CPU for brokers, 3 * 250m = 750m CPU for controllers = 1500m CPU
+	// 3 * 1Gi = 3Gi Mem for brokers, 3 * 1Gi = 3Gi Mem for controllers = 6Gi Mem
+	reqCPU := 1500
+	reqMem := 6
+	
+	if kafkaCPU >= reqCPU && kafkaMem >= reqMem {
+		return "Sufficient"
+	}
+	
+	var missingCPU, missingMem int
+	if kafkaCPU < reqCPU {
+		missingCPU = reqCPU - kafkaCPU
+	}
+	if kafkaMem < reqMem {
+		missingMem = reqMem - kafkaMem
+	}
+	
+	var deficits []string
+	if missingCPU > 0 {
+		deficits = append(deficits, fmt.Sprintf("%dm CPU", missingCPU))
+	}
+	if missingMem > 0 {
+		deficits = append(deficits, fmt.Sprintf("%dGi Memory", missingMem))
+	}
+	
+	return "Insufficient: missing " + strings.Join(deficits, ", ")
+}
+
+func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit {
+	audit := SecretCreationAudit{}
+	
+	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	ns := fmt.Sprintf("kates-detect-secrets-%s", runID)
+	
+	// Create namespace
+	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
+	if err != nil {
+		audit.NamespaceCreated = false
+		audit.SecretCreated = false
+		audit.ErrorMsg = fmt.Sprintf("failed to create namespace: %v", err)
+		return audit
+	}
+	audit.NamespaceCreated = true
+	
+	// Defer cleanup of namespace (double-layer cleanup)
+	defer func() {
+		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+	}()
+	
+	// Label the namespace
+	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
+	
+	// Try to create secret and capture combined stdout/stderr using sh -c
+	cmdStr := fmt.Sprintf("kubectl create secret generic kates-detect-test-sec --from-literal=test-key=test-val -n %s 2>&1", ns)
+	out, err := c.exec.Exec("sh", "-c", cmdStr)
+	
+	if err != nil {
+		audit.SecretCreated = false
+		audit.ErrorMsg = out
+		
+		// Parse blockage reason
+		outLower := strings.ToLower(out)
+		if strings.Contains(outLower, "kyverno") || strings.Contains(outLower, "policy") {
+			audit.BlockedByPolicy = true
+			if idx := strings.Index(outLower, "policy "); idx != -1 {
+				pName := out[idx+7:]
+				if spaceIdx := strings.IndexAny(pName, " .:\n\t"); spaceIdx != -1 {
+					audit.PolicyName = pName[:spaceIdx]
+				} else {
+					audit.PolicyName = pName
+				}
+			} else if idx := strings.Index(outLower, "clusterpolicy "); idx != -1 {
+				pName := out[idx+14:]
+				if spaceIdx := strings.IndexAny(pName, " .:\n\t"); spaceIdx != -1 {
+					audit.PolicyName = pName[:spaceIdx]
+				} else {
+					audit.PolicyName = pName
+				}
+			}
+		} else if strings.Contains(outLower, "gatekeeper") || strings.Contains(outLower, "denied by") {
+			audit.BlockedByPolicy = true
+			if idx := strings.Index(outLower, "denied by "); idx != -1 {
+				pName := out[idx+10:]
+				if endIdx := strings.IndexAny(pName, " ]\n\t"); endIdx != -1 {
+					audit.PolicyName = pName[:endIdx]
+				} else {
+					audit.PolicyName = pName
+				}
+			}
+		}
+	} else {
+		audit.SecretCreated = true
+	}
+	
+	return audit
+}
+
+func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []LatencyResult {
+	var results []LatencyResult
+	
+	// Group nodes by zone
+	zoneToNode := make(map[string]string)
+	for _, n := range nodes {
+		if n.Zone == "" || n.Zone == "-" {
+			continue
+		}
+		// Pick the first node in each zone
+		if _, exists := zoneToNode[n.Zone]; !exists {
+			zoneToNode[n.Zone] = n.Name
+		}
+	}
+	
+	// If zero or only one zone is detected, cross-AZ latency doesn't apply
+	if len(zoneToNode) <= 1 {
+		return nil
+	}
+	
+	// Session run ID and namespace
+	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	ns := fmt.Sprintf("kates-detect-latency-%s", runID)
+	
+	// Create namespace
+	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
+	if err != nil {
+		return nil
+	}
+	
+	// Defer cleanup of namespace (double-layer cleanup)
+	defer func() {
+		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+	}()
+	
+	// Label the namespace
+	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
+	
+	// Spin up a prober pod in each zone
+	g, ctx2 := errgroup.WithContext(ctx)
+	for zone, nodeName := range zoneToNode {
+		zone := zone
+		nodeName := nodeName
+		podName := fmt.Sprintf("prober-%s", sanitizeDNSLabel(zone))
+		
+		g.Go(func() error {
+			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"busybox","image":"busybox:1.37","command":["sleep","3600"]}]}}`, nodeName)
+			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image=busybox:1.37", "-n", ns,
+				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
+				"--overrides", overrides, "--restart=Never")
+			return runErr
+		})
+	}
+	
+	if err := g.Wait(); err != nil {
+		// Failed to create one or more pods
+		return nil
+	}
+	
+	// Wait for all pods to be ready
+	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
+	if waitErr != nil {
+		// Pods failed to become ready (e.g. image pull backoff)
+		return nil
+	}
+	
+	// Fetch Pod IPs
+	podListOut, err := c.exec.Exec("kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
+	if err != nil {
+		return nil
+	}
+	
+	var podData struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Status struct {
+				PodIP string `json:"podIP"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(podListOut), &podData) != nil {
+		return nil
+	}
+	
+	podIPs := make(map[string]string)
+	for _, item := range podData.Items {
+		podIPs[item.Metadata.Name] = item.Status.PodIP
+	}
+	
+	// Ping sweeps between all pairs of zones (matrix size: len(zoneToNode) x len(zoneToNode))
+	resultsChan := make(chan LatencyResult, len(zoneToNode)*len(zoneToNode))
+	pingGroup, _ := errgroup.WithContext(ctx2)
+	
+	for srcZone := range zoneToNode {
+		for dstZone := range zoneToNode {
+			srcZone := srcZone
+			dstZone := dstZone
+			srcPod := fmt.Sprintf("prober-%s", sanitizeDNSLabel(srcZone))
+			dstPod := fmt.Sprintf("prober-%s", sanitizeDNSLabel(dstZone))
+			dstIP := podIPs[dstPod]
+			
+			if dstIP == "" {
+				continue
+			}
+			
+			pingGroup.Go(func() error {
+				pingOut, pingErr := c.exec.Exec("kubectl", "exec", "-n", ns, srcPod, "--", "ping", "-c", "5", dstIP)
+				minMs, avgMs, maxMs, jitterMs, ok := parsePingOutput(pingOut)
+				
+				resultsChan <- LatencyResult{
+					SourceZone: srcZone,
+					TargetZone: dstZone,
+					MinMs:      minMs,
+					MaxMs:      maxMs,
+					AvgMs:      avgMs,
+					JitterMs:   jitterMs,
+					Success:    ok && pingErr == nil,
+				}
+				return nil
+			})
+		}
+	}
+	
+	_ = pingGroup.Wait()
+	close(resultsChan)
+	
+	for res := range resultsChan {
+		results = append(results, res)
+	}
+	
+	return results
+}
+
+func sanitizeDNSLabel(s string) string {
+	s = strings.ToLower(s)
+	var sb strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('-')
+		}
+	}
+	res := sb.String()
+	for strings.Contains(res, "--") {
+		res = strings.ReplaceAll(res, "--", "-")
+	}
+	return strings.Trim(res, "-")
+}
+
+func parsePingOutput(pingOut string) (min, avg, max, jitter float64, success bool) {
+	for _, line := range strings.Split(pingOut, "\n") {
+		if strings.Contains(line, "min/avg/max") {
+			parts := strings.Split(line, "=")
+			if len(parts) >= 2 {
+				valPart := strings.TrimSpace(parts[1])
+				valPart = strings.TrimSuffix(valPart, " ms")
+				subParts := strings.Split(valPart, "/")
+				if len(subParts) >= 3 {
+					min, _ = strconv.ParseFloat(subParts[0], 64)
+					avg, _ = strconv.ParseFloat(subParts[1], 64)
+					max, _ = strconv.ParseFloat(subParts[2], 64)
+					success = true
+					if len(subParts) >= 4 {
+						jitter, _ = strconv.ParseFloat(subParts[3], 64)
+					}
+				}
+			}
+		}
+	}
+	return
 }
 
 func (c *Collector) getMonitoringStatus() MonitoringInfo {
