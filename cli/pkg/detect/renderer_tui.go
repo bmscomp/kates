@@ -16,6 +16,108 @@ func RenderTUI(report *DetectReport) {
 	output.KeyValue("Kubernetes:", report.K8sVersion)
 	output.KeyValue("Helm:", report.HelmVersion)
 
+	// ── Deployment Prerequisites ────────────────────────────────────────────
+	output.Header("Deployment Prerequisites")
+
+	// Strimzi Operator requirement
+	fmt.Println()
+	output.KeyValue("  Strimzi Operator", "")
+	if report.Strimzi.Running {
+		output.Success(fmt.Sprintf("  Operator: running in namespace '%s'", report.Strimzi.Namespace))
+		output.Success(fmt.Sprintf("  Image: %s", report.Strimzi.Image))
+		output.Success(fmt.Sprintf("  Replicas: %d/%d ready", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas))
+		if report.Strimzi.CRDsPresent {
+			output.Success("  CRDs: Kafka, KafkaNodePool, KafkaTopic, KafkaUser installed")
+		}
+	} else if report.Strimzi.CRDsPresent {
+		output.Warn("  CRDs present but operator is NOT running")
+		output.Hint(fmt.Sprintf("  Restart: kubectl rollout restart deployment/strimzi-cluster-operator -n %s", report.Strimzi.Namespace))
+	} else {
+		output.Warn("  Strimzi not installed — will be deployed by kates deploy")
+		output.Hint("  Manual install: helm install strimzi oci://quay.io/strimzi-helm/strimzi-kafka-operator -n strimzi-operator --create-namespace")
+	}
+
+	// StorageClass requirement
+	fmt.Println()
+	output.KeyValue("  StorageClass", "")
+	if len(report.Storage) > 0 {
+		output.Success(fmt.Sprintf("  StorageClasses: %d available", len(report.Storage)))
+
+		// Check for default StorageClass
+		hasDefault := false
+		for _, sc := range report.Storage {
+			if sc.IsDefault {
+				hasDefault = true
+				output.Success(fmt.Sprintf("  Default class: %s (%s)", sc.Name, sc.Provisioner))
+				break
+			}
+		}
+		if !hasDefault {
+			output.Warn("  No default StorageClass — specify storageClass in values.yaml")
+		}
+
+		// Check volume expansion support
+		expandable := 0
+		for _, sc := range report.Storage {
+			if sc.AllowExpansion {
+				expandable++
+			}
+		}
+		if expandable > 0 {
+			output.Success(fmt.Sprintf("  Volume expansion: %d/%d classes support online resize", expandable, len(report.Storage)))
+		} else {
+			output.Warn("  Volume expansion: none support online resize — PVC growth will require recreation")
+		}
+
+		// Per-zone StorageClass coverage
+		if len(report.Zones) >= 3 {
+			zoneClasses := 0
+			for _, sc := range report.Storage {
+				for _, z := range report.Zones {
+					if strings.Contains(strings.ToLower(sc.Name), strings.ToLower(z.Name)) {
+						zoneClasses++
+						break
+					}
+				}
+			}
+			if zoneClasses >= len(report.Zones) {
+				output.Success(fmt.Sprintf("  Zone coverage: %d/%d zones have dedicated StorageClasses", zoneClasses, len(report.Zones)))
+			} else if zoneClasses > 0 {
+				output.Warn(fmt.Sprintf("  Zone coverage: only %d/%d zones have dedicated StorageClasses", zoneClasses, len(report.Zones)))
+			}
+		}
+
+		// CSI drivers
+		if len(report.StorageAudit.CSIDrivers) > 0 {
+			output.Success(fmt.Sprintf("  CSI drivers: %s", strings.Join(report.StorageAudit.CSIDrivers, ", ")))
+		}
+	} else {
+		output.Error("  No StorageClasses found — Kafka PVCs will fail to bind")
+		output.Hint("  Create StorageClasses: kubectl apply -f config/storage/")
+	}
+
+	// Prerequisites summary
+	fmt.Println()
+	prereqOK := true
+	prereqWarns := 0
+	if !report.Strimzi.Running && !report.Strimzi.CRDsPresent {
+		prereqWarns++
+	}
+	if !report.Strimzi.Running && report.Strimzi.CRDsPresent {
+		prereqOK = false
+	}
+	if len(report.Storage) == 0 {
+		prereqOK = false
+	}
+
+	if prereqOK && prereqWarns == 0 {
+		output.Success("Prerequisites: all satisfied ✓")
+	} else if prereqOK {
+		output.Warn(fmt.Sprintf("Prerequisites: satisfied with %d auto-installable component(s)", prereqWarns))
+	} else {
+		output.Error("Prerequisites: NOT satisfied — resolve issues above before deploying")
+	}
+
 	output.Header("Node Details")
 	if len(report.Nodes) > 0 {
 		headers := []string{"NAME", "ZONE", "ROLES", "CPU", "MEMORY", "RUNTIME", "KUBELET"}
