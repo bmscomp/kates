@@ -8,6 +8,24 @@ import (
 	"time"
 )
 
+// ── ANSI color helpers ───────────────────────────────────────────────────────
+const (
+	cReset = "\033[0m"
+	cBlue  = "\033[38;5;39m"  // bright blue — OK / success
+	cRed   = "\033[38;5;196m" // bright red  — KO / error / pending
+	cAmber = "\033[38;5;208m" // amber       — warning / hint
+	cDim   = "\033[38;5;243m" // dim gray    — borders / labels
+	cBold  = "\033[1m"
+	cGreen = "\033[38;5;48m"  // green — final success banner
+)
+
+func blue(s string) string  { return cBlue + s + cReset }
+func red(s string) string   { return cRed + s + cReset }
+func amber(s string) string { return cAmber + s + cReset }
+func dim(s string) string   { return cDim + s + cReset }
+func green(s string) string { return cGreen + s + cReset }
+func bold(s string) string  { return cBold + s + cReset }
+
 // kafkaPodStatus holds Running/Total counts for broker and controller pods.
 type kafkaPodStatus struct {
 	brokerRunning int
@@ -66,16 +84,15 @@ func pollKafkaPods(ctx context.Context, namespace string) kafkaPodStatus {
 	return s
 }
 
-// progressBar returns a 10-char Unicode block bar, e.g. "████████░░".
-func progressBar(running, total int) string {
+// colorProgressBar returns a 10-char Unicode block bar with colors:
+//   - filled blocks in blue, empty blocks in dim red.
+func colorProgressBar(running, total int) string {
 	const width = 10
-	const full = "█"
-	const empty = "░"
 	if total == 0 {
-		return strings.Repeat(empty, width)
+		return red(strings.Repeat("░", width))
 	}
 	filled := (running * width) / total
-	return strings.Repeat(full, filled) + strings.Repeat(empty, width-filled)
+	return blue(strings.Repeat("█", filled)) + red(strings.Repeat("░", width-filled))
 }
 
 // fmtElapsed formats seconds as "0:00".
@@ -97,16 +114,16 @@ func fmtRemaining(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", m, s)
 }
 
-// podPhaseLabel returns a short phase badge for display.
+// podPhaseLabel returns a colored phase badge.
 func podPhaseLabel(running, total int) string {
 	if total == 0 {
-		return "⏳ waiting"
+		return red("⏳ waiting")
 	}
 	if running == total {
-		return "✅ running"
+		return blue("✔ running")
 	}
 	pending := total - running
-	return fmt.Sprintf("⚠  %d pending", pending)
+	return red(fmt.Sprintf("✖ %d pending", pending))
 }
 
 // waitKafkaReady polls the Kafka CR condition AND actual pod phases every 6 s.
@@ -121,7 +138,8 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 	elapsed := 0
 	hintShown := false
 
-	fmt.Printf("\n    ╭─ Kafka Cluster  (%s timeout) ─────────────────────────╮\n", fmtRemaining(timeout))
+	fmt.Printf("\n    %s Kafka Cluster  %s %s\n",
+		dim("╭─"), bold(fmt.Sprintf("(%s timeout)", fmtRemaining(timeout))), dim("─────────────────────────╮"))
 
 	for {
 		// ── 1. Kafka CR condition ──────────────────────────────────────────────
@@ -142,9 +160,9 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 			"-o", "custom-columns=PHASE:.status.phase",
 		).Output()
 		eoReady := strings.Contains(string(eoOut), "Running")
-		eoIcon := "⏳"
+		eoIcon := red("⏳")
 		if eoReady {
-			eoIcon = "✅"
+			eoIcon = blue("✔")
 		}
 
 		// ── 4. Evaluate ────────────────────────────────────────────────────────
@@ -153,45 +171,55 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 
 		if crReady && allBrokersUp && allCtrlUp {
 			// Final success block
-			fmt.Printf("    │  Brokers      [%s]  %d/%d  ✅ running\n",
-				progressBar(pods.brokerRunning, pods.brokerTotal),
-				pods.brokerRunning, pods.brokerTotal)
-			fmt.Printf("    │  Controllers  [%s]  %d/%d  ✅ running\n",
-				progressBar(pods.ctrlRunning, pods.ctrlTotal),
-				pods.ctrlRunning, pods.ctrlTotal)
-			fmt.Printf("    │  Entity Op    %s\n", eoIcon)
-			fmt.Printf("    │  CR status    ✅ Ready=True\n")
-			fmt.Printf("    ╰──────────────────────────────────────────────────────────╯\n")
-			fmt.Printf("    ✅ Kafka ready  elapsed %s\n\n", fmtElapsed(elapsed))
+			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+				dim("│"), dim("Brokers     "),
+				colorProgressBar(pods.brokerRunning, pods.brokerTotal),
+				blue(fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal)),
+				blue("✔ running"))
+			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+				dim("│"), dim("Controllers "),
+				colorProgressBar(pods.ctrlRunning, pods.ctrlTotal),
+				blue(fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal)),
+				blue("✔ running"))
+			fmt.Printf("    %s  %s  %s\n", dim("│"), dim("Entity Op   "), eoIcon)
+			fmt.Printf("    %s  %s  %s\n", dim("│"), dim("CR status   "), blue("✔ Ready=True"))
+			fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
+			fmt.Printf("    %s Kafka ready  %s %s\n\n",
+				green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed)))
 			return nil
 		}
 
-		// ── 5. Progress block (overwrites previous with blank prefix trick) ────
+		// ── 5. Progress block ──────────────────────────────────────────────────
 		remaining := time.Until(deadline)
-		fmt.Printf("    │  Brokers      [%s]  %d/%d  %s\n",
-			progressBar(pods.brokerRunning, pods.brokerTotal),
-			pods.brokerRunning, pods.brokerTotal,
+		fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+			dim("│"), dim("Brokers     "),
+			colorProgressBar(pods.brokerRunning, pods.brokerTotal),
+			fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal),
 			podPhaseLabel(pods.brokerRunning, pods.brokerTotal))
-		fmt.Printf("    │  Controllers  [%s]  %d/%d  %s\n",
-			progressBar(pods.ctrlRunning, pods.ctrlTotal),
-			pods.ctrlRunning, pods.ctrlTotal,
+		fmt.Printf("    %s  %s  [%s]  %s  %s\n",
+			dim("│"), dim("Controllers "),
+			colorProgressBar(pods.ctrlRunning, pods.ctrlTotal),
+			fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal),
 			podPhaseLabel(pods.ctrlRunning, pods.ctrlTotal))
-		fmt.Printf("    │  Entity Op    %s          %s elapsed  %s left\n",
-			eoIcon, fmtElapsed(elapsed), fmtRemaining(remaining))
-		fmt.Printf("    │\n")
+		fmt.Printf("    %s  %s  %s          %s %s  %s %s\n",
+			dim("│"), dim("Entity Op   "), eoIcon,
+			dim("elapsed"), fmtElapsed(elapsed),
+			dim("remaining"), fmtRemaining(remaining))
+		fmt.Printf("    %s\n", dim("│"))
 
 		// ── 6. Pending pods hint (once, after 30 s) ────────────────────────────
 		if !hintShown && elapsed >= 30 && len(pods.pendingPods) > 0 {
 			hintShown = true
-			fmt.Printf("    │  ⚠  %d pod(s) Pending — diagnose with:\n", len(pods.pendingPods))
-			fmt.Printf("    │     kubectl describe pod %s -n %s\n", pods.pendingPods[0], namespace)
-			fmt.Printf("    │\n")
+			fmt.Printf("    %s  %s\n", dim("│"), amber(fmt.Sprintf("⚠  %d pod(s) Pending — diagnose with:", len(pods.pendingPods))))
+			fmt.Printf("    %s     %s\n", dim("│"), dim(fmt.Sprintf("kubectl describe pod %s -n %s", pods.pendingPods[0], namespace)))
+			fmt.Printf("    %s\n", dim("│"))
 		}
 
 		// ── 7. Timeout ─────────────────────────────────────────────────────────
 		if time.Now().After(deadline) {
-			fmt.Printf("    ╰──────────────────────────────────────────────────────────╯\n")
-			return fmt.Errorf("kafka not ready after %s (brokers:%d/%d controllers:%d/%d pending:%d)",
+			fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
+			return fmt.Errorf("%s kafka not ready after %s (brokers:%d/%d controllers:%d/%d pending:%d)",
+				red("✖"),
 				timeout,
 				pods.brokerRunning, pods.brokerTotal,
 				pods.ctrlRunning, pods.ctrlTotal,
@@ -201,7 +229,7 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 		// ── 8. Wait ────────────────────────────────────────────────────────────
 		select {
 		case <-ctx.Done():
-			fmt.Printf("    ╰──────────────────────────────────────────────────────────╯\n")
+			fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
 			return ctx.Err()
 		case <-time.After(poll):
 			elapsed += int(poll.Seconds())

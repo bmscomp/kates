@@ -40,7 +40,8 @@ var (
 
 var (
 	// Success indicates a passing / healthy / completed state.
-	Success = adaptive("#16A34A", "#4ADE80")
+	// Blue (not green) — aligns with the kates blue=OK / red=KO palette.
+	Success = adaptive("#2563EB", "#60A5FA")
 
 	// Warning indicates a degraded or cautionary state.
 	Warning = adaptive("#C2410C", "#FB923C")

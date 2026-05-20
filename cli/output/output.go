@@ -225,7 +225,7 @@ func Table(headers []string, rows [][]string) {
 				rendered = SuccessStyle.Bold(true).Render(pure) + padded[len(pure):]
 			case "RUNNING", "PENDING":
 				rendered = AccentStyle.Bold(true).Render(pure) + padded[len(pure):]
-			case "FAILED", "ERROR", "DOWN", "DISABLED":
+			case "FAILED", "ERROR", "DOWN", "DISABLED", "FAIL":
 				rendered = ErrorStyle.Render(pure) + padded[len(pure):]
 			case "DEGRADED", "STOPPING":
 				rendered = WarningStyle.Render(pure) + padded[len(pure):]
