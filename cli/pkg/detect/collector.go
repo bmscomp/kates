@@ -13,11 +13,19 @@ import (
 
 // Collector fetches raw data from the cluster using the provided executor.
 type Collector struct {
-	exec CommandExecutor
+	exec         CommandExecutor
+	BenchStorage bool
+	OnProgress   func(string)
 }
 
 func NewCollector(exec CommandExecutor) *Collector {
 	return &Collector{exec: exec}
+}
+
+func (c *Collector) progress(msg string) {
+	if c.OnProgress != nil {
+		c.OnProgress(msg)
+	}
 }
 
 // Preflight checks if required binaries are installed and cluster is reachable.
@@ -114,6 +122,12 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		report.Network.LatencyMatrix = c.getAZLatency(ctx2, report.Nodes)
 		return nil
 	})
+	if c.BenchStorage && len(report.Nodes) > 0 {
+		g2.Go(func() error {
+			c.runLiveStorageBench(ctx2, report)
+			return nil
+		})
+	}
 	_ = g2.Wait()
 
 	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
@@ -720,6 +734,7 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
 	ns := fmt.Sprintf("kates-detect-latency-%s", runID)
 	
+	c.progress("Auditing inter-AZ network latency: setting up temporary namespace...")
 	// Create namespace
 	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
 	if err != nil {
@@ -728,11 +743,14 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 	
 	// Defer cleanup of namespace (double-layer cleanup)
 	defer func() {
+		c.progress("Auditing inter-AZ network latency: cleaning up resources...")
 		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
 	
 	// Label the namespace
 	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
+	
+	c.progress("Auditing inter-AZ network latency: creating prober pods...")
 	
 	// Spin up a prober pod in each zone
 	g, ctx2 := errgroup.WithContext(ctx)
@@ -755,6 +773,7 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 		return nil
 	}
 	
+	c.progress("Auditing inter-AZ network latency: waiting for prober pods to be Ready...")
 	// Wait for all pods to be ready
 	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
 	if waitErr != nil {
@@ -787,6 +806,7 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 		podIPs[item.Metadata.Name] = item.Status.PodIP
 	}
 	
+	c.progress("Auditing inter-AZ network latency: running cross-AZ ping sweeps...")
 	// Ping sweeps between all pairs of zones (matrix size: len(zoneToNode) x len(zoneToNode))
 	resultsChan := make(chan LatencyResult, len(zoneToNode)*len(zoneToNode))
 	pingGroup, _ := errgroup.WithContext(ctx2)
@@ -1350,4 +1370,145 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 	}
 
 	return wp
+}
+
+type fioOutput struct {
+	Jobs []struct {
+		Read struct {
+			IOPS float64 `json:"iops"`
+			Lat  struct {
+				Mean float64 `json:"mean"`
+			} `json:"lat_ns"`
+		} `json:"read"`
+		Write struct {
+			IOPS float64 `json:"iops"`
+			Lat  struct {
+				Mean float64 `json:"mean"`
+			} `json:"lat_ns"`
+		} `json:"write"`
+	} `json:"jobs"`
+}
+
+func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectReport) {
+	if len(report.Nodes) == 0 || len(report.Storage) == 0 {
+		return
+	}
+
+	// Pick target node (first node)
+	nodeName := report.Nodes[0].Name
+
+	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
+	ns := fmt.Sprintf("kates-detect-bench-%s", runID)
+
+	c.progress("Storage benchmarking: setting up temporary namespace...")
+	// Create namespace
+	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
+	if err != nil {
+		return
+	}
+
+	// Setup double-layer cleanup
+	defer func() {
+		c.progress("Storage benchmarking: cleaning up ephemeral resources...")
+		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+	}()
+
+	// Label the namespace
+	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
+
+	// Benchmark each StorageClass sequentially to avoid disk self-contention
+	for idx, sc := range report.Storage {
+		scName := sc.Name
+		pvcName := fmt.Sprintf("kates-detect-bench-pvc-%d", idx)
+		podName := fmt.Sprintf("kates-detect-bench-pod-%d", idx)
+
+		c.progress(fmt.Sprintf("Storage benchmarking: provisioning ephemeral PVC on StorageClass %q...", scName))
+		// 1. Create Dynamic PVC inside temporary namespace
+		pvcManifest := fmt.Sprintf(`cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: %s
+  resources:
+    requests:
+      storage: 1Gi
+EOF`, pvcName, ns, scName)
+
+		_, pvcErr := c.exec.Exec("sh", "-c", pvcManifest)
+		if pvcErr != nil {
+			c.progress(fmt.Sprintf("Storage benchmarking: failed to provision PVC on %q, falling back to heuristics...", scName))
+			continue // fallback remains unchanged
+		}
+
+		c.progress(fmt.Sprintf("Storage benchmarking: launching ephemeral FIO pod for %q...", scName))
+		// 2. Create the Benchmark Pod pinned to target node to resolve WaitForFirstConsumer immediately
+		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":"%s"}}],"containers":[{"name":"fio-bench","image":"alpine:3.19","volumeMounts":[{"name":"bench-volume","mountPath":"/data"}],"command":["sh","-c","apk add --no-cache fio && fio --name=bench-test --filename=/data/testfile --size=64M --rw=randrw --rwmixwrite=50 --bs=4k --direct=1 --numjobs=1 --time_based --runtime=15 --group_reporting --output-format=json"]}]}}`, nodeName, pvcName)
+
+		_, runErr := c.exec.Exec("kubectl", "run", podName,
+			"--image=alpine:3.19", "-n", ns,
+			"--overrides", podOverrides,
+			"--restart=Never")
+		if runErr != nil {
+			c.progress(fmt.Sprintf("Storage benchmarking: failed to launch pod on %q, falling back to heuristics...", scName))
+			continue // fallback remains unchanged
+		}
+
+		c.progress(fmt.Sprintf("Storage benchmarking: waiting for FIO pod to be ready on %q...", scName))
+		// 3. Wait for the pod to become Ready (timeout 60s)
+		_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=60s")
+		if waitErr != nil {
+			c.progress(fmt.Sprintf("Storage benchmarking: pod failed to become ready on %q, falling back to heuristics...", scName))
+			continue // fallback remains unchanged
+		}
+
+		c.progress(fmt.Sprintf("Storage benchmarking: executing 15s random I/O benchmark on %q...", scName))
+		// 4. Stream and capture logs (kubectl logs -f blocks until pod exits)
+		logOut, logErr := c.exec.Exec("kubectl", "logs", "-f", podName, "-n", ns)
+		if logErr != nil {
+			c.progress(fmt.Sprintf("Storage benchmarking: failed to capture benchmark logs on %q, falling back to heuristics...", scName))
+			continue // fallback remains unchanged
+		}
+
+		// 5. Parse the FIO JSON block from logs
+		firstBrace := strings.Index(logOut, "{")
+		if firstBrace == -1 {
+			c.progress(fmt.Sprintf("Storage benchmarking: FIO output format unexpected on %q, falling back to heuristics...", scName))
+			continue // fallback remains unchanged
+		}
+		jsonStr := logOut[firstBrace:]
+
+		var fioData fioOutput
+		if jsonUnmarshalErr := json.Unmarshal([]byte(jsonStr), &fioData); jsonUnmarshalErr != nil {
+			c.progress(fmt.Sprintf("Storage benchmarking: FIO JSON parse error on %q, falling back to heuristics...", scName))
+			continue // fallback remains unchanged
+		}
+
+		if len(fioData.Jobs) > 0 {
+			job := fioData.Jobs[0]
+			totalIOPS := int(job.Read.IOPS + job.Write.IOPS)
+			
+			var meanLat float64
+			if job.Read.IOPS > 0 && job.Write.IOPS > 0 {
+				meanLat = (job.Read.Lat.Mean + job.Write.Lat.Mean) / 2.0 / 1000000.0
+			} else if job.Read.IOPS > 0 {
+				meanLat = job.Read.Lat.Mean / 1000000.0
+			} else if job.Write.IOPS > 0 {
+				meanLat = job.Write.Lat.Mean / 1000000.0
+			}
+
+			if totalIOPS > 0 {
+				c.progress(fmt.Sprintf("Storage benchmarking: successfully measured %q (%d IOPS, %.2fms latency)!", scName, totalIOPS, meanLat))
+				// Overwrite with actual dynamic measurements
+				report.Storage[idx].ProbedIOPS = totalIOPS
+				report.Storage[idx].ProbeLatencyMs = meanLat
+			} else {
+				c.progress(fmt.Sprintf("Storage benchmarking: measured 0 IOPS on %q, falling back to heuristics...", scName))
+			}
+		}
+	}
 }

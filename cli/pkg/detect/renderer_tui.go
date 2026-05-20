@@ -97,7 +97,19 @@ func RenderTUI(report *DetectReport) {
 
 	output.Header("Storage Compatibility")
 	if len(report.Storage) > 0 {
+		hasBenchResults := false
+		for _, sc := range report.Storage {
+			if sc.ProbedIOPS > 0 || sc.ProbeLatencyMs > 0 {
+				hasBenchResults = true
+				break
+			}
+		}
+
 		sHeaders := []string{"NAME", "PROVISIONER", "BINDING", "RECLAIM", "DEFAULT", "EXPAND"}
+		if hasBenchResults {
+			sHeaders = append(sHeaders, "PROBED IOPS", "LATENCY")
+		}
+
 		var sRows [][]string
 		for _, sc := range report.Storage {
 			def := "✗"
@@ -108,9 +120,21 @@ func RenderTUI(report *DetectReport) {
 			if sc.AllowExpansion {
 				expand = "✓"
 			}
-			sRows = append(sRows, []string{
+			row := []string{
 				sc.Name, sc.Provisioner, sc.BindingMode, sc.ReclaimPolicy, def, expand,
-			})
+			}
+			if hasBenchResults {
+				iopsStr := "—"
+				latStr := "—"
+				if sc.ProbedIOPS > 0 {
+					iopsStr = strconv.Itoa(sc.ProbedIOPS)
+				}
+				if sc.ProbeLatencyMs > 0 {
+					latStr = fmt.Sprintf("%.2fms", sc.ProbeLatencyMs)
+				}
+				row = append(row, iopsStr, latStr)
+			}
+			sRows = append(sRows, row)
 		}
 		output.Table(sHeaders, sRows)
 		output.Success(fmt.Sprintf("StorageClasses: %d available", len(report.Storage)))
