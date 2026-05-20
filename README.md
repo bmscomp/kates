@@ -44,51 +44,131 @@ The suite comes fully integrated with **OpenTelemetry (OTLP)**. Auto-instrumente
 
 ## Platform Architecture & Kates Backend
 
-Kates is architected as a decoupled, multi-tier system designed for high performance, swappable testing backends, and low latency:
+Kates is architected as an asynchronous, highly decoupled, multi-tier system. The orchestration logic is completely separated from workload generation and fault-injection mechanics. This separation of concerns is achieved through declarative Service Provider Interfaces (SPIs) and reactive communication boundaries.
 
+### Architectural Component Diagram
+
+```mermaid
+graph TD
+    classDef cli fill:#1f6feb,stroke:#58a6ff,stroke-width:2px,color:#fff;
+    classDef core fill:#238636,stroke:#3fb950,stroke-width:2px,color:#fff;
+    classDef spi fill:#8957e5,stroke:#a371f7,stroke-width:2px,color:#fff;
+    classDef ext fill:#d29922,stroke:#f0883e,stroke-width:2px,color:#fff;
+
+    subgraph User Space
+        CLI[Kates CLI Client]:::cli
+        TUI[Interactive TUI Dashboard]:::cli
+    end
+
+    subgraph Kates Backend Engine (Quarkus App)
+        API[JAX-RS REST Resource Layer]:::core
+        GRPC[gRPC Telemetry Service]:::core
+        Orch[Test & Disruption Orchestrators]:::core
+        Intel[Kafka Intelligence Service]:::core
+        Panache[(PostgreSQL / Panache DB)]:::core
+        MPConfig[MicroProfile Config Engine]:::core
+    end
+
+    subgraph Service Provider Interfaces
+        BENCH_SPI{BenchmarkBackend SPI}:::spi
+        CHAOS_SPI{ChaosProvider SPI}:::spi
+    end
+
+    subgraph Concrete Execution Backends
+        NativeEng[Native Loom Workload Engine]:::spi
+        TrogClient[Trogdor Coordinator Adapter]:::spi
+        LitmusEng[LitmusChaos CRD Provider]:::spi
+        DirectK8s[Direct Kubernetes API Provider]:::spi
+    end
+
+    subgraph Infrastructure
+        Kafka[Strimzi Apache Kafka Cluster]:::ext
+        Prom[Prometheus Metrics Server]:::ext
+        Litmus[Litmus Operator]:::ext
+    end
+
+    CLI -->|HTTP/JSON REST| API
+    TUI -->|gRPC Bidirectional Stream| GRPC
+    API --> Orch
+    GRPC --> Orch
+    Orch --> Intel
+    Orch --> Panache
+    Orch --> MPConfig
+
+    Orch --> BENCH_SPI
+    Orch --> CHAOS_SPI
+
+    BENCH_SPI --> NativeEng
+    BENCH_SPI --> TrogClient
+    CHAOS_SPI --> LitmusEng
+    CHAOS_SPI --> DirectK8s
+
+    NativeEng -->|Producer/Consumer clients| Kafka
+    TrogClient -->|REST Client| TrogClient
+    LitmusEng -->|Custom Resources| Litmus
+    DirectK8s -->|Fabric8 API Restarts| Kafka
+    Intel -->|AdminClient Metadata| Kafka
 ```
-  ┌─────────────────────────────────────────────────────────┐
-  │                        Kates CLI                        │
-  │     (Interactive TUI Explorer, Contexts, Audit Tools)   │
-  └───────────────────────────┬─────────────────────────────┘
-                              │ gRPC / REST (HTTP/JSON)
-                              ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │                 Kates Backend Application               │
-  │  (Quarkus 3.32.1 Engine, Loom Virtual Threads, REST/gRPC)│
-  └─────────────┬─────────────────────────────┬─────────────┘
-                │                             │
-  ┌─────────────▼─────────────┐ ┌─────────────▼─────────────┐
-  │   BenchmarkBackend SPI    │ │     ChaosProvider SPI     │
-  ├───────────────────────────┤ ├───────────────────────────┤
-  │ - Native (Virtual Threads)│ │ - LitmusChaos (CRDs)      │
-  │ - Trogdor (Distributed)   │ │ - Kubernetes (Direct API) │
-  └───────────────────────────┘ └───────────────────────────┘
+
+### The Kates Backend Application Internals
+The core backend (`/kates`) is a reactive, containerized Java microservice engineered on the **Quarkus 3.32.1** runtime framework and optimized for **Java 25**.
+* **High-Concurrency Virtual Threads (Project Loom)**: Workload engines rely heavily on Java 25's virtual threads. When executing a native performance test, Kates spawns hundreds of independent producer/consumer loops on lightweight virtual threads mapped dynamically to a minimal set of OS carrier threads. This avoids the high memory footprint and scheduling overhead of platform thread pools, allowing massive throughput simulation locally.
+* **Reactive REST & gRPC Dual Stack**: Standard CRUD administration, configurations, and state polling are serviced via JAX-RS reactive endpoints utilizing Jackson deserialization. Real-time telemetry, terminal sparklines, and the full-screen terminal UI (TUI) are powered by high-throughput, low-latency **gRPC bidirectional streams** (using Quarkus gRPC/Mutiny).
+* **Three-Tier Configuration Resolution**: System parameters follow the Eclipse MicroProfile Config specification. Configurations resolve dynamically through a strict three-tier hierarchy:
+  1. *Request-level Overrides*: Request-level JSON overrides take ultimate priority.
+  2. *Environment Configs*: Kubernetes ConfigMaps mapping to environment variables (e.g. `KATES_TESTS_STRESS_PARTITIONS=12`).
+  3. *Built-in Properties*: `application.properties` and built-in Java `@ConfigProperty` default values.
+* **Persistent Telemetry**: Long-term data integrity verification reports, historic benchmark runs, scheduled cron execution blocks, and security audit grades are stored in a **PostgreSQL** database managed via **Hibernate ORM (Panache)** and versioned via **Flyway** schema migrations.
+
+### Extensible Service Provider Interfaces (SPIs)
+Kates leverages Java Service Provider Interfaces to achieve complete pluggability, allowing engineers to swap underlying performance benchmark engines and chaos tools seamlessly:
+
+#### 1. BenchmarkBackend SPI
+Abstracts how a benchmark is executed. Implementations define submission, status polling, and stop sequences:
+* `NativeKafkaBackend`: Executes workloads in-process using direct, virtual-threaded Java Kafka clients.
+* `TrogdorBackend`: Formats the task into JSON payload structures using a Plain Old Java Object (POJO) translation layer and submits it to Apache Kafka's official `Trogdor` Coordinator via MicroProfile REST Client interfaces.
+
+#### 2. ChaosProvider SPI
+Abstracts how fault scenarios are injected into the cluster:
+* `LitmusChaosProvider`: Connects to the Kubernetes cluster using the Fabric8 client to deploy, monitor, and clean up LitmusChaos `ChaosEngine` Custom Resources.
+* `KubernetesChaosProvider`: Bypasses external operators by executing direct API calls (e.g., namespace pod deletions, replica scaling) for rapid, dependency-free disruptions.
+* `HybridChaosProvider`: Evaluates the capabilities of active operators and dynamically routes the requested disruption to the most efficient provider.
+
+### Intelligent Disruption Pipeline Sequence
+
+The orchestration logic behind Kates correlation tests evaluates resilience dynamically. The sequence below describes a typical chaos-performance correlation test run:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cli as Kates CLI
+    participant Orch as DisruptionOrchestrator
+    participant Guard as SafetyGuard
+    participant Intel as KafkaIntelligenceService
+    participant Chaos as ChaosProvider
+    participant Prom as Prometheus Metrics
+
+    Cli->>Orch: POST /api/resilience (DisruptionPlan)
+    Orch->>Guard: Validate Blast Radius & RBAC (maxAffectedBrokers)
+    Guard-->>Orch: Approved (Dry-Run Match)
+    Orch->>Intel: Query Partition Leader & Replica ISR
+    Intel-->>Orch: Leader Broker ID & Partition Metadata
+    Orch->>Prom: Query Baseline "Before" Telemetry Snapshot
+    Orch->>Orch: Wait steadyStateSec (Establish Benchmark Baseline)
+    Orch->>Chaos: triggerFault(FaultSpec) Asynchronously
+    Note over Orch,Chaos: Fault Injected (e.g. Leader Broker Kill)
+    loop Observation Window (observationWindowSec)
+        Intel->>Intel: Periodically track ISR shrinks/expansions
+        Intel->>Intel: Periodically track consumer offset lag spikes
+    end
+    Orch->>Prom: Query Post-Disruption "After" Telemetry Snapshot
+    Orch->>Orch: Compute Impact Delta & SLA Recovery Times
+    alt SLA Verification Fails or Timeout (requireRecovery = true)
+        Orch->>Guard: Trigger Automated Rollback
+        Guard->>Chaos: cleanup(engineName)
+    end
+    Orch->>Cli: Return DisruptionReport (Grade A-F + Verdicts)
 ```
-
-### The Kates Backend Application
-The Kates backend engine (`/kates`) is a cloud-native Java microservice built on the **Quarkus 3.32.1** framework and optimized for running on **Java 25**.
-* **High-Concurrency Execution**: Utilizes Java 25's **Project Loom virtual threads** to spin up hundreds of concurrent producer/consumer workloads in-process with minimal CPU overhead, making native testing highly efficient.
-* **Unified API Interfaces**: Exposes a reactive **JAX-RS REST API** for standard configurations and context management, alongside a high-performance **gRPC streaming API** to drive the real-time TUI dashboard.
-* **Robust Persistence**: Persists historical test runs, scheduled test configurations, and SLA trends in a **PostgreSQL** database managed via **Hibernate ORM (Panache)** and version-controlled via **Flyway** schema migrations.
-
-### Pluggability via Service Provider Interfaces (SPIs)
-Kates leverages Java's Service Provider Interface (SPI) pattern to decouple the core orchestrator from specific performance or chaos injection engines:
-* **BenchmarkBackend SPI**: Abstracts the workload generator. Implementations include:
-  - `NativeKafkaBackend`: Runs in-process virtual-thread workloads directly using Java Kafka clients.
-  - `TrogdorBackend`: Integrates with Apache Kafka's official `Trogdor` agent/coordinator via REST client mapping.
-* **ChaosProvider SPI**: Abstracts the chaos engine. Implementations include:
-  - `LitmusChaosProvider`: Dispatches and watches complex experiments using Kubernetes Litmus custom resource definitions (CRDs).
-  - `KubernetesChaosProvider`: Interacts directly with the Kubernetes API to perform rapid container restarts and node manipulations.
-  - `NoOpChaosProvider`: Lightweight mock provider for fast offline unit tests.
-
-### Intelligent Disruption Pipeline
-When a resilience test is initiated, the Kates backend drives an automated lifecycle:
-1. **Safety Blast-Radius Check**: The `DisruptionSafetyGuard` ensures the requested chaos plan does not exceed the maximum allowed broker failure count (`maxAffectedBrokers`) and validates Kubernetes RBAC permissions.
-2. **Leader Resolution**: The `KafkaIntelligenceService` dynamically checks the Kafka AdminClient to pinpoint which broker currently leads the target partition.
-3. **Continuous Tracking**: Background threads start tracking topic ISR (In-Sync Replicas) and consumer group lag at sub-second intervals.
-4. **Before/After Metrics Capture**: Integrates with Prometheus to query metrics baseline before the disruption and computes the exact impact delta after chaos injection.
-5. **Auto-Rollback**: On experiment failure or timeout, the safety guard automatically reverses the fault (e.g. scaling back replica counts) to protect the cluster.
 
 ---
 
