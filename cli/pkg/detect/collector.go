@@ -145,6 +145,7 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	_ = g2.Wait()
 
 	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
+	report.Security = c.getSecurityAudit(report.Admission)
 
 	return report, nil
 }
@@ -1887,4 +1888,38 @@ func computeDNSProbeResult(queryType string, times []float64, totalRun int) DNSP
 		AvgLatencyMs: avg,
 		MaxLatencyMs: max,
 	}
+}
+
+func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
+	audit := SecurityAudit{
+		PSALabelEnforced: "none",
+		KyvernoEnforced:  adm.Kyverno.Installed,
+	}
+
+	// 1. Fetch "kafka" namespace labels
+	nsOut, err := c.exec.Exec("kubectl", "get", "ns", "kafka", "-o", "json")
+	if err == nil {
+		var nsData struct {
+			Metadata struct {
+				Labels map[string]string `json:"labels"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal([]byte(nsOut), &nsData) == nil {
+			if val, ok := nsData.Metadata.Labels["pod-security.kubernetes.io/enforce"]; ok {
+				audit.PSALabelEnforced = val
+			}
+		}
+	}
+
+	// 2. Check RBAC permissions (permissionsOk)
+	hasRbac := true
+	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
+		if check, _ := c.exec.Exec("kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
+			hasRbac = false
+			break
+		}
+	}
+	audit.PermissionsOk = hasRbac
+
+	return audit
 }

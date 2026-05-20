@@ -128,7 +128,11 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 	}
 
 	// Admission
-	p("## Admission Controllers")
+	p("## Admission Controllers & Security")
+	p("")
+	p("- **Pod Security Admission (PSA) Label:** `%s`", report.Security.PSALabelEnforced)
+	p("- **Kyverno Installed:** %t", report.Security.KyvernoEnforced)
+	p("- **Permissions Verification:** %t", report.Security.PermissionsOk)
 	p("")
 	if report.Admission.Kyverno.Installed {
 		p("- **Kyverno:** ✅ Running in `%s` (v%s)", report.Admission.Kyverno.Namespace, report.Admission.Kyverno.Version)
@@ -353,6 +357,22 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 			p("")
 		}
 	}
+
+	// Sizing Profile Recommendation
+	p("## Sizing Profile Recommendation")
+	p("")
+	p("- **Recommended Profile:** `%s`", strings.ToUpper(report.Budget.RecommendedProfile))
+	switch report.Budget.RecommendedProfile {
+	case "production":
+		p("- **Description:** Suitable for highly-available, high-throughput production workloads. Spans across at least 3 AZs with dedicated resources.")
+	case "standard":
+		p("- **Description:** Suitable for development, testing, or standard production environments with moderate throughput.")
+	case "minimal":
+		p("- **Description:** Suitable for lightweight/sandbox environments with minimal resource footprint.")
+	default:
+		p("- **Description:** Insufficient resources to recommend a standard profile. Scale up your cluster to at least Minimal levels (>= 3 CPU cores, >= 8Gi Memory).")
+	}
+	p("")
 
 	// Resource Budget
 	p("## Resource Budget")

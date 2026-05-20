@@ -443,8 +443,12 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	}
 
 	// ── Admission Controllers & Secret Audits ────────────────────────────────
-	sectionHeader("Admission Controllers & Secret Audit")
+	sectionHeader("Admission Controllers & Security Audit")
 	pdf.SetFont("Helvetica", "", 9)
+	pdf.SetTextColor(60, 60, 60)
+	pdf.CellFormat(0, 5, fmt.Sprintf("- Pod Security Admission (PSA) Label: %s", report.Security.PSALabelEnforced), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 5, fmt.Sprintf("- Kyverno Enforced: %t", report.Security.KyvernoEnforced), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 5, fmt.Sprintf("- Namespace Management Permissions: %t", report.Security.PermissionsOk), "", 1, "L", false, 0, "")
 	if report.Admission.Kyverno.Installed {
 		pdf.CellFormat(0, 5, fmt.Sprintf("- Kyverno: Running in '%s' (v%s) with %d policies (%d Kafka-relevant)",
 			report.Admission.Kyverno.Namespace, report.Admission.Kyverno.Version,
@@ -580,8 +584,27 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	}
 	pdf.SetFont("Helvetica", "B", 9)
 	pdf.CellFormat(0, 6, "Status: "+sufficientText, "", 1, "L", false, 0, "")
-	pdf.Ln(4)
+	pdf.Ln(2)
 	pdf.SetTextColor(60, 60, 60)
+
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.CellFormat(0, 6, "Sizing Profile Recommendation", "", 1, "L", false, 0, "")
+	pdf.SetFont("Helvetica", "", 9)
+	pdf.CellFormat(0, 5, fmt.Sprintf("- Recommended Sizing Profile: %s", strings.ToUpper(report.Budget.RecommendedProfile)), "", 1, "L", false, 0, "")
+	
+	desc := ""
+	switch report.Budget.RecommendedProfile {
+	case "production":
+		desc = "Resilient, highly available production workload capacity (spans 3 AZs)."
+	case "standard":
+		desc = "Standard capacity, suitable for staging/moderate production."
+	case "minimal":
+		desc = "Minimal capacity, suitable for dev, test, or lightweight sandboxes."
+	default:
+		desc = "Scale cluster capacity to meet at least Minimal sizing requirements."
+	}
+	pdf.CellFormat(0, 5, fmt.Sprintf("- Description: %s", desc), "", 1, "L", false, 0, "")
+	pdf.Ln(4)
 
 	// ── Compatibility Verdict Checks Table ───────────────────────────────────
 	sectionHeader("Compatibility Verdict Checks")
