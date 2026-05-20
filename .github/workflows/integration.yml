@@ -4,11 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "config/**"
-      - "scripts/**"
-      - "charts/**"
       - "cli/**"
+      - "kates/**"
+      - "images.env"
+      - "versions.env"
       - "Makefile"
+      - ".github/workflows/integration.yml"
   workflow_dispatch:
 
 permissions:

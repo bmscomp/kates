@@ -4,17 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - "kates/Dockerfile*"
+      - "kates/**"
       - "cli/**"
-      - "kates/pom.xml"
-      - "kates/src/**"
+      - "images.env"
+      - "versions.env"
+      - ".github/workflows/ci-docker.yml"
   pull_request:
     branches: [main]
     paths:
-      - "kates/Dockerfile*"
+      - "kates/**"
       - "cli/**"
-      - "kates/pom.xml"
-      - "kates/src/**"
+      - "images.env"
+      - "versions.env"
+      - ".github/workflows/ci-docker.yml"
 
 permissions:
   contents: read

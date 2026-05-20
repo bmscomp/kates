@@ -5,14 +5,22 @@ on:
     branches: [main]
     paths:
       - "kates/**"
+      - "cli/**"
       - "charts/kates/**"
       - "config/**"
+      - "images.env"
+      - "versions.env"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
     paths:
       - "kates/**"
+      - "cli/**"
       - "charts/kates/**"
       - "config/**"
+      - "images.env"
+      - "versions.env"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
@@ -22,7 +30,33 @@ env:
   JAVA_VERSION: "25"
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      helm: ${{ steps.filter.outputs.helm }}
+      yaml: ${{ steps.filter.outputs.yaml }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'kates/**'
+              - 'cli/**'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci.yml'
+            helm:
+              - 'charts/kates/**'
+            yaml:
+              - 'config/**'
+
   build-and-test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
@@ -47,6 +81,8 @@ jobs:
 
   helm-lint:
     name: Helm Lint
+    needs: changes
+    if: needs.changes.outputs.helm == 'true' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +102,8 @@ jobs:
 
   yaml-validation:
     name: YAML Validation
+    needs: changes
+    if: needs.changes.outputs.yaml == 'true' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +133,8 @@ jobs:
 
   go-tests:
     name: CLI Tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
