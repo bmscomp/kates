@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -103,8 +101,24 @@ func pGreen(s string) string { return cPGreen + s + cPReset }
 func runPorts(ctx context.Context) {
 	// ── 0. Clean up existing port forwards to prevent bind conflicts ───────────
 	fmt.Printf("\n    %s Cleaning up existing port-forwards...\n", pDim("🧹"))
+
+	myPid := os.Getpid()
+	if out, err := exec.Command("pgrep", "-f", "ports").Output(); err == nil {
+		for _, pidStr := range strings.Fields(string(out)) {
+			var pid int
+			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid != myPid {
+				if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
+					cmdLine := string(cmdOut)
+					if strings.Contains(cmdLine, "kates") {
+						_ = syscall.Kill(pid, syscall.SIGTERM)
+					}
+				}
+			}
+		}
+	}
+
 	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// ── 1. Discover services ─────────────────────────────────────────────────
 	fmt.Printf("    %s Discovering services...\n", pDim("⇄"))
@@ -141,35 +155,70 @@ func runPorts(ctx context.Context) {
 	}
 
 	fmt.Printf("    %s\n", pDim("────────────────────────────────────────────────────────────────"))
-	fmt.Printf("    %s\n\n", pDim("Press Ctrl+C to stop all port-forwards"))
+	// ── 3. Start all forwards in the background ──────────────────────────────
+	fmt.Printf("\n    %s Establishing port-forwards in the background...\n", pBold("⚡"))
 
-	// ── 3. Start all forwards ────────────────────────────────────────────────
-	cancelCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigCh:
-			fmt.Printf("\n    %s Stopping port-forwards...\n", pDim("⏹"))
-			cancel()
-		case <-cancelCtx.Done():
-		}
-	}()
-
-	var wg sync.WaitGroup
 	for _, spec := range specs {
-		spec := spec
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			runSinglePortForward(cancelCtx, spec)
-		}()
+		pfArg := fmt.Sprintf("%d:%d", spec.Local, spec.Remote)
+		cmd := exec.Command("kubectl", "port-forward",
+			spec.Resource,
+			pfArg,
+			"-n", spec.Namespace,
+		)
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err == nil {
+			cmd.Stdout = devNull
+			cmd.Stderr = devNull
+		}
+		cmd.Stdin = nil
+		_ = cmd.Start()
 	}
 
-	wg.Wait()
-	fmt.Printf("    %s All port-forwards stopped\n\n", pDim("⏹"))
+	// Verify reachability
+	fmt.Printf("    %s Verifying connections...\n", pDim("⇄"))
+	time.Sleep(300 * time.Millisecond)
+
+	okStyle := lipgloss.NewStyle().Foreground(theme.Success).Bold(true)
+	errStyle := lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
+
+	allOk := true
+	for _, spec := range specs {
+		addr := fmt.Sprintf("127.0.0.1:%d", spec.Local)
+		success := false
+		for i := 0; i < 15; i++ {
+			if isPortReachable(addr) {
+				success = true
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		if success {
+			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
+				okStyle.Render("✔"),
+				spec.Label,
+				spec.Local,
+				pGreen("[ACTIVE]"),
+			)
+		} else {
+			allOk = false
+			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
+				errStyle.Render("✖"),
+				spec.Label,
+				spec.Local,
+				cPRed+"[FAILED]"+cPReset,
+			)
+		}
+	}
+
+	fmt.Println()
+	if allOk {
+		fmt.Printf("    %s %s\n", okStyle.Render("✓"), pBold("Port forwards established successfully!"))
+		fmt.Printf("      %s\n\n", pDim("They are running in the background. You can continue typing commands in this terminal."))
+	} else {
+		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), pBold("Some port forwards failed to establish."))
+		fmt.Printf("      %s\n\n", pDim("Check if the pods are ready or run 'kates clean' to reset."))
+	}
 }
 
 // discoverServices returns a set of "namespace/service-name" strings for all
@@ -249,72 +298,7 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 	return specs
 }
 
-// runSinglePortForward runs kubectl port-forward with auto-restart.
-func runSinglePortForward(ctx context.Context, spec portForwardSpec) {
-	pfArg := fmt.Sprintf("%d:%d", spec.Local, spec.Remote)
-	attempt := 0
-
-	okStyle := lipgloss.NewStyle().Foreground(theme.Success).Bold(true)
-	errStyle := lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(theme.Muted)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		attempt++
-		var stderrBuf strings.Builder
-		cmd := exec.CommandContext(ctx,
-			"kubectl", "port-forward",
-			spec.Resource,
-			pfArg,
-			"-n", spec.Namespace,
-		)
-		cmd.Stdout = nil
-		cmd.Stderr = &stderrBuf
-
-		if attempt == 1 {
-			fmt.Printf("    %s  %s  localhost:%d\n",
-				okStyle.Render("▶"),
-				dimStyle.Render(spec.Label),
-				spec.Local,
-			)
-		}
-
-		if err := cmd.Run(); err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			errStr := strings.TrimSpace(stderrBuf.String())
-			errStr = strings.ReplaceAll(errStr, "error: unable to listen on any of the requested ports:", "")
-			errStr = strings.TrimSpace(errStr)
-			if errStr != "" {
-				fmt.Printf("    %s  %s crashed: %s (attempt %d), restarting in 3s...\n",
-					errStyle.Render("✖"),
-					spec.Label,
-					errStr,
-					attempt,
-				)
-			} else {
-				fmt.Printf("    %s  %s crashed (attempt %d), restarting in 3s...\n",
-					errStyle.Render("✖"),
-					spec.Label,
-					attempt,
-				)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(3 * time.Second):
-			}
-		}
-	}
-}
+// runSinglePortForward is deprecated. Port forwards now run directly in the background.
 
 // ── Legacy bridge ────────────────────────────────────────────────────────────
 // RunPortForwards is called by `deploy --port-forward`. It delegates to the

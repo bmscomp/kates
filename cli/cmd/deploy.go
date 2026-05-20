@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -827,11 +828,41 @@ data:
 
 	RenderDeployDashboard(ctx, entries, time.Since(deployStartTime))
 
+	// Automatically sync API key from deployed cluster to active context
+	updateActiveContextAPIKey(ctx, appNS)
+
 	if deployPortForward {
 		RunPortForwards(ctx, kafkaNS, appNS, jaegerNS)
 	}
 
 	return nil
+}
+
+func updateActiveContextAPIKey(ctx context.Context, appNS string) {
+	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}").Output()
+	if err != nil {
+		return
+	}
+	encoded := strings.TrimSpace(string(out))
+	if encoded == "" {
+		return
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+		apiKey := strings.TrimSpace(string(decoded))
+		if apiKey != "" {
+			cfg := loadConfig()
+			ctxName := cfg.CurrentContext
+			if contextFlag != "" {
+				ctxName = contextFlag
+			}
+			if active, ok := cfg.Contexts[ctxName]; ok {
+				active.APIKey = apiKey
+				cfg.Contexts[ctxName] = active
+				_ = saveConfig(cfg)
+				fmt.Printf("    ✓ Automatically synced API Key to context %q: %s****\n\n", ctxName, apiKey[:4])
+			}
+		}
+	}
 }
 
 // Helpers

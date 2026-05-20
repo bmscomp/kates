@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -99,6 +100,25 @@ func runClean(cmd *cobra.Command, args []string) error {
 		Render("⎈ Kates Clean — Teardown"))
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 35)))
+
+	// ── Clean up active port forwards ──
+	fmt.Printf("    %s Terminating background port-forwards...\n", lipgloss.NewStyle().Foreground(clrDim).Render("🧹"))
+	myPid := os.Getpid()
+	if out, err := exec.Command("pgrep", "-f", "ports").Output(); err == nil {
+		for _, pidStr := range strings.Fields(string(out)) {
+			var pid int
+			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid != myPid {
+				if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
+					cmdLine := string(cmdOut)
+					if strings.Contains(cmdLine, "kates") {
+						_ = syscall.Kill(pid, syscall.SIGTERM)
+					}
+				}
+			}
+		}
+	}
+	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
+	time.Sleep(500 * time.Millisecond)
 
 	// Strimzi CRD resource types that carry finalizers.
 	strimziCRDTypes := []string{

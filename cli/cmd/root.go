@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/klster/kates-cli/client"
 	"github.com/spf13/cobra"
@@ -209,6 +212,10 @@ var rootCmd = &cobra.Command{
 				apiURL = ctx.URL
 			}
 		}
+
+		// Apply dynamic local port fallback if using localhost/127.0.0.1
+		apiURL = resolveFallbackURL(apiURL, isPortReachable)
+
 		if outputMode == "" {
 			if envOut := os.Getenv("KATES_OUTPUT"); envOut != "" {
 				outputMode = envOut
@@ -234,6 +241,32 @@ var rootCmd = &cobra.Command{
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
+}
+
+func isPortReachable(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+func resolveFallbackURL(url string, checkPort func(string) bool) string {
+	if strings.Contains(url, "localhost:8080") || strings.Contains(url, "127.0.0.1:8080") {
+		if !checkPort("127.0.0.1:8080") {
+			if checkPort("127.0.0.1:30083") {
+				return strings.Replace(url, "8080", "30083", 1)
+			}
+		}
+	} else if strings.Contains(url, "localhost:30083") || strings.Contains(url, "127.0.0.1:30083") {
+		if !checkPort("127.0.0.1:30083") {
+			if checkPort("127.0.0.1:8080") {
+				return strings.Replace(url, "30083", "8080", 1)
+			}
+		}
+	}
+	return url
 }
 
 func Execute() {
