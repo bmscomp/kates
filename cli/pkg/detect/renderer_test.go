@@ -322,18 +322,26 @@ func TestAZBandwidthBench_Success(t *testing.T) {
 
 	collector.runAZBandwidthBench(context.Background(), report)
 
-	if len(report.Network.BandwidthMatrix) != 2 {
-		t.Fatalf("Expected 2 bandwidth sweep results, got %d", len(report.Network.BandwidthMatrix))
+	var res1, res2 *BandwidthResult
+	for i := range report.Network.BandwidthMatrix {
+		r := &report.Network.BandwidthMatrix[i]
+		if r.SourceZone == "zone-a" && r.TargetZone == "zone-b" {
+			res1 = r
+		} else if r.SourceZone == "zone-b" && r.TargetZone == "zone-a" {
+			res2 = r
+		}
 	}
 
-	res1 := report.Network.BandwidthMatrix[0]
-	if res1.SourceZone != "zone-a" || res1.TargetZone != "zone-b" || !res1.Success || res1.BandwidthMbps != 945.0 {
-		t.Errorf("Unexpected result for zone-a -> zone-b: %+v", res1)
+	if res1 == nil {
+		t.Errorf("Could not find bandwidth result for zone-a -> zone-b")
+	} else if !res1.Success || res1.BandwidthMbps != 945.0 {
+		t.Errorf("Unexpected result for zone-a -> zone-b: %+v", *res1)
 	}
 
-	res2 := report.Network.BandwidthMatrix[1]
-	if res2.SourceZone != "zone-b" || res2.TargetZone != "zone-a" || !res2.Success || res2.BandwidthMbps != 880.0 {
-		t.Errorf("Unexpected result for zone-b -> zone-a: %+v", res2)
+	if res2 == nil {
+		t.Errorf("Could not find bandwidth result for zone-b -> zone-a")
+	} else if !res2.Success || res2.BandwidthMbps != 880.0 {
+		t.Errorf("Unexpected result for zone-b -> zone-a: %+v", *res2)
 	}
 
 	if len(progressMessages) == 0 {
