@@ -487,6 +487,12 @@ kates kyverno audit kates-pod-security-standards
 | `kates kyverno enforce <policy>` | — | Patches a ClusterPolicy's `validationFailureAction` to `Enforce` |
 | `kates kyverno audit <policy>` | — | Patches a ClusterPolicy's `validationFailureAction` to `Audit` |
 
+> [!TIP]
+> **Cross-references:**
+> - For Kyverno installation instructions, see [Chapter 20: Installation Guide](20-installation-guide.md#kyverno-optional).
+> - For Kyverno upgrade procedures, see [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md).
+> - For a full index of Kyverno-related troubleshooting, see [Appendix B: Troubleshooting](appendix-b-troubleshooting.md#deployment-issues).
+
 ## Security Checklist
 
 Use this checklist when auditing your deployment:

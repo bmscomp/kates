@@ -29,6 +29,7 @@ graph TB
         GRAF[Grafana]
         JAEGER[Jaeger]
         LIT[LitmusChaos]
+        KYV[Kyverno]
     end
     
     CLI1 --> API
@@ -315,6 +316,7 @@ sequenceDiagram
 | Registry | Apicurio | Latest | Schema registry for Kafka |
 | Database | PostgreSQL | Latest | Test results and schedule persistence |
 | Backup | Velero + MinIO | Latest | Cluster backup and restore |
+| Policy Engine | Kyverno | Latest | Admission control, PSS enforcement, NetworkPolicy generation |
 
 ## Data Model
 

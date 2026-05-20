@@ -185,6 +185,80 @@ helm upgrade monitoring charts/monitoring \
   --reuse-values
 ```
 
+## Kyverno Upgrade
+
+Kyverno upgrades require special attention because admission webhooks are in the critical path of the Kubernetes API server.
+
+### Procedure
+
+**Step 1 — Review the release notes** at [Kyverno releases](https://github.com/kyverno/kyverno/releases) for breaking changes, especially CRD schema changes and policy API deprecations.
+
+**Step 2 — Upgrade the Kyverno CRDs first:**
+
+```bash
+# Download and apply the latest CRDs before upgrading the controller
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/kyverno/kyverno.io_clusterpolicies.yaml
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/kyverno/kyverno.io_policyexceptions.yaml
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/policyreport/wgpolicyk8s.io_clusterpolicyreports.yaml
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/policyreport/wgpolicyk8s.io_policyreports.yaml
+```
+
+> [!WARNING]
+> Always upgrade CRDs before the controller. If the new controller version expects CRD fields that don't exist yet, the admission webhook may fail open or reject all requests.
+
+**Step 3 — Upgrade the Kyverno controller via Helm:**
+
+```bash
+helm repo update kyverno
+helm upgrade kyverno kyverno/kyverno \
+  -n kyverno \
+  --reuse-values
+```
+
+**Step 4 — Verify the upgrade:**
+
+```bash
+# Check controller pods are running
+kubectl get pods -n kyverno
+
+# Verify all ClusterPolicies are ready
+kates kyverno status
+
+# Check for any new violations
+kates kyverno violations
+```
+
+### Switching Between Enforce and Audit Modes
+
+When switching a policy from `Audit` to `Enforce` (or vice versa) during an upgrade:
+
+1. **Audit first** — always deploy policy changes in `Audit` mode before enforcing
+2. **Check PolicyReports** — review existing violations with `kates kyverno violations` to ensure no critical workloads would be blocked
+3. **Switch per-policy** — use `kates kyverno enforce <policy-name>` to switch individual policies rather than all at once
+
+```bash
+# Check current violations before switching to Enforce
+kates kyverno violations --namespace kafka
+
+# Switch to Enforce only when clean
+kates kyverno enforce kates-pod-security-standards
+```
+
+### PolicyException Compatibility
+
+After upgrading Kyverno, verify that existing `PolicyException` resources are still compatible:
+
+```bash
+# List all PolicyExceptions
+kubectl get policyexceptions -A
+
+# Verify no exceptions are in an error state
+kubectl get policyexceptions -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+```
+
+> [!IMPORTANT]
+> Kyverno v2 introduced the `PolicyException` CRD with a different API shape than v1 exceptions. When upgrading from Kyverno 1.x to 2.x, migrate any existing exception configurations to the new `kyverno.io/v2` API. Refer to the [Kyverno migration guide](https://kyverno.io/docs/upgrading/) for details.
+
 ## Pre-Upgrade Checklist
 
 Run through this before any upgrade:

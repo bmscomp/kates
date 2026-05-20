@@ -24,12 +24,13 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 | 14 | [Recipes & Patterns](14-recipes.md) | Ready-to-use workflows for upgrades, nightly regressions, chaos certification, and tuning |
 | 15 | [Kafka Deployment Engineering](15-kafka-deployment.md) | Strimzi operator, KRaft architecture, broker tuning, security, and operations |
 | 16 | [gRPC API Reference](16-grpc-api.md) | Protobuf service definitions, message types, and usage examples |
-| 17 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, and audit checklist |
+| 17 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, Kyverno admission control, and audit checklist |
 | 18 | [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |
 | 19 | [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
 | 20 | [Installation Guide](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites, verification, and troubleshooting |
 | A | [Glossary](appendix-a-glossary.md) | Quick reference for all terms and abbreviations |
 | B | [Troubleshooting Index](appendix-b-troubleshooting.md) | Consolidated troubleshooting procedures from across the book |
+| C | [CI/CD Pipeline](appendix-c-cicd.md) | GitHub Actions workflows, build validation, and release automation |
 
 ## Tutorials
 
@@ -43,6 +44,7 @@ Hands-on step-by-step guides for specific workflows:
 | [Integrity Under Fire](../tutorials/04-integrity-under-fire.md) | Data integrity verification under fault conditions |
 | [Observability](../tutorials/05-observability.md) | Setting up dashboards and alerts |
 | [CI/CD Integration](../tutorials/06-cicd-integration.md) | Automated testing in pipelines |
+| [Kyverno & Security](../tutorials/07-kyverno-security.md) | Policy enforcement, security auditing, and compliance checks |
 
 ## Who This Book Is For
 
