@@ -310,3 +310,53 @@ func TestVerdict_SecurityAndSizing(t *testing.T) {
 		t.Errorf("expected recommended profile to be 'production', got %q", r4.Budget.RecommendedProfile)
 	}
 }
+
+func TestVerdict_SecurityAudits(t *testing.T) {
+	m := setupHealthyMock()
+	a := NewAnalyzer(m)
+
+	// Case 1: Wildcard RBAC roles and expiring certificates
+	r := buildReport(3, true, true, 1, 2)
+	r.Security.HasExcessivePrivileges = true
+	r.Security.ExpiringCerts = []CertExpirationInfo{
+		{SecretName: "bad-cert", Subject: "CN=bad", ExpiryDate: "2026-06-01", DaysLeft: 10},
+		{SecretName: "good-cert", Subject: "CN=good", ExpiryDate: "2026-08-01", DaysLeft: 45},
+	}
+
+	a.Analyze(r, ParsedReqs{})
+
+	if r.Verdict.Compatible {
+		t.Error("expected compatible to be false because a check failed (TLS certificate validity)")
+	}
+
+	rbacChecked := false
+	certChecked := false
+	for _, c := range r.Verdict.Checks {
+		if c.Description == "Wildcard RBAC roles avoided" {
+			rbacChecked = true
+			if c.Status {
+				t.Error("expected wildcard RBAC role check to fail")
+			}
+			if c.Detail != "wildcard rules detected" {
+				t.Errorf("expected detail 'wildcard rules detected', got %q", c.Detail)
+			}
+		}
+		if c.Description == "TLS certificate validity" {
+			certChecked = true
+			if c.Status {
+				t.Error("expected TLS certificate validity check to fail")
+			}
+			if c.Detail != "1 certificate(s) expiring in < 30 days" {
+				t.Errorf("expected detail '1 certificate(s) expiring in < 30 days', got %q", c.Detail)
+			}
+		}
+	}
+
+	if !rbacChecked {
+		t.Error("expected 'Wildcard RBAC roles avoided' check to be performed")
+	}
+	if !certChecked {
+		t.Error("expected 'TLS certificate validity' check to be performed")
+	}
+}
+

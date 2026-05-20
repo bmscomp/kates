@@ -145,6 +145,50 @@ func TestRenderMarkdownAndJSON(t *testing.T) {
 	}
 }
 
+func TestRenderHTML(t *testing.T) {
+	report := buildReport(3, true, true, 2, 2)
+	report.Context = "test-context"
+	report.Provider = "kind"
+	report.K8sVersion = "v1.31.0"
+	report.HelmVersion = "v3.15.0"
+
+	// Mock some security audit and bandwidth matrix
+	report.Security.HasExcessivePrivileges = true
+	report.Security.ExpiringCerts = []CertExpirationInfo{
+		{SecretName: "test-cert", Subject: "CN=test", ExpiryDate: "2026-06-15", DaysLeft: 25},
+	}
+	report.Budget.RecommendedProfile = "production"
+
+	// Trigger matrix generation logic by having zones in Nodes
+	report.Nodes[0].Zone = "zone-a"
+	report.Nodes[1].Zone = "zone-b"
+
+	var buf bytes.Buffer
+	err := RenderHTML(report, &buf)
+	if err != nil {
+		t.Fatalf("RenderHTML failed: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Error("RenderHTML wrote no bytes")
+	}
+
+	htmlStr := buf.String()
+	if !strings.Contains(htmlStr, "Kates Preflight Audit Report") {
+		t.Error("expected html to contain title")
+	}
+	if !strings.Contains(htmlStr, "Wildcard RBAC Audit") {
+		t.Error("expected html to contain Wildcard RBAC Audit section")
+	}
+	if !strings.Contains(htmlStr, "TLS Secret Expiration") {
+		t.Error("expected html to contain TLS Secret Expiration section")
+	}
+	if !strings.Contains(htmlStr, "zone-a") {
+		t.Error("expected html to contain zone-a in matrix")
+	}
+}
+
+
 func TestLiveStorageBench_Success(t *testing.T) {
 	m := NewMockExecutor()
 	m.Responses["kubectl create ns"] = ""

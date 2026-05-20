@@ -246,6 +246,31 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	sizingDetail := fmt.Sprintf("profile: %s", report.Budget.RecommendedProfile)
 	addCheck("Sizing recommendation available", sizingPass, sizingDetail)
 
+	// Wildcard RBAC roles audit check
+	rbacPass := !report.Security.HasExcessivePrivileges
+	rbacDetail := "no wildcard rules"
+	if !rbacPass {
+		rbacDetail = "wildcard rules detected"
+		v.Warns++
+	}
+	addCheck("Wildcard RBAC roles avoided", rbacPass, rbacDetail)
+
+	// TLS Certificate validity audit check
+	certPass := true
+	certDetail := "all certificates valid"
+	expiringSoon := 0
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expiringSoon++
+		}
+	}
+	if expiringSoon > 0 {
+		certPass = false
+		certDetail = fmt.Sprintf("%d certificate(s) expiring in < 30 days", expiringSoon)
+		v.Warns++
+	}
+	addCheck("TLS certificate validity", certPass, certDetail)
+
 	v.Compatible = v.Fails == 0
 	report.Verdict = v
 }

@@ -225,6 +225,18 @@ func runDetect(cmd *cobra.Command, args []string) error {
 				detect.RenderJSONTo(report, f)
 				output.Success(fmt.Sprintf("Report written to %s", outputFile))
 			}
+		case ".html", ".htm":
+			f, err := os.Create(outputFile)
+			if err != nil {
+				output.Error(fmt.Sprintf("Failed to create output file: %v", err))
+			} else {
+				defer f.Close()
+				if err := detect.RenderHTML(report, f); err != nil {
+					output.Error(fmt.Sprintf("Failed to write HTML report: %v", err))
+				} else {
+					output.Success(fmt.Sprintf("Report written to %s", outputFile))
+				}
+			}
 		case ".md", ".markdown":
 			f, err := os.Create(outputFile)
 			if err != nil {

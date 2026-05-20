@@ -2,7 +2,10 @@ package detect
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"strconv"
 	"strings"
@@ -1920,6 +1923,90 @@ func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
 		}
 	}
 	audit.PermissionsOk = hasRbac
+
+	// 3. Scan for TLS secrets and verify expiration
+	secOut, err := c.exec.Exec("kubectl", "get", "secrets", "-n", "kafka", "-o", "json")
+	if err == nil {
+		var secData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Type string            `json:"type"`
+				Data map[string]string `json:"data"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(secOut), &secData) == nil {
+			for _, item := range secData.Items {
+				if item.Type == "kubernetes.io/tls" {
+					if certB64, ok := item.Data["tls.crt"]; ok {
+						certBytes, err := base64.StdEncoding.DecodeString(certB64)
+						if err == nil {
+							block, _ := pem.Decode(certBytes)
+							if block != nil {
+								cert, err := x509.ParseCertificate(block.Bytes)
+								if err == nil {
+									daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+									audit.ExpiringCerts = append(audit.ExpiringCerts, CertExpirationInfo{
+										SecretName: item.Metadata.Name,
+										Subject:    cert.Subject.CommonName,
+										ExpiryDate: cert.NotAfter.Format("2006-01-02"),
+										DaysLeft:   daysLeft,
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Audit roles inside target namespace for excessive privileges
+	rolesOut, err := c.exec.Exec("kubectl", "get", "roles", "-n", "kafka", "-o", "json")
+	if err == nil {
+		var rolesData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Rules []struct {
+					APIGroups []string `json:"apiGroups"`
+					Resources []string `json:"resources"`
+					Verbs     []string `json:"verbs"`
+				} `json:"rules"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(rolesOut), &rolesData) == nil {
+			for _, role := range rolesData.Items {
+				for _, rule := range role.Rules {
+					hasWildcardVerb := false
+					hasWildcardResource := false
+
+					for _, v := range rule.Verbs {
+						if v == "*" {
+							hasWildcardVerb = true
+							break
+						}
+					}
+					for _, r := range rule.Resources {
+						if r == "*" {
+							hasWildcardResource = true
+							break
+						}
+					}
+
+					if hasWildcardVerb && hasWildcardResource {
+						audit.HasExcessivePrivileges = true
+						break
+					}
+				}
+				if audit.HasExcessivePrivileges {
+					break
+				}
+			}
+		}
+	}
 
 	return audit
 }

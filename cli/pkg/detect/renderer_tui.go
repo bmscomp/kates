@@ -387,6 +387,22 @@ func RenderTUI(report *DetectReport) {
 	output.KeyValue("PSA Enforced Label:", report.Security.PSALabelEnforced)
 	output.KeyValue("Kyverno Enforced:", fmt.Sprintf("%t", report.Security.KyvernoEnforced))
 	output.KeyValue("Permissions Valid:", fmt.Sprintf("%t", report.Security.PermissionsOk))
+	if report.Security.HasExcessivePrivileges {
+		output.Error("Wildcard RBAC: Excessive wildcard permissions detected in namespace Roles!")
+	} else {
+		output.Success("Wildcard RBAC: Avoided (secure roles)")
+	}
+
+	expiringAlerts := 0
+	for _, c := range report.Security.ExpiringCerts {
+		if c.DaysLeft < 30 {
+			expiringAlerts++
+			output.Warn(fmt.Sprintf("TLS Secret %q (%s) expires in %d days", c.SecretName, c.Subject, c.DaysLeft))
+		}
+	}
+	if expiringAlerts == 0 {
+		output.Success("TLS Certs Expiration: All certificates valid")
+	}
 	if report.Admission.Kyverno.Installed {
 		version := report.Admission.Kyverno.Version
 		if version == "" {
