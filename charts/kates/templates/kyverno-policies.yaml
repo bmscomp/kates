@@ -1,0 +1,285 @@
+{{- if and .Values.kyvernoPolicy.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kates-pod-security-standards
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Kates Pod Security Standards
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Enforces and auto-patches restricted pod security standards for all
+      Kates application pods: non-root containers, dropped capabilities,
+      seccomp profiles, read-only root filesystem, and no privilege escalation.
+spec:
+  validationFailureAction: {{ .Values.kyvernoPolicy.action | default "Audit" }}
+  background: true
+  rules:
+    {{- if .Values.kyvernoPolicy.mutate }}
+    # ── Mutate: auto-inject pod-level security context ────────────────────────
+    - name: mutate-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(runAsNonRoot): true
+              +(runAsUser): 1000
+              +(fsGroup): 1000
+
+    # ── Mutate: auto-inject container-level security context ──────────────────
+    - name: mutate-drop-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(capabilities):
+                    +(drop):
+                      - "ALL"
+
+    - name: mutate-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                +(type): RuntimeDefault
+
+    - name: mutate-disable-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(allowPrivilegeEscalation): false
+
+    - name: mutate-readonly-rootfs
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(readOnlyRootFilesystem): true
+    {{- end }}
+
+    # ── Validate: enforce PSS restricted standards ────────────────────────────
+    - name: validate-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Kates pods must run as non-root (spec.securityContext.runAsNonRoot: true)."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+
+    - name: validate-drop-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Containers must drop ALL capabilities."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop: ["ALL"]
+
+    - name: validate-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Pods must use RuntimeDefault or Localhost seccomp profile."
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: "RuntimeDefault | Localhost"
+
+    - name: validate-no-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Containers must not allow privilege escalation."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+
+    - name: validate-readonly-rootfs
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Containers must use a read-only root filesystem. Mount /tmp as emptyDir for writable access."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true
+
+    # ── Validate: resource governance ─────────────────────────────────────────
+    - name: require-resource-limits
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "All containers must specify memory limits and CPU requests."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                  requests:
+                    cpu: "?*"
+
+    # ── Validate: image registry restriction ──────────────────────────────────
+    {{- if .Values.kyvernoPolicy.restrictRegistries }}
+    - name: restrict-image-registries
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: >-
+          Images must come from approved registries:
+          {{ .Values.kyvernoPolicy.allowedRegistries | join ", " }}.
+        pattern:
+          spec:
+            containers:
+              - image: "{{ .Values.kyvernoPolicy.allowedRegistries | join "* | " }}*"
+    {{- end }}
+{{- end }}
+---
+{{- if and .Values.kyvernoPolicy.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kates-workload-standards
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Kates Workload Standards
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Enforces label standards and probe requirements on Kates workloads.
+spec:
+  validationFailureAction: {{ .Values.kyvernoPolicy.action | default "Audit" }}
+  background: true
+  rules:
+    # ── Validate: require standard labels on workloads ────────────────────────
+    - name: require-standard-labels
+      match:
+        any:
+          - resources:
+              kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: >-
+          Workloads must include standard Kubernetes labels:
+          app.kubernetes.io/name and app.kubernetes.io/managed-by.
+        pattern:
+          metadata:
+            labels:
+              app.kubernetes.io/name: "?*"
+              app.kubernetes.io/managed-by: "?*"
+
+    # ── Validate: require health probes ───────────────────────────────────────
+    - name: require-liveness-probe
+      match:
+        any:
+          - resources:
+              kinds: ["Deployment", "StatefulSet"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Deployments and StatefulSets must define a livenessProbe."
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - livenessProbe:
+                      httpGet:
+                        path: "?*"
+
+    - name: require-readiness-probe
+      match:
+        any:
+          - resources:
+              kinds: ["Deployment", "StatefulSet"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Deployments and StatefulSets must define a readinessProbe."
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - readinessProbe:
+                      httpGet:
+                        path: "?*"
+
+    # ── Validate: disallow latest tag ─────────────────────────────────────────
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ .Release.Namespace | quote }}]
+      validate:
+        message: "Using ':latest' tag is not allowed. Specify a pinned version tag."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+{{- end }}
