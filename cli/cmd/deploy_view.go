@@ -54,7 +54,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	fmt.Println(banner + timer)
 
 	// ── Grouped entries ──
-	groups := map[string][]DeploySummaryEntry{"A": {}, "B": {}, "C": {}}
+	groups := map[string][]DeploySummaryEntry{"A": {}, "B": {}, "C": {}, "D": {}}
 	for _, e := range entries {
 		groups[e.Group] = append(groups[e.Group], e)
 	}
@@ -62,12 +62,13 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 		"A": "Operators & CRDs",
 		"B": "Core Infrastructure",
 		"C": "Applications",
+		"D": "Verification",
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
 	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", 58))
 
-	for _, g := range []string{"A", "B", "C"} {
+	for _, g := range []string{"A", "B", "C", "D"} {
 		if len(groups[g]) == 0 {
 			continue
 		}

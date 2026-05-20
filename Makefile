@@ -248,8 +248,8 @@ tester-build:
 	@echo "✅ Kates Tester image built (tagged as kates-tester:latest and kates-test:latest)"
 
 kates-deploy-test: tester-build
-	@echo "🧪 Deploying Kates with post-deployment verification..."
-	RUN_TESTS=true TEST_IMAGE=kates-test:latest ENV=$(ENV) ./scripts/deploy-kates.sh
+	@echo "🧪 Deploying Kates with connectivity verification..."
+	kates deploy --run-tests --test-image kates-test:latest --topology single --namespace kates-stack
 
 REGISTRY ?= ghcr.io/bmscomp
 push-images:
