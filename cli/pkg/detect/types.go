@@ -108,13 +108,31 @@ type LatencyResult struct {
 	Success    bool
 }
 
+type BandwidthResult struct {
+	SourceZone    string
+	TargetZone    string
+	BandwidthMbps float64
+	Success       bool
+}
+
+type DNSProbeResult struct {
+	QueryType    string  // "Internal" or "External"
+	QueriesRun   int
+	SuccessCount int
+	SuccessRate  float64
+	AvgLatencyMs float64
+	MaxLatencyMs float64
+}
+
 type NetworkInfo struct {
-	CNI            string
-	CoreDNSRunning int
-	ClusterDomain  string
-	PodCIDR        string
-	ServiceCIDR    string
-	LatencyMatrix  []LatencyResult
+	CNI             string
+	CoreDNSRunning  int
+	ClusterDomain   string
+	PodCIDR         string
+	ServiceCIDR     string
+	LatencyMatrix   []LatencyResult
+	BandwidthMatrix []BandwidthResult
+	DNSResults      []DNSProbeResult
 }
 
 // ── Admission Controller Types ───────────────────────────────────────────────

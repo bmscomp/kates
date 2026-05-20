@@ -341,6 +341,107 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		pdf.Ln(4)
 	}
 
+	// ── Active Zone Network Bandwidth Matrix ─────────────────────────────────
+	if len(report.Network.BandwidthMatrix) > 0 {
+		sectionHeader("Active Zone Network Bandwidth Matrix")
+		
+		// extract unique zones
+		zoneMap := make(map[string]bool)
+		for _, r := range report.Network.BandwidthMatrix {
+			zoneMap[r.SourceZone] = true
+			zoneMap[r.TargetZone] = true
+		}
+		var zones []string
+		for z := range zoneMap {
+			zones = append(zones, z)
+		}
+		
+		colWidth := 135.0 / float64(len(zones))
+		
+		pdf.SetFont("Helvetica", "B", 8)
+		pdf.SetFillColor(30, 41, 59)
+		pdf.SetTextColor(196, 181, 253)
+		pdf.CellFormat(45, 6, "Source \\ Target", "1", 0, "C", true, 0, "")
+		for _, z := range zones {
+			pdf.CellFormat(colWidth, 6, z, "1", 0, "C", true, 0, "")
+		}
+		pdf.Ln(-1)
+		
+		pdf.SetFont("Helvetica", "", 8)
+		pdf.SetTextColor(60, 60, 60)
+		for i, src := range zones {
+			if i%2 == 0 {
+				pdf.SetFillColor(248, 250, 252)
+			} else {
+				pdf.SetFillColor(255, 255, 255)
+			}
+			pdf.SetFont("Helvetica", "B", 8)
+			pdf.CellFormat(45, 6, src, "1", 0, "C", true, 0, "")
+			pdf.SetFont("Helvetica", "", 8)
+			
+			for _, dst := range zones {
+				if src == dst {
+					pdf.CellFormat(colWidth, 6, "—", "1", 0, "C", true, 0, "")
+					continue
+				}
+				found := false
+				for _, r := range report.Network.BandwidthMatrix {
+					if r.SourceZone == src && r.TargetZone == dst {
+						if r.Success {
+							pdf.CellFormat(colWidth, 6, fmt.Sprintf("%.1f Mbps", r.BandwidthMbps), "1", 0, "C", true, 0, "")
+						} else {
+							pdf.SetTextColor(239, 68, 68)
+							pdf.CellFormat(colWidth, 6, "FAIL", "1", 0, "C", true, 0, "")
+							pdf.SetTextColor(60, 60, 60)
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					pdf.CellFormat(colWidth, 6, "—", "1", 0, "C", true, 0, "")
+				}
+			}
+			pdf.Ln(-1)
+		}
+		pdf.Ln(4)
+	}
+
+	// ── Active CoreDNS Latency & Success Audits ──────────────────────────────
+	if len(report.Network.DNSResults) > 0 {
+		sectionHeader("Active CoreDNS Latency & Success Audits")
+		
+		pdf.SetFont("Helvetica", "B", 8)
+		pdf.SetFillColor(30, 41, 59)
+		pdf.SetTextColor(196, 181, 253)
+		
+		pdf.CellFormat(40, 6, "Query Type", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(25, 6, "Queries Run", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(25, 6, "Success Count", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(30, 6, "Success Rate", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(30, 6, "Avg Latency", "1", 0, "C", true, 0, "")
+		pdf.CellFormat(30, 6, "Max Latency", "1", 0, "C", true, 0, "")
+		pdf.Ln(-1)
+		
+		pdf.SetFont("Helvetica", "", 8)
+		pdf.SetTextColor(60, 60, 60)
+		for i, r := range report.Network.DNSResults {
+			if i%2 == 0 {
+				pdf.SetFillColor(248, 250, 252)
+			} else {
+				pdf.SetFillColor(255, 255, 255)
+			}
+			pdf.CellFormat(40, 6, r.QueryType, "1", 0, "C", true, 0, "")
+			pdf.CellFormat(25, 6, fmt.Sprintf("%d", r.QueriesRun), "1", 0, "C", true, 0, "")
+			pdf.CellFormat(25, 6, fmt.Sprintf("%d", r.SuccessCount), "1", 0, "C", true, 0, "")
+			pdf.CellFormat(30, 6, fmt.Sprintf("%.1f%%", r.SuccessRate), "1", 0, "C", true, 0, "")
+			pdf.CellFormat(30, 6, fmt.Sprintf("%.2fms", r.AvgLatencyMs), "1", 0, "C", true, 0, "")
+			pdf.CellFormat(30, 6, fmt.Sprintf("%.2fms", r.MaxLatencyMs), "1", 0, "C", true, 0, "")
+			pdf.Ln(-1)
+		}
+		pdf.Ln(4)
+	}
+
 	// ── Admission Controllers & Secret Audits ────────────────────────────────
 	sectionHeader("Admission Controllers & Secret Audit")
 	pdf.SetFont("Helvetica", "", 9)

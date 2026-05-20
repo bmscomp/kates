@@ -306,6 +306,69 @@ func RenderTUI(report *DetectReport) {
 		output.Table(headers, rows)
 	}
 
+	// Active AZ network bandwidth matrix
+	if len(report.Network.BandwidthMatrix) > 0 {
+		output.Header("Active Zone Network Bandwidth Matrix")
+		
+		zoneMap := make(map[string]bool)
+		for _, r := range report.Network.BandwidthMatrix {
+			zoneMap[r.SourceZone] = true
+			zoneMap[r.TargetZone] = true
+		}
+		var zones []string
+		for z := range zoneMap {
+			zones = append(zones, z)
+		}
+		
+		headers := append([]string{"SRC \\ DST"}, zones...)
+		var rows [][]string
+		for _, src := range zones {
+			row := []string{src}
+			for _, dst := range zones {
+				if src == dst {
+					row = append(row, "—")
+					continue
+				}
+				found := false
+				for _, r := range report.Network.BandwidthMatrix {
+					if r.SourceZone == src && r.TargetZone == dst {
+						if r.Success {
+							row = append(row, fmt.Sprintf("%.1f Mbps", r.BandwidthMbps))
+						} else {
+							row = append(row, "FAIL")
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					row = append(row, "—")
+				}
+			}
+			rows = append(rows, row)
+		}
+		output.Table(headers, rows)
+	}
+
+	// Active CoreDNS Latency & Success Audits
+	if len(report.Network.DNSResults) > 0 {
+		output.Header("Active CoreDNS Latency & Success Audits")
+		
+		headers := []string{"Query Type", "Queries Run", "Success Count", "Success Rate", "Avg Latency", "Max Latency"}
+		var rows [][]string
+		for _, r := range report.Network.DNSResults {
+			rows = append(rows, []string{
+				r.QueryType,
+				strconv.Itoa(r.QueriesRun),
+				strconv.Itoa(r.SuccessCount),
+				fmt.Sprintf("%.1f%%", r.SuccessRate),
+				fmt.Sprintf("%.2fms", r.AvgLatencyMs),
+				fmt.Sprintf("%.2fms", r.MaxLatencyMs),
+			})
+		}
+		output.Table(headers, rows)
+	}
+
 	// ── Admission Controllers ────────────────────────────────────────────────
 	output.Header("Admission Controllers")
 	if report.Admission.Kyverno.Installed {

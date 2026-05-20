@@ -33,7 +33,7 @@ func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 		matched = true
 	} else {
 		for pattern, err := range m.Errors {
-			if strings.HasPrefix(k, pattern) {
+			if strings.HasPrefix(k, pattern) || strings.Contains(k, pattern) {
 				resErr = err
 				matched = true
 				break
@@ -47,7 +47,7 @@ func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 		matched = true
 	} else {
 		for pattern, resp := range m.Responses {
-			if strings.HasPrefix(k, pattern) {
+			if strings.HasPrefix(k, pattern) || strings.Contains(k, pattern) {
 				resResp = resp
 				matched = true
 				break

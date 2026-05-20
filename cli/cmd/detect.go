@@ -47,6 +47,8 @@ var (
 	dryRun           bool
 	reservePct       float64
 	benchStorage     bool
+	benchNetwork     bool
+	benchDNS         bool
 )
 
 func init() {
@@ -61,6 +63,8 @@ func init() {
 	detectCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview values to stdout without writing a file")
 	detectCmd.Flags().Float64Var(&reservePct, "reserve", 0.30, "Reserve percentage of cluster resources (0.30 = 30% reserved, 70% for Kafka)")
 	detectCmd.Flags().BoolVar(&benchStorage, "bench-storage", false, "Run active live storage benchmarking using ephemeral fio pods (takes ~30s)")
+	detectCmd.Flags().BoolVar(&benchNetwork, "bench-network", false, "Run active network throughput sweeps between AZs using iperf3 (~10s)")
+	detectCmd.Flags().BoolVar(&benchDNS, "bench-dns", false, "Run active CoreDNS latency and throttling sweeps using parallel DNS queries (~5s)")
 	rootCmd.AddCommand(detectCmd)
 }
 
@@ -68,6 +72,8 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	executor := detect.NewOSExecutor()
 	collector := detect.NewCollector(executor)
 	collector.BenchStorage = benchStorage
+	collector.BenchNetwork = benchNetwork
+	collector.BenchDNS = benchDNS
 	analyzer := detect.NewAnalyzer(executor)
 
 	if err := collector.Preflight(); err != nil {
