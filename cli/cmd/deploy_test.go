@@ -36,6 +36,8 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 	deployWithMonitoring = false
 	deployWithCertManager = false
 	deployWithKyverno = false
+	deployRunTests = false
+	deployTestImage = "kates-test:latest"
 
 	var executedCommands []string
 	
@@ -105,6 +107,8 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 	deployWithMonitoring = false
 	deployWithCertManager = false
 	deployWithKyverno = false
+	deployRunTests = false
+	deployTestImage = "kates-test:latest"
 
 	var executedCommands []string
 	
@@ -173,6 +177,8 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 	deployWithMonitoring = true
 	deployWithCertManager = true
 	deployWithKyverno = true
+	deployRunTests = false
+	deployTestImage = "kates-test:latest"
 
 	var executedCommands []string
 	

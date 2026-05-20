@@ -15,7 +15,8 @@ spec:
     fsGroup: 100
   containers:
   - name: api-check
-    image: curlimages/curl:8.7.1
+    image: "{{ .Values.helmTest.image.repository }}:{{ .Values.helmTest.image.tag }}"
+    imagePullPolicy: {{ .Values.helmTest.image.pullPolicy }}
     securityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true

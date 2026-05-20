@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-deploy-test kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
 
 .DEFAULT_GOAL := help
 
@@ -242,8 +242,14 @@ kates-native:
 tester-build:
 	@echo "🔨 Building Kates Tester image..."
 	docker build -f tester/Dockerfile -t kates-tester:latest tester/
+	docker tag kates-tester:latest kates-test:latest
 	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
-	@echo "✅ Kates Tester image built and available"
+	kind load docker-image kates-test:latest --name $(CLUSTER_NAME) 2>/dev/null || true
+	@echo "✅ Kates Tester image built (tagged as kates-tester:latest and kates-test:latest)"
+
+kates-deploy-test: tester-build
+	@echo "🧪 Deploying Kates with post-deployment verification..."
+	RUN_TESTS=true TEST_IMAGE=kates-test:latest ENV=$(ENV) ./scripts/deploy-kates.sh
 
 REGISTRY ?= ghcr.io/bmscomp
 push-images:
@@ -587,6 +593,7 @@ help:
 	@echo "  kates-build                        - Build Kates JVM image and load into Kind"
 	@echo "  kates-native                       - Build Kates native image and load into Kind"
 	@echo "  tester-build                       - Build Kates Tester image and load into Kind"
+	@echo "  kates-deploy-test                  - Build test image + deploy Kates + run verification"
 	@echo "  push-images                        - Push kates and tester images to remote registry"
 	@echo "  kates-deploy                       - Apply Kates K8s manifests"
 	@echo "  kates-redeploy                     - Restart Kates deployment"

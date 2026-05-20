@@ -54,6 +54,8 @@ var (
 	deployInteractive        bool
 	deployVerbose            bool
 	deployPortForward        bool
+	deployRunTests           bool
+	deployTestImage          string
 )
 
 func init() {
@@ -74,6 +76,8 @@ func init() {
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
+	deployCmd.Flags().BoolVar(&deployRunTests, "run-tests", false, "Run Helm verification tests after Kates deployment")
+	deployCmd.Flags().StringVar(&deployTestImage, "test-image", "kates-test:latest", "Docker image for Helm test pods (health, API, Kafka checks)")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -115,6 +119,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 						huh.NewOption("🛡️  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
 					).
 					Value(&components),
+
+				huh.NewConfirm().
+					Title("Run Post-Deployment Verification Tests?").
+					Description("Runs Helm test pods (health, API, Kafka) using the kates-test image after deployment").
+					Affirmative("Yes").
+					Negative("No").
+					Value(&deployRunTests),
 			),
 
 			// ── Group 2: Namespace configuration (isolated topology only) ────────
@@ -187,6 +198,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	if deployWithKyverno {
 		PrintPhaseSuccess("Kyverno (Policies)")
+	}
+	if deployRunTests {
+		PrintPhaseSuccess(fmt.Sprintf("Post-Deploy Verification (image: %s)", deployTestImage))
 	}
 
 	// 3. Cluster Detection
@@ -758,12 +772,28 @@ data:
 		}
 		
 		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
+
+		// Build the Kates Helm args
+		katesHelmArgs := []string{
+			"upgrade", "--install", "kates", "charts/kates",
 			"-n", appNS, "--create-namespace",
 			"-f", valuesFile,
 			"-f", chartOverlay("charts/kates"),
-			"--set", "kafka.bootstrapServers="+bootstrap,
-			"--timeout", "8m", "--wait"); err != nil {
+			"--set", "kafka.bootstrapServers=" + bootstrap,
+			"--timeout", "8m", "--wait",
+		}
+
+		// Override Helm test image if verification tests are enabled
+		if deployRunTests && deployTestImage != "" {
+			testRepo, testTag := parseImageRef(deployTestImage)
+			katesHelmArgs = append(katesHelmArgs,
+				"--set", "helmTest.image.repository="+testRepo,
+				"--set", "helmTest.image.tag="+testTag,
+				"--set", "helmTest.image.pullPolicy=Never",
+			)
+		}
+
+		if err := runHelmFn(ctx, katesHelmArgs...); err != nil {
 			return err
 		}
 	} else {
@@ -787,6 +817,39 @@ data:
 			}
 		} else {
 			fmt.Println("⏭️  Litmus Chaos already deployed.")
+		}
+	}
+
+	// ---------------------------------------------------------
+	// Post-Deployment Verification Tests
+	// ---------------------------------------------------------
+	if deployRunTests {
+		PrintPhaseHeader(5, "Post-Deployment Verification")
+
+		// For Kind clusters, ensure the test image is loaded into the cluster nodes
+		if isKind && deployTestImage != "" {
+			PrintPhaseItem(fmt.Sprintf("Loading test image %s into Kind cluster...", deployTestImage))
+			loadErr := runExecFn(ctx, "kind", "load", "docker-image", deployTestImage, "--name", "panda")
+			if loadErr != nil {
+				PrintPhaseWarn(fmt.Sprintf("Could not load %s into Kind — test pods may fail to pull", deployTestImage))
+			} else {
+				PrintPhaseSuccess(fmt.Sprintf("Test image %s loaded into Kind", deployTestImage))
+			}
+		}
+
+		PrintPhaseItem(fmt.Sprintf("Running Helm tests for release 'kates' in namespace '%s'...", appNS))
+		if deployTestImage != "" {
+			PrintPhaseItem(fmt.Sprintf("Test image: %s", deployTestImage))
+		}
+
+		testErr := runHelmFn(ctx, "test", "kates", "-n", appNS, "--timeout", "5m")
+		if testErr != nil {
+			PrintPhaseWarn("Some verification tests failed — check results above")
+			fmt.Println()
+			fmt.Printf("    Debug test pods:   kubectl get pods -n %s -l helm.sh/hook=test\n", appNS)
+			fmt.Printf("    View test logs:    kubectl logs -n %s -l helm.sh/hook=test --all-containers\n", appNS)
+		} else {
+			PrintPhaseSuccess("All verification tests passed!")
 		}
 	}
 
@@ -821,6 +884,19 @@ data:
 	}
 
 	return nil
+}
+
+// parseImageRef splits an image reference like "kates-test:latest" into
+// repository and tag components. If no tag is provided, defaults to "latest".
+func parseImageRef(image string) (repo, tag string) {
+	parts := strings.SplitN(image, ":", 2)
+	repo = parts[0]
+	if len(parts) == 2 {
+		tag = parts[1]
+	} else {
+		tag = "latest"
+	}
+	return
 }
 
 // Helpers
