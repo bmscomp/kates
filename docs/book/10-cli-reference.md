@@ -572,6 +572,740 @@ See [Chapter 10b: Lab](10b-lab.md) for the full guide.
 
 ---
 
+### deploy
+
+Deploy the Kates stack (Kafka, Kates, Chaos, Schema Registry).
+
+```bash
+kates deploy
+```
+
+### clean
+
+Remove all Kates-managed resources and namespaces.
+
+```bash
+kates clean
+```
+
+### detect
+
+Aliases: `preflight-cluster`, `cluster-check`
+
+Deep cluster compatibility report for 3-AZ Kafka.
+
+```bash
+kates detect
+kates preflight-cluster
+kates cluster-check
+```
+
+### ports
+
+Port-forward all Kates services to localhost.
+
+```bash
+kates ports
+```
+
+### doctor
+
+Aliases: `preflight`, `check`
+
+Pre-flight cluster readiness checklist.
+
+```bash
+kates doctor
+kates preflight
+kates check
+```
+
+### auto
+
+Auto-detect cluster configuration and deploy Kafka.
+
+```bash
+kates auto
+```
+
+### operator
+
+Run the Kates Environment Operator.
+
+```bash
+kates operator
+```
+
+### init
+
+Initialize a new Kates workspace with config, scenarios, and CI gate.
+
+```bash
+kates init
+```
+
+### upgrade
+
+Build from source and install a new version of the Kates CLI.
+
+```bash
+kates upgrade
+```
+
+---
+
+### security
+
+Aliases: `sec`
+
+Kafka security auditing, ACL testing, TLS inspection, and penetration testing.
+
+```bash
+kates security
+kates sec
+```
+
+#### security audit
+
+Aliases: `scan`
+
+Run a full security posture audit with A–F grading.
+
+```bash
+kates security audit
+kates security scan
+kates sec audit -o json
+```
+
+#### security tls-inspect
+
+Aliases: `tls`
+
+Inspect TLS configuration, protocol versions, and cipher suites.
+
+```bash
+kates security tls-inspect
+kates sec tls
+```
+
+#### security auth-test
+
+Aliases: `auth`
+
+Probe ACL rules for a specific user to verify least-privilege access.
+
+```bash
+kates security auth-test
+kates sec auth
+```
+
+#### security pentest
+
+Aliases: `pen`
+
+Run adversarial penetration tests against the cluster.
+
+```bash
+kates security pentest
+kates sec pen
+```
+
+#### security compliance
+
+Aliases: `comply`
+
+Map security checks to CIS Kafka Benchmark, SOC2, and PCI-DSS frameworks.
+
+```bash
+kates security compliance
+kates sec comply
+```
+
+#### security baseline
+
+Aliases: `base`
+
+Save current security posture as baseline for drift detection.
+
+```bash
+kates security baseline
+kates sec base
+```
+
+#### security drift
+
+Compare current security posture against saved baseline.
+
+```bash
+kates security drift
+kates sec drift
+```
+
+#### security gate
+
+CI/CD security gate — exit non-zero if grade is below threshold.
+
+```bash
+kates security gate
+kates sec gate --min-grade B
+```
+
+#### security certs
+
+Aliases: `cert`, `certificates`
+
+Inspect SSL/TLS certificate configuration across brokers.
+
+```bash
+kates security certs
+kates sec cert
+kates sec certificates
+```
+
+#### security cve
+
+Check for known CVEs.
+
+```bash
+kates security cve
+kates sec cve
+```
+
+#### security secrets
+
+Audit Kubernetes secrets management.
+
+```bash
+kates security secrets
+kates sec secrets
+```
+
+#### security netpol
+
+Audit NetworkPolicy coverage.
+
+```bash
+kates security netpol
+kates sec netpol
+```
+
+#### security acl-map
+
+Visualize ACL topology.
+
+```bash
+kates security acl-map
+kates sec acl-map
+```
+
+#### security config-diff
+
+Diff security configs between clusters.
+
+```bash
+kates security config-diff
+kates sec config-diff
+```
+
+#### security trend
+
+Track security posture over time.
+
+```bash
+kates security trend
+kates sec trend
+```
+
+---
+
+### kyverno
+
+Aliases: `kyv`, `policy`
+
+Kyverno policy engine management.
+
+```bash
+kates kyverno
+kates kyv
+kates policy
+```
+
+#### kyverno status
+
+Aliases: `st`, `list`
+
+Show all ClusterPolicies with mode, readiness, and rule counts.
+
+```bash
+kates kyverno status
+kates kyv st
+kates kyv list
+```
+
+#### kyverno violations
+
+Aliases: `viol`, `fails`
+
+Show policy violations grouped by namespace and pod.
+
+```bash
+kates kyverno violations
+kates kyv viol
+kates kyv fails --namespace kafka
+```
+
+| Flag | Description |
+|------|-------------|
+| `--namespace` | Filter violations by namespace |
+
+#### kyverno enforce
+
+Switch a ClusterPolicy to Enforce mode.
+
+```bash
+kates kyverno enforce <policy>
+kates kyv enforce disallow-privilege-escalation
+```
+
+#### kyverno audit
+
+Switch a ClusterPolicy to Audit mode.
+
+```bash
+kates kyverno audit <policy>
+kates kyv audit disallow-privilege-escalation
+```
+
+---
+
+### kafka
+
+Interactive Kafka client.
+
+```bash
+kates kafka
+```
+
+#### kafka brokers
+
+List brokers with ID, host, port, rack, and controller status.
+
+```bash
+kates kafka brokers
+```
+
+#### kafka topics
+
+List all topics with partition, replication, and ISR health.
+
+```bash
+kates kafka topics
+```
+
+#### kafka topic
+
+Describe a topic — partitions, ISR, offsets, and configuration.
+
+```bash
+kates kafka topic <name>
+kates kafka topic my-events
+```
+
+#### kafka groups
+
+List consumer groups with state, members, and lag summary.
+
+```bash
+kates kafka groups
+```
+
+#### kafka group
+
+Describe a consumer group with per-partition offsets and lag.
+
+```bash
+kates kafka group <id>
+kates kafka group my-consumer-group
+```
+
+#### kafka consume
+
+Fetch records from a topic (latest N records, or tail with `--follow`).
+
+```bash
+kates kafka consume <topic>
+kates kafka consume my-events
+kates kafka consume my-events --follow
+```
+
+| Flag | Description |
+|------|-------------|
+| `--follow` | Tail the topic continuously |
+
+#### kafka produce
+
+Produce a record to a topic (from flag or stdin).
+
+```bash
+kates kafka produce <topic>
+kates kafka produce my-events --value '{"key": "value"}'
+echo '{"key": "value"}' | kates kafka produce my-events
+```
+
+#### kafka create-topic
+
+Create a new topic.
+
+```bash
+kates kafka create-topic <name>
+kates kafka create-topic my-new-topic --partitions 6 --replication-factor 3
+```
+
+| Flag | Description |
+|------|-------------|
+| `--partitions` | Number of partitions |
+| `--replication-factor` | Replication factor |
+
+#### kafka alter-topic
+
+Alter topic configuration entries.
+
+```bash
+kates kafka alter-topic <name>
+kates kafka alter-topic my-events --set retention.ms=604800000
+```
+
+#### kafka delete-topic
+
+Delete a topic (with confirmation prompt).
+
+```bash
+kates kafka delete-topic <name>
+kates kafka delete-topic my-old-topic
+```
+
+#### kafka tui
+
+Launch interactive Kafka explorer (full-screen TUI).
+
+```bash
+kates kafka tui
+```
+
+---
+
+### benchmark
+
+Aliases: `bench`
+
+Run a full test battery (LOAD → STRESS → SPIKE) with a letter-grade scorecard.
+
+```bash
+kates benchmark
+kates bench
+```
+
+### advisor
+
+Analyze test results and recommend configuration improvements.
+
+```bash
+kates advisor <run-id>
+kates advisor abc123
+```
+
+### explain
+
+Aliases: `why`, `interpret`
+
+Plain-English summary and verdict for a test run.
+
+```bash
+kates explain <id>
+kates why <id>
+kates interpret <id>
+```
+
+### replay
+
+Re-run a previous test with the same parameters.
+
+```bash
+kates replay <id>
+kates replay abc123
+```
+
+---
+
+### tune
+
+Configuration & tuning tests.
+
+```bash
+kates tune
+```
+
+#### tune run
+
+Run a tuning test.
+
+```bash
+kates tune run <type>
+kates tune run TUNE_REPLICATION
+kates tune run TUNE_ACKS
+kates tune run TUNE_BATCHING
+kates tune run TUNE_COMPRESSION
+kates tune run TUNE_PARTITIONS
+```
+
+| Type | Description |
+|------|-------------|
+| `TUNE_REPLICATION` | Test different replication factor settings |
+| `TUNE_ACKS` | Test different acks modes |
+| `TUNE_BATCHING` | Test different batch size configurations |
+| `TUNE_COMPRESSION` | Test different compression codecs |
+| `TUNE_PARTITIONS` | Test different partition counts |
+
+#### tune report
+
+Show tuning comparison report.
+
+```bash
+kates tune report <run-id>
+kates tune report abc123
+```
+
+#### tune types
+
+List available tuning tests.
+
+```bash
+kates tune types
+```
+
+---
+
+### profile
+
+Save, compare, and assert named performance profiles.
+
+```bash
+kates profile
+```
+
+#### profile save
+
+Save a test run as a named performance profile.
+
+```bash
+kates profile save <name> <run-id>
+kates profile save baseline abc123
+```
+
+#### profile list
+
+List all saved profiles.
+
+```bash
+kates profile list
+```
+
+#### profile compare
+
+Compare two profiles side by side.
+
+```bash
+kates profile compare <name1> <name2>
+kates profile compare baseline optimized
+```
+
+#### profile assert
+
+Assert a test run meets a profile's thresholds.
+
+```bash
+kates profile assert <name> <run-id>
+kates profile assert baseline def456
+```
+
+---
+
+### cost
+
+Estimate cloud costs for test configurations.
+
+```bash
+kates cost
+```
+
+#### cost estimate
+
+Estimate resource costs.
+
+```bash
+kates cost estimate
+kates cost estimate --records 1000000 --record-size 1024 --duration 3600
+```
+
+| Flag | Description |
+|------|-------------|
+| `--records` | Number of records |
+| `--record-size` | Record payload size in bytes |
+| `--duration` | Test duration in seconds |
+
+---
+
+### snapshot
+
+Capture, list, and compare cluster state snapshots.
+
+```bash
+kates snapshot
+```
+
+#### snapshot create
+
+Capture current cluster state as a named snapshot.
+
+```bash
+kates snapshot create <name>
+kates snapshot create pre-upgrade
+```
+
+#### snapshot list
+
+List all saved snapshots.
+
+```bash
+kates snapshot list
+```
+
+#### snapshot diff
+
+Compare two snapshots.
+
+```bash
+kates snapshot diff <name1> <name2>
+kates snapshot diff pre-upgrade post-upgrade
+```
+
+---
+
+### gate
+
+Aliases: `ci`, `quality-gate`
+
+CI quality gate — run a test and exit non-zero if grade is below threshold.
+
+```bash
+kates gate
+kates ci
+kates quality-gate
+```
+
+### flow
+
+Declarative multi-step pipeline orchestrator.
+
+```bash
+kates flow
+```
+
+#### flow run
+
+Execute a flow pipeline from a YAML file.
+
+```bash
+kates flow run -f pipeline.yaml
+```
+
+| Flag | Description |
+|------|-------------|
+| `-f` | Path to flow pipeline YAML file |
+
+### badge
+
+Generate status badges for README files (shields.io-compatible).
+
+```bash
+kates badge
+```
+
+### webhook
+
+Manage webhook notifications for test completion events.
+
+```bash
+kates webhook
+```
+
+#### webhook list
+
+List registered webhooks.
+
+```bash
+kates webhook list
+```
+
+#### webhook add
+
+Register a webhook.
+
+```bash
+kates webhook add <name> <url>
+kates webhook add slack-alerts https://hooks.slack.com/services/...
+```
+
+#### webhook remove
+
+Aliases: `rm`, `delete`
+
+Unregister a webhook.
+
+```bash
+kates webhook remove <name>
+kates webhook rm <name>
+kates webhook delete <name>
+```
+
+---
+
+### docs
+
+Man-style documentation for all Kates commands.
+
+```bash
+kates docs
+kates docs test create
+kates docs security audit
+```
+
+### tldr
+
+Quick command reference cheatsheet.
+
+```bash
+kates tldr
+kates tldr security
+kates tldr kafka
+```
+
+### changelog
+
+Generate changelog from audit events.
+
+```bash
+kates changelog
+kates changelog --since 2025-01-01 --until 2025-01-31
+```
+
+| Flag | Description |
+|------|-------------|
+| `--since` | Start date for changelog range |
+| `--until` | End date for changelog range |
+
+---
+
 ## Output Modes
 
 All commands support two output modes:
