@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger kyverno kyverno-undeploy
 
 .DEFAULT_GOAL := help
 
@@ -109,6 +109,23 @@ monitoring-undeploy:
 cert-manager:
 	@echo "🔐 Deploying cert-manager..."
 	./scripts/deploy-cert-manager.sh
+
+kyverno:
+	@echo "🛡️  Deploying Kyverno policy engine..."
+	helm repo add kyverno https://kyverno.github.io/kyverno/ 2>/dev/null || true
+	helm repo update kyverno 2>/dev/null || true
+	helm upgrade --install kyverno kyverno/kyverno \
+		-n kyverno --create-namespace \
+		--set admissionController.replicas=1 \
+		--timeout 5m --wait
+	@echo "✅ Kyverno deployed"
+	@kubectl get pods -n kyverno
+
+kyverno-undeploy:
+	@echo "🗑️ Removing Kyverno..."
+	helm uninstall kyverno -n kyverno || true
+	kubectl delete namespace kyverno --ignore-not-found
+	@echo "✅ Kyverno removed"
 
 # Deploy full stack (monitoring, Kafka, UI, Litmus) — without cluster/images
 deploy-all:
@@ -570,6 +587,8 @@ help:
 	@echo "  ui                                 - Deploy Kafka UI"
 	@echo "  apicurio                           - Deploy Apicurio Registry"
 	@echo "  jaeger                             - Deploy Jaeger (distributed tracing)"
+	@echo "  kyverno                            - Deploy Kyverno policy engine"
+	@echo "  kyverno-undeploy                   - Remove Kyverno"
 	@echo "  litmus                             - Deploy Kates Chaos (Kind overlay)"
 	@echo "  litmus-generic                     - Deploy Kates Chaos (generic K8s overlay)"
 	@echo "  litmus-undeploy                    - Remove Kates Chaos stack completely"

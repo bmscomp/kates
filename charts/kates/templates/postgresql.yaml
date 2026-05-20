@@ -49,6 +49,10 @@ spec:
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
+        - name: run-postgresql
+          mountPath: /var/run/postgresql
+        - name: tmp
+          mountPath: /tmp
         resources:
           {{- toYaml .Values.postgresql.resources | nindent 10 }}
         readinessProbe:
@@ -61,6 +65,11 @@ spec:
             command: ['pg_isready', '-U', {{ .Values.postgresql.auth.username | quote }}]
           initialDelaySeconds: 10
           periodSeconds: 30
+      volumes:
+      - name: run-postgresql
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
   volumeClaimTemplates:
   - metadata:
       name: data

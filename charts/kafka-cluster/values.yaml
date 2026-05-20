@@ -416,6 +416,8 @@ networkPolicies:
     - kates
     - litmus
   monitoringNamespace: kafka
+  # Namespace where the Strimzi Operator is deployed (for its NetworkPolicy)
+  operatorNamespace: strimzi-operator
 
 tieredStorage:
   enabled: false
@@ -556,6 +558,8 @@ dashboards:
 podSecurityPolicy:
   enabled: false
   action: Audit
+  mutate: false
+  excludeStrimziPods: true
 
 backup:
   enabled: false
