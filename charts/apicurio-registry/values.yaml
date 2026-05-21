@@ -85,10 +85,10 @@ kafka:
   enabled: false
 
 global:
-  kafka: ## These values are only used when kafka.enabled is set to false
+  kafka:
     bootstrapServers:
       - "krafter-kafka-bootstrap.kafka.svc:9092"
-    fullname: ~
-    port: ~
-    name: ~
+    securityProtocol: "SASL_PLAINTEXT"
+    saslMechanism: "SCRAM-SHA-512"
+    saslJaasConfigSecretName: "apicurio-registry"
 

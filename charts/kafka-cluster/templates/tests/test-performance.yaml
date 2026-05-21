@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-performance"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: performance
+      image: {{ include "kafka-cluster.kafkaImage" $ }}
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          echo "=== Tier 10: Performance Baseline ==="
+          
+          # Priority: plain (SASL_PLAINTEXT) → tls (SASL_SSL) → first available
+          BOOTSTRAP=""
+          SECURITY_PROTOCOL=""
+
+          {{- $firstUser := "" }}
+          {{- if and .Values.users.enabled (gt (len (default (list) .Values.users.items)) 0) }}
+          {{- $firstUser = (index .Values.users.items 0).name }}
+          {{- end }}
+          SASL_USER="{{ $firstUser }}"
+
+          # Try listeners in order of preference for produce/consume tests
+          {{- range .Values.kafka.listeners }}
+          {{- if and (eq .type "internal") (not (empty .authentication)) }}
+          if [ -z "$BOOTSTRAP" ]; then
+            DISCOVERED=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+              -o jsonpath='{.status.listeners[?(@.name=="{{ .name }}")].bootstrapServers}' 2>/dev/null || true)
+            if [ -n "$DISCOVERED" ]; then
+              # Verify TCP reachability before committing
+              DISCOVERED=$(echo "$DISCOVERED" | cut -d, -f1)
+              D_HOST=$(echo "$DISCOVERED" | cut -d: -f1)
+              D_PORT=$(echo "$DISCOVERED" | cut -d: -f2)
+              if echo "$D_HOST" | grep -q "\.svc$"; then
+                D_HOST="${D_HOST}.{{ include "kafka-cluster.clusterDomain" $ }}"
+              fi
+              if nc -zv -w 5 "$D_HOST" "$D_PORT" 2>/dev/null; then
+                BOOTSTRAP="$DISCOVERED"
+                {{- if .tls }}
+                SECURITY_PROTOCOL="SASL_SSL"
+                {{- else }}
+                SECURITY_PROTOCOL="SASL_PLAINTEXT"
+                {{- end }}
+                echo "  ℹ Using listener '{{ .name }}' → $BOOTSTRAP ($SECURITY_PROTOCOL)"
+              fi
+            fi
+          fi
+          {{- end }}
+          {{- end }}
+
+          # Final fallback to chart-configured bootstrap
+          if [ -z "$BOOTSTRAP" ]; then
+            BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
+            SECURITY_PROTOCOL="SASL_PLAINTEXT"
+            echo "  ℹ Fallback to chart-configured bootstrap: $BOOTSTRAP ($SECURITY_PROTOCOL)"
+          fi
+
+          PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
+
+          echo "security.protocol=${SECURITY_PROTOCOL}" > /tmp/client.properties
+          echo "sasl.mechanism=SCRAM-SHA-512" >> /tmp/client.properties
+          echo "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${SASL_USER}\" password=\"${PASSWORD}\";" >> /tmp/client.properties
+
+          {{/* If TLS, add truststore config */}}
+          if [ "$SECURITY_PROTOCOL" = "SASL_SSL" ]; then
+            if kubectl get secret ${CLUSTER}-cluster-ca-cert -n $NAMESPACE -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d > /tmp/ca.crt 2>/dev/null; then
+              keytool -import -trustcacerts -alias kafka-ca -file /tmp/ca.crt -keystore /tmp/truststore.jks -storepass changeit -noprompt 2>/dev/null || true
+              echo "ssl.truststore.location=/tmp/truststore.jks" >> /tmp/client.properties
+              echo "ssl.truststore.password=changeit" >> /tmp/client.properties
+            fi
+          fi
+
+          PERF_TOPIC="helm-test-perf-$(date +%s)"
+          echo "Creating performance topic: ${PERF_TOPIC}..."
+          printf "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: %s\n  namespace: %s\n  labels:\n    strimzi.io/cluster: %s\nspec:\n  partitions: 3\n  replicas: 1\n  config:\n    retention.ms: 60000\n" "${PERF_TOPIC}" "$NAMESPACE" "$CLUSTER" | kubectl apply -f -
+          
+          echo "Waiting for topic to be ready..."
+          kubectl wait kafkatopic/${PERF_TOPIC} --for=condition=Ready --timeout=60s -n $NAMESPACE || echo "⚠ Timeout waiting for topic"
+
+          echo ""
+          echo "--- Producer Performance Benchmark ---"
+          echo "Sending 50,000 records (1KB each) to measure throughput..."
+          kafka-producer-perf-test.sh \
+            --topic ${PERF_TOPIC} \
+            --num-records 50000 \
+            --record-size 1024 \
+            --throughput -1 \
+            --producer.config /tmp/client.properties \
+            --producer-props bootstrap.servers=${BOOTSTRAP} acks=1 linger.ms=5 2>&1 | tee /tmp/perf_output.txt || true
+
+          MB_S=$(cat /tmp/perf_output.txt | tail -n 1 | awk -F',' '{print $4}' | awk '{print $1}')
+          echo "  Measured Throughput: $MB_S MB/s"
+
+          echo "Cleaning up..."
+          kubectl delete kafkatopic ${PERF_TOPIC} -n $NAMESPACE --ignore-not-found
+          echo "✓ Tier 10 complete"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- if and .Values.users.enabled (gt (len (default (list) .Values.users.items)) 0) }}
+        - name: connect-password
+          mountPath: /opt/kafka/connect-password
+          readOnly: true
+        {{- end }}
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    {{- if and .Values.users.enabled (gt (len (default (list) .Values.users.items)) 0) }}
+    - name: connect-password
+      secret:
+        secretName: {{ (index .Values.users.items 0).name }}
+    {{- end }}

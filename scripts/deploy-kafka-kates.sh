@@ -116,6 +116,22 @@ helm upgrade --install kates "${ROOT_DIR}/charts/kates" \
     --set metrics.grafanaDashboard.enabled=false \
     --timeout 5m
 
+# Auto-configure Kates CLI Context
+info "Configuring local Kates CLI context..."
+API_KEY=$(kubectl get secret "kates-api-key" -n "${NAMESPACE}" -o jsonpath='{.data.api-key}' 2>/dev/null | base64 -d || true)
+if [ -n "${API_KEY}" ]; then
+    if command -v kates &> /dev/null || [ -x "${ROOT_DIR}/cli/dist/kates" ]; then
+        KATES_BIN="kates"
+        [ -x "${ROOT_DIR}/cli/dist/kates" ] && KATES_BIN="${ROOT_DIR}/cli/dist/kates"
+        "${KATES_BIN}" ctx set local --url "http://localhost:30083" --api-key "${API_KEY}" >/dev/null 2>&1 || true
+        "${KATES_BIN}" ctx use local >/dev/null 2>&1 || true
+        info "✅ Kates CLI context 'local' configured automatically!"
+    else
+        warn "Kates CLI not found in PATH. You'll need to configure it manually:"
+        echo "  kates ctx set local --url http://localhost:30083 --api-key \"${API_KEY}\""
+    fi
+fi
+
 info "✅ Kafka and Kates deployment complete!"
 echo ""
 echo "  Check cluster:     kubectl get kafka -n ${NAMESPACE}"

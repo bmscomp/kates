@@ -33,7 +33,7 @@ rules:
       - kafkatopics
     verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "secrets"]
+    resources: ["pods", "services", "configmaps", "secrets", "persistentvolumeclaims"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/log"]

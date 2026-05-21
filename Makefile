@@ -287,6 +287,19 @@ kates-deploy:
 	kubectl apply -f kates/k8s/service.yaml
 	kubectl rollout status deployment/kates -n kafka --timeout=300s
 	@echo "✅ Kates is running"
+	@echo "Configuring local Kates CLI context..."
+	@if command -v kates >/dev/null 2>&1; then \
+		kates ctx set local --url "http://localhost:30083" --api-key "changeme" >/dev/null 2>&1 || true; \
+		kates ctx use local >/dev/null 2>&1 || true; \
+		echo "✅ Kates CLI context 'local' configured automatically!"; \
+	elif [ -x "cli/dist/kates" ]; then \
+		cli/dist/kates ctx set local --url "http://localhost:30083" --api-key "changeme" >/dev/null 2>&1 || true; \
+		cli/dist/kates ctx use local >/dev/null 2>&1 || true; \
+		echo "✅ Kates CLI context 'local' configured automatically!"; \
+	else \
+		echo "⚠️ Kates CLI not found. To configure manually run:"; \
+		echo "  kates ctx set local --url http://localhost:30083 --api-key changeme"; \
+	fi
 
 kates-redeploy:
 	@echo "🔄 Redeploying Kates..."
