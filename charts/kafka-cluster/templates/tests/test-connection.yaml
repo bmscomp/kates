@@ -1,3 +1,41 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-egress"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      kates.io/test-pod: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+        - port: 9094
+          protocol: TCP
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
 apiVersion: v1
 kind: Pod
 metadata:
@@ -6,6 +44,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "1"
@@ -108,8 +147,12 @@ spec:
             echo "" > /tmp/probe_results
             echo "$LISTENER_DATA" | while IFS='=' read -r LNAME LBOOTSTRAP; do
               [ -z "$LNAME" ] && continue
+              LBOOTSTRAP=$(echo "$LBOOTSTRAP" | cut -d, -f1)
               LHOST=$(echo "$LBOOTSTRAP" | cut -d: -f1)
               LPORT=$(echo "$LBOOTSTRAP" | cut -d: -f2)
+              if echo "$LHOST" | grep -q "\.svc$"; then
+                LHOST="${LHOST}.{{ include "kafka-cluster.clusterDomain" $ }}"
+              fi
               info "Probing $LNAME at $LHOST:$LPORT..."
               if nc -zv -w 10 "$LHOST" "$LPORT" 2>/dev/null; then
                 echo "OK" >> /tmp/probe_results
@@ -174,6 +217,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "2"
@@ -217,8 +261,12 @@ spec:
               -o jsonpath='{.status.listeners[?(@.name=="{{ .name }}")].bootstrapServers}' 2>/dev/null || true)
             if [ -n "$DISCOVERED" ]; then
               # Verify TCP reachability before committing
+              DISCOVERED=$(echo "$DISCOVERED" | cut -d, -f1)
               D_HOST=$(echo "$DISCOVERED" | cut -d: -f1)
               D_PORT=$(echo "$DISCOVERED" | cut -d: -f2)
+              if echo "$D_HOST" | grep -q "\.svc$"; then
+                D_HOST="${D_HOST}.{{ include "kafka-cluster.clusterDomain" $ }}"
+              fi
               if nc -zv -w 5 "$D_HOST" "$D_PORT" 2>/dev/null; then
                 BOOTSTRAP="$DISCOVERED"
                 {{- if .tls }}
@@ -324,6 +372,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "3"
@@ -400,6 +449,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "4"
@@ -475,6 +525,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "5"
@@ -557,6 +608,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "6"
@@ -641,6 +693,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "7"
@@ -724,6 +777,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "8"
@@ -797,6 +851,7 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "9"
