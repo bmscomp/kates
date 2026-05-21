@@ -84,13 +84,16 @@ var knownComponents = map[string][]string{
 // ---------------------------------------------------------------------------
 
 var helmTestCmd = &cobra.Command{
-	Use:   "helm [component]",
+	Use:   "helm [component] [-- extra-helm-args...]",
 	Short: "Run Helm tests for deployed Kates ecosystem components",
 	Long: `Run Helm tests against all deployed Kates components on the cluster.
 
 Automatically discovers Kafka, Kates, and Chaos Helm releases and runs
 helm test for each. Results are displayed with pass/fail status per test
 hook, with optional verbose pod logs and export to JSON/Markdown/PDF.
+
+You can pass extra native arguments to the underlying 'helm test' command
+by appending them after a '--' separator (e.g. to filter tests).
 
 Examples:
   kates test helm                              # test all detected components
@@ -100,8 +103,9 @@ Examples:
   kates test helm --timeout 5m                 # custom timeout
   kates test helm --export md                  # export results to Markdown
   kates test helm --export json                # export results to JSON
+  kates test helm kafka -- --filter my-test    # run only 'my-test' hook
   kates test helm -o json                      # raw JSON output (no styling)`,
-	Args: cobra.MaximumNArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: runHelmTests,
 }
 
@@ -132,13 +136,24 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 		releases = discoverHelmReleases(ns)
 	}
 
-	// 4. Optional component filter
-	if len(args) == 1 {
-		component := strings.ToLower(args[0])
+	// 4. Parse arguments (component and passthrough args)
+	var component string
+	var extraArgs []string
+	if len(args) > 0 {
+		if !strings.HasPrefix(args[0], "-") {
+			component = strings.ToLower(args[0])
+			extraArgs = args[1:]
+		} else {
+			extraArgs = args
+		}
+	}
+
+	// 5. Optional component filter
+	if component != "" {
 		releases = filterByComponent(releases, component)
 	}
 
-	// 5. Discovery section
+	// 6. Discovery section
 	output.SubHeader("Discovering Releases")
 	if len(releases) == 0 {
 		output.Warn("No Kates ecosystem releases found in namespace " + ns)
@@ -156,14 +171,14 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 			output.DimStyle.Render(r.Chart))
 	}
 
-	// 6. Run tests per release
+	// 7. Run tests per release
 	var results []HelmTestResult
 	for _, rel := range releases {
 		fmt.Fprintln(output.Out)
 		displayName := helmDisplayName(rel)
 		output.Header(fmt.Sprintf("%s (%s)", displayName, rel.Name))
 
-		result := runSingleHelmTest(rel)
+		result := runSingleHelmTest(rel, extraArgs)
 		results = append(results, result)
 
 		// Per-hook display
@@ -354,12 +369,15 @@ func filterByComponent(releases []HelmRelease, component string) []HelmRelease {
 // Single release test
 // ---------------------------------------------------------------------------
 
-func runSingleHelmTest(rel HelmRelease) HelmTestResult {
+func runSingleHelmTest(rel HelmRelease, extraArgs []string) HelmTestResult {
 	start := time.Now()
 
 	args := []string{"test", rel.Name, "-n", rel.Namespace, "--timeout", helmTestTimeout, "--logs"}
 	if helmTestKubeconfig != "" {
 		args = append(args, "--kubeconfig", helmTestKubeconfig)
+	}
+	if len(extraArgs) > 0 {
+		args = append(args, extraArgs...)
 	}
 
 	rawOutput, err := runHelmCmd(args...)
