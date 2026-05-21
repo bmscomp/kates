@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-profiler"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: profiler
+      image: {{ include "kafka-cluster.kafkaImage" $ }}
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          echo "=== Tier 0: Cluster Setup Profiler ==="
+          echo "Gathering environment profile for $CLUSTER in $NAMESPACE..."
+          
+          echo ""
+          echo "--- Architecture ---"
+          echo "NodePools:"
+          kubectl get kafkanodepools -n $NAMESPACE -l strimzi.io/cluster=$CLUSTER -o custom-columns="NAME:.metadata.name,ROLES:.spec.roles,REPLICAS:.spec.replicas" 2>/dev/null || echo "  No NodePools found (or no permissions)"
+          
+          echo ""
+          echo "--- Pod Distribution ---"
+          echo "Broker/Controller Node placements:"
+          kubectl get pods -n $NAMESPACE -l strimzi.io/cluster=$CLUSTER,strimzi.io/kind=Kafka -o custom-columns="POD:.metadata.name,NODE:.spec.nodeName,STATUS:.status.phase" 2>/dev/null || echo "  Unable to fetch pod distribution"
+
+          echo ""
+          echo "--- Storage Profile ---"
+          echo "Persistent Volume Claims:"
+          kubectl get pvc -n $NAMESPACE -l strimzi.io/cluster=$CLUSTER -o custom-columns="NAME:.metadata.name,STATUS:.status.phase,CAPACITY:.status.capacity.storage,STORAGECLASS:.spec.storageClassName" 2>/dev/null || echo "  No PVCs found (or no permissions)"
+          
+          echo ""
+          echo "--- Configuration ---"
+          echo "Kafka CR configured listeners:"
+          kubectl get kafka $CLUSTER -n $NAMESPACE -o jsonpath='{range .spec.kafka.listeners[*]}{"  - Name: "}{.name}{" (Port: "}{.port}{", TLS: "}{.tls}{")\n"}{end}' 2>/dev/null || true
+
+          echo "========================================"
+          echo "✓ Profiler complete."
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
