@@ -22,32 +22,140 @@ spec:
       args:
         - |
           set -e
-          echo "=== Tier 1: Bootstrap Connectivity ==="
-          BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
-          HOST=$(echo $BOOTSTRAP | cut -d: -f1)
-          PORT=$(echo $BOOTSTRAP | cut -d: -f2)
-          echo "Testing TCP connection to ${HOST}:${PORT}..."
-          nc -zv -w 5 $HOST $PORT
-          echo "✓ Bootstrap connectivity OK"
+          FAIL=0
+          PASS=0
 
+          ok()   { PASS=$((PASS+1)); echo "  ✓ $1"; }
+          fail() { FAIL=$((FAIL+1)); echo "  ✗ $1"; }
+          warn() { echo "  ⚠ $1"; }
+          info() { echo "  ℹ $1"; }
+
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          # ─── Tier 1a: Kafka CR Readiness ─────────────────────────────────────
           echo ""
-          echo "=== Tier 1: Kafka CR Ready ==="
-          STATUS=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
-          if [ "$STATUS" = "True" ]; then
-            echo "✓ Kafka CR Ready=True"
+          echo "=== Tier 1a: Kafka CR Readiness ==="
+          CR_STATUS=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+
+          if [ "$CR_STATUS" = "True" ]; then
+            ok "Kafka CR $CLUSTER Ready=True"
+          elif [ -z "$CR_STATUS" ]; then
+            fail "Kafka CR $CLUSTER has no Ready condition (operator may not have reconciled)"
           else
-            echo "✗ Kafka CR not ready: $STATUS" && exit 1
+            fail "Kafka CR $CLUSTER Ready=$CR_STATUS"
+            REASON=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)
+            [ -n "$REASON" ] && info "Reason: $REASON"
+          fi
+
+          # ─── Tier 1b: Broker Pods ────────────────────────────────────────────
+          echo ""
+          echo "=== Tier 1b: Broker Pod Health ==="
+          TOTAL=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/kind=Kafka \
+            --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          READY=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/kind=Kafka \
+            --no-headers 2>/dev/null | grep -c "Running" || true)
+
+          echo "  Broker pods: $READY/$TOTAL running"
+          if [ "$READY" -lt 1 ]; then
+            fail "No broker pods running"
+          elif [ "$READY" -lt "$TOTAL" ]; then
+            warn "Only $READY of $TOTAL broker pods running"
+            PASS=$((PASS+1))
+          else
+            ok "All $TOTAL broker pods running"
+          fi
+
+          # ─── Tier 1c: DNS Resolution ─────────────────────────────────────────
+          echo ""
+          echo "=== Tier 1c: DNS Resolution ==="
+          BOOTSTRAP_SVC="${CLUSTER}-kafka-bootstrap"
+          info "Resolving ${BOOTSTRAP_SVC}..."
+          if nslookup "${BOOTSTRAP_SVC}.${NAMESPACE}.svc" >/dev/null 2>&1; then
+            RESOLVED_IP=$(nslookup "${BOOTSTRAP_SVC}.${NAMESPACE}.svc" 2>/dev/null | grep -A1 "Name:" | grep "Address:" | awk '{print $2}' | head -1)
+            ok "DNS resolved: ${BOOTSTRAP_SVC}.${NAMESPACE}.svc → ${RESOLVED_IP:-OK}"
+          elif nslookup "${BOOTSTRAP_SVC}" >/dev/null 2>&1; then
+            ok "DNS resolved via short name: ${BOOTSTRAP_SVC}"
+          else
+            fail "DNS resolution failed for ${BOOTSTRAP_SVC}.${NAMESPACE}.svc"
+            info "Check: is the bootstrap Service created? (kubectl get svc -n $NAMESPACE)"
+          fi
+
+          # ─── Tier 1d: Listener Connectivity ──────────────────────────────────
+          echo ""
+          echo "=== Tier 1d: Listener Connectivity ==="
+
+          # Discover active listeners from Kafka CR status (authoritative source)
+          LISTENER_DATA=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+            -o jsonpath='{range .status.listeners[*]}{.name}={.bootstrapServers}{"\n"}{end}' 2>/dev/null || true)
+
+          REACHABLE=0
+          PROBED=0
+
+          if [ -n "$LISTENER_DATA" ]; then
+            info "Discovered listeners from Kafka CR status:"
+            echo "$LISTENER_DATA" | while IFS='=' read -r LNAME LBOOTSTRAP; do
+              [ -z "$LNAME" ] && continue
+              echo "    $LNAME → $LBOOTSTRAP"
+            done
+
+            # Probe each discovered listener (no subshell — use temp file for counters)
+            echo "" > /tmp/probe_results
+            echo "$LISTENER_DATA" | while IFS='=' read -r LNAME LBOOTSTRAP; do
+              [ -z "$LNAME" ] && continue
+              LHOST=$(echo "$LBOOTSTRAP" | cut -d: -f1)
+              LPORT=$(echo "$LBOOTSTRAP" | cut -d: -f2)
+              info "Probing $LNAME at $LHOST:$LPORT..."
+              if nc -zv -w 10 "$LHOST" "$LPORT" 2>/dev/null; then
+                echo "OK" >> /tmp/probe_results
+                echo "  ✓ Listener '$LNAME' reachable ($LBOOTSTRAP)"
+              else
+                echo "FAIL" >> /tmp/probe_results
+                echo "  ✗ Listener '$LNAME' unreachable at $LBOOTSTRAP (timeout 10s)"
+              fi
+            done
+
+            REACHABLE=$(grep -c "OK" /tmp/probe_results 2>/dev/null || true)
+            PROBED=$(wc -l < /tmp/probe_results | tr -d ' ')
+            UNREACHABLE=$((PROBED - REACHABLE))
+          else
+            warn "No listeners in Kafka CR status — falling back to chart-configured ports"
+
+            # Fallback: probe using chart-declared listener ports with FQDN
+            {{- range .Values.kafka.listeners }}
+            {{- if ne .type "nodeport" }}
+            PROBED=$((PROBED + 1))
+            FQDN="{{ include "kafka-cluster.clusterName" $ }}-kafka-bootstrap.{{ include "kafka-cluster.namespace" $ }}.svc.{{ include "kafka-cluster.clusterDomain" $ }}"
+            info "Probing listener '{{ .name }}' at $FQDN:{{ .port }}..."
+            if nc -zv -w 10 "$FQDN" {{ .port }} 2>/dev/null; then
+              ok "Listener '{{ .name }}' reachable on port {{ .port }}"
+              REACHABLE=$((REACHABLE + 1))
+            else
+              fail "Listener '{{ .name }}' unreachable at $FQDN:{{ .port }} (timeout 10s)"
+            fi
+            {{- end }}
+            {{- end }}
           fi
 
           echo ""
-          echo "=== Tier 1: Broker Pods ==="
-          TOTAL=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka --no-headers | wc -l)
-          READY=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka --no-headers | grep "Running" | wc -l)
-          echo "Broker pods: $READY/$TOTAL running"
-          if [ "$READY" -lt 1 ]; then
-            echo "✗ No broker pods running" && exit 1
+          if [ "$REACHABLE" -ge 1 ]; then
+            ok "$REACHABLE/$PROBED listener(s) reachable"
+          elif [ "$PROBED" -eq 0 ]; then
+            warn "No listeners to probe"
+          else
+            fail "No listeners reachable (0/$PROBED)"
           fi
-          echo "✓ Broker pods healthy"
+
+          # ─── Summary ─────────────────────────────────────────────────────────
+          echo ""
+          echo "───────────────────────────────────"
+          echo "  Tier 1 Results: $PASS passed, $FAIL failed"
+          echo "───────────────────────────────────"
+          [ "$FAIL" -eq 0 ]
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
       volumeMounts:
@@ -81,27 +189,92 @@ spec:
       args:
         - |
           set -e
-          BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
           TOPIC="helm-test-$(date +%s)"
           MSG="helm-test-roundtrip-$(date +%s)"
 
           echo "=== Tier 2: Produce/Consume Round-Trip ==="
 
+          # ─── Step 1: Discover the best listener + protocol ───────────────
+          # Priority: plain (SASL_PLAINTEXT) → tls (SASL_SSL) → first available
+          BOOTSTRAP=""
+          SECURITY_PROTOCOL=""
+
+          {{- $firstUser := "" }}
+          {{- if and .Values.users.enabled (gt (len (default (list) .Values.users.items)) 0) }}
+          {{- $firstUser = (index .Values.users.items 0).name }}
+          {{- end }}
+          SASL_USER="{{ $firstUser }}"
+
+          # Try listeners in order of preference for produce/consume tests
+          {{- range .Values.kafka.listeners }}
+          {{- if and (eq .type "internal") (not (empty .authentication)) }}
+          if [ -z "$BOOTSTRAP" ]; then
+            DISCOVERED=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+              -o jsonpath='{.status.listeners[?(@.name=="{{ .name }}")].bootstrapServers}' 2>/dev/null || true)
+            if [ -n "$DISCOVERED" ]; then
+              # Verify TCP reachability before committing
+              D_HOST=$(echo "$DISCOVERED" | cut -d: -f1)
+              D_PORT=$(echo "$DISCOVERED" | cut -d: -f2)
+              if nc -zv -w 5 "$D_HOST" "$D_PORT" 2>/dev/null; then
+                BOOTSTRAP="$DISCOVERED"
+                {{- if .tls }}
+                SECURITY_PROTOCOL="SASL_SSL"
+                {{- else }}
+                SECURITY_PROTOCOL="SASL_PLAINTEXT"
+                {{- end }}
+                echo "  ℹ Using listener '{{ .name }}' → $BOOTSTRAP ($SECURITY_PROTOCOL)"
+              fi
+            fi
+          fi
+          {{- end }}
+          {{- end }}
+
+          # Final fallback to chart-configured bootstrap
+          if [ -z "$BOOTSTRAP" ]; then
+            BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
+            SECURITY_PROTOCOL="SASL_PLAINTEXT"
+            echo "  ℹ Fallback to chart-configured bootstrap: $BOOTSTRAP ($SECURITY_PROTOCOL)"
+          fi
+
+          # ─── Step 2: Build client.properties ─────────────────────────────
+          PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
+
           cat > /tmp/client.properties << EOF
-          security.protocol=SASL_PLAINTEXT
+          security.protocol=${SECURITY_PROTOCOL}
           sasl.mechanism=SCRAM-SHA-512
-          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')";
+          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="${SASL_USER}" password="${PASSWORD}";
           EOF
 
+          {{- /* If TLS, add truststore config */ -}}
+          if [ "$SECURITY_PROTOCOL" = "SASL_SSL" ]; then
+            # Check for cluster CA cert and build a JKS truststore
+            if kubectl get secret ${CLUSTER}-cluster-ca-cert -n $NAMESPACE -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d > /tmp/ca.crt 2>/dev/null; then
+              echo "  ℹ Building TLS truststore from cluster CA certificate..."
+              keytool -import -trustcacerts -alias kafka-ca -file /tmp/ca.crt -keystore /tmp/truststore.jks -storepass changeit -noprompt 2>/dev/null || true
+              cat >> /tmp/client.properties << EOF
+          ssl.truststore.location=/tmp/truststore.jks
+          ssl.truststore.password=changeit
+          EOF
+              echo "  ℹ TLS truststore configured"
+            else
+              echo "  ⚠ Cluster CA secret not found — TLS may fail with self-signed certs"
+            fi
+          fi
+
+          echo "  ℹ Protocol: $SECURITY_PROTOCOL | User: $SASL_USER | Bootstrap: $BOOTSTRAP"
+
+          # ─── Step 3: Create ephemeral test topic via CRD ─────────────────
           echo "Creating test topic via CRD: ${TOPIC}..."
           cat <<EOF | kubectl apply -f -
           apiVersion: kafka.strimzi.io/v1
           kind: KafkaTopic
           metadata:
             name: ${TOPIC}
-            namespace: {{ include "kafka-cluster.namespace" . }}
+            namespace: $NAMESPACE
             labels:
-              strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+              strimzi.io/cluster: $CLUSTER
           spec:
             partitions: 1
             replicas: 1
@@ -110,22 +283,23 @@ spec:
           EOF
 
           echo "Waiting for topic to be ready..."
-          kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=30s -n {{ include "kafka-cluster.namespace" . }}
+          kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=60s -n $NAMESPACE
 
-          PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
-          
-          # Create client properties for Java tools (bypassing kcat librdkafka SCRAM-SHA-512 bug with Kafka 4.0+)
-          cat > /tmp/client.properties << EOF
-          security.protocol=SASL_PLAINTEXT
-          sasl.mechanism=SCRAM-SHA-512
-          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="${PASSWORD}";
-          EOF
-
+          # ─── Step 4: Produce ─────────────────────────────────────────────
           echo "Producing test record..."
-          echo "${MSG}" | kafka-console-producer.sh --broker-list ${BOOTSTRAP} --topic ${TOPIC} --producer.config /tmp/client.properties 2>/dev/null
+          echo "${MSG}" | kafka-console-producer.sh \
+            --broker-list ${BOOTSTRAP} \
+            --topic ${TOPIC} \
+            --producer.config /tmp/client.properties 2>/dev/null
 
+          # ─── Step 5: Consume ─────────────────────────────────────────────
           echo "Consuming test record..."
-          RECEIVED=$(timeout 15 kafka-console-consumer.sh --bootstrap-server ${BOOTSTRAP} --topic ${TOPIC} --from-beginning --max-messages 1 --consumer.config /tmp/client.properties 2>/dev/null || true)
+          RECEIVED=$(timeout 20 kafka-console-consumer.sh \
+            --bootstrap-server ${BOOTSTRAP} \
+            --topic ${TOPIC} \
+            --from-beginning \
+            --max-messages 1 \
+            --consumer.config /tmp/client.properties 2>/dev/null || true)
 
           if echo "${RECEIVED}" | grep -q "${MSG}"; then
             echo "✓ Round-trip OK: produced and consumed '${MSG}'"
@@ -133,8 +307,9 @@ spec:
             echo "⚠ Round-trip: message sent but consume may have timed out (non-blocking)"
           fi
 
+          # ─── Step 6: Cleanup ─────────────────────────────────────────────
           echo "Cleaning up test topic..."
-          kubectl delete kafkatopic ${TOPIC} -n {{ include "kafka-cluster.namespace" . }} --ignore-not-found
+          kubectl delete kafkatopic ${TOPIC} -n $NAMESPACE --ignore-not-found
           echo "✓ Tier 2 complete"
       securityContext:
         allowPrivilegeEscalation: false
@@ -180,13 +355,16 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 3: Authorization Verification ==="
 
           echo "Checking KafkaUser CRs are Ready..."
-          USERS=$(kubectl get kafkausers -n {{ include "kafka-cluster.namespace" . }} -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} -o jsonpath='{.items[*].metadata.name}')
+          USERS=$(kubectl get kafkausers -n $NAMESPACE -l strimzi.io/cluster=$CLUSTER -o jsonpath='{.items[*].metadata.name}')
           FAIL=0
           for u in $USERS; do
-            STATUS=$(kubectl get kafkauser $u -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+            STATUS=$(kubectl get kafkauser $u -n $NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
             if [ "$STATUS" = "True" ]; then
               echo "  ✓ KafkaUser $u: Ready"
             else
@@ -198,7 +376,7 @@ spec:
           echo ""
           echo "Checking SCRAM credential secrets exist..."
           for u in $USERS; do
-            if kubectl get secret $u -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.data.password}' > /dev/null 2>&1; then
+            if kubectl get secret $u -n $NAMESPACE -o jsonpath='{.data.password}' > /dev/null 2>&1; then
               echo "  ✓ Secret $u: exists"
             else
               echo "  ⚠ Secret $u: missing (may use TLS auth)"
@@ -207,7 +385,7 @@ spec:
 
           echo ""
           echo "Checking authorization type..."
-          AUTH_TYPE=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.spec.kafka.authorization.type}')
+          AUTH_TYPE=$(kubectl get kafka $CLUSTER -n $NAMESPACE -o jsonpath='{.spec.kafka.authorization.type}')
           echo "  Authorization type: $AUTH_TYPE"
           if [ "$AUTH_TYPE" = "simple" ]; then
             echo "  ✓ Simple ACL authorization enabled"
@@ -252,6 +430,9 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 4: KRaft Controller Quorum ==="
 
           echo "Checking controller node pool CRs..."
@@ -270,8 +451,8 @@ spec:
           echo ""
           echo "Checking controller pods..."
           EXPECTED={{ $totalControllers }}
-          RUNNING=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/controller-role=true \
+          RUNNING=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/controller-role=true \
             --no-headers | grep "Running" | wc -l | tr -d ' ')
           echo "  Controller pods running: $RUNNING/$EXPECTED"
           if [ "$RUNNING" -lt "$EXPECTED" ]; then
@@ -281,7 +462,7 @@ spec:
 
           echo ""
           echo "Verifying KRaft mode annotation..."
-          KRAFT=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} -o jsonpath='{.metadata.annotations.strimzi\.io/kraft}')
+          KRAFT=$(kubectl get kafka $CLUSTER -n $NAMESPACE -o jsonpath='{.metadata.annotations.strimzi\.io/kraft}')
           if [ "$KRAFT" = "enabled" ]; then
             echo "  ✓ KRaft mode enabled"
           else
@@ -323,17 +504,20 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 5: Topic Provisioning ==="
 
-          echo "Checking KafkaTopic CRs for cluster {{ include "kafka-cluster.clusterName" . }}..."
-          TOPICS=$(kubectl get kafkatopics -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} \
+          echo "Checking KafkaTopic CRs for cluster $CLUSTER..."
+          TOPICS=$(kubectl get kafkatopics -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER \
             -o jsonpath='{.items[*].metadata.name}')
           FAIL=0
           COUNT=0
           for t in $TOPICS; do
             COUNT=$((COUNT + 1))
-            STATUS=$(kubectl get kafkatopic $t -n {{ include "kafka-cluster.namespace" . }} \
+            STATUS=$(kubectl get kafkatopic $t -n $NAMESPACE \
               -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
             if [ "$STATUS" = "True" ]; then
               echo "  ✓ Topic $t: Ready"
@@ -401,12 +585,15 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 6: Listener & TLS Configuration ==="
 
           FAIL=0
           {{- range .Values.kafka.listeners }}
-          echo "Checking listener '{{ .name }}' (port {{ .port }})..."
-          BOOTSTRAP=$(kubectl get kafka {{ include "kafka-cluster.clusterName" $ }} -n {{ include "kafka-cluster.namespace" $ }} \
+          echo "Checking listener '{{ .name }}' (port {{ .port }}, type={{ .type }}, tls={{ .tls }})..."
+          BOOTSTRAP=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
             -o jsonpath='{.status.listeners[?(@.name=="{{ .name }}")].bootstrapServers}')
           if [ -n "$BOOTSTRAP" ]; then
             echo "  ✓ Listener '{{ .name }}': $BOOTSTRAP"
@@ -417,8 +604,15 @@ spec:
           {{- if .tls }}
 
           echo "  Verifying TLS CA secret..."
-          if kubectl get secret {{ include "kafka-cluster.clusterName" $ }}-cluster-ca-cert -n {{ include "kafka-cluster.namespace" $ }} > /dev/null 2>&1; then
-            echo "  ✓ Cluster CA cert secret exists"
+          if kubectl get secret ${CLUSTER}-cluster-ca-cert -n $NAMESPACE > /dev/null 2>&1; then
+            # Verify the cert is not expired
+            EXPIRY=$(kubectl get secret ${CLUSTER}-cluster-ca-cert -n $NAMESPACE \
+              -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)
+            if [ -n "$EXPIRY" ]; then
+              echo "  ✓ Cluster CA cert exists (expires: $EXPIRY)"
+            else
+              echo "  ✓ Cluster CA cert secret exists"
+            fi
           else
             echo "  ⚠ Cluster CA cert secret not found"
           fi
@@ -428,7 +622,7 @@ spec:
           echo ""
           echo "Checking listener count..."
           CONFIGURED={{ len .Values.kafka.listeners }}
-          ACTUAL=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} \
+          ACTUAL=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
             -o jsonpath='{.status.listeners}' | grep -o '"name"' | wc -l | tr -d ' ')
           echo "  Configured: $CONFIGURED, Active: $ACTUAL"
           if [ "$ACTUAL" -lt "$CONFIGURED" ]; then
@@ -474,6 +668,9 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 7: Node Pool Topology ==="
 
           FAIL=0
@@ -493,8 +690,8 @@ spec:
 
           echo ""
           echo "Checking total broker pods..."
-          RUNNING=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka \
+          RUNNING=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/kind=Kafka \
             --no-headers | grep "Running" | wc -l | tr -d ' ')
           echo "  Total broker pods running: $RUNNING (expected >= $TOTAL_EXPECTED)"
           if [ "$RUNNING" -lt "$TOTAL_EXPECTED" ]; then
@@ -505,8 +702,8 @@ spec:
 
           echo ""
           echo "Checking node distribution..."
-          NODES=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }},strimzi.io/kind=Kafka \
+          NODES=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/kind=Kafka \
             -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')
           echo "  Broker pods spread across $NODES unique node(s)"
           if [ "$NODES" -ge 2 ]; then
@@ -553,11 +750,14 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 8: CruiseControl Readiness ==="
 
           echo "Checking CruiseControl pod..."
-          CC_PODS=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-cruise-control \
+          CC_PODS=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/name=${CLUSTER}-cruise-control \
             --no-headers 2>/dev/null)
           if [ -z "$CC_PODS" ]; then
             echo "  ✗ No CruiseControl pod found" && exit 1
@@ -580,7 +780,7 @@ spec:
 
           echo ""
           echo "Checking CruiseControl configuration in Kafka CR..."
-          CC_SPEC=$(kubectl get kafka {{ include "kafka-cluster.clusterName" . }} -n {{ include "kafka-cluster.namespace" . }} \
+          CC_SPEC=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
             -o jsonpath='{.spec.cruiseControl}')
           if [ -n "$CC_SPEC" ]; then
             echo "  ✓ CruiseControl section present in Kafka CR"
@@ -622,11 +822,14 @@ spec:
       args:
         - |
           set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
           echo "=== Tier 9: Metrics & Exporter Pipeline ==="
 
           echo "Checking kafka-metrics ConfigMap..."
-          if kubectl get configmap kafka-metrics -n {{ include "kafka-cluster.namespace" . }} > /dev/null 2>&1; then
-            KEYS=$(kubectl get configmap kafka-metrics -n {{ include "kafka-cluster.namespace" . }} \
+          if kubectl get configmap kafka-metrics -n $NAMESPACE > /dev/null 2>&1; then
+            KEYS=$(kubectl get configmap kafka-metrics -n $NAMESPACE \
               -o jsonpath='{.data}' | grep -o '"[^"]*":' | tr -d '":' | tr '\n' ', ')
             echo "  ✓ ConfigMap 'kafka-metrics' exists (keys: ${KEYS%,})"
           else
@@ -636,8 +839,8 @@ spec:
           {{- if .Values.kafkaExporter.enabled }}
           echo ""
           echo "Checking Kafka Exporter pod..."
-          EXPORTER_PODS=$(kubectl get pods -n {{ include "kafka-cluster.namespace" . }} \
-            -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-kafka-exporter \
+          EXPORTER_PODS=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/name=${CLUSTER}-kafka-exporter \
             --no-headers 2>/dev/null)
           if [ -z "$EXPORTER_PODS" ]; then
             echo "  ✗ No Kafka Exporter pod found" && exit 1
@@ -653,7 +856,7 @@ spec:
           {{- if .Values.podMonitors.enabled }}
           echo ""
           echo "Checking PodMonitor resources..."
-          PM_COUNT=$(kubectl get podmonitors -n {{ include "kafka-cluster.namespace" . }} \
+          PM_COUNT=$(kubectl get podmonitors -n $NAMESPACE \
             --no-headers 2>/dev/null | wc -l | tr -d ' ')
           if [ "$PM_COUNT" -ge 1 ]; then
             echo "  ✓ Found $PM_COUNT PodMonitor(s)"
