@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chart-lint chart-package chart-push gameday jaeger kyverno kyverno-undeploy
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy
 
 .DEFAULT_GOAL := help
 
@@ -406,7 +406,179 @@ kafka-chart-push: kafka-chart-package
 	@echo "✅ Kafka chart pushed: $(CHART_REGISTRY)/kafka-cluster:$(KAFKA_CHART_VERSION)"
 
 kafka-chart-test:
-	helm test kafka-cluster --namespace kafka --timeout 120s
+	@echo ""
+	@echo "╭────────────────────────────────────────────────────────────────╮"
+	@echo "│  🧪 Helm Test · Kafka Cluster                                 │"
+	@echo "╰────────────────────────────────────────────────────────────────╯"
+	@echo ""
+	@KAFKA_RELEASE=$${KAFKA_RELEASE:-kafka-cluster}; \
+	KAFKA_NAMESPACE=$${KAFKA_NAMESPACE:-kafka}; \
+	TIMEOUT=$${TIMEOUT:-180s}; \
+	echo "  Release:    $$KAFKA_RELEASE"; \
+	echo "  Namespace:  $$KAFKA_NAMESPACE"; \
+	echo "  Timeout:    $$TIMEOUT"; \
+	echo ""; \
+	helm test $$KAFKA_RELEASE --namespace $$KAFKA_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; \
+	EXIT=$$?; \
+	echo ""; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "  ✅ Kafka cluster tests passed"; \
+	else \
+		echo "  ❌ Kafka cluster tests failed (exit $$EXIT)"; \
+		echo ""; \
+		echo "  Diagnostics:"; \
+		echo "    kubectl get pods -n $$KAFKA_NAMESPACE -l helm.sh/hook=test --no-headers"; \
+		kubectl get pods -n $$KAFKA_NAMESPACE -l helm.sh/hook=test --no-headers 2>/dev/null | sed 's/^/    /'; \
+		echo ""; \
+		echo "  View failed pod logs:"; \
+		for POD in $$(kubectl get pods -n $$KAFKA_NAMESPACE -l helm.sh/hook=test --field-selector=status.phase=Failed -o name 2>/dev/null); do \
+			echo "    kubectl logs $$POD -n $$KAFKA_NAMESPACE"; \
+		done; \
+	fi; \
+	exit $$EXIT
+
+kates-helm-test:
+	@echo ""
+	@echo "╭────────────────────────────────────────────────────────────────╮"
+	@echo "│  🧪 Helm Test · Kates API                                     │"
+	@echo "╰────────────────────────────────────────────────────────────────╯"
+	@echo ""
+	@KATES_RELEASE=$${KATES_RELEASE:-kates}; \
+	KATES_NAMESPACE=$${KATES_NAMESPACE:-$(KATES_NS)}; \
+	TIMEOUT=$${TIMEOUT:-120s}; \
+	echo "  Release:    $$KATES_RELEASE"; \
+	echo "  Namespace:  $$KATES_NAMESPACE"; \
+	echo "  Timeout:    $$TIMEOUT"; \
+	echo ""; \
+	helm test $$KATES_RELEASE --namespace $$KATES_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; \
+	EXIT=$$?; \
+	echo ""; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "  ✅ Kates API tests passed"; \
+	else \
+		echo "  ❌ Kates API tests failed (exit $$EXIT)"; \
+		echo ""; \
+		echo "  Diagnostics:"; \
+		kubectl get pods -n $$KATES_NAMESPACE -l helm.sh/hook=test --no-headers 2>/dev/null | sed 's/^/    /'; \
+	fi; \
+	exit $$EXIT
+
+chaos-helm-test:
+	@echo ""
+	@echo "╭────────────────────────────────────────────────────────────────╮"
+	@echo "│  🧪 Helm Test · Chaos (LitmusChaos)                           │"
+	@echo "╰────────────────────────────────────────────────────────────────╯"
+	@echo ""
+	@CHAOS_RELEASE=$${CHAOS_RELEASE:-chaos}; \
+	CHAOS_NAMESPACE=$${CHAOS_NAMESPACE:-kafka}; \
+	TIMEOUT=$${TIMEOUT:-120s}; \
+	echo "  Release:    $$CHAOS_RELEASE"; \
+	echo "  Namespace:  $$CHAOS_NAMESPACE"; \
+	echo "  Timeout:    $$TIMEOUT"; \
+	echo ""; \
+	helm test $$CHAOS_RELEASE --namespace $$CHAOS_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; \
+	EXIT=$$?; \
+	echo ""; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "  ✅ Chaos tests passed"; \
+	else \
+		echo "  ❌ Chaos tests failed (exit $$EXIT)"; \
+	fi; \
+	exit $$EXIT
+
+# ── Unified Helm Test Suite ──────────────────────────────────────────────────
+# Run all Helm tests across every component, with a final summary.
+# Configurable via environment variables:
+#   KAFKA_RELEASE    Kafka Helm release name      (default: kafka-cluster)
+#   KAFKA_NAMESPACE  Kafka namespace               (default: kafka)
+#   KATES_RELEASE    Kates Helm release name       (default: kates)
+#   KATES_NAMESPACE  Kates namespace               (default: kafka)
+#   CHAOS_RELEASE    Chaos Helm release name       (default: chaos)
+#   CHAOS_NAMESPACE  Chaos namespace               (default: kafka)
+#   TIMEOUT          Helm test timeout per suite   (default: 180s)
+#   SKIP_CHAOS       Set to 1 to skip chaos tests  (default: 0)
+#   SKIP_KATES       Set to 1 to skip kates tests  (default: 0)
+helm-test-all:
+	@echo ""
+	@echo "╔════════════════════════════════════════════════════════════════╗"
+	@echo "║  🧪 Helm Test Suite · All Components                          ║"
+	@echo "╚════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@TOTAL=0; PASSED=0; FAILED=0; SKIPPED=0; \
+	KAFKA_RELEASE=$${KAFKA_RELEASE:-kafka-cluster}; \
+	KAFKA_NAMESPACE=$${KAFKA_NAMESPACE:-kafka}; \
+	KATES_RELEASE=$${KATES_RELEASE:-kates}; \
+	KATES_NAMESPACE=$${KATES_NAMESPACE:-$(KATES_NS)}; \
+	CHAOS_RELEASE=$${CHAOS_RELEASE:-chaos}; \
+	CHAOS_NAMESPACE=$${CHAOS_NAMESPACE:-kafka}; \
+	TIMEOUT=$${TIMEOUT:-180s}; \
+	SKIP_CHAOS=$${SKIP_CHAOS:-0}; \
+	SKIP_KATES=$${SKIP_KATES:-0}; \
+	echo "  Configuration:"; \
+	echo "    Kafka:   $$KAFKA_RELEASE  (ns: $$KAFKA_NAMESPACE)"; \
+	echo "    Kates:   $$KATES_RELEASE  (ns: $$KATES_NAMESPACE)"; \
+	echo "    Chaos:   $$CHAOS_RELEASE  (ns: $$CHAOS_NAMESPACE)"; \
+	echo "    Timeout: $$TIMEOUT"; \
+	echo ""; \
+	echo "──────────────────────────────────────────────────────────────────"; \
+	echo "  ▸ Kafka Cluster"; \
+	TOTAL=$$((TOTAL+1)); \
+	if helm status $$KAFKA_RELEASE -n $$KAFKA_NAMESPACE >/dev/null 2>&1; then \
+		if helm test $$KAFKA_RELEASE -n $$KAFKA_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; then \
+			PASSED=$$((PASSED+1)); \
+			echo "  ✅ Kafka: PASSED"; \
+		else \
+			FAILED=$$((FAILED+1)); \
+			echo "  ❌ Kafka: FAILED"; \
+		fi; \
+	else \
+		SKIPPED=$$((SKIPPED+1)); \
+		echo "  ⏭  Kafka: SKIPPED (release $$KAFKA_RELEASE not found in $$KAFKA_NAMESPACE)"; \
+	fi; \
+	echo ""; \
+	echo "──────────────────────────────────────────────────────────────────"; \
+	echo "  ▸ Kates API"; \
+	TOTAL=$$((TOTAL+1)); \
+	if [ "$$SKIP_KATES" = "1" ]; then \
+		SKIPPED=$$((SKIPPED+1)); \
+		echo "  ⏭  Kates: SKIPPED (SKIP_KATES=1)"; \
+	elif helm status $$KATES_RELEASE -n $$KATES_NAMESPACE >/dev/null 2>&1; then \
+		if helm test $$KATES_RELEASE -n $$KATES_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; then \
+			PASSED=$$((PASSED+1)); \
+			echo "  ✅ Kates: PASSED"; \
+		else \
+			FAILED=$$((FAILED+1)); \
+			echo "  ❌ Kates: FAILED"; \
+		fi; \
+	else \
+		SKIPPED=$$((SKIPPED+1)); \
+		echo "  ⏭  Kates: SKIPPED (release $$KATES_RELEASE not found in $$KATES_NAMESPACE)"; \
+	fi; \
+	echo ""; \
+	echo "──────────────────────────────────────────────────────────────────"; \
+	echo "  ▸ Chaos (LitmusChaos)"; \
+	TOTAL=$$((TOTAL+1)); \
+	if [ "$$SKIP_CHAOS" = "1" ]; then \
+		SKIPPED=$$((SKIPPED+1)); \
+		echo "  ⏭  Chaos: SKIPPED (SKIP_CHAOS=1)"; \
+	elif helm status $$CHAOS_RELEASE -n $$CHAOS_NAMESPACE >/dev/null 2>&1; then \
+		if helm test $$CHAOS_RELEASE -n $$CHAOS_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; then \
+			PASSED=$$((PASSED+1)); \
+			echo "  ✅ Chaos: PASSED"; \
+		else \
+			FAILED=$$((FAILED+1)); \
+			echo "  ❌ Chaos: FAILED"; \
+		fi; \
+	else \
+		SKIPPED=$$((SKIPPED+1)); \
+		echo "  ⏭  Chaos: SKIPPED (release $$CHAOS_RELEASE not found in $$CHAOS_NAMESPACE)"; \
+	fi; \
+	echo ""; \
+	echo "╔════════════════════════════════════════════════════════════════╗"; \
+	echo "║  Results: $$PASSED passed · $$FAILED failed · $$SKIPPED skipped     ║"; \
+	echo "╚════════════════════════════════════════════════════════════════╝"; \
+	echo ""; \
+	[ $$FAILED -eq 0 ]
 
 kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package
 	@echo "✅ All kafka chart checks passed: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
@@ -595,6 +767,13 @@ help:
 	@echo "  litmus-test                        - Run Helm tests for chaos stack"
 	@echo "  litmus-gameday                     - Trigger GameDay validation run"
 	@echo "  velero                             - Deploy Velero backup"
+	@echo ""
+	@echo "  Helm Test Suite"
+	@echo "  kafka-chart-test                   - Run Helm tests for Kafka cluster (KAFKA_RELEASE=... KAFKA_NAMESPACE=...)"
+	@echo "  kates-helm-test                    - Run Helm tests for Kates API (KATES_RELEASE=... KATES_NAMESPACE=...)"
+	@echo "  chaos-helm-test                    - Run Helm tests for Chaos stack (CHAOS_RELEASE=... CHAOS_NAMESPACE=...)"
+	@echo "  helm-test-all                      - Run all Helm tests across all components with summary"
+	@echo "                                       TIMEOUT=180s SKIP_CHAOS=0 SKIP_KATES=0"
 	@echo ""
 	@echo "  Kates CLI"
 	@echo "  cli-build                          - Cross-compile CLI (macOS + Linux)"
