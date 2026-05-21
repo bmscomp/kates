@@ -49,7 +49,7 @@ var securityAuditCmd = &cobra.Command{
 				"compliance": "CIS 5.1",
 			})
 			
-			polOut, _ := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.spec.validationFailureAction}\n").Output()
+			polOut, _ := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.spec.validationFailureAction}{\"\n\"}{end}").Output()
 			policies := strings.Split(strings.TrimSpace(string(polOut)), "\n")
 			activeCount, enforceCount := 0, 0
 			for _, p := range policies {
@@ -102,7 +102,7 @@ var securityAuditCmd = &cobra.Command{
 				})
 			}
 			// Detect workload violations and penalize grade
-			polRepOut, err := exec.Command("kubectl", "get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}\\n").Output()
+			polRepOut, err := exec.Command("kubectl", "get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}{\"\\n\"}{end}").Output()
 			if err == nil {
 				outStr := strings.TrimSpace(string(polRepOut))
 				if len(outStr) > 0 {

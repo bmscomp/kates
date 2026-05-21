@@ -66,7 +66,7 @@ func checkKyvernoInstalled() bool {
 }
 
 func discoverExistingPolicies() map[string]string {
-	out, err := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.status.ready}\n").Output()
+	out, err := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.status.ready}{\"\\n\"}{end}").Output()
 	policies := make(map[string]string)
 	if err != nil {
 		return policies
