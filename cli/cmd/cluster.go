@@ -143,14 +143,11 @@ var clusterTopologyCmd = &cobra.Command{
 					if v {
 						icon = "✓"
 					}
-					statusParts = append(statusParts, fmt.Sprintf("  %s %s", icon, label))
+					statusParts = append(statusParts, fmt.Sprintf("%s %s", icon, label))
 				}
 			}
 			if len(statusParts) > 0 {
-				output.KeyValue("Components", "")
-				for _, p := range statusParts {
-					fmt.Println(p)
-				}
+				output.KeyValue("Components", strings.Join(statusParts, "\n                           "))
 			}
 		}
 
