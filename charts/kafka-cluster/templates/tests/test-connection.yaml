@@ -241,22 +241,18 @@ spec:
           # ─── Step 2: Build client.properties ─────────────────────────────
           PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
 
-          cat > /tmp/client.properties << EOF
-          security.protocol=${SECURITY_PROTOCOL}
-          sasl.mechanism=SCRAM-SHA-512
-          sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="${SASL_USER}" password="${PASSWORD}";
-          EOF
+          echo "security.protocol=${SECURITY_PROTOCOL}" > /tmp/client.properties
+          echo "sasl.mechanism=SCRAM-SHA-512" >> /tmp/client.properties
+          echo "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${SASL_USER}\" password=\"${PASSWORD}\";" >> /tmp/client.properties
 
-          {{- /* If TLS, add truststore config */ -}}
+          {{/* If TLS, add truststore config */}}
           if [ "$SECURITY_PROTOCOL" = "SASL_SSL" ]; then
             # Check for cluster CA cert and build a JKS truststore
             if kubectl get secret ${CLUSTER}-cluster-ca-cert -n $NAMESPACE -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d > /tmp/ca.crt 2>/dev/null; then
               echo "  ℹ Building TLS truststore from cluster CA certificate..."
               keytool -import -trustcacerts -alias kafka-ca -file /tmp/ca.crt -keystore /tmp/truststore.jks -storepass changeit -noprompt 2>/dev/null || true
-              cat >> /tmp/client.properties << EOF
-          ssl.truststore.location=/tmp/truststore.jks
-          ssl.truststore.password=changeit
-          EOF
+              echo "ssl.truststore.location=/tmp/truststore.jks" >> /tmp/client.properties
+              echo "ssl.truststore.password=changeit" >> /tmp/client.properties
               echo "  ℹ TLS truststore configured"
             else
               echo "  ⚠ Cluster CA secret not found — TLS may fail with self-signed certs"
@@ -267,20 +263,7 @@ spec:
 
           # ─── Step 3: Create ephemeral test topic via CRD ─────────────────
           echo "Creating test topic via CRD: ${TOPIC}..."
-          cat <<EOF | kubectl apply -f -
-          apiVersion: kafka.strimzi.io/v1
-          kind: KafkaTopic
-          metadata:
-            name: ${TOPIC}
-            namespace: $NAMESPACE
-            labels:
-              strimzi.io/cluster: $CLUSTER
-          spec:
-            partitions: 1
-            replicas: 1
-            config:
-              retention.ms: 60000
-          EOF
+          printf "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: %s\n  namespace: %s\n  labels:\n    strimzi.io/cluster: %s\nspec:\n  partitions: 1\n  replicas: 1\n  config:\n    retention.ms: 60000\n" "${TOPIC}" "$NAMESPACE" "$CLUSTER" | kubectl apply -f -
 
           echo "Waiting for topic to be ready..."
           kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=60s -n $NAMESPACE
