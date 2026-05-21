@@ -120,7 +120,7 @@ var doctorCmd = &cobra.Command{
 				checks = append(checks, checkResult{"Kyverno Policies", false, "No active policies", "Run 'kates kyverno apply' to configure recommended policies."})
 			}
 
-			polRepOut, _ := exec.Command("kubectl", "get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}\\n").Output()
+			polRepOut, _ := exec.Command("kubectl", "get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}{\"\\n\"}{end}").Output()
 			outStr := strings.TrimSpace(string(polRepOut))
 			if len(outStr) > 0 {
 				failures := strings.Split(outStr, "\n")
