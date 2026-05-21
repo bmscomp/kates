@@ -5,6 +5,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "1"
@@ -172,6 +173,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "2"
@@ -321,6 +323,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "3"
@@ -396,6 +399,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "4"
@@ -470,6 +474,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "5"
@@ -551,6 +556,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "6"
@@ -634,6 +640,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "7"
@@ -716,6 +723,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "8"
@@ -788,6 +796,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "9"
