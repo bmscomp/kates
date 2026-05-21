@@ -200,8 +200,14 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if result.Error != "" && len(result.Hooks) == 0 {
-			output.Error(result.Error)
+		if result.Error != "" {
+			// Extract just the Error: line if it exists to avoid dumping the whole log again
+			lines := strings.Split(result.Error, "\n")
+			for _, l := range lines {
+				if strings.HasPrefix(l, "Error:") || strings.Contains(l, "unable to get pod logs") {
+					output.Error(l)
+				}
+			}
 		}
 	}
 
