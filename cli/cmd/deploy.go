@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -212,7 +213,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			var response string
 			fmt.Scanln(&response)
 			if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
-				fmt.Println("🚀 Creating Kind cluster via 'make cluster'...")
+				fmt.Println("📦 Creating Kind cluster via 'make cluster'...")
 				cmd := exec.Command("make", "cluster")
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
@@ -307,7 +308,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				fmt.Println("⏭️  Strimzi Operator already deployed. Skipping.")
 				return nil
 			}
-			fmt.Println("\n🚀 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
+			fmt.Println("\n📦 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
 			// Create namespace properly
 			runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
 kind: Namespace
@@ -328,7 +329,7 @@ metadata:
 				fmt.Println("⏭️  Cert-Manager already deployed. Skipping.")
 				return nil
 			}
-			fmt.Printf("\n🚀 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
+			fmt.Printf("\n📦 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
 			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
 			runHelmFn(gCtx, "repo", "update", "jetstack")
 			// global.clusterDomain ensures cert-manager generates webhook TLS certificates
@@ -443,7 +444,7 @@ spec:
 				fmt.Println("⏭️  Kyverno already deployed. Skipping.")
 				return nil
 			}
-			fmt.Println("\n🚀 Deploying Kyverno (Namespace: kyverno)...")
+			fmt.Println("\n📦 Deploying Kyverno (Namespace: kyverno)...")
 			runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
 			runHelmFn(gCtx, "repo", "update", "kyverno")
 
@@ -501,7 +502,7 @@ spec:
 				fmt.Println("⏭️  Monitoring stack already deployed. Skipping.")
 				return nil
 			}
-			fmt.Printf("\n🚀 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
+			fmt.Printf("\n📦 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
 
 			// Update chart dependencies (kube-prometheus-stack subchart).
 			runHelmFn(g2Ctx, "dependency", "update", "charts/monitoring")
@@ -519,7 +520,7 @@ spec:
 	// Deploy Kafka
 	g2.Go(func() error {
 		if !isHelmReleaseDeployedFn(g2Ctx, "krafter", kafkaNS) {
-			fmt.Printf("\n🚀 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
+			fmt.Printf("\n📦 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
 
 			runHelmFn(g2Ctx, "dependency", "update", "charts/kafka-cluster")
 			// No --wait: Helm only needs to submit the manifests; the Strimzi
@@ -593,8 +594,9 @@ spec:
 		userDeadline := time.Now().Add(userTimeout)
 		start := time.Now()
 
-		fmt.Printf("\n    %s Kafka Users  %s %s\n",
-			dim("╭─"), bold(fmt.Sprintf("(%s timeout)", fmtRemaining(userTimeout))), dim("─────────────────────────────╮"))
+		fmt.Printf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Users  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(userTimeout)))), 58))
+
+		lastPrintedUserLines := 0
 
 		for {
 			out, _ := exec.CommandContext(g2Ctx,
@@ -604,8 +606,12 @@ spec:
 				"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status",
 			).Output()
 
+			type userStat struct {
+				name  string
+				ready bool
+			}
+			var users []userStat
 			total, ready := 0, 0
-			var pending []string
 			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 				if line == "" {
 					continue
@@ -615,12 +621,16 @@ spec:
 					continue
 				}
 				total++
-				if len(fields) >= 2 && fields[1] == "True" {
+				isReady := len(fields) >= 2 && fields[1] == "True"
+				if isReady {
 					ready++
-				} else {
-					pending = append(pending, fields[0])
 				}
+				users = append(users, userStat{name: fields[0], ready: isReady})
 			}
+			
+			sort.Slice(users, func(i, j int) bool {
+				return users[i].name < users[j].name
+			})
 
 			elapsed := time.Since(start)
 			remaining := time.Until(userDeadline)
@@ -632,55 +642,86 @@ spec:
 			isCancelled := g2Ctx.Err() != nil
 			failed := isTimedOut || isCancelled
 
+			if lastPrintedUserLines > 0 {
+				fmt.Printf("\033[%dA", lastPrintedUserLines)
+			}
+			
+			renderUsers := func(finalFailed bool) int {
+				lines := 0
+				if len(users) == 0 {
+					fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s", dim("Waiting for KafkaUsers to be applied...")), 58))
+					lines++
+					return lines
+				}
+				for _, u := range users {
+					namePadded := fmt.Sprintf("%-18s", u.name)
+					if len(namePadded) > 18 {
+						namePadded = namePadded[:15] + "..."
+					}
+					
+					statusStr := dim("⏳ provisioning")
+					progress := 0
+					if u.ready {
+						statusStr = blue("✔ ready")
+						progress = 1
+					} else if finalFailed {
+						statusStr = red("✖ failed")
+						if isTimedOut {
+							statusStr = red("✖ timed out")
+						}
+					}
+					
+					fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
+						dim(namePadded),
+						renderProgressBar(progress, 1, 15, finalFailed && !u.ready),
+						fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", progress, 1)),
+						statusStr), 58))
+					lines++
+				}
+				return lines
+			}
+
 			if total > 0 && ready == total {
 				// Final success UI
-				fmt.Printf("    %s  %s  [%s]  %s  %s\n",
-					dim("│"), dim("KafkaUsers  "),
-					renderProgressBar(ready, total, 15, false),
-					blue(fmt.Sprintf("%d/%d", ready, total)),
-					blue("✔ ready"))
-				fmt.Printf("    %s  %s  [%s]  %s / %s\n",
-					dim("│"), dim("Timeout     "),
+				renderUsers(false)
+				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+					dim(fmt.Sprintf("%-18s", "Timeout")),
 					renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, false),
-					blue(fmtElapsed(int(elapsed.Seconds()))), blue(fmtElapsed(int(userTimeout.Seconds()))))
-				fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
-				fmt.Printf("    %s All %d KafkaUser credentials ready  %s %s\n\n",
+					blue(fmtElapsed(int(elapsed.Seconds()))), blue(fmtElapsed(int(userTimeout.Seconds())))), 58))
+				fmt.Printf("    %s\033[K\n", boxBottom(58))
+				fmt.Printf("    %s All %d KafkaUser credentials ready  %s %s\033[K\n\n",
 					green("✔"), total, dim("elapsed"), bold(fmtElapsed(int(elapsed.Seconds()))))
 				break
 			}
 
-			// Render active progress
-			userStatus := "⏳ provisioning"
-			if len(pending) > 0 {
-				userStatus = fmt.Sprintf("⏳ wait: %s", strings.Join(pending, ", "))
-			}
-
-			fmt.Printf("    %s  %s  [%s]  %s  %s\n",
-				dim("│"), dim("KafkaUsers  "),
-				renderProgressBar(ready, total, 15, failed),
-				fmt.Sprintf("%d/%d", ready, total),
-				dim(userStatus))
-
-			fmt.Printf("    %s  %s  [%s]  %s / %s\n",
-				dim("│"), dim("Timeout     "),
-				renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, failed),
-				fmtElapsed(int(elapsed.Seconds())), fmtElapsed(int(userTimeout.Seconds())))
-			fmt.Printf("    %s\n", dim("│"))
-
 			if isTimedOut {
 				// Show final failed state
-				fmt.Printf("    %s  %s  [%s]  %s  %s\n",
-					dim("│"), dim("KafkaUsers  "),
-					renderProgressBar(ready, total, 15, true),
-					red(fmt.Sprintf("%d/%d", ready, total)),
-					red("✖ timed out"))
-				fmt.Printf("    %s  %s  [%s]  %s / %s\n",
-					dim("│"), dim("Timeout     "),
+				renderUsers(true)
+				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+					dim(fmt.Sprintf("%-18s", "Timeout")),
 					renderProgressBar(int(userTimeout.Seconds()), int(userTimeout.Seconds()), 15, true),
-					red(fmtElapsed(int(userTimeout.Seconds()))), red(fmtElapsed(int(userTimeout.Seconds()))))
-				fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
+					red(fmtElapsed(int(userTimeout.Seconds()))), red(fmtElapsed(int(userTimeout.Seconds())))), 58))
+				fmt.Printf("    %s\033[K\n", boxBottom(58))
 				break
 			}
+
+			// Render active progress
+			lines := renderUsers(failed)
+			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+				dim(fmt.Sprintf("%-18s", "Timeout")),
+				renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, failed),
+				fmtElapsed(int(elapsed.Seconds())), fmtElapsed(int(userTimeout.Seconds()))), 58))
+			lines++
+			fmt.Printf("    %s\033[K\n", boxBottom(58))
+			lines++
+
+			if lastPrintedUserLines > lines {
+				for i := lines; i < lastPrintedUserLines; i++ {
+					fmt.Printf("\033[K\n")
+				}
+				fmt.Printf("\033[%dA", lastPrintedUserLines-lines)
+			}
+			lastPrintedUserLines = lines
 
 			select {
 			case <-g2Ctx.Done():
@@ -721,7 +762,7 @@ spec:
 	// Deploy Schema Registry (if requested)
 	if deployWithSchemaRegistry == "apicurio" {
 		if !isHelmReleaseDeployedFn(ctx, "apicurio", kafkaNS) {
-			fmt.Printf("\n🚀 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
+			fmt.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
 			if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
 				return err
 			}
@@ -732,7 +773,7 @@ spec:
 	
 	// Deploy Kates
 	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
-		fmt.Printf("\n🚀 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+		fmt.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
 		
 		// Auto-cleanup stale ClusterRole ownership from previous topology switches
 		cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
@@ -784,7 +825,7 @@ data:
 	// Deploy Chaos
 	if deployWithChaos {
 		if !isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
-			fmt.Printf("\n🚀 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
+			fmt.Printf("\n📦 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
 			cleanupStaleClusterResource(ctx, "clusterrole", "litmus", chaosNS)
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
 			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
@@ -816,12 +857,12 @@ data:
 	}
 	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
 	if deployWithMonitoring {
-		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring (Prometheus + Grafana)", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
+		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
 	}
 	if deployWithSchemaRegistry == "apicurio" {
 		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
 	}
-	entries = append(entries, DeploySummaryEntry{Icon: "🚀", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
+	entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
 	if deployWithChaos {
 		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
 	}

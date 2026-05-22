@@ -266,9 +266,11 @@ type CapacityBudget struct {
 	KafkaMem int // available × (1 - reserve)
 
 	// Per-zone bottleneck
-	WeakestZone    string
-	WeakestZoneCPU int
-	WeakestZoneMem int
+	WeakestZone      string
+	WeakestZoneCPU   int
+	WeakestZoneMem   int
+	StrongestZoneCPU int
+	StrongestZoneMem int
 
 	// Component distribution
 	ControllerCPU     int    // per-controller millicores

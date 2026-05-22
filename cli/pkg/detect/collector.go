@@ -609,6 +609,17 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 				if strings.Contains(lineLower, "warn") || strings.Contains(lineLower, "error") || 
 					strings.Contains(lineLower, "exception") || strings.Contains(lineLower, "denied") || 
 					strings.Contains(lineLower, "leader election") || strings.Contains(lineLower, "permission") {
+					
+					// Ignore known harmless Strimzi warnings
+					if strings.Contains(lineLower, "platformfeaturesavailability") ||
+						strings.Contains(lineLower, "meterregistry") ||
+						strings.Contains(lineLower, "route.openshift.io") ||
+						strings.Contains(lineLower, "build.openshift.io") ||
+						strings.Contains(lineLower, "image.openshift.io") ||
+						strings.Contains(lineLower, "the gauge registration will be ignored") {
+						continue
+					}
+
 					warningLogs = append(warningLogs, line)
 					if len(warningLogs) >= 10 {
 						break
@@ -1301,6 +1312,8 @@ func (c *Collector) getNetworkPolicyAudit() NetworkPolicyAudit {
 		managedBy := "manual"
 		if rel, ok := np.Metadata.Annotations["meta.helm.sh/release-name"]; ok {
 			managedBy = rel
+		} else if np.Metadata.Labels["app.kubernetes.io/managed-by"] == "strimzi-cluster-operator" || np.Metadata.Labels["strimzi.io/cluster"] != "" || np.Metadata.Labels["strimzi.io/kind"] == "Kafka" {
+			managedBy = "strimzi"
 		}
 
 		npInfo := ExistingNetPol{

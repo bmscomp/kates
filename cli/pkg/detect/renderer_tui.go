@@ -69,7 +69,7 @@ func RenderTUI(report *DetectReport) {
 				})
 			}
 			output.Table(zHeaders, zRows)
-			if cb.WeakestZone != "" {
+			if cb.WeakestZone != "" && (cb.WeakestZoneCPU < cb.StrongestZoneCPU || cb.WeakestZoneMem < cb.StrongestZoneMem) {
 				output.Warn(fmt.Sprintf("Bottleneck zone: %s (%dm CPU, %dGi mem)", cb.WeakestZone, cb.WeakestZoneCPU, cb.WeakestZoneMem))
 			}
 		}
@@ -500,9 +500,12 @@ func RenderTUI(report *DetectReport) {
 		output.Table(npHeaders, npRows)
 
 		helmCount := 0
+		strimziCount := 0
 		manualCount := 0
 		for _, np := range report.NetPolAudit.Existing {
-			if np.ManagedBy != "manual" {
+			if np.ManagedBy == "strimzi" {
+				strimziCount++
+			} else if np.ManagedBy != "manual" {
 				helmCount++
 			} else {
 				manualCount++
@@ -510,6 +513,9 @@ func RenderTUI(report *DetectReport) {
 		}
 		if helmCount > 0 {
 			output.Success(fmt.Sprintf("%d policies managed by Helm", helmCount))
+		}
+		if strimziCount > 0 {
+			output.Success(fmt.Sprintf("%d policies managed by Strimzi Operator", strimziCount))
 		}
 		if manualCount > 0 {
 			output.Warn(fmt.Sprintf("%d manually-managed policies detected", manualCount))
