@@ -65,8 +65,7 @@ The suite comes fully integrated with **OpenTelemetry (OTLP)**. Auto-instrumente
 
 ## Platform Architecture
 
-<details>
-<summary>📐 <strong>Architectural Component Diagram</strong> (click to expand)</summary>
+### Architectural Component Diagram
 
 ```mermaid
 graph TD
@@ -130,8 +129,6 @@ graph TD
     Intel -->|AdminClient Metadata| Kafka
 ```
 
-</details>
-
 ### Backend Internals
 
 The core backend (`/kates`) is a reactive, containerized Java microservice built on **Quarkus 3.32.1** and optimized for **Java 25**:
@@ -146,8 +143,7 @@ The core backend (`/kates`) is a reactive, containerized Java microservice built
 * **BenchmarkBackend SPI** — Swap workload engines: `NativeKafkaBackend` (in-process virtual threads) or `TrogdorBackend` (external coordinator).
 * **ChaosProvider SPI** — Swap fault injection: `LitmusChaosProvider`, `KubernetesChaosProvider`, or `HybridChaosProvider`.
 
-<details>
-<summary>📊 <strong>Disruption Pipeline Sequence Diagram</strong> (click to expand)</summary>
+### Intelligent Disruption Pipeline
 
 ```mermaid
 sequenceDiagram
@@ -180,8 +176,6 @@ sequenceDiagram
     end
     Orch->>Cli: Return DisruptionReport with Verdicts
 ```
-
-</details>
 
 ---
 
@@ -563,36 +557,6 @@ Access the Jaeger UI at http://localhost:30086 after deployment.
 
 ---
 
-## Project Structure
-
-```
-kates/
-├── kates/                # Backend (Quarkus 3.32.1 / Java 25)
-│   ├── src/              #   Application source code
-│   ├── docs/             #   Backend-specific documentation
-│   └── pom.xml           #   Maven build configuration
-├── cli/                  # CLI (Go 1.24 / Cobra)
-│   ├── cmd/              #   92 command files (50+ commands)
-│   ├── client/           #   HTTP/gRPC API client
-│   ├── pkg/              #   Shared packages (theme, detect, etc.)
-│   └── output/           #   Terminal rendering utilities
-├── charts/               # Helm charts (9)
-│   ├── kates/            #   Kates backend chart
-│   ├── kafka-cluster/    #   Strimzi KRaft cluster
-│   ├── kates-chaos/      #   LitmusChaos wrapper
-│   ├── monitoring/       #   Prometheus + Grafana
-│   └── ...               #   Apicurio, Headlamp, Velero, MinIO, Umbrella
-├── docs/                 # Documentation
-│   ├── book/             #   The Definitive Guide (20 chapters)
-│   └── tutorials/        #   Step-by-step tutorials (8)
-├── scenarios/            # Built-in test scenarios (8 YAML files)
-├── scripts/              # Build & deployment scripts
-├── Makefile              # Build & deploy automation
-├── CONTRIBUTING.md       # Contribution guidelines
-└── LICENSE               # Apache 2.0
-```
-
----
 
 ## Contributing
 
