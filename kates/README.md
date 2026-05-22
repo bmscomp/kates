@@ -6,7 +6,7 @@ Quarkus-based REST API that orchestrates Kafka performance tests, chaos engineer
 
 | Component | Technology |
 |-----------|------------|
-| Framework | Quarkus 3.x (Java 21) |
+| Framework | Quarkus 3.32.1 (Java 25, Virtual Threads) |
 | Database | PostgreSQL (Flyway migrations) |
 | Kafka | Strimzi KRaft (no ZooKeeper) |
 | Build | Maven Wrapper (`./mvnw`) |
@@ -57,7 +57,7 @@ docker build -f Dockerfile -t kates:latest ..
 
 ### Build Native Image (GraalVM)
 
-Requires GraalVM 21+ and Docker:
+Requires GraalVM 25+ and Docker:
 
 ```bash
 ./mvnw package -Dnative -DskipTests -B
