@@ -114,6 +114,12 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 			if zoneMem < cb.WeakestZoneMem {
 				cb.WeakestZoneMem = zoneMem
 			}
+			if zoneCPU > cb.StrongestZoneCPU {
+				cb.StrongestZoneCPU = zoneCPU
+			}
+			if zoneMem > cb.StrongestZoneMem {
+				cb.StrongestZoneMem = zoneMem
+			}
 		}
 	}
 
