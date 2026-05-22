@@ -13,10 +13,10 @@ maintainers:
   - name: Platform Team
 dependencies:
   - name: kafka-cluster
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://../kafka-cluster"
     condition: kafka-cluster.enabled
   - name: kates
-    version: "0.4.0"
+    version: "0.4.1"
     repository: "file://../kates"
     condition: kates.enabled
