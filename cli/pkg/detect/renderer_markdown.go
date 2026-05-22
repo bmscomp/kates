@@ -325,6 +325,28 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 			p("| %s | `%s` | %s | %d/%d | %s |", np.Name, np.PodSelector, types, np.IngressRules, np.EgressRules, np.ManagedBy)
 		}
 		p("")
+		helmCount := 0
+		strimziCount := 0
+		manualCount := 0
+		for _, np := range report.NetPolAudit.Existing {
+			if np.ManagedBy == "strimzi" {
+				strimziCount++
+			} else if np.ManagedBy != "manual" {
+				helmCount++
+			} else {
+				manualCount++
+			}
+		}
+		if helmCount > 0 {
+			p("✓ **%d policies managed by Helm**", helmCount)
+		}
+		if strimziCount > 0 {
+			p("✓ **%d policies managed by Strimzi Operator**", strimziCount)
+		}
+		if manualCount > 0 {
+			p("⚠ **%d manually-managed policies detected**", manualCount)
+		}
+		p("")
 	}
 
 	// Verdict

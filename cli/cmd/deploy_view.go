@@ -104,27 +104,36 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 }
 
 func printRow(icon, name, namespace, status string) {
-	// Column widths (in terminal cells).
-	const nameColWidth = 22
-	const nsColWidth = 22
-	const statusColWidth = 12
+	// Total combined visual width for icon + name + namespace before the status column starts.
+	// This ensures the status column perfectly aligns for all rows.
+	const targetWidth = 44
 
-	// Build icon+name string and pad to fixed visual width.
-	// Emojis are typically 2 cells wide, so we account for that.
 	raw := icon + " " + name
-	visualLen := visualWidth(raw)
-	pad := ""
-	if visualLen < nameColWidth {
-		pad = strings.Repeat(" ", nameColWidth-visualLen)
+	visualLen := runewidth.StringWidth(raw)
+	
+	// Minimum padding between name and namespace
+	padLen := 26 - visualLen
+	if padLen < 1 {
+		padLen = 1
 	}
+	pad := strings.Repeat(" ", padLen)
 
-	// Namespace column, padded.
-	nsPad := ""
-	if len(namespace) < nsColWidth {
-		nsPad = strings.Repeat(" ", nsColWidth-len(namespace))
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(raw) + pad
+	
+	// Calculate the actual visual width consumed so far
+	consumedWidth := visualLen + padLen
+	
+	// How much space is left for the namespace column padding
+	nsVisualLen := runewidth.StringWidth(namespace)
+	nsPadLen := targetWidth - consumedWidth - nsVisualLen
+	if nsPadLen < 1 {
+		nsPadLen = 1
 	}
+	nsPad := strings.Repeat(" ", nsPadLen)
 
-	// Status column.
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(namespace) + nsPad
+
+	// Status column
 	var statusStr string
 	switch status {
 	case "ready":
@@ -134,9 +143,6 @@ func printRow(icon, name, namespace, status string) {
 	default:
 		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render("⏭ Skipped")
 	}
-
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(raw) + pad
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(namespace) + nsPad
 
 	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
 }
