@@ -26,6 +26,7 @@ type labIteration struct {
 	Number     int
 	Throughput float64
 	P99Ms      float64
+	AvgMs      float64
 	ErrorRate  float64
 	TestID     string
 	Delta      string
@@ -115,8 +116,9 @@ type LabModel struct {
 }
 
 type labTestDoneMsg struct {
-	run *client.TestRun
-	err error
+	run     *client.TestRun
+	summary *client.ReportSummary
+	err     error
 }
 
 type labTickMsg struct{}
@@ -347,7 +349,7 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.medianActive = false
 			return m, nil
 		}
-		iter := m.buildIteration(msg.run)
+		iter := m.buildIteration(msg.run, msg.summary)
 
 		// Warmup: discard this iteration silently
 		if m.warmupRemaining > 0 {
@@ -629,6 +631,11 @@ func (m LabModel) viewParams(width int) string {
 		}
 	}
 
+	if len(m.iterations) > 0 {
+		last := m.iterations[len(m.iterations)-1]
+		b.WriteString("\n" + m.latencyHistogram(last.P99Ms, width))
+	}
+
 	return b.String()
 }
 
@@ -676,30 +683,35 @@ func (m LabModel) viewResults(width int) string {
 	b.WriteString(detailTitleStyle.Render("Iteration History") + "\n\n")
 
 	numW := 4
-	deltaW := 8
-	remaining := width - numW - deltaW - 6
-	if remaining < 20 {
-		remaining = 20
-	}
-	thrW := remaining * 40 / 100
-	p99W := remaining * 30 / 100
-	errW := remaining - thrW - p99W
+	gap := "  " // 2-space gap between columns
+	showErr := width >= 60
 
-	showErr := width >= 50
+	// Fixed column widths — generous enough for typical values
+	thrW := 16 // e.g. "122.9K rec/s"
+	p99W := 10 // e.g. "0.01ms"
+	errPctW := 10 // e.g. "0.0000%"
+	deltaW := 8  // e.g. "▲133%"
 
 	if showErr {
-		b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
+		b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s%s%s\n",
 			dimStyle.Render(padRight("#", numW)),
+			gap,
 			dimStyle.Render(padRight("Throughput", thrW)),
+			gap,
 			dimStyle.Render(padRight("P99", p99W)),
-			dimStyle.Render(padRight("Err", errW)),
+			gap,
+			dimStyle.Render(padRight("Err %", errPctW)),
+			gap,
 			dimStyle.Render(padRight("Δ", deltaW)),
 		))
 	} else {
-		b.WriteString(fmt.Sprintf("  %s%s%s%s\n",
+		b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s\n",
 			dimStyle.Render(padRight("#", numW)),
-			dimStyle.Render(padRight("Throughput", thrW+errW)),
+			gap,
+			dimStyle.Render(padRight("Throughput", thrW)),
+			gap,
 			dimStyle.Render(padRight("P99", p99W)),
+			gap,
 			dimStyle.Render(padRight("Δ", deltaW)),
 		))
 	}
@@ -735,21 +747,28 @@ func (m LabModel) viewResults(width int) string {
 		if showErr {
 			thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", thrW)
 			p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", p99W)
-			errStr := padRight(fmtLabFloat(iter.ErrorRate), errW)
-			b.WriteString(fmt.Sprintf("  %s%s%s%s%s\n",
+			errPctStr := padRight(fmt.Sprintf("%.4f%%", iter.ErrorRate), errPctW)
+			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s%s%s\n",
 				numStr,
+				gap,
 				healthyStyle.Render(thrStr),
+				gap,
 				warnStyle.Render(p99Str),
-				dimStyle.Render(errStr),
+				gap,
+				dimStyle.Render(errPctStr),
+				gap,
 				delta,
 			))
 		} else {
-			thrStr := padRight(fmtLabNum(iter.Throughput), thrW+errW)
-			p99Str := padRight(fmtLabFloat(iter.P99Ms), p99W)
-			b.WriteString(fmt.Sprintf("  %s%s%s%s\n",
+			thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", thrW)
+			p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", p99W)
+			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s\n",
 				numStr,
+				gap,
 				healthyStyle.Render(thrStr),
+				gap,
 				warnStyle.Render(p99Str),
+				gap,
 				delta,
 			))
 		}
@@ -759,11 +778,6 @@ func (m LabModel) viewResults(width int) string {
 		b.WriteString("\n")
 		b.WriteString("  " + dimStyle.Render("Throughput: ") + sparkline(extractMetric(m.iterations, func(i labIteration) float64 { return i.Throughput })) + "\n")
 		b.WriteString("  " + dimStyle.Render("P99 ms:     ") + sparkline(extractMetric(m.iterations, func(i labIteration) float64 { return i.P99Ms })) + "\n")
-	}
-
-	if len(m.iterations) > 0 {
-		last := m.iterations[len(m.iterations)-1]
-		b.WriteString("\n" + m.latencyHistogram(last.P99Ms, width))
 	}
 
 	return b.String()
@@ -816,7 +830,7 @@ func (m LabModel) latencyHistogram(p99 float64, width int) string {
 		}
 		bar := strings.Repeat("█", barLen)
 		pctStr := fmt.Sprintf("%4.0f%%", bk.pct*100)
-		sb.WriteString(fmt.Sprintf("  %s %s %s\n",
+		sb.WriteString(fmt.Sprintf("  %s  %s  %s\n",
 			dimStyle.Render(bk.label),
 			healthyStyle.Render(bar),
 			dimStyle.Render(pctStr),
@@ -1057,13 +1071,14 @@ func (m LabModel) pollTest(testID string, records int) tea.Msg {
 
 		status := strings.ToUpper(updated.Status)
 		if status == "DONE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
-			return labTestDoneMsg{run: updated}
+			summary, _ := m.client.ReportSummary(context.Background(), testID)
+			return labTestDoneMsg{run: updated, summary: summary}
 		}
 	}
 	return labTestDoneMsg{err: fmt.Errorf("test timed out after %s", maxWait.Truncate(time.Minute))}
 }
 
-func (m *LabModel) buildIteration(run *client.TestRun) labIteration {
+func (m *LabModel) buildIteration(run *client.TestRun, summary *client.ReportSummary) labIteration {
 	iter := labIteration{
 		Number: len(m.iterations) + 1,
 		TestID: truncID(run.ID),
@@ -1077,7 +1092,10 @@ func (m *LabModel) buildIteration(run *client.TestRun) labIteration {
 		}
 		iter.Throughput = totalThroughput / float64(len(run.Results))
 		iter.P99Ms = totalP99 / float64(len(run.Results))
-		iter.ErrorRate = run.Results[len(run.Results)-1].AvgLatencyMs
+		iter.AvgMs = run.Results[len(run.Results)-1].AvgLatencyMs
+	}
+	if summary != nil {
+		iter.ErrorRate = summary.ErrorRate * 100
 	}
 	if len(m.iterations) > 0 {
 		prev := m.iterations[len(m.iterations)-1]
@@ -1385,6 +1403,13 @@ func truncID(id string) string {
 func padRight(s string, w int) string {
 	for len(s) < w {
 		s += " "
+	}
+	return s
+}
+
+func padLeft(s string, w int) string {
+	for len(s) < w {
+		s = " " + s
 	}
 	return s
 }

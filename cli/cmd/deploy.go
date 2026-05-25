@@ -659,7 +659,7 @@ spec:
 						namePadded = namePadded[:15] + "..."
 					}
 					
-					statusStr := dim("⏳ provisioning")
+					statusStr := dim("⏳ pending")
 					progress := 0
 					if u.ready {
 						statusStr = blue("✔ ready")
