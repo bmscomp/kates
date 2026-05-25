@@ -94,6 +94,7 @@ func cleanRunOutput(ctx context.Context, name string, args ...string) ([]byte, e
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
 	// ── Banner ──
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
@@ -120,13 +121,25 @@ func runClean(cmd *cobra.Command, args []string) error {
 	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
 	time.Sleep(500 * time.Millisecond)
 
-	// Strimzi CRD resource types that carry finalizers.
-	strimziCRDTypes := []string{
+	// Operator CRD resource types that may carry finalizers or webhooks.
+	operatorCRDTypes := []string{
+		// Strimzi
 		"kafkas.kafka.strimzi.io",
 		"kafkatopics.kafka.strimzi.io",
 		"kafkausers.kafka.strimzi.io",
 		"kafkaconnects.kafka.strimzi.io",
 		"kafkabridges.kafka.strimzi.io",
+		// Litmus Chaos
+		"chaosengines.litmuschaos.io",
+		"chaosexperiments.litmuschaos.io",
+		"chaosresults.litmuschaos.io",
+		// Cert-Manager
+		"certificates.cert-manager.io",
+		"issuers.cert-manager.io",
+		"clusterissuers.cert-manager.io",
+		// Kyverno
+		"clusterpolicies.kyverno.io",
+		"policies.kyverno.io",
 	}
 
 	// CustomResourceDefinitions (CRDs) deployed by the Kates stack.
@@ -159,6 +172,26 @@ func runClean(cmd *cobra.Command, args []string) error {
 		"scrapeconfigs.monitoring.coreos.com",
 		"servicemonitors.monitoring.coreos.com",
 		"thanosrulers.monitoring.coreos.com",
+
+		// Cert-Manager CRDs
+		"certificaterequests.cert-manager.io",
+		"certificates.cert-manager.io",
+		"challenges.acme.cert-manager.io",
+		"clusterissuers.cert-manager.io",
+		"issuers.cert-manager.io",
+		"orders.acme.cert-manager.io",
+
+		// Kyverno CRDs
+		"admissionreports.kyverno.io",
+		"backgroundscanreports.kyverno.io",
+		"clusteradmissionreports.kyverno.io",
+		"clusterbackgroundscanreports.kyverno.io",
+		"cleanuppolicies.kyverno.io",
+		"clustercleanuppolicies.kyverno.io",
+		"clusterpolicies.kyverno.io",
+		"policies.kyverno.io",
+		"policyexceptions.kyverno.io",
+		"updaterequests.kyverno.io",
 	}
 
 	var appReleases []helmRelease
@@ -325,26 +358,26 @@ func runClean(cmd *cobra.Command, args []string) error {
 	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
 	errStyle := lipgloss.NewStyle().Foreground(clrRed)
 
-	// ── 1. Delete Strimzi CRs FIRST (while operator is still running) ──
-	// The Strimzi operator handles finalizer removal. If we delete it first,
+	// ── 1. Delete Operator CRs FIRST (while operators are still running) ──
+	// Operators handle finalizer removal. If we delete operators first,
 	// finalizers become orphaned and namespaces hang in Terminating forever.
 	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-		Render("  Step 1: Removing Strimzi custom resources..."))
-	for _, crdType := range strimziCRDTypes {
-		for _, ns := range strimziNS {
+		Render("  Step 1: Removing operator custom resources..."))
+	for _, crdType := range operatorCRDTypes {
+		for _, ns := range managedNamespaces {
 			dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
 			cleanRun(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found")
 			dCancel()
 		}
 	}
-	// Wait briefly for the operator to process finalizer removal.
+	// Wait briefly for operators to process finalizer removal.
 	cleanSleepFn(5 * time.Second)
 
 	// ── 2. Strip orphaned finalizers on any remaining stuck resources ──
 	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
 		Render("  Step 2: Stripping orphaned finalizers..."))
-	for _, crdType := range strimziCRDTypes {
-		for _, ns := range strimziNS {
+	for _, crdType := range operatorCRDTypes {
+		for _, ns := range managedNamespaces {
 			pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
 			// Get any remaining resources and patch their finalizers to empty
 			out, _ := cleanRunOutput(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
@@ -429,8 +462,11 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// ── Done ──
 	fmt.Println()
+	
+	elapsed := time.Since(startTime).Round(time.Second)
+	
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-		Render("  ✅ Cluster cleaned successfully."))
+		Render(fmt.Sprintf("  ✅ Cluster cleaned successfully in %s.", elapsed)))
 	fmt.Println()
 	return nil
 }
