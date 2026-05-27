@@ -654,20 +654,20 @@ spec:
 					return lines
 				}
 				for _, u := range users {
-					namePadded := fmt.Sprintf("%-18s", u.name)
-					if len(namePadded) > 18 {
-						namePadded = namePadded[:15] + "..."
+					namePadded := fmt.Sprintf("%-12s", u.name)
+					if len(u.name) > 12 {
+						namePadded = u.name[:9] + "..."
 					}
 					
-					statusStr := dim("⏳ pending")
+					statusStr := red("pending")
 					progress := 0
 					if u.ready {
-						statusStr = blue("✔ ready")
+						statusStr = blue("ready")
 						progress = 1
 					} else if finalFailed {
-						statusStr = red("✖ failed")
+						statusStr = red("failed")
 						if isTimedOut {
-							statusStr = red("✖ timed out")
+							statusStr = red("timed out")
 						}
 					}
 					
@@ -681,16 +681,19 @@ spec:
 				return lines
 			}
 
+			elapsedSecs := int(elapsed.Seconds())
+			totalSecs := int(userTimeout.Seconds())
+
 			if total > 0 && ready == total {
 				// Final success UI
 				renderUsers(false)
 				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-					dim(fmt.Sprintf("%-18s", "Timeout")),
-					renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, false),
-					blue(fmtElapsed(int(elapsed.Seconds()))), blue(fmtElapsed(int(userTimeout.Seconds())))), 58))
+					dim(fmt.Sprintf("%-12s", "Timeout")),
+					renderProgressBar(elapsedSecs, totalSecs, 15, false),
+					blue(fmtElapsed(elapsedSecs)), blue(fmtElapsed(totalSecs))), 58))
 				fmt.Printf("    %s\033[K\n", boxBottom(58))
 				fmt.Printf("    %s All %d KafkaUser credentials ready  %s %s\033[K\n\n",
-					green("✔"), total, dim("elapsed"), bold(fmtElapsed(int(elapsed.Seconds()))))
+					green("✔"), total, dim("elapsed"), bold(fmtElapsed(elapsedSecs)))
 				break
 			}
 
@@ -698,9 +701,9 @@ spec:
 				// Show final failed state
 				renderUsers(true)
 				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-					dim(fmt.Sprintf("%-18s", "Timeout")),
-					renderProgressBar(int(userTimeout.Seconds()), int(userTimeout.Seconds()), 15, true),
-					red(fmtElapsed(int(userTimeout.Seconds()))), red(fmtElapsed(int(userTimeout.Seconds())))), 58))
+					dim(fmt.Sprintf("%-12s", "Timeout")),
+					renderProgressBar(totalSecs, totalSecs, 15, true),
+					red(fmtElapsed(totalSecs)), red(fmtElapsed(totalSecs))), 58))
 				fmt.Printf("    %s\033[K\n", boxBottom(58))
 				break
 			}
@@ -708,9 +711,9 @@ spec:
 			// Render active progress
 			lines := renderUsers(failed)
 			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-				dim(fmt.Sprintf("%-18s", "Timeout")),
-				renderProgressBar(int(elapsed.Seconds()), int(userTimeout.Seconds()), 15, failed),
-				fmtElapsed(int(elapsed.Seconds())), fmtElapsed(int(userTimeout.Seconds()))), 58))
+				dim(fmt.Sprintf("%-12s", "Timeout")),
+				renderProgressBar(elapsedSecs, totalSecs, 15, failed),
+				fmtElapsed(elapsedSecs), fmtElapsed(totalSecs)), 58))
 			lines++
 			fmt.Printf("    %s\033[K\n", boxBottom(58))
 			lines++
