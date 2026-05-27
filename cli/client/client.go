@@ -24,6 +24,9 @@ func New(baseURL string) *Client {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{
 			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+			},
 		},
 		MaxRetries: 3,
 	}
@@ -376,36 +379,32 @@ func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, pay
 	if err != nil {
 		return result, fmt.Errorf("marshal request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
+
+	// Use a context deadline instead of a separate http.Client so we reuse
+	// c.HTTPClient (same transport, connection pool, and retry logic via doRequest).
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Temporarily extend the client timeout for this long-running request
+	origTimeout := c.HTTPClient.Timeout
+	c.HTTPClient.Timeout = timeout
+	defer func() { c.HTTPClient.Timeout = origTimeout }()
+
+	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
 		return result, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	}
-	
-	// Create a custom client with the extended timeout
-	customClient := &http.Client{Timeout: timeout}
-	resp, err := customClient.Do(req)
+
+	respData, err := c.doRequest(timeoutCtx, req, false)
 	if err != nil {
-		return result, fmt.Errorf("connection failed: %w", err)
-	}
-	
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return result, fmt.Errorf("read response: %w", err)
+		return result, err
 	}
 
-	if resp.StatusCode >= 400 {
-		return result, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	if len(body) == 0 {
+	if len(respData) == 0 {
 		return result, nil
 	}
-	return result, json.Unmarshal(body, &result)
+	return result, json.Unmarshal(respData, &result)
 }
 
 func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*DisruptionRunResponse, error) {

@@ -128,3 +128,9 @@ metrics:
     interval: "30s"
   prometheusRule:
     enabled: true
+
+# ── JVM Tuning ────────────────────────────────────────────────────────────────
+jvm:
+  # Optimized for 8Gi container memory limit (leaving 4Gi for ZGC and off-heap/system)
+  options: "-Xms2g -Xmx4g -XX:+UseZGC -XX:+ZGenerational"
+
