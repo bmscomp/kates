@@ -156,6 +156,9 @@ func renderProgressBar(running, total int, width int, failed bool) string {
 	if filled < 0 {
 		filled = 0
 	}
+	if running > 0 && filled == 0 {
+		filled = 1
+	}
 	if failed {
 		return red(strings.Repeat(charFilled, filled) + strings.Repeat(charUnfilled, width-filled))
 	}
@@ -264,7 +267,7 @@ func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration
 				blue("✔ running")), 58))
 			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
 				dim("Timeout     "),
-				renderProgressBar(totalSecs, totalSecs, 15, false),
+				renderProgressBar(elapsed, totalSecs, 15, false),
 				blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58))
 			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  %s", dim("Entity Op   "), eoIcon), 58))
 			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  %s", dim("CR status   "), blue("✔ Ready=True")), 58))
