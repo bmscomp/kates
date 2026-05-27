@@ -122,7 +122,15 @@ var resilienceRunCmd = &cobra.Command{
 
 		result, err := apiClient.Resilience(context.Background(), req)
 		if err != nil {
-			return cmdErr("Resilience test failed: " + err.Error())
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "EOF") || strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "connection reset") {
+				output.Warn("Connection error — common causes:")
+				output.Hint("  • Backend not running: verify with 'kates health'")
+				output.Hint("  • Port-forward not active: run 'kates ports'")
+				output.Hint("  • API key missing: set with 'kates ctx set <name> --api-key <key>'")
+				output.Hint(fmt.Sprintf("  • Current endpoint: %s", apiURL))
+			}
+			return cmdErr("Resilience test failed: " + errMsg)
 		}
 
 		if outputMode == "json" {
