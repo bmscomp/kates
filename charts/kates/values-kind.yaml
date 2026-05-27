@@ -13,6 +13,10 @@ resources:
     cpu: 1000m
     memory: 2Gi
 
+jvm:
+  options: "-Xms512m -Xmx1024m -XX:+UseZGC"
+
+
 service:
   type: NodePort
   nodePort: "30083"
