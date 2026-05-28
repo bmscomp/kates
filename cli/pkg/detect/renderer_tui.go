@@ -249,6 +249,47 @@ func RenderTUI(report *DetectReport) {
 		}
 	}
 
+	output.Header("Kafka Connect & CDC Ecosystem")
+	if report.Ecosystem.KafkaConnect.Installed {
+		output.KeyValue("Kafka Connect:", fmt.Sprintf("%s (in %s)", report.Ecosystem.KafkaConnect.Name, report.Ecosystem.KafkaConnect.Namespace))
+		output.KeyValue("Image:", report.Ecosystem.KafkaConnect.Image)
+		output.KeyValue("Workers:", fmt.Sprintf("%d/%d ready", report.Ecosystem.KafkaConnect.ReadyReplicas, report.Ecosystem.KafkaConnect.TotalReplicas))
+
+		if len(report.Ecosystem.KafkaConnect.Connectors) > 0 {
+			output.Success(fmt.Sprintf("Connectors: %d detected", len(report.Ecosystem.KafkaConnect.Connectors)))
+			cHeaders := []string{"NAME", "CLASS", "TASKS MAX", "STATUS"}
+			var cRows [][]string
+			for _, c := range report.Ecosystem.KafkaConnect.Connectors {
+				cRows = append(cRows, []string{c.Name, c.Class, strconv.Itoa(c.TasksMax), c.Status})
+			}
+			output.Table(cHeaders, cRows)
+		} else {
+			output.Hint("Connectors: none deployed")
+		}
+	} else {
+		output.Warn("Kafka Connect: not installed")
+	}
+
+	if report.Ecosystem.SchemaRegistry.Installed {
+		if report.Ecosystem.SchemaRegistry.Available {
+			output.Success(fmt.Sprintf("Schema Registry: available (%s in %s)", report.Ecosystem.SchemaRegistry.Name, report.Ecosystem.SchemaRegistry.Namespace))
+		} else {
+			output.Error(fmt.Sprintf("Schema Registry: deployed but NOT READY (%s)", report.Ecosystem.SchemaRegistry.Name))
+		}
+	} else {
+		output.Hint("Schema Registry: not installed")
+	}
+
+	if report.Ecosystem.Database.Installed {
+		if report.Ecosystem.Database.Accessible {
+			output.Success(fmt.Sprintf("Database (CDC Source): accessible (%s in %s, port %d)", report.Ecosystem.Database.Name, report.Ecosystem.Database.Namespace, report.Ecosystem.Database.Port))
+		} else {
+			output.Error(fmt.Sprintf("Database (CDC Source): deployed but NOT READY (%s)", report.Ecosystem.Database.Name))
+		}
+	} else {
+		output.Hint("Database (CDC Source): not detected")
+	}
+
 	output.Header("Monitoring Stack")
 	if report.Monitoring.PodMonitorCRD {
 		output.Success("PodMonitor CRD: present")

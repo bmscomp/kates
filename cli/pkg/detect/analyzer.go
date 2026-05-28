@@ -271,6 +271,25 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	}
 	addCheck("TLS certificate validity", certPass, certDetail)
 
+	// Ecosystem / CDC Checks
+	if report.Ecosystem.KafkaConnect.Installed {
+		addCheck("Kafka Connect running", report.Ecosystem.KafkaConnect.ReadyReplicas > 0, fmt.Sprintf("%d/%d workers ready", report.Ecosystem.KafkaConnect.ReadyReplicas, report.Ecosystem.KafkaConnect.TotalReplicas))
+		
+		if !report.Ecosystem.SchemaRegistry.Installed {
+			v.Warns++
+			addCheck("Schema Registry for CDC", true, "warning: not found (Debezium Avro requires it)")
+		} else {
+			addCheck("Schema Registry for CDC", report.Ecosystem.SchemaRegistry.Available, "available")
+		}
+
+		if report.Ecosystem.Database.Installed {
+			addCheck("Database CDC source", report.Ecosystem.Database.Accessible, "available in "+report.Ecosystem.Database.Namespace)
+		} else {
+			v.Warns++
+			addCheck("Database CDC source", true, "warning: PostgreSQL not detected in cluster")
+		}
+	}
+
 	v.Compatible = v.Fails == 0
 	report.Verdict = v
 }

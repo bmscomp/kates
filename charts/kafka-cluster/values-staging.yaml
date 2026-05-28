@@ -69,3 +69,51 @@ dashboards:
   kraftDashboard: true
   cruiseControlDashboard: true
   connectDashboard: true
+
+kafkaConnect:
+  enabled: true
+  replicas: 2
+  config:
+    keyConverter: io.apicurio.registry.utils.converter.AvroConverter
+    valueConverter: io.apicurio.registry.utils.converter.AvroConverter
+    keyConverterSchemasEnable: false
+    valueConverterSchemasEnable: false
+  schemaRegistry:
+    enabled: true
+  databaseEgress:
+    - namespace: database
+      port: 5432
+      podSelector:
+        app.kubernetes.io/name: postgresql
+  externalConfiguration:
+    volumes:
+      - name: pg-credentials
+        secretName: connect-pg-credentials
+  build:
+    output:
+      type: docker
+      image: ghcr.io/bmscomp/kates-connect:latest
+      pushSecret: ghcr-credentials
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-postgres
+            version: 2.7.3.Final
+  connectors:
+    - name: cdc-orders
+      class: io.debezium.connector.postgresql.PostgresConnector
+      tasksMax: 1
+      config:
+        database.hostname: postgresql.database.svc
+        database.port: "5432"
+        database.user: debezium
+        database.password: "${file:/opt/kafka/external-configuration/pg-credentials/password}"
+        database.dbname: orders
+        topic.prefix: cdc.orders
+        schema.include.list: public
+        plugin.name: pgoutput
+        slot.name: debezium_orders
+        heartbeat.interval.ms: "10000"
+        snapshot.mode: initial

@@ -44,6 +44,7 @@ var (
 	deployTopology           string
 	deployNamespace          string
 	deployKafkaNS            string
+	deployDbNS               string
 	deployAppNS              string
 	deployChaosNS            string
 	deployMonitoringNS       string
@@ -54,6 +55,7 @@ var (
 	deployWithKyverno        bool
 	deployWithSecretManager  bool
 	deployWithStrimzi        bool
+	deployWithKafkaConnect   bool
 	deployInteractive        bool
 	deployVerbose            bool
 	deployPortForward        bool
@@ -63,6 +65,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
 	deployCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	deployCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	deployCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
@@ -75,6 +78,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithKyverno, "with-kyverno", false, "Deploy Kyverno for cluster policy enforcement")
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
 	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
+	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
@@ -114,6 +118,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Description("Use space to toggle, enter to confirm").
 					Options(
 						huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
+						huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
 						huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
 						huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
 						huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
@@ -128,6 +133,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Title("Kafka Namespace").
 					Description("Namespace for Strimzi operator and Kafka cluster").
 					Value(&deployKafkaNS),
+				huh.NewInput().
+					Title("Database Namespace").
+					Description("Namespace for PostgreSQL CDC database").
+					Value(&deployDbNS),
 				huh.NewInput().
 					Title("Kates App Namespace").
 					Description("Namespace for the Kates backend service").
@@ -157,6 +166,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		for _, c := range components {
 			switch c {
 			case "strimzi": deployWithStrimzi = true
+			case "kafka-connect": deployWithKafkaConnect = true
 			case "chaos": deployWithChaos = true
 			case "monitoring": deployWithMonitoring = true
 			case "cert-manager": deployWithCertManager = true
@@ -171,6 +181,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		PrintPhaseItem(fmt.Sprintf("All components → %s", deployNamespace))
 	} else {
 		PrintPhaseItem(fmt.Sprintf("Kafka        → %s", deployKafkaNS))
+		if deployWithKafkaConnect {
+			PrintPhaseItem(fmt.Sprintf("Database     → %s", deployDbNS))
+		}
 		PrintPhaseItem(fmt.Sprintf("Kates App    → %s", deployAppNS))
 		if deployWithMonitoring {
 			PrintPhaseItem(fmt.Sprintf("Monitoring   → %s", deployMonitoringNS))
@@ -182,6 +195,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	PrintPhaseHeader(2, "Component Selection")
 	if deployWithStrimzi {
 		PrintPhaseSuccess("Strimzi Operator")
+	}
+	if deployWithKafkaConnect {
+		PrintPhaseSuccess("Kafka Connect + PostgreSQL (CDC)")
 	}
 	if deployWithSchemaRegistry != "none" {
 		PrintPhaseSuccess(fmt.Sprintf("Schema Registry: %s", deployWithSchemaRegistry))
@@ -517,6 +533,57 @@ spec:
 	}
 
 	
+	if deployWithKafkaConnect {
+		g2.Go(func() error {
+			dbNS := deployDbNS
+			if isHelmReleaseDeployedFn(g2Ctx, "postgresql", dbNS) {
+				fmt.Println("⏭️  PostgreSQL already deployed. Skipping.")
+				return nil
+			}
+			fmt.Printf("\n📦 Deploying PostgreSQL CDC Database (Namespace: %s)...\n", dbNS)
+
+			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s`, dbNS))
+
+			runHelmFn(g2Ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
+			runHelmFn(g2Ctx, "repo", "update", "bitnami")
+
+			if err := runHelmFn(g2Ctx, "upgrade", "--install", "postgresql", "bitnami/postgresql",
+				"-n", dbNS, "--create-namespace",
+				"--set", "auth.postgresPassword=postgres",
+				"--set", "auth.username=debezium",
+				"--set", "auth.password=debezium",
+				"--set", "auth.database=orders",
+				"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
+				"--timeout", "5m", "--wait"); err != nil {
+				return err
+			}
+
+			fmt.Println("    - Waiting for PostgreSQL to be ready...")
+			pgDeadline := time.Now().Add(3 * time.Minute)
+			for time.Now().Before(pgDeadline) {
+				out, _ := exec.CommandContext(g2Ctx,
+					"kubectl", "get", "pods", "-n", dbNS,
+					"-l", "app.kubernetes.io/name=postgresql",
+					"--no-headers",
+					"-o", "custom-columns=PHASE:.status.phase",
+				).Output()
+				if strings.Contains(string(out), "Running") {
+					fmt.Printf("    %s PostgreSQL running in %s namespace\n", green("✔"), dbNS)
+					break
+				}
+				select {
+				case <-g2Ctx.Done():
+					return g2Ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+			}
+			return nil
+		})
+	}
+
 	// Deploy Kafka
 	g2.Go(func() error {
 		if !isHelmReleaseDeployedFn(g2Ctx, "krafter", kafkaNS) {
@@ -540,6 +607,23 @@ spec:
 			if isKind {
 				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
 			}
+			
+			if deployWithKafkaConnect {
+				registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
+					kafkaNS, clusterDomain)
+
+				kafkaArgs = append(kafkaArgs,
+					"--set", "kafkaConnect.enabled=true",
+					"--set", "kafkaConnect.schemaRegistry.enabled=true",
+					"--set", "kafkaConnect.databaseEgress[0].namespace="+deployDbNS,
+					"--set", "kafkaConnect.databaseEgress[0].port=5432",
+					"--set", "kafkaConnect.databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
+					"--set", "kafkaConnect.externalConfiguration.volumes[0].name=pg-credentials",
+					"--set", "kafkaConnect.externalConfiguration.volumes[0].secretName=connect-pg-credentials",
+					"--set", "kafkaConnect.extraConfig.schema\\.registry\\.url="+registryFQDN,
+				)
+			}
+			
 			if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
 				return err
 			}
@@ -750,6 +834,49 @@ spec:
 		if !allReady {
 			fmt.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", amber("⚠"))
 		}
+		
+		if deployWithKafkaConnect {
+			fmt.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
+			pgSecretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: connect-pg-credentials
+  namespace: %s
+type: Opaque
+stringData:
+  password: debezium
+  username: debezium`, kafkaNS)
+			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
+			
+			fmt.Println("\n    - Waiting for Kafka Connect to be ready...")
+			connectDeadline := time.Now().Add(5 * time.Minute)
+			for time.Now().Before(connectDeadline) {
+				out, _ := exec.CommandContext(g2Ctx,
+					"kubectl", "get", "kafkaconnect", "-n", kafkaNS,
+					"--no-headers",
+					"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status,REPLICAS:.spec.replicas",
+				).Output()
+				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+				if len(lines) > 0 && lines[0] != "" {
+					for _, line := range lines {
+						fields := strings.Fields(line)
+						if len(fields) >= 2 && fields[1] == "True" {
+							fmt.Printf("    %s Kafka Connect %s ready (%s replicas)\n",
+								green("✔"), fields[0], fields[2])
+							goto connectReady
+						}
+					}
+				}
+				select {
+				case <-g2Ctx.Done():
+					return g2Ctx.Err()
+				case <-time.After(6 * time.Second):
+				}
+			}
+			fmt.Printf("    %s Kafka Connect not ready after 5m — connectors may need manual check\n", amber("⚠"))
+		connectReady:
+		}
+		
 		return nil
 	})
 
@@ -859,6 +986,10 @@ data:
 		entries = append(entries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
 	}
 	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+	if deployWithKafkaConnect {
+		entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: "database", Group: "B"})
+		entries = append(entries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+	}
 	if deployWithMonitoring {
 		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
 	}

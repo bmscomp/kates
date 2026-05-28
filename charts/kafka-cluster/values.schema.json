@@ -272,6 +272,43 @@
             "timeoutSeconds": { "type": "integer", "minimum": 1 }
           }
         },
+        "externalConfiguration": {
+          "type": "object",
+          "properties": {
+            "volumes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "secretName"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 },
+                  "secretName": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        },
+        "databaseEgress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["namespace"],
+            "properties": {
+              "namespace": { "type": "string", "minLength": 1 },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "podSelector": { "type": "object" }
+            }
+          }
+        },
+        "schemaRegistry": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "serviceName": { "type": "string" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "path": { "type": "string" }
+          }
+        },
         "connectors": {
           "type": "array",
           "items": {

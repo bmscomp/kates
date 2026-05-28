@@ -36,6 +36,9 @@ spec:
     value.converter: {{ .Values.kafkaConnect.config.valueConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
     key.converter.schemas.enable: {{ .Values.kafkaConnect.config.keyConverterSchemasEnable | default true }}
     value.converter.schemas.enable: {{ .Values.kafkaConnect.config.valueConverterSchemasEnable | default true }}
+    {{- if .Values.kafkaConnect.schemaRegistry.enabled }}
+    schema.registry.url: {{ printf "http://%s.%s.svc.%s:%d%s" .Values.kafkaConnect.schemaRegistry.serviceName (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) (.Values.kafkaConnect.schemaRegistry.port | int) .Values.kafkaConnect.schemaRegistry.path }}
+    {{- end }}
     {{- range $key, $value := .Values.kafkaConnect.extraConfig }}
     {{ $key }}: {{ $value | toJson }}
     {{- end }}
@@ -65,6 +68,10 @@ spec:
   livenessProbe:
     {{- toYaml .Values.kafkaConnect.livenessProbe | nindent 4 }}
   template:
+    {{- if .Values.kafkaConnect.podDisruptionBudget }}
+    podDisruptionBudget:
+      {{- toYaml .Values.kafkaConnect.podDisruptionBudget | nindent 6 }}
+    {{- end }}
     pod:
       securityContext:
         {{- include "kafka-cluster.podSecurityContext" . | nindent 8 }}
@@ -92,7 +99,23 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.kafkaConnect.externalConfiguration }}
+      volumes:
+        {{- range .Values.kafkaConnect.externalConfiguration.volumes }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+        {{- end }}
+      {{- end }}
     connectContainer:
+      {{- if .Values.kafkaConnect.externalConfiguration }}
+      volumeMounts:
+        {{- range .Values.kafkaConnect.externalConfiguration.volumes }}
+        - name: {{ .name }}
+          mountPath: /opt/kafka/external-configuration/{{ .name }}
+          readOnly: true
+        {{- end }}
+      {{- end }}
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
 {{- end }}
