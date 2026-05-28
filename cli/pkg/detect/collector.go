@@ -111,6 +111,10 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		report.Workload = c.getWorkloadPressure()
 		return nil
 	})
+	g.Go(func() error {
+		report.Ecosystem = c.getEcosystemStatus()
+		return nil
+	})
 
 	err := g.Wait()
 	if err != nil {
@@ -632,6 +636,129 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 		}
 	} else {
 		info.Health.Status = "Unhealthy"
+	}
+
+	return info
+}
+
+func (c *Collector) getEcosystemStatus() EcosystemInfo {
+	info := EcosystemInfo{}
+
+	// Kafka Connect Status
+	kcOut, _ := c.exec.Exec("kubectl", "get", "kafkaconnect", "-A", "-o", "json")
+	var kcData struct {
+		Items []struct {
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Spec struct {
+				Replicas int    `json:"replicas"`
+				Image    string `json:"image"`
+			} `json:"spec"`
+			Status struct {
+				Conditions []struct {
+					Type   string `json:"type"`
+					Status string `json:"status"`
+				} `json:"conditions"`
+				LabelSelector string `json:"labelSelector"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+
+	if json.Unmarshal([]byte(kcOut), &kcData) == nil && len(kcData.Items) > 0 {
+		info.KafkaConnect.Installed = true
+		info.KafkaConnect.Name = kcData.Items[0].Metadata.Name
+		info.KafkaConnect.Namespace = kcData.Items[0].Metadata.Namespace
+		info.KafkaConnect.TotalReplicas = kcData.Items[0].Spec.Replicas
+		info.KafkaConnect.Image = kcData.Items[0].Spec.Image
+
+		// Check deployment for ready replicas
+		depOut, _ := c.exec.Exec("kubectl", "get", "deployment", fmt.Sprintf("%s-connect", info.KafkaConnect.Name), "-n", info.KafkaConnect.Namespace, "-o", "jsonpath={.status.readyReplicas}")
+		if depOut != "" {
+			info.KafkaConnect.ReadyReplicas, _ = strconv.Atoi(depOut)
+		}
+
+		// Connectors
+		kctorOut, _ := c.exec.Exec("kubectl", "get", "kafkaconnectors", "-n", info.KafkaConnect.Namespace, "-o", "json")
+		var kctorData struct {
+			Items []struct {
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Spec struct {
+					Class    string `json:"class"`
+					TasksMax int    `json:"tasksMax"`
+				} `json:"spec"`
+				Status struct {
+					Conditions []struct {
+						Type   string `json:"type"`
+						Status string `json:"status"`
+					} `json:"conditions"`
+				} `json:"status"`
+			} `json:"items"`
+		}
+		if json.Unmarshal([]byte(kctorOut), &kctorData) == nil {
+			for _, kctor := range kctorData.Items {
+				status := "Unknown"
+				for _, cond := range kctor.Status.Conditions {
+					if cond.Type == "Ready" {
+						if cond.Status == "True" {
+							status = "Ready"
+						} else {
+							status = "NotReady"
+						}
+					}
+				}
+				info.KafkaConnect.Connectors = append(info.KafkaConnect.Connectors, ConnectorStatus{
+					Name:     kctor.Metadata.Name,
+					Class:    kctor.Spec.Class,
+					TasksMax: kctor.Spec.TasksMax,
+					Status:   status,
+				})
+			}
+		}
+	}
+
+	// Schema Registry Status
+	srOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-l", "app.kubernetes.io/name=apicurio-registry", "-o", "json")
+	var srData struct {
+		Items []struct {
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Status struct {
+				ReadyReplicas int `json:"readyReplicas"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(srOut), &srData) == nil && len(srData.Items) > 0 {
+		info.SchemaRegistry.Installed = true
+		info.SchemaRegistry.Name = srData.Items[0].Metadata.Name
+		info.SchemaRegistry.Namespace = srData.Items[0].Metadata.Namespace
+		info.SchemaRegistry.Available = srData.Items[0].Status.ReadyReplicas > 0
+	}
+
+	// Database CDC Status
+	dbOut, _ := c.exec.Exec("kubectl", "get", "statefulset,deployment", "-A", "-l", "app.kubernetes.io/name=postgresql", "-o", "json")
+	var dbData struct {
+		Items []struct {
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Status struct {
+				ReadyReplicas int `json:"readyReplicas"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal([]byte(dbOut), &dbData) == nil && len(dbData.Items) > 0 {
+		info.Database.Installed = true
+		info.Database.Name = dbData.Items[0].Metadata.Name
+		info.Database.Namespace = dbData.Items[0].Metadata.Namespace
+		info.Database.Port = 5432
+		info.Database.Accessible = dbData.Items[0].Status.ReadyReplicas > 0
 	}
 
 	return info

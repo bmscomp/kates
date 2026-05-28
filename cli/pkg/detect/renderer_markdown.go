@@ -127,6 +127,47 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 		p("")
 	}
 
+	// Ecosystem & CDC
+	p("## Kafka Connect & CDC Ecosystem")
+	p("")
+	if report.Ecosystem.KafkaConnect.Installed {
+		p("- **Kafka Connect:** %s (in `%s`)", report.Ecosystem.KafkaConnect.Name, report.Ecosystem.KafkaConnect.Namespace)
+		p("- **Image:** `%s`", report.Ecosystem.KafkaConnect.Image)
+		p("- **Workers:** %d/%d ready", report.Ecosystem.KafkaConnect.ReadyReplicas, report.Ecosystem.KafkaConnect.TotalReplicas)
+		
+		if len(report.Ecosystem.KafkaConnect.Connectors) > 0 {
+			p("")
+			p("| Connector Name | Class | Tasks Max | Status |")
+			p("|----------------|-------|-----------|--------|")
+			for _, c := range report.Ecosystem.KafkaConnect.Connectors {
+				p("| %s | %s | %d | %s |", c.Name, c.Class, c.TasksMax, c.Status)
+			}
+		}
+	} else {
+		p("- **Kafka Connect:** ❌ Not installed")
+	}
+
+	if report.Ecosystem.SchemaRegistry.Installed {
+		if report.Ecosystem.SchemaRegistry.Available {
+			p("- **Schema Registry:** ✅ Available (`%s` in `%s`)", report.Ecosystem.SchemaRegistry.Name, report.Ecosystem.SchemaRegistry.Namespace)
+		} else {
+			p("- **Schema Registry:** ⚠️ Deployed but NOT READY (`%s`)", report.Ecosystem.SchemaRegistry.Name)
+		}
+	} else {
+		p("- **Schema Registry:** ❌ Not installed")
+	}
+
+	if report.Ecosystem.Database.Installed {
+		if report.Ecosystem.Database.Accessible {
+			p("- **Database CDC Source:** ✅ Accessible (`%s` in `%s`, port %d)", report.Ecosystem.Database.Name, report.Ecosystem.Database.Namespace, report.Ecosystem.Database.Port)
+		} else {
+			p("- **Database CDC Source:** ⚠️ Deployed but NOT READY (`%s`)", report.Ecosystem.Database.Name)
+		}
+	} else {
+		p("- **Database CDC Source:** ❌ Not detected")
+	}
+	p("")
+
 	// Admission
 	p("## Admission Controllers & Security")
 	p("")

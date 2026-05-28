@@ -98,6 +98,44 @@ type MonitoringInfo struct {
 	ReleaseLabel      string
 }
 
+type EcosystemInfo struct {
+	KafkaConnect   KafkaConnectStatus
+	SchemaRegistry SchemaRegistryStatus
+	Database       DatabaseCDCStatus
+}
+
+type KafkaConnectStatus struct {
+	Installed     bool
+	Name          string
+	Namespace     string
+	ReadyReplicas int
+	TotalReplicas int
+	Image         string
+	Connectors    []ConnectorStatus
+}
+
+type ConnectorStatus struct {
+	Name   string
+	Class  string
+	TasksMax int
+	Status string
+}
+
+type SchemaRegistryStatus struct {
+	Installed bool
+	Name      string
+	Namespace string
+	Available bool
+}
+
+type DatabaseCDCStatus struct {
+	Installed  bool
+	Name       string
+	Namespace  string
+	Port       int
+	Accessible bool
+}
+
 type LatencyResult struct {
 	SourceZone string
 	TargetZone string
@@ -338,6 +376,7 @@ type DetectReport struct {
 	StorageAudit     StorageAudit
 	ExistingKafka    KafkaResources
 	Strimzi          StrimziInfo
+	Ecosystem        EcosystemInfo
 	Monitoring       MonitoringInfo
 	Network          NetworkInfo
 	Admission        AdmissionInfo

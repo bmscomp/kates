@@ -88,3 +88,35 @@ networkPolicies:
 podSecurityPolicy:
   enabled: true
   action: Enforce
+
+kafkaConnect:
+  enabled: true
+  replicas: 3
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 2000m
+  podDisruptionBudget:
+    maxUnavailable: 1
+  topologySpreadConstraints:
+    enabled: true
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+  podAntiAffinity:
+    enabled: true
+    topologyKey: kubernetes.io/hostname
+  schemaRegistry:
+    enabled: true
+  databaseEgress:
+    - namespace: database
+      port: 5432
+      podSelector:
+        app.kubernetes.io/name: postgresql
+  externalConfiguration:
+    volumes:
+      - name: pg-credentials
+        secretName: connect-pg-credentials

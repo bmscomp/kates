@@ -37,6 +37,7 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 	deployWithCertManager = false
 	deployWithKyverno = false
 	deployWithStrimzi = false
+	deployWithKafkaConnect = false
 
 	var executedCommands []string
 	
@@ -107,6 +108,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 	deployWithCertManager = false
 	deployWithKyverno = false
 	deployWithStrimzi = false
+	deployWithKafkaConnect = true
 
 	var executedCommands []string
 	
@@ -133,13 +135,16 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	foundKafka, foundKates, foundChaos, foundSchema := false, false, false, false
+	foundKafka, foundKates, foundChaos, foundSchema, foundPostgres := false, false, false, false, false
 	
 	for _, cmd := range executedCommands {
 		if strings.Contains(cmd, "helm upgrade --install krafter") {
 			foundKafka = true
 			if !strings.Contains(cmd, "-n kafka-sys") {
 				t.Errorf("Expected Kafka to be deployed in kafka-sys namespace, got: %s", cmd)
+			}
+			if !strings.Contains(cmd, "kafkaConnect.enabled=true") {
+				t.Errorf("Expected Kafka Connect to be enabled, got: %s", cmd)
 			}
 		}
 		if strings.Contains(cmd, "helm upgrade --install kates") {
@@ -160,10 +165,16 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 				t.Errorf("Expected Apicurio to be deployed in kafka-sys namespace, got: %s", cmd)
 			}
 		}
+		if strings.Contains(cmd, "helm upgrade --install postgresql bitnami/postgresql") {
+			foundPostgres = true
+			if !strings.Contains(cmd, "-n database") {
+				t.Errorf("Expected Postgres to be deployed in database namespace, got: %s", cmd)
+			}
+		}
 	}
 	
-	if !foundKafka || !foundKates || !foundChaos || !foundSchema {
-		t.Errorf("Missing expected commands. Kafka: %v, Kates: %v, Chaos: %v, Schema: %v", foundKafka, foundKates, foundChaos, foundSchema)
+	if !foundKafka || !foundKates || !foundChaos || !foundSchema || !foundPostgres {
+		t.Errorf("Missing expected commands. Kafka: %v, Kates: %v, Chaos: %v, Schema: %v, Postgres: %v", foundKafka, foundKates, foundChaos, foundSchema, foundPostgres)
 	}
 }
 
@@ -176,6 +187,7 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 	deployWithCertManager = true
 	deployWithKyverno = true
 	deployWithStrimzi = true
+	deployWithKafkaConnect = false
 
 	var executedCommands []string
 	

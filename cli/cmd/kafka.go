@@ -671,6 +671,7 @@ func init() {
 	kafkaCmd.AddCommand(kafkaAlterTopicCmd)
 	kafkaCmd.AddCommand(kafkaDeleteTopicCmd)
 	kafkaCmd.AddCommand(kafkaTuiCmd)
+	kafkaCmd.AddCommand(kafkaConnectCmd)
 	rootCmd.AddCommand(kafkaCmd)
 
 	registerKafkaCompletions()
