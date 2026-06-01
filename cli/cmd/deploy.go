@@ -718,7 +718,7 @@ stringData:
 			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 			
 			if !isTesting {
-				if err := waitConnectReady(g2Ctx, kafkaNS, 8*time.Minute); err != nil {
+				if err := waitConnectReady(g2Ctx, kafkaNS, 15*time.Minute); err != nil {
 					fmt.Printf("    %s Kafka Connect not ready: %v\n", amber("⚠"), err)
 				}
 			}
@@ -765,7 +765,7 @@ spec:
 			}
 
 			if !isTesting {
-				if err := waitConnectorReady(g2Ctx, kafkaNS, 5*time.Minute); err != nil {
+				if err := waitConnectorReady(g2Ctx, kafkaNS, 10*time.Minute); err != nil {
 					fmt.Printf("    %s Connectors not all ready: %v\n", amber("⚠"), err)
 				}
 			}
