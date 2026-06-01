@@ -224,3 +224,199 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 		}
 	}
 }
+
+func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
+	// Save and restore global flags
+	defer func() {
+		deployTopology = "isolated"
+		deployNamespace = "kates-stack"
+		deployKafkaNS = "kafka"
+		deployDbNS = "database"
+		deployAppNS = "kates"
+		deployChaosNS = "litmus"
+		deployWithSchemaRegistry = "none"
+		deployWithChaos = false
+		deployWithMonitoring = false
+		deployWithCertManager = false
+		deployWithKyverno = false
+		deployWithStrimzi = false
+		deployWithKafkaConnect = false
+	}()
+
+	deployTopology = "isolated"
+	deployKafkaNS = "kafka"
+	deployDbNS = "database"
+	deployAppNS = "kates"
+	deployChaosNS = "litmus"
+	deployWithSchemaRegistry = "none"
+	deployWithChaos = false
+	deployWithMonitoring = false
+	deployWithCertManager = false
+	deployWithKyverno = false
+	deployWithStrimzi = false
+	deployWithKafkaConnect = true
+
+	var executedCommands []string
+	var stdinCommands []string
+
+	runExecFn = func(ctx context.Context, name string, args ...string) error {
+		cmdStr := name + " " + strings.Join(args, " ")
+		executedCommands = append(executedCommands, cmdStr)
+		return nil
+	}
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error {
+		cmdStr := name + " " + strings.Join(args, " ")
+		stdinCommands = append(stdinCommands, cmdStr+"|"+stdinData)
+		return nil
+	}
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		cmdStr := "helm " + strings.Join(args, " ")
+		executedCommands = append(executedCommands, cmdStr)
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool {
+		return false
+	}
+
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	err := runDeploy(deployCmd, []string{})
+	if err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+
+	// 1. Verify Kafka helm command includes ALL connect-specific sets
+	foundKafkaConnect := false
+	for _, cmd := range executedCommands {
+		if !strings.Contains(cmd, "helm upgrade --install krafter") {
+			continue
+		}
+		foundKafkaConnect = true
+
+		connectSets := []string{
+			"kafkaConnect.enabled=true",
+			"kafkaConnect.schemaRegistry.enabled=true",
+			"kafkaConnect.databaseEgress[0].namespace=database",
+			"kafkaConnect.externalConfiguration.volumes[0].name=pg-credentials",
+		}
+		for _, expected := range connectSets {
+			if !strings.Contains(cmd, expected) {
+				t.Errorf("Expected Kafka helm command to include %q, got: %s", expected, cmd)
+			}
+		}
+	}
+	if !foundKafkaConnect {
+		t.Error("Kafka deployment command (krafter) was not executed")
+	}
+
+	// 2. Verify PostgreSQL is deployed with the correct namespace (database)
+	foundPostgres := false
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm upgrade --install postgresql bitnami/postgresql") {
+			foundPostgres = true
+			if !strings.Contains(cmd, "-n database") {
+				t.Errorf("Expected PostgreSQL to be deployed in 'database' namespace, got: %s", cmd)
+			}
+		}
+	}
+	if !foundPostgres {
+		t.Error("PostgreSQL deployment command was not executed")
+	}
+
+	// 3. Verify the connect-pg-credentials Secret creation kubectl command is invoked
+	foundPgSecret := false
+	for _, cmd := range stdinCommands {
+		if strings.Contains(cmd, "kubectl") && strings.Contains(cmd, "connect-pg-credentials") {
+			foundPgSecret = true
+		}
+	}
+	if !foundPgSecret {
+		t.Error("connect-pg-credentials Secret creation command was not invoked")
+	}
+}
+
+func TestDeployCommand_KafkaConnectIdempotent(t *testing.T) {
+	// Save and restore global flags
+	defer func() {
+		deployTopology = "isolated"
+		deployNamespace = "kates-stack"
+		deployKafkaNS = "kafka"
+		deployDbNS = "database"
+		deployAppNS = "kates"
+		deployChaosNS = "litmus"
+		deployWithSchemaRegistry = "none"
+		deployWithChaos = false
+		deployWithMonitoring = false
+		deployWithCertManager = false
+		deployWithKyverno = false
+		deployWithStrimzi = false
+		deployWithKafkaConnect = false
+	}()
+
+	deployTopology = "isolated"
+	deployKafkaNS = "kafka"
+	deployDbNS = "database"
+	deployAppNS = "kates"
+	deployChaosNS = "litmus"
+	deployWithSchemaRegistry = "none"
+	deployWithChaos = false
+	deployWithMonitoring = false
+	deployWithCertManager = false
+	deployWithKyverno = false
+	deployWithStrimzi = false
+	deployWithKafkaConnect = true
+
+	var executedCommands []string
+	var stdinCommands []string
+
+	runExecFn = func(ctx context.Context, name string, args ...string) error {
+		cmdStr := name + " " + strings.Join(args, " ")
+		executedCommands = append(executedCommands, cmdStr)
+		return nil
+	}
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error {
+		cmdStr := name + " " + strings.Join(args, " ")
+		stdinCommands = append(stdinCommands, cmdStr+"|"+stdinData)
+		return nil
+	}
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		cmdStr := "helm " + strings.Join(args, " ")
+		executedCommands = append(executedCommands, cmdStr)
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool {
+		// All releases are already deployed
+		return true
+	}
+
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	err := runDeploy(deployCmd, []string{})
+	if err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+
+	// When everything is already deployed, no helm upgrade should be called
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm upgrade") {
+			t.Errorf("Expected no helm upgrade commands due to idempotency, got: %s", cmd)
+		}
+	}
+
+	// Specifically, PostgreSQL should NOT be deployed
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm upgrade --install postgresql") {
+			t.Error("PostgreSQL should not be redeployed when already deployed (idempotency)")
+		}
+	}
+
+	// The connect-pg-credentials secret should still be created (it's applied idempotently via kubectl apply)
+	// but no helm upgrade for kafka/postgresql should run
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm upgrade --install krafter") {
+			t.Error("Kafka chart should not be redeployed when already deployed (idempotency)")
+		}
+	}
+}

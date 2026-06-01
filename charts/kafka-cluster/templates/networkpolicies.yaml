@@ -323,7 +323,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: kates-connect
+      strimzi.io/name: {{ $clusterName }}-connect
   policyTypes:
     - Ingress
     - Egress
@@ -336,6 +336,13 @@ spec:
         - port: 9404
           protocol: TCP
     - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kates
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
         {{- range .Values.networkPolicies.allowedClientNamespaces }}
         - namespaceSelector:
             matchLabels:

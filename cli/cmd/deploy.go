@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +48,7 @@ var (
 	deployChaosNS            string
 	deployMonitoringNS       string
 	deployWithSchemaRegistry string
+	deployHA                 bool
 	deployWithChaos          bool
 	deployWithMonitoring     bool
 	deployWithCertManager    bool
@@ -72,6 +72,7 @@ func init() {
 	
 	// Component flags
 	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "none", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
+	deployCmd.Flags().BoolVar(&deployHA, "ha", false, "Enable High Availability (Multi-AZ)")
 	deployCmd.Flags().BoolVar(&deployWithChaos, "with-chaos", true, "Deploy LitmusChaos engine")
 	deployCmd.Flags().BoolVar(&deployWithMonitoring, "with-monitoring", true, "Deploy monitoring components (Prometheus/Grafana/Jaeger)")
 	deployCmd.Flags().BoolVar(&deployWithCertManager, "with-cert-manager", true, "Deploy Cert-Manager for TLS certificate management")
@@ -112,6 +113,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 						huh.NewOption("Apicurio", "apicurio"),
 					).
 					Value(&deployWithSchemaRegistry),
+
+				huh.NewConfirm().
+					Title("Enable High Availability (Multi-AZ)?").
+					Description("Sets replicas=3, min.insync.replicas=2, and enables Topology Spread Constraints").
+					Value(&deployHA),
 
 				huh.NewMultiSelect[string]().
 					Title("Select Additional Components").
@@ -330,7 +336,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 kind: Namespace
 metadata:
   name: strimzi-operator`)
-			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator", "--set", "watchAnyNamespace=true", "--set", "replicas=1", "--timeout", "5m", "--wait")
+			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator", 
+				"--set", "watchAnyNamespace=true", 
+				"--set", "replicas=1", 
+				"--set", "resources.limits.memory=768Mi", 
+				"--set", "resources.requests.memory=768Mi", 
+				"--set", "leaderElection.enabled=false",
+				"--timeout", "5m", "--wait")
 			if err != nil { return err }
 			
 			fmt.Println("    - Waiting for Strimzi CRDs to be established...")
@@ -597,16 +609,36 @@ metadata:
 			if clusterDomain == "" {
 				clusterDomain = "cluster.local"
 			}
-			kafkaArgs := []string{
-				"upgrade", "--install", "krafter", "charts/kafka-cluster",
-				"-n", kafkaNS, "--create-namespace",
+			kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
+
+			kafkaArgs = append(kafkaArgs,
 				"-f", valuesFile,
-				"--set", "global.clusterDomain=" + clusterDomain,
+				"--set", "global.clusterDomain="+clusterDomain,
 				"--timeout", "10m",
-			}
+			)
 			if isKind {
 				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
 			}
+
+			if deployHA {
+				kafkaArgs = append(kafkaArgs,
+					"--set", "kafka.replicas=3",
+					"--set", "kafka.config.default\\.replication\\.factor=3",
+					"--set", "kafka.config.min\\.insync\\.replicas=2",
+					"--set", "zookeeper.replicas=3",
+					"--set", "kafkaConnect.replicas=3",
+				)
+			} else {
+				kafkaArgs = append(kafkaArgs,
+					"--set", "kafka.replicas=1",
+					"--set", "kafka.config.default\\.replication\\.factor=1",
+					"--set", "kafka.config.min\\.insync\\.replicas=1",
+					"--set", "zookeeper.replicas=1",
+					"--set", "kafkaConnect.replicas=1",
+				)
+			}
+
+			// (Values files are already appended above so these overrides take precedence)
 			
 			if deployWithKafkaConnect {
 				registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
@@ -632,10 +664,7 @@ metadata:
 		}
 
 
-		if isTesting {
-			fmt.Println("⚡ Running in test mode, skipping Kafka readiness polling and manifest waits.")
-			return nil
-		}
+		if !isTesting {
 
 		// Live progress poller — shows broker/controller/EO counts every 6s.
 		// waitKafkaReady already confirms Ready=True on the Kafka CR, which
@@ -674,167 +703,15 @@ metadata:
 		}
 
 		// ── Poll KafkaUsers with progress ─────────────────────────────────
-		userTimeout := 5 * time.Minute
-		userDeadline := time.Now().Add(userTimeout)
-		start := time.Now()
-
-		fmt.Printf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Users  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(userTimeout)))), 58))
-
-		lastPrintedUserLines := 0
-
-		for {
-			out, _ := exec.CommandContext(g2Ctx,
-				"kubectl", "get", "kafkauser",
-				"-n", kafkaNS,
-				"--no-headers",
-				"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status",
-			).Output()
-
-			type userStat struct {
-				name  string
-				ready bool
-			}
-			var users []userStat
-			total, ready := 0, 0
-			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-				if line == "" {
-					continue
-				}
-				fields := strings.Fields(line)
-				if len(fields) < 1 {
-					continue
-				}
-				total++
-				isReady := len(fields) >= 2 && fields[1] == "True"
-				if isReady {
-					ready++
-				}
-				users = append(users, userStat{name: fields[0], ready: isReady})
-			}
-			
-			sort.Slice(users, func(i, j int) bool {
-				return users[i].name < users[j].name
-			})
-
-			elapsed := time.Since(start)
-			remaining := time.Until(userDeadline)
-			if remaining < 0 {
-				remaining = 0
-			}
-
-			isTimedOut := time.Now().After(userDeadline)
-			isCancelled := g2Ctx.Err() != nil
-			failed := isTimedOut || isCancelled
-
-			if lastPrintedUserLines > 0 {
-				fmt.Printf("\033[%dA", lastPrintedUserLines)
-			}
-			
-			renderUsers := func(finalFailed bool) int {
-				lines := 0
-				if len(users) == 0 {
-					fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s", dim("Waiting for KafkaUsers to be applied...")), 58))
-					lines++
-					return lines
-				}
-				for _, u := range users {
-					namePadded := fmt.Sprintf("%-12s", u.name)
-					if len(u.name) > 12 {
-						namePadded = u.name[:9] + "..."
-					}
-					
-					statusStr := red("pending")
-					progress := 0
-					if u.ready {
-						statusStr = blue("ready")
-						progress = 1
-					} else if finalFailed {
-						statusStr = red("failed")
-						if isTimedOut {
-							statusStr = red("timed out")
-						}
-					}
-					
-					fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-						dim(namePadded),
-						renderProgressBar(progress, 1, 15, finalFailed && !u.ready),
-						fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", progress, 1)),
-						statusStr), 58))
-					lines++
-				}
-				return lines
-			}
-
-			elapsedSecs := int(elapsed.Seconds())
-			totalSecs := int(userTimeout.Seconds())
-
-			if total > 0 && ready == total {
-				// Final success UI
-				renderUsers(false)
-				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-					dim(fmt.Sprintf("%-12s", "Timeout")),
-					renderProgressBar(elapsedSecs, totalSecs, 15, false),
-					blue(fmtElapsed(elapsedSecs)), blue(fmtElapsed(totalSecs))), 58))
-				fmt.Printf("    %s\033[K\n", boxBottom(58))
-				fmt.Printf("    %s All %d KafkaUser credentials ready  %s %s\033[K\n\n",
-					green("✔"), total, dim("elapsed"), bold(fmtElapsed(elapsedSecs)))
-				break
-			}
-
-			if isTimedOut {
-				// Show final failed state
-				renderUsers(true)
-				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-					dim(fmt.Sprintf("%-12s", "Timeout")),
-					renderProgressBar(totalSecs, totalSecs, 15, true),
-					red(fmtElapsed(totalSecs)), red(fmtElapsed(totalSecs))), 58))
-				fmt.Printf("    %s\033[K\n", boxBottom(58))
-				break
-			}
-
-			// Render active progress
-			lines := renderUsers(failed)
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-				dim(fmt.Sprintf("%-12s", "Timeout")),
-				renderProgressBar(elapsedSecs, totalSecs, 15, failed),
-				fmtElapsed(elapsedSecs), fmtElapsed(totalSecs)), 58))
-			lines++
-			fmt.Printf("    %s\033[K\n", boxBottom(58))
-			lines++
-
-			if lastPrintedUserLines > lines {
-				for i := lines; i < lastPrintedUserLines; i++ {
-					fmt.Printf("\033[K\n")
-				}
-				fmt.Printf("\033[%dA", lastPrintedUserLines-lines)
-			}
-			lastPrintedUserLines = lines
-
-			select {
-			case <-g2Ctx.Done():
-				return g2Ctx.Err()
-			case <-time.After(6 * time.Second):
-			}
-		}
-
-		// Final check — if we exhausted the deadline
-		checkOut, _ := exec.CommandContext(g2Ctx,
-			"kubectl", "get", "kafkauser", "-n", kafkaNS,
-			"--no-headers",
-			"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status",
-		).Output()
-		allReady := true
-		for _, line := range strings.Split(strings.TrimSpace(string(checkOut)), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 2 || fields[1] != "True" {
-				allReady = false
-				break
-			}
+		allReady, err := waitKafkaUsersReady(g2Ctx, kafkaNS, 5*time.Minute)
+		if err != nil {
+			return err
 		}
 		if !allReady {
 			fmt.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", amber("⚠"))
 		}
-		
+		} // end !isTesting
+
 		if deployWithKafkaConnect {
 			fmt.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
 			pgSecretYaml := fmt.Sprintf(`apiVersion: v1
@@ -848,33 +725,75 @@ stringData:
   username: debezium`, kafkaNS)
 			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 			
-			fmt.Println("\n    - Waiting for Kafka Connect to be ready...")
-			connectDeadline := time.Now().Add(5 * time.Minute)
-			for time.Now().Before(connectDeadline) {
-				out, _ := exec.CommandContext(g2Ctx,
-					"kubectl", "get", "kafkaconnect", "-n", kafkaNS,
-					"--no-headers",
-					"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status,REPLICAS:.spec.replicas",
-				).Output()
-				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-				if len(lines) > 0 && lines[0] != "" {
-					for _, line := range lines {
-						fields := strings.Fields(line)
-						if len(fields) >= 2 && fields[1] == "True" {
-							fmt.Printf("    %s Kafka Connect %s ready (%s replicas)\n",
-								green("✔"), fields[0], fields[2])
-							goto connectReady
+			if !isTesting {
+				fmt.Println("\n    - Waiting for Kafka Connect to be ready...")
+				connectDeadline := time.Now().Add(5 * time.Minute)
+				for time.Now().Before(connectDeadline) {
+					out, _ := exec.CommandContext(g2Ctx,
+						"kubectl", "get", "kafkaconnect", "-n", kafkaNS,
+						"--no-headers",
+						"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status,REPLICAS:.spec.replicas",
+					).Output()
+					lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+					if len(lines) > 0 && lines[0] != "" {
+						for _, line := range lines {
+							fields := strings.Fields(line)
+							if len(fields) >= 2 && fields[1] == "True" {
+								fmt.Printf("    %s Kafka Connect %s ready (%s replicas)\n",
+									green("✔"), fields[0], fields[2])
+								goto connectReady
+							}
 						}
 					}
+					select {
+					case <-g2Ctx.Done():
+						return g2Ctx.Err()
+					case <-time.After(6 * time.Second):
+					}
 				}
-				select {
-				case <-g2Ctx.Done():
-					return g2Ctx.Err()
-				case <-time.After(6 * time.Second):
-				}
+				fmt.Printf("    %s Kafka Connect not ready after 5m — connectors may need manual check\n", amber("⚠"))
 			}
-			fmt.Printf("    %s Kafka Connect not ready after 5m — connectors may need manual check\n", amber("⚠"))
 		connectReady:
+			checkOut, checkErr := exec.CommandContext(g2Ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", kafkaNS, "--no-headers").CombinedOutput()
+			if checkErr != nil || strings.Contains(string(checkOut), "not found") {
+				fmt.Println("    - Deploying Debezium PostgreSQL CDC connector...")
+				connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: debezium-postgres-source
+  namespace: %s
+  labels:
+    strimzi.io/cluster: krafter-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  autoRestart:
+    enabled: true
+    maxRestarts: 10
+  config:
+    database.hostname: postgresql.database.svc
+    database.port: "5432"
+    database.user: debezium
+    database.password: "${file:/mnt/pg-credentials/password}"
+    database.dbname: katesdb
+    topic.prefix: cdc
+    schema.include.list: public
+    plugin.name: pgoutput
+    slot.name: debezium_kates
+    heartbeat.interval.ms: "10000"
+    snapshot.mode: initial
+    decimal.handling.mode: double
+    tombstones.on.delete: "true"
+    schema.history.internal.kafka.bootstrap.servers: krafter-kafka-bootstrap.%s.svc:9092
+    schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, kafkaNS)
+				if err := runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
+					fmt.Printf("    %s Failed to deploy Debezium connector: %v\n", amber("⚠"), err)
+				} else {
+					fmt.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", green("✔"))
+				}
+			} else {
+				fmt.Printf("    %s Debezium connector already exists — skipping\n", green("✔"))
+			}
 		}
 		
 		return nil

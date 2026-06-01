@@ -69,6 +69,13 @@ public class ClusterTopologyService {
             .withScope("Namespaced")
             .build();
 
+    private static final CustomResourceDefinitionContext KAFKA_CONNECTOR_CRD = new CustomResourceDefinitionContext.Builder()
+            .withGroup("kafka.strimzi.io")
+            .withVersion("v1")
+            .withPlural("kafkaconnectors")
+            .withScope("Namespaced")
+            .build();
+
     private static final CustomResourceDefinitionContext KAFKA_MM2_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("kafka.strimzi.io")
             .withVersion("v1")
@@ -253,6 +260,24 @@ public class ClusterTopologyService {
             }
         } catch (Exception e) {
             LOG.debug("Unable to read Kafka Exporter info", e);
+        }
+
+        // Kafka Connect
+        try {
+            var connectPods = kubernetesClient.pods()
+                    .inNamespace(kafkaNamespace)
+                    .withLabel("strimzi.io/name", kafkaCluster + "-connect")
+                    .list().getItems();
+            if (!connectPods.isEmpty()) {
+                long readyCount = connectPods.stream().filter(this::isPodReady).count();
+                strimzi.put("kafkaConnectReady", readyCount == connectPods.size());
+                strimzi.put("kafkaConnectPods", connectPods.size());
+                strimzi.put("kafkaConnectReadyPods", readyCount);
+                String connectImage = connectPods.get(0).getSpec().getContainers().get(0).getImage();
+                strimzi.put("kafkaConnectImage", connectImage);
+            }
+        } catch (Exception e) {
+            LOG.debug("Unable to read Kafka Connect pod info", e);
         }
 
         return strimzi;
@@ -1083,11 +1108,174 @@ public class ClusterTopologyService {
                     .getItems();
             for (GenericKubernetesResource res : list) {
                 Map<String, Object> c = new LinkedHashMap<>();
-                c.put("name", res.getMetadata().getName());
+                String connectName = res.getMetadata().getName();
+                c.put("name", connectName);
                 Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
                         .getOrDefault("spec", Map.of());
                 if (spec.get("replicas") instanceof Number n) c.put("replicas", n.intValue());
                 if (spec.get("bootstrapServers") != null) c.put("bootstrapServers", spec.get("bootstrapServers"));
+                if (spec.get("version") != null) c.put("version", spec.get("version"));
+
+                // CR status
+                Map<String, Object> status = (Map<String, Object>) res.getAdditionalProperties()
+                        .getOrDefault("status", Map.of());
+                if (status.get("conditions") instanceof List<?> conditions) {
+                    for (Object cond : conditions) {
+                        if (cond instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
+                            c.put("ready", "True".equals(cm.get("status")));
+                        }
+                    }
+                }
+                if (status.get("url") != null) c.put("restUrl", status.get("url"));
+
+                // Build status
+                if (spec.get("build") != null) {
+                    c.put("hasBuild", true);
+                    Map<String, Object> buildSpec = (Map<String, Object>) spec.get("build");
+                    if (buildSpec.get("output") instanceof Map<?, ?> output) {
+                        c.put("buildImage", output.get("image"));
+                        c.put("buildType", output.get("type"));
+                    }
+                }
+
+                // Installed plugins from status
+                if (status.get("connectorPlugins") instanceof List<?> plugins) {
+                    List<Map<String, Object>> pluginList = new ArrayList<>();
+                    for (Object p : plugins) {
+                        if (p instanceof Map<?, ?> pm) {
+                            Map<String, Object> pi = new LinkedHashMap<>();
+                            pi.put("class", pm.get("class"));
+                            pi.put("type", pm.get("type"));
+                            pi.put("version", pm.get("version"));
+                            pluginList.add(pi);
+                        }
+                    }
+                    c.put("plugins", pluginList);
+                }
+
+                // Rack awareness
+                if (spec.get("rack") != null) {
+                    c.put("rackAware", true);
+                    if (spec.get("rack") instanceof Map<?, ?> rack) {
+                        c.put("rackTopologyKey", rack.get("topologyKey"));
+                    }
+                }
+
+                // Tracing
+                if (spec.get("tracing") instanceof Map<?, ?> tracing) {
+                    c.put("tracingEnabled", true);
+                    c.put("tracingType", tracing.get("type"));
+                }
+
+                // Resources
+                if (spec.get("resources") instanceof Map<?, ?> resources) {
+                    c.put("resources", resources);
+                }
+
+                // JVM options
+                if (spec.get("jvmOptions") instanceof Map<?, ?> jvm) {
+                    c.put("jvmOptions", jvm);
+                }
+
+                // Config details (schema registry, converters)
+                if (spec.get("config") instanceof Map<?, ?> config) {
+                    Map<String, Object> configSummary = new LinkedHashMap<>();
+                    if (config.get("key.converter") != null) configSummary.put("keyConverter", config.get("key.converter"));
+                    if (config.get("value.converter") != null) configSummary.put("valueConverter", config.get("value.converter"));
+                    if (config.get("schema.registry.url") != null) configSummary.put("schemaRegistryUrl", config.get("schema.registry.url"));
+                    if (!configSummary.isEmpty()) c.put("configSummary", configSummary);
+                }
+
+                // Pods for this KafkaConnect resource
+                try {
+                    var connectPods = kubernetesClient.pods()
+                            .inNamespace(kafkaNamespace)
+                            .withLabel("strimzi.io/name", connectName)
+                            .list().getItems();
+                    List<Map<String, Object>> podDetails = new ArrayList<>();
+                    int readyCount = 0;
+                    for (Pod pod : connectPods) {
+                        Map<String, Object> p = new LinkedHashMap<>();
+                        p.put("name", pod.getMetadata().getName());
+                        boolean ready = isPodReady(pod);
+                        p.put("ready", ready);
+                        if (ready) readyCount++;
+                        p.put("phase", pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown");
+                        if (pod.getSpec().getNodeName() != null) {
+                            p.put("k8sNode", pod.getSpec().getNodeName());
+                        }
+                        if (!pod.getSpec().getContainers().isEmpty()) {
+                            p.put("image", pod.getSpec().getContainers().get(0).getImage());
+                        }
+                        // Container restart count
+                        if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
+                            int restarts = pod.getStatus().getContainerStatuses().stream()
+                                    .mapToInt(cs -> cs.getRestartCount() != null ? cs.getRestartCount() : 0)
+                                    .sum();
+                            p.put("restarts", restarts);
+                        }
+                        podDetails.add(p);
+                    }
+                    c.put("pods", podDetails);
+                    c.put("readyPods", readyCount);
+                    c.put("totalPods", connectPods.size());
+                } catch (Exception e) {
+                    LOG.debug("Unable to read Kafka Connect pods for " + connectName, e);
+                }
+
+                // KafkaConnector resources
+                try {
+                    var connectors = kubernetesClient.genericKubernetesResources(KAFKA_CONNECTOR_CRD)
+                            .inNamespace(kafkaNamespace)
+                            .withLabel("strimzi.io/cluster", connectName)
+                            .list()
+                            .getItems();
+                    List<Map<String, Object>> connectorList = new ArrayList<>();
+                    for (GenericKubernetesResource connector : connectors) {
+                        Map<String, Object> ci = new LinkedHashMap<>();
+                        ci.put("name", connector.getMetadata().getName());
+                        Map<String, Object> connSpec = (Map<String, Object>) connector.getAdditionalProperties()
+                                .getOrDefault("spec", Map.of());
+                        if (connSpec.get("class") != null) ci.put("class", connSpec.get("class"));
+                        if (connSpec.get("tasksMax") instanceof Number n) ci.put("tasksMax", n.intValue());
+                        if (connSpec.get("pause") instanceof Boolean paused) ci.put("paused", paused);
+
+                        Map<String, Object> connStatus = (Map<String, Object>) connector.getAdditionalProperties()
+                                .getOrDefault("status", Map.of());
+                        if (connStatus.get("conditions") instanceof List<?> connConds) {
+                            for (Object cond : connConds) {
+                                if (cond instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
+                                    ci.put("ready", "True".equals(cm.get("status")));
+                                    if (cm.get("message") != null) ci.put("message", cm.get("message"));
+                                }
+                            }
+                        }
+                        if (connStatus.get("connectorStatus") instanceof Map<?, ?> cs) {
+                            if (cs.get("connector") instanceof Map<?, ?> conn) {
+                                ci.put("state", conn.get("state"));
+                            }
+                            if (cs.get("tasks") instanceof List<?> tasks) {
+                                List<Map<String, Object>> taskList = new ArrayList<>();
+                                for (Object t : tasks) {
+                                    if (t instanceof Map<?, ?> tm) {
+                                        Map<String, Object> ti = new LinkedHashMap<>();
+                                        ti.put("id", tm.get("id"));
+                                        ti.put("state", tm.get("state"));
+                                        if (tm.get("trace") != null) ti.put("trace", tm.get("trace"));
+                                        taskList.add(ti);
+                                    }
+                                }
+                                ci.put("tasks", taskList);
+                            }
+                        }
+                        connectorList.add(ci);
+                    }
+                    connectorList.sort(Comparator.comparing(ci -> (String) ci.get("name")));
+                    c.put("connectors", connectorList);
+                } catch (Exception e) {
+                    LOG.debug("Unable to read KafkaConnectors for " + connectName, e);
+                }
+
                 connects.add(c);
             }
         } catch (Exception e) {

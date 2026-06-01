@@ -41,9 +41,7 @@ kafka:
       tls: true
       authentication:
         type: scram-sha-512
-      configuration:
-        bootstrap:
-          nodePort: null
+      configuration: {}
 
   authorization:
     type: simple
@@ -398,6 +396,12 @@ users:
             operations: ["Read", "Write", "Create", "Describe"]
             host: "*"
           - resource:
+              type: transactionalId
+              name: "connect-cluster-"
+              patternType: prefix
+            operations: ["Write", "Describe"]
+            host: "*"
+          - resource:
               type: topic
               name: "cdc"
               patternType: prefix
@@ -466,12 +470,29 @@ tieredStorage:
 
 kafkaConnect:
   enabled: false
-  replicas: 1
+  replicas: 3
   version: ""
+  image: "kates-connect:local"
   groupId: kates-connect-cluster
 
+  topologySpreadConstraints:
+    enabled: true
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+
+  authentication:
+    username: kates-connect
+    secretName: ""
+
+  podDisruptionBudget:
+    maxUnavailable: 1
+
+  internalTopics:
+    prefix: ""  # defaults to groupId
+
   jvmOptions:
-    -Xms: 256m
+    -Xms: 512m
     -Xmx: 512m
     gcLoggingEnabled: true
     javaSystemProperties: []
@@ -480,11 +501,11 @@ kafkaConnect:
 
   resources:
     requests:
-      memory: 512Mi
-      cpu: 200m
-    limits:
       memory: 1Gi
-      cpu: 1000m
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: 2000m
 
   # Schema registry integration (Apicurio — open source, no Confluent)
   schemaRegistry:
@@ -496,9 +517,10 @@ kafkaConnect:
     path: /apis/ccompat/v7
 
   externalConfiguration:
-    volumes: []
-    # - name: pg-credentials
-    #   secretName: connect-pg-credentials
+    volumes:
+      - name: pg-credentials
+        secretName: connect-pg-credentials
+    env: []
 
   databaseEgress: []
     # - namespace: database
@@ -509,32 +531,39 @@ kafkaConnect:
   config:
     replicationFactor: 3
     # Converter defaults — override for Avro/Protobuf
-    keyConverter: io.apicurio.registry.utils.converter.AvroConverter
-    valueConverter: io.apicurio.registry.utils.converter.AvroConverter
-    keyConverterSchemasEnable: false
-    valueConverterSchemasEnable: false
+    keyConverter: org.apache.kafka.connect.json.JsonConverter
+    valueConverter: org.apache.kafka.connect.json.JsonConverter
+    keyConverterSchemasEnable: true
+    valueConverterSchemasEnable: true
   # Arbitrary extra Kafka Connect config (merged into spec.config)
-  extraConfig: {}
-    # producer.acks: "all"
-    # consumer.auto.offset.reset: earliest
+  extraConfig:
+    producer.acks: "all"
+    producer.enable.idempotence: "true"
+    consumer.auto.offset.reset: "earliest"
+    exactly.once.source.support: "enabled"
     # schema.registry.url is auto-computed when kafkaConnect.schemaRegistry.enabled=true
     # FQDN: http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompat/v7
 
   logging:
-    type: inline
-    loggers:
-      connect.root.logger.level: INFO
-      # log4j.logger.org.apache.kafka.connect: DEBUG
+    type: external
+    valueFrom:
+      configMapKeyRef:
+        name: krafter-connect-logging
+        key: log4j2.properties
       # log4j.logger.org.apache.kafka.connect.runtime.WorkerSourceTask: TRACE
 
+  tracing:
+    enabled: true
+    type: opentelemetry
+
   tls:
-    enabled: false
-    # trustedCertificates:
-    #   - secretName: krafter-cluster-ca-cert
-    #     certificate: ca.crt
+    enabled: true
+    trustedCertificates:
+      - secretName: krafter-cluster-ca-cert
+        certificate: ca.crt
 
   rack:
-    enabled: false
+    enabled: true
     topologyKey: topology.kubernetes.io/zone
 
   tolerations: []
@@ -544,8 +573,12 @@ kafkaConnect:
     topologyKey: topology.kubernetes.io/zone
     whenUnsatisfiable: ScheduleAnyway
   podAntiAffinity:
-    enabled: false
+    enabled: true
     topologyKey: kubernetes.io/hostname
+
+  priorityClassName: "system-cluster-critical"
+  imagePullSecrets: []
+  env: []
 
   readinessProbe:
     initialDelaySeconds: 60
@@ -554,32 +587,31 @@ kafkaConnect:
     initialDelaySeconds: 60
     timeoutSeconds: 5
 
-
+  # Strimzi native build (disabled — using pre-built image instead).
+  # Enable this if you don't have a pre-built image and want Strimzi to build one.
   build: {}
-    # output:
-    #   type: docker
-    #   image: my-registry/my-connect:latest
-    #   pushSecret: my-registry-credentials
-    # plugins:
-    #   - name: debezium-postgres
-    #     artifacts:
-    #       - type: maven
-    #         group: io.debezium
-    #         artifact: debezium-connector-postgres
-    #         version: 2.5.0.Final
+
+  metricsConfig:
+    configMapName: kafka-metrics
+    configMapKey: kafka-metrics-config.yml
+
+  template:
+    pod:
+      metadata: {}
 
   connectors: []
     # - name: cdc-orders
     #   class: io.debezium.connector.postgresql.PostgresConnector
     #   tasksMax: 1
+    #   state: running  # running, paused, or stopped
     #   autoRestart:
     #     enabled: true
     #     maxRestarts: 10
     #   config:
     #     database.hostname: postgresql.database.svc
     #     database.port: "5432"
-    #     database.user: debezium
-    #     database.password: "${file:/opt/kafka/external-configuration/pg-credentials/password}"
+    #     database.user: "${file:/mnt/pg-credentials/username}"
+    #     database.password: "${file:/mnt/pg-credentials/password}"
     #     database.dbname: orders
     #     topic.prefix: cdc.orders
     #     schema.include.list: public
@@ -602,7 +634,7 @@ dashboards:
   brokerDashboard: true
   kraftDashboard: true
   cruiseControlDashboard: true
-  connectDashboard: false
+  connectDashboard: true
 
 podSecurityPolicy:
   enabled: false
