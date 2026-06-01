@@ -582,10 +582,10 @@ kafkaConnect:
 
   readinessProbe:
     initialDelaySeconds: 60
-    timeoutSeconds: 5
+    timeoutSeconds: 30
   livenessProbe:
     initialDelaySeconds: 60
-    timeoutSeconds: 5
+    timeoutSeconds: 30
 
   # Strimzi native build (disabled — using pre-built image instead).
   # Enable this if you don't have a pre-built image and want Strimzi to build one.
