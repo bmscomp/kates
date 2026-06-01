@@ -573,23 +573,9 @@ metadata:
 				return err
 			}
 
-			fmt.Println("    - Waiting for PostgreSQL to be ready...")
-			pgDeadline := time.Now().Add(3 * time.Minute)
-			for time.Now().Before(pgDeadline) {
-				out, _ := exec.CommandContext(g2Ctx,
-					"kubectl", "get", "pods", "-n", dbNS,
-					"-l", "app.kubernetes.io/name=postgresql",
-					"--no-headers",
-					"-o", "custom-columns=PHASE:.status.phase",
-				).Output()
-				if strings.Contains(string(out), "Running") {
-					fmt.Printf("    %s PostgreSQL running in %s namespace\n", green("✔"), dbNS)
-					break
-				}
-				select {
-				case <-g2Ctx.Done():
-					return g2Ctx.Err()
-				case <-time.After(5 * time.Second):
+			if !isTesting {
+				if err := waitPostgresReady(g2Ctx, dbNS, 3*time.Minute); err != nil {
+					fmt.Printf("    %s PostgreSQL not ready: %v\n", amber("⚠"), err)
 				}
 			}
 			return nil
@@ -726,34 +712,11 @@ stringData:
 			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 			
 			if !isTesting {
-				fmt.Println("\n    - Waiting for Kafka Connect to be ready...")
-				connectDeadline := time.Now().Add(5 * time.Minute)
-				for time.Now().Before(connectDeadline) {
-					out, _ := exec.CommandContext(g2Ctx,
-						"kubectl", "get", "kafkaconnect", "-n", kafkaNS,
-						"--no-headers",
-						"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status,REPLICAS:.spec.replicas",
-					).Output()
-					lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-					if len(lines) > 0 && lines[0] != "" {
-						for _, line := range lines {
-							fields := strings.Fields(line)
-							if len(fields) >= 2 && fields[1] == "True" {
-								fmt.Printf("    %s Kafka Connect %s ready (%s replicas)\n",
-									green("✔"), fields[0], fields[2])
-								goto connectReady
-							}
-						}
-					}
-					select {
-					case <-g2Ctx.Done():
-						return g2Ctx.Err()
-					case <-time.After(6 * time.Second):
-					}
+				if err := waitConnectReady(g2Ctx, kafkaNS, 5*time.Minute); err != nil {
+					fmt.Printf("    %s Kafka Connect not ready: %v\n", amber("⚠"), err)
 				}
-				fmt.Printf("    %s Kafka Connect not ready after 5m — connectors may need manual check\n", amber("⚠"))
 			}
-		connectReady:
+
 			checkOut, checkErr := exec.CommandContext(g2Ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", kafkaNS, "--no-headers").CombinedOutput()
 			if checkErr != nil || strings.Contains(string(checkOut), "not found") {
 				fmt.Println("    - Deploying Debezium PostgreSQL CDC connector...")
@@ -793,6 +756,12 @@ spec:
 				}
 			} else {
 				fmt.Printf("    %s Debezium connector already exists — skipping\n", green("✔"))
+			}
+
+			if !isTesting {
+				if err := waitConnectorReady(g2Ctx, kafkaNS, 3*time.Minute); err != nil {
+					fmt.Printf("    %s Connectors not all ready: %v\n", amber("⚠"), err)
+				}
 			}
 		}
 		
