@@ -720,7 +720,7 @@ stringData:
 			
 			if !isTesting {
 				if err := waitConnectReady(g2Ctx, kafkaNS, 15*time.Minute); err != nil {
-					fmt.Printf("    %s Kafka Connect not ready: %v\n", amber("⚠"), err)
+					return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
 				}
 			}
 
@@ -767,7 +767,7 @@ spec:
 
 			if !isTesting {
 				if err := waitConnectorReady(g2Ctx, kafkaNS, 10*time.Minute); err != nil {
-					fmt.Printf("    %s Connectors not all ready: %v\n", amber("⚠"), err)
+					return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
 				}
 			}
 		}
