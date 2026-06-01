@@ -25,15 +25,15 @@ Production-ready Apache Kafka deployment on Kubernetes using the [Strimzi](https
 ### 1. Deploy on a local Kind cluster
 
 ```bash
-make kafka-deploy              # ENV=kind (default)
+kates deploy --topology single --namespace kafka
 ```
 
 ### 2. Deploy to any Kubernetes cluster
 
 ```bash
-make kafka-deploy ENV=dev      # minimal single-replica
-make kafka-deploy ENV=staging  # production-like topology
-make kafka-deploy ENV=prod     # full HA, tiered storage, backup
+kates deploy --topology isolated --kafka-ns kafka
+kates deploy --with-schema-registry apicurio
+kates deploy --with-kafka-connect
 ```
 
 Or use Helm directly:
@@ -94,10 +94,9 @@ make kafka-undeploy            # helm uninstall + PVC cleanup
 The chart ships with 4 environment-specific overlays, selectable via `ENV`:
 
 ```bash
-make kafka-deploy              # Kind (default) — layers values-dev + values-kind
-make kafka-deploy ENV=dev      # Development
-make kafka-deploy ENV=staging  # Staging
-make kafka-deploy ENV=prod     # Production
+kates deploy                       # Kind (default) — layers values-dev + values-kind
+kates deploy --topology single     # Development
+kates deploy --topology isolated   # Staging / Production depending on values
 ```
 
 | Setting | Kind | Dev | Staging | Prod |
@@ -161,7 +160,7 @@ graph TB
 
 ```mermaid
 flowchart LR
-    A["make kafka-deploy<br/>ENV=kind|dev|staging|prod"] --> B["helm upgrade --install"]
+    A["kates deploy"] --> B["helm upgrade --install"]
     B --> C["Strimzi Operator<br/>(subchart)"]
     C --> D["Kafka CR"]
     D --> E["KafkaNodePool<br/>controllers"]
@@ -559,7 +558,62 @@ tieredStorage:
     localRetentionMs: 86400000      # Keep 1 day locally
 ```
 
-### Kafka Connect
+### Kafka Connect & PostgreSQL CDC (Debezium)
+
+The chart supports deploying Kafka Connect alongside the Kafka cluster, pre-configured with Debezium for PostgreSQL Change Data Capture (CDC) and Apicurio for Avro schema management.
+
+**Quick Start**:
+```bash
+kates deploy --with-kafka-connect
+```
+This deploys PostgreSQL into the `database` namespace, Kafka Connect into the `kafka` namespace, configures cross-namespace network policies, and mounts PostgreSQL credentials directly into Connect.
+
+> [!IMPORTANT]
+> **PostgreSQL prerequisite**: External PostgreSQL instances must have `wal_level = logical` enabled for Debezium to perform logical decoding.
+
+#### Schema Registry
+
+To use Avro converters, enable the open-source Apicurio registry integration. The `schema.registry.url` is automatically computed using the cluster domain (e.g. `http://apicurio-apicurio-registry.kafka.svc.cluster.local:80/apis/ccompat/v7`).
+
+```yaml
+kafkaConnect:
+  schemaRegistry:
+    enabled: true
+    serviceName: apicurio-apicurio-registry
+```
+
+#### Network Egress & Secrets
+
+Kafka Connect requires explicit egress to databases. Configure it along with external secrets:
+
+```yaml
+kafkaConnect:
+  databaseEgress:
+    - namespace: database
+      port: 5432
+      podSelector:
+        app.kubernetes.io/name: postgresql
+  externalConfiguration:
+    volumes:
+      - name: pg-credentials
+        secretName: connect-pg-credentials
+```
+
+#### CLI Management
+
+Manage Kafka Connect using the new `kates kafka connect` CLI commands:
+
+- `kates kafka connect status` — View Connect cluster health
+- `kates kafka connect connectors` — List deployed connectors and their state
+- `kates kafka connect connector <name>` — View detailed connector configuration
+- `kates kafka connect tasks <name>` — Check individual task status and traces
+- `kates kafka connect restart <name>` — Trigger a rolling restart
+- `kates kafka connect pause <name>` / `resume <name>` — Control connector flow
+- `kates kafka connect plugins` — List installed connector classes (e.g., `io.debezium.connector.postgresql.PostgresConnector`)
+
+---
+
+### Kafka Connect Base Config
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -842,11 +896,10 @@ Set `strimziOperator.enabled: false` if the operator is already installed in the
 ### Deployment
 
 ```bash
-make kafka-deploy              # Deploy to Kind (default)
-make kafka-deploy ENV=staging  # Deploy with staging overlay
-make kafka-deploy ENV=prod     # Deploy with production overlay
-make kafka-upgrade             # Upgrade existing release (ENV=kind default)
-make kafka-undeploy            # Uninstall + PVC cleanup
+kates deploy                       # Deploy to detected local cluster (default)
+kates deploy --topology single     # Deploy to single namespace
+kates deploy --topology isolated   # Deploy to isolated namespaces
+kates clean                        # Uninstall + PVC cleanup
 ```
 
 ### Chart Development

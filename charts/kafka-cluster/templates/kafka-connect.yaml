@@ -10,14 +10,17 @@ metadata:
     helm.sh/resource-policy: keep
     strimzi.io/use-connector-resources: "true"
 spec:
+  {{- if .Values.kafkaConnect.image }}
+  image: {{ .Values.kafkaConnect.image }}
+  {{- end }}
   version: {{ .Values.kafkaConnect.version | default .Values.kafkaVersion }}
   replicas: {{ .Values.kafkaConnect.replicas }}
   bootstrapServers: {{ if .Values.kafkaConnect.tls.enabled }}{{ include "kafka-cluster.bootstrapServersTLS" . }}{{ else }}{{ include "kafka-cluster.bootstrapServers" . }}{{ end }}
   authentication:
     type: scram-sha-512
-    username: kates-connect
+    username: {{ .Values.kafkaConnect.authentication.username | default "kates-connect" }}
     passwordSecret:
-      secretName: kates-connect
+      secretName: {{ .Values.kafkaConnect.authentication.secretName | default .Values.kafkaConnect.authentication.username | default "kates-connect" }}
       password: password
   {{- if .Values.kafkaConnect.tls.enabled }}
   tls:
@@ -25,9 +28,9 @@ spec:
       {{- toYaml .Values.kafkaConnect.tls.trustedCertificates | nindent 6 }}
   {{- end }}
   groupId: {{ .Values.kafkaConnect.groupId | default "kates-connect-cluster" }}
-  offsetStorageTopic: kates-connect-offsets
-  configStorageTopic: kates-connect-configs
-  statusStorageTopic: kates-connect-status
+  offsetStorageTopic: {{ .Values.kafkaConnect.internalTopics.offsetsName | default (printf "%s-offsets" .Values.kafkaConnect.groupId) }}
+  configStorageTopic: {{ .Values.kafkaConnect.internalTopics.configsName | default (printf "%s-configs" .Values.kafkaConnect.groupId) }}
+  statusStorageTopic: {{ .Values.kafkaConnect.internalTopics.statusName | default (printf "%s-status" .Values.kafkaConnect.groupId) }}
   config:
     offset.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
     config.storage.replication.factor: {{ .Values.kafkaConnect.config.replicationFactor | default 3 }}
@@ -36,6 +39,13 @@ spec:
     value.converter: {{ .Values.kafkaConnect.config.valueConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
     key.converter.schemas.enable: {{ .Values.kafkaConnect.config.keyConverterSchemasEnable | default true }}
     value.converter.schemas.enable: {{ .Values.kafkaConnect.config.valueConverterSchemasEnable | default true }}
+    {{- if .Values.kafkaConnect.schemaRegistry.enabled }}
+    schema.registry.url: {{ printf "http://%s.%s.svc.%s:%d%s" .Values.kafkaConnect.schemaRegistry.serviceName (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) (.Values.kafkaConnect.schemaRegistry.port | int) .Values.kafkaConnect.schemaRegistry.path }}
+    {{- end }}
+    {{- if and .Values.kafkaConnect.externalConfiguration .Values.kafkaConnect.externalConfiguration.volumes }}
+    config.providers: file
+    config.providers.file.class: org.apache.kafka.common.config.provider.FileConfigProvider
+    {{- end }}
     {{- range $key, $value := .Values.kafkaConnect.extraConfig }}
     {{ $key }}: {{ $value | toJson }}
     {{- end }}
@@ -49,7 +59,7 @@ spec:
   rack:
     topologyKey: {{ .Values.kafkaConnect.rack.topologyKey }}
   {{- end }}
-  {{- if .Values.kafkaConnect.build }}
+  {{- if and .Values.kafkaConnect.build .Values.kafkaConnect.build.output }}
   build:
     {{- toYaml .Values.kafkaConnect.build | nindent 4 }}
   {{- end }}
@@ -57,17 +67,38 @@ spec:
     type: jmxPrometheusExporter
     valueFrom:
       configMapKeyRef:
-        name: kafka-metrics
-        key: kafka-metrics-config.yml
+        name: {{ .Values.kafkaConnect.metricsConfig.configMapName | default "kafka-metrics" }}
+        key: {{ .Values.kafkaConnect.metricsConfig.configMapKey | default "kafka-metrics-config.yml" }}
+  {{- if .Values.kafkaConnect.tracing.enabled }}
+  tracing:
+    type: {{ .Values.kafkaConnect.tracing.type | default "opentelemetry" }}
+  {{- end }}
 
   readinessProbe:
     {{- toYaml .Values.kafkaConnect.readinessProbe | nindent 4 }}
   livenessProbe:
     {{- toYaml .Values.kafkaConnect.livenessProbe | nindent 4 }}
   template:
+    {{- if .Values.kafkaConnect.podDisruptionBudget }}
+    podDisruptionBudget:
+      {{- toYaml .Values.kafkaConnect.podDisruptionBudget | nindent 6 }}
+    {{- end }}
     pod:
+      {{- if .Values.kafkaConnect.template.pod.metadata }}
+      metadata:
+        {{- with .Values.kafkaConnect.template.pod.metadata.labels }}
+        labels:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.kafkaConnect.template.pod.metadata.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- end }}
       securityContext:
-        {{- include "kafka-cluster.podSecurityContext" . | nindent 8 }}
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       {{- if .Values.kafkaConnect.topologySpreadConstraints.enabled }}
       topologySpreadConstraints:
         - maxSkew: {{ .Values.kafkaConnect.topologySpreadConstraints.maxSkew }}
@@ -92,7 +123,41 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.kafkaConnect.priorityClassName }}
+      priorityClassName: {{ .Values.kafkaConnect.priorityClassName }}
+      {{- end }}
+      {{- with .Values.kafkaConnect.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and .Values.kafkaConnect.externalConfiguration .Values.kafkaConnect.externalConfiguration.volumes }}
+      volumes:
+        {{- range .Values.kafkaConnect.externalConfiguration.volumes }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+        {{- end }}
+      {{- end }}
     connectContainer:
+      {{- if and .Values.kafkaConnect.externalConfiguration .Values.kafkaConnect.externalConfiguration.volumes }}
+      volumeMounts:
+        {{- range .Values.kafkaConnect.externalConfiguration.volumes }}
+        - name: {{ .name }}
+          mountPath: /mnt/{{ .name }}
+          readOnly: true
+        {{- end }}
+      {{- end }}
+      {{- if or .Values.kafkaConnect.env (and .Values.kafkaConnect.externalConfiguration .Values.kafkaConnect.externalConfiguration.env) }}
+      env:
+        {{- with .Values.kafkaConnect.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.kafkaConnect.externalConfiguration }}
+        {{- with .Values.kafkaConnect.externalConfiguration.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
 {{- end }}

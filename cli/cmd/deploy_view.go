@@ -67,12 +67,18 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
 	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", 58))
 
+	colHdrName := lipgloss.NewStyle().Width(26).Render("COMPONENT")
+	colHdrNs := lipgloss.NewStyle().Width(18).Render("NAMESPACE")
+	colHdrStat := lipgloss.NewStyle().Render("STATUS")
+	colHeaders := lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render(fmt.Sprintf("  %s%s%s", colHdrName, colHdrNs, colHdrStat))
+
 	for _, g := range []string{"A", "B", "C"} {
 		if len(groups[g]) == 0 {
 			continue
 		}
 		fmt.Println()
 		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, groupNames[g])))
+		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
 		for _, e := range groups[g] {
 			status := getComponentStatus(ctx, e.Release, e.Namespace)
@@ -104,34 +110,24 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 }
 
 func printRow(icon, name, namespace, status string) {
-	// Total combined visual width for icon + name + namespace before the status column starts.
-	// This ensures the status column perfectly aligns for all rows.
-	const targetWidth = 44
+	const nameWidth = 26
+	const nsWidth = 18
 
-	raw := icon + " " + name
-	visualLen := runewidth.StringWidth(raw)
-	
-	// Minimum padding between name and namespace
-	padLen := 26 - visualLen
-	if padLen < 1 {
-		padLen = 1
+	nameStr := icon + " " + name
+	nsStr := namespace
+
+	// Pad based on actual visual width so emoji don't throw off alignment
+	namePad := nameWidth - runewidth.StringWidth(nameStr)
+	if namePad < 1 {
+		namePad = 1
 	}
-	pad := strings.Repeat(" ", padLen)
-
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(raw) + pad
-	
-	// Calculate the actual visual width consumed so far
-	consumedWidth := visualLen + padLen
-	
-	// How much space is left for the namespace column padding
-	nsVisualLen := runewidth.StringWidth(namespace)
-	nsPadLen := targetWidth - consumedWidth - nsVisualLen
-	if nsPadLen < 1 {
-		nsPadLen = 1
+	nsPad := nsWidth - runewidth.StringWidth(nsStr)
+	if nsPad < 1 {
+		nsPad = 1
 	}
-	nsPad := strings.Repeat(" ", nsPadLen)
 
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(namespace) + nsPad
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr) + strings.Repeat(" ", namePad)
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(nsStr) + strings.Repeat(" ", nsPad)
 
 	// Status column
 	var statusStr string

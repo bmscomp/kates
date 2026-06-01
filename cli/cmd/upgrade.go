@@ -74,7 +74,7 @@ func runUpgrade() error {
 
 	// ── 5. Display plan ──────────────────────────────────────────────────────
 	fmt.Println()
-	fmt.Println("    ╭─ Kates Upgrade ──────────────────────────────────────────╮")
+	fmt.Println("    ╭─ Kates Upgrade ────────────────────────────────────────────────────────────╮")
 	upgradeRow("Source", srcDir)
 	upgradeRow("Branch", gitBranch+gitDirty)
 	upgradeRow("Commit", gitCommit)
@@ -85,7 +85,7 @@ func runUpgrade() error {
 	if oldVersion != "" {
 		upgradeRow("Current", oldVersion)
 	}
-	fmt.Println("    ╰──────────────────────────────────────────────────────────╯")
+	fmt.Println("    ╰────────────────────────────────────────────────────────────────────────────╯")
 	fmt.Println()
 
 	if upgradeDryRun {
@@ -132,13 +132,13 @@ func runUpgrade() error {
 	newVersion := captureInstalledVersion(installPath)
 
 	fmt.Println()
-	fmt.Println("    ╭─ Upgrade Complete ───────────────────────────────────────╮")
+	fmt.Println("    ╭─ Upgrade Complete ─────────────────────────────────────────────────────────╮")
 	if oldVersion != "" {
 		upgradeRow("Previous", oldVersion)
 	}
 	upgradeRow("Installed", newVersion)
 	upgradeRow("Elapsed", time.Since(start).Round(time.Millisecond).String())
-	fmt.Println("    ╰──────────────────────────────────────────────────────────╯")
+	fmt.Println("    ╰────────────────────────────────────────────────────────────────────────────╯")
 	fmt.Println()
 
 	return nil
@@ -311,7 +311,13 @@ func execOutput(dir, name string, args ...string) (string, error) {
 }
 
 func upgradeRow(label, value string) {
-	fmt.Printf("    │  %-12s %s\n", label, value)
+	content := fmt.Sprintf("  %-12s %s", label, value)
+	pad := 76 - len(content)
+	if pad < 0 {
+		content = content[:73] + "..."
+		pad = 0
+	}
+	fmt.Printf("    │%s%s│\n", content, strings.Repeat(" ", pad))
 }
 
 func humanSize(bytes int64) string {

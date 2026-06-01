@@ -249,6 +249,90 @@ func RenderTUI(report *DetectReport) {
 		}
 	}
 
+	output.Header("Kafka Connect & CDC Ecosystem")
+	if report.Ecosystem.KafkaConnect.Installed {
+		output.KeyValue("Kafka Connect:", fmt.Sprintf("%s (in %s)", report.Ecosystem.KafkaConnect.Name, report.Ecosystem.KafkaConnect.Namespace))
+		output.KeyValue("Image:", report.Ecosystem.KafkaConnect.Image)
+		output.KeyValue("Workers:", fmt.Sprintf("%d/%d ready", report.Ecosystem.KafkaConnect.ReadyReplicas, report.Ecosystem.KafkaConnect.TotalReplicas))
+
+		// JVM health display
+		if report.Ecosystem.KafkaConnect.HeapXmx != "" {
+			heapMi := parseHeapMi(report.Ecosystem.KafkaConnect.HeapXmx)
+			limitMi := report.Ecosystem.KafkaConnect.MemLimitMi
+			if limitMi > 0 {
+				ratio := float64(heapMi) / float64(limitMi) * 100
+				output.KeyValue("JVM Heap:", fmt.Sprintf("-Xms=%s -Xmx=%s (%.0f%% of %dMi limit)",
+					report.Ecosystem.KafkaConnect.HeapXms,
+					report.Ecosystem.KafkaConnect.HeapXmx,
+					ratio, limitMi))
+				if ratio > 75 {
+					output.Error("JVM heap dangerously high — risks OOMKill. Run: kates detect --generate-values")
+				} else if ratio > 50 {
+					output.Warn("JVM heap > 50% of limit — limited off-heap space")
+				} else {
+					output.Success("JVM heap ratio: healthy")
+				}
+			} else {
+				output.KeyValue("JVM Heap:", fmt.Sprintf("-Xms=%s -Xmx=%s",
+					report.Ecosystem.KafkaConnect.HeapXms,
+					report.Ecosystem.KafkaConnect.HeapXmx))
+			}
+		}
+		if !report.Ecosystem.KafkaConnect.TLSEnabled {
+			output.Warn("TLS: disabled — Connect ↔ Kafka traffic is plaintext")
+		}
+		if !report.Ecosystem.KafkaConnect.PDBConfigured {
+			output.Warn("PDB: not configured — rolling upgrades may cause downtime")
+		}
+
+		if len(report.Ecosystem.KafkaConnect.Plugins) > 0 {
+			output.Success(fmt.Sprintf("Plugins: %d installed", len(report.Ecosystem.KafkaConnect.Plugins)))
+		}
+		if report.Ecosystem.KafkaConnect.TracingEnabled {
+			output.Success("Tracing: OpenTelemetry enabled")
+		}
+		if report.Ecosystem.KafkaConnect.RackAware {
+			output.Success("Rack awareness: enabled")
+		}
+		if report.Ecosystem.KafkaConnect.HasBuild {
+			output.Success("Strimzi Build: configured")
+		}
+
+		if len(report.Ecosystem.KafkaConnect.Connectors) > 0 {
+			output.Success(fmt.Sprintf("Connectors: %d detected", len(report.Ecosystem.KafkaConnect.Connectors)))
+			cHeaders := []string{"NAME", "CLASS", "TASKS MAX", "STATUS"}
+			var cRows [][]string
+			for _, c := range report.Ecosystem.KafkaConnect.Connectors {
+				cRows = append(cRows, []string{c.Name, c.Class, strconv.Itoa(c.TasksMax), c.Status})
+			}
+			output.Table(cHeaders, cRows)
+		} else {
+			output.Hint("Connectors: none deployed")
+		}
+	} else {
+		output.Warn("Kafka Connect: not installed")
+	}
+
+	if report.Ecosystem.SchemaRegistry.Installed {
+		if report.Ecosystem.SchemaRegistry.Available {
+			output.Success(fmt.Sprintf("Schema Registry: available (%s in %s)", report.Ecosystem.SchemaRegistry.Name, report.Ecosystem.SchemaRegistry.Namespace))
+		} else {
+			output.Error(fmt.Sprintf("Schema Registry: deployed but NOT READY (%s)", report.Ecosystem.SchemaRegistry.Name))
+		}
+	} else {
+		output.Hint("Schema Registry: not installed")
+	}
+
+	if report.Ecosystem.Database.Installed {
+		if report.Ecosystem.Database.Accessible {
+			output.Success(fmt.Sprintf("Database (CDC Source): accessible (%s in %s, port %d)", report.Ecosystem.Database.Name, report.Ecosystem.Database.Namespace, report.Ecosystem.Database.Port))
+		} else {
+			output.Error(fmt.Sprintf("Database (CDC Source): deployed but NOT READY (%s)", report.Ecosystem.Database.Name))
+		}
+	} else {
+		output.Hint("Database (CDC Source): not detected")
+	}
+
 	output.Header("Monitoring Stack")
 	if report.Monitoring.PodMonitorCRD {
 		output.Success("PodMonitor CRD: present")

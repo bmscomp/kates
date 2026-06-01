@@ -2,6 +2,7 @@ package detect
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -271,6 +272,64 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	}
 	addCheck("TLS certificate validity", certPass, certDetail)
 
+	// Ecosystem / CDC Checks
+	if report.Ecosystem.KafkaConnect.Installed {
+
+		// Connect JVM health check
+		if report.Ecosystem.KafkaConnect.HeapXmx != "" && report.Ecosystem.KafkaConnect.MemLimitMi > 0 {
+			heapMi := parseHeapMi(report.Ecosystem.KafkaConnect.HeapXmx)
+			limitMi := report.Ecosystem.KafkaConnect.MemLimitMi
+			ratio := float64(heapMi) / float64(limitMi) * 100
+			if ratio > 75 {
+				addCheck("Connect JVM heap ratio", false, fmt.Sprintf("%.0f%% of limit — risks OOMKill, reduce -Xmx", ratio))
+			} else if ratio > 50 {
+				v.Warns++
+				addCheck("Connect JVM heap ratio", true, fmt.Sprintf("%.0f%% of limit — limited off-heap space", ratio))
+			} else {
+				addCheck("Connect JVM heap ratio", true, fmt.Sprintf("%.0f%% of limit — healthy", ratio))
+			}
+		}
+
+		if !report.Ecosystem.KafkaConnect.TLSEnabled {
+			v.Warns++
+			addCheck("Connect TLS", true, "disabled — traffic is plaintext")
+		}
+
+		if !report.Ecosystem.KafkaConnect.PDBConfigured {
+			v.Warns++
+			addCheck("Connect PDB", true, "not configured — upgrades may cause downtime")
+		}
+
+		if !report.Ecosystem.SchemaRegistry.Installed {
+			v.Warns++
+			addCheck("Schema Registry for CDC", true, "warning: not found (Debezium Avro requires it)")
+		} else {
+			addCheck("Schema Registry for CDC", report.Ecosystem.SchemaRegistry.Available, "available")
+		}
+
+		if report.Ecosystem.Database.Installed {
+			addCheck("Database CDC source", report.Ecosystem.Database.Accessible, "available in "+report.Ecosystem.Database.Namespace)
+		} else {
+			v.Warns++
+			addCheck("Database CDC source", true, "warning: PostgreSQL not detected in cluster")
+		}
+	}
+
 	v.Compatible = v.Fails == 0
 	report.Verdict = v
+}
+
+// parseHeapMi converts a JVM heap string like "768m" or "2g" to MiB.
+func parseHeapMi(heap string) int {
+	heap = strings.TrimSpace(strings.ToLower(heap))
+	if strings.HasSuffix(heap, "m") {
+		v, _ := strconv.Atoi(strings.TrimSuffix(heap, "m"))
+		return v
+	}
+	if strings.HasSuffix(heap, "g") {
+		v, _ := strconv.Atoi(strings.TrimSuffix(heap, "g"))
+		return v * 1024
+	}
+	v, _ := strconv.Atoi(heap)
+	return v
 }
