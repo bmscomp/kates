@@ -561,9 +561,16 @@ type GenUsers struct {
 }
 
 type GenUser struct {
-	Name           string       `yaml:"name"`
-	Authentication GenUserAuth  `yaml:"authentication"`
-	Authorization  *GenUserAuthz `yaml:"authorization,omitempty"`
+	Name           string         `yaml:"name"`
+	Authentication GenUserAuth    `yaml:"authentication"`
+	Quotas         *GenUserQuotas `yaml:"quotas,omitempty"`
+	Authorization  *GenUserAuthz  `yaml:"authorization,omitempty"`
+}
+
+type GenUserQuotas struct {
+	ProducerByteRate  int `yaml:"producerByteRate,omitempty"`
+	ConsumerByteRate  int `yaml:"consumerByteRate,omitempty"`
+	RequestPercentage int `yaml:"requestPercentage,omitempty"`
 }
 
 type GenUserAuth struct {
