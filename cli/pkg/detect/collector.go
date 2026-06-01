@@ -606,7 +606,7 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 			}
 
 			// Fetch logs
-			logs, _ := c.exec.Exec("kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100")
+			logs, _ := c.exec.Exec("kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100", "--since=15m")
 			var warningLogs []string
 			for _, line := range strings.Split(logs, "\n") {
 				lineLower := strings.ToLower(line)
