@@ -23,7 +23,7 @@ spec:
   build:
     output:
       type: docker
-      image: kind-registry:5000/kates-connect:latest
+      image: ghcr.io/bmscomp/connect:3.0.2
     plugins:
       - name: debezium-postgres
         artifacts:

@@ -92,7 +92,7 @@ kafkaConnect:
   build:
     output:
       type: docker
-      image: ghcr.io/bmscomp/kates-connect:latest
+      image: ghcr.io/bmscomp/connect:3.0.2
       pushSecret: ghcr-credentials
     plugins:
       - name: debezium-postgres

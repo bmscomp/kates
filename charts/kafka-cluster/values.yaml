@@ -472,7 +472,7 @@ kafkaConnect:
   enabled: false
   replicas: 3
   version: ""
-  image: "kates-connect:local"
+  image: "ghcr.io/bmscomp/connect:3.0.2"
   groupId: kates-connect-cluster
 
   topologySpreadConstraints:
