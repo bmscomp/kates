@@ -398,6 +398,68 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 						},
 					},
 				},
+				{
+					Name: "kates-connect",
+					Authentication: GenUserAuth{
+						Type: "scram-sha-512",
+					},
+					Quotas: &GenUserQuotas{
+						ProducerByteRate: 52428800,
+						ConsumerByteRate: 52428800,
+						RequestPercentage: 25,
+					},
+					Authorization: &GenUserAuthz{
+						Type: "simple",
+						Acls: []GenAcl{
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "kates-connect-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "kates-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "transactionalId",
+									Name:        "connect-cluster-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Write", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "cdc",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "group",
+									Name:        "kates-connect",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type: "cluster",
+								},
+								Operations: []string{"Describe"},
+							},
+						},
+					},
+				},
 			},
 		},
 		StrimziSubchart: GenStrimziSubchart{},
