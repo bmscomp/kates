@@ -342,11 +342,15 @@ metadata:
 				"--set", "resources.limits.memory=768Mi", 
 				"--set", "resources.requests.memory=768Mi", 
 				"--set", "leaderElection.enabled=false",
-				"--timeout", "5m", "--wait")
+				"--timeout", "5m")
 			if err != nil { return err }
 			
-			fmt.Println("    - Waiting for Strimzi CRDs to be established...")
-			return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established", "crd", "kafkas.kafka.strimzi.io", "--timeout=60s")
+			if !isTesting {
+				if err := waitStrimziReady(gCtx, "strimzi-operator", 5*time.Minute); err != nil {
+					return fmt.Errorf("strimzi operator readiness failed: %w", err)
+				}
+			}
+			return nil
 		})
 	}
 	
