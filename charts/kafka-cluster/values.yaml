@@ -541,6 +541,7 @@ kafkaConnect:
     producer.enable.idempotence: "true"
     consumer.auto.offset.reset: "earliest"
     exactly.once.source.support: "enabled"
+    group.initial.rebalance.delay.ms: "3000"
     # schema.registry.url is auto-computed when kafkaConnect.schemaRegistry.enabled=true
     # FQDN: http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompat/v7
 
@@ -581,10 +582,14 @@ kafkaConnect:
   env: []
 
   readinessProbe:
-    initialDelaySeconds: 60
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 10
     timeoutSeconds: 30
   livenessProbe:
-    initialDelaySeconds: 60
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 20
     timeoutSeconds: 30
 
   # Strimzi native build (disabled — using pre-built image instead).
