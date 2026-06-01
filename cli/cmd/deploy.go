@@ -574,7 +574,7 @@ metadata:
 			}
 
 			if !isTesting {
-				if err := waitPostgresReady(g2Ctx, dbNS, 3*time.Minute); err != nil {
+				if err := waitPostgresReady(g2Ctx, dbNS, 5*time.Minute); err != nil {
 					fmt.Printf("    %s PostgreSQL not ready: %v\n", amber("⚠"), err)
 				}
 			}
@@ -656,7 +656,7 @@ metadata:
 		// waitKafkaReady already confirms Ready=True on the Kafka CR, which
 		// Strimzi only sets after the Entity Operator is also healthy.
 		// No separate EO wait needed.
-		if err := waitKafkaReady(g2Ctx, kafkaNS, 12*time.Minute); err != nil {
+		if err := waitKafkaReady(g2Ctx, kafkaNS, 15*time.Minute); err != nil {
 			return fmt.Errorf("kafka readiness failed: %w", err)
 		}
 
@@ -669,7 +669,7 @@ metadata:
 		// time to establish its admin Kafka connection before it can process
 		// KafkaUser resources.
 		fmt.Println("    - Waiting for Entity Operator to start...")
-		eoDeadline := time.Now().Add(3 * time.Minute)
+		eoDeadline := time.Now().Add(5 * time.Minute)
 		for time.Now().Before(eoDeadline) {
 			eoOut, _ := exec.CommandContext(g2Ctx,
 				"kubectl", "get", "pods", "-n", kafkaNS,
@@ -689,7 +689,7 @@ metadata:
 		}
 
 		// ── Poll KafkaUsers with progress ─────────────────────────────────
-		allReady, err := waitKafkaUsersReady(g2Ctx, kafkaNS, 5*time.Minute)
+		allReady, err := waitKafkaUsersReady(g2Ctx, kafkaNS, 8*time.Minute)
 		if err != nil {
 			return err
 		}
@@ -712,7 +712,7 @@ stringData:
 			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 			
 			if !isTesting {
-				if err := waitConnectReady(g2Ctx, kafkaNS, 5*time.Minute); err != nil {
+				if err := waitConnectReady(g2Ctx, kafkaNS, 8*time.Minute); err != nil {
 					fmt.Printf("    %s Kafka Connect not ready: %v\n", amber("⚠"), err)
 				}
 			}
@@ -759,7 +759,7 @@ spec:
 			}
 
 			if !isTesting {
-				if err := waitConnectorReady(g2Ctx, kafkaNS, 3*time.Minute); err != nil {
+				if err := waitConnectorReady(g2Ctx, kafkaNS, 5*time.Minute); err != nil {
 					fmt.Printf("    %s Connectors not all ready: %v\n", amber("⚠"), err)
 				}
 			}
