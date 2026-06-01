@@ -311,10 +311,10 @@ func execOutput(dir, name string, args ...string) (string, error) {
 }
 
 func upgradeRow(label, value string) {
-	content := fmt.Sprintf(" %-12s %s", label, value)
-	pad := 74 - len(content)
+	content := fmt.Sprintf("  %-12s %s", label, value)
+	pad := 76 - len(content)
 	if pad < 0 {
-		content = content[:71] + "..."
+		content = content[:73] + "..."
 		pad = 0
 	}
 	fmt.Printf("    │%s%s│\n", content, strings.Repeat(" ", pad))
