@@ -115,49 +115,38 @@ func (m strimziWaitModel) View() string {
 
 	b.WriteString(fmt.Sprintf("\n    %s\n", boxTop(fmt.Sprintf(" Strimzi Operator  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(m.timeout)))), 58)))
 
+	opStatus := podPhaseLabel(m.podRunning, m.podTotal)
+	opCount := fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal))
 	if m.done {
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-			dim("Operator    "),
-			renderProgressBar(m.podRunning, m.podTotal, 15, false),
-			blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal))),
-			blue("✔ running")), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-			dim("Timeout     "),
-			renderProgressBar(elapsed, totalSecs, 15, false),
-			blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s", dim("CRDs        "), blue("✔ Established")), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
-		b.WriteString(fmt.Sprintf("    %s Strimzi Operator ready  %s %s\n",
-			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
-		return b.String()
+		opStatus = blue("✔ running")
+		opCount = blue(opCount)
 	}
-
-	crdIcon := red("⏳ waiting")
-	if m.crdReady {
-		crdIcon = blue("✔ Established")
-	}
-
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
 		dim("Operator    "),
 		renderProgressBar(m.podRunning, m.podTotal, 15, failed),
-		fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal)),
-		podPhaseLabel(m.podRunning, m.podTotal)), 58)))
+		opCount, opStatus), 58)))
 
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
 		dim("Timeout     "),
 		renderProgressBar(elapsed, totalSecs, 15, failed),
 		fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58)))
 
+	crdIcon := red("⏳ waiting")
+	if m.crdReady || m.done {
+		crdIcon = blue("✔ Established")
+	}
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s",
 		dim("CRDs        "), crdIcon), 58)))
 
-	if elapsed >= 30 && len(m.pending) > 0 {
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow("", 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s", amber(fmt.Sprintf("⚠  %d pod(s) Pending — diagnose with:", len(m.pending)))), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf("    %s", dim(fmt.Sprintf("kubectl describe pod %s -n %s", m.pending[0], m.namespace))), 58)))
+	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+
+	if m.done {
+		b.WriteString(fmt.Sprintf("    %s Strimzi Operator ready  %s %s\n",
+			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
+	} else {
+		b.WriteString("\n")
 	}
 
-	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
 	return b.String()
 }
 

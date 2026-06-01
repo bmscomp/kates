@@ -117,43 +117,38 @@ func (m connectWaitModel) View() string {
 
 	b.WriteString(fmt.Sprintf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Connect  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(m.timeout)))), 58)))
 
+	workerStatus := podPhaseLabel(m.podRunning, m.podTotal)
+	workerCount := fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal))
 	if m.done {
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-			dim("Workers     "),
-			renderProgressBar(m.podRunning, m.podTotal, 15, false),
-			blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal))),
-			blue("✔ running")), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-			dim("Timeout     "),
-			renderProgressBar(elapsed, totalSecs, 15, false),
-			blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s", dim("CR status   "), blue("✔ Ready=True")), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
-		b.WriteString(fmt.Sprintf("    %s Kafka Connect ready  %s %s\n",
-			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
-		return b.String()
+		workerStatus = blue("✔ running")
+		workerCount = blue(workerCount)
 	}
-
-	crIcon := red("⏳ waiting")
-	if m.crReady {
-		crIcon = blue("✔ Ready=True")
-	}
-
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
 		dim("Workers     "),
 		renderProgressBar(m.podRunning, m.podTotal, 15, failed),
-		fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal)),
-		podPhaseLabel(m.podRunning, m.podTotal)), 58)))
+		workerCount, workerStatus), 58)))
 
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
 		dim("Timeout     "),
 		renderProgressBar(elapsed, totalSecs, 15, failed),
 		fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58)))
 
+	crIcon := red("⏳ waiting")
+	if m.crReady || m.done {
+		crIcon = blue("✔ Ready=True")
+	}
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s",
 		dim("CR status   "), crIcon), 58)))
 
 	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+
+	if m.done {
+		b.WriteString(fmt.Sprintf("    %s Kafka Connect ready  %s %s\n",
+			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
+	} else {
+		b.WriteString("\n")
+	}
+
 	return b.String()
 }
 
@@ -302,34 +297,21 @@ func (m connectorWaitModel) View() string {
 
 	b.WriteString(fmt.Sprintf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Connectors  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(m.timeout)))), 58)))
 
-	if m.done {
-		if m.isTimeout {
-			b.WriteString(m.renderConnectors(true))
-			b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-				dim(fmt.Sprintf("%-12s", "Timeout")),
-				renderProgressBar(totalSecs, totalSecs, 15, true),
-				red(fmtElapsed(totalSecs)), red(fmtElapsed(totalSecs))), 58)))
-			b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
-			return b.String()
-		}
-
-		b.WriteString(m.renderConnectors(false))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-			dim(fmt.Sprintf("%-12s", "Timeout")),
-			renderProgressBar(elapsed, totalSecs, 15, false),
-			blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
-		b.WriteString(fmt.Sprintf("    %s All %d connectors ready  %s %s\n\n",
-			green("✔"), m.total, dim("elapsed"), bold(fmtElapsed(elapsed))))
-		return b.String()
-	}
-
 	b.WriteString(m.renderConnectors(failed))
+
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
 		dim(fmt.Sprintf("%-12s", "Timeout")),
 		renderProgressBar(elapsed, totalSecs, 15, failed),
 		fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58)))
+
 	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+
+	if m.done && !m.isTimeout {
+		b.WriteString(fmt.Sprintf("    %s All %d connectors ready  %s %s\n",
+			green("✔"), m.total, dim("elapsed"), bold(fmtElapsed(elapsed))))
+	} else {
+		b.WriteString("\n")
+	}
 
 	return b.String()
 }
@@ -484,27 +466,16 @@ func (m pgWaitModel) View() string {
 
 	b.WriteString(fmt.Sprintf("\n    %s\n", boxTop(fmt.Sprintf(" PostgreSQL  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(m.timeout)))), 58)))
 
+	podStatus := podPhaseLabel(m.podRunning, m.podTotal)
+	podCount := fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal))
 	if m.done {
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-			dim("Pods        "),
-			renderProgressBar(m.podRunning, m.podTotal, 15, false),
-			blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal))),
-			blue("✔ running")), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-			dim("Timeout     "),
-			renderProgressBar(elapsed, totalSecs, 15, false),
-			blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58)))
-		b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
-		b.WriteString(fmt.Sprintf("    %s PostgreSQL ready  %s %s\n",
-			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
-		return b.String()
+		podStatus = blue("✔ running")
+		podCount = blue(podCount)
 	}
-
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
 		dim("Pods        "),
 		renderProgressBar(m.podRunning, m.podTotal, 15, failed),
-		fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.podRunning, m.podTotal)),
-		podPhaseLabel(m.podRunning, m.podTotal)), 58)))
+		podCount, podStatus), 58)))
 
 	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
 		dim("Timeout     "),
@@ -512,6 +483,14 @@ func (m pgWaitModel) View() string {
 		fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58)))
 
 	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+
+	if m.done {
+		b.WriteString(fmt.Sprintf("    %s PostgreSQL ready  %s %s\n",
+			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
+	} else {
+		b.WriteString("\n")
+	}
+
 	return b.String()
 }
 
