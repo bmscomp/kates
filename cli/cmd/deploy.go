@@ -342,6 +342,7 @@ metadata:
 				"--set", "resources.limits.memory=768Mi", 
 				"--set", "resources.requests.memory=768Mi", 
 				"--set", "leaderElection.enabled=false",
+				"--set", "operationTimeoutMs=900000",
 				"--timeout", "5m")
 			if err != nil { return err }
 			return nil
