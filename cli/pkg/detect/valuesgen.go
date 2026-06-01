@@ -474,30 +474,30 @@ func (g *ValuesGenerator) buildKafkaConnect() GenKafkaConnect {
 	}
 
 	// JVM sizing: memory limit based on cluster capacity
-	// Connect gets ~5% of Kafka memory budget, clamped [1Gi, 4Gi]
-	connectMemGi := float64(g.Cap.KafkaMem) * 0.05
-	if connectMemGi < 1 {
-		connectMemGi = 1
+	// Connect gets ~10% of Kafka memory budget, clamped [2Gi, 8Gi]
+	connectMemGi := float64(g.Cap.KafkaMem) * 0.1
+	if connectMemGi < 2 {
+		connectMemGi = 2
 	}
-	if connectMemGi > 4 {
-		connectMemGi = 4
+	if connectMemGi > 8 {
+		connectMemGi = 8
 	}
 	memLimitMi := int(connectMemGi * 1024)
 	// Heap = 50% of limit (safe ratio for off-heap buffers)
 	heapMi := memLimitMi / 2
 	memRequestMi := memLimitMi * 3 / 4
 
-	// CPU: 5% of Kafka CPU budget, clamped [500m, 2000m]
-	connectCPU := g.Cap.KafkaCPU / 20
-	if connectCPU < 500 {
-		connectCPU = 500
+	// CPU: 10% of Kafka CPU budget, clamped [1000m, 4000m]
+	connectCPU := g.Cap.KafkaCPU / 10
+	if connectCPU < 1000 {
+		connectCPU = 1000
 	}
-	if connectCPU > 2000 {
-		connectCPU = 2000
+	if connectCPU > 4000 {
+		connectCPU = 4000
 	}
 	cpuLimit := connectCPU * 2
-	if cpuLimit > 4000 {
-		cpuLimit = 4000
+	if cpuLimit > 8000 {
+		cpuLimit = 8000
 	}
 
 	replicas := 3

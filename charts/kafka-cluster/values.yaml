@@ -492,8 +492,8 @@ kafkaConnect:
     prefix: ""  # defaults to groupId
 
   jvmOptions:
-    -Xms: 512m
-    -Xmx: 512m
+    -Xms: 1024m
+    -Xmx: 1024m
     gcLoggingEnabled: true
     javaSystemProperties: []
     # - name: com.sun.management.jmxremote
@@ -501,11 +501,11 @@ kafkaConnect:
 
   resources:
     requests:
-      memory: 1Gi
-      cpu: 500m
-    limits:
       memory: 2Gi
-      cpu: 2000m
+      cpu: 1000m
+    limits:
+      memory: 4Gi
+      cpu: 4000m
 
   # Schema registry integration (Apicurio — open source, no Confluent)
   schemaRegistry:
