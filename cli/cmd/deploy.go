@@ -344,12 +344,6 @@ metadata:
 				"--set", "leaderElection.enabled=false",
 				"--timeout", "5m")
 			if err != nil { return err }
-			
-			if !isTesting {
-				if err := waitStrimziReady(gCtx, "strimzi-operator", 5*time.Minute); err != nil {
-					return fmt.Errorf("strimzi operator readiness failed: %w", err)
-				}
-			}
 			return nil
 		})
 	}
@@ -513,6 +507,14 @@ spec:
 	if err := g.Wait(); err != nil {
 		output.Error(fmt.Sprintf("Failed during Group A (Operators) deployments: %v", err))
 		return err
+	}
+
+	// ── Strimzi readiness (sequential — Bubble Tea needs exclusive terminal) ──
+	if deployWithStrimzi && !isTesting {
+		if err := waitStrimziReady(ctx, "strimzi-operator", 5*time.Minute); err != nil {
+			output.Error(fmt.Sprintf("Strimzi operator readiness failed: %v", err))
+			return err
+		}
 	}
 	
 	// Bust Kubernetes Discovery Cache so Helm knows about the newly created CRDs
