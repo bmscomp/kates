@@ -98,6 +98,55 @@ type MonitoringInfo struct {
 	ReleaseLabel      string
 }
 
+type EcosystemInfo struct {
+	KafkaConnect   KafkaConnectStatus
+	SchemaRegistry SchemaRegistryStatus
+	Database       DatabaseCDCStatus
+}
+
+type KafkaConnectStatus struct {
+	Installed      bool
+	Name           string
+	Namespace      string
+	ReadyReplicas  int
+	TotalReplicas  int
+	Image          string
+	Connectors     []ConnectorStatus
+	Plugins        []string
+	HasBuild       bool
+	TracingEnabled bool
+	RackAware      bool
+	HeapXms        string
+	HeapXmx        string
+	MemLimitMi     int
+	CPURequestM    int
+	CPULimitM      int
+	TLSEnabled     bool
+	PDBConfigured  bool
+}
+
+type ConnectorStatus struct {
+	Name   string
+	Class  string
+	TasksMax int
+	Status string
+}
+
+type SchemaRegistryStatus struct {
+	Installed bool
+	Name      string
+	Namespace string
+	Available bool
+}
+
+type DatabaseCDCStatus struct {
+	Installed  bool
+	Name       string
+	Namespace  string
+	Port       int
+	Accessible bool
+}
+
 type LatencyResult struct {
 	SourceZone string
 	TargetZone string
@@ -338,6 +387,7 @@ type DetectReport struct {
 	StorageAudit     StorageAudit
 	ExistingKafka    KafkaResources
 	Strimzi          StrimziInfo
+	Ecosystem        EcosystemInfo
 	Monitoring       MonitoringInfo
 	Network          NetworkInfo
 	Admission        AdmissionInfo
@@ -373,7 +423,7 @@ type GeneratedValues struct {
 	KafkaExporter      GenFeature             `yaml:"kafkaExporter"`
 	DrainCleaner       GenFeature             `yaml:"drainCleaner"`
 	Rebalance          GenFeature             `yaml:"rebalance"`
-	KafkaConnect       GenFeature             `yaml:"kafkaConnect"`
+	KafkaConnect       GenKafkaConnect        `yaml:"kafkaConnect"`
 	RBAC               GenFeature             `yaml:"rbac"`
 	EntityOperator     map[string]interface{} `yaml:"entityOperator"`
 	StrimziSubchart    GenStrimziSubchart     `yaml:"strimzi-kafka-operator"`
@@ -511,9 +561,16 @@ type GenUsers struct {
 }
 
 type GenUser struct {
-	Name           string       `yaml:"name"`
-	Authentication GenUserAuth  `yaml:"authentication"`
-	Authorization  *GenUserAuthz `yaml:"authorization,omitempty"`
+	Name           string         `yaml:"name"`
+	Authentication GenUserAuth    `yaml:"authentication"`
+	Quotas         *GenUserQuotas `yaml:"quotas,omitempty"`
+	Authorization  *GenUserAuthz  `yaml:"authorization,omitempty"`
+}
+
+type GenUserQuotas struct {
+	ProducerByteRate  int `yaml:"producerByteRate,omitempty"`
+	ConsumerByteRate  int `yaml:"consumerByteRate,omitempty"`
+	RequestPercentage int `yaml:"requestPercentage,omitempty"`
 }
 
 type GenUserAuth struct {
@@ -539,4 +596,49 @@ type GenAclResource struct {
 type GenFeature struct {
 	Enabled bool `yaml:"enabled"`
 	Create  bool `yaml:"create,omitempty"`
+}
+
+type GenKafkaConnect struct {
+	Enabled         bool                   `yaml:"enabled"`
+	Replicas        int                    `yaml:"replicas"`
+	GroupID         string                 `yaml:"groupId"`
+	JVMOptions      GenJVMOptions          `yaml:"jvmOptions"`
+	Resources       GenResources           `yaml:"resources"`
+	TLS             GenConnectTLS          `yaml:"tls"`
+	Rack            GenConnectRack         `yaml:"rack"`
+	Tracing         GenConnectTracing      `yaml:"tracing"`
+	TopologySpread  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
+	PodAntiAffinity GenAntiAffinity        `yaml:"podAntiAffinity"`
+	PDB             GenConnectPDB          `yaml:"podDisruptionBudget"`
+	Config          GenConnectConfig       `yaml:"config"`
+	ExtraConfig     map[string]string      `yaml:"extraConfig,omitempty"`
+}
+
+type GenJVMOptions struct {
+	Xms string `yaml:"-Xms"`
+	Xmx string `yaml:"-Xmx"`
+}
+
+type GenConnectTLS struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+type GenConnectRack struct {
+	Enabled     bool   `yaml:"enabled"`
+	TopologyKey string `yaml:"topologyKey,omitempty"`
+}
+
+type GenConnectTracing struct {
+	Enabled bool   `yaml:"enabled"`
+	Type    string `yaml:"type,omitempty"`
+}
+
+type GenConnectPDB struct {
+	MaxUnavailable int `yaml:"maxUnavailable"`
+}
+
+type GenConnectConfig struct {
+	ReplicationFactor int    `yaml:"replicationFactor"`
+	KeyConverter      string `yaml:"keyConverter"`
+	ValueConverter    string `yaml:"valueConverter"`
 }

@@ -262,6 +262,30 @@ tester-build:
 	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
 	@echo "✅ Kates Tester image built and available"
 
+connect-build:
+	@echo "🔌 Building Kafka Connect image with enterprise plugins..."
+	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | cut -d= -f2); \
+	TAG=$${DBZ_VERSION%.Final}; \
+	echo "  Debezium: $${DBZ_VERSION}  →  connect:$${TAG}"; \
+	docker build -t connect:$${TAG} -t connect:latest \
+		-t ghcr.io/bmscomp/connect:$${TAG} \
+		-t ghcr.io/bmscomp/connect:latest \
+		-f Dockerfile.connect .; \
+	if kind get clusters 2>/dev/null | grep -q "$(CLUSTER_NAME)"; then \
+		echo "Loading into Kind cluster ($(CLUSTER_NAME))..."; \
+		kind load docker-image connect:$${TAG} --name $(CLUSTER_NAME); \
+	fi; \
+	echo "✅ connect:$${TAG} built successfully"; \
+	echo "   Plugins: debezium-postgres, debezium-mysql, debezium-mongodb, debezium-sqlserver, apicurio-converter, aiven-jdbc"
+
+connect-push:
+	@echo "🚀 Pushing Kafka Connect image to $(REGISTRY)..."
+	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | cut -d= -f2); \
+	TAG=$${DBZ_VERSION%.Final}; \
+	docker push $(REGISTRY)/connect:$${TAG}; \
+	docker push $(REGISTRY)/connect:latest; \
+	echo "✅ Pushed: $(REGISTRY)/connect:$${TAG}"
+
 REGISTRY ?= ghcr.io/bmscomp
 push-images:
 	@echo "🚀 Pushing images to $(REGISTRY)..."

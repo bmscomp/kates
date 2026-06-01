@@ -14,6 +14,9 @@ metadata:
 spec:
   class: {{ .class }}
   tasksMax: {{ .tasksMax | default 1 }}
+  {{- if .state }}
+  state: {{ .state }}
+  {{- end }}
   {{- if .autoRestart }}
   autoRestart:
     enabled: {{ .autoRestart.enabled | default true }}
