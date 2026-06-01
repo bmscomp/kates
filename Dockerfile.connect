@@ -1,5 +1,5 @@
 FROM quay.io/strimzi/kafka:1.0.0-kafka-4.2.0 AS base
-
+# Trigger build
 # ─── Stage 1: Download connector plugins ─────────────────────────────────────
 #
 # This stage downloads all enterprise connector plugins from Maven Central
