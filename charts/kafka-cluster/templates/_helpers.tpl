@@ -52,6 +52,7 @@ Security context defaults for pods.
 */}}
 {{- define "kafka-cluster.podSecurityContext" -}}
 runAsNonRoot: true
+runAsUser: 1001
 fsGroup: 1001
 seccompProfile:
   type: RuntimeDefault

@@ -1,0 +1,74 @@
+FROM quay.io/strimzi/kafka:1.0.0-kafka-4.2.0 AS base
+
+# ─── Stage 1: Download connector plugins ─────────────────────────────────────
+#
+# This stage downloads all enterprise connector plugins from Maven Central
+# and GitHub. Each plugin is placed in its own directory under /plugins.
+#
+# Plugin versions are pinned as build args for easy upgrades.
+#
+FROM eclipse-temurin:21-jre-alpine AS download
+
+ARG DEBEZIUM_VERSION=3.0.2.Final
+ARG APICURIO_VERSION=2.5.11.Final
+
+RUN apk add --no-cache curl tar
+
+WORKDIR /plugins
+
+# ── Debezium CDC Connectors ──────────────────────────────────────────────────
+# Debezium captures row-level changes from database transaction logs (WAL/binlog)
+# and streams them as Kafka events. Essential for Change Data Capture pipelines.
+
+# PostgreSQL — primary relational database CDC via logical replication
+RUN mkdir -p debezium-postgres && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/${DEBEZIUM_VERSION}/debezium-connector-postgres-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-postgres --strip-components=1
+
+# MySQL / MariaDB — binlog-based CDC for legacy OLTP systems
+RUN mkdir -p debezium-mysql && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-mysql/${DEBEZIUM_VERSION}/debezium-connector-mysql-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-mysql --strip-components=1
+
+# MongoDB — oplog/change-stream CDC for document stores
+RUN mkdir -p debezium-mongodb && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-mongodb/${DEBEZIUM_VERSION}/debezium-connector-mongodb-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-mongodb --strip-components=1
+
+# SQL Server — CDC via SQL Server Change Tracking
+RUN mkdir -p debezium-sqlserver && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-sqlserver/${DEBEZIUM_VERSION}/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-sqlserver --strip-components=1
+
+# ── Apicurio Schema Registry Integration ─────────────────────────────────────
+# Apicurio converters enable schema governance with Avro, JSON Schema, and
+# Protobuf serialization. Required when connecting to Apicurio Registry.
+RUN mkdir -p apicurio-converter && \
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-utils-converter/${APICURIO_VERSION}/apicurio-registry-utils-converter-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-utils-converter.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-serdes-avro-serde/${APICURIO_VERSION}/apicurio-registry-serdes-avro-serde-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-serdes-avro-serde.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-serdes-jsonschema-serde/${APICURIO_VERSION}/apicurio-registry-serdes-jsonschema-serde-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-serdes-jsonschema-serde.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-serdes-protobuf-serde/${APICURIO_VERSION}/apicurio-registry-serdes-protobuf-serde-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-serdes-protobuf-serde.jar
+
+# ─── Stage 2: Final production image ─────────────────────────────────────────
+FROM base
+
+ARG DEBEZIUM_VERSION=3.0.2.Final
+
+USER root:root
+COPY --from=download /plugins/ /opt/kafka/plugins/
+USER 1001
+
+# ─── OCI Image Labels (https://github.com/opencontainers/image-spec) ─────────
+LABEL org.opencontainers.image.title="connect"
+LABEL org.opencontainers.image.description="Enterprise Kafka Connect image with Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), and Aiven JDBC connectors. Built on Strimzi Kafka 4.2.0."
+LABEL org.opencontainers.image.source="https://github.com/bmscomp/kates"
+LABEL org.opencontainers.image.url="https://github.com/bmscomp/kates/pkgs/container/connect"
+LABEL org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/kafka-connect.md"
+LABEL org.opencontainers.image.vendor="bmscomp"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.base.name="quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
+LABEL io.debezium.version="${DEBEZIUM_VERSION}"

@@ -255,6 +255,49 @@ func RenderTUI(report *DetectReport) {
 		output.KeyValue("Image:", report.Ecosystem.KafkaConnect.Image)
 		output.KeyValue("Workers:", fmt.Sprintf("%d/%d ready", report.Ecosystem.KafkaConnect.ReadyReplicas, report.Ecosystem.KafkaConnect.TotalReplicas))
 
+		// JVM health display
+		if report.Ecosystem.KafkaConnect.HeapXmx != "" {
+			heapMi := parseHeapMi(report.Ecosystem.KafkaConnect.HeapXmx)
+			limitMi := report.Ecosystem.KafkaConnect.MemLimitMi
+			if limitMi > 0 {
+				ratio := float64(heapMi) / float64(limitMi) * 100
+				output.KeyValue("JVM Heap:", fmt.Sprintf("-Xms=%s -Xmx=%s (%.0f%% of %dMi limit)",
+					report.Ecosystem.KafkaConnect.HeapXms,
+					report.Ecosystem.KafkaConnect.HeapXmx,
+					ratio, limitMi))
+				if ratio > 75 {
+					output.Error("JVM heap dangerously high — risks OOMKill. Run: kates detect --generate-values")
+				} else if ratio > 50 {
+					output.Warn("JVM heap > 50% of limit — limited off-heap space")
+				} else {
+					output.Success("JVM heap ratio: healthy")
+				}
+			} else {
+				output.KeyValue("JVM Heap:", fmt.Sprintf("-Xms=%s -Xmx=%s",
+					report.Ecosystem.KafkaConnect.HeapXms,
+					report.Ecosystem.KafkaConnect.HeapXmx))
+			}
+		}
+		if !report.Ecosystem.KafkaConnect.TLSEnabled {
+			output.Warn("TLS: disabled — Connect ↔ Kafka traffic is plaintext")
+		}
+		if !report.Ecosystem.KafkaConnect.PDBConfigured {
+			output.Warn("PDB: not configured — rolling upgrades may cause downtime")
+		}
+
+		if len(report.Ecosystem.KafkaConnect.Plugins) > 0 {
+			output.Success(fmt.Sprintf("Plugins: %d installed", len(report.Ecosystem.KafkaConnect.Plugins)))
+		}
+		if report.Ecosystem.KafkaConnect.TracingEnabled {
+			output.Success("Tracing: OpenTelemetry enabled")
+		}
+		if report.Ecosystem.KafkaConnect.RackAware {
+			output.Success("Rack awareness: enabled")
+		}
+		if report.Ecosystem.KafkaConnect.HasBuild {
+			output.Success("Strimzi Build: configured")
+		}
+
 		if len(report.Ecosystem.KafkaConnect.Connectors) > 0 {
 			output.Success(fmt.Sprintf("Connectors: %d detected", len(report.Ecosystem.KafkaConnect.Connectors)))
 			cHeaders := []string{"NAME", "CLASS", "TASKS MAX", "STATUS"}

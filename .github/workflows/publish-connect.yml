@@ -1,0 +1,263 @@
+name: Publish Kafka Connect Image
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Builds and publishes the enterprise Kafka Connect image to:
+#   - ghcr.io/bmscomp/connect:<version>
+#   - bmscomp/connect:<version>
+#
+# Tags follow the convention: <debezium-version> (e.g., 3.0.2)
+# The image includes: Debezium CDC, Apicurio converters, Aiven JDBC.
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - "v*"
+    paths:
+      - "Dockerfile.connect"
+  workflow_dispatch:
+    inputs:
+      debezium_version:
+        description: "Debezium version to build"
+        type: string
+        default: "3.0.2.Final"
+      platforms:
+        description: "Target platforms"
+        type: choice
+        options:
+          - linux/amd64,linux/arm64
+          - linux/amd64
+          - linux/arm64
+        default: linux/amd64,linux/arm64
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  DOCKERHUB_REPO: bmscomp/connect
+  GHCR_REPO: ghcr.io/bmscomp/connect
+
+jobs:
+  meta:
+    name: Compute Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      debezium_version: ${{ steps.version.outputs.debezium_version }}
+      platforms: ${{ steps.set.outputs.platforms }}
+      platform_matrix: ${{ steps.set.outputs.platform_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          # Extract Debezium version from Dockerfile ARG
+          DBZ_VERSION="${{ inputs.debezium_version || '' }}"
+          if [[ -z "${DBZ_VERSION}" ]]; then
+            DBZ_VERSION=$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | cut -d= -f2)
+          fi
+          echo "debezium_version=${DBZ_VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Image version = Debezium version without .Final suffix
+          VERSION="${DBZ_VERSION%.Final}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set build matrix
+        id: set
+        run: |
+          PLATFORMS="${{ inputs.platforms || 'linux/amd64,linux/arm64' }}"
+          echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
+
+          MATRIX="["
+          FIRST=true
+          IFS=',' read -ra PLATS <<< "${PLATFORMS}"
+          for p in "${PLATS[@]}"; do
+            p="$(echo "$p" | xargs)"
+            case "$p" in
+              linux/amd64) RUNNER="ubuntu-latest" ; ARCH="amd64" ;;
+              linux/arm64) RUNNER="ubuntu-24.04-arm" ; ARCH="arm64" ;;
+            esac
+            if [ "$FIRST" = true ]; then FIRST=false; else MATRIX+=","; fi
+            MATRIX+="{\"platform\":\"${p}\",\"runner\":\"${RUNNER}\",\"arch\":\"${ARCH}\"}"
+          done
+          MATRIX+="]"
+          echo "platform_matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+
+  build-per-platform:
+    name: Build Connect (${{ matrix.platform.arch }})
+    needs: meta
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.meta.outputs.platform_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (single arch)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.connect
+          platforms: ${{ matrix.platform.platform }}
+          push: true
+          build-args: |
+            DEBEZIUM_VERSION=${{ needs.meta.outputs.debezium_version }}
+          tags: |
+            ${{ env.DOCKERHUB_REPO }}:sha-${{ github.sha }}-${{ matrix.platform.arch }}
+            ${{ env.GHCR_REPO }}:sha-${{ github.sha }}-${{ matrix.platform.arch }}
+          cache-from: type=gha,scope=connect-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=connect-${{ matrix.platform.arch }}
+          provenance: false
+
+      - name: Export digest
+        run: echo "${{ steps.build.outputs.digest }}" > /tmp/digest-${{ matrix.platform.arch }}.txt
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: connect-digest-${{ matrix.platform.arch }}
+          path: /tmp/digest-*.txt
+          retention-days: 1
+
+  merge-manifests:
+    name: Merge Multi-Arch Manifests
+    needs: [meta, build-per-platform]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute Docker metadata
+        id: docker-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.DOCKERHUB_REPO }}
+            ${{ env.GHCR_REPO }}
+          tags: |
+            type=raw,value=${{ needs.meta.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=,format=short
+          labels: |
+            org.opencontainers.image.title=connect
+            org.opencontainers.image.description=Enterprise Kafka Connect — Debezium CDC, Apicurio Registry, Aiven JDBC
+            org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.version=${{ needs.meta.outputs.version }}
+            io.debezium.version=${{ needs.meta.outputs.debezium_version }}
+
+      - name: Create and push multi-arch manifests
+        run: |
+          PLATFORMS="${{ needs.meta.outputs.platforms }}"
+          TAGS=$(echo '${{ steps.docker-meta.outputs.tags }}')
+
+          IFS=',' read -ra PLATS <<< "${PLATFORMS}"
+          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
+            SOURCES=""
+            for p in "${PLATS[@]}"; do
+              p="$(echo "$p" | xargs)"
+              ARCH="${p#*/}"
+              TAG="sha-${{ github.sha }}-${ARCH}"
+              SOURCES="${SOURCES} ${REPO}:${TAG}"
+            done
+
+            while IFS= read -r TAG; do
+              if [[ "${TAG}" == "${REPO}:"* ]]; then
+                echo "Creating manifest: ${TAG}"
+                docker manifest create "${TAG}" ${SOURCES}
+                docker manifest push "${TAG}"
+              fi
+            done <<< "${TAGS}"
+          done
+
+  sign:
+    name: Sign Images
+    needs: [meta, merge-manifests]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign images
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
+            IMAGE="${REPO}:${VERSION}"
+            DIGEST=$(docker manifest inspect "${IMAGE}" -v 2>/dev/null | jq -r '.digest // empty' || true)
+            if [[ -n "${DIGEST}" ]]; then
+              cosign sign --yes "${REPO}@${DIGEST}"
+            else
+              echo "⚠️ Could not resolve digest for ${IMAGE}, skipping sign"
+            fi
+          done
+
+  verify:
+    name: Verify Published Images
+    needs: [meta, merge-manifests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and verify plugins
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          IMAGE="${{ env.GHCR_REPO }}:${VERSION}"
+          echo "Pulling ${IMAGE}..."
+          docker pull "${IMAGE}"
+
+          echo ""
+          echo "=== Image Info ==="
+          docker inspect "${IMAGE}" --format '{{range $k,$v := .Config.Labels}}{{$k}}={{$v}}{{println}}{{end}}'
+
+          echo ""
+          echo "=== Connector Plugins ==="
+          docker run --rm --entrypoint sh "${IMAGE}" -c \
+            'for d in /opt/kafka/plugins/*/; do echo "✅ $(basename $d) ($(ls $d/*.jar 2>/dev/null | wc -l) JARs)"; done'
+
+          echo ""
+          echo "=== Image Size ==="
+          docker images "${IMAGE}" --format "{{.Size}}"

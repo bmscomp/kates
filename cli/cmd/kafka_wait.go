@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -38,12 +40,6 @@ type kafkaPodStatus struct {
 	pendingPods   []string // names of Pending pods, for diagnostics
 }
 
-// countPodsByLabel queries pods matching the given label selector and counts
-// how many are fully Ready (all containers passing readiness probes) vs total.
-//
-// We check the pod-level Ready condition (True only when ALL containers are
-// ready) rather than just the pod phase, because a broker in phase "Running"
-// with 0/1 containers ready is NOT serving traffic.
 func countPodsByLabel(ctx context.Context, namespace, selector string) (running, total int, pending []string) {
 	out, _ := exec.CommandContext(ctx,
 		"kubectl", "get", "pods",
@@ -65,10 +61,9 @@ func countPodsByLabel(ctx context.Context, namespace, selector string) (running,
 		readyCond := ""
 		phase := ""
 		if len(fields) >= 3 {
-			readyCond = fields[1] // "True" or "False" or "<none>"
+			readyCond = fields[1]
 			phase = fields[2]
 		} else {
-			// Only 2 fields — Ready condition might be missing
 			phase = fields[1]
 		}
 
@@ -78,15 +73,12 @@ func countPodsByLabel(ctx context.Context, namespace, selector string) (running,
 		} else if phase == "Pending" || phase == "ContainerCreating" {
 			pending = append(pending, name)
 		} else {
-			// Running but not ready (e.g., 0/1) — still counts as pending
 			pending = append(pending, name)
 		}
 	}
 	return
 }
 
-// pollKafkaPods returns broker and controller pod counts using Strimzi's own
-// role labels (strimzi.io/broker-role and strimzi.io/controller-role).
 func pollKafkaPods(ctx context.Context, namespace string) kafkaPodStatus {
 	var s kafkaPodStatus
 
@@ -102,15 +94,12 @@ func pollKafkaPods(ctx context.Context, namespace string) kafkaPodStatus {
 	return s
 }
 
-// ── Progress Bar & Display Helpers ──────────────────────────────────────────
-
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
 }
 
-// boxTop returns the top border of a box.
 func boxTop(title string, insideWidth int) string {
 	visibleLen := runewidth.StringWidth(stripANSI(title))
 	dashes := insideWidth - visibleLen - 1
@@ -120,12 +109,10 @@ func boxTop(title string, insideWidth int) string {
 	return dim("╭─") + title + dim(strings.Repeat("─", dashes) + "╮")
 }
 
-// boxBottom returns the bottom border of a box.
 func boxBottom(insideWidth int) string {
 	return dim("╰" + strings.Repeat("─", insideWidth) + "╯")
 }
 
-// boxRow pads the content to insideWidth and wraps it in left and right borders.
 func boxRow(content string, insideWidth int) string {
 	visibleLen := runewidth.StringWidth(stripANSI(content))
 	if visibleLen < insideWidth {
@@ -139,9 +126,6 @@ const (
 	charUnfilled = "▱"
 )
 
-// renderProgressBar returns a customizable width Unicode block bar with adaptive colors:
-//   - When not failed, filled blocks are in blue, empty blocks in dim gray.
-//   - When failed, the entire bar is shown in red.
 func renderProgressBar(running, total int, width int, failed bool) string {
 	if total <= 0 {
 		if failed {
@@ -165,17 +149,14 @@ func renderProgressBar(running, total int, width int, failed bool) string {
 	return blue(strings.Repeat(charFilled, filled)) + dim(strings.Repeat(charUnfilled, width-filled))
 }
 
-// colorProgressBar is a backward-compatible wrapper for renderProgressBar.
 func colorProgressBar(running, total int) string {
 	return renderProgressBar(running, total, 15, false)
 }
 
-// fmtElapsed formats seconds as "0:00".
 func fmtElapsed(secs int) string {
 	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
 
-// fmtRemaining formats a duration as "7m54s" trimming sub-seconds.
 func fmtRemaining(d time.Duration) string {
 	d = d.Round(time.Second)
 	if d <= 0 {
@@ -189,7 +170,6 @@ func fmtRemaining(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", m, s)
 }
 
-// podPhaseLabel returns a colored phase badge.
 func podPhaseLabel(running, total int) string {
 	if total == 0 {
 		return red("⏳ waiting")
@@ -201,199 +181,441 @@ func podPhaseLabel(running, total int) string {
 	return red(fmt.Sprintf("✖ %d pending", pending))
 }
 
-// waitKafkaReady polls the Kafka CR condition AND actual pod phases every 6 s.
-//
-// It declares success only when ALL three conditions hold simultaneously:
-//   - kafka/krafter has condition Ready=True         (Strimzi agrees)
-//   - every broker pod is Running (and at least one exists)
-//   - every controller pod is Running (and at least one exists)
-func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	poll := 6 * time.Second
-	elapsed := 0
-	totalSecs := int(timeout.Seconds())
+// ── Bubble Tea Implementation ──────────────────────────────────────────────
 
-	fmt.Printf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Cluster  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(timeout)))), 58))
+type statusMsg struct {
+	crReady  bool
+	eoReady  bool
+	pods     kafkaPodStatus
+	pvcError bool
+	err      error
+}
 
-	lastPrintedLines := 0
+type tickMsg time.Time
 
-	for {
-		// ── 1. Kafka CR condition ──────────────────────────────────────────────
+func pollKafkaStatus(ctx context.Context, namespace string, elapsed int) tea.Cmd {
+	return func() tea.Msg {
+		var s statusMsg
+		// 1. CR condition
 		condOut, _ := exec.CommandContext(ctx,
 			"kubectl", "get", "kafka/krafter", "-n", namespace,
 			"-o", `jsonpath={range .status.conditions[*]}{.type}={.status} {end}`,
 		).Output()
-		crReady := strings.Contains(string(condOut), "Ready=True")
+		s.crReady = strings.Contains(string(condOut), "Ready=True")
 
-		// ── 2. Pod counts ──────────────────────────────────────────────────────
-		pods := pollKafkaPods(ctx, namespace)
+		// 2. Pod counts
+		s.pods = pollKafkaPods(ctx, namespace)
 
-		// ── 3. Entity Operator ─────────────────────────────────────────────────
+		// 3. Entity Operator
 		eoOut, _ := exec.CommandContext(ctx,
 			"kubectl", "get", "pods", "-n", namespace,
 			"-l", "app.kubernetes.io/name=entity-operator",
 			"--no-headers",
 			"-o", "custom-columns=PHASE:.status.phase",
 		).Output()
-		eoReady := strings.Contains(string(eoOut), "Running")
-		eoIcon := red("⏳")
-		if eoReady {
-			eoIcon = blue("✔")
-		}
+		s.eoReady = strings.Contains(string(eoOut), "Running")
 
-		// ── 4. Evaluate ────────────────────────────────────────────────────────
-		allBrokersUp := pods.brokerTotal > 0 && pods.brokerRunning == pods.brokerTotal
-		allCtrlUp := pods.ctrlTotal > 0 && pods.ctrlRunning == pods.ctrlTotal
-
-		isTimedOut := time.Now().After(deadline)
-		isCancelled := ctx.Err() != nil
-		failed := isTimedOut || isCancelled
-
-		if lastPrintedLines > 0 {
-			fmt.Printf("\033[%dA", lastPrintedLines)
-		}
-
-		if crReady && allBrokersUp && allCtrlUp {
-			// Final success block
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-				dim("Brokers     "),
-				renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, false),
-				blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal))),
-				blue("✔ running")), 58))
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-				dim("Controllers "),
-				renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, false),
-				blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal))),
-				blue("✔ running")), 58))
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-				dim("Timeout     "),
-				renderProgressBar(elapsed, totalSecs, 15, false),
-				blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58))
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  %s", dim("Entity Op   "), eoIcon), 58))
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  %s", dim("CR status   "), blue("✔ Ready=True")), 58))
-			fmt.Printf("    %s\033[K\n", boxBottom(58))
-			fmt.Printf("    %s Kafka ready  %s %s\033[K\n\n",
-				green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed)))
-			return nil
-		}
-
-		// ── 5. Progress block ──────────────────────────────────────────────────
-		remaining := time.Until(deadline)
-		if remaining < 0 {
-			remaining = 0
-		}
-		
-		lines := 0
-		fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-			dim("Brokers     "),
-			renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, failed),
-			fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal)),
-			podPhaseLabel(pods.brokerRunning, pods.brokerTotal)), 58))
-		lines++
-		fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-			dim("Controllers "),
-			renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, failed),
-			fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal)),
-			podPhaseLabel(pods.ctrlRunning, pods.ctrlTotal)), 58))
-		lines++
-		fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-			dim("Timeout     "),
-			renderProgressBar(elapsed, totalSecs, 15, failed),
-			fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58))
-		lines++
-		fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  %s",
-			dim("Entity Op   "), eoIcon), 58))
-		lines++
-
-		// ── 6. Pending pods hint (after 30 s) ────────────────────────────
-		if elapsed >= 30 && len(pods.pendingPods) > 0 {
-			fmt.Printf("    %s\033[K\n", boxRow("", 58))
-			lines++
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s", amber(fmt.Sprintf("⚠  %d pod(s) Pending — diagnose with:", len(pods.pendingPods)))), 58))
-			lines++
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf("    %s", dim(fmt.Sprintf("kubectl describe pod %s -n %s", pods.pendingPods[0], namespace))), 58))
-			lines++
-		}
-
-		// Always print the bottom border of the box
-		fmt.Printf("    %s\033[K\n", boxBottom(58))
-		lines++
-		
-		// Clear any leftover lines from a previous taller frame
-		if lastPrintedLines > lines {
-			for i := lines; i < lastPrintedLines; i++ {
-				fmt.Printf("\033[K\n")
-			}
-			fmt.Printf("\033[%dA", lastPrintedLines-lines)
-		}
-
-		// ── 6b. Early exit on unrecoverable storage errors ────────────────────
-		if elapsed > 30 && len(pods.pendingPods) > 0 {
+		// 4. PVC Error
+		if elapsed > 30 && len(s.pods.pendingPods) > 0 {
 			evOut, _ := exec.CommandContext(ctx,
 				"kubectl", "get", "events", "-n", namespace,
 				"--field-selector=reason=FailedScheduling",
 				"--no-headers", "-o", "custom-columns=MSG:.message",
 			).Output()
 			if strings.Contains(string(evOut), "unbound immediate PersistentVolumeClaims") {
-				fmt.Printf("\033[%dA", lines) // Re-render in place
-				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-					dim("Brokers     "),
-					renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, true),
-					red(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal))),
-					red("✖ failed")), 58))
-				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-					dim("Controllers "),
-					renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, true),
-					red(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal))),
-					red("✖ failed")), 58))
-				fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-					dim("Timeout     "),
-					renderProgressBar(elapsed, totalSecs, 15, true),
-					red(fmtElapsed(elapsed)), red(fmtElapsed(totalSecs))), 58))
-				fmt.Printf("    %s\033[K\n", boxBottom(58))
-				return fmt.Errorf(
-					"pods stuck Pending: PVCs unbound (StorageClass likely using Immediate mode — check kind_storage.go)\n" +
-					"Fix: kubectl delete pvc -n %s --all && kubectl delete kafka/krafter -n %s --ignore-not-found",
-					namespace, namespace,
-				)
+				s.pvcError = true
 			}
 		}
 
-		// ── 7. Timeout ─────────────────────────────────────────────────────────
-		if time.Now().After(deadline) {
-			fmt.Printf("\033[%dA", lines) // Re-render in place
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-				dim("Brokers     "),
-				renderProgressBar(pods.brokerRunning, pods.brokerTotal, 15, true),
-				red(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.brokerRunning, pods.brokerTotal))),
-				red("✖ timed out")), 58))
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
-				dim("Controllers "),
-				renderProgressBar(pods.ctrlRunning, pods.ctrlTotal, 15, true),
-				red(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", pods.ctrlRunning, pods.ctrlTotal))),
-				red("✖ timed out")), 58))
-			fmt.Printf("    %s\033[K\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
-				dim("Timeout     "),
-				renderProgressBar(totalSecs, totalSecs, 15, true),
-				red(fmtElapsed(totalSecs)), red(fmtElapsed(totalSecs))), 58))
-			fmt.Printf("    %s\033[K\n", boxBottom(58))
-			return fmt.Errorf("%s kafka not ready after %s (brokers:%d/%d controllers:%d/%d pending:%d)",
-				red("✖"),
-				timeout,
-				pods.brokerRunning, pods.brokerTotal,
-				pods.ctrlRunning, pods.ctrlTotal,
-				len(pods.pendingPods))
-		}
-
-		lastPrintedLines = lines
-
-		// ── 8. Wait ────────────────────────────────────────────────────────────
-		select {
-		case <-ctx.Done():
-			fmt.Printf("    %s\n", dim("╰──────────────────────────────────────────────────────────╯"))
-			return ctx.Err()
-		case <-time.After(poll):
-			elapsed += int(poll.Seconds())
-		}
+		return s
 	}
+}
+
+type kafkaWaitModel struct {
+	ctx       context.Context
+	namespace string
+	timeout   time.Duration
+	start     time.Time
+	
+	pods      kafkaPodStatus
+	crReady   bool
+	eoReady   bool
+	pvcError  bool
+	err       error
+	done      bool
+}
+
+func (m kafkaWaitModel) Init() tea.Cmd {
+	m.start = time.Now()
+	return tea.Batch(
+		pollKafkaStatus(m.ctx, m.namespace, 0),
+		tea.Tick(6*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+func (m kafkaWaitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			m.err = fmt.Errorf("user aborted")
+			return m, tea.Quit
+		}
+	case statusMsg:
+		m.pods = msg.pods
+		m.crReady = msg.crReady
+		m.eoReady = msg.eoReady
+		
+		elapsed := int(time.Since(m.start).Seconds())
+		
+		if msg.pvcError {
+			m.pvcError = true
+			m.err = fmt.Errorf(
+				"pods stuck Pending: PVCs unbound (StorageClass likely using Immediate mode — check kind_storage.go)\n" +
+				"Fix: kubectl delete pvc -n %s --all && kubectl delete kafka/krafter -n %s --ignore-not-found",
+				m.namespace, m.namespace,
+			)
+			return m, tea.Quit
+		}
+
+		allBrokersUp := m.pods.brokerTotal > 0 && m.pods.brokerRunning == m.pods.brokerTotal
+		allCtrlUp := m.pods.ctrlTotal > 0 && m.pods.ctrlRunning == m.pods.ctrlTotal
+
+		if m.crReady && allBrokersUp && allCtrlUp {
+			m.done = true
+			return m, tea.Quit
+		}
+		
+		if elapsed >= int(m.timeout.Seconds()) {
+			m.err = fmt.Errorf("%s kafka not ready after %s (brokers:%d/%d controllers:%d/%d pending:%d)",
+				red("✖"),
+				m.timeout,
+				m.pods.brokerRunning, m.pods.brokerTotal,
+				m.pods.ctrlRunning, m.pods.ctrlTotal,
+				len(m.pods.pendingPods))
+			return m, tea.Quit
+		}
+
+	case tickMsg:
+		elapsed := int(time.Since(m.start).Seconds())
+		if elapsed >= int(m.timeout.Seconds()) {
+			m.err = fmt.Errorf("%s kafka not ready after %s (brokers:%d/%d controllers:%d/%d pending:%d)",
+				red("✖"),
+				m.timeout,
+				m.pods.brokerRunning, m.pods.brokerTotal,
+				m.pods.ctrlRunning, m.pods.ctrlTotal,
+				len(m.pods.pendingPods))
+			return m, tea.Quit
+		}
+		return m, tea.Batch(
+			pollKafkaStatus(m.ctx, m.namespace, elapsed),
+			tea.Tick(6*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+		)
+	}
+	return m, nil
+}
+
+func (m kafkaWaitModel) View() string {
+	var b strings.Builder
+
+	elapsed := int(time.Since(m.start).Seconds())
+	totalSecs := int(m.timeout.Seconds())
+	if elapsed > totalSecs {
+		elapsed = totalSecs
+	}
+
+	failed := m.err != nil
+
+	b.WriteString(fmt.Sprintf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Cluster  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(m.timeout)))), 58)))
+
+	if m.done {
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
+			dim("Brokers     "),
+			renderProgressBar(m.pods.brokerRunning, m.pods.brokerTotal, 15, false),
+			blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.pods.brokerRunning, m.pods.brokerTotal))),
+			blue("✔ running")), 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
+			dim("Controllers "),
+			renderProgressBar(m.pods.ctrlRunning, m.pods.ctrlTotal, 15, false),
+			blue(fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.pods.ctrlRunning, m.pods.ctrlTotal))),
+			blue("✔ running")), 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+			dim("Timeout     "),
+			renderProgressBar(elapsed, totalSecs, 15, false),
+			blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58)))
+		
+		eoIcon := blue("✔")
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s", dim("Entity Op   "), eoIcon), 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s", dim("CR status   "), blue("✔ Ready=True")), 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+		b.WriteString(fmt.Sprintf("    %s Kafka ready  %s %s\n",
+			green("✔"), dim("elapsed"), bold(fmtElapsed(elapsed))))
+		return b.String()
+	}
+
+	eoIcon := red("⏳")
+	if m.eoReady {
+		eoIcon = blue("✔")
+	}
+
+	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
+		dim("Brokers     "),
+		renderProgressBar(m.pods.brokerRunning, m.pods.brokerTotal, 15, failed),
+		fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.pods.brokerRunning, m.pods.brokerTotal)),
+		podPhaseLabel(m.pods.brokerRunning, m.pods.brokerTotal)), 58)))
+
+	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
+		dim("Controllers "),
+		renderProgressBar(m.pods.ctrlRunning, m.pods.ctrlTotal, 15, failed),
+		fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", m.pods.ctrlRunning, m.pods.ctrlTotal)),
+		podPhaseLabel(m.pods.ctrlRunning, m.pods.ctrlTotal)), 58)))
+
+	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+		dim("Timeout     "),
+		renderProgressBar(elapsed, totalSecs, 15, failed),
+		fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58)))
+
+	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  %s",
+		dim("Entity Op   "), eoIcon), 58)))
+
+	if elapsed >= 30 && len(m.pods.pendingPods) > 0 {
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow("", 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s", amber(fmt.Sprintf("⚠  %d pod(s) Pending — diagnose with:", len(m.pods.pendingPods)))), 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf("    %s", dim(fmt.Sprintf("kubectl describe pod %s -n %s", m.pods.pendingPods[0], m.namespace))), 58)))
+	}
+
+	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+	return b.String()
+}
+
+func waitKafkaReady(ctx context.Context, namespace string, timeout time.Duration) error {
+	m := kafkaWaitModel{
+		ctx:       ctx,
+		namespace: namespace,
+		timeout:   timeout,
+		start:     time.Now(),
+	}
+	
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+	
+	fm := finalModel.(kafkaWaitModel)
+	if fm.err != nil {
+		return fm.err
+	}
+	
+	return nil
+}
+
+// ── Bubble Tea Implementation for Kafka Users ─────────────────────────────
+
+type userStat struct {
+	name  string
+	ready bool
+}
+
+type usersStatusMsg struct {
+	users []userStat
+	total int
+	ready int
+	err   error
+}
+
+func pollKafkaUsers(ctx context.Context, namespace string) tea.Cmd {
+	return func() tea.Msg {
+		var msg usersStatusMsg
+		out, _ := exec.CommandContext(ctx,
+			"kubectl", "get", "kafkauser",
+			"-n", namespace,
+			"--no-headers",
+			"-o", "custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status",
+		).Output()
+
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line == "" {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 1 {
+				continue
+			}
+			msg.total++
+			isReady := len(fields) >= 2 && fields[1] == "True"
+			if isReady {
+				msg.ready++
+			}
+			msg.users = append(msg.users, userStat{name: fields[0], ready: isReady})
+		}
+		
+		sort.Slice(msg.users, func(i, j int) bool {
+			return msg.users[i].name < msg.users[j].name
+		})
+
+		return msg
+	}
+}
+
+type kafkaUsersModel struct {
+	ctx       context.Context
+	namespace string
+	timeout   time.Duration
+	start     time.Time
+
+	users   []userStat
+	total   int
+	ready   int
+	err     error
+	done      bool
+	isTimeout bool
+}
+
+func (m kafkaUsersModel) Init() tea.Cmd {
+	m.start = time.Now()
+	return tea.Batch(
+		pollKafkaUsers(m.ctx, m.namespace),
+		tea.Tick(6*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+	)
+}
+
+func (m kafkaUsersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			m.err = fmt.Errorf("user aborted")
+			return m, tea.Quit
+		}
+	case usersStatusMsg:
+		m.users = msg.users
+		m.total = msg.total
+		m.ready = msg.ready
+		
+		elapsed := int(time.Since(m.start).Seconds())
+		
+		if m.total > 0 && m.ready == m.total {
+			m.done = true
+			return m, tea.Quit
+		}
+		
+		if elapsed >= int(m.timeout.Seconds()) {
+			m.isTimeout = true
+			m.done = true
+			return m, tea.Quit
+		}
+
+	case tickMsg:
+		elapsed := int(time.Since(m.start).Seconds())
+		if elapsed >= int(m.timeout.Seconds()) {
+			m.isTimeout = true
+			m.done = true
+			return m, tea.Quit
+		}
+		return m, tea.Batch(
+			pollKafkaUsers(m.ctx, m.namespace),
+			tea.Tick(6*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
+		)
+	}
+	return m, nil
+}
+
+func (m kafkaUsersModel) View() string {
+	var b strings.Builder
+
+	elapsed := int(time.Since(m.start).Seconds())
+	totalSecs := int(m.timeout.Seconds())
+	if elapsed > totalSecs {
+		elapsed = totalSecs
+	}
+
+	failed := m.err != nil || m.isTimeout
+
+	b.WriteString(fmt.Sprintf("\n    %s\n", boxTop(fmt.Sprintf(" Kafka Users  %s ", bold(fmt.Sprintf("(%s timeout)", fmtRemaining(m.timeout)))), 58)))
+
+	if m.done {
+		if m.isTimeout {
+			b.WriteString(m.renderUsers(true))
+			b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+				dim(fmt.Sprintf("%-12s", "Timeout")),
+				renderProgressBar(totalSecs, totalSecs, 15, true),
+				red(fmtElapsed(totalSecs)), red(fmtElapsed(totalSecs))), 58)))
+			b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+			return b.String()
+		}
+		
+		b.WriteString(m.renderUsers(false))
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+			dim(fmt.Sprintf("%-12s", "Timeout")),
+			renderProgressBar(elapsed, totalSecs, 15, false),
+			blue(fmtElapsed(elapsed)), blue(fmtElapsed(totalSecs))), 58)))
+		b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+		b.WriteString(fmt.Sprintf("    %s All %d KafkaUser credentials ready  %s %s\n\n",
+			green("✔"), m.total, dim("elapsed"), bold(fmtElapsed(elapsed))))
+		return b.String()
+	}
+
+	b.WriteString(m.renderUsers(failed))
+	b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s / %s",
+		dim(fmt.Sprintf("%-12s", "Timeout")),
+		renderProgressBar(elapsed, totalSecs, 15, failed),
+		fmtElapsed(elapsed), fmtElapsed(totalSecs)), 58)))
+	b.WriteString(fmt.Sprintf("    %s\n", boxBottom(58)))
+
+	return b.String()
+}
+
+func (m kafkaUsersModel) renderUsers(finalFailed bool) string {
+	var b strings.Builder
+	if len(m.users) == 0 {
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s", dim("Waiting for KafkaUsers to be applied...")), 58)))
+		return b.String()
+	}
+	for _, u := range m.users {
+		namePadded := fmt.Sprintf("%-12s", u.name)
+		if len(u.name) > 12 {
+			namePadded = u.name[:9] + "..."
+		}
+		
+		statusStr := red("pending")
+		progress := 0
+		if u.ready {
+			statusStr = blue("ready")
+			progress = 1
+		} else if finalFailed {
+			statusStr = red("failed")
+			if m.isTimeout {
+				statusStr = red("timed out")
+			}
+		}
+		
+		b.WriteString(fmt.Sprintf("    %s\n", boxRow(fmt.Sprintf(" %s  [%s]  %s  %s",
+			dim(namePadded),
+			renderProgressBar(progress, 1, 15, finalFailed && !u.ready),
+			fmt.Sprintf("%-5s", fmt.Sprintf("%d/%d", progress, 1)),
+			statusStr), 58)))
+	}
+	return b.String()
+}
+
+func waitKafkaUsersReady(ctx context.Context, namespace string, timeout time.Duration) (bool, error) {
+	m := kafkaUsersModel{
+		ctx:       ctx,
+		namespace: namespace,
+		timeout:   timeout,
+		start:     time.Now(),
+	}
+	
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return false, err
+	}
+	
+	fm := finalModel.(kafkaUsersModel)
+	if fm.err != nil {
+		return false, fm.err
+	}
+	
+	// Return true if all users are ready, false if timed out
+	return fm.total > 0 && fm.ready == fm.total, nil
 }
