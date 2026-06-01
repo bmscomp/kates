@@ -32,6 +32,7 @@ var (
 	cleanTopology      string
 	cleanNamespace     string
 	cleanKafkaNS       string
+	cleanDbNS          string
 	cleanAppNS         string
 	cleanChaosNS       string
 	cleanMonitoringNS  string
@@ -43,6 +44,7 @@ func init() {
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
 	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	cleanCmd.Flags().StringVar(&cleanKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	cleanCmd.Flags().StringVar(&cleanDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
@@ -209,6 +211,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"jaeger", cleanNamespace},
 			helmRelease{"krafter", cleanNamespace},
 			helmRelease{"monitoring", cleanNamespace},
+			helmRelease{"postgresql", cleanNamespace},
 		)
 		managedNamespaces = append(managedNamespaces, cleanNamespace)
 		strimziNS = append(strimziNS, cleanNamespace)
@@ -224,9 +227,10 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"jaeger", cleanMonitoringNS},
 			helmRelease{"krafter", cleanKafkaNS},
 			helmRelease{"monitoring", cleanMonitoringNS},
+			helmRelease{"postgresql", cleanDbNS},
 		)
 		managedNamespaces = append(managedNamespaces,
-			cleanKafkaNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS,
+			cleanKafkaNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS, cleanDbNS,
 		)
 		strimziNS = append(strimziNS, cleanKafkaNS)
 	}

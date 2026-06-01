@@ -1,0 +1,177 @@
+{{- if and .Values.dashboards.enabled .Values.dashboards.connectDashboard }}
+{{- $clusterName := include "kafka-cluster.clusterName" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-connect-dashboard
+  namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+data:
+  kafka-connect.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "Worker Count",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [{
+            "expr": "kafka_connect_worker_metrics_connector_count",
+            "legendFormat": "Workers"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Connectors Running",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "targets": [{
+            "expr": "kafka_connect_worker_metrics_connector_startup_success_total",
+            "legendFormat": "Running"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Connectors Failed",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "targets": [{
+            "expr": "kafka_connect_worker_metrics_connector_startup_failure_total",
+            "legendFormat": "Failed"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Connectors Paused",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "targets": [{
+            "expr": "kafka_connect_worker_metrics_connector_paused_task_count",
+            "legendFormat": "Paused"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Source Records In/s",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [{
+            "expr": "rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])",
+            "legendFormat": "{{ "{{" }}connector{{ "}}" }} records/s"
+          }]
+        },
+        {
+          "title": "Sink Records Out/s",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [{
+            "expr": "rate(kafka_connect_sink_task_metrics_sink_record_send_total[5m])",
+            "legendFormat": "{{ "{{" }}connector{{ "}}" }} records/s"
+          }]
+        },
+        {
+          "title": "Task Error Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "targets": [{
+            "expr": "rate(kafka_connect_task_metrics_total_errors_logged_total[5m])",
+            "legendFormat": "{{ "{{" }}connector{{ "}}" }} errors/s"
+          }]
+        },
+        {
+          "title": "Task Commit Latency p99",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "targets": [{
+            "expr": "kafka_connect_worker_metrics_task_batch_duration_avg",
+            "legendFormat": "{{ "{{" }}connector{{ "}}" }} avg ms"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms"
+            }
+          }
+        },
+        {
+          "title": "JVM Heap Used %",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "targets": [{
+            "expr": "jvm_memory_bytes_used{area=\"heap\"} / jvm_memory_bytes_max{area=\"heap\"}",
+            "legendFormat": "{{ "{{" }}kubernetes_pod_name{{ "}}" }}"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0, "max": 1,
+              "unit": "percentunit",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 0.7 },
+                  { "color": "red", "value": 0.85 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Worker Rebalance Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "targets": [{
+            "expr": "rate(kafka_connect_worker_rebalance_metrics_rebalance_total[5m])",
+            "legendFormat": "rebalances/s"
+          }]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "connect", "strimzi", "{{ $clusterName }}"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "Kafka Connect — {{ $clusterName }}",
+      "uid": "kafka-connect-overview"
+    }
+{{- end }}

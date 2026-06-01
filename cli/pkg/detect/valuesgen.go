@@ -337,7 +337,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		KafkaExporter: GenFeature{Enabled: false},
 		DrainCleaner:  GenFeature{Enabled: false},
 		Rebalance:     GenFeature{Enabled: true},
-		KafkaConnect:  GenFeature{Enabled: false},
+		KafkaConnect:  g.buildKafkaConnect(),
 		RBAC:          GenFeature{Create: true},
 		EntityOperator: map[string]interface{}{
 			"topicOperator": map[string]interface{}{
@@ -398,9 +398,176 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 						},
 					},
 				},
+				{
+					Name: "kates-connect",
+					Authentication: GenUserAuth{
+						Type: "scram-sha-512",
+					},
+					Quotas: &GenUserQuotas{
+						ProducerByteRate: 52428800,
+						ConsumerByteRate: 52428800,
+						RequestPercentage: 25,
+					},
+					Authorization: &GenUserAuthz{
+						Type: "simple",
+						Acls: []GenAcl{
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "kates-connect-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "kates-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "transactionalId",
+									Name:        "connect-cluster-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Write", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "cdc",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "group",
+									Name:        "kates-connect",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type: "cluster",
+								},
+								Operations: []string{"Describe"},
+							},
+						},
+					},
+				},
 			},
 		},
 		StrimziSubchart: GenStrimziSubchart{},
+	}
+}
+
+func (g *ValuesGenerator) buildKafkaConnect() GenKafkaConnect {
+	zoneScheduling := len(g.Report.Zones) >= 3
+	topologyKey := "topology.kubernetes.io/zone"
+	if !zoneScheduling {
+		topologyKey = "kubernetes.io/hostname"
+	}
+
+	// JVM sizing: memory limit based on cluster capacity
+	// Connect gets ~10% of Kafka memory budget, clamped [2Gi, 8Gi]
+	connectMemGi := float64(g.Cap.KafkaMem) * 0.1
+	if connectMemGi < 2 {
+		connectMemGi = 2
+	}
+	if connectMemGi > 8 {
+		connectMemGi = 8
+	}
+	memLimitMi := int(connectMemGi * 1024)
+	// Heap = 50% of limit (safe ratio for off-heap buffers)
+	heapMi := memLimitMi / 2
+	memRequestMi := memLimitMi * 3 / 4
+
+	// CPU: 10% of Kafka CPU budget, clamped [1000m, 4000m]
+	connectCPU := g.Cap.KafkaCPU / 10
+	if connectCPU < 1000 {
+		connectCPU = 1000
+	}
+	if connectCPU > 4000 {
+		connectCPU = 4000
+	}
+	cpuLimit := connectCPU * 2
+	if cpuLimit > 8000 {
+		cpuLimit = 8000
+	}
+
+	replicas := 3
+	if len(g.Report.Zones) > 0 && len(g.Report.Zones) < 3 {
+		replicas = len(g.Report.Zones)
+	}
+
+	// Auto-enable TLS when Kafka has TLS listener
+	tlsEnabled := false
+	for _, l := range g.Report.ExistingKafka.Health.Listeners {
+		if l.Type == "tls" || l.TLS {
+			tlsEnabled = true
+			break
+		}
+	}
+
+	extraConfig := map[string]string{
+		"producer.acks":               "all",
+		"producer.enable.idempotence": "true",
+		"consumer.auto.offset.reset":  "earliest",
+		"exactly.once.source.support":  "enabled",
+	}
+
+	return GenKafkaConnect{
+		Enabled:  g.Report.Ecosystem.KafkaConnect.Installed,
+		Replicas: replicas,
+		GroupID:  "kates-connect-cluster",
+		JVMOptions: GenJVMOptions{
+			Xms: fmt.Sprintf("%dm", heapMi),
+			Xmx: fmt.Sprintf("%dm", heapMi),
+		},
+		Resources: GenResources{
+			Requests: GenResourceValues{
+				Memory: fmt.Sprintf("%dMi", memRequestMi),
+				CPU:    fmt.Sprintf("%dm", connectCPU),
+			},
+			Limits: GenResourceValues{
+				Memory: fmt.Sprintf("%dMi", memLimitMi),
+				CPU:    fmt.Sprintf("%dm", cpuLimit),
+			},
+		},
+		TLS: GenConnectTLS{
+			Enabled: tlsEnabled,
+		},
+		Rack: GenConnectRack{
+			Enabled:     zoneScheduling,
+			TopologyKey: topologyKey,
+		},
+		Tracing: GenConnectTracing{
+			Enabled: g.Report.Monitoring.PodMonitorCRD,
+			Type:    "opentelemetry",
+		},
+		TopologySpread: GenTopologyConstraints{
+			Enabled:           zoneScheduling,
+			TopologyKey:       topologyKey,
+			WhenUnsatisfiable: "DoNotSchedule",
+		},
+		PodAntiAffinity: GenAntiAffinity{
+			Enabled:     true,
+			TopologyKey: "kubernetes.io/hostname",
+		},
+		PDB: GenConnectPDB{
+			MaxUnavailable: 1,
+		},
+		Config: GenConnectConfig{
+			ReplicationFactor: 3,
+			KeyConverter:      "org.apache.kafka.connect.json.JsonConverter",
+			ValueConverter:    "org.apache.kafka.connect.json.JsonConverter",
+		},
+		ExtraConfig: extraConfig,
 	}
 }
 
