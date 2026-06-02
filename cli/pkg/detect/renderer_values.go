@@ -92,8 +92,6 @@ func RenderValuesWithReserve(report *DetectReport, clusterName string, reserve f
 		report.Admission.Kyverno.Installed,
 	)
 
-
-
 	if _, err := fmt.Fprint(w, header); err != nil {
 		return err
 	}

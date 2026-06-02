@@ -43,8 +43,9 @@ spec:
     schema.registry.url: {{ printf "http://%s.%s.svc.%s:%d%s" .Values.kafkaConnect.schemaRegistry.serviceName (include "kafka-cluster.namespace" .) (include "kafka-cluster.clusterDomain" .) (.Values.kafkaConnect.schemaRegistry.port | int) .Values.kafkaConnect.schemaRegistry.path }}
     {{- end }}
     {{- if and .Values.kafkaConnect.externalConfiguration .Values.kafkaConnect.externalConfiguration.volumes }}
-    config.providers: file
+    config.providers: file,dir
     config.providers.file.class: org.apache.kafka.common.config.provider.FileConfigProvider
+    config.providers.dir.class: org.apache.kafka.common.config.provider.DirectoryConfigProvider
     {{- end }}
     {{- range $key, $value := .Values.kafkaConnect.extraConfig }}
     {{ $key }}: {{ $value | toJson }}

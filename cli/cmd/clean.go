@@ -27,15 +27,15 @@ Examples:
 }
 
 var (
-	cleanForce         bool
-	cleanVerbose       bool
-	cleanTopology      string
-	cleanNamespace     string
-	cleanKafkaNS       string
-	cleanDbNS          string
-	cleanAppNS         string
-	cleanChaosNS       string
-	cleanMonitoringNS  string
+	cleanForce        bool
+	cleanVerbose      bool
+	cleanTopology     string
+	cleanNamespace    string
+	cleanKafkaNS      string
+	cleanDbNS         string
+	cleanAppNS        string
+	cleanChaosNS      string
+	cleanMonitoringNS string
 )
 
 func init() {
@@ -466,12 +466,11 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// ── Done ──
 	fmt.Println()
-	
+
 	elapsed := time.Since(startTime).Round(time.Second)
-	
+
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
 		Render(fmt.Sprintf("  ✅ Cluster cleaned successfully in %s.", elapsed)))
 	fmt.Println()
 	return nil
 }
-

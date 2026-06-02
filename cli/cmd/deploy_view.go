@@ -17,14 +17,14 @@ import (
 // All colors are backed by theme tokens — no hardcoded hex values here.
 
 var (
-	clrAccent = theme.Accent   // interactive blue
-	clrGreen  = theme.Success  // positive / ready
-	clrRed    = theme.Error    // error / danger
-	clrDim    = theme.Muted    // secondary text
-	clrCyan   = theme.Info     // teal / info
-	clrPink   = theme.Primary  // phase headers
-	clrText   = theme.Text     // primary body text
-	clrOrange = theme.Warning  // warnings
+	clrAccent = theme.Accent  // interactive blue
+	clrGreen  = theme.Success // positive / ready
+	clrRed    = theme.Error   // error / danger
+	clrDim    = theme.Muted   // secondary text
+	clrCyan   = theme.Info    // teal / info
+	clrPink   = theme.Primary // phase headers
+	clrText   = theme.Text    // primary body text
+	clrOrange = theme.Warning // warnings
 )
 
 // ─── Dashboard ──────────────────────────────────────────────
@@ -189,14 +189,14 @@ func ThemeKates() *huh.Theme {
 	t := huh.ThemeBase()
 
 	var (
-		blue      = theme.Accent     // focused borders, selectors
-		navy      = theme.Primary    // titles
-		slate     = theme.Text       // body text (light on dark, dark on light)
-		gray      = theme.Muted      // descriptions
-		lightGray = theme.Subtle     // borders / unselected prefix
-		green     = theme.Highlight  // selected items
-		red       = theme.Error      // error indicators
-		white     = theme.OnDark     // button text on filled backgrounds
+		blue      = theme.Accent    // focused borders, selectors
+		navy      = theme.Primary   // titles
+		slate     = theme.Text      // body text (light on dark, dark on light)
+		gray      = theme.Muted     // descriptions
+		lightGray = theme.Subtle    // borders / unselected prefix
+		green     = theme.Highlight // selected items
+		red       = theme.Error     // error indicators
+		white     = theme.OnDark    // button text on filled backgrounds
 	)
 
 	// Focused field styles.

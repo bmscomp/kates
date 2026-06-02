@@ -224,7 +224,7 @@ func RenderTUI(report *DetectReport) {
 		} else {
 			output.Error("Operator pods: not ready")
 		}
-		
+
 		if len(report.Strimzi.Health.WarningLogs) > 0 {
 			output.Warn("Strimzi Operator Warning/Error log patterns:")
 			for _, log := range report.Strimzi.Health.WarningLogs {
@@ -366,7 +366,7 @@ func RenderTUI(report *DetectReport) {
 	// Active AZ network latency matrix
 	if len(report.Network.LatencyMatrix) > 0 {
 		output.Header("Active Zone Network Latency Matrix")
-		
+
 		zoneMap := make(map[string]bool)
 		for _, r := range report.Network.LatencyMatrix {
 			zoneMap[r.SourceZone] = true
@@ -376,7 +376,7 @@ func RenderTUI(report *DetectReport) {
 		for z := range zoneMap {
 			zones = append(zones, z)
 		}
-		
+
 		headers := append([]string{"SRC \\ DST"}, zones...)
 		var rows [][]string
 		for _, src := range zones {
@@ -406,7 +406,7 @@ func RenderTUI(report *DetectReport) {
 	// Active AZ network bandwidth matrix
 	if len(report.Network.BandwidthMatrix) > 0 {
 		output.Header("Active Zone Network Bandwidth Matrix")
-		
+
 		zoneMap := make(map[string]bool)
 		for _, r := range report.Network.BandwidthMatrix {
 			zoneMap[r.SourceZone] = true
@@ -416,7 +416,7 @@ func RenderTUI(report *DetectReport) {
 		for z := range zoneMap {
 			zones = append(zones, z)
 		}
-		
+
 		headers := append([]string{"SRC \\ DST"}, zones...)
 		var rows [][]string
 		for _, src := range zones {
@@ -450,7 +450,7 @@ func RenderTUI(report *DetectReport) {
 	// Active CoreDNS Latency & Success Audits
 	if len(report.Network.DNSResults) > 0 {
 		output.Header("Active CoreDNS Latency & Success Audits")
-		
+
 		headers := []string{"Query Type", "Queries Run", "Success Count", "Success Rate", "Avg Latency", "Max Latency"}
 		var rows [][]string
 		for _, r := range report.Network.DNSResults {
