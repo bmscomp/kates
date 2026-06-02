@@ -47,10 +47,10 @@ func init() {
 
 func runAuto(cmd *cobra.Command, args []string) error {
 	output.Header("Kates Auto-Deploy")
-	
+
 	executor := detect.NewOSExecutor()
 	collector := detect.NewCollector(executor)
-	
+
 	if err := collector.Preflight(); err != nil {
 		output.Error(fmt.Sprintf("Preflight failed: %v", err))
 		os.Exit(1)
@@ -76,12 +76,12 @@ func runAuto(cmd *cobra.Command, args []string) error {
 
 	// 2. Generate Phase
 	output.Header("Generate Configuration")
-	
+
 	tmpDir := ".build"
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return fmt.Errorf("failed to create %s directory: %w", tmpDir, err)
 	}
-	
+
 	valuesPath := filepath.Join(tmpDir, "values-detected.yaml")
 	f, err := os.Create(valuesPath)
 	if err != nil {
@@ -132,7 +132,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	}
 
 	output.Hint(fmt.Sprintf("🚀 Executing: helm %s", strings.Join(helmArgs, " ")))
-	
+
 	deployCmd := exec.Command("helm", helmArgs...)
 	deployCmd.Stdout = os.Stdout
 	deployCmd.Stderr = os.Stderr

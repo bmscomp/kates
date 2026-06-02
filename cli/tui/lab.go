@@ -687,10 +687,10 @@ func (m LabModel) viewResults(width int) string {
 	showErr := width >= 60
 
 	// Fixed column widths — generous enough for typical values
-	thrW := 16 // e.g. "122.9K rec/s"
-	p99W := 10 // e.g. "0.01ms"
+	thrW := 16    // e.g. "122.9K rec/s"
+	p99W := 10    // e.g. "0.01ms"
 	errPctW := 10 // e.g. "0.0000%"
-	deltaW := 8  // e.g. "▲133%"
+	deltaW := 8   // e.g. "▲133%"
 
 	if showErr {
 		b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s%s%s\n",
@@ -1233,7 +1233,7 @@ func (m LabModel) exportCSV() string {
 }
 
 type labSession struct {
-	Iterations []labSessionIter `json:"iterations"`
+	Iterations []labSessionIter  `json:"iterations"`
 	Params     []labSessionParam `json:"params"`
 }
 

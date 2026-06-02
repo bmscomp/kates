@@ -42,16 +42,16 @@ func ResetForTesting() *bytes.Buffer {
 // Exported color aliases — backed by theme tokens so all packages share
 // a single adaptive palette. Use these (not raw lipgloss.Color) everywhere.
 var (
-	Purple  = theme.Secondary                                          // violet/purple tones
-	Indigo  = theme.Primary                                            // deep blue headings
-	Cyan    = theme.Info                                               // teal accents
-	Green   = theme.Success                                            // positive states
-	Red     = theme.Error                                              // error / danger
-	Amber   = theme.Warning                                            // warnings
-	Gray    = theme.Muted                                              // secondary text
-	Light   = theme.Text                                               // primary text
+	Purple  = theme.Secondary                                           // violet/purple tones
+	Indigo  = theme.Primary                                             // deep blue headings
+	Cyan    = theme.Info                                                // teal accents
+	Green   = theme.Success                                             // positive states
+	Red     = theme.Error                                               // error / danger
+	Amber   = theme.Warning                                             // warnings
+	Gray    = theme.Muted                                               // secondary text
+	Light   = theme.Text                                                // primary text
 	Dim     = lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"} // truly visible dim
-	Surface = theme.Surface                                            // panel backgrounds
+	Surface = theme.Surface                                             // panel backgrounds
 
 	HeaderColor    = theme.Secondary
 	KeyColor       = theme.Secondary

@@ -113,8 +113,8 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	// Start collection in background
 	go func() {
 		report, collectErr = collector.Collect(ctx)
-		close(done)  // signal completion — happens-after assignment
-		cancel()     // signal spinner to stop
+		close(done) // signal completion — happens-after assignment
+		cancel()    // signal spinner to stop
 	}()
 
 	if p != nil {

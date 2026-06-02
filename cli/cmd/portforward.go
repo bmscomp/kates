@@ -28,22 +28,22 @@ type portForwardSpec struct {
 // Each entry maps a service name → the ports to forward.
 // The key is matched via strings.Contains against discovered service names.
 var wellKnownPorts = []struct {
-	Match     string // substring to match in "namespace/service-name"
-	Label     string
-	Remote    int
-	Local     int
-	URL       string
+	Match  string // substring to match in "namespace/service-name"
+	Label  string
+	Remote int
+	Local  int
+	URL    string
 }{
-	{"kates/kates",                       "Kates REST API",          8080,  8080,  "http://localhost:8080/api/health"},
-	{"kates/kates",                       "Kates gRPC",              9000,  9000,  ""},
-	{"kafka/krafter-kafka-bootstrap",     "Kafka Bootstrap (plain)", 9092,  9092,  ""},
-	{"kafka/krafter-kafka-bootstrap",     "Kafka Bootstrap (TLS)",   9093,  9093,  ""},
-	{"kafka/apicurio",                    "Apicurio Schema Registry",80,    8081,  "http://localhost:8081/ui"},
-	{"monitoring/monitoring-grafana",      "Grafana",                 80,    3000,  "http://localhost:3000"},
-	{"monitoring/monitoring-kube-prometheus-prometheus", "Prometheus",9090,  9090,  "http://localhost:9090"},
-	{"monitoring/monitoring-kube-prometheus-alertmanager","Alertmanager",9093,9094, "http://localhost:9094"},
-	{"jaeger/jaeger-query",               "Jaeger UI",               16686, 16686, "http://localhost:16686"},
-	{"kates/kates-postgresql",            "PostgreSQL",              5432,  5432,  ""},
+	{"kates/kates", "Kates REST API", 8080, 8080, "http://localhost:8080/api/health"},
+	{"kates/kates", "Kates gRPC", 9000, 9000, ""},
+	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (plain)", 9092, 9092, ""},
+	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (TLS)", 9093, 9093, ""},
+	{"kafka/apicurio", "Apicurio Schema Registry", 80, 8081, "http://localhost:8081/ui"},
+	{"monitoring/monitoring-grafana", "Grafana", 80, 3000, "http://localhost:3000"},
+	{"monitoring/monitoring-kube-prometheus-prometheus", "Prometheus", 9090, 9090, "http://localhost:9090"},
+	{"monitoring/monitoring-kube-prometheus-alertmanager", "Alertmanager", 9093, 9094, "http://localhost:9094"},
+	{"jaeger/jaeger-query", "Jaeger UI", 16686, 16686, "http://localhost:16686"},
+	{"kates/kates-postgresql", "PostgreSQL", 5432, 5432, ""},
 }
 
 var (

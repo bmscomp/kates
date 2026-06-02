@@ -109,6 +109,13 @@ spec:
           patternType: prefix
         operations: ["Read", "Write", "Create", "Describe"]
         host: "*"
+      # Debezium CDC topics
+      - resource:
+          type: topic
+          name: "cdc"
+          patternType: prefix
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
       # Consumer groups
       - resource:
           type: group
@@ -119,4 +126,18 @@ spec:
       - resource:
           type: cluster
         operations: ["Describe"]
+        host: "*"
+      # Exactly-once semantics transactional ID (Worker)
+      - resource:
+          type: transactionalId
+          name: "connect-cluster-"
+          patternType: prefix
+        operations: ["Write", "Describe"]
+        host: "*"
+      # Exactly-once semantics transactional ID (Source Tasks)
+      - resource:
+          type: transactionalId
+          name: "kates-connect-"
+          patternType: prefix
+        operations: ["Write", "Describe"]
         host: "*"

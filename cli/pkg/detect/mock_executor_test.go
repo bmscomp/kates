@@ -25,7 +25,7 @@ func (m *MockExecutor) key(name string, args ...string) string {
 
 func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 	k := m.key(name, args...)
-	
+
 	var matched bool
 	var resErr error
 	if err, ok := m.Errors[k]; ok {
@@ -40,7 +40,7 @@ func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 			}
 		}
 	}
-	
+
 	var resResp string
 	if resp, ok := m.Responses[k]; ok {
 		resResp = resp
@@ -54,7 +54,7 @@ func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 			}
 		}
 	}
-	
+
 	if matched {
 		return resResp, resErr
 	}

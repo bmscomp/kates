@@ -74,7 +74,7 @@ type KafkaCondition struct {
 }
 
 type StrimziHealth struct {
-	Status      string   // "Healthy", "Degraded", "Unhealthy"
+	Status      string // "Healthy", "Degraded", "Unhealthy"
 	PodsReady   bool
 	WarningLogs []string
 	MissingCRDs []string
@@ -126,10 +126,10 @@ type KafkaConnectStatus struct {
 }
 
 type ConnectorStatus struct {
-	Name   string
-	Class  string
+	Name     string
+	Class    string
 	TasksMax int
-	Status string
+	Status   string
 }
 
 type SchemaRegistryStatus struct {
@@ -165,7 +165,7 @@ type BandwidthResult struct {
 }
 
 type DNSProbeResult struct {
-	QueryType    string  // "Internal" or "External"
+	QueryType    string // "Internal" or "External"
 	QueriesRun   int
 	SuccessCount int
 	SuccessRate  float64
@@ -273,11 +273,11 @@ type NodePressure struct {
 }
 
 type ZonePressure struct {
-	Name           string
-	Nodes          int
-	CPUAvailable   int     // sum of available across nodes in zone
-	MemAvailable   int     // GiB
-	Utilization    float64 // 0.0–1.0 percentage of zone capacity used
+	Name         string
+	Nodes        int
+	CPUAvailable int     // sum of available across nodes in zone
+	MemAvailable int     // GiB
+	Utilization  float64 // 0.0–1.0 percentage of zone capacity used
 }
 
 // ── Budget & Verdict Types ───────────────────────────────────────────────────
@@ -322,13 +322,13 @@ type CapacityBudget struct {
 	StrongestZoneMem int
 
 	// Component distribution
-	ControllerCPU     int    // per-controller millicores
-	ControllerMem     int    // per-controller GiB
-	BrokerCPU         int    // per-broker millicores
-	BrokerMem         int    // per-broker GiB
-	BrokerStorage     string // per-broker storage
-	ControllerStorage string // per-controller storage
-	BrokerReplicas    int    // per-zone
+	ControllerCPU      int    // per-controller millicores
+	ControllerMem      int    // per-controller GiB
+	BrokerCPU          int    // per-broker millicores
+	BrokerMem          int    // per-broker GiB
+	BrokerStorage      string // per-broker storage
+	ControllerStorage  string // per-controller storage
+	BrokerReplicas     int    // per-zone
 	ControllerReplicas int
 
 	// Metadata
@@ -374,40 +374,40 @@ type SecurityAudit struct {
 }
 
 type DetectReport struct {
-	Context          string
-	Server           string
-	Provider         string
-	K8sVersion       string
-	K8sMinor         int
-	HelmVersion      string
-	HelmMajor        int
-	Nodes            []NodeInfo
-	Zones            []ZoneInfo
-	Storage          []SCInfo
-	StorageAudit     StorageAudit
-	ExistingKafka    KafkaResources
-	Strimzi          StrimziInfo
-	Ecosystem        EcosystemInfo
-	Monitoring       MonitoringInfo
-	Network          NetworkInfo
-	Admission        AdmissionInfo
-	NetPolAudit      NetworkPolicyAudit
-	Workload         WorkloadPressure
-	Budget           BudgetReport
-	Capacity         CapacityBudget
-	Verdict          Verdict
-	SecretAudit      SecretCreationAudit
-	Security         SecurityAudit
+	Context       string
+	Server        string
+	Provider      string
+	K8sVersion    string
+	K8sMinor      int
+	HelmVersion   string
+	HelmMajor     int
+	Nodes         []NodeInfo
+	Zones         []ZoneInfo
+	Storage       []SCInfo
+	StorageAudit  StorageAudit
+	ExistingKafka KafkaResources
+	Strimzi       StrimziInfo
+	Ecosystem     EcosystemInfo
+	Monitoring    MonitoringInfo
+	Network       NetworkInfo
+	Admission     AdmissionInfo
+	NetPolAudit   NetworkPolicyAudit
+	Workload      WorkloadPressure
+	Budget        BudgetReport
+	Capacity      CapacityBudget
+	Verdict       Verdict
+	SecretAudit   SecretCreationAudit
+	Security      SecurityAudit
 }
 
 // ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
 
 type GeneratedValues struct {
-	Global         GenGlobal             `yaml:"global"`
-	ClusterName    string                `yaml:"clusterName"`
+	Global      GenGlobal `yaml:"global"`
+	ClusterName string    `yaml:"clusterName"`
 
-	StrimziOp      GenStrimziOp          `yaml:"strimziOperator"`
-	CRDUpgrade     GenCRDUpgrade         `yaml:"crdUpgrade"`
+	StrimziOp          GenStrimziOp           `yaml:"strimziOperator"`
+	CRDUpgrade         GenCRDUpgrade          `yaml:"crdUpgrade"`
 	ControllerPools    []GenControllerPool    `yaml:"controllerPools"`
 	ControllerDefaults GenControllerDefaults  `yaml:"controllerDefaults"`
 	BrokerPools        []GenBrokerPool        `yaml:"brokerPools"`
@@ -429,11 +429,9 @@ type GeneratedValues struct {
 	StrimziSubchart    GenStrimziSubchart     `yaml:"strimzi-kafka-operator"`
 }
 
-
-
 type GenGlobal struct {
-	ClusterDomain  string `yaml:"clusterDomain"`
-	StorageClass   string `yaml:"storageClass,omitempty"`
+	ClusterDomain string `yaml:"clusterDomain"`
+	StorageClass  string `yaml:"storageClass,omitempty"`
 }
 
 type GenStrimziOp struct {
@@ -459,7 +457,7 @@ type GenControllerPool struct {
 type GenControllerDefaults struct {
 	Resources    GenResources           `yaml:"resources"`
 	TopologyTSC  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
-	AntiAffinity GenAntiAffinity       `yaml:"podAntiAffinity"`
+	AntiAffinity GenAntiAffinity        `yaml:"podAntiAffinity"`
 }
 
 type GenStorage struct {
@@ -478,7 +476,7 @@ type GenBrokerPool struct {
 type GenBrokerDefaults struct {
 	Resources    GenResources           `yaml:"resources"`
 	TopologyTSC  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
-	AntiAffinity GenAntiAffinity       `yaml:"podAntiAffinity"`
+	AntiAffinity GenAntiAffinity        `yaml:"podAntiAffinity"`
 }
 
 type GenResources struct {
@@ -508,12 +506,12 @@ type GenKafka struct {
 }
 
 type GenListener struct {
-	Name           string               `yaml:"name"`
-	Port           int                  `yaml:"port"`
-	Type           string               `yaml:"type"`
-	TLS            bool                 `yaml:"tls"`
-	Authentication *GenAuth             `yaml:"authentication,omitempty"`
-	Configuration  *GenListenerConfig   `yaml:"configuration,omitempty"`
+	Name           string             `yaml:"name"`
+	Port           int                `yaml:"port"`
+	Type           string             `yaml:"type"`
+	TLS            bool               `yaml:"tls"`
+	Authentication *GenAuth           `yaml:"authentication,omitempty"`
+	Configuration  *GenListenerConfig `yaml:"configuration,omitempty"`
 }
 
 type GenAuth struct {

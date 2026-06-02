@@ -22,13 +22,13 @@ func TestRenderPDF(t *testing.T) {
 
 	// Build a fully fleshed-out report to exercise all sections of RenderPDF
 	report := buildReport(3, true, true, 2, 2)
-	
+
 	// Add context and basic fields
 	report.Context = "test-context"
 	report.Provider = "kind"
 	report.K8sVersion = "v1.31.0"
 	report.HelmVersion = "v3.15.0"
-	
+
 	// Add custom storage class audit details
 	report.StorageAudit.PVCount = 5
 	report.StorageAudit.PVBoundCount = 3
@@ -187,7 +187,6 @@ func TestRenderHTML(t *testing.T) {
 		t.Error("expected html to contain zone-a in matrix")
 	}
 }
-
 
 func TestLiveStorageBench_Success(t *testing.T) {
 	m := NewMockExecutor()

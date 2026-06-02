@@ -61,7 +61,7 @@ var connectConnectorCmd = &cobra.Command{
 		if outputMode == "json" {
 			argsCmd = append(argsCmd, "-o", "json")
 		} else {
-			argsCmd = append(argsCmd, "-o", "yaml") 
+			argsCmd = append(argsCmd, "-o", "yaml")
 		}
 		out, err := exec.CommandContext(context.Background(), "kubectl", argsCmd...).Output()
 		if err != nil {
@@ -144,7 +144,7 @@ var connectPluginsCmd = &cobra.Command{
 			fmt.Println("No plugins found or status unavailable.")
 			return nil
 		}
-		
+
 		if outputMode == "json" {
 			fmt.Println(string(out))
 		} else {

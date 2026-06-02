@@ -359,4 +359,3 @@ func TestVerdict_SecurityAudits(t *testing.T) {
 		t.Error("expected 'TLS certificate validity' check to be performed")
 	}
 }
-

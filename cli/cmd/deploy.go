@@ -10,13 +10,15 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/errgroup"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/klster/kates-cli/output"
 	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
-	"github.com/charmbracelet/huh"
+	"golang.org/x/sync/errgroup"
 )
 
 var isTesting = false
@@ -69,7 +71,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
-	
+
 	// Component flags
 	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "none", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
 	deployCmd.Flags().BoolVar(&deployHA, "ha", false, "Enable High Availability (Multi-AZ)")
@@ -90,9 +92,11 @@ func init() {
 func runDeploy(cmd *cobra.Command, args []string) error {
 	deployStartTime := time.Now()
 	PrintDeployBanner()
-	
+
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
 		var components []string
+
+		dl = &DashboardController{}
 
 		form := huh.NewForm(
 			// ── Group 1: What to deploy ──────────────────────────────────────────
@@ -171,16 +175,22 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 		for _, c := range components {
 			switch c {
-			case "strimzi": deployWithStrimzi = true
-			case "kafka-connect": deployWithKafkaConnect = true
-			case "chaos": deployWithChaos = true
-			case "monitoring": deployWithMonitoring = true
-			case "cert-manager": deployWithCertManager = true
-			case "kyverno": deployWithKyverno = true
+			case "strimzi":
+				deployWithStrimzi = true
+			case "kafka-connect":
+				deployWithKafkaConnect = true
+			case "chaos":
+				deployWithChaos = true
+			case "monitoring":
+				deployWithMonitoring = true
+			case "cert-manager":
+				deployWithCertManager = true
+			case "kyverno":
+				deployWithKyverno = true
 			}
 		}
 	}
-	
+
 	// 1. Resolve Topology
 	PrintPhaseHeader(1, fmt.Sprintf("Resolving Namespace Topology (%s mode)", deployTopology))
 	if deployTopology == "single" {
@@ -225,10 +235,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
 	executor := defaultExecutor
 	collector := detect.NewCollector(executor)
-	
+
 	if err := collector.Preflight(); err != nil {
 		fmt.Println("⚠️  Kubernetes cluster is unreachable.")
-		
+
 		// Check if docker is running
 		if dockerCheck := exec.Command("docker", "info"); dockerCheck.Run() == nil {
 			fmt.Print("🐳 Docker is running. Would you like to automatically create a local Kind cluster? [y/N]: ")
@@ -243,7 +253,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("failed to create Kind cluster: %w", err)
 				}
 				fmt.Println("✅ Kind cluster created successfully! Retrying preflight...")
-				
+
 				// Re-run preflight
 				if err := collector.Preflight(); err != nil {
 					return fmt.Errorf("preflight failed even after cluster creation: %w", err)
@@ -256,7 +266,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	
+
 	// ── Kind storage bootstrap ────────────────────────────────────────────────
 	// Create zone-specific StorageClasses (local-storage-alpha, etc.) BEFORE
 	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
@@ -274,10 +284,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		output.Error(fmt.Sprintf("Introspection failed: %v", err))
 		return err
 	}
-	
+
 	analyzer := detect.NewAnalyzer(executor)
 	analyzer.Analyze(report, detect.ParsedReqs{})
-	
+
 	PrintPhaseItem("Generating values-detected.yaml...")
 	valuesFile := ".build/values-detected.yaml"
 	os.MkdirAll(".build", 0755)
@@ -303,411 +313,585 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}
 		return chartDir + "/values-generic.yaml"
 	}
-	
+
 	// 4. Execution Plan (Helm)
 	PrintPhaseHeader(4, "Executing Deployment Pipeline")
-	
+
 	var kafkaNS, appNS, chaosNS, jaegerNS string
 	if deployTopology == "single" {
 		kafkaNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
 		kafkaNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployAppNS, deployChaosNS, deployMonitoringNS
 	}
-	
+
+	var totalSteps int
+	if deployWithStrimzi {
+		totalSteps++
+	}
+	if deployWithCertManager {
+		totalSteps++
+	}
+	if deployWithKyverno {
+		totalSteps++
+	}
+	totalSteps += 2 // kafka, kafka-users
+	if deployWithMonitoring {
+		totalSteps++
+	}
+	if deployWithKafkaConnect {
+		totalSteps += 3
+	} // postgres, kafka-connect, kafka-connector
+	if deployWithSchemaRegistry == "apicurio" {
+		totalSteps++
+	}
+	totalSteps++ // kates
+	if deployWithChaos {
+		totalSteps++
+	}
+
 	// Create context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// ---------------------------------------------------------
-	// GROUP A: Operators & CRDs (Parallel)
+	// DEPLOYMENT DASHBOARD (BUBBLE TEA)
 	// ---------------------------------------------------------
-	g, gCtx := errgroup.WithContext(ctx)
-	
-	// Deploy Strimzi Operator
+	dashboard := NewDeployDashboard(ctx, totalSteps)
 	if deployWithStrimzi {
-		g.Go(func() error {
-			if isHelmReleaseDeployedFn(gCtx, "strimzi-operator", "strimzi-operator") {
-				fmt.Println("⏭️  Strimzi Operator already deployed. Skipping.")
-				return nil
-			}
-			fmt.Println("\n📦 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
-			// Create namespace properly
-			runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
+		dashboard.RegisterComponent("strimzi", "Strimzi Operator", "strimzi-operator", "name=strimzi-cluster-operator", "A")
+	}
+	if deployWithCertManager {
+		dashboard.RegisterComponent("cert-manager", "Cert-Manager", "cert-manager", "app.kubernetes.io/instance=cert-manager", "A")
+	}
+	if deployWithKyverno {
+		dashboard.RegisterComponent("kyverno", "Kyverno", "kyverno", "app.kubernetes.io/instance=kyverno", "A")
+	}
+	dashboard.RegisterComponent("kafka", "Kafka Cluster", kafkaNS, "strimzi.io/cluster=krafter", "B")
+	dashboard.RegisterComponent("kafka-users", "Kafka Users", kafkaNS, "strimzi.io/cluster=krafter", "B")
+	if deployWithMonitoring {
+		dashboard.RegisterComponent("monitoring", "Monitoring Stack", jaegerNS, "release=monitoring", "B")
+	}
+	if deployWithKafkaConnect {
+		dashboard.RegisterComponent("postgres", "PostgreSQL CDC", deployDbNS, "app.kubernetes.io/instance=postgresql", "B")
+		dashboard.RegisterComponent("kafka-connect", "Kafka Connect", kafkaNS, "app.kubernetes.io/name=kafka-connect", "B")
+		dashboard.RegisterComponent("kafka-connector", "Debezium Connector", kafkaNS, "strimzi.io/cluster=krafter-connect", "B")
+	}
+	if deployWithSchemaRegistry == "apicurio" {
+		dashboard.RegisterComponent("apicurio", "Apicurio Registry", kafkaNS, "app.kubernetes.io/instance=apicurio", "C")
+	}
+	dashboard.RegisterComponent("kates", "Kates Backend", appNS, "app.kubernetes.io/instance=kates", "C")
+	if deployWithChaos {
+		dashboard.RegisterComponent("chaos", "Litmus Chaos", chaosNS, "app.kubernetes.io/instance=chaos", "C")
+	}
+
+	var pOptions []tea.ProgramOption
+	if isTesting {
+		pOptions = append(pOptions, tea.WithoutRenderer(), tea.WithInput(nil))
+	} else {
+		pOptions = append(pOptions, tea.WithAltScreen())
+	}
+	p := tea.NewProgram(dashboard, pOptions...)
+	dl = &DashboardController{p: p}
+
+	var step int32
+	advanceStep := func() {
+		current := atomic.AddInt32(&step, 1)
+		dl.UpdateProgress(int(current), totalSteps)
+	}
+
+	var deployErr error
+	var finalEntries []DeploySummaryEntry
+	var deployElapsed time.Duration
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		defer p.Quit()
+
+		deployErr = func() error {
+			// ---------------------------------------------------------
+			// GROUP A: Operators & CRDs (Parallel)
+			// ---------------------------------------------------------
+			g, gCtx := errgroup.WithContext(ctx)
+
+			// Deploy Strimzi Operator
+			if deployWithStrimzi {
+				g.Go(func() error {
+					if isHelmReleaseDeployedFn(gCtx, "strimzi-operator", "strimzi-operator") {
+						dl.Println("⏭️  Strimzi Operator already deployed. Skipping.")
+						dl.FinishComponent("strimzi", true)
+						advanceStep()
+						return nil
+					}
+					dl.Println("\n📦 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
+					// Create namespace properly
+					runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
 kind: Namespace
 metadata:
   name: strimzi-operator`)
-			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator", 
-				"--set", "watchAnyNamespace=true", 
-				"--set", "replicas=1", 
-				"--set", "resources.limits.memory=768Mi", 
-				"--set", "resources.requests.memory=768Mi", 
-				"--set", "leaderElection.enabled=false",
-				"--set", "operationTimeoutMs=900000",
-				"--timeout", "5m")
-			if err != nil { return err }
-			return nil
-		})
-	}
-	
-	// Deploy Cert-Manager
-	if deployWithCertManager {
-		g.Go(func() error {
-			if isHelmReleaseDeployedFn(gCtx, "cert-manager", "cert-manager") {
-				fmt.Println("⏭️  Cert-Manager already deployed. Skipping.")
-				return nil
-			}
-			fmt.Printf("\n📦 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
-			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
-			runHelmFn(gCtx, "repo", "update", "jetstack")
-			// global.clusterDomain ensures cert-manager generates webhook TLS certificates
-			// and service references using the actual cluster DNS domain (not always cluster.local).
-			// report.Network.ClusterDomain is detected from the live cluster by kates detect.
-			clusterDomain := report.Network.ClusterDomain
-			if clusterDomain == "" {
-				clusterDomain = "cluster.local"
-			}
-			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager",
-				"--version", "v1.13.3",
-				"-n", "cert-manager", "--create-namespace",
-				"--set", "installCRDs=true",
-				"--set", "startupapicheck.enabled=false",
-				"--set", "global.clusterDomain="+clusterDomain,
-				"--timeout", "10m", "--wait")
-			if err != nil {
-				return err
+					err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator",
+						"--set", "watchAnyNamespace=true",
+						"--set", "replicas=1",
+						"--set", "resources.limits.memory=768Mi",
+						"--set", "resources.requests.memory=768Mi",
+						"--set", "leaderElection.enabled=false",
+						"--set", "operationTimeoutMs=900000",
+						"--timeout", "5m")
+					if err != nil {
+						return err
+					}
+					return nil
+				})
 			}
 
-			fmt.Println("    - Waiting for Cert-Manager CRDs to be established...")
-			if err := runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
-				"crd", "clusterissuers.cert-manager.io", "--timeout=60s"); err != nil {
-				return err
-			}
+			// Deploy Cert-Manager
+			if deployWithCertManager {
+				g.Go(func() error {
+					if isHelmReleaseDeployedFn(gCtx, "cert-manager", "cert-manager") {
+						dl.Println("⏭️  Cert-Manager already deployed. Skipping.")
+						dl.FinishComponent("cert-manager", true)
+						advanceStep()
+						return nil
+					}
+					dl.Printf("\n📦 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
+					runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
+					runHelmFn(gCtx, "repo", "update", "jetstack")
+					// global.clusterDomain ensures cert-manager generates webhook TLS certificates
+					// and service references using the actual cluster DNS domain (not always cluster.local).
+					// report.Network.ClusterDomain is detected from the live cluster by kates detect.
+					clusterDomain := report.Network.ClusterDomain
+					if clusterDomain == "" {
+						clusterDomain = "cluster.local"
+					}
+					err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager",
+						"--version", "v1.13.3",
+						"-n", "cert-manager", "--create-namespace",
+						"--set", "installCRDs=true",
+						"--set", "startupapicheck.enabled=false",
+						"--set", "global.clusterDomain="+clusterDomain,
+						"--timeout", "10m")
+					if err != nil {
+						return err
+					}
 
-			// On re-deploys the cainjector may hold a stale CA from the previous
-			// installation. Restart it to force fresh CA bundle generation and
-			// re-injection into the MutatingWebhookConfiguration.
-			fmt.Println("    - Restarting Cert-Manager CA injector for fresh CA bundle...")
-			runExecFn(gCtx, "kubectl", "rollout", "restart",
-				"deployment/cert-manager-cainjector", "-n", "cert-manager")
-			runExecFn(gCtx, "kubectl", "rollout", "status",
-				"deployment/cert-manager-cainjector", "-n", "cert-manager", "--timeout=90s")
+					dl.Println("    - Waiting for Cert-Manager CRDs to be established...")
+					if err := runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
+						"crd", "clusterissuers.cert-manager.io", "--timeout=60s"); err != nil {
+						return err
+					}
 
-			// The definitive readiness signal: poll the MutatingWebhookConfiguration
-			// until caBundle is non-empty. Only then can the API server verify the
-			// webhook TLS certificate without x509: certificate signed by unknown authority.
-			fmt.Println("    - Polling for Cert-Manager CA bundle injection...")
-			const caTimeout = 120 * time.Second
-			const caPoll = 3 * time.Second
-			caDeadline := time.Now().Add(caTimeout)
-			for {
-				out, err := exec.CommandContext(gCtx,
-					"kubectl", "get",
-					"mutatingwebhookconfiguration", "cert-manager-webhook",
-					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
-				).Output()
-				if err == nil && len(strings.TrimSpace(string(out))) > 0 {
-					fmt.Println("    - CA bundle injected. Applying ClusterIssuer...")
-					break
-				}
-				if time.Now().After(caDeadline) {
-					fmt.Println("    ⚠ CA bundle injection timed out — proceeding with webhook bypass fallback")
-					break
-				}
-				select {
-				case <-gCtx.Done():
-					return gCtx.Err()
-				case <-time.After(caPoll):
-				}
-			}
+					// On re-deploys the cainjector may hold a stale CA from the previous
+					// installation. Restart it to force fresh CA bundle generation and
+					// re-injection into the MutatingWebhookConfiguration.
+					dl.Println("    - Restarting Cert-Manager CA injector for fresh CA bundle...")
+					runExecFn(gCtx, "kubectl", "rollout", "restart",
+						"deployment/cert-manager-cainjector", "-n", "cert-manager")
+					runExecFn(gCtx, "kubectl", "rollout", "status",
+						"deployment/cert-manager-cainjector", "-n", "cert-manager", "--timeout=90s")
 
-			clusterIssuer := `apiVersion: cert-manager.io/v1
+					// The definitive readiness signal: poll the MutatingWebhookConfiguration
+					// until caBundle is non-empty. Only then can the API server verify the
+					// webhook TLS certificate without x509: certificate signed by unknown authority.
+					dl.Println("    - Polling for Cert-Manager CA bundle injection...")
+					const caTimeout = 120 * time.Second
+					const caPoll = 3 * time.Second
+					caDeadline := time.Now().Add(caTimeout)
+					for {
+						out, err := exec.CommandContext(gCtx,
+							"kubectl", "get",
+							"mutatingwebhookconfiguration", "cert-manager-webhook",
+							"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
+						).Output()
+						if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+							dl.Println("    - CA bundle injected. Applying ClusterIssuer...")
+							break
+						}
+						if time.Now().After(caDeadline) {
+							dl.Println("    ⚠ CA bundle injection timed out — proceeding with webhook bypass fallback")
+							break
+						}
+						select {
+						case <-gCtx.Done():
+							return gCtx.Err()
+						case <-time.After(caPoll):
+						}
+					}
+
+					clusterIssuer := `apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: selfsigned-issuer
 spec:
   selfSigned: {}`
 
-			// Try applying normally first (3 quick attempts).
-			var lastErr error
-			for attempt := 1; attempt <= 3; attempt++ {
-				if lastErr = runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer); lastErr == nil {
+					// Try applying normally first (3 quick attempts).
+					var lastErr error
+					for attempt := 1; attempt <= 3; attempt++ {
+						if lastErr = runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer); lastErr == nil {
+							return nil
+						}
+						if attempt < 3 {
+							time.Sleep(3 * time.Second)
+						}
+					}
+
+					// Hard fallback: temporarily set failurePolicy: Ignore so the API server
+					// allows the resource creation call through even if webhook TLS is still
+					// not verifiable. cert-manager will reconcile the webhook config shortly.
+					dl.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
+					runExecFn(gCtx, "kubectl", "patch",
+						"mutatingwebhookconfiguration", "cert-manager-webhook",
+						"--type=json", "-p",
+						`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+					time.Sleep(2 * time.Second) // let the API server pick up the patch
+
+					applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
+
+					// Always restore failurePolicy: Fail regardless of outcome.
+					runExecFn(gCtx, "kubectl", "patch",
+						"mutatingwebhookconfiguration", "cert-manager-webhook",
+						"--type=json", "-p",
+						`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+
+					if applyErr != nil {
+						return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
+					}
+					dl.Println("    - ClusterIssuer created. Webhook policy restored.")
 					return nil
-				}
-				if attempt < 3 {
-					time.Sleep(3 * time.Second)
-				}
+				})
 			}
 
-			// Hard fallback: temporarily set failurePolicy: Ignore so the API server
-			// allows the resource creation call through even if webhook TLS is still
-			// not verifiable. cert-manager will reconcile the webhook config shortly.
-			fmt.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
-			time.Sleep(2 * time.Second) // let the API server pick up the patch
+			// Deploy Kyverno
+			if deployWithKyverno {
+				g.Go(func() error {
+					if isHelmReleaseDeployedFn(gCtx, "kyverno", "kyverno") {
+						dl.Println("⏭️  Kyverno already deployed. Skipping.")
+						dl.FinishComponent("kyverno", true)
+						advanceStep()
+						return nil
+					}
+					dl.Println("\n📦 Deploying Kyverno (Namespace: kyverno)...")
+					runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
+					runHelmFn(gCtx, "repo", "update", "kyverno")
 
-			applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
+					// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
+					// Pinned to 3.6.4 — the last stable patch of the 3.6 minor series.
+					// Chart versions: https://kyverno.github.io/kyverno/
+					// global.clusterDomain ensures Kyverno webhook certificates use the
+					// correct cluster DNS domain — same value detected for all other components.
+					kyvernoDomain := report.Network.ClusterDomain
+					if kyvernoDomain == "" {
+						kyvernoDomain = "cluster.local"
+					}
+					err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
+						"--version", "3.6.4",
+						"-n", "kyverno", "--create-namespace",
+						"--set", "admissionController.replicas=1",
+						"--set", "backgroundController.replicas=1",
+						"--set", "cleanupController.replicas=1",
+						"--set", "reportsController.replicas=1",
+						"--set", "global.clusterDomain="+kyvernoDomain,
+						"--timeout", "5m")
+					if err != nil {
+						return err
+					}
 
-			// Always restore failurePolicy: Fail regardless of outcome.
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
-
-			if applyErr != nil {
-				return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
+					// Wait for Kyverno CRDs before anything downstream tries to use them.
+					dl.Println("    - Waiting for Kyverno CRDs to be established...")
+					return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
+						"crd", "clusterpolicies.kyverno.io",
+						"--timeout=60s")
+				})
 			}
-			fmt.Println("    - ClusterIssuer created. Webhook policy restored.")
-			return nil
-		})
-	}
-	
-	// Deploy Kyverno
-	if deployWithKyverno {
-		g.Go(func() error {
-			if isHelmReleaseDeployedFn(gCtx, "kyverno", "kyverno") {
-				fmt.Println("⏭️  Kyverno already deployed. Skipping.")
-				return nil
-			}
-			fmt.Println("\n📦 Deploying Kyverno (Namespace: kyverno)...")
-			runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
-			runHelmFn(gCtx, "repo", "update", "kyverno")
 
-			// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
-			// Pinned to 3.6.4 — the last stable patch of the 3.6 minor series.
-			// Chart versions: https://kyverno.github.io/kyverno/
-			// global.clusterDomain ensures Kyverno webhook certificates use the
-			// correct cluster DNS domain — same value detected for all other components.
-			kyvernoDomain := report.Network.ClusterDomain
-			if kyvernoDomain == "" {
-				kyvernoDomain = "cluster.local"
-			}
-			err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
-				"--version", "3.6.4",
-				"-n", "kyverno", "--create-namespace",
-				"--set", "admissionController.replicas=1",
-				"--set", "backgroundController.replicas=1",
-				"--set", "cleanupController.replicas=1",
-				"--set", "reportsController.replicas=1",
-				"--set", "global.clusterDomain="+kyvernoDomain,
-				"--timeout", "5m", "--wait")
-			if err != nil {
+			if err := g.Wait(); err != nil {
+				output.Error(fmt.Sprintf("Failed during Group A (Operators) deployments: %v", err))
 				return err
 			}
 
-			// Wait for Kyverno CRDs before anything downstream tries to use them.
-			fmt.Println("    - Waiting for Kyverno CRDs to be established...")
-			return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
-				"crd", "clusterpolicies.kyverno.io",
-				"--timeout=60s")
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		output.Error(fmt.Sprintf("Failed during Group A (Operators) deployments: %v", err))
-		return err
-	}
-
-	// ── Strimzi readiness (sequential — Bubble Tea needs exclusive terminal) ──
-	if deployWithStrimzi && !isTesting {
-		if err := waitStrimziReady(ctx, "strimzi-operator", 5*time.Minute); err != nil {
-			output.Error(fmt.Sprintf("Strimzi operator readiness failed: %v", err))
-			return err
-		}
-	}
-	
-	// Bust Kubernetes Discovery Cache so Helm knows about the newly created CRDs
-	fmt.Println("    - Refreshing API server schema cache...")
-	if home, err := os.UserHomeDir(); err == nil {
-		os.RemoveAll(fmt.Sprintf("%s/.kube/cache/discovery", home))
-		os.RemoveAll(fmt.Sprintf("%s/.cache/helm", home))
-	}
-
-	// ---------------------------------------------------------
-	// GROUP B: Core Infrastructure (Parallel)
-	// ---------------------------------------------------------
-	g2, g2Ctx := errgroup.WithContext(ctx)
-
-	// Deploy Monitoring (Prometheus + Grafana via charts/monitoring)
-	if deployWithMonitoring {
-		g2.Go(func() error {
-			if isHelmReleaseDeployedFn(g2Ctx, "monitoring", jaegerNS) {
-				fmt.Println("⏭️  Monitoring stack already deployed. Skipping.")
-				return nil
+			// ── Sequential Readiness Waits for Group A ──
+			if deployWithStrimzi && !isTesting {
+				if isHelmReleaseDeployedFn(ctx, "strimzi-operator", "strimzi-operator") {
+					// Already skipped above, but ensure progress isn't blocked
+				} else {
+					if err := waitComponentReadySilent(ctx, "strimzi", "strimzi-operator", "name=strimzi-cluster-operator", 5*time.Minute); err != nil {
+						output.Error(fmt.Sprintf("Strimzi operator readiness failed: %v", err))
+						return err
+					}
+					dl.FinishComponent("strimzi", true)
+					advanceStep()
+				}
 			}
-			fmt.Printf("\n📦 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
-
-			// Update chart dependencies (kube-prometheus-stack subchart).
-			runHelmFn(g2Ctx, "dependency", "update", "charts/monitoring")
-
-			return runHelmFn(g2Ctx, "upgrade", "--install", "monitoring",
-				"charts/monitoring",
-				"-n", jaegerNS, "--create-namespace",
-				"-f", chartOverlay("charts/monitoring"),
-				"--set", "kube-prometheus-stack.global.clusterDomain="+report.Network.ClusterDomain,
-				"--timeout", "10m", "--wait")
-		})
-	}
-
-	
-	if deployWithKafkaConnect {
-		g2.Go(func() error {
-			dbNS := deployDbNS
-			if isHelmReleaseDeployedFn(g2Ctx, "postgresql", dbNS) {
-				fmt.Println("⏭️  PostgreSQL already deployed. Skipping.")
-				return nil
+			if deployWithCertManager && !isTesting {
+				if isHelmReleaseDeployedFn(ctx, "cert-manager", "cert-manager") {
+					// already handled
+				} else {
+					if err := waitComponentReadySilent(ctx, "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager", 10*time.Minute); err != nil {
+						output.Error(fmt.Sprintf("Cert-Manager readiness failed: %v", err))
+						return err
+					}
+					dl.FinishComponent("cert-manager", true)
+					advanceStep()
+				}
 			}
-			fmt.Printf("\n📦 Deploying PostgreSQL CDC Database (Namespace: %s)...\n", dbNS)
+			if deployWithKyverno && !isTesting {
+				if isHelmReleaseDeployedFn(ctx, "kyverno", "kyverno") {
+					// already handled
+				} else {
+					if err := waitComponentReadySilent(ctx, "kyverno", "kyverno", "app.kubernetes.io/instance=kyverno", 5*time.Minute); err != nil {
+						output.Error(fmt.Sprintf("Kyverno readiness failed: %v", err))
+						return err
+					}
+					dl.FinishComponent("kyverno", true)
+					advanceStep()
+				}
+			}
 
-			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, fmt.Sprintf(`apiVersion: v1
+			// Bust Kubernetes Discovery Cache so Helm knows about the newly created CRDs
+			dl.Println("    - Refreshing API server schema cache...")
+			if home, err := os.UserHomeDir(); err == nil {
+				os.RemoveAll(fmt.Sprintf("%s/.kube/cache/discovery", home))
+				os.RemoveAll(fmt.Sprintf("%s/.cache/helm", home))
+			}
+
+			// ---------------------------------------------------------
+			// GROUP B: Core Infrastructure (Parallel)
+			// ---------------------------------------------------------
+
+			deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", kafkaNS)
+			deployMon := false
+			if deployWithMonitoring {
+				deployMon = !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS)
+			}
+			deployPG := false
+			if deployWithKafkaConnect {
+				deployPG = !isHelmReleaseDeployedFn(ctx, "postgresql", deployDbNS)
+			}
+
+			if deployKafka {
+				dl.Printf("\n📦 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
+			} else {
+				dl.Println("⏭️  Kafka Cluster already deployed. Skipping.")
+				dl.FinishComponent("kafka", true)
+				advanceStep()
+				dl.FinishComponent("kafka-users", true)
+				advanceStep()
+			}
+
+			if deployWithMonitoring {
+				if deployMon {
+					dl.Printf("\n📦 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
+				} else {
+					dl.Println("⏭️  Monitoring stack already deployed. Skipping.")
+					dl.FinishComponent("monitoring", true)
+					advanceStep()
+				}
+			}
+
+			if deployWithKafkaConnect {
+				if deployPG {
+					dl.Printf("\n📦 Deploying PostgreSQL CDC Database (Namespace: %s)...\n", deployDbNS)
+				} else {
+					dl.Println("⏭️  PostgreSQL already deployed. Skipping.")
+					dl.FinishComponent("postgres", true)
+					advanceStep()
+					dl.FinishComponent("kafka-connect", true)
+					advanceStep()
+					dl.FinishComponent("kafka-connector", true)
+					advanceStep()
+				}
+			}
+
+			g2, g2Ctx := errgroup.WithContext(ctx)
+
+			// Deploy Monitoring (Prometheus + Grafana via charts/monitoring)
+			if deployWithMonitoring && deployMon {
+				g2.Go(func() error {
+					// Update chart dependencies (kube-prometheus-stack subchart).
+					runHelmFn(g2Ctx, "dependency", "update", "charts/monitoring")
+
+					return runHelmFn(g2Ctx, "upgrade", "--install", "monitoring",
+						"charts/monitoring",
+						"-n", jaegerNS, "--create-namespace",
+						"-f", chartOverlay("charts/monitoring"),
+						"--set", "kube-prometheus-stack.global.clusterDomain="+report.Network.ClusterDomain,
+						"--timeout", "10m")
+				})
+			}
+
+			if deployWithKafkaConnect && deployPG {
+				g2.Go(func() error {
+					dbNS := deployDbNS
+
+					runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
   name: %s`, dbNS))
 
-			runHelmFn(g2Ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
-			runHelmFn(g2Ctx, "repo", "update", "bitnami")
+					runHelmFn(g2Ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
+					runHelmFn(g2Ctx, "repo", "update", "bitnami")
 
-			if err := runHelmFn(g2Ctx, "upgrade", "--install", "postgresql", "bitnami/postgresql",
-				"-n", dbNS, "--create-namespace",
-				"--set", "auth.postgresPassword=postgres",
-				"--set", "auth.username=debezium",
-				"--set", "auth.password=debezium",
-				"--set", "auth.database=orders",
-				"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
-				"--timeout", "5m", "--wait"); err != nil {
+					if err := runHelmFn(g2Ctx, "upgrade", "--install", "postgresql", "bitnami/postgresql",
+						"-n", dbNS, "--create-namespace",
+						"--set", "auth.postgresPassword=postgres",
+						"--set", "auth.username=debezium",
+						"--set", "auth.password=debezium",
+						"--set", "auth.database=orders",
+						"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
+						"--timeout", "5m"); err != nil {
+						return err
+					}
+
+					return nil
+				})
+			}
+
+			// Deploy Kafka
+			if deployKafka {
+				g2.Go(func() error {
+
+					runHelmFn(g2Ctx, "dependency", "update", "charts/kafka-cluster")
+					// No --wait: Helm only needs to submit the manifests; the Strimzi
+					// operator drives reconciliation asynchronously. waitKafkaReady()
+					// below is the real readiness gate.
+					clusterDomain := report.Network.ClusterDomain
+					if clusterDomain == "" {
+						clusterDomain = "cluster.local"
+					}
+					kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
+
+					kafkaArgs = append(kafkaArgs,
+						"-f", valuesFile,
+						"--set", "global.clusterDomain="+clusterDomain,
+						"--timeout", "10m",
+					)
+					if isKind {
+						kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
+					}
+
+					if deployHA {
+						kafkaArgs = append(kafkaArgs,
+							"--set", "kafka.replicas=3",
+							"--set", "kafka.config.default\\.replication\\.factor=3",
+							"--set", "kafka.config.min\\.insync\\.replicas=2",
+							"--set", "zookeeper.replicas=3",
+							"--set", "kafkaConnect.replicas=3",
+						)
+					} else {
+						kafkaArgs = append(kafkaArgs,
+							"--set", "kafka.replicas=1",
+							"--set", "kafka.config.default\\.replication\\.factor=1",
+							"--set", "kafka.config.min\\.insync\\.replicas=1",
+							"--set", "zookeeper.replicas=1",
+							"--set", "kafkaConnect.replicas=1",
+						)
+					}
+
+					// (Values files are already appended above so these overrides take precedence)
+
+					if deployWithKafkaConnect {
+						registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
+							kafkaNS, clusterDomain)
+
+						kafkaArgs = append(kafkaArgs,
+							"--set", "kafkaConnect.enabled=true",
+							"--set", "kafkaConnect.schemaRegistry.enabled=true",
+							"--set", "kafkaConnect.databaseEgress[0].namespace="+deployDbNS,
+							"--set", "kafkaConnect.databaseEgress[0].port=5432",
+							"--set", "kafkaConnect.databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
+							"--set", "kafkaConnect.externalConfiguration.volumes[0].name=pg-credentials",
+							"--set", "kafkaConnect.externalConfiguration.volumes[0].secretName=connect-pg-credentials",
+							"--set", "kafkaConnect.extraConfig.schema\\.registry\\.url="+registryFQDN,
+						)
+					}
+
+					if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
+						return err
+					}
+
+					return nil
+				})
+			}
+
+			if err := g2.Wait(); err != nil {
+				output.Error(fmt.Sprintf("Failed during Group B (Core Infra) deployments: %v", err))
 				return err
 			}
 
+			// ---------------------------------------------------------
+			// ── Sequential Readiness Waits for Group B ───────────────
+			// ---------------------------------------------------------
 			if !isTesting {
-				if err := waitPostgresReady(g2Ctx, dbNS, 5*time.Minute); err != nil {
-					fmt.Printf("    %s PostgreSQL not ready: %v\n", amber("⚠"), err)
+				// 1. Kafka Cluster
+				if deployKafka {
+					if err := waitComponentReadySilent(ctx, "kafka", kafkaNS, "strimzi.io/cluster=krafter", 15*time.Minute); err != nil {
+						return fmt.Errorf("kafka readiness failed: %w", err)
+					}
+					dl.FinishComponent("kafka", true)
+					advanceStep()
+				}
+
+				// 2. Monitoring Stack
+				if deployWithMonitoring && deployMon {
+					if err := waitComponentReadySilent(ctx, "monitoring", jaegerNS, "release=monitoring", 10*time.Minute); err != nil {
+						return fmt.Errorf("monitoring readiness failed: %w", err)
+					}
+					dl.FinishComponent("monitoring", true)
+					advanceStep()
+				}
+
+				// 2. PostgreSQL
+				if deployWithKafkaConnect {
+					if deployPG {
+						if err := waitComponentReadySilent(ctx, "postgres", deployDbNS, "app.kubernetes.io/instance=postgresql", 5*time.Minute); err != nil {
+							dl.Printf("    %s PostgreSQL not ready: %v\n", amber("⚠"), err)
+						} else {
+							// Grant superuser to debezium after DB is ready (avoids Bitnami initdb symlink issues)
+							exec.CommandContext(ctx, "kubectl", "exec", "-n", deployDbNS, "postgresql-0", "--",
+								"env", "PGPASSWORD=postgres", "psql", "-U", "postgres", "-c",
+								"ALTER ROLE debezium SUPERUSER;").Run()
+						}
+						dl.FinishComponent("postgres", true)
+						advanceStep()
+					}
 				}
 			}
-			return nil
-		})
-	}
 
-	// Deploy Kafka
-	g2.Go(func() error {
-		if !isHelmReleaseDeployedFn(g2Ctx, "krafter", kafkaNS) {
-			fmt.Printf("\n📦 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
+			dl.Println("    - Applying Kafka users and topics...")
+			applyManifestWithNamespace(ctx, "config/kafka/kafka-users.yaml", kafkaNS)
+			applyManifestWithNamespace(ctx, "config/kafka/kafka-topics.yaml", kafkaNS)
 
-			runHelmFn(g2Ctx, "dependency", "update", "charts/kafka-cluster")
-			// No --wait: Helm only needs to submit the manifests; the Strimzi
-			// operator drives reconciliation asynchronously. waitKafkaReady()
-			// below is the real readiness gate.
-			clusterDomain := report.Network.ClusterDomain
-			if clusterDomain == "" {
-				clusterDomain = "cluster.local"
-			}
-			kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
+			if !isTesting {
+				dl.Println("    - Waiting for Entity Operator to start...")
+				eoDeadline := time.Now().Add(5 * time.Minute)
+				for time.Now().Before(eoDeadline) {
+					eoOut, _ := exec.CommandContext(ctx,
+						"kubectl", "get", "pods", "-n", kafkaNS,
+						"-l", "app.kubernetes.io/name=entity-operator",
+						"--no-headers",
+						"-o", "custom-columns=PHASE:.status.phase",
+					).Output()
+					if strings.Contains(string(eoOut), "Running") {
+						dl.Printf("    %s Entity Operator running\n", blue("✔"))
+						break
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(5 * time.Second):
+					}
+				}
 
-			kafkaArgs = append(kafkaArgs,
-				"-f", valuesFile,
-				"--set", "global.clusterDomain="+clusterDomain,
-				"--timeout", "10m",
-			)
-			if isKind {
-				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
-			}
-
-			if deployHA {
-				kafkaArgs = append(kafkaArgs,
-					"--set", "kafka.replicas=3",
-					"--set", "kafka.config.default\\.replication\\.factor=3",
-					"--set", "kafka.config.min\\.insync\\.replicas=2",
-					"--set", "zookeeper.replicas=3",
-					"--set", "kafkaConnect.replicas=3",
-				)
-			} else {
-				kafkaArgs = append(kafkaArgs,
-					"--set", "kafka.replicas=1",
-					"--set", "kafka.config.default\\.replication\\.factor=1",
-					"--set", "kafka.config.min\\.insync\\.replicas=1",
-					"--set", "zookeeper.replicas=1",
-					"--set", "kafkaConnect.replicas=1",
-				)
+				err := waitKafkaUsersReadySilent(ctx, "kafka-users", kafkaNS, 8*time.Minute)
+				if err != nil {
+					dl.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", amber("⚠"))
+				}
 			}
 
-			// (Values files are already appended above so these overrides take precedence)
-			
+			// 3. Kafka Connect & Debezium Connector
+			deployConnect := deployKafka
 			if deployWithKafkaConnect {
-				registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
-					kafkaNS, clusterDomain)
-
-				kafkaArgs = append(kafkaArgs,
-					"--set", "kafkaConnect.enabled=true",
-					"--set", "kafkaConnect.schemaRegistry.enabled=true",
-					"--set", "kafkaConnect.databaseEgress[0].namespace="+deployDbNS,
-					"--set", "kafkaConnect.databaseEgress[0].port=5432",
-					"--set", "kafkaConnect.databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
-					"--set", "kafkaConnect.externalConfiguration.volumes[0].name=pg-credentials",
-					"--set", "kafkaConnect.externalConfiguration.volumes[0].secretName=connect-pg-credentials",
-					"--set", "kafkaConnect.extraConfig.schema\\.registry\\.url="+registryFQDN,
-				)
-			}
-			
-			if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
-				return err
-			}
-		} else {
-			fmt.Println("⏭️  Kafka chart already deployed. Verifying readiness...")
-		}
-
-
-		if !isTesting {
-
-		// Live progress poller — shows broker/controller/EO counts every 6s.
-		// waitKafkaReady already confirms Ready=True on the Kafka CR, which
-		// Strimzi only sets after the Entity Operator is also healthy.
-		// No separate EO wait needed.
-		if err := waitKafkaReady(g2Ctx, kafkaNS, 15*time.Minute); err != nil {
-			return fmt.Errorf("kafka readiness failed: %w", err)
-		}
-
-		fmt.Println("    - Applying Kafka users and topics...")
-		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-users.yaml", kafkaNS)
-		applyManifestWithNamespace(g2Ctx, "config/kafka/kafka-topics.yaml", kafkaNS)
-
-		// ── Wait for Entity Operator first ────────────────────────────────
-		// The EO only starts after the Kafka CR becomes Ready. It then needs
-		// time to establish its admin Kafka connection before it can process
-		// KafkaUser resources.
-		fmt.Println("    - Waiting for Entity Operator to start...")
-		eoDeadline := time.Now().Add(5 * time.Minute)
-		for time.Now().Before(eoDeadline) {
-			eoOut, _ := exec.CommandContext(g2Ctx,
-				"kubectl", "get", "pods", "-n", kafkaNS,
-				"-l", "app.kubernetes.io/name=entity-operator",
-				"--no-headers",
-				"-o", "custom-columns=PHASE:.status.phase",
-			).Output()
-			if strings.Contains(string(eoOut), "Running") {
-				fmt.Printf("    %s Entity Operator running\n", blue("✔"))
-				break
-			}
-			select {
-			case <-g2Ctx.Done():
-				return g2Ctx.Err()
-			case <-time.After(5 * time.Second):
-			}
-		}
-
-		// ── Poll KafkaUsers with progress ─────────────────────────────────
-		allReady, err := waitKafkaUsersReady(g2Ctx, kafkaNS, 8*time.Minute)
-		if err != nil {
-			return err
-		}
-		if !allReady {
-			fmt.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", amber("⚠"))
-		}
-		} // end !isTesting
-
-		if deployWithKafkaConnect {
-			fmt.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
-			pgSecretYaml := fmt.Sprintf(`apiVersion: v1
+				dl.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
+				pgSecretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
 metadata:
   name: connect-pg-credentials
@@ -716,18 +900,20 @@ type: Opaque
 stringData:
   password: debezium
   username: debezium`, kafkaNS)
-			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
-			
-			if !isTesting {
-				if err := waitConnectReady(g2Ctx, kafkaNS, 15*time.Minute); err != nil {
-					return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
-				}
-			}
+				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
-			checkOut, checkErr := exec.CommandContext(g2Ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", kafkaNS, "--no-headers").CombinedOutput()
-			if checkErr != nil || strings.Contains(string(checkOut), "not found") {
-				fmt.Println("    - Deploying Debezium PostgreSQL CDC connector...")
-				connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
+				if deployConnect && !isTesting {
+					if err := waitComponentReadySilent(ctx, "kafka-connect", kafkaNS, "app.kubernetes.io/name=kafka-connect", 15*time.Minute); err != nil {
+						return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
+					}
+				}
+
+				deployConnector := false
+				checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", kafkaNS, "--no-headers").CombinedOutput()
+				if checkErr != nil || strings.Contains(string(checkOut), "not found") {
+					deployConnector = true
+					dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
+					connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
 metadata:
   name: debezium-postgres-source
@@ -744,8 +930,8 @@ spec:
     database.hostname: postgresql.database.svc
     database.port: "5432"
     database.user: debezium
-    database.password: "${file:/mnt/pg-credentials/password}"
-    database.dbname: katesdb
+    database.password: "${dir:/mnt/pg-credentials:password}"
+    database.dbname: orders
     topic.prefix: cdc
     schema.include.list: public
     plugin.name: pgoutput
@@ -756,71 +942,66 @@ spec:
     tombstones.on.delete: "true"
     schema.history.internal.kafka.bootstrap.servers: krafter-kafka-bootstrap.%s.svc:9092
     schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, kafkaNS)
-				if err := runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
-					fmt.Printf("    %s Failed to deploy Debezium connector: %v\n", amber("⚠"), err)
+					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
+						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", amber("⚠"), err)
+					} else {
+						dl.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", green("✔"))
+					}
 				} else {
-					fmt.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", green("✔"))
+					dl.Printf("    %s Debezium connector already exists — skipping\n", green("✔"))
+					dl.FinishComponent("kafka-connector", true)
+					advanceStep()
 				}
-			} else {
-				fmt.Printf("    %s Debezium connector already exists — skipping\n", green("✔"))
-			}
 
-			if !isTesting {
-				if err := waitConnectorReady(g2Ctx, kafkaNS, 10*time.Minute); err != nil {
-					return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
+				if deployConnector && !isTesting {
+					if err := waitConnectorReadySilent(ctx, "kafka-connector", kafkaNS, 10*time.Minute); err != nil {
+						return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
+					}
 				}
 			}
-		}
-		
-		return nil
-	})
 
-
-	if err := g2.Wait(); err != nil {
-		output.Error(fmt.Sprintf("Failed during Group B (Core Infra) deployments: %v", err))
-		return err
-	}
-
-	// ---------------------------------------------------------
-	// GROUP C (Apps / Sequential)
-	// ---------------------------------------------------------
-	// Deploy Schema Registry (if requested)
-	if deployWithSchemaRegistry == "apicurio" {
-		if !isHelmReleaseDeployedFn(ctx, "apicurio", kafkaNS) {
-			fmt.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
-			if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
-				return err
+			// ---------------------------------------------------------
+			// GROUP C (Apps / Sequential)
+			// ---------------------------------------------------------
+			// Deploy Schema Registry (if requested)
+			if deployWithSchemaRegistry == "apicurio" {
+				if !isHelmReleaseDeployedFn(ctx, "apicurio", kafkaNS) {
+					dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
+					if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
+						return err
+					}
+				} else {
+					dl.Println("⏭️  Apicurio already deployed.")
+					dl.FinishComponent("apicurio", true)
+					advanceStep()
+				}
 			}
-		} else {
-			fmt.Println("⏭️  Apicurio already deployed.")
-		}
-	}
-	
-	// Deploy Kates
-	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
-		fmt.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
-		
-		// Auto-cleanup stale ClusterRole ownership from previous topology switches
-		cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
-		cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
-		
-		if kafkaNS != appNS {
-			// Ensure app namespace exists before copying secrets into it.
-			nsYaml := fmt.Sprintf(`apiVersion: v1
+
+			// Deploy Kates
+			if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
+				dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+
+				// Auto-cleanup stale ClusterRole ownership from previous topology switches
+				cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
+				cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
+
+				if kafkaNS != appNS {
+					// Ensure app namespace exists before copying secrets into it.
+					nsYaml := fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
   name: %s
 spec: {}`, appNS)
-			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
-			// The KafkaUser was already waited on in Group B — just read the Secret.
-			pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend",
-				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-			pwBytes, pwErr := pwCmd.Output()
+					// The KafkaUser was already waited on in Group B — just read the Secret.
+					pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend",
+						"-n", kafkaNS, "-o", "jsonpath={.data.password}")
+					pwBytes, pwErr := pwCmd.Output()
 
-			if pwErr == nil && len(pwBytes) > 0 {
-				fmt.Println("    - Copying Kafka SASL credentials to app namespace...")
-				secretYaml := fmt.Sprintf(`apiVersion: v1
+					if pwErr == nil && len(pwBytes) > 0 {
+						dl.Println("    - Copying Kafka SASL credentials to app namespace...")
+						secretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
 metadata:
   name: kates-backend
@@ -828,84 +1009,118 @@ metadata:
 type: Opaque
 data:
   password: %s`, appNS, string(pwBytes))
-				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
+						runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
+					} else {
+						dl.Printf("    ⚠️  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+					}
+				}
+
+				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
+				dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
+				if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
+					"-n", appNS, "--create-namespace",
+					"-f", valuesFile,
+					"-f", chartOverlay("charts/kates"),
+					"--set", "kafka.bootstrapServers="+bootstrap,
+					"--timeout", "8m"); err != nil {
+					return err
+				}
+
+				if !isTesting {
+					if err := waitComponentReadySilent(ctx, "kates", appNS, "app.kubernetes.io/instance=kates", 8*time.Minute); err != nil {
+						return err
+					}
+				}
 			} else {
-				fmt.Printf("    ⚠️  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+				dl.Println("⏭️  Kates Backend already deployed.")
+				dl.FinishComponent("kates", true)
+				advanceStep()
 			}
-		}
-		
-		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, report.Network.ClusterDomain)
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
-			"-n", appNS, "--create-namespace",
-			"-f", valuesFile,
-			"-f", chartOverlay("charts/kates"),
-			"--set", "kafka.bootstrapServers="+bootstrap,
-			"--timeout", "8m", "--wait"); err != nil {
-			return err
-		}
-	} else {
-		fmt.Println("⏭️  Kates Backend already deployed.")
-	}
-	
-	// Deploy Chaos
-	if deployWithChaos {
-		if !isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
-			fmt.Printf("\n📦 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
-			cleanupStaleClusterResource(ctx, "clusterrole", "litmus", chaosNS)
-			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
-			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
-			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos",
-				"-n", chaosNS, "--create-namespace",
-				"-f", valuesFile,
-				"-f", chartOverlay("charts/kates-chaos"),
-				"--set", "rbac.kafkaNamespace="+kafkaNS,
-				"--timeout", "5m", "--wait"); err != nil {
-				return err
+
+			// Deploy Chaos
+			if deployWithChaos {
+				if !isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
+					dl.Printf("\n📦 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
+					cleanupStaleClusterResource(ctx, "clusterrole", "litmus", chaosNS)
+					cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
+					runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
+					dl.Println("    - Waiting for Litmus Chaos pods to become ready (this may take a few minutes)...")
+					if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos",
+						"-n", chaosNS, "--create-namespace",
+						"-f", valuesFile,
+						"-f", chartOverlay("charts/kates-chaos"),
+						"--set", "rbac.kafkaNamespace="+kafkaNS,
+						"--timeout", "5m"); err != nil {
+						return err
+					}
+
+					if !isTesting {
+						if err := waitComponentReadySilent(ctx, "chaos", chaosNS, "app.kubernetes.io/instance=chaos", 5*time.Minute); err != nil {
+							return err
+						}
+					}
+					dl.FinishComponent("chaos", true)
+					advanceStep()
+				} else {
+					dl.Println("⏭️  Litmus Chaos already deployed.")
+					dl.FinishComponent("chaos", true)
+					advanceStep()
+				}
 			}
-		} else {
-			fmt.Println("⏭️  Litmus Chaos already deployed.")
+
+			// ---------------------------------------------------------
+			// Deployment Summary Dashboard
+			// ---------------------------------------------------------
+			var entries []DeploySummaryEntry
+			if deployWithStrimzi {
+				entries = append(entries, DeploySummaryEntry{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
+			}
+			if deployWithCertManager {
+				entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
+			}
+			if deployWithKyverno {
+				entries = append(entries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
+			}
+			entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+			if deployWithKafkaConnect {
+				entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: "database", Group: "B"})
+				entries = append(entries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+			}
+			if deployWithMonitoring {
+				entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
+			}
+			if deployWithSchemaRegistry == "apicurio" {
+				entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
+			}
+			entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
+			if deployWithChaos {
+				entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
+			}
+
+			finalEntries = entries
+			deployElapsed = time.Since(deployStartTime)
+			return nil
+		}()
+	}()
+
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+
+	<-doneCh // Wait for deployment goroutine to fully exit
+
+	if deployErr == nil && len(finalEntries) > 0 {
+		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
+
+		// Automatically sync API key from deployed cluster to active context
+		updateActiveContextAPIKey(ctx, appNS)
+
+		if deployPortForward {
+			RunPortForwards(ctx, kafkaNS, appNS, jaegerNS)
 		}
 	}
 
-	// ---------------------------------------------------------
-	// Deployment Summary Dashboard
-	// ---------------------------------------------------------
-	var entries []DeploySummaryEntry
-	if deployWithStrimzi {
-		entries = append(entries, DeploySummaryEntry{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
-	}
-	if deployWithCertManager {
-		entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
-	}
-	if deployWithKyverno {
-		entries = append(entries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
-	}
-	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
-	if deployWithKafkaConnect {
-		entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: "database", Group: "B"})
-		entries = append(entries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "krafter", Namespace: kafkaNS, Group: "B"})
-	}
-	if deployWithMonitoring {
-		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
-	}
-	if deployWithSchemaRegistry == "apicurio" {
-		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
-	}
-	entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
-	if deployWithChaos {
-		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
-	}
-
-	RenderDeployDashboard(ctx, entries, time.Since(deployStartTime))
-
-	// Automatically sync API key from deployed cluster to active context
-	updateActiveContextAPIKey(ctx, appNS)
-
-	if deployPortForward {
-		RunPortForwards(ctx, kafkaNS, appNS, jaegerNS)
-	}
-
-	return nil
+	return deployErr
 }
 
 func updateActiveContextAPIKey(ctx context.Context, appNS string) {
@@ -929,7 +1144,7 @@ func updateActiveContextAPIKey(ctx context.Context, appNS string) {
 				active.APIKey = apiKey
 				cfg.Contexts[ctxName] = active
 				_ = saveConfig(cfg)
-				fmt.Printf("    ✓ Automatically synced API Key to context %q: %s****\n\n", ctxName, apiKey[:4])
+				dl.Printf("    ✓ Automatically synced API Key to context %q: %s****\n\n", ctxName, apiKey[:4])
 			}
 		}
 	}
@@ -938,30 +1153,30 @@ func updateActiveContextAPIKey(ctx context.Context, appNS string) {
 // Helpers
 
 var (
-	runExecFn = runExecDefault
-	runExecStdinFn = runExecStdinDefault
-	runHelmFn = runHelmDefault
-	isHelmReleaseDeployedFn = isHelmReleaseDeployedDefault
-	defaultExecutor detect.CommandExecutor = detect.NewOSExecutor()
+	runExecFn                                      = runExecDefault
+	runExecStdinFn                                 = runExecStdinDefault
+	runHelmFn                                      = runHelmDefault
+	isHelmReleaseDeployedFn                        = isHelmReleaseDeployedDefault
+	defaultExecutor         detect.CommandExecutor = detect.NewOSExecutor()
 )
 
 var execMutex sync.Mutex
 
 func runExecDefault(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	
+
 	// Prevent interwoven output lines for parallel commands
 	execMutex.Lock()
 	defer execMutex.Unlock()
-	
+
 	if deployVerbose {
 		// Show the command being run
-		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		dl.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
-	
+
 	// Non-verbose: capture output, show stderr only on error
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
@@ -973,7 +1188,7 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
-			fmt.Printf("    \033[31m%s\033[0m\n", errMsg)
+			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
 		}
 		return err
 	}
@@ -982,27 +1197,27 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 
 func runExecStdinDefault(ctx context.Context, name string, args []string, stdinData string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
-	
+
 	go func() {
 		defer stdin.Close()
 		stdin.Write([]byte(stdinData))
 	}()
-	
+
 	execMutex.Lock()
 	defer execMutex.Unlock()
-	
+
 	if deployVerbose {
-		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		dl.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
-	
+
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -1012,7 +1227,7 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
-			fmt.Printf("    \033[31m%s\033[0m\n", errMsg)
+			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
 		}
 		return runErr
 	}
@@ -1044,7 +1259,7 @@ func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS str
 	}
 	existingNS := strings.TrimSpace(string(out))
 	if existingNS != "" && existingNS != expectedNS {
-		fmt.Printf("    - Cleaning stale %s/%s (owned by namespace %q, deploying to %q)\n", kind, name, existingNS, expectedNS)
+		dl.Printf("    - Cleaning stale %s/%s (owned by namespace %q, deploying to %q)\n", kind, name, existingNS, expectedNS)
 		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer delCancel()
 		exec.CommandContext(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found").Run()

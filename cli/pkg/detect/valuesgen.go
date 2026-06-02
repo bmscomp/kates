@@ -15,9 +15,9 @@ const (
 	// remaining 15% CPU + 15% mem for operators, exporters, cruise control
 
 	// Resource bounds
-	minControllerCPU = 250  // millicores
+	minControllerCPU = 250 // millicores
 	maxControllerCPU = 4000
-	minControllerMem = 1    // GiB
+	minControllerMem = 1 // GiB
 	maxControllerMem = 4
 	minBrokerCPU     = 250
 	maxBrokerCPU     = 8000
@@ -281,8 +281,8 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		},
 		ClusterName: g.ClusterName,
 
-		StrimziOp:   g.buildStrimziOp(),
-		CRDUpgrade:  g.buildCRDUpgrade(),
+		StrimziOp:       g.buildStrimziOp(),
+		CRDUpgrade:      g.buildCRDUpgrade(),
 		ControllerPools: g.buildControllerPools(),
 		ControllerDefaults: GenControllerDefaults{
 			Resources: GenResources{
@@ -327,11 +327,11 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				TopologyKey: "kubernetes.io/hostname",
 			},
 		},
-		Kafka:       g.buildKafka(topologyKey),
-		Dashboards:  g.buildDashboards(),
-		PodMonitors: g.buildPodMonitors(),
-		Alerts:      g.buildAlerts(),
-		NetPolicies: g.buildNetworkPolicies(),
+		Kafka:         g.buildKafka(topologyKey),
+		Dashboards:    g.buildDashboards(),
+		PodMonitors:   g.buildPodMonitors(),
+		Alerts:        g.buildAlerts(),
+		NetPolicies:   g.buildNetworkPolicies(),
 		Topics:        GenFeature{Enabled: true},
 		CruiseControl: GenFeature{Enabled: false},
 		KafkaExporter: GenFeature{Enabled: false},
@@ -404,8 +404,8 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 						Type: "scram-sha-512",
 					},
 					Quotas: &GenUserQuotas{
-						ProducerByteRate: 52428800,
-						ConsumerByteRate: 52428800,
+						ProducerByteRate:  52428800,
+						ConsumerByteRate:  52428800,
 						RequestPercentage: 25,
 					},
 					Authorization: &GenUserAuthz{
@@ -518,7 +518,7 @@ func (g *ValuesGenerator) buildKafkaConnect() GenKafkaConnect {
 		"producer.acks":               "all",
 		"producer.enable.idempotence": "true",
 		"consumer.auto.offset.reset":  "earliest",
-		"exactly.once.source.support":  "enabled",
+		"exactly.once.source.support": "enabled",
 	}
 
 	return GenKafkaConnect{
@@ -903,4 +903,3 @@ func formatMem(gi int) string {
 	}
 	return fmt.Sprintf("%dGi", gi)
 }
-

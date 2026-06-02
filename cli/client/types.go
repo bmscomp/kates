@@ -45,32 +45,32 @@ type BrokerNode struct {
 }
 
 type ClusterTopology struct {
-	Kubernetes     *K8sInfo                 `json:"kubernetes,omitempty"`
-	Strimzi        map[string]interface{}   `json:"strimzi,omitempty"`
-	Cluster        *TopoClusterInfo         `json:"cluster,omitempty"`
-	KafkaConfig    map[string]interface{}   `json:"kafkaConfig,omitempty"`
-	NodePools      []NodePoolInfo           `json:"nodePools,omitempty"`
-	Nodes          []TopologyNode           `json:"nodes,omitempty"`
-	EntityOperator map[string]interface{}   `json:"entityOperator,omitempty"`
-	CruiseControl  map[string]interface{}   `json:"cruiseControl,omitempty"`
-	KafkaExporter  map[string]interface{}   `json:"kafkaExporter,omitempty"`
-	Certificates   map[string]interface{}   `json:"certificates,omitempty"`
-	Metrics        map[string]interface{}   `json:"metrics,omitempty"`
-	Topics         *TopoTopics              `json:"topics,omitempty"`
-	Users          *TopoUsers               `json:"users,omitempty"`
-	ConsumerGroups *TopoCountItems           `json:"consumerGroups,omitempty"`
-	ACLs           *TopoCountItems           `json:"acls,omitempty"`
-	LogDirs        []map[string]interface{}  `json:"logDirs,omitempty"`
-	FeatureFlags   *TopoCountItems           `json:"featureFlags,omitempty"`
-	Rebalances     []map[string]interface{}  `json:"rebalances,omitempty"`
-	DrainCleaner   map[string]interface{}    `json:"drainCleaner,omitempty"`
-	PodSets          []map[string]interface{}  `json:"podSets,omitempty"`
-	NetworkPolicies  []map[string]interface{}  `json:"networkPolicies,omitempty"`
-	PVCs             []map[string]interface{}  `json:"pvcs,omitempty"`
-	Services         []map[string]interface{}  `json:"services,omitempty"`
-	Endpoints        []map[string]interface{}  `json:"endpoints,omitempty"`
-	Connect          []map[string]interface{}  `json:"connect,omitempty"`
-	MirrorMaker    []map[string]interface{}  `json:"mirrorMaker2,omitempty"`
+	Kubernetes      *K8sInfo                 `json:"kubernetes,omitempty"`
+	Strimzi         map[string]interface{}   `json:"strimzi,omitempty"`
+	Cluster         *TopoClusterInfo         `json:"cluster,omitempty"`
+	KafkaConfig     map[string]interface{}   `json:"kafkaConfig,omitempty"`
+	NodePools       []NodePoolInfo           `json:"nodePools,omitempty"`
+	Nodes           []TopologyNode           `json:"nodes,omitempty"`
+	EntityOperator  map[string]interface{}   `json:"entityOperator,omitempty"`
+	CruiseControl   map[string]interface{}   `json:"cruiseControl,omitempty"`
+	KafkaExporter   map[string]interface{}   `json:"kafkaExporter,omitempty"`
+	Certificates    map[string]interface{}   `json:"certificates,omitempty"`
+	Metrics         map[string]interface{}   `json:"metrics,omitempty"`
+	Topics          *TopoTopics              `json:"topics,omitempty"`
+	Users           *TopoUsers               `json:"users,omitempty"`
+	ConsumerGroups  *TopoCountItems          `json:"consumerGroups,omitempty"`
+	ACLs            *TopoCountItems          `json:"acls,omitempty"`
+	LogDirs         []map[string]interface{} `json:"logDirs,omitempty"`
+	FeatureFlags    *TopoCountItems          `json:"featureFlags,omitempty"`
+	Rebalances      []map[string]interface{} `json:"rebalances,omitempty"`
+	DrainCleaner    map[string]interface{}   `json:"drainCleaner,omitempty"`
+	PodSets         []map[string]interface{} `json:"podSets,omitempty"`
+	NetworkPolicies []map[string]interface{} `json:"networkPolicies,omitempty"`
+	PVCs            []map[string]interface{} `json:"pvcs,omitempty"`
+	Services        []map[string]interface{} `json:"services,omitempty"`
+	Endpoints       []map[string]interface{} `json:"endpoints,omitempty"`
+	Connect         []map[string]interface{} `json:"connect,omitempty"`
+	MirrorMaker     []map[string]interface{} `json:"mirrorMaker2,omitempty"`
 }
 
 type TopoCountItems struct {
@@ -569,11 +569,11 @@ type DisruptionTypeInfo struct {
 }
 
 type DisruptionTimeline struct {
-	Step             string     `json:"step"`
-	Type             string     `json:"type"`
-	Events           []PodEvent `json:"events"`
-	TimeToFirstReady interface{}`json:"timeToFirstReady"`
-	TimeToAllReady   interface{}`json:"timeToAllReady"`
+	Step             string      `json:"step"`
+	Type             string      `json:"type"`
+	Events           []PodEvent  `json:"events"`
+	TimeToFirstReady interface{} `json:"timeToFirstReady"`
+	TimeToAllReady   interface{} `json:"timeToAllReady"`
 }
 
 type IsrMetrics struct {

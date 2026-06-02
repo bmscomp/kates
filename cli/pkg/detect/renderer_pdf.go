@@ -53,7 +53,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		pdf.SetFont("Helvetica", "B", 12)
 		pdf.SetTextColor(15, 23, 42)
 		pdf.CellFormat(0, 8, title, "", 1, "L", false, 0, "")
-		
+
 		// Draw line under header
 		pdf.SetDrawColor(100, 80, 200)
 		pdf.SetLineWidth(0.4)
@@ -93,10 +93,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── Nodes Table ──────────────────────────────────────────────────────────
 	if len(report.Nodes) > 0 {
 		sectionHeader(fmt.Sprintf("Nodes (%d total)", len(report.Nodes)))
-		
+
 		colWidths := []float64{50, 30, 30, 20, 20, 30}
 		headers := []string{"Name", "Zone", "Roles", "CPU", "Memory", "Kubelet"}
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
@@ -127,10 +127,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── Zones Table ──────────────────────────────────────────────────────────
 	if len(report.Zones) > 0 {
 		sectionHeader(fmt.Sprintf("Zones (%d total)", len(report.Zones)))
-		
+
 		colWidths := []float64{50, 30, 50, 50}
 		headers := []string{"Zone", "Nodes", "CPU", "Memory"}
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
@@ -159,7 +159,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── Storage Classes Table ────────────────────────────────────────────────
 	if len(report.Storage) > 0 {
 		sectionHeader("StorageClasses")
-		
+
 		hasBenchResults := false
 		for _, sc := range report.Storage {
 			if sc.ProbedIOPS > 0 || sc.ProbeLatencyMs > 0 {
@@ -177,7 +177,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			colWidths = []float64{35, 60, 35, 20, 15, 15}
 			headers = []string{"Name", "Provisioner", "Binding Mode", "Reclaim", "Def", "Exp"}
 		}
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
@@ -202,7 +202,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			if sc.AllowExpansion {
 				expVal = "yes"
 			}
-			
+
 			if hasBenchResults {
 				iopsVal := "—"
 				if sc.ProbedIOPS > 0 {
@@ -230,7 +230,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			}
 			pdf.Ln(-1)
 		}
-		
+
 		if report.StorageAudit.PVCount > 0 {
 			pdf.Ln(2)
 			pdf.SetFont("Helvetica", "", 9)
@@ -250,7 +250,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		pdf.CellFormat(0, 5, fmt.Sprintf("- Status: Running in namespace '%s' (Health: %s)", report.Strimzi.Namespace, report.Strimzi.Health.Status), "", 1, "L", false, 0, "")
 		pdf.CellFormat(0, 5, fmt.Sprintf("- Image: %s", report.Strimzi.Image), "", 1, "L", false, 0, "")
 		pdf.CellFormat(0, 5, fmt.Sprintf("- Replicas: %d/%d ready", report.Strimzi.ReadyReplicas, report.Strimzi.TotalReplicas), "", 1, "L", false, 0, "")
-		
+
 		if len(report.Strimzi.Health.WarningLogs) > 0 {
 			pdf.Ln(1)
 			pdf.SetFont("Helvetica", "B", 8)
@@ -282,7 +282,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── Active Zone Network Latency Matrix ───────────────────────────────────
 	if len(report.Network.LatencyMatrix) > 0 {
 		sectionHeader("Active Zone Network Latency Matrix")
-		
+
 		// extract unique zones
 		zoneMap := make(map[string]bool)
 		for _, r := range report.Network.LatencyMatrix {
@@ -293,9 +293,9 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		for z := range zoneMap {
 			zones = append(zones, z)
 		}
-		
+
 		colWidth := 135.0 / float64(len(zones))
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
@@ -304,7 +304,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			pdf.CellFormat(colWidth, 6, z, "1", 0, "C", true, 0, "")
 		}
 		pdf.Ln(-1)
-		
+
 		pdf.SetFont("Helvetica", "", 8)
 		pdf.SetTextColor(60, 60, 60)
 		for i, src := range zones {
@@ -316,7 +316,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			pdf.SetFont("Helvetica", "B", 8)
 			pdf.CellFormat(45, 6, src, "1", 0, "C", true, 0, "")
 			pdf.SetFont("Helvetica", "", 8)
-			
+
 			for _, dst := range zones {
 				found := false
 				for _, r := range report.Network.LatencyMatrix {
@@ -344,7 +344,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── Active Zone Network Bandwidth Matrix ─────────────────────────────────
 	if len(report.Network.BandwidthMatrix) > 0 {
 		sectionHeader("Active Zone Network Bandwidth Matrix")
-		
+
 		// extract unique zones
 		zoneMap := make(map[string]bool)
 		for _, r := range report.Network.BandwidthMatrix {
@@ -355,9 +355,9 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		for z := range zoneMap {
 			zones = append(zones, z)
 		}
-		
+
 		colWidth := 135.0 / float64(len(zones))
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
@@ -366,7 +366,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			pdf.CellFormat(colWidth, 6, z, "1", 0, "C", true, 0, "")
 		}
 		pdf.Ln(-1)
-		
+
 		pdf.SetFont("Helvetica", "", 8)
 		pdf.SetTextColor(60, 60, 60)
 		for i, src := range zones {
@@ -378,7 +378,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			pdf.SetFont("Helvetica", "B", 8)
 			pdf.CellFormat(45, 6, src, "1", 0, "C", true, 0, "")
 			pdf.SetFont("Helvetica", "", 8)
-			
+
 			for _, dst := range zones {
 				if src == dst {
 					pdf.CellFormat(colWidth, 6, "—", "1", 0, "C", true, 0, "")
@@ -410,11 +410,11 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── Active CoreDNS Latency & Success Audits ──────────────────────────────
 	if len(report.Network.DNSResults) > 0 {
 		sectionHeader("Active CoreDNS Latency & Success Audits")
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
-		
+
 		pdf.CellFormat(40, 6, "Query Type", "1", 0, "C", true, 0, "")
 		pdf.CellFormat(25, 6, "Queries Run", "1", 0, "C", true, 0, "")
 		pdf.CellFormat(25, 6, "Success Count", "1", 0, "C", true, 0, "")
@@ -422,7 +422,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		pdf.CellFormat(30, 6, "Avg Latency", "1", 0, "C", true, 0, "")
 		pdf.CellFormat(30, 6, "Max Latency", "1", 0, "C", true, 0, "")
 		pdf.Ln(-1)
-		
+
 		pdf.SetFont("Helvetica", "", 8)
 		pdf.SetTextColor(60, 60, 60)
 		for i, r := range report.Network.DNSResults {
@@ -449,7 +449,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Pod Security Admission (PSA) Label: %s", report.Security.PSALabelEnforced), "", 1, "L", false, 0, "")
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Kyverno Enforced: %t", report.Security.KyvernoEnforced), "", 1, "L", false, 0, "")
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Namespace Management Permissions: %t", report.Security.PermissionsOk), "", 1, "L", false, 0, "")
-	
+
 	rbacText := "✓ Secure (no wildcard rules)"
 	if report.Security.HasExcessivePrivileges {
 		rbacText = "Warning: Wildcard permissions detected in Roles!"
@@ -506,10 +506,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	// ── NetworkPolicies Table ────────────────────────────────────────────────
 	if report.NetPolAudit.TotalCount > 0 {
 		sectionHeader("NetworkPolicies (kafka namespace)")
-		
+
 		colWidths := []float64{50, 65, 25, 20, 20}
 		headers := []string{"Name", "Pod Selector", "Policy Types", "In/Out Rules", "Managed By"}
-		
+
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(196, 181, 253)
@@ -528,12 +528,12 @@ func RenderPDF(report *DetectReport, filePath string) error {
 			}
 			types := strings.Join(np.PolicyTypes, ",")
 			rulesStr := fmt.Sprintf("%d/%d", np.IngressRules, np.EgressRules)
-			
+
 			selector := np.PodSelector
 			if len(selector) > 42 {
 				selector = selector[:39] + "..."
 			}
-			
+
 			pdf.CellFormat(colWidths[0], 6, np.Name, "1", 0, "L", true, 0, "")
 			pdf.CellFormat(colWidths[1], 6, selector, "1", 0, "L", true, 0, "")
 			pdf.CellFormat(colWidths[2], 6, types, "1", 0, "L", true, 0, "")
@@ -546,10 +546,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 
 	// ── Resource Budget ──────────────────────────────────────────────────────
 	sectionHeader("Resource Budget & Requirements")
-	
+
 	colWidths := []float64{60, 60, 60}
 	headers := []string{"Component", "CPU", "Memory"}
-	
+
 	pdf.SetFont("Helvetica", "B", 8)
 	pdf.SetFillColor(30, 41, 59)
 	pdf.SetTextColor(196, 181, 253)
@@ -560,7 +560,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 
 	pdf.SetFont("Helvetica", "", 8)
 	pdf.SetTextColor(60, 60, 60)
-	
+
 	pdf.SetFillColor(248, 250, 252)
 	pdf.CellFormat(colWidths[0], 6, "Controllers", "1", 0, "L", true, 0, "")
 	pdf.CellFormat(colWidths[1], 6, fmt.Sprintf("%dm", report.Budget.CtrlCPU), "1", 0, "L", true, 0, "")
@@ -591,7 +591,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	pdf.CellFormat(colWidths[1], 6, fmt.Sprintf("%dm", report.Budget.TotalCPU), "1", 0, "L", true, 0, "")
 	pdf.CellFormat(colWidths[2], 6, fmt.Sprintf("%dGi", report.Budget.TotalMem), "1", 0, "L", true, 0, "")
 	pdf.Ln(-1)
-	
+
 	pdf.Ln(2)
 	sufficientText := "Sufficient resources available"
 	if !report.Budget.Sufficient {
@@ -609,7 +609,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	pdf.CellFormat(0, 6, "Sizing Profile Recommendation", "", 1, "L", false, 0, "")
 	pdf.SetFont("Helvetica", "", 9)
 	pdf.CellFormat(0, 5, fmt.Sprintf("- Recommended Sizing Profile: %s", strings.ToUpper(report.Budget.RecommendedProfile)), "", 1, "L", false, 0, "")
-	
+
 	desc := ""
 	switch report.Budget.RecommendedProfile {
 	case "production":
@@ -626,10 +626,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 
 	// ── Compatibility Verdict Checks Table ───────────────────────────────────
 	sectionHeader("Compatibility Verdict Checks")
-	
+
 	colWidths = []float64{65, 25, 90}
 	headers = []string{"Check", "Status", "Details"}
-	
+
 	pdf.SetFont("Helvetica", "B", 8)
 	pdf.SetFillColor(30, 41, 59)
 	pdf.SetTextColor(196, 181, 253)
@@ -646,7 +646,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		} else {
 			pdf.SetFillColor(255, 255, 255)
 		}
-		
+
 		statusStr := "PASS"
 		if !c.Status {
 			statusStr = "FAIL"
@@ -654,10 +654,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 		} else {
 			pdf.SetTextColor(16, 185, 129)
 		}
-		
+
 		pdf.CellFormat(colWidths[0], 6, c.Description, "1", 0, "L", true, 0, "")
 		pdf.CellFormat(colWidths[1], 6, statusStr, "1", 0, "L", true, 0, "")
-		
+
 		pdf.SetTextColor(60, 60, 60)
 		detailText := c.Detail
 		if len(detailText) > 55 {
@@ -672,7 +672,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 	hints := GenerateRemediation(report)
 	if len(hints) > 0 {
 		sectionHeader("Remediation Hints")
-		
+
 		for _, h := range hints {
 			// Title of hint
 			pdf.SetFont("Helvetica", "B", 9)
@@ -686,10 +686,10 @@ func RenderPDF(report *DetectReport, filePath string) error {
 				pdf.SetTextColor(100, 80, 200) // indigo
 				pdf.CellFormat(0, 5, "INFO: "+h.Summary, "", 1, "L", false, 0, "")
 			}
-			
+
 			pdf.SetTextColor(60, 60, 60)
 			pdf.SetFont("Helvetica", "", 8.5)
-			
+
 			// Command details
 			if len(h.Commands) > 0 {
 				pdf.Ln(1)
@@ -704,7 +704,7 @@ func RenderPDF(report *DetectReport, filePath string) error {
 				pdf.SetFont("Helvetica", "", 8.5)
 				pdf.Ln(1)
 			}
-			
+
 			if h.DocURL != "" {
 				pdf.SetTextColor(100, 80, 200)
 				pdf.CellFormat(0, 4, "Documentation: "+h.DocURL, "", 1, "L", false, 0, h.DocURL)
