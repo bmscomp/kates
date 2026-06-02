@@ -67,7 +67,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
 	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", 58))
 
-	colHdrName := lipgloss.NewStyle().Width(26).Render("COMPONENT")
+	colHdrName := lipgloss.NewStyle().Width(28).Render("COMPONENT")
 	colHdrNs := lipgloss.NewStyle().Width(18).Render("NAMESPACE")
 	colHdrStat := lipgloss.NewStyle().Render("STATUS")
 	colHeaders := lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render(fmt.Sprintf("  %s%s%s", colHdrName, colHdrNs, colHdrStat))
@@ -110,18 +110,20 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 }
 
 func printRow(icon, name, namespace, status string) {
-	const nameWidth = 26
+	const nameWidth = 28
 	const nsWidth = 18
 
 	nameStr := icon + " " + name
 	nsStr := namespace
 
 	// Pad based on actual visual width so emoji don't throw off alignment
-	namePad := nameWidth - runewidth.StringWidth(nameStr)
+	// Hardcode icon width to 2 cells to bypass go-runewidth emoji miscalculations
+	visualNameWidth := 2 + 1 + len(name)
+	namePad := nameWidth - visualNameWidth
 	if namePad < 1 {
 		namePad = 1
 	}
-	nsPad := nsWidth - runewidth.StringWidth(nsStr)
+	nsPad := nsWidth - len(nsStr)
 	if nsPad < 1 {
 		nsPad = 1
 	}
