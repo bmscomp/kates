@@ -616,7 +616,6 @@ var clusterTopologyCmd = &cobra.Command{
 	},
 }
 
-
 var clusterTopicsCmd = &cobra.Command{
 	Use:   "topics",
 	Short: "List all Kafka topics",
@@ -970,4 +969,3 @@ func init() {
 	clusterTopicsCmd.AddCommand(clusterTopicDescribeCmd)
 	rootCmd.AddCommand(clusterCmd)
 }
-

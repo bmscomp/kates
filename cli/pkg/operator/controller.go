@@ -25,7 +25,7 @@ func (o *KatesOperator) Start(ctx context.Context) error {
 
 	// In a complete implementation, we would initialize client-go shared informers here
 	// and watch for CoreV1 Node and StorageClass events.
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

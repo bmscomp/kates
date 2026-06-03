@@ -492,8 +492,8 @@ var securityDriftCmd = &cobra.Command{
 }
 
 var securityGateCmd = &cobra.Command{
-	Use:     "gate",
-	Short:   "CI/CD security gate — exit non-zero if grade is below threshold",
+	Use:   "gate",
+	Short: "CI/CD security gate — exit non-zero if grade is below threshold",
 	Example: `  kates security gate --min-grade B
   kates security gate --min-grade A -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {

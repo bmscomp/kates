@@ -134,7 +134,7 @@ func RenderMarkdown(report *DetectReport, w io.Writer) {
 		p("- **Kafka Connect:** %s (in `%s`)", report.Ecosystem.KafkaConnect.Name, report.Ecosystem.KafkaConnect.Namespace)
 		p("- **Image:** `%s`", report.Ecosystem.KafkaConnect.Image)
 		p("- **Workers:** %d/%d ready", report.Ecosystem.KafkaConnect.ReadyReplicas, report.Ecosystem.KafkaConnect.TotalReplicas)
-		
+
 		if len(report.Ecosystem.KafkaConnect.Connectors) > 0 {
 			p("")
 			p("| Connector Name | Class | Tasks Max | Status |")

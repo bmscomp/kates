@@ -84,7 +84,7 @@ spec:
               CRD_URL="https://github.com/strimzi/strimzi-kafka-operator/releases/download/{{ .Values.strimziVersion }}/strimzi-crds-{{ .Values.strimziVersion }}.yaml"
 
               echo "Downloading CRDs from ${CRD_URL}..."
-              wget -q -O /tmp/strimzi-crds.yaml "${CRD_URL}"
+              curl -sL "${CRD_URL}" -o /tmp/strimzi-crds.yaml
 
               echo "Applying CRDs with server-side apply..."
               kubectl apply --server-side --force-conflicts -f /tmp/strimzi-crds.yaml

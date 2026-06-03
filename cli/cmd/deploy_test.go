@@ -42,7 +42,7 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 
 	var executedCommands []string
 	var mu sync.Mutex
-	
+
 	// Mock functions
 	runExecFn = func(ctx context.Context, name string, args ...string) error {
 		cmdStr := name + " " + strings.Join(args, " ")
@@ -64,9 +64,9 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool {
 		return false
 	}
-	
+
 	defaultExecutor = &MockExecutor{}
-	
+
 	// Mock the cluster detection dependencies by overriding valuesFile creation or ensuring it succeeds
 	// In runDeploy it creates .build/values-detected.yaml. We just run it and let it create the file.
 
@@ -79,7 +79,7 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 	// Verify that the commands executed successfully and used the correct namespace
 	foundKafka := false
 	foundKates := false
-	
+
 	for _, cmd := range executedCommands {
 		if strings.Contains(cmd, "helm upgrade --install krafter") {
 			foundKafka = true
@@ -94,7 +94,7 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundKafka {
 		t.Error("Kafka deployment command was not executed")
 	}
@@ -118,7 +118,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 
 	var executedCommands []string
 	var mu sync.Mutex
-	
+
 	runExecFn = func(ctx context.Context, name string, args ...string) error {
 		cmdStr := name + " " + strings.Join(args, " ")
 		mu.Lock()
@@ -147,7 +147,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 	}
 
 	foundKafka, foundKates, foundChaos, foundSchema, foundPostgres := false, false, false, false, false
-	
+
 	for _, cmd := range executedCommands {
 		if strings.Contains(cmd, "helm upgrade --install krafter") {
 			foundKafka = true
@@ -183,7 +183,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundKafka || !foundKates || !foundChaos || !foundSchema || !foundPostgres {
 		t.Errorf("Missing expected commands. Kafka: %v, Kates: %v, Chaos: %v, Schema: %v, Postgres: %v", foundKafka, foundKates, foundChaos, foundSchema, foundPostgres)
 	}
@@ -202,7 +202,7 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 
 	var executedCommands []string
 	var mu sync.Mutex
-	
+
 	runExecFn = func(ctx context.Context, name string, args ...string) error {
 		cmdStr := name + " " + strings.Join(args, " ")
 		mu.Lock()

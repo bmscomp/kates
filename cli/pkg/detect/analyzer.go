@@ -30,12 +30,24 @@ func (a *Analyzer) calculateBudget(report *DetectReport, reqs ParsedReqs) {
 		OtherMem:  1,
 	}
 
-	if reqs.BrokerCPU > 0 { b.BrokerCPU = reqs.BrokerCPU }
-	if reqs.BrokerMem > 0 { b.BrokerMem = reqs.BrokerMem }
-	if reqs.ControllerCPU > 0 { b.CtrlCPU = reqs.ControllerCPU }
-	if reqs.ControllerMem > 0 { b.CtrlMem = reqs.ControllerMem }
-	if reqs.OtherCPU > 0 { b.OtherCPU = reqs.OtherCPU }
-	if reqs.OtherMem > 0 { b.OtherMem = reqs.OtherMem }
+	if reqs.BrokerCPU > 0 {
+		b.BrokerCPU = reqs.BrokerCPU
+	}
+	if reqs.BrokerMem > 0 {
+		b.BrokerMem = reqs.BrokerMem
+	}
+	if reqs.ControllerCPU > 0 {
+		b.CtrlCPU = reqs.ControllerCPU
+	}
+	if reqs.ControllerMem > 0 {
+		b.CtrlMem = reqs.ControllerMem
+	}
+	if reqs.OtherCPU > 0 {
+		b.OtherCPU = reqs.OtherCPU
+	}
+	if reqs.OtherMem > 0 {
+		b.OtherMem = reqs.OtherMem
+	}
 
 	b.NeedCPU = b.CtrlCPU + b.BrokerCPU*3 + b.OtherCPU
 	b.NeedMem = b.CtrlMem + b.BrokerMem*3 + b.OtherMem
@@ -76,7 +88,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 	addCheck("Kubernetes version ≥ 1.25", report.K8sMinor >= 25, report.K8sVersion)
 	addCheck("Helm version ≥ 3.12", report.HelmMajor >= 3, report.HelmVersion)
-	
+
 	// Treat absence of Strimzi CRDs as a warning rather than a fatal failure since they are deployed automatically by Kates.
 	if !report.Strimzi.CRDsPresent {
 		v.Warns++
@@ -86,7 +98,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	}
 
 	addCheck("≥ 3 availability zones", len(report.Zones) >= 3, fmt.Sprintf("%d zone(s)", len(report.Zones)))
-	
+
 	min1Node := true
 	for _, z := range report.Zones {
 		if z.Nodes < 1 {
@@ -95,7 +107,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	}
 	addCheck("≥ 1 node per zone", min1Node, fmt.Sprintf("%d nodes across %d zones", len(report.Nodes), len(report.Zones)))
 	addCheck("StorageClass available", len(report.Storage) > 0, fmt.Sprintf("%d class(es)", len(report.Storage)))
-	
+
 	// Active Infrastructure Probing Validation
 	minIOPS := 1000 // we want at least 1000 IOPS
 	iopsPass := false
@@ -111,10 +123,10 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	if len(report.Storage) > 0 {
 		addCheck("Disk IOPS sufficient (≥ 1000)", iopsPass, fmt.Sprintf("max %d IOPS measured", maxIOPS))
 	}
-	
+
 	addCheck("Controller resources fit", report.Budget.TotalCPU >= report.Budget.CtrlCPU && report.Budget.TotalMem >= report.Budget.CtrlMem, fmt.Sprintf("%dm needed", report.Budget.CtrlCPU))
 	addCheck("Broker resources fit (all zones)", report.Budget.TotalCPU >= report.Budget.NeedCPU && report.Budget.TotalMem >= report.Budget.NeedMem, fmt.Sprintf("%dm total needed", report.Budget.NeedCPU))
-	
+
 	addCheck("Replication factor 3 achievable", len(report.Zones) >= 3, fmt.Sprintf("%d zones", len(report.Zones)))
 	addCheck("min.insync.replicas=2 safe", len(report.Zones) >= 3, "can lose 1 zone")
 
@@ -126,7 +138,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		}
 	}
 	addCheck("RBAC permissions", hasRbac, "kafka namespace")
-	
+
 	// Treat absence of Prometheus monitoring CRD as a warning rather than a fatal failure since they are deployed automatically by Kates.
 	if !report.Monitoring.PodMonitorCRD {
 		v.Warns++
@@ -151,7 +163,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 				}
 			}
 		}
-		
+
 		if hasFailure {
 			v.Warns++
 			addCheck("AZ network latency (cross-zone)", true, "some zone probes failed")
