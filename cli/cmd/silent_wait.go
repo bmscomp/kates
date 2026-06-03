@@ -65,7 +65,12 @@ func waitCustomResourceReadySilent(ctx context.Context, id, kind, namespace, sel
 				return nil
 			}
 		}
-		time.Sleep(3 * time.Second)
+		select {
+		case <-ctx.Done():
+			dl.FinishComponent(id, false)
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
 	}
 	dl.FinishComponent(id, false)
 	return fmt.Errorf("timeout waiting for %s to become ready", id)
