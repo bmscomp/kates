@@ -46,6 +46,7 @@ enum TestType {
   TUNE_BATCHING = 11;
   TUNE_COMPRESSION = 12;
   TUNE_PARTITIONS = 13;
+  INTEGRATION_CDC = 14;
 }
 
 enum TestStatus {

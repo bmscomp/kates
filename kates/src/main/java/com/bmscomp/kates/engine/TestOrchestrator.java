@@ -327,6 +327,14 @@ public class TestOrchestrator {
                         BenchmarkStatus status = backend.poll(handle);
                         result = applyStatus(result, status);
 
+                        // Propagate CDC phase data to the TestRun
+                        if (status.getPhaseDurations() != null && !status.getPhaseDurations().isEmpty()) {
+                            run = run.withCdcPhases(status.getPhaseDurations());
+                        }
+                        if (status.getCurrentPhase() != null) {
+                            run = run.withCdcPhase(status.getCurrentPhase());
+                        }
+
                         if (status.getHeatmapBuckets() != null) {
                             heatmapRows
                                     .computeIfAbsent(runId, k -> new java.util.ArrayList<>())
@@ -611,6 +619,12 @@ public class TestOrchestrator {
                         .build());
             case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS ->
                 List.of(produceTask(runId + "-tune-0", runId, topic, spec, producerConfig));
+            case INTEGRATION_CDC ->
+                List.of(BenchmarkTask.builder(runId + "-integration-cdc", BenchmarkTask.WorkloadType.INTEGRITY_CDC)
+                        .runId(runId)
+                        .topic(topic)
+                        .producerConfig(producerConfig)
+                        .build());
         };
     }
 

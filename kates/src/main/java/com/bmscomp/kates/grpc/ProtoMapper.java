@@ -90,6 +90,7 @@ public final class ProtoMapper {
             case TUNE_BATCHING -> com.bmscomp.kates.grpc.proto.TestType.TUNE_BATCHING;
             case TUNE_COMPRESSION -> com.bmscomp.kates.grpc.proto.TestType.TUNE_COMPRESSION;
             case TUNE_PARTITIONS -> com.bmscomp.kates.grpc.proto.TestType.TUNE_PARTITIONS;
+            case INTEGRATION_CDC -> com.bmscomp.kates.grpc.proto.TestType.INTEGRATION_CDC;
         };
     }
 
@@ -108,6 +109,7 @@ public final class ProtoMapper {
             case TUNE_BATCHING -> TestType.TUNE_BATCHING;
             case TUNE_COMPRESSION -> TestType.TUNE_COMPRESSION;
             case TUNE_PARTITIONS -> TestType.TUNE_PARTITIONS;
+            case INTEGRATION_CDC -> TestType.INTEGRATION_CDC;
             default -> null;
         };
     }
