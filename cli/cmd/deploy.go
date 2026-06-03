@@ -61,6 +61,7 @@ var (
 	deployInteractive        bool
 	deployVerbose            bool
 	deployPortForward        bool
+	deployDryRun             bool
 )
 
 func init() {
@@ -85,6 +86,7 @@ func init() {
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
+	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -314,15 +316,58 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return chartDir + "/values-generic.yaml"
 	}
 
-	// 4. Execution Plan (Helm)
-	PrintPhaseHeader(4, "Executing Deployment Pipeline")
-
+	// Resolve namespaces before building entries
 	var kafkaNS, appNS, chaosNS, jaegerNS string
 	if deployTopology == "single" {
 		kafkaNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
 		kafkaNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployAppNS, deployChaosNS, deployMonitoringNS
 	}
+
+	// ── Build shared component registry (single source of truth) ──
+	var sharedEntries []DeploySummaryEntry
+	if deployWithStrimzi {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
+	}
+	if deployWithCertManager {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
+	}
+	if deployWithKyverno {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
+	}
+	sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+	if deployWithKafkaConnect {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: deployDbNS, Group: "B"})
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+	}
+	if deployWithMonitoring {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
+	}
+	if deployWithSchemaRegistry == "apicurio" {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
+	}
+	sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
+	if deployWithChaos {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
+	}
+
+	// ── Dry-run: show preview and exit ──
+	if deployDryRun {
+		dryCtx, dryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer dryCancel()
+		existingReleases := make(map[string]bool)
+		for _, e := range sharedEntries {
+			key := e.Release + "/" + e.Namespace
+			if isHelmReleaseDeployedFn(dryCtx, e.Release, e.Namespace) {
+				existingReleases[key] = true
+			}
+		}
+		renderDeployPreview(sharedEntries, existingReleases)
+		return nil
+	}
+
+	// 4. Execution Plan (Helm)
+	PrintPhaseHeader(4, "Executing Deployment Pipeline")
 
 	var totalSteps int
 	if deployWithStrimzi {
@@ -358,30 +403,32 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// ---------------------------------------------------------
 	dashboard := NewDeployDashboard(ctx, totalSteps)
 	if deployWithStrimzi {
-		dashboard.RegisterComponent("strimzi", "Strimzi Operator", "strimzi-operator", "name=strimzi-cluster-operator", "A")
+		dashboard.RegisterComponent("strimzi", "Strimzi Operator", "A", Target{"strimzi-operator", "name=strimzi-cluster-operator"})
 	}
 	if deployWithCertManager {
-		dashboard.RegisterComponent("cert-manager", "Cert-Manager", "cert-manager", "app.kubernetes.io/instance=cert-manager", "A")
+		dashboard.RegisterComponent("cert-manager", "Cert-Manager", "A", Target{"cert-manager", "app.kubernetes.io/instance=cert-manager"})
 	}
 	if deployWithKyverno {
-		dashboard.RegisterComponent("kyverno", "Kyverno", "kyverno", "app.kubernetes.io/instance=kyverno", "A")
+		dashboard.RegisterComponent("kyverno", "Kyverno", "A", Target{"kyverno", "app.kubernetes.io/instance=kyverno"})
 	}
-	dashboard.RegisterComponent("kafka", "Kafka Cluster", kafkaNS, "strimzi.io/cluster=krafter", "B")
-	dashboard.RegisterComponent("kafka-users", "Kafka Users", kafkaNS, "strimzi.io/cluster=krafter", "B")
+	dashboard.RegisterComponent("kafka", "Kafka Cluster", "B", Target{kafkaNS, "strimzi.io/cluster=krafter"})
+	dashboard.RegisterComponent("kafka-users", "Kafka Users", "B", Target{kafkaNS, "strimzi.io/cluster=krafter"})
 	if deployWithMonitoring {
-		dashboard.RegisterComponent("monitoring", "Monitoring Stack", jaegerNS, "release=monitoring", "B")
+		dashboard.RegisterComponent("monitoring", "Monitoring Stack", "B", Target{jaegerNS, "release=monitoring"})
 	}
 	if deployWithKafkaConnect {
-		dashboard.RegisterComponent("postgres", "PostgreSQL CDC", deployDbNS, "app.kubernetes.io/instance=postgresql", "B")
-		dashboard.RegisterComponent("kafka-connect", "Kafka Connect", kafkaNS, "app.kubernetes.io/name=kafka-connect", "B")
-		dashboard.RegisterComponent("kafka-connector", "Debezium Connector", kafkaNS, "strimzi.io/cluster=krafter-connect", "B")
+		dashboard.RegisterComponent("cdc", "CDC Infrastructure", "B", 
+			Target{deployDbNS, "app.kubernetes.io/instance=postgresql"},
+			Target{kafkaNS, "app.kubernetes.io/name=kafka-connect"},
+			Target{kafkaNS, "strimzi.io/cluster=krafter-connect"},
+		)
 	}
 	if deployWithSchemaRegistry == "apicurio" {
-		dashboard.RegisterComponent("apicurio", "Apicurio Registry", kafkaNS, "app.kubernetes.io/instance=apicurio", "C")
+		dashboard.RegisterComponent("apicurio", "Apicurio Registry", "C", Target{kafkaNS, "app.kubernetes.io/instance=apicurio"})
 	}
-	dashboard.RegisterComponent("kates", "Kates Backend", appNS, "app.kubernetes.io/instance=kates", "C")
+	dashboard.RegisterComponent("kates", "Kates Backend", "C", Target{appNS, "app.kubernetes.io/instance=kates"})
 	if deployWithChaos {
-		dashboard.RegisterComponent("chaos", "Litmus Chaos", chaosNS, "app.kubernetes.io/instance=chaos", "C")
+		dashboard.RegisterComponent("chaos", "Litmus Chaos", "C", Target{chaosNS, "app.kubernetes.io/instance=chaos"})
 	}
 
 	var pOptions []tea.ProgramOption
@@ -841,19 +888,20 @@ metadata:
 
 				// 2. PostgreSQL
 				if deployWithKafkaConnect {
+					dl.StartComponent("cdc", 25*time.Minute)
 					if deployPG {
 						if err := waitComponentReadySilent(ctx, "postgres", deployDbNS, "app.kubernetes.io/instance=postgresql", 5*time.Minute); err != nil {
-							dl.Printf("    %s PostgreSQL not ready: %v\n", amber("⚠"), err)
+							dl.Printf("    %s PostgreSQL not ready: %v\n", output.WarningStyle.Render("⚠"), err)
 						} else {
 							// Grant superuser to debezium after DB is ready (avoids Bitnami initdb symlink issues)
 							exec.CommandContext(ctx, "kubectl", "exec", "-n", deployDbNS, "postgresql-0", "--",
 								"env", "PGPASSWORD=postgres", "psql", "-U", "postgres", "-c",
 								"ALTER ROLE debezium SUPERUSER;").Run()
 						}
-						dl.FinishComponent("postgres", true)
 						advanceStep()
 					}
 				}
+
 			}
 
 			dl.Println("    - Applying Kafka users and topics...")
@@ -871,7 +919,7 @@ metadata:
 						"-o", "custom-columns=PHASE:.status.phase",
 					).Output()
 					if strings.Contains(string(eoOut), "Running") {
-						dl.Printf("    %s Entity Operator running\n", blue("✔"))
+						dl.Printf("    %s Entity Operator running\n", output.AccentStyle.Render("✔"))
 						break
 					}
 					select {
@@ -883,7 +931,7 @@ metadata:
 
 				err := waitKafkaUsersReadySilent(ctx, "kafka-users", kafkaNS, 8*time.Minute)
 				if err != nil {
-					dl.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", amber("⚠"))
+					dl.Printf("    %s KafkaUsers not all ready after 5m — downstream deploys will retry secret lookup\n", output.WarningStyle.Render("⚠"))
 				}
 			}
 
@@ -904,6 +952,7 @@ stringData:
 
 				if deployConnect && !isTesting {
 					if err := waitComponentReadySilent(ctx, "kafka-connect", kafkaNS, "app.kubernetes.io/name=kafka-connect", 15*time.Minute); err != nil {
+						dl.FinishComponent("cdc", false)
 						return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
 					}
 				}
@@ -943,20 +992,25 @@ spec:
     schema.history.internal.kafka.bootstrap.servers: krafter-kafka-bootstrap.%s.svc:9092
     schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, kafkaNS)
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
-						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", amber("⚠"), err)
+						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", output.WarningStyle.Render("⚠"), err)
+						dl.FinishComponent("cdc", false)
 					} else {
-						dl.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", green("✔"))
+						dl.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", output.SuccessStyle.Render("✔"))
 					}
 				} else {
-					dl.Printf("    %s Debezium connector already exists — skipping\n", green("✔"))
-					dl.FinishComponent("kafka-connector", true)
+					dl.Printf("    %s Debezium connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
+					dl.FinishComponent("cdc", true)
 					advanceStep()
 				}
 
+
 				if deployConnector && !isTesting {
 					if err := waitConnectorReadySilent(ctx, "kafka-connector", kafkaNS, 10*time.Minute); err != nil {
+						dl.FinishComponent("cdc", false)
 						return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
 					}
+					dl.FinishComponent("cdc", true)
+					advanceStep()
 				}
 			}
 
@@ -1068,36 +1122,8 @@ data:
 				}
 			}
 
-			// ---------------------------------------------------------
-			// Deployment Summary Dashboard
-			// ---------------------------------------------------------
-			var entries []DeploySummaryEntry
-			if deployWithStrimzi {
-				entries = append(entries, DeploySummaryEntry{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
-			}
-			if deployWithCertManager {
-				entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
-			}
-			if deployWithKyverno {
-				entries = append(entries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
-			}
-			entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
-			if deployWithKafkaConnect {
-				entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: "database", Group: "B"})
-				entries = append(entries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "krafter", Namespace: kafkaNS, Group: "B"})
-			}
-			if deployWithMonitoring {
-				entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
-			}
-			if deployWithSchemaRegistry == "apicurio" {
-				entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
-			}
-			entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
-			if deployWithChaos {
-				entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
-			}
-
-			finalEntries = entries
+			// Use shared entries for summary (single source of truth)
+			finalEntries = sharedEntries
 			deployElapsed = time.Since(deployStartTime)
 			return nil
 		}()
