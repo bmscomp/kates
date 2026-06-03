@@ -232,9 +232,9 @@ kates: kates-build kates-deploy
 kates-build:
 	@if docker image inspect kates:latest >/dev/null 2>&1; then \
 		echo "✅ Kates image already exists locally (kates:latest)."; \
-	elif docker pull ghcr.io/bmscomp/kates:1.11.0; then \
+	elif docker pull ghcr.io/bmscomp/kates:1.16.0; then \
 		echo "✅ Pulled Kates image from registry."; \
-		docker tag ghcr.io/bmscomp/kates:1.11.0 kates:latest; \
+		docker tag ghcr.io/bmscomp/kates:1.16.0 kates:latest; \
 	else \
 		echo "🔨 Building Kates (JVM + CLI) from source..."; \
 		cd kates && ./mvnw package -DskipTests -B && \
@@ -246,9 +246,9 @@ kates-build:
 kates-native:
 	@if docker image inspect kates:native >/dev/null 2>&1; then \
 		echo "✅ Kates native image already exists locally (kates:native)."; \
-	elif docker pull ghcr.io/bmscomp/kates:1.11.0-native; then \
+	elif docker pull ghcr.io/bmscomp/kates:1.16.0-native; then \
 		echo "✅ Pulled Kates native image from registry."; \
-		docker tag ghcr.io/bmscomp/kates:1.11.0-native kates:native; \
+		docker tag ghcr.io/bmscomp/kates:1.16.0-native kates:native; \
 	else \
 		echo "🔨 Building Kates (native) from source..."; \
 		docker build -f kates/Dockerfile.native -t kates:native .; \
