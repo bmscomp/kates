@@ -40,6 +40,11 @@ RUN mkdir -p debezium-sqlserver && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-sqlserver/${DEBEZIUM_VERSION}/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz" \
     | tar -xz -C debezium-sqlserver --strip-components=1
 
+# JDBC Sink Connector — Write events to relational databases
+RUN mkdir -p debezium-jdbc && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jdbc/${DEBEZIUM_VERSION}/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-jdbc --strip-components=1
+
 # ── Apicurio Schema Registry Integration ─────────────────────────────────────
 # Apicurio converters enable schema governance with Avro, JSON Schema, and
 # Protobuf serialization. Required when connecting to Apicurio Registry.

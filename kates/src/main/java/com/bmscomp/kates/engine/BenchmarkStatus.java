@@ -1,5 +1,6 @@
 package com.bmscomp.kates.engine;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,6 +29,8 @@ public class BenchmarkStatus {
     private final List<MetricsSample> timeSeries;
     private final Map<String, Double> latencyHistogram;
     private final long[] heatmapBuckets;
+    private final Map<String, Long> phaseDurations;
+    private final String currentPhase;
 
     private BenchmarkStatus(Builder builder) {
         this.state = builder.state;
@@ -45,6 +48,8 @@ public class BenchmarkStatus {
         this.timeSeries = builder.timeSeries != null ? List.copyOf(builder.timeSeries) : List.of();
         this.latencyHistogram = builder.latencyHistogram != null ? Map.copyOf(builder.latencyHistogram) : Map.of();
         this.heatmapBuckets = builder.heatmapBuckets;
+        this.phaseDurations = builder.phaseDurations != null ? new LinkedHashMap<>(builder.phaseDurations) : Map.of();
+        this.currentPhase = builder.currentPhase;
     }
 
     public TaskStatus getState() {
@@ -107,6 +112,14 @@ public class BenchmarkStatus {
         return heatmapBuckets;
     }
 
+    public Map<String, Long> getPhaseDurations() {
+        return phaseDurations;
+    }
+
+    public String getCurrentPhase() {
+        return currentPhase;
+    }
+
     public boolean isTerminal() {
         return state == TaskStatus.DONE || state == TaskStatus.FAILED;
     }
@@ -131,6 +144,8 @@ public class BenchmarkStatus {
         private List<MetricsSample> timeSeries;
         private Map<String, Double> latencyHistogram;
         private long[] heatmapBuckets;
+        private Map<String, Long> phaseDurations;
+        private String currentPhase;
 
         private Builder(TaskStatus state) {
             this.state = state;
@@ -203,6 +218,16 @@ public class BenchmarkStatus {
 
         public Builder heatmapBuckets(long[] b) {
             this.heatmapBuckets = b;
+            return this;
+        }
+
+        public Builder phaseDurations(Map<String, Long> p) {
+            this.phaseDurations = p;
+            return this;
+        }
+
+        public Builder currentPhase(String c) {
+            this.currentPhase = c;
             return this;
         }
 

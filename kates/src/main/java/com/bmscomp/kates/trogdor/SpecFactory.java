@@ -34,7 +34,7 @@ public class SpecFactory {
             case VOLUME -> buildVolumeSpecs(spec, runId);
             case CAPACITY -> buildCapacitySpecs(spec, runId);
             case ROUND_TRIP -> buildRoundTripSpecs(spec, runId);
-            case INTEGRITY -> buildLoadSpecs(spec, runId);
+            case INTEGRITY, INTEGRATION_CDC -> buildLoadSpecs(spec, runId);
             case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS ->
                 buildLoadSpecs(spec, runId);
         };
