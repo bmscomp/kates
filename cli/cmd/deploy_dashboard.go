@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/output"
 )
 
 // ── Controller Interface for deploy.go ─────────────────────────────────────
@@ -83,11 +84,15 @@ type allWorkloadsMsg struct {
 
 // ── Bubble Tea Model ─────────────────────────────────────────────────────
 
+type Target struct {
+	Namespace string
+	Selector  string
+}
+
 type componentStat struct {
 	ID        string
 	Name      string
-	Namespace string
-	Selector  string
+	Targets   []Target
 	Group     string
 	Active    bool
 	Done      bool
@@ -143,12 +148,13 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 	return m
 }
 
-func (m *deployDashboardModel) RegisterComponent(id, name, namespace, selector, group string) {
+// ── Dashboard Methods ────────────────────────────────────────────────────
+
+func (m *deployDashboardModel) RegisterComponent(id, name, group string, targets ...Target) {
 	c := &componentStat{
 		ID:        id,
 		Name:      name,
-		Namespace: namespace,
-		Selector:  selector,
+		Targets:   targets,
 		Group:     group,
 	}
 	m.components = append(m.components, c)
@@ -160,83 +166,91 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 		results := make(map[string][]workloadStat)
 
 		for _, c := range components {
-			if c.Selector == "" {
-				continue
-			}
-
-			out, err := exec.CommandContext(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
-				"-n", c.Namespace,
-				"-l", c.Selector,
-				"-o", "json").Output()
-
-			if err != nil || len(out) == 0 {
-				continue
-			}
-
-			var list struct {
-				Items []struct {
-					Kind     string `json:"kind"`
-					Metadata struct {
-						Name string `json:"name"`
-					} `json:"metadata"`
-					Spec struct {
-						Replicas *int `json:"replicas"`
-					} `json:"spec"`
-					Status struct {
-						ReadyReplicas *int `json:"readyReplicas"`
-						NumberReady   *int `json:"numberReady"`
-						DesiredNumber *int `json:"desiredNumberScheduled"`
-						Pods          *int `json:"pods"`
-						ReadyPods     *int `json:"readyPods"`
-					} `json:"status"`
-				} `json:"items"`
-			}
-
-			if err := json.Unmarshal(out, &list); err != nil {
+			if len(c.Targets) == 0 {
 				continue
 			}
 
 			var workloads []workloadStat
-			for _, item := range list.Items {
-				stat := workloadStat{
-					kind: item.Kind,
-					name: item.Metadata.Name,
-				}
-				if item.Kind == "DaemonSet" {
-					if item.Status.DesiredNumber != nil {
-						stat.expected = *item.Status.DesiredNumber
-					}
-					if item.Status.NumberReady != nil {
-						stat.ready = *item.Status.NumberReady
-					}
-				} else if item.Kind == "StrimziPodSet" {
-					if item.Status.Pods != nil {
-						stat.expected = *item.Status.Pods
-					} else {
-						stat.expected = 1
-					}
-					if item.Status.ReadyPods != nil {
-						stat.ready = *item.Status.ReadyPods
-					}
-				} else {
-					if item.Spec.Replicas != nil {
-						stat.expected = *item.Spec.Replicas
-					} else {
-						stat.expected = 1
-					}
-					if item.Status.ReadyReplicas != nil {
-						stat.ready = *item.Status.ReadyReplicas
-					}
-				}
-				// Poll pods for this workload to get phase
-				podOut, _ := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", c.Namespace, "-l", c.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
-				phases := strings.Split(strings.TrimSpace(string(podOut)), ",")
-				if len(phases) > 0 && phases[0] != "" {
-					stat.phase = phases[0] // Simplify by just taking the first pod's phase for the workload
+
+			for _, target := range c.Targets {
+				if target.Selector == "" {
+					continue
 				}
 
-				workloads = append(workloads, stat)
+				out, err := exec.CommandContext(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
+					"-n", target.Namespace,
+					"-l", target.Selector,
+					"-o", "json").Output()
+
+				if err != nil || len(out) == 0 {
+					continue
+				}
+
+				var list struct {
+					Items []struct {
+						Kind     string `json:"kind"`
+						Metadata struct {
+							Name string `json:"name"`
+						} `json:"metadata"`
+						Spec struct {
+							Replicas *int `json:"replicas"`
+						} `json:"spec"`
+						Status struct {
+							ReadyReplicas *int `json:"readyReplicas"`
+							NumberReady   *int `json:"numberReady"`
+							DesiredNumber *int `json:"desiredNumberScheduled"`
+							Pods          *int `json:"pods"`
+							ReadyPods     *int `json:"readyPods"`
+						} `json:"status"`
+					} `json:"items"`
+				}
+
+				if err := json.Unmarshal(out, &list); err != nil {
+					continue
+				}
+
+				for _, item := range list.Items {
+					stat := workloadStat{
+						kind: item.Kind,
+						name: item.Metadata.Name,
+					}
+					if item.Kind == "DaemonSet" {
+						if item.Status.DesiredNumber != nil {
+							stat.expected = *item.Status.DesiredNumber
+						}
+						if item.Status.NumberReady != nil {
+							stat.ready = *item.Status.NumberReady
+						}
+					} else if item.Kind == "StrimziPodSet" {
+						if item.Status.Pods != nil {
+							stat.expected = *item.Status.Pods
+						} else {
+							stat.expected = 1
+						}
+						if item.Status.ReadyPods != nil {
+							stat.ready = *item.Status.ReadyPods
+						}
+					} else {
+						if item.Spec.Replicas != nil {
+							stat.expected = *item.Spec.Replicas
+						} else {
+							stat.expected = 1
+						}
+						if item.Status.ReadyReplicas != nil {
+							stat.ready = *item.Status.ReadyReplicas
+						}
+					}
+					// Poll pods for this workload to get phase
+					podOut, _ := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
+					phases := strings.Split(strings.TrimSpace(string(podOut)), ",")
+					if len(phases) > 0 && phases[0] != "" {
+						stat.phase = phases[0] // Simplify by just taking the first pod's phase for the workload
+					}
+
+					workloads = append(workloads, stat)
+				}
 			}
+			
 			sort.Slice(workloads, func(i, j int) bool { return workloads[i].name < workloads[j].name })
 			results[c.ID] = workloads
 		}
@@ -259,15 +273,25 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.logsViewport.Width = msg.Width - 4
-		m.logsViewport.Height = 8 // Fixed height for logs
-
-		compHeight := msg.Height - 8 - 6 // 8 for logs, 6 for header/footer
-		if compHeight < 5 {
-			compHeight = 5
+		
+		// 6 for header/footer (progress bar + padding)
+		viewHeight := msg.Height - 6
+		if viewHeight < 5 {
+			viewHeight = 5
 		}
-		m.componentsViewport.Width = msg.Width - 4
-		m.componentsViewport.Height = compHeight
+		
+		// Components pane is fixed at 60 columns
+		compWidth := 60
+		logsWidth := msg.Width - compWidth - 4 // 4 for spacing/margins
+		if logsWidth < 20 {
+			logsWidth = 20
+		}
+
+		m.componentsViewport.Width = compWidth
+		m.componentsViewport.Height = viewHeight
+		
+		m.logsViewport.Width = logsWidth
+		m.logsViewport.Height = viewHeight
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -377,27 +401,28 @@ func (m deployDashboardModel) View() string {
 
 		if !c.Active && !c.Done {
 			// Total inside width is 56. "◯ Pending..." is 12. Pad it to 56.
-			b.WriteString(fmt.Sprintf("│ %s │\n", padRight(dim("◯ Pending..."), 56)))
+			b.WriteString(fmt.Sprintf("│ %s │\n", padRight(output.DimStyle.Render("◯ Pending..."), 56)))
 		} else {
 			icon := m.spinner.View()
 			if c.Done {
 				if c.Success {
-					icon = green("✔")
+					icon = output.SuccessStyle.Render("✔")
 				} else {
-					icon = red("✖")
+					icon = output.ErrorStyle.Render("✖")
 				}
 			}
 
-			statusText := dim("Deploying...")
+			statusText := output.DimStyle.Render("Deploying...")
 			if c.Done {
 				if c.Success {
-					statusText = blue("Ready")
+					statusText = output.AccentStyle.Render("Ready")
 				} else {
-					statusText = red("Failed")
+					statusText = output.ErrorStyle.Render("Failed")
 				}
 			}
 
-			leftPart := fmt.Sprintf("%s %s", icon, bold(c.Name)) // removed one space to save width
+			boldStyle := lipgloss.NewStyle().Bold(true)
+			leftPart := fmt.Sprintf("%s %s", icon, boldStyle.Render(c.Name))
 			rightPart := statusText
 			// We have "│ " (2) and " │" (2), leaving 56 for leftPart + spaces + rightPart
 			spaces := 56 - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
@@ -413,7 +438,7 @@ func (m deployDashboardModel) View() string {
 					elapsed = c.Timeout
 				}
 
-				tLeft := fmt.Sprintf("  %s", dim("Timeout"))
+				tLeft := fmt.Sprintf("  %s", output.DimStyle.Render("Timeout"))
 
 				// Format mm:ss
 				eM := int(elapsed.Minutes())
@@ -429,7 +454,7 @@ func (m deployDashboardModel) View() string {
 				if tSpaces < 1 {
 					tSpaces = 1
 				}
-				b.WriteString(fmt.Sprintf("│ %s%s%s │\n", tLeft, strings.Repeat(" ", tSpaces), dim(tRight)))
+				b.WriteString(fmt.Sprintf("│ %s%s%s │\n", tLeft, strings.Repeat(" ", tSpaces), output.DimStyle.Render(tRight)))
 			}
 
 			for _, w := range c.Workloads {
@@ -453,12 +478,12 @@ func (m deployDashboardModel) View() string {
 					}
 				}
 				if status == "Ready" {
-					status = blue("Ready")
+					status = output.AccentStyle.Render("Ready")
 				} else {
-					status = amber(status)
+					status = output.WarningStyle.Render(status)
 				}
 
-				wLeft := fmt.Sprintf("  %s", dim(name)) // removed one space
+				wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
 				wRight := fmt.Sprintf("[%s] %d/%d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
 				// We have "│ " (2) and " │" (2), leaving 56 for wLeft + wSpaces + wRight
 				wSpaces := 56 - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
@@ -492,9 +517,13 @@ func (m deployDashboardModel) View() string {
 
 	var out strings.Builder
 	out.WriteString(fmt.Sprintf("\n📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps)\n\n", bar, pct*100, m.currentStep, m.totalSteps))
-	out.WriteString(m.componentsViewport.View())
-	out.WriteString("\n")
-	out.WriteString(m.logsViewport.View())
+	
+	split := lipgloss.JoinHorizontal(lipgloss.Top, 
+		m.componentsViewport.View(),
+		"    ", // padding between columns
+		m.logsViewport.View(),
+	)
+	out.WriteString(split)
 	out.WriteString("\n")
 
 	return out.String()
@@ -532,20 +561,20 @@ func renderProgressBar(current, total, width int, failed bool, isTimeout bool) s
 
 	fillStr := strings.Repeat(fillChar, filled)
 	if failed {
-		fillStr = red(fillStr)
+		fillStr = output.ErrorStyle.Render(fillStr)
 	} else if current == total {
 		if isTimeout {
-			fillStr = red(fillStr) // Timeout reaching max is bad
+			fillStr = output.ErrorStyle.Render(fillStr) // Timeout reaching max is bad
 		} else {
-			fillStr = blue(fillStr)
+			fillStr = output.AccentStyle.Render(fillStr)
 		}
 	} else if isTimeout {
-		fillStr = amber(fillStr) // Timeout progress in amber
+		fillStr = output.WarningStyle.Render(fillStr) // Timeout progress in amber
 	}
 
 	emptyStr := strings.Repeat(emptyChar, empty)
 	if !isTimeout {
-		emptyStr = dim(emptyStr)
+		emptyStr = output.DimStyle.Render(emptyStr)
 	}
 
 	return fmt.Sprintf("%s%s", fillStr, emptyStr)

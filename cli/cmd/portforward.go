@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/output"
 	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
@@ -80,27 +81,11 @@ func init() {
 	rootCmd.AddCommand(portsCmd)
 }
 
-// ── ANSI helpers (reuse from kafka_wait.go) ──────────────────────────────────
-const (
-	cPBlue  = "\033[38;5;39m"
-	cPRed   = "\033[38;5;196m"
-	cPAmber = "\033[38;5;208m"
-	cPDim   = "\033[38;5;243m"
-	cPBold  = "\033[1m"
-	cPReset = "\033[0m"
-	cPGreen = "\033[38;5;48m"
-)
-
-func pBlue(s string) string  { return cPBlue + s + cPReset }
-func pDim(s string) string   { return cPDim + s + cPReset }
-func pBold(s string) string  { return cPBold + s + cPReset }
-func pGreen(s string) string { return cPGreen + s + cPReset }
-
 // ──────────────────────────────────────────────────────────────────────────────
 
 func runPorts(ctx context.Context) {
-	// ── 0. Clean up existing port forwards to prevent bind conflicts ───────────
-	fmt.Printf("\n    %s Cleaning up existing port-forwards...\n", pDim("🧹"))
+	// ── 0. Clean up existing port forwards to prevent bind conflicts ────────────
+	fmt.Printf("\n    %s Cleaning up existing port-forwards...\n", output.DimStyle.Render("🧹"))
 
 	myPid := os.Getpid()
 	if out, err := exec.Command("pgrep", "-f", "ports").Output(); err == nil {
@@ -121,42 +106,44 @@ func runPorts(ctx context.Context) {
 	time.Sleep(1000 * time.Millisecond)
 
 	// ── 1. Discover services ─────────────────────────────────────────────────
-	fmt.Printf("    %s Discovering services...\n", pDim("⇄"))
+	fmt.Printf("    %s Discovering services...\n", output.DimStyle.Render("⇄"))
 
 	discovered := discoverServices()
 
 	specs := matchSpecs(discovered)
 	if len(specs) == 0 {
-		fmt.Printf("    %s No Kates services found in the cluster\n\n", cPRed+"✖"+cPReset)
+		fmt.Printf("    %s No Kates services found in the cluster\n\n", output.ErrorStyle.Render("✖"))
 		return
 	}
 
+	boldStyle := lipgloss.NewStyle().Bold(true)
+
 	// ── 2. Display table ─────────────────────────────────────────────────────
-	fmt.Printf("\n    %s Port Forwarding %s\n", pBold("⇄"), pDim(fmt.Sprintf("(%d services)", len(specs))))
-	fmt.Printf("    %s\n", pDim("────────────────────────────────────────────────────────────────"))
+	fmt.Printf("\n    %s Port Forwarding %s\n", boldStyle.Render("⇄"), output.DimStyle.Render(fmt.Sprintf("(%d services)", len(specs))))
+	fmt.Printf("    %s\n", output.DimStyle.Render("────────────────────────────────────────────────────────────────"))
 	fmt.Printf("    %s  %s  %s  %s\n",
-		pDim(fmt.Sprintf("%-26s", "SERVICE")),
-		pDim(fmt.Sprintf("%-14s", "NAMESPACE")),
-		pDim(fmt.Sprintf("%-22s", "PORTS")),
-		pDim("URL"))
-	fmt.Printf("    %s\n", pDim("────────────────────────────────────────────────────────────────"))
+		output.DimStyle.Render(fmt.Sprintf("%-26s", "SERVICE")),
+		output.DimStyle.Render(fmt.Sprintf("%-14s", "NAMESPACE")),
+		output.DimStyle.Render(fmt.Sprintf("%-22s", "PORTS")),
+		output.DimStyle.Render("URL"))
+	fmt.Printf("    %s\n", output.DimStyle.Render("────────────────────────────────────────────────────────────────"))
 
 	for _, s := range specs {
 		portStr := fmt.Sprintf(":%d → localhost:%d", s.Remote, s.Local)
 		urlStr := ""
 		if s.URL != "" {
-			urlStr = pDim(s.URL)
+			urlStr = output.DimStyle.Render(s.URL)
 		}
 		fmt.Printf("    %s  %s  %s  %s\n",
-			pBlue(fmt.Sprintf("%-26s", s.Label)),
+			output.AccentStyle.Render(fmt.Sprintf("%-26s", s.Label)),
 			fmt.Sprintf("%-14s", s.Namespace),
-			pGreen(fmt.Sprintf("%-22s", portStr)),
+			output.SuccessStyle.Render(fmt.Sprintf("%-22s", portStr)),
 			urlStr)
 	}
 
-	fmt.Printf("    %s\n", pDim("────────────────────────────────────────────────────────────────"))
+	fmt.Printf("    %s\n", output.DimStyle.Render("────────────────────────────────────────────────────────────────"))
 	// ── 3. Start all forwards in the background ──────────────────────────────
-	fmt.Printf("\n    %s Establishing port-forwards in the background...\n", pBold("⚡"))
+	fmt.Printf("\n    %s Establishing port-forwards in the background...\n", boldStyle.Render("⚡"))
 
 	for _, spec := range specs {
 		pfArg := fmt.Sprintf("%d:%d", spec.Local, spec.Remote)
@@ -175,7 +162,7 @@ func runPorts(ctx context.Context) {
 	}
 
 	// Verify reachability
-	fmt.Printf("    %s Verifying connections...\n", pDim("⇄"))
+	fmt.Printf("    %s Verifying connections...\n", output.DimStyle.Render("⇄"))
 	time.Sleep(300 * time.Millisecond)
 
 	okStyle := lipgloss.NewStyle().Foreground(theme.Success).Bold(true)
@@ -198,7 +185,7 @@ func runPorts(ctx context.Context) {
 				okStyle.Render("✔"),
 				spec.Label,
 				spec.Local,
-				pGreen("[ACTIVE]"),
+				output.SuccessStyle.Render("[ACTIVE]"),
 			)
 		} else {
 			allOk = false
@@ -206,18 +193,18 @@ func runPorts(ctx context.Context) {
 				errStyle.Render("✖"),
 				spec.Label,
 				spec.Local,
-				cPRed+"[FAILED]"+cPReset,
+				output.ErrorStyle.Render("[FAILED]"),
 			)
 		}
 	}
 
 	fmt.Println()
 	if allOk {
-		fmt.Printf("    %s %s\n", okStyle.Render("✓"), pBold("Port forwards established successfully!"))
-		fmt.Printf("      %s\n\n", pDim("They are running in the background. You can continue typing commands in this terminal."))
+		fmt.Printf("    %s %s\n", okStyle.Render("✓"), boldStyle.Render("Port forwards established successfully!"))
+		fmt.Printf("      %s\n\n", output.DimStyle.Render("They are running in the background. You can continue typing commands in this terminal."))
 	} else {
-		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), pBold("Some port forwards failed to establish."))
-		fmt.Printf("      %s\n\n", pDim("Check if the pods are ready or run 'kates clean' to reset."))
+		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
+		fmt.Printf("      %s\n\n", output.DimStyle.Render("Check if the pods are ready or run 'kates clean' to reset."))
 	}
 }
 

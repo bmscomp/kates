@@ -35,7 +35,10 @@ type DeploySummaryEntry struct {
 	Name      string
 	Release   string
 	Namespace string
-	Group     string // "A", "B", or "C"
+	Group     string        // "A", "B", or "C"
+	Status    string        // "deployed", "skipped", "failed"
+	Error     string        // error message if failed
+	Duration  time.Duration // per-component deploy time
 }
 
 // RenderDeployDashboard renders the full deployment summary using lipgloss.
@@ -88,12 +91,39 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 
 	// ── Footer ──
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-		Render("  ✅ All components deployed successfully!"))
+
+	var deployedCount, skippedCount, failedCount int
+	for _, e := range entries {
+		switch e.Status {
+		case "failed":
+			failedCount++
+		case "skipped":
+			skippedCount++
+		default:
+			deployedCount++
+		}
+	}
+
+	if failedCount > 0 {
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
+			Render(fmt.Sprintf("  ⚠️  %d deployed, %d failed", deployedCount, failedCount)))
+		for _, e := range entries {
+			if e.Status == "failed" && e.Error != "" {
+				fmt.Printf("     %s %s: %s\n",
+					lipgloss.NewStyle().Foreground(clrRed).Render("┖"),
+					e.Name,
+					lipgloss.NewStyle().Foreground(clrDim).Render(e.Error))
+			}
+		}
+	} else {
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
+			Render(fmt.Sprintf("  ✅ %d components deployed successfully!", deployedCount)))
+	}
+
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Italic(true).Render("  Quick commands:"))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Italic(true).Render("  ⏭  Next steps:"))
 	cmdStyle := lipgloss.NewStyle().Foreground(clrCyan)
-	for _, c := range []string{"kubectl get pods -A", "helm list -A", "kates health"} {
+	for _, c := range []string{"kates status", "kates kafka connect test", "kates deploy -P"} {
 		fmt.Println(cmdStyle.Render("    $ " + c))
 	}
 	fmt.Println()
@@ -113,23 +143,21 @@ func printRow(icon, name, namespace, status string) {
 	const nameWidth = 28
 	const nsWidth = 18
 
-	nameStr := icon + " " + name
-	nsStr := namespace
-
-	// Pad based on actual visual width so emoji don't throw off alignment
-	// Hardcode icon width to 2 cells to bypass go-runewidth emoji miscalculations
-	visualNameWidth := 2 + 1 + len(name)
-	namePad := nameWidth - visualNameWidth
+	// Bypass go-runewidth emoji miscalculations by hardcoding icon width to 2 cells
+	nameVisualLen := 2 + 1 + len(name)
+	namePad := nameWidth - nameVisualLen
 	if namePad < 1 {
 		namePad = 1
 	}
-	nsPad := nsWidth - len(nsStr)
+	
+	nsPad := nsWidth - len(namespace)
 	if nsPad < 1 {
 		nsPad = 1
 	}
 
+	nameStr := icon + " " + name
 	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr) + strings.Repeat(" ", namePad)
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(nsStr) + strings.Repeat(" ", nsPad)
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(namespace) + strings.Repeat(" ", nsPad)
 
 	// Status column
 	var statusStr string
