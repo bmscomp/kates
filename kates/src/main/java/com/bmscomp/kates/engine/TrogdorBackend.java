@@ -97,9 +97,9 @@ public class TrogdorBackend implements BenchmarkBackend {
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getRecordSize());
-            case INTEGRITY ->
+            case INTEGRITY, INTEGRITY_CDC ->
                 throw new BenchmarkException(
-                        "INTEGRITY tests require the native backend (per-record sequencing not supported by Trogdor)",
+                        "INTEGRITY/CDC tests require the native backend",
                         null);
         };
     }

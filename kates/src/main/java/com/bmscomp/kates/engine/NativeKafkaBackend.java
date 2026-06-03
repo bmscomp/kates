@@ -39,14 +39,17 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
     private final String bootstrapServers;
     private final KafkaSecurityConfig securityConfig;
+    private final CdcIntegrationService cdcIntegrationService;
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
 
     @Inject
     public NativeKafkaBackend(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
-            KafkaSecurityConfig securityConfig) {
+            KafkaSecurityConfig securityConfig,
+            CdcIntegrationService cdcIntegrationService) {
         this.bootstrapServers = bootstrapServers;
         this.securityConfig = securityConfig;
+        this.cdcIntegrationService = cdcIntegrationService;
     }
 
     @Override
@@ -93,6 +96,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 case CONSUME -> runConsumer(task, state);
                 case ROUND_TRIP -> runProducer(task, state);
                 case INTEGRITY -> runIntegrity(task, state);
+                case INTEGRITY_CDC -> runIntegrityCdc(task, state);
             }
             state.status = TaskStatus.DONE;
         } catch (Exception e) {
@@ -101,6 +105,22 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             state.status = TaskStatus.FAILED;
         } finally {
             state.endTimeMs = System.currentTimeMillis();
+        }
+    }
+
+    private void runIntegrityCdc(BenchmarkTask task, WorkerState state) {
+        try {
+            BenchmarkStatus cdcStatus = cdcIntegrationService.runCdcTest(task).join();
+            state.status = cdcStatus.getState();
+            if (cdcStatus.getError() != null) {
+                state.error = cdcStatus.getError();
+            }
+            state.recordsProcessed.set(cdcStatus.getRecordsProcessed());
+            if (cdcStatus.getPhaseDurations() != null && !cdcStatus.getPhaseDurations().isEmpty()) {
+                state.cdcPhaseDurations = cdcStatus.getPhaseDurations();
+            }
+        } catch (Exception e) {
+            throw new BenchmarkException("CDC Integration test failed: " + e.getMessage(), e);
         }
     }
 
@@ -330,6 +350,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         volatile Thread thread;
         volatile DataIntegrityVerifier verifier;
         volatile IntegrityResult integrityResult;
+        volatile Map<String, Long> cdcPhaseDurations;
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
@@ -362,6 +383,10 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
             if (integrityResult != null) {
                 builder.integrityResult(integrityResult);
+            }
+
+            if (cdcPhaseDurations != null) {
+                builder.phaseDurations(cdcPhaseDurations);
             }
 
             return builder.build();

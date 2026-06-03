@@ -12,7 +12,8 @@ public class BenchmarkTask {
         PRODUCE,
         CONSUME,
         ROUND_TRIP,
-        INTEGRITY
+        INTEGRITY,
+        INTEGRITY_CDC
     }
 
     private final String taskId;
