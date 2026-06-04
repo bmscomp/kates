@@ -13,7 +13,7 @@
   <p>
     <a href="https://github.com/bmscomp/kates/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/bmscomp/kates/ci.yml?branch=main&label=CI&logo=github" alt="CI" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?logo=apache" alt="License" /></a>
-    <a href="https://github.com/bmscomp/kates/releases/tag/v1.13.0"><img src="https://img.shields.io/badge/release-v1.13.0-brightgreen?logo=github" alt="Release" /></a>
+    <a href="https://github.com/bmscomp/kates/releases/tag/v1.17.0"><img src="https://img.shields.io/badge/release-v1.17.0-brightgreen?logo=github" alt="Release" /></a>
     <img src="https://img.shields.io/badge/CLI-Go%201.24-00ADD8?logo=go&logoColor=white" alt="Go" />
     <img src="https://img.shields.io/badge/Backend-Quarkus%203.32-4695EB?logo=quarkus&logoColor=white" alt="Quarkus" />
     <img src="https://img.shields.io/badge/Kafka-4.2.0%20KRaft-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
@@ -300,7 +300,7 @@ brew install kates
 ```
 
 #### Pre-Compiled Binaries
-Download the official **`v1.13.0`** binaries from the [GitHub Releases](https://github.com/bmscomp/kates/releases/tag/v1.13.0) page. Available for macOS and Linux (amd64 and arm64).
+Download the official **`v1.17.0`** binaries from the [GitHub Releases](https://github.com/bmscomp/kates/releases/tag/v1.17.0) page. Available for macOS and Linux (amd64 and arm64).
 
 #### From Source
 ```bash

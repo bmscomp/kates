@@ -3,7 +3,7 @@
 
 image:
   repository: ghcr.io/bmscomp/kates
-  tag: "1.11"
+  tag: "1.17.0"
   pullPolicy: IfNotPresent
 
 resources:
