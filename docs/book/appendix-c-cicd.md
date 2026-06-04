@@ -210,8 +210,8 @@ graph TD
 
 | Variant | Image | Platforms |
 |---------|-------|-----------|
-| **JVM** | `ghcr.io/bmscomp/kates:v1.x.x` | `linux/amd64`, `linux/arm64` |
-| **Native** | `ghcr.io/bmscomp/kates:v1.x.x-native` | `linux/amd64`, `linux/arm64` |
+| **JVM** | `ghcr.io/bmscomp/kates:1.17.0` | `linux/amd64`, `linux/arm64` |
+| **Native** | `ghcr.io/bmscomp/kates:1.17.0-native` | `linux/amd64`, `linux/arm64` |
 
 ### Process
 
@@ -245,7 +245,7 @@ graph TD
 
 | Property | Value |
 |----------|-------|
-| **Image** | `ghcr.io/bmscomp/kates-tester` |
+| **Image** | `ghcr.io/bmscomp/kates-tester:1.17.0` |
 | **Base** | Minimal Alpine/distroless |
 | **Contents** | Pre-built Kates CLI binary, `curl`, `kafkacat`, connectivity test scripts |
 | **Platforms** | `linux/amd64`, `linux/arm64` |
