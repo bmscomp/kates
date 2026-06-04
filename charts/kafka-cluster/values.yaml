@@ -15,11 +15,11 @@ global:
 
 # ── Image Overrides ──────────────────────────────────────────────────────────
 # Per-component image references for test pods and utilities.
-images:
-  # Tester image used in Helm test tier 2 (produce/consume round-trip) and kubectl tests
-  kafka: "ghcr.io/bmscomp/kates-tester:sha-ada3b78"
-  # kubectl image used in Helm tests and CRD upgrade hooks
-  kubectl: "ghcr.io/bmscomp/kates-tester:sha-ada3b78"
+# -- Test images
+testImages:
+  kafka: "ghcr.io/bmscomp/kates-tester:1.17.0"
+  bash: "bash:5.2"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
 
 kafka:
   listeners:

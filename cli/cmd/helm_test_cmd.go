@@ -74,9 +74,10 @@ var (
 
 // knownComponents maps a component alias to well-known release name prefixes.
 var knownComponents = map[string][]string{
-	"kafka": {"kafka-cluster", "krafter"},
-	"kates": {"kates"},
-	"chaos": {"chaos", "kates-chaos"},
+	"kafka":   {"kafka-cluster", "krafter"},
+	"kates":   {"kates"},
+	"chaos":   {"chaos", "kates-chaos"},
+	"connect": {"connect-cluster"},
 }
 
 // ---------------------------------------------------------------------------
