@@ -1,11 +1,11 @@
-{{- if .Values.kafkaConnect.enabled }}
+{{- if eq ((.Values.logging).type | default "inline") "external" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "kafka-cluster.clusterName" . }}-connect-logging
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "connect-cluster.fullname" . }}-logging
+  namespace: {{ include "connect-cluster.namespace" . }}
   labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    {{- include "connect-cluster.labels" . | nindent 4 }}
 data:
   log4j2.properties: |-
     name = Config

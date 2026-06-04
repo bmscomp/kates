@@ -1,0 +1,91 @@
+{{- if .Values.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-dashboard
+  namespace: {{ .Values.dashboards.namespace | default (include "connect-cluster.namespace" .) }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+    {{ .Values.dashboards.label | default "grafana_dashboard" }}: {{ .Values.dashboards.labelValue | default "1" | quote }}
+  annotations:
+    grafana_folder: Kafka
+data:
+  kafka-connect.json: |-
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "Running Connectors",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [{ "expr": "kafka_connect_worker_metrics_connector_count", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0 }] } } }
+        },
+        {
+          "title": "Failed Tasks",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "targets": [{ "expr": "kafka_connect_worker_metrics_connector_failed_task_count", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
+        },
+        {
+          "title": "Running Tasks",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "targets": [{ "expr": "kafka_connect_worker_metrics_task_count", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
+        },
+        {
+          "title": "Rebalance Rate",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "targets": [{ "expr": "rate(kafka_connect_worker_rebalance_metrics_rebalance_total[5m])", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "unit": "ops", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.1 }] } } }
+        },
+        {
+          "title": "Task Error Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [{ "expr": "rate(kafka_connect_task_metrics_total_errors_logged_total[5m])", "legendFormat": "{{ "{{" }}connector{{ "}}" }}/{{ "{{" }}task{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "unit": "errors/s" } }
+        },
+        {
+          "title": "Source Records Poll Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [{ "expr": "rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])", "legendFormat": "{{ "{{" }}connector{{ "}}" }}/{{ "{{" }}task{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "unit": "records/s" } }
+        },
+        {
+          "title": "Sink Records Put Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "targets": [{ "expr": "rate(kafka_connect_sink_task_metrics_sink_record_send_total[5m])", "legendFormat": "{{ "{{" }}connector{{ "}}" }}/{{ "{{" }}task{{ "}}" }}" }],
+          "fieldConfig": { "defaults": { "unit": "records/s" } }
+        },
+        {
+          "title": "JVM Heap Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "targets": [
+            { "expr": "jvm_memory_bytes_used{area=\"heap\", kubernetes_name=~\".*connect.*\"}", "legendFormat": "{{ "{{" }}pod{{ "}}" }} used" },
+            { "expr": "jvm_memory_bytes_max{area=\"heap\", kubernetes_name=~\".*connect.*\"}", "legendFormat": "{{ "{{" }}pod{{ "}}" }} max" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes" } }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["kafka", "connect", "strimzi"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Kafka Connect",
+      "uid": "{{ include "connect-cluster.fullname" . }}-overview",
+      "version": 1
+    }
+{{- end }}

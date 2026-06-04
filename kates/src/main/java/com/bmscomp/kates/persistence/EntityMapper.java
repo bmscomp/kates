@@ -36,6 +36,7 @@ public final class EntityMapper {
         entity.setSpecJson(toJson(run.getSpec()));
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
+        entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
 
         if (run.getResults() != null) {
             for (TestResult result : run.getResults()) {
@@ -56,7 +57,8 @@ public final class EntityMapper {
             .withScenarioName(entity.getScenarioName())
             .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
             .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
-            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}));
+            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
+            .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -81,7 +83,8 @@ public final class EntityMapper {
             .withScenarioName(entity.getScenarioName())
             .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
             .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
-            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}));
+            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
+            .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
     }
 
     public static void updateEntity(TestRunEntity entity, TestRun run) {
@@ -92,6 +95,7 @@ public final class EntityMapper {
         entity.setSpecJson(toJson(run.getSpec()));
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
+        entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
 
         entity.getResults().clear();
         if (run.getResults() != null) {

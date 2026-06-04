@@ -414,6 +414,12 @@ users:
             operations: ["Read", "Describe"]
             host: "*"
           - resource:
+              type: group
+              name: "connect-"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource:
               type: cluster
             operations: ["Describe"]
             host: "*"
@@ -467,165 +473,6 @@ tieredStorage:
   retention:
     taskIntervalMs: 30000
     localRetentionMs: 86400000   # 1 day on local disk; rest lives in SeaweedFS
-
-kafkaConnect:
-  enabled: false
-  replicas: 3
-  version: ""
-  image: "ghcr.io/bmscomp/connect:3.0.2"
-  groupId: kates-connect-cluster
-
-  topologySpreadConstraints:
-    enabled: true
-    maxSkew: 1
-    topologyKey: topology.kubernetes.io/zone
-    whenUnsatisfiable: DoNotSchedule
-
-  authentication:
-    username: kates-connect
-    secretName: ""
-
-  podDisruptionBudget:
-    maxUnavailable: 1
-
-  internalTopics:
-    prefix: ""  # defaults to groupId
-
-  jvmOptions:
-    -Xms: 1024m
-    -Xmx: 1024m
-    gcLoggingEnabled: true
-    javaSystemProperties: []
-    # - name: com.sun.management.jmxremote
-    #   value: "true"
-
-  resources:
-    requests:
-      memory: 2Gi
-      cpu: 1000m
-    limits:
-      memory: 4Gi
-      cpu: 4000m
-
-  # Schema registry integration (Apicurio — open source, no Confluent)
-  schemaRegistry:
-    enabled: false
-    # Service name of the Apicurio Registry in the same namespace
-    serviceName: apicurio-apicurio-registry
-    port: 80
-    # Compatibility API path
-    path: /apis/ccompat/v7
-
-  externalConfiguration:
-    volumes:
-      - name: pg-credentials
-        secretName: connect-pg-credentials
-    env: []
-
-  databaseEgress: []
-    # - namespace: database
-    #   port: 5432
-    #   podSelector:
-    #     app.kubernetes.io/name: postgresql
-
-  config:
-    replicationFactor: 3
-    # Converter defaults — override for Avro/Protobuf
-    keyConverter: org.apache.kafka.connect.json.JsonConverter
-    valueConverter: org.apache.kafka.connect.json.JsonConverter
-    keyConverterSchemasEnable: true
-    valueConverterSchemasEnable: true
-  # Arbitrary extra Kafka Connect config (merged into spec.config)
-  extraConfig:
-    producer.acks: "all"
-    producer.enable.idempotence: "true"
-    consumer.auto.offset.reset: "earliest"
-    exactly.once.source.support: "enabled"
-    group.initial.rebalance.delay.ms: "3000"
-    # schema.registry.url is auto-computed when kafkaConnect.schemaRegistry.enabled=true
-    # FQDN: http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompat/v7
-
-  logging:
-    type: external
-    valueFrom:
-      configMapKeyRef:
-        name: krafter-connect-logging
-        key: log4j2.properties
-      # log4j.logger.org.apache.kafka.connect.runtime.WorkerSourceTask: TRACE
-
-  tracing:
-    enabled: true
-    type: opentelemetry
-
-  tls:
-    enabled: true
-    trustedCertificates:
-      - secretName: krafter-cluster-ca-cert
-        certificate: ca.crt
-
-  rack:
-    enabled: true
-    topologyKey: topology.kubernetes.io/zone
-
-  tolerations: []
-  topologySpreadConstraints:
-    enabled: false
-    maxSkew: 1
-    topologyKey: topology.kubernetes.io/zone
-    whenUnsatisfiable: ScheduleAnyway
-  podAntiAffinity:
-    enabled: true
-    topologyKey: kubernetes.io/hostname
-
-  priorityClassName: "system-cluster-critical"
-  imagePullSecrets: []
-  env: []
-
-  readinessProbe:
-    initialDelaySeconds: 15
-    periodSeconds: 10
-    failureThreshold: 10
-    timeoutSeconds: 30
-  livenessProbe:
-    initialDelaySeconds: 15
-    periodSeconds: 10
-    failureThreshold: 20
-    timeoutSeconds: 30
-
-  # Strimzi native build (disabled — using pre-built image instead).
-  # Enable this if you don't have a pre-built image and want Strimzi to build one.
-  build: {}
-
-  metricsConfig:
-    configMapName: kafka-metrics
-    configMapKey: kafka-metrics-config.yml
-
-  template:
-    pod:
-      metadata: {}
-
-  connectors: []
-    # - name: cdc-orders
-    #   class: io.debezium.connector.postgresql.PostgresConnector
-    #   tasksMax: 1
-    #   state: running  # running, paused, or stopped
-    #   autoRestart:
-    #     enabled: true
-    #     maxRestarts: 10
-    #   config:
-    #     database.hostname: postgresql.database.svc
-    #     database.port: "5432"
-    #     database.user: "${file:/mnt/pg-credentials/username}"
-    #     database.password: "${file:/mnt/pg-credentials/password}"
-    #     database.dbname: orders
-    #     topic.prefix: cdc.orders
-    #     schema.include.list: public
-    #     plugin.name: pgoutput
-    #     slot.name: debezium_orders
-    #     heartbeat.interval.ms: "10000"
-    #     snapshot.mode: initial
-    #     decimal.handling.mode: double
-    #     tombstones.on.delete: true
 
 crdUpgrade:
   enabled: true
