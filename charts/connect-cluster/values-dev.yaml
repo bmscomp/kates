@@ -1,0 +1,44 @@
+# Development overlay for connect-cluster
+# Usage: helm upgrade --install connect-cluster charts/connect-cluster -f charts/connect-cluster/values-dev.yaml
+
+replicas: 1
+
+topologySpreadConstraints:
+  enabled: false
+
+podAntiAffinity:
+  enabled: false
+
+jvmOptions:
+  -Xms: 512m
+  -Xmx: 512m
+  gcLoggingEnabled: true
+
+resources:
+  requests:
+    memory: 1Gi
+    cpu: 500m
+  limits:
+    memory: 2Gi
+    cpu: 2000m
+
+priorityClassName: ""
+
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: true
+
+dashboards:
+  enabled: true
+
+tracing:
+  enabled: true
+  type: opentelemetry
+
+config:
+  replicationFactor: 1
+
+networkPolicy:
+  enabled: false

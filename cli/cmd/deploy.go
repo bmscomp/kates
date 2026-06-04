@@ -338,7 +338,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
 	if deployWithKafkaConnect {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: deployDbNS, Group: "B"})
-		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "krafter", Namespace: kafkaNS, Group: "B"})
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: kafkaNS, Group: "B"})
 	}
 	if deployWithMonitoring {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
@@ -821,7 +821,6 @@ metadata:
 							"--set", "kafka.config.default\\.replication\\.factor=3",
 							"--set", "kafka.config.min\\.insync\\.replicas=2",
 							"--set", "zookeeper.replicas=3",
-							"--set", "kafkaConnect.replicas=3",
 						)
 					} else {
 						kafkaArgs = append(kafkaArgs,
@@ -829,27 +828,12 @@ metadata:
 							"--set", "kafka.config.default\\.replication\\.factor=1",
 							"--set", "kafka.config.min\\.insync\\.replicas=1",
 							"--set", "zookeeper.replicas=1",
-							"--set", "kafkaConnect.replicas=1",
 						)
 					}
 
 					// (Values files are already appended above so these overrides take precedence)
 
-					if deployWithKafkaConnect {
-						registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
-							kafkaNS, clusterDomain)
 
-						kafkaArgs = append(kafkaArgs,
-							"--set", "kafkaConnect.enabled=true",
-							"--set", "kafkaConnect.schemaRegistry.enabled=true",
-							"--set", "kafkaConnect.databaseEgress[0].namespace="+deployDbNS,
-							"--set", "kafkaConnect.databaseEgress[0].port=5432",
-							"--set", "kafkaConnect.databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
-							"--set", "kafkaConnect.externalConfiguration.volumes[0].name=pg-credentials",
-							"--set", "kafkaConnect.externalConfiguration.volumes[0].secretName=connect-pg-credentials",
-							"--set", "kafkaConnect.extraConfig.schema\\.registry\\.url="+registryFQDN,
-						)
-					}
 
 					if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
 						return err
@@ -935,8 +919,7 @@ metadata:
 				}
 			}
 
-			// 3. Kafka Connect & Debezium Connector
-			deployConnect := deployKafka
+			// 3. Kafka Connect (separate chart)
 			if deployWithKafkaConnect {
 				dl.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
 				pgSecretYaml := fmt.Sprintf(`apiVersion: v1
@@ -950,17 +933,59 @@ stringData:
   username: debezium`, kafkaNS)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
-				if deployConnect && !isTesting {
-					if err := waitComponentReadySilent(ctx, "kafka-connect", kafkaNS, "app.kubernetes.io/name=kafka-connect", 15*time.Minute); err != nil {
+					if !isHelmReleaseDeployedFn(ctx, "connect-cluster", kafkaNS) {
+					dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", kafkaNS)
+
+					connectDomain := report.Network.ClusterDomain
+					if connectDomain == "" {
+						connectDomain = "cluster.local"
+					}
+					registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
+						kafkaNS, connectDomain)
+
+					connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
+						"-n", kafkaNS, "--create-namespace",
+						"--set", "kafka.bootstrapServers=krafter-kafka-bootstrap." + kafkaNS + ".svc:9093",
+						"--set", "kafka.tls.trustedCertificateSecret=krafter-cluster-ca-cert",
+						"--set", "schemaRegistry.enabled=true",
+						"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
+						"--set", "databaseEgress[0].namespace=" + deployDbNS,
+						"--set", "databaseEgress[0].port=5432",
+						"--set", "databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
+						"--set", "externalConfiguration.volumes[0].name=pg-credentials",
+						"--set", "externalConfiguration.volumes[0].secretName=connect-pg-credentials",
+						"--timeout", "10m",
+					}
+
+					if isKind {
+						connectArgs = append(connectArgs, "-f", "charts/connect-cluster/values-kind.yaml")
+					}
+
+					if deployHA {
+						connectArgs = append(connectArgs, "--set", "replicas=3")
+					} else {
+						connectArgs = append(connectArgs, "--set", "replicas=1")
+					}
+
+					if err := runHelmFn(ctx, connectArgs...); err != nil {
+						return err
+					}
+				} else {
+					dl.Println("⏭️  Kafka Connect already deployed. Skipping.")
+					dl.FinishComponent("cdc", true)
+					advanceStep()
+				}
+
+				if !isTesting {
+					if err := waitComponentReadySilent(ctx, "kafka-connect", kafkaNS, "strimzi.io/kind=KafkaConnect", 15*time.Minute); err != nil {
 						dl.FinishComponent("cdc", false)
 						return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
 					}
 				}
 
-				deployConnector := false
+				// Deploy Debezium connector
 				checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", kafkaNS, "--no-headers").CombinedOutput()
 				if checkErr != nil || strings.Contains(string(checkOut), "not found") {
-					deployConnector = true
 					dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
 					connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
@@ -968,7 +993,7 @@ metadata:
   name: debezium-postgres-source
   namespace: %s
   labels:
-    strimzi.io/cluster: krafter-connect
+    strimzi.io/cluster: connect-cluster
 spec:
   class: io.debezium.connector.postgresql.PostgresConnector
   tasksMax: 1
@@ -999,19 +1024,16 @@ spec:
 					}
 				} else {
 					dl.Printf("    %s Debezium connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
-					dl.FinishComponent("cdc", true)
-					advanceStep()
 				}
 
-
-				if deployConnector && !isTesting {
+				if !isTesting {
 					if err := waitConnectorReadySilent(ctx, "kafka-connector", kafkaNS, 10*time.Minute); err != nil {
 						dl.FinishComponent("cdc", false)
 						return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
 					}
-					dl.FinishComponent("cdc", true)
-					advanceStep()
 				}
+				dl.FinishComponent("cdc", true)
+				advanceStep()
 			}
 
 			// ---------------------------------------------------------

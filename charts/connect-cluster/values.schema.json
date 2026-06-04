@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["replicas", "version", "groupId", "kafka", "config"],
+  "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "namespaceOverride": { "type": "string" },
+    "replicas": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "Number of Kafka Connect worker replicas"
+    },
+    "image": { "type": "string" },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Kafka version (semver)"
+    },
+    "groupId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 249,
+      "pattern": "^[a-zA-Z0-9._-]+$",
+      "description": "Connect cluster group ID"
+    },
+    "clusterDomain": {
+      "type": "string",
+      "default": "cluster.local"
+    },
+    "kafka": {
+      "type": "object",
+      "required": ["bootstrapServers"],
+      "properties": {
+        "bootstrapServers": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Kafka bootstrap servers (host:port)"
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "trustedCertificateSecret": { "type": "string" },
+            "certificateKey": { "type": "string" }
+          }
+        },
+        "authentication": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["scram-sha-512", "tls", "tls-external", "plain"]
+            },
+            "username": { "type": "string" },
+            "secretName": { "type": "string" }
+          }
+        }
+      }
+    },
+    "topologySpreadConstraints": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxSkew": { "type": "integer", "minimum": 1 },
+        "topologyKey": { "type": "string" },
+        "whenUnsatisfiable": {
+          "type": "string",
+          "enum": ["DoNotSchedule", "ScheduleAnyway"]
+        }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "maxUnavailable": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "rack": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "topologyKey": { "type": "string" }
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "podAntiAffinity": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "topologyKey": { "type": "string" }
+      }
+    },
+    "priorityClassName": { "type": "string" },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "internalTopics": {
+      "type": "object",
+      "properties": {
+        "prefix": { "type": "string" },
+        "offsetsName": { "type": "string" },
+        "configsName": { "type": "string" },
+        "statusName": { "type": "string" }
+      }
+    },
+    "jvmOptions": {
+      "type": "object",
+      "properties": {
+        "-Xms": { "type": "string", "pattern": "^[0-9]+[kmgKMG]$" },
+        "-Xmx": { "type": "string", "pattern": "^[0-9]+[kmgKMG]$" },
+        "gcLoggingEnabled": { "type": "boolean" },
+        "javaSystemProperties": { "type": "array" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "memory": { "type": "string" },
+            "cpu": { "type": "string" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "memory": { "type": "string" },
+            "cpu": { "type": "string" }
+          }
+        }
+      }
+    },
+    "schemaRegistry": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "serviceName": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "path": { "type": "string" }
+      }
+    },
+    "externalConfiguration": {
+      "type": "object",
+      "properties": {
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": {
+                "type": "string",
+                "enum": ["secret", "configMap"],
+                "default": "secret"
+              },
+              "secretName": { "type": "string" },
+              "configMapName": { "type": "string" }
+            }
+          }
+        },
+        "env": { "type": "array" }
+      }
+    },
+    "databaseEgress": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["namespace"],
+        "properties": {
+          "namespace": { "type": "string" },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "podSelector": { "type": "object" }
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "replicationFactor": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "keyConverter": { "type": "string" },
+        "valueConverter": { "type": "string" },
+        "keyConverterSchemasEnable": { "type": "boolean" },
+        "valueConverterSchemasEnable": { "type": "boolean" }
+      }
+    },
+    "extraConfig": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "logging": { "type": "object" },
+    "tracing": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "type": {
+          "type": "string",
+          "enum": ["opentelemetry", "jaeger"]
+        }
+      }
+    },
+    "env": { "type": "array" },
+    "readinessProbe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "failureThreshold": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "livenessProbe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "failureThreshold": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "build": { "type": "object" },
+    "metricsConfig": {
+      "type": "object",
+      "properties": {
+        "configMapName": { "type": "string" },
+        "configMapKey": { "type": "string" }
+      }
+    },
+    "template": { "type": "object" },
+    "autoRestart": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxRestarts": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "class"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
+          },
+          "class": { "type": "string", "minLength": 1 },
+          "tasksMax": { "type": "integer", "minimum": 1 },
+          "state": {
+            "type": "string",
+            "enum": ["running", "paused", "stopped"]
+          },
+          "autoRestart": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "maxRestarts": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "config": { "type": "object" }
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "annotations": { "type": "object" },
+        "name": { "type": "string" }
+      }
+    },
+    "restApi": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "type": {
+              "type": "string",
+              "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+            },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "annotations": { "type": "object" }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "className": { "type": "string" },
+            "annotations": { "type": "object" },
+            "hosts": { "type": "array" },
+            "tls": { "type": "array" }
+          }
+        }
+      }
+    },
+    "alerts": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "labels": { "type": "object" }
+      }
+    },
+    "podMonitors": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "labels": { "type": "object" }
+      }
+    },
+    "dashboards": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string" },
+        "label": { "type": "string" },
+        "labelValue": { "type": "string" }
+      }
+    }
+  }
+}

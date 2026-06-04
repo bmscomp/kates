@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-test
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: connect-health-check
+      image: curlimages/curl:8.7.1
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "=== Kafka Connect REST API Health Check ==="
+          echo ""
+
+          REST_URL="http://{{ include "connect-cluster.fullname" . }}-rest-api.{{ include "connect-cluster.namespace" . }}.svc:{{ .Values.restApi.service.port | default 8083 }}"
+
+          echo "► Testing REST API reachability..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "${REST_URL}/")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "✗ REST API returned HTTP ${HTTP_CODE} (expected 200)"
+            exit 1
+          fi
+          echo "✓ REST API is reachable (HTTP 200)"
+          echo ""
+
+          echo "► Fetching cluster info..."
+          curl -s "${REST_URL}/" | head -c 500
+          echo ""
+          echo ""
+
+          echo "► Listing connectors..."
+          CONNECTORS=$(curl -s --max-time 15 "${REST_URL}/connectors")
+          echo "  Connectors: ${CONNECTORS}"
+          echo ""
+
+          echo "► Listing installed plugins..."
+          PLUGINS=$(curl -s --max-time 15 "${REST_URL}/connector-plugins" | grep -o '"class":"[^"]*"' | head -20)
+          echo "  ${PLUGINS}"
+          echo ""
+
+          CONNECT_HOST="{{ include "connect-cluster.fullname" . }}-rest-api.{{ include "connect-cluster.namespace" . }}.svc"
+
+          # Check each connector status
+          for connector in $(curl -sf http://$CONNECT_HOST:{{ .Values.restApi.service.port | default 8083 }}/connectors 2>/dev/null | tr -d '[]"' | tr ',' '\n'); do
+            status=$(curl -sf http://$CONNECT_HOST:{{ .Values.restApi.service.port | default 8083 }}/connectors/$connector/status | grep -o '"state":"[A-Z]*"' | head -1 | grep -o '[A-Z]*')
+            if [ "$status" = "FAILED" ]; then
+              echo "FAIL: Connector $connector is in FAILED state"
+              exit 1
+            fi
+            echo "OK: Connector $connector is $status"
+          done
+
+          echo "=== All checks passed ==="
+      resources:
+        requests:
+          cpu: 50m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault

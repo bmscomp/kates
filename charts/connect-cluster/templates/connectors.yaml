@@ -1,0 +1,51 @@
+{{- if gt (len (default (list) .Values.connectors)) 0 }}
+{{- $globalAutoRestart := .Values.autoRestart }}
+{{- range .Values.connectors }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: {{ .name }}
+  namespace: {{ include "connect-cluster.namespace" $ }}
+  labels:
+    {{- include "connect-cluster.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: connector
+    kates.io/connector-name: {{ .name }}
+    strimzi.io/cluster: {{ include "connect-cluster.fullname" $ }}
+    {{- with .labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .annotations }}
+  annotations:
+    {{- if not (eq (toString $.Values.keepOnDelete) "false") }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    {{- range $k, $v := .annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- else }}
+  annotations:
+    {{- if not (eq (toString $.Values.keepOnDelete) "false") }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+  {{- end }}
+spec:
+  class: {{ .class }}
+  tasksMax: {{ .tasksMax | default 1 }}
+  {{- if .state }}
+  state: {{ .state }}
+  {{- end }}
+  autoRestart:
+    {{- if .autoRestart }}
+    enabled: {{ .autoRestart.enabled | default true }}
+    maxRestarts: {{ .autoRestart.maxRestarts | default ($globalAutoRestart.maxRestarts | default 10) }}
+    {{- else }}
+    enabled: {{ $globalAutoRestart.enabled | default true }}
+    maxRestarts: {{ $globalAutoRestart.maxRestarts | default 10 }}
+    {{- end }}
+  {{- with .config }}
+  config:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

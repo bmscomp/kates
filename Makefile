@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy
 
 .DEFAULT_GOAL := help
 
@@ -611,6 +611,24 @@ helm-test-all:
 		echo "  ⏭  Chaos: SKIPPED (release $$CHAOS_RELEASE not found in $$CHAOS_NAMESPACE)"; \
 	fi; \
 	echo ""; \
+	echo "──────────────────────────────────────────────────────────────────"; \
+	echo "  ▸ Kafka Connect"; \
+	CONNECT_RELEASE=$${CONNECT_RELEASE:-connect-cluster}; \
+	CONNECT_NAMESPACE=$${CONNECT_NAMESPACE:-kafka}; \
+	TOTAL=$$((TOTAL+1)); \
+	if helm status $$CONNECT_RELEASE -n $$CONNECT_NAMESPACE >/dev/null 2>&1; then \
+		if helm test $$CONNECT_RELEASE -n $$CONNECT_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; then \
+			PASSED=$$((PASSED+1)); \
+			echo "  ✅ Connect: PASSED"; \
+		else \
+			FAILED=$$((FAILED+1)); \
+			echo "  ❌ Connect: FAILED"; \
+		fi; \
+	else \
+		SKIPPED=$$((SKIPPED+1)); \
+		echo "  ⏭  Connect: SKIPPED (release $$CONNECT_RELEASE not found in $$CONNECT_NAMESPACE)"; \
+	fi; \
+	echo ""; \
 	echo "╔════════════════════════════════════════════════════════════════╗"; \
 	echo "║  Results: $$PASSED passed · $$FAILED failed · $$SKIPPED skipped     ║"; \
 	echo "╚════════════════════════════════════════════════════════════════╝"; \
@@ -619,6 +637,75 @@ helm-test-all:
 
 kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package
 	@echo "✅ All kafka chart checks passed: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
+
+CONNECT_CHART_DIR     := charts/connect-cluster
+CONNECT_CHART_VERSION := $(shell grep '^version:' $(CONNECT_CHART_DIR)/Chart.yaml | awk '{print $$2}')
+
+connect-chart-lint:
+	@echo "🔍 Linting connect-cluster chart..."
+	helm lint $(CONNECT_CHART_DIR)
+	@echo "✅ Connect chart lint passed"
+
+connect-chart-template:
+	@mkdir -p .build
+	helm template connect-cluster $(CONNECT_CHART_DIR) \
+		--namespace kafka \
+		> .build/connect-rendered.yaml
+	@echo "Rendered $$(grep -c '^kind:' .build/connect-rendered.yaml) resources → .build/connect-rendered.yaml"
+
+connect-chart-package:
+	@mkdir -p .build
+	helm package $(CONNECT_CHART_DIR) --destination .build/
+	@echo "✅ Connect chart packaged: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
+
+connect-chart-push: connect-chart-package
+	helm push .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz $(CHART_REGISTRY)
+	@echo "✅ Connect chart pushed: $(CHART_REGISTRY)/connect-cluster:$(CONNECT_CHART_VERSION)"
+
+connect-chart-test:
+	@echo ""
+	@echo "╭────────────────────────────────────────────────────────────────╮"
+	@echo "│  🧪 Helm Test · Kafka Connect                                 │"
+	@echo "╰────────────────────────────────────────────────────────────────╯"
+	@echo ""
+	@CONNECT_RELEASE=$${CONNECT_RELEASE:-connect-cluster}; \
+	CONNECT_NAMESPACE=$${CONNECT_NAMESPACE:-kafka}; \
+	TIMEOUT=$${TIMEOUT:-180s}; \
+	echo "  Release:    $$CONNECT_RELEASE"; \
+	echo "  Namespace:  $$CONNECT_NAMESPACE"; \
+	echo "  Timeout:    $$TIMEOUT"; \
+	echo ""; \
+	helm test $$CONNECT_RELEASE --namespace $$CONNECT_NAMESPACE --timeout $$TIMEOUT --logs 2>&1; \
+	EXIT=$$?; \
+	echo ""; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "  ✅ Connect tests passed"; \
+	else \
+		echo "  ❌ Connect tests failed (exit $$EXIT)"; \
+	fi; \
+	exit $$EXIT
+
+connect-chart-all: connect-chart-lint connect-chart-template connect-chart-package
+	@echo "✅ All connect chart checks passed: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
+
+connect-deploy:
+	@echo "🔌 Deploying Kafka Connect cluster (ENV=$(ENV))..."
+	@OVERLAY=""; \
+	if [ "$(ENV)" = "kind" ] && [ -f "$(CONNECT_CHART_DIR)/values-kind.yaml" ]; then \
+		OVERLAY="-f $(CONNECT_CHART_DIR)/values-kind.yaml"; \
+	elif [ -f "$(CONNECT_CHART_DIR)/values-$(ENV).yaml" ]; then \
+		OVERLAY="-f $(CONNECT_CHART_DIR)/values-$(ENV).yaml"; \
+	fi; \
+	helm upgrade --install connect-cluster $(CONNECT_CHART_DIR) \
+		--namespace kafka --create-namespace \
+		$$OVERLAY \
+		--timeout 10m --wait
+	@echo "✅ Kafka Connect deployed"
+
+connect-undeploy:
+	@echo "🗑️  Removing Kafka Connect cluster..."
+	helm uninstall connect-cluster -n kafka 2>/dev/null || true
+	@echo "✅ Kafka Connect removed"
 
 kafka-deploy: kafka-chart-deps
 	@echo "📦 Deploying Kafka cluster (ENV=$(ENV))..."
@@ -804,6 +891,16 @@ help:
 	@echo "  litmus-test                        - Run Helm tests for chaos stack"
 	@echo "  litmus-gameday                     - Trigger GameDay validation run"
 	@echo "  velero                             - Deploy Velero backup"
+	@echo ""
+	@echo "  Kafka Connect Chart"
+	@echo "  connect-chart-lint                 - Lint the connect-cluster chart"
+	@echo "  connect-chart-template             - Render connect-cluster templates"
+	@echo "  connect-chart-package              - Package the connect-cluster chart"
+	@echo "  connect-chart-push                 - Push connect-cluster to OCI registry"
+	@echo "  connect-chart-test                 - Run Helm tests for connect-cluster"
+	@echo "  connect-chart-all                  - lint + template + package"
+	@echo "  connect-deploy                     - Deploy Kafka Connect via Helm (ENV=kind|dev|staging|prod)"
+	@echo "  connect-undeploy                   - Remove Kafka Connect Helm release"
 	@echo ""
 	@echo "  Helm Test Suite"
 	@echo "  kafka-chart-test                   - Run Helm tests for Kafka cluster (KAFKA_RELEASE=... KAFKA_NAMESPACE=...)"

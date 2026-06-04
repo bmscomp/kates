@@ -33,6 +33,9 @@ public final class ProtoMapper {
         if (run.getLabels() != null) {
             builder.putAllLabels(run.getLabels());
         }
+        if (run.getCdcPhases() != null) {
+            builder.putAllCdcPhases(run.getCdcPhases());
+        }
         return builder.build();
     }
 

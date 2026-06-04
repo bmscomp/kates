@@ -102,6 +102,7 @@ message TestRun {
   string backend = 7;
   string scenario_name = 8;
   map<string, string> labels = 9;
+  map<string, int64> cdc_phases = 10;
 }
 
 message CreateTestRequest {

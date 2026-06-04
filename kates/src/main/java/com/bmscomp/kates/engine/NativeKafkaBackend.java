@@ -110,7 +110,10 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
     private void runIntegrityCdc(BenchmarkTask task, WorkerState state) {
         try {
-            BenchmarkStatus cdcStatus = cdcIntegrationService.runCdcTest(task).join();
+            BenchmarkStatus cdcStatus = cdcIntegrationService.runCdcTest(task, (phase, durations) -> {
+                state.currentPhase = phase;
+                state.cdcPhaseDurations = durations;
+            }).join();
             state.status = cdcStatus.getState();
             if (cdcStatus.getError() != null) {
                 state.error = cdcStatus.getError();
@@ -351,6 +354,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         volatile DataIntegrityVerifier verifier;
         volatile IntegrityResult integrityResult;
         volatile Map<String, Long> cdcPhaseDurations;
+        volatile String currentPhase;
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
@@ -387,6 +391,10 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
             if (cdcPhaseDurations != null) {
                 builder.phaseDurations(cdcPhaseDurations);
+            }
+
+            if (currentPhase != null) {
+                builder.currentPhase(currentPhase);
             }
 
             return builder.build();

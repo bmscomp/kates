@@ -12,9 +12,6 @@
 {{- if .Values.users.enabled }}
   Users:       {{ len .Values.users.items }} managed user(s)
 {{- end }}
-{{- if .Values.kafkaConnect.enabled }}
-  Connect:     {{ .Values.kafkaConnect.replicas }} worker(s)
-{{- end }}
 
 Listeners:
 {{- range .Values.kafka.listeners }}
@@ -29,7 +26,6 @@ Components:
   Alerts:           {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
   Tiered Storage:   {{ if .Values.tieredStorage.enabled }}enabled{{ else }}disabled{{ end }}
   Backup:           {{ if .Values.backup.enabled }}enabled{{ else }}disabled{{ end }}
-  Kafka Connect:    {{ if .Values.kafkaConnect.enabled }}enabled{{ else }}disabled{{ end }}
 
 ────────────────────────────────────────────
   Getting Started
@@ -95,7 +91,4 @@ External NodePort (port {{ .port }}):
   kubectl logs -n {{ .Release.Namespace }} -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-kafka --tail=50
 {{- if .Values.cruiseControl.enabled }}
   kubectl get kafkarebalance -n {{ .Release.Namespace }}
-{{- end }}
-{{- if .Values.kafkaConnect.enabled }}
-  kubectl get kafkaconnect,kafkaconnector -n {{ .Release.Namespace }}
 {{- end }}
