@@ -558,173 +558,6 @@ tieredStorage:
     localRetentionMs: 86400000      # Keep 1 day locally
 ```
 
-### Kafka Connect & PostgreSQL CDC (Debezium)
-
-The chart supports deploying Kafka Connect alongside the Kafka cluster, pre-configured with Debezium for PostgreSQL Change Data Capture (CDC) and Apicurio for Avro schema management.
-
-**Quick Start**:
-```bash
-kates deploy --with-kafka-connect
-```
-This deploys PostgreSQL into the `database` namespace, Kafka Connect into the `kafka` namespace, configures cross-namespace network policies, and mounts PostgreSQL credentials directly into Connect.
-
-> [!IMPORTANT]
-> **PostgreSQL prerequisite**: External PostgreSQL instances must have `wal_level = logical` enabled for Debezium to perform logical decoding.
-
-#### Schema Registry
-
-To use Avro converters, enable the open-source Apicurio registry integration. The `schema.registry.url` is automatically computed using the cluster domain (e.g. `http://apicurio-apicurio-registry.kafka.svc.cluster.local:80/apis/ccompat/v7`).
-
-```yaml
-kafkaConnect:
-  schemaRegistry:
-    enabled: true
-    serviceName: apicurio-apicurio-registry
-```
-
-#### Network Egress & Secrets
-
-Kafka Connect requires explicit egress to databases. Configure it along with external secrets:
-
-```yaml
-kafkaConnect:
-  databaseEgress:
-    - namespace: database
-      port: 5432
-      podSelector:
-        app.kubernetes.io/name: postgresql
-  externalConfiguration:
-    volumes:
-      - name: pg-credentials
-        secretName: connect-pg-credentials
-```
-
-#### CLI Management
-
-Manage Kafka Connect using the new `kates kafka connect` CLI commands:
-
-- `kates kafka connect status` — View Connect cluster health
-- `kates kafka connect connectors` — List deployed connectors and their state
-- `kates kafka connect connector <name>` — View detailed connector configuration
-- `kates kafka connect tasks <name>` — Check individual task status and traces
-- `kates kafka connect restart <name>` — Trigger a rolling restart
-- `kates kafka connect pause <name>` / `resume <name>` — Control connector flow
-- `kates kafka connect plugins` — List installed connector classes (e.g., `io.debezium.connector.postgresql.PostgresConnector`)
-
----
-
-### Kafka Connect Base Config
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `kafkaConnect.enabled` | Deploy KafkaConnect CR | `false` |
-| `kafkaConnect.replicas` | Worker replicas | `1` |
-| `kafkaConnect.version` | Kafka version (defaults to `kafkaVersion`) | `""` |
-| `kafkaConnect.groupId` | Connect cluster group ID | `kates-connect-cluster` |
-
-#### JVM Tuning
-
-```yaml
-kafkaConnect:
-  jvmOptions:
-    -Xms: 256m
-    -Xmx: 512m
-    gcLoggingEnabled: true
-    javaSystemProperties:
-      - name: com.sun.management.jmxremote
-        value: "true"
-```
-
-#### Converters & Extra Config
-
-```yaml
-kafkaConnect:
-  config:
-    keyConverter: io.apicurio.registry.utils.converter.AvroConverter
-    valueConverter: io.apicurio.registry.utils.converter.AvroConverter
-    keyConverterSchemasEnable: false
-    valueConverterSchemasEnable: false
-  extraConfig:
-    schema.registry.url: http://apicurio-registry:8080/apis/ccompat/v7
-    producer.acks: "all"
-    consumer.auto.offset.reset: earliest
-```
-
-#### Logging
-
-```yaml
-kafkaConnect:
-  logging:
-    type: inline
-    loggers:
-      connect.root.logger.level: INFO
-      log4j.logger.org.apache.kafka.connect.runtime.WorkerSourceTask: TRACE
-```
-
-#### TLS & Rack Awareness
-
-```yaml
-kafkaConnect:
-  tls:
-    enabled: true
-    trustedCertificates:
-      - secretName: krafter-cluster-ca-cert
-        certificate: ca.crt
-  rack:
-    enabled: true
-    topologyKey: topology.kubernetes.io/zone
-```
-
-#### Scheduling & Probes
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `kafkaConnect.tolerations` | Pod tolerations | `[]` |
-| `kafkaConnect.topologySpreadConstraints.enabled` | Enable topology spread | `false` |
-| `kafkaConnect.podAntiAffinity.enabled` | Enable pod anti-affinity | `false` |
-| `kafkaConnect.readinessProbe.initialDelaySeconds` | Readiness probe delay | `60` |
-| `kafkaConnect.livenessProbe.initialDelaySeconds` | Liveness probe delay | `60` |
-| `kafkaConnect.autoRestart.enabled` | Auto-restart failed tasks | `true` |
-| `kafkaConnect.autoRestart.maxRestarts` | Max restart attempts | `10` |
-
-#### Build (Custom Plugins)
-
-```yaml
-kafkaConnect:
-  build:
-    output:
-      type: docker
-      image: my-registry/my-connect:latest
-      pushSecret: my-registry-credentials
-    plugins:
-      - name: debezium-postgres
-        artifacts:
-          - type: maven
-            group: io.debezium
-            artifact: debezium-connector-postgres
-            version: 2.5.0.Final
-```
-
-#### Declarative Connectors
-
-Define `KafkaConnector` CRs directly in values:
-
-```yaml
-kafkaConnect:
-  connectors:
-    - name: my-source-connector
-      class: io.debezium.connector.postgresql.PostgresConnector
-      tasksMax: 1
-      autoRestart:
-        enabled: true
-        maxRestarts: 5
-      config:
-        database.hostname: postgres.default.svc
-        database.port: "5432"
-        database.dbname: mydb
-        topic.prefix: cdc
-```
-
 ### Backup Strategy
 
 > [!CAUTION]
@@ -998,7 +831,6 @@ The chart includes `values.schema.json` for install-time validation. Coverage in
 | `controllers` | Replicas 1–9, storage size pattern, JVM options, priorityClassName |
 | `brokerPools` | Required name/replicas/storageSize, replicas 1–100 |
 | `brokerDefaults` | Resources, JVM, topology, anti-affinity, priorityClassName |
-| `kafkaConnect` | JVM, config (converters, replication), logging, TLS, rack, autoRestart, probes, connectors (name+class required), build |
 | `tieredStorage` | Enabled flag, credentials |
 | `backup` | Schedule pattern, TTL pattern, snapshot, persistence |
 | `lifecycle` | preStopSleepSeconds 0–120 |
@@ -1010,7 +842,4 @@ helm install kafka-cluster charts/kafka-cluster --set controllers.replicas=-1
 helm install kafka-cluster charts/kafka-cluster --set lifecycle.preStopSleepSeconds=999
 # Error: at '/lifecycle/preStopSleepSeconds': maximum: got 999, want 120
 
-helm install kafka-cluster charts/kafka-cluster \
-  --set 'kafkaConnect.connectors[0].tasksMax=1'
-# Error: at '/kafkaConnect/connectors/0': missing required: name, class
 ```

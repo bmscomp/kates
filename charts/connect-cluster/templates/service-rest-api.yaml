@@ -1,0 +1,23 @@
+{{- if .Values.restApi.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-rest-api
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+  {{- with .Values.restApi.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.restApi.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.restApi.service.port | default 8083 }}
+      targetPort: 8083
+      protocol: TCP
+      name: rest-api
+  selector:
+    strimzi.io/name: {{ include "connect-cluster.fullname" . }}
+    strimzi.io/kind: KafkaConnect
+{{- end }}

@@ -56,6 +56,10 @@ public class TestRunEntity {
     @Column(name = "labels_json", columnDefinition = "jsonb")
     private String labelsJson;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "cdc_phases_json", columnDefinition = "jsonb")
+    private String cdcPhasesJson;
+
     @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("id ASC")
     private List<TestResultEntity> results = new ArrayList<>();
@@ -132,6 +136,14 @@ public class TestRunEntity {
 
     public void setLabelsJson(String labelsJson) {
         this.labelsJson = labelsJson;
+    }
+
+    public String getCdcPhasesJson() {
+        return cdcPhasesJson;
+    }
+
+    public void setCdcPhasesJson(String cdcPhasesJson) {
+        this.cdcPhasesJson = cdcPhasesJson;
     }
 
     public List<TestResultEntity> getResults() {

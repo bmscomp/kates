@@ -68,7 +68,7 @@ public class CdcIntegrationService {
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "kates.kafka.sasl.password")
     java.util.Optional<String> kafkaPassword;
 
-    public CompletableFuture<BenchmarkStatus> runCdcTest(BenchmarkTask task) {
+    public CompletableFuture<BenchmarkStatus> runCdcTest(BenchmarkTask task, java.util.function.BiConsumer<String, Map<String, Long>> progressCallback) {
         return CompletableFuture.supplyAsync(() -> {
             TestResult.TaskStatus endState = TestResult.TaskStatus.RUNNING;
             String errorMsg = null;
@@ -82,6 +82,7 @@ public class CdcIntegrationService {
 
             try {
                 // ── Phase: DB_SETUP ──────────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("DB_SETUP", phaseDurations);
                 Instant phaseStart = Instant.now();
 
                 // Auto-discover PostgreSQL namespace
@@ -147,6 +148,7 @@ public class CdcIntegrationService {
                 phaseDurations.put("DB_SETUP", Duration.between(phaseStart, Instant.now()).toMillis());
 
                 // ── Phase: TOPIC_CREATE ──────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("TOPIC_CREATE", phaseDurations);
                 phaseStart = Instant.now();
                 LOG.info("Creating KafkaTopic for CDC...");
                 String topicYaml = String.format("""
@@ -173,6 +175,7 @@ public class CdcIntegrationService {
                 phaseDurations.put("TOPIC_CREATE", Duration.between(phaseStart, Instant.now()).toMillis());
 
                 // ── Phase: SOURCE_DEPLOY ─────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("SOURCE_DEPLOY", phaseDurations);
                 phaseStart = Instant.now();
                 LOG.info("Deploying Kafka Source Connector...");
                 // Note: database password is embedded in the connector config. This is acceptable
@@ -213,6 +216,7 @@ public class CdcIntegrationService {
                 phaseDurations.put("SOURCE_DEPLOY", Duration.between(phaseStart, Instant.now()).toMillis());
 
                 // ── Phase: SINK_DEPLOY ───────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("SINK_DEPLOY", phaseDurations);
                 phaseStart = Instant.now();
                 LOG.info("Deploying Kafka Sink Connector...");
                 String sinkYaml = String.format("""
@@ -251,6 +255,7 @@ public class CdcIntegrationService {
                 phaseDurations.put("SINK_DEPLOY", Duration.between(phaseStart, Instant.now()).toMillis());
 
                 // ── Phase: CONNECTOR_READY ───────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("CONNECTOR_READY", phaseDurations);
                 phaseStart = Instant.now();
                 LOG.info("Waiting for connectors to be ready...");
                 boolean sourceReady = false;
@@ -292,6 +297,7 @@ public class CdcIntegrationService {
                 phaseDurations.put("CONNECTOR_READY", Duration.between(phaseStart, Instant.now()).toMillis());
 
                 // ── Phase: KAFKA_VERIFY ──────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("KAFKA_VERIFY", phaseDurations);
                 phaseStart = Instant.now();
                 LOG.info("Waiting for CDC event in Kafka...");
                 boolean foundInKafka = false;
@@ -323,6 +329,7 @@ public class CdcIntegrationService {
                 phaseDurations.put("KAFKA_VERIFY", Duration.between(phaseStart, Instant.now()).toMillis());
 
                 // ── Phase: SINK_VERIFY ───────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("SINK_VERIFY", phaseDurations);
                 phaseStart = Instant.now();
                 boolean foundInDb = false;
                 try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword)) {
@@ -359,6 +366,7 @@ public class CdcIntegrationService {
                 errorMsg = e.getMessage();
             } finally {
                 // ── Phase: CLEANUP ───────────────────────────────────────────
+                if (progressCallback != null) progressCallback.accept("CLEANUP", phaseDurations);
                 Instant cleanupStart = Instant.now();
                 cleanupTestResources(connectNamespace, testDbNS);
                 phaseDurations.put("CLEANUP", Duration.between(cleanupStart, Instant.now()).toMillis());

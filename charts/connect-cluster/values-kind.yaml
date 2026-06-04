@@ -1,0 +1,60 @@
+# Kind cluster overlay for connect-cluster
+# Usage: helm upgrade --install connect-cluster charts/connect-cluster -f charts/connect-cluster/values-kind.yaml
+
+# Single replica is sufficient for local development
+replicas: 1
+
+# Relax scheduling constraints for single-node Kind clusters
+topologySpreadConstraints:
+  enabled: false
+
+podAntiAffinity:
+  enabled: false
+
+rack:
+  enabled: false
+
+podDisruptionBudget:
+  maxUnavailable: 1
+
+# Use lower resource limits for local development
+jvmOptions:
+  -Xms: 256m
+  -Xmx: 512m
+  gcLoggingEnabled: false
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 250m
+  limits:
+    memory: 1Gi
+    cpu: 1000m
+
+# Disable production observability features
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+# Disable tracing locally
+tracing:
+  enabled: false
+
+# Use default priority (not system-critical on Kind)
+priorityClassName: ""
+
+config:
+  replicationFactor: 1
+
+networkPolicy:
+  enabled: false
+
+podSecurityContext:
+  fsGroup: 1001
+  runAsNonRoot: true
+  seccompProfile: RuntimeDefault

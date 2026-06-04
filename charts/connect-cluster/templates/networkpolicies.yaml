@@ -1,0 +1,109 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $clusterName := include "connect-cluster.fullname" . -}}
+{{- $namespace := include "connect-cluster.namespace" . -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $clusterName }}-connect
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/name: {{ $clusterName }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+      ports:
+        - port: 9404
+          protocol: TCP
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kates
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
+      ports:
+        - port: 8083
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: Kafka
+      ports:
+        {{- range .Values.networkPolicy.kafkaPorts | default (list 9092 9093) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- if .Values.schemaRegistry.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: apicurio-registry
+      ports:
+        - port: {{ .Values.schemaRegistry.port | default 80 }}
+          protocol: TCP
+    {{- end }}
+    {{- range (default (list) .Values.databaseEgress) }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          {{- with .podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - port: {{ .port | default 5432 }}
+          protocol: TCP
+    {{- end }}
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+{{- if .Values.databaseEgress }}
+{{- range .Values.databaseEgress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kafka-connect-ingress
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "connect-cluster.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    {{- with .podSelector }}
+    matchLabels:
+      {{- toYaml . | nindent 6 }}
+    {{- else }}
+    matchLabels: {}
+    {{- end }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $namespace }}
+          podSelector:
+            matchLabels:
+              strimzi.io/name: {{ $clusterName }}
+      ports:
+        - port: {{ .port | default 5432 }}
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

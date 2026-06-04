@@ -1,0 +1,60 @@
+┌──────────────────────────────────────────────────────────────────┐
+│  Kafka Connect cluster "{{ include "connect-cluster.fullname" . }}" deployed to namespace {{ include "connect-cluster.namespace" . }}
+└──────────────────────────────────────────────────────────────────┘
+
+  Version:        Kafka {{ .Values.version }}
+  Workers:        {{ .Values.replicas }} replica(s)
+  Group ID:       {{ .Values.groupId }}
+  Bootstrap:      {{ .Values.kafka.bootstrapServers }}
+{{- if gt (len (default (list) .Values.connectors)) 0 }}
+  Connectors:     {{ len .Values.connectors }} declared
+{{- end }}
+
+Components:
+  TLS:                {{ if .Values.kafka.tls.enabled }}enabled{{ else }}disabled{{ end }}
+  Tracing:            {{ if .Values.tracing.enabled }}{{ .Values.tracing.type }}{{ else }}disabled{{ end }}
+  Schema Registry:    {{ if .Values.schemaRegistry.enabled }}{{ .Values.schemaRegistry.serviceName }}{{ else }}disabled{{ end }}
+  REST API Service:   {{ if .Values.restApi.service.enabled }}enabled (port {{ .Values.restApi.service.port | default 8083 }}){{ else }}disabled{{ end }}
+  Alerts:             {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
+  Dashboards:         {{ if .Values.dashboards.enabled }}enabled{{ else }}disabled{{ end }}
+
+────────────────────────────────────────────
+  Getting Started
+────────────────────────────────────────────
+
+1. Wait for KafkaConnect to become ready:
+
+  kubectl wait kafkaconnect/{{ include "connect-cluster.fullname" . }} \
+    --for=condition=Ready -n {{ include "connect-cluster.namespace" . }} --timeout=300s
+
+2. Check worker pods:
+
+  kubectl get pods -n {{ include "connect-cluster.namespace" . }} \
+    -l strimzi.io/name={{ include "connect-cluster.fullname" . }} \
+    -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,NODE:.spec.nodeName
+
+3. Run Helm tests:
+
+  helm test {{ .Release.Name }} -n {{ include "connect-cluster.namespace" . }}
+
+────────────────────────────────────────────
+  REST API
+────────────────────────────────────────────
+{{- if .Values.restApi.service.enabled }}
+
+  # List connectors
+  kubectl run -n {{ include "connect-cluster.namespace" . }} curl-test --rm -it --image=curlimages/curl -- \
+    curl -s http://{{ include "connect-cluster.fullname" . }}-rest-api:{{ .Values.restApi.service.port | default 8083 }}/connectors
+
+  # List installed plugins
+  kubectl run -n {{ include "connect-cluster.namespace" . }} curl-test --rm -it --image=curlimages/curl -- \
+    curl -s http://{{ include "connect-cluster.fullname" . }}-rest-api:{{ .Values.restApi.service.port | default 8083 }}/connector-plugins
+{{- end }}
+
+────────────────────────────────────────────
+  Useful Commands
+────────────────────────────────────────────
+
+  kubectl get kafkaconnect,kafkaconnector -n {{ include "connect-cluster.namespace" . }}
+  kubectl logs -n {{ include "connect-cluster.namespace" . }} \
+    -l strimzi.io/name={{ include "connect-cluster.fullname" . }} --tail=50

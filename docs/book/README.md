@@ -28,6 +28,7 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 | 18 | [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |
 | 19 | [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
 | 20 | [Installation Guide](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites, verification, and troubleshooting |
+| 21 | [Kafka Connect & CDC Pipelines](21-kafka-connect.md) | Kafka Connect architecture, Debezium CDC, connector lifecycle, multi-AZ strategy, and operational procedures |
 | A | [Glossary](appendix-a-glossary.md) | Quick reference for all terms and abbreviations |
 | B | [Troubleshooting Index](appendix-b-troubleshooting.md) | Consolidated troubleshooting procedures from across the book |
 | C | [CI/CD Pipeline](appendix-c-cicd.md) | GitHub Actions workflows, build validation, and release automation |
@@ -55,4 +56,4 @@ Hands-on step-by-step guides for specific workflows:
 
 ## How to Read This Book
 
-Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows. Chapter 15 is the **Kafka operations manual** — read it when deploying, upgrading, or troubleshooting the cluster. Chapters 16–19 cover advanced topics: gRPC integration, security hardening, upgrade procedures, and multi-tenant operations. **Chapter 20 is the step-by-step installation guide** — start here if you're deploying the kafka-cluster Helm chart for the first time. The appendices provide quick reference for terminology and troubleshooting.
+Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows. Chapter 15 is the **Kafka operations manual** — read it when deploying, upgrading, or troubleshooting the cluster. Chapters 16–19 cover advanced topics: gRPC integration, security hardening, upgrade procedures, and multi-tenant operations. **Chapter 20 is the step-by-step installation guide** — start here if you're deploying the kafka-cluster Helm chart for the first time. **Chapter 21 covers Kafka Connect and CDC pipelines** — read it when deploying Debezium connectors, configuring exactly-once semantics, or operating Connect clusters in production. The appendices provide quick reference for terminology and troubleshooting.

@@ -109,11 +109,31 @@ spec:
 ### Using with Helm chart
 
 ```bash
-# In values.yaml
-kafkaConnect:
-  enabled: true
-  image: "ghcr.io/bmscomp/connect:3.0.2"
+# Deploy the standalone connect-cluster chart
+helm upgrade --install connect-cluster charts/connect-cluster \
+  --namespace kafka \
+  --set image="ghcr.io/bmscomp/connect:3.0.2"
 ```
+
+## Multi-AZ Deployment Strategy
+
+When deploying Kafka Connect across multiple Availability Zones (AZs), the `connect-cluster` chart uses the **Stretched Cluster** strategy to prioritize High Availability (HA) and automatic failover.
+
+### How it works
+
+The chart provisions a single `KafkaConnect` resource that spans all configured zones.
+
+* **Shared `groupId`:** All worker nodes across all AZs share a single `groupId` (e.g., `kates-connect-cluster`) and the same internal storage topics (`*-offsets`, `*-configs`, `*-status`).
+* **Topology Spread Constraints:** Instead of pinning workers to specific zones using strict `nodeAffinity`, the chart relies on Kubernetes `topologySpreadConstraints` and `podAntiAffinity` to evenly distribute the Connect worker pods across the available AZs.
+* **Unified Connector Assignment:** You deploy connectors to the single stretched cluster using the `strimzi.io/cluster: <cluster-name>-connect` label.
+
+### Benefits
+
+1. **Automatic Failover:** If an entire Availability Zone goes offline, the Kafka Connect framework will automatically reassign the affected connectors and tasks to surviving workers in other AZs.
+2. **State Preservation:** Because the offsets are stored in a single, globally shared topic, connectors that fail over to a new AZ resume exactly where they left off without needing costly data snapshots.
+3. **Simpler Management:** You do not have to manage multiple Connect clusters or worry about which AZ a connector is deployed into.
+
+> **Note:** While this strategy provides seamless failover, it can incur higher cross-AZ data transfer costs compared to independent clusters since connectors may be scheduled in different AZs than their data sources.
 
 ## Building Locally
 
@@ -169,7 +189,7 @@ gh workflow run publish-connect.yml \
 1. Update `DEBEZIUM_VERSION` in `Dockerfile.connect`
 2. Push to main or tag a release
 3. CI builds and publishes the new image
-4. Update `kafkaConnect.image` in your Helm values
+4. Update `image` in your `connect-cluster` values
 
 ```bash
 # Example: upgrade to Debezium 3.1.0

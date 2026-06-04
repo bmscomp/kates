@@ -322,8 +322,7 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
   -f charts/kafka-cluster/values-prod.yaml \
   --set clusterName=my-kafka \
   --set controllers.replicas=5 \
-  --set kafkaConnect.enabled=true \
-  --set 'kafkaConnect.jvmOptions.-Xmx=1024m' \
+
   --timeout 10m \
   --wait
 ```
@@ -505,8 +504,7 @@ users:
 ```bash
 helm upgrade kafka-cluster charts/kafka-cluster \
   --namespace kafka --reuse-values \
-  --set kafkaConnect.enabled=true \
-  --set 'kafkaConnect.jvmOptions.-Xmx=1024m' \
+
   --wait
 ```
 

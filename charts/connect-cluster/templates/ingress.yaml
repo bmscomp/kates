@@ -1,0 +1,42 @@
+{{- if .Values.restApi.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-rest-api
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+  {{- with .Values.restApi.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.restApi.ingress.className }}
+  ingressClassName: {{ .Values.restApi.ingress.className }}
+  {{- end }}
+  {{- if .Values.restApi.ingress.tls }}
+  tls:
+    {{- range .Values.restApi.ingress.tls }}
+    - secretName: {{ .secretName }}
+      hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.restApi.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "connect-cluster.fullname" $ }}-rest-api
+                port:
+                  number: {{ $.Values.restApi.service.port | default 8083 }}
+          {{- end }}
+    {{- end }}
+{{- end }}

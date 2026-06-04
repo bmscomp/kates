@@ -1,0 +1,309 @@
+# connect-cluster values.yaml
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+# -- Override the release namespace
+namespaceOverride: ""
+
+# -- Keep CRDs on helm uninstall (safety measure)
+keepOnDelete: true
+
+# -- Extra labels to add to all resources
+extraLabels: {}
+
+# -- Number of Kafka Connect worker replicas
+replicas: 3
+# -- Kafka Connect image (leave empty to use Strimzi default)
+image: "ghcr.io/bmscomp/connect:3.0.2"
+# -- Kafka version
+version: "4.2.0"
+# -- Group ID for the Connect cluster
+groupId: kates-connect-cluster
+
+# -- Kubernetes cluster domain (used for Schema Registry FQDN computation)
+clusterDomain: cluster.local
+
+# ── Kafka Connection Settings ───────────────────────────────────────────────
+# By default, this assumes the Kafka cluster is named 'krafter' and is deployed
+# in the same namespace as this Connect cluster. Adjust these if Kafka is deployed
+# elsewhere or has a different name.
+kafka:
+  # -- Bootstrap servers for the Kafka cluster
+  bootstrapServers: "krafter-kafka-bootstrap:9093"
+  tls:
+    enabled: true
+    # -- Secret containing the CA certificate for Kafka
+    trustedCertificateSecret: "krafter-cluster-ca-cert"
+    certificateKey: "ca.crt"
+  authentication:
+    type: scram-sha-512
+    username: "kates-connect"
+    # -- Secret containing the authentication password (defaults to username if empty)
+    secretName: "kates-connect"
+
+# ── Scheduling ──────────────────────────────────────────────────────────────
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+  additional: []
+
+podDisruptionBudget:
+  maxUnavailable: 1
+
+rack:
+  enabled: true
+  topologyKey: topology.kubernetes.io/zone
+
+tolerations: []
+nodeSelector: {}
+nodeAffinity: {}
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+# -- Pod-level security context
+podSecurityContext:
+  fsGroup: 1001
+  runAsNonRoot: true
+  # runAsUser: 1001
+  seccompProfile: RuntimeDefault
+
+# -- DNS settings
+dnsPolicy: ""
+dnsConfig: {}
+
+# -- Termination grace period (seconds)
+terminationGracePeriodSeconds: 30
+
+priorityClassName: "system-cluster-critical"
+imagePullSecrets: []
+
+
+# ── Internal Topics ─────────────────────────────────────────────────────────
+internalTopics:
+  prefix: ""  # defaults to groupId
+  # -- Override individual topic names (defaults to <groupId>-<suffix>)
+  # offsetsName: ""
+  # configsName: ""
+  # statusName: ""
+
+# ── JVM & Resources ────────────────────────────────────────────────────────
+jvmOptions:
+  -Xms: 1024m
+  -Xmx: 1024m
+  gcLoggingEnabled: true
+  javaSystemProperties: []
+
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 1000m
+  limits:
+    memory: 4Gi
+    cpu: 4000m
+
+# ── Schema Registry (Apicurio) ──────────────────────────────────────────────
+schemaRegistry:
+  enabled: false
+  serviceName: apicurio-apicurio-registry
+  port: 80
+  path: /apis/ccompat/v7
+
+# ── External Configuration ──────────────────────────────────────────────────
+# Mount secrets and/or configmaps into Connect worker pods for use with
+# Kafka Connect's FileConfigProvider / DirectoryConfigProvider.
+externalConfiguration:
+  volumes: []
+    # Secret volumes — mounted at /mnt/<name>
+    # - name: pg-credentials
+    #   type: secret                  # default if omitted
+    #   secretName: connect-pg-credentials
+    #
+    # ConfigMap volumes — mounted at /mnt/<name>
+    # - name: transform-scripts
+    #   type: configMap
+    #   configMapName: connect-transforms
+  env: []
+
+# ── Network Policy ──────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+  kafkaPorts:
+    - 9092
+    - 9093
+  monitoringNamespace: monitoring
+
+# ── Database Egress (NetworkPolicy) ─────────────────────────────────────────
+databaseEgress: []
+  # - namespace: database
+  #   port: 5432
+  #   podSelector:
+  #     app.kubernetes.io/name: postgresql
+
+# ── Converter Configuration ─────────────────────────────────────────────────
+config:
+  replicationFactor: 3
+  keyConverter: org.apache.kafka.connect.json.JsonConverter
+  valueConverter: org.apache.kafka.connect.json.JsonConverter
+  keyConverterSchemasEnable: true
+  valueConverterSchemasEnable: true
+
+# -- Arbitrary extra Kafka Connect worker config properties
+extraConfig:
+  producer.acks: "all"
+  producer.enable.idempotence: "true"
+  consumer.auto.offset.reset: "earliest"
+  exactly.once.source.support: "enabled"
+  group.initial.rebalance.delay.ms: "3000"
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+logging:
+  type: external
+
+# ── Tracing (OpenTelemetry) ─────────────────────────────────────────────────
+tracing:
+  enabled: true
+  type: opentelemetry
+
+# ── Environment Variables ───────────────────────────────────────────────────
+env: []
+
+# ── Probes ──────────────────────────────────────────────────────────────────
+readinessProbe:
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 10
+  timeoutSeconds: 30
+livenessProbe:
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 20
+  timeoutSeconds: 30
+
+# ── Strimzi Build (Custom Plugins) ──────────────────────────────────────────
+# Enable this to let Strimzi build a custom Connect image with plugins.
+# If using a pre-built image (recommended), leave this empty.
+build: {}
+  # output:
+  #   type: docker
+  #   image: my-registry/my-connect:latest
+  #   pushSecret: my-registry-credentials
+  # plugins:
+  #   - name: debezium-postgres
+  #     artifacts:
+  #       - type: maven
+  #         group: io.debezium
+  #         artifact: debezium-connector-postgres
+  #         version: 2.5.0.Final
+  #   - name: apicurio-converter
+  #     artifacts:
+  #       - type: maven
+  #         group: io.apicurio
+  #         artifact: apicurio-registry-distro-connect-converter
+  #         version: 2.6.5.Final
+
+# ── Metrics ─────────────────────────────────────────────────────────────────
+metricsConfig:
+  configMapName: kafka-metrics
+  configMapKey: kafka-metrics-config.yml
+
+# ── Pod Template Overrides ──────────────────────────────────────────────────
+template:
+  pod:
+    metadata: {}
+
+# ── Connectors ──────────────────────────────────────────────────────────────
+# Default auto-restart settings applied to all connectors unless overridden
+# at the individual connector level.
+autoRestart:
+  enabled: true
+  maxRestarts: 10
+
+connectors: []
+  # - name: cdc-orders
+  #   class: io.debezium.connector.postgresql.PostgresConnector
+  #   tasksMax: 1
+  #   state: running          # running | paused | stopped
+  #   autoRestart:            # per-connector override (optional)
+  #     enabled: true
+  #     maxRestarts: 20
+  #   config:
+  #     database.hostname: postgresql.database.svc
+  #     database.port: "5432"
+  #     database.user: "${file:/mnt/pg-credentials/username}"
+  #     database.password: "${file:/mnt/pg-credentials/password}"
+  #     database.dbname: orders
+  #     topic.prefix: cdc.orders
+  #     schema.include.list: public
+  #     plugin.name: pgoutput
+  #     slot.name: debezium_orders
+
+# ── RBAC ────────────────────────────────────────────────────────────────────
+serviceAccount:
+  # -- Create a dedicated ServiceAccount for Connect pods
+  create: true
+  # -- Annotations to add to the ServiceAccount (e.g. for IRSA/Workload Identity)
+  annotations: {}
+  # -- Name of the ServiceAccount (defaults to fullname)
+  name: ""
+
+# ── REST API Exposure ───────────────────────────────────────────────────────
+# Expose the Kafka Connect REST API (port 8083) via a Kubernetes Service
+# and optionally an Ingress for external tooling (Kafka UI, monitoring).
+restApi:
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 8083
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+      # nginx.ingress.kubernetes.io/rewrite-target: /
+    hosts: []
+      # - host: connect.example.com
+      #   paths:
+      #     - path: /
+      #       pathType: Prefix
+    tls: []
+      # - secretName: connect-tls
+      #   hosts:
+      #     - connect.example.com
+
+# ── Observability ───────────────────────────────────────────────────────────
+alerts:
+  enabled: true
+  labels:
+    release: kafka
+    prometheus: kube-prometheus
+    severity: warning
+  thresholds:
+    heapUsagePercent: 85
+    errorRatePerSecond: 1
+    rebalanceRatePerSecond: 0.1
+    sourceLagMinutes: 15
+
+podMonitors:
+  enabled: true
+  labels:
+    release: kafka
+    prometheus: kube-prometheus
+
+dashboards:
+  enabled: true
+  namespace: ""   # defaults to release namespace
+  label: grafana_dashboard
+  labelValue: "1"
+
+# ── Monitoring (PodMonitor) ─────────────────────────────────────────────────
+monitoring:
+  enabled: true
+  interval: ""
+  scrapeTimeout: ""
+  honorLabels: false
+  metricRelabelings: []

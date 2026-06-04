@@ -1,0 +1,158 @@
+{{- /*
+  Helm pre-install/pre-upgrade hook that validates connector configurations.
+  Catches missing required fields before they reach the Strimzi operator.
+*/ -}}
+{{- if gt (len (default (list) .Values.connectors)) 0 }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-connector-validation
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  validate.sh: |
+    #!/bin/sh
+    set -e
+    ERRORS=0
+    WARNINGS=0
+
+    echo "=== Kafka Connect Connector Validation ==="
+    echo ""
+
+    {{- range $i, $connector := .Values.connectors }}
+    echo "▸ Validating connector: {{ $connector.name }}"
+
+    # Required: name must be a valid Kubernetes name
+    {{- if not $connector.name }}
+    echo "  ✗ ERROR: Connector at index {{ $i }} is missing 'name'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+
+    # Required: class must be specified
+    {{- if not $connector.class }}
+    echo "  ✗ ERROR: Connector '{{ $connector.name }}' is missing 'class'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+
+    # Warning: tasksMax should be set explicitly
+    {{- if not $connector.tasksMax }}
+    echo "  ⚠ WARNING: Connector '{{ $connector.name }}' has no tasksMax (defaults to 1)"
+    WARNINGS=$((WARNINGS+1))
+    {{- end }}
+
+    # Validate state if provided
+    {{- if $connector.state }}
+    {{- if not (or (eq $connector.state "running") (eq $connector.state "paused") (eq $connector.state "stopped")) }}
+    echo "  ✗ ERROR: Connector '{{ $connector.name }}' has invalid state '{{ $connector.state }}' (must be: running, paused, stopped)"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+    {{- end }}
+
+    # Validate connector-specific required fields based on class
+    {{- if $connector.config }}
+    {{- if contains "PostgresConnector" (default "" $connector.class) }}
+    {{- if not (index $connector.config "database.hostname") }}
+    echo "  ✗ ERROR: PostgreSQL connector '{{ $connector.name }}' is missing config 'database.hostname'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+    {{- if not (index $connector.config "database.dbname") }}
+    echo "  ✗ ERROR: PostgreSQL connector '{{ $connector.name }}' is missing config 'database.dbname'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+    {{- if not (index $connector.config "topic.prefix") }}
+    echo "  ⚠ WARNING: PostgreSQL connector '{{ $connector.name }}' is missing config 'topic.prefix'"
+    WARNINGS=$((WARNINGS+1))
+    {{- end }}
+    {{- if not (index $connector.config "plugin.name") }}
+    echo "  ⚠ WARNING: PostgreSQL connector '{{ $connector.name }}' is missing config 'plugin.name' (defaults to decoderbufs, recommend pgoutput)"
+    WARNINGS=$((WARNINGS+1))
+    {{- end }}
+    {{- end }}
+    {{- if contains "MySqlConnector" (default "" $connector.class) }}
+    {{- if not (index $connector.config "database.hostname") }}
+    echo "  ✗ ERROR: MySQL connector '{{ $connector.name }}' is missing config 'database.hostname'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+    {{- if not (index $connector.config "database.server.id") }}
+    echo "  ⚠ WARNING: MySQL connector '{{ $connector.name }}' is missing config 'database.server.id'"
+    WARNINGS=$((WARNINGS+1))
+    {{- end }}
+    {{- end }}
+    {{- if contains "JdbcSinkConnector" (default "" $connector.class) }}
+    {{- if not (index $connector.config "connection.url") }}
+    echo "  ✗ ERROR: JDBC Sink connector '{{ $connector.name }}' is missing config 'connection.url'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+    {{- end }}
+    {{- if contains "JdbcSourceConnector" (default "" $connector.class) }}
+    {{- if not (index $connector.config "connection.url") }}
+    echo "  ✗ ERROR: JDBC Source connector '{{ $connector.name }}' is missing config 'connection.url'"
+    ERRORS=$((ERRORS+1))
+    {{- end }}
+    {{- end }}
+    {{- else }}
+    echo "  ⚠ WARNING: Connector '{{ $connector.name }}' has no config block"
+    WARNINGS=$((WARNINGS+1))
+    {{- end }}
+
+    echo "  ✓ Validated"
+    echo ""
+    {{- end }}
+
+    echo "=== Results: $ERRORS error(s), $WARNINGS warning(s) ==="
+    if [ $ERRORS -gt 0 ]; then
+      echo ""
+      echo "✗ Validation FAILED — fix the errors above before deploying."
+      exit 1
+    fi
+    echo "✓ All connectors passed validation."
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-validate-connectors
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: validate
+      image: busybox:1.36
+      command: ["sh", "/scripts/validate.sh"]
+      volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+    - name: scripts
+      configMap:
+        name: {{ include "connect-cluster.fullname" . }}-connector-validation
+        defaultMode: 0755
+{{- end }}

@@ -1,0 +1,59 @@
+# Production overlay for connect-cluster
+# Usage: helm upgrade --install connect-cluster charts/connect-cluster -f charts/connect-cluster/values-prod.yaml
+
+replicas: 3
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+rack:
+  enabled: true
+  topologyKey: topology.kubernetes.io/zone
+
+jvmOptions:
+  -Xms: 2048m
+  -Xmx: 2048m
+  gcLoggingEnabled: true
+
+resources:
+  requests:
+    memory: 4Gi
+    cpu: 2000m
+  limits:
+    memory: 6Gi
+    cpu: 4000m
+
+podDisruptionBudget:
+  maxUnavailable: 1
+
+priorityClassName: "system-cluster-critical"
+
+alerts:
+  enabled: true
+
+podMonitors:
+  enabled: true
+
+dashboards:
+  enabled: true
+
+tracing:
+  enabled: true
+  type: opentelemetry
+
+autoRestart:
+  enabled: true
+  maxRestarts: 20
+
+networkPolicy:
+  enabled: true
+  kafkaPorts:
+    - 9093
+  monitoringNamespace: monitoring

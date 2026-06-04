@@ -146,7 +146,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	foundKafka, foundKates, foundChaos, foundSchema, foundPostgres := false, false, false, false, false
+	foundKafka, foundKates, foundChaos, foundSchema, foundPostgres, foundKafkaConnect := false, false, false, false, false, false
 
 	for _, cmd := range executedCommands {
 		if strings.Contains(cmd, "helm upgrade --install krafter") {
@@ -154,8 +154,11 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 			if !strings.Contains(cmd, "-n kafka-sys") {
 				t.Errorf("Expected Kafka to be deployed in kafka-sys namespace, got: %s", cmd)
 			}
-			if !strings.Contains(cmd, "kafkaConnect.enabled=true") {
-				t.Errorf("Expected Kafka Connect to be enabled, got: %s", cmd)
+		}
+		if strings.Contains(cmd, "helm upgrade --install connect-cluster") {
+			foundKafkaConnect = true
+			if !strings.Contains(cmd, "-n kafka-sys") {
+				t.Errorf("Expected Connect to be deployed in kafka-sys namespace, got: %s", cmd)
 			}
 		}
 		if strings.Contains(cmd, "helm upgrade --install kates") {
@@ -184,8 +187,8 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 		}
 	}
 
-	if !foundKafka || !foundKates || !foundChaos || !foundSchema || !foundPostgres {
-		t.Errorf("Missing expected commands. Kafka: %v, Kates: %v, Chaos: %v, Schema: %v, Postgres: %v", foundKafka, foundKates, foundChaos, foundSchema, foundPostgres)
+	if !foundKafka || !foundKates || !foundChaos || !foundSchema || !foundPostgres || !foundKafkaConnect {
+		t.Errorf("Missing expected commands. Kafka: %v, Kates: %v, Chaos: %v, Schema: %v, Postgres: %v, Connect: %v", foundKafka, foundKates, foundChaos, foundSchema, foundPostgres, foundKafkaConnect)
 	}
 }
 
@@ -309,28 +312,27 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	// 1. Verify Kafka helm command includes ALL connect-specific sets
+	// 1. Verify connect-cluster helm command includes ALL connect-specific sets
 	foundKafkaConnect := false
 	for _, cmd := range executedCommands {
-		if !strings.Contains(cmd, "helm upgrade --install krafter") {
+		if !strings.Contains(cmd, "helm upgrade --install connect-cluster") {
 			continue
 		}
 		foundKafkaConnect = true
 
 		connectSets := []string{
-			"kafkaConnect.enabled=true",
-			"kafkaConnect.schemaRegistry.enabled=true",
-			"kafkaConnect.databaseEgress[0].namespace=database",
-			"kafkaConnect.externalConfiguration.volumes[0].name=pg-credentials",
+			"schemaRegistry.enabled=true",
+			"databaseEgress[0].namespace=database",
+			"externalConfiguration.volumes[0].name=pg-credentials",
 		}
 		for _, expected := range connectSets {
 			if !strings.Contains(cmd, expected) {
-				t.Errorf("Expected Kafka helm command to include %q, got: %s", expected, cmd)
+				t.Errorf("Expected Connect helm command to include %q, got: %s", expected, cmd)
 			}
 		}
 	}
 	if !foundKafkaConnect {
-		t.Error("Kafka deployment command (krafter) was not executed")
+		t.Error("Connect deployment command (connect-cluster) was not executed")
 	}
 
 	// 2. Verify PostgreSQL is deployed with the correct namespace (database)
