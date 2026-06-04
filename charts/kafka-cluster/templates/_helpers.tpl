@@ -64,8 +64,8 @@ Default: quay.io/strimzi/kafka:1.0.0-kafka-4.2.0
 Override via: images.kafka or global.imageRegistry + global.imageRepository
 */}}
 {{- define "kafka-cluster.kafkaImage" -}}
-{{- if .Values.images.kafka -}}
-  {{- .Values.images.kafka -}}
+{{- if .Values.testImages.kafka -}}
+  {{- .Values.testImages.kafka -}}
 {{- else -}}
   {{- printf "%s/%s/kafka:%s-kafka-%s" .Values.global.imageRegistry .Values.global.imageRepository .Values.strimziVersion .Values.kafkaVersion -}}
 {{- end -}}
@@ -77,7 +77,7 @@ Default: bitnami/kubectl:1.33.0
 Override via: images.kubectl
 */}}
 {{- define "kafka-cluster.kubectlImage" -}}
-{{- .Values.images.kubectl -}}
+{{- .Values.testImages.kubectl -}}
 {{- end }}
 
 {{/*
