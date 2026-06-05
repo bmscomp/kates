@@ -94,7 +94,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 		fmt.Println("  " + sepLine)
 		for _, e := range groups[g] {
 			status := getComponentStatus(ctx, e.Release, e.Namespace)
-			printRow(e.Icon, e.Name, e.Namespace, status)
+			printRow(e.Icon, e.Name, e.Namespace, status, e.Duration)
 		}
 	}
 
@@ -148,7 +148,7 @@ func getComponentStatus(ctx context.Context, release, namespace string) string {
 	return "skip"
 }
 
-func printRow(icon, name, namespace, status string) {
+func printRow(icon, name, namespace, status string, duration time.Duration) {
 	const nameWidth = 28
 	const nsWidth = 18
 
@@ -172,7 +172,11 @@ func printRow(icon, name, namespace, status string) {
 	var statusStr string
 	switch status {
 	case "ready":
-		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render("✔ Ready")
+		if duration > 0 {
+			statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render(fmt.Sprintf("✔ Ready (%s)", duration.Round(time.Second)))
+		} else {
+			statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render("✔ Ready")
+		}
 	case "fail":
 		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render("✖ Failed")
 	default:

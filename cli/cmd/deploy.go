@@ -3,10 +3,13 @@ package cmd
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -33,8 +36,21 @@ Examples:
   # Deploy everything into a single namespace (dev mode)
   kates deploy --topology single --namespace kates-stack
 
+  # Deploy with a preset profile
+  kates deploy --profile dev
+  kates deploy --profile production
+
   # Deploy components into isolated namespaces (production mode)
   kates deploy --topology isolated --kafka-ns kafka-system --app-ns kates-app --chaos-ns litmus-system
+
+  # Deploy only specific components
+  kates deploy --only kafka,kates
+
+  # Upgrade existing releases (don't skip already-deployed)
+  kates deploy --upgrade
+
+  # Tear down the entire stack
+  kates deploy --destroy
 
   # Deploy with Apicurio Schema Registry
   kates deploy --with-schema-registry apicurio`,
@@ -62,6 +78,16 @@ var (
 	deployVerbose            bool
 	deployPortForward        bool
 	deployDryRun             bool
+
+	// New enhancement flags
+	deployForceUpgrade   bool
+	deployOnly           []string
+	deployTimeout        time.Duration
+	deployProfile        string
+	deployDestroy        bool
+	deployDestroyYes     bool
+	deployDestroyDeleteNS bool
+	deployDbPassword     string
 )
 
 func init() {
@@ -88,6 +114,16 @@ func init() {
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
 
+	// Enhancement flags
+	deployCmd.Flags().BoolVar(&deployForceUpgrade, "upgrade", false, "Upgrade existing releases instead of skipping them")
+	deployCmd.Flags().StringSliceVar(&deployOnly, "only", nil, "Deploy only specific components (comma-separated release names, e.g. kafka,kates,connect-cluster)")
+	deployCmd.Flags().DurationVar(&deployTimeout, "timeout", 30*time.Minute, "Maximum total time for the entire deployment")
+	deployCmd.Flags().StringVar(&deployProfile, "profile", "", "Use a deployment profile: dev, production, ci, minimal, full")
+	deployCmd.Flags().BoolVar(&deployDestroy, "destroy", false, "Tear down the deployed stack (reverse uninstall)")
+	deployCmd.Flags().BoolVar(&deployDestroyYes, "yes", false, "Skip confirmation prompt for --destroy")
+	deployCmd.Flags().BoolVar(&deployDestroyDeleteNS, "delete-namespaces", false, "Also delete namespaces when using --destroy")
+	deployCmd.Flags().StringVar(&deployDbPassword, "db-password", "", "PostgreSQL password for CDC (auto-generated if empty)")
+
 	rootCmd.AddCommand(deployCmd)
 }
 
@@ -96,6 +132,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	PrintDeployBanner()
 
 	dl = &DashboardController{}
+
+	// ── Apply deployment profile (before interactive or flag logic) ──
+	if deployProfile != "" {
+		if err := applyProfile(deployProfile, cmd); err != nil {
+			return err
+		}
+		PrintPhaseItem(fmt.Sprintf("Profile: %s", deployProfile))
+	}
 
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
 		var components []string
@@ -306,6 +350,23 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// right values overlay (values-kind.yaml vs values-generic.yaml).
 	isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
 
+	// Resolve global cluster domain
+	clusterDomain := report.Network.ClusterDomain
+	if clusterDomain == "" {
+		clusterDomain = "cluster.local"
+	}
+
+	// Resolve database password
+	if deployDbPassword == "" {
+		chars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		pwd := make([]byte, 24)
+		for i := 0; i < 24; i++ {
+			n, _ := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(len(chars))))
+			pwd[i] = chars[n.Int64()]
+		}
+		deployDbPassword = string(pwd)
+	}
+
 	// chartOverlay returns the path to the appropriate environment values file
 	// for a given chart directory. Falls back to generic when the file doesn't
 	// exist for that chart (e.g. kafka-cluster has no values-generic.yaml).
@@ -351,6 +412,43 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
 	}
 
+	// ── Filter by --only ──
+	var deployWithKafka = true
+	var deployWithKates = true
+	if len(deployOnly) > 0 {
+		var filtered []DeploySummaryEntry
+		onlySet := make(map[string]bool)
+		for _, e := range sharedEntries {
+			for _, only := range deployOnly {
+				if e.Release == only {
+					filtered = append(filtered, e)
+					onlySet[e.Release] = true
+					break
+				}
+			}
+		}
+		sharedEntries = filtered
+
+		deployWithStrimzi = onlySet["strimzi-operator"]
+		deployWithCertManager = onlySet["cert-manager"]
+		deployWithKyverno = onlySet["kyverno"]
+		deployWithMonitoring = onlySet["monitoring"]
+		deployWithChaos = onlySet["chaos"]
+		deployWithKafkaConnect = onlySet["connect-cluster"] || onlySet["postgresql"]
+		if !onlySet["apicurio"] {
+			deployWithSchemaRegistry = "none"
+		}
+		deployWithKafka = onlySet["krafter"]
+		deployWithKates = onlySet["kates"]
+	}
+
+	// ── Teardown: show summary and exit ──
+	if deployDestroy {
+		ctx, cancel := context.WithTimeout(context.Background(), deployTimeout)
+		defer cancel()
+		return runDestroy(ctx, sharedEntries, deployDestroyDeleteNS)
+	}
+
 	// ── Dry-run: show preview and exit ──
 	if deployDryRun {
 		dryCtx, dryCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -379,7 +477,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployWithKyverno {
 		totalSteps++
 	}
-	totalSteps += 2 // kafka, kafka-users
+	if deployWithKafka {
+		totalSteps += 2 // kafka, kafka-users
+	}
 	if deployWithMonitoring {
 		totalSteps++
 	}
@@ -389,13 +489,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployWithSchemaRegistry == "apicurio" {
 		totalSteps++
 	}
-	totalSteps++ // kates
+	if deployWithKates {
+		totalSteps++ // kates
+	}
 	if deployWithChaos {
 		totalSteps++
 	}
 
-	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create context with global timeout
+	ctx, cancel := context.WithTimeout(context.Background(), deployTimeout)
 	defer cancel()
 
 	// ---------------------------------------------------------
@@ -411,8 +513,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployWithKyverno {
 		dashboard.RegisterComponent("kyverno", "Kyverno", "A", Target{"kyverno", "app.kubernetes.io/instance=kyverno"})
 	}
-	dashboard.RegisterComponent("kafka", "Kafka Cluster", "B", Target{kafkaNS, "strimzi.io/cluster=krafter"})
-	dashboard.RegisterComponent("kafka-users", "Kafka Users", "B", Target{kafkaNS, "app.kubernetes.io/name=entity-operator"})
+	if deployWithKafka {
+		dashboard.RegisterComponent("kafka", "Kafka Cluster", "B", Target{kafkaNS, "strimzi.io/cluster=krafter"})
+		dashboard.RegisterComponent("kafka-users", "Kafka Users", "B", Target{kafkaNS, "app.kubernetes.io/name=entity-operator"})
+	}
 	if deployWithMonitoring {
 		dashboard.RegisterComponent("monitoring", "Monitoring Stack", "B", Target{jaegerNS, "release=monitoring"})
 	}
@@ -427,7 +531,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployWithSchemaRegistry == "apicurio" {
 		dashboard.RegisterComponent("apicurio", "Apicurio Registry", "C", Target{kafkaNS, "app.kubernetes.io/instance=apicurio"})
 	}
-	dashboard.RegisterComponent("kates", "Kates Backend", "C", Target{appNS, "app.kubernetes.io/instance=kates"})
+	if deployWithKates {
+		dashboard.RegisterComponent("kates", "Kates Backend", "C", Target{appNS, "app.kubernetes.io/instance=kates"})
+	}
 	if deployWithChaos {
 		dashboard.RegisterComponent("chaos", "Litmus Chaos", "C", Target{chaosNS, "app.kubernetes.io/instance=chaos"})
 	}
@@ -506,10 +612,6 @@ metadata:
 					// global.clusterDomain ensures cert-manager generates webhook TLS certificates
 					// and service references using the actual cluster DNS domain (not always cluster.local).
 					// report.Network.ClusterDomain is detected from the live cluster by kates detect.
-					clusterDomain := report.Network.ClusterDomain
-					if clusterDomain == "" {
-						clusterDomain = "cluster.local"
-					}
 					err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager",
 						"--version", "v1.13.3",
 						"-n", "cert-manager", "--create-namespace",
@@ -623,13 +725,9 @@ spec:
 
 					// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
 					// Pinned to 3.6.4 — the last stable patch of the 3.6 minor series.
-					// Chart versions: https://kyverno.github.io/kyverno/
+					// chart versions: https://kyverno.github.io/kyverno/
 					// global.clusterDomain ensures Kyverno webhook certificates use the
 					// correct cluster DNS domain — same value detected for all other components.
-					kyvernoDomain := report.Network.ClusterDomain
-					if kyvernoDomain == "" {
-						kyvernoDomain = "cluster.local"
-					}
 					err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
 						"--version", "3.6.4",
 						"-n", "kyverno", "--create-namespace",
@@ -637,7 +735,7 @@ spec:
 						"--set", "backgroundController.replicas=1",
 						"--set", "cleanupController.replicas=1",
 						"--set", "reportsController.replicas=1",
-						"--set", "global.clusterDomain="+kyvernoDomain,
+						"--set", "global.clusterDomain="+clusterDomain,
 						"--timeout", "5m")
 					if err != nil {
 						return err
@@ -707,15 +805,9 @@ spec:
 			// GROUP B: Core Infrastructure (Parallel)
 			// ---------------------------------------------------------
 
-			deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", kafkaNS)
-			deployMon := false
-			if deployWithMonitoring {
-				deployMon = !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS)
-			}
-			deployPG := false
-			if deployWithKafkaConnect {
-				deployPG = !isHelmReleaseDeployedFn(ctx, "postgresql", deployDbNS)
-			}
+			deployMon := !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS) && deployWithMonitoring
+			deployPG := !isHelmReleaseDeployedFn(ctx, "postgresql", deployDbNS) && deployWithKafkaConnect
+			deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", kafkaNS) && deployWithKafka
 
 			if deployKafka {
 				dl.Printf("\n📦 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
@@ -780,7 +872,7 @@ metadata:
 						"-n", dbNS, "--create-namespace",
 						"--set", "auth.postgresPassword=postgres",
 						"--set", "auth.username=debezium",
-						"--set", "auth.password=debezium",
+						"--set", "auth.password="+deployDbPassword,
 						"--set", "auth.database=orders",
 						"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
 						"--timeout", "5m"); err != nil {
@@ -799,10 +891,6 @@ metadata:
 					// No --wait: Helm only needs to submit the manifests; the Strimzi
 					// operator drives reconciliation asynchronously. waitKafkaReady()
 					// below is the real readiness gate.
-					clusterDomain := report.Network.ClusterDomain
-					if clusterDomain == "" {
-						clusterDomain = "cluster.local"
-					}
 					kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
 
 					kafkaArgs = append(kafkaArgs,
@@ -938,19 +1026,15 @@ metadata:
   namespace: %s
 type: Opaque
 stringData:
-  password: debezium
-  username: debezium`, kafkaNS)
+  password: %s
+  username: debezium`, kafkaNS, deployDbPassword)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
 				if !isHelmReleaseDeployedFn(ctx, "connect-cluster", kafkaNS) {
 					dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", kafkaNS)
 
-					connectDomain := report.Network.ClusterDomain
-					if connectDomain == "" {
-						connectDomain = "cluster.local"
-					}
 					registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
-						kafkaNS, connectDomain)
+						kafkaNS, clusterDomain)
 
 					connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
 						"-n", kafkaNS, "--create-namespace",
@@ -1102,16 +1186,17 @@ spec:
 				}
 			}
 
-			// Deploy Kates
-			if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
-				dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
-				dl.StartComponent("kates", 8*time.Minute)
+			// Deploy Kates Backend
+			if deployWithKates {
+				if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
+					dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+					dl.StartComponent("kates", 8*time.Minute)
 
-				// Auto-cleanup stale ClusterRole ownership from previous topology switches
-				cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
-				cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
+					// Auto-cleanup stale ClusterRole ownership from previous topology switches
+					cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
+					cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
 
-				if kafkaNS != appNS {
+					if kafkaNS != appNS {
 					// Ensure app namespace exists before copying secrets into it.
 					nsYaml := fmt.Sprintf(`apiVersion: v1
 kind: Namespace
@@ -1165,6 +1250,7 @@ data:
 				dl.FinishComponent("kates", true)
 				advanceStep()
 			}
+			}
 
 			// Deploy Chaos
 			if deployWithChaos {
@@ -1206,13 +1292,59 @@ data:
 		}()
 	}()
 
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		return err
 	}
 
 	<-doneCh // Wait for deployment goroutine to fully exit
 
+	if dm, ok := finalModel.(deployDashboardModel); ok {
+		logFile := filepath.Join(".build", fmt.Sprintf("deploy-%d.log", time.Now().Unix()))
+		os.MkdirAll(".build", 0755)
+		os.WriteFile(logFile, []byte(strings.Join(dm.logs, "\n")), 0644)
+		if deployErr != nil {
+			fmt.Printf("\nDeployment failed. View logs at: %s\n", logFile)
+			fmt.Println("\n--- Last 20 log lines ---")
+			start := len(dm.logs) - 20
+			if start < 0 {
+				start = 0
+			}
+			fmt.Println(strings.Join(dm.logs[start:], "\n"))
+		} else {
+			fmt.Printf("\nDeploy logs saved to: %s\n", logFile)
+		}
+	}
+
 	if deployErr == nil && len(finalEntries) > 0 {
+		if dm, ok := finalModel.(deployDashboardModel); ok {
+			// Map dashboard IDs to Release names to populate duration
+			idToRelease := map[string]string{
+				"strimzi":       "strimzi-operator",
+				"cert-manager":  "cert-manager",
+				"kyverno":       "kyverno",
+				"kafka":         "krafter",
+				"monitoring":    "monitoring",
+				"postgres":      "postgresql",
+				"kafka-connect": "connect-cluster",
+				"apicurio":      "apicurio",
+				"kates":         "kates",
+				"chaos":         "chaos",
+			}
+			for i, e := range finalEntries {
+				for id, rel := range idToRelease {
+					if e.Release == rel {
+						if cStat, exists := dm.compMap[id]; exists && cStat.Done {
+							// Duration is time since StartTime if it was active
+							if !cStat.StartTime.IsZero() {
+								finalEntries[i].Duration = time.Since(cStat.StartTime)
+							}
+						}
+					}
+				}
+			}
+		}
+
 		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
 
 		// Automatically sync API key from deployed cluster to active context
@@ -1342,6 +1474,9 @@ func runHelmDefault(ctx context.Context, args ...string) error {
 }
 
 func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string) bool {
+	if deployForceUpgrade {
+		return false
+	}
 	// Create context with short timeout
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
