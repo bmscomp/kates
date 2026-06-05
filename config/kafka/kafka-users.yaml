@@ -116,6 +116,13 @@ spec:
           patternType: prefix
         operations: ["Read", "Write", "Create", "Describe"]
         host: "*"
+      # Debezium Heartbeat topics
+      - resource:
+          type: topic
+          name: "__debezium"
+          patternType: prefix
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
       # Consumer groups
       - resource:
           type: group

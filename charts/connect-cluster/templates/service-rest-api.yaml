@@ -18,6 +18,6 @@ spec:
       protocol: TCP
       name: rest-api
   selector:
-    strimzi.io/name: {{ include "connect-cluster.fullname" . }}
+    strimzi.io/name: {{ include "connect-cluster.fullname" . }}-connect
     strimzi.io/kind: KafkaConnect
 {{- end }}

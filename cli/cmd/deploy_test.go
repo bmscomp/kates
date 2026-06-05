@@ -323,7 +323,6 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 		connectSets := []string{
 			"schemaRegistry.enabled=true",
 			"databaseEgress[0].namespace=database",
-			"externalConfiguration.volumes[0].name=pg-credentials",
 		}
 		for _, expected := range connectSets {
 			if !strings.Contains(cmd, expected) {

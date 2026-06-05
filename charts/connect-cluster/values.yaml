@@ -13,6 +13,10 @@ keepOnDelete: true
 # -- Extra labels to add to all resources
 extraLabels: {}
 
+# -- Test images used in Helm test pods
+testImages:
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
+
 # -- Number of Kafka Connect worker replicas
 replicas: 3
 # -- Kafka Connect image (leave empty to use Strimzi default)
@@ -113,21 +117,13 @@ schemaRegistry:
   port: 80
   path: /apis/ccompat/v7
 
-# ── External Configuration ──────────────────────────────────────────────────
-# Mount secrets and/or configmaps into Connect worker pods for use with
-# Kafka Connect's FileConfigProvider / DirectoryConfigProvider.
-externalConfiguration:
-  volumes: []
-    # Secret volumes — mounted at /mnt/<name>
-    # - name: pg-credentials
-    #   type: secret                  # default if omitted
-    #   secretName: connect-pg-credentials
-    #
-    # ConfigMap volumes — mounted at /mnt/<name>
-    # - name: transform-scripts
-    #   type: configMap
-    #   configMapName: connect-transforms
-  env: []
+# ── Secret Access (Strimzi 1.0.0+) ──────────────────────────────────────────
+# The KubernetesSecretConfigProvider is always enabled. Use the syntax
+# ${secrets:<namespace>/<secret-name>:<key>} in connector configs to reference
+# Kubernetes Secrets without volume mounts. The Connect ServiceAccount must
+# have RBAC permissions to read the target secrets.
+# See: https://strimzi.io/docs/operators/latest/configuring.html#type-ExternalConfiguration-reference
+
 
 # ── Network Policy ──────────────────────────────────────────────────────────
 networkPolicy:

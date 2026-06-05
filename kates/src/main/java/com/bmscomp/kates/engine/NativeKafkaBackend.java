@@ -98,7 +98,9 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 case INTEGRITY -> runIntegrity(task, state);
                 case INTEGRITY_CDC -> runIntegrityCdc(task, state);
             }
-            state.status = TaskStatus.DONE;
+            if (state.status != TaskStatus.FAILED) {
+                state.status = TaskStatus.DONE;
+            }
         } catch (Exception e) {
             LOG.warn("Native benchmark failed: " + task.getTaskId(), e);
             state.error = e.getMessage();
