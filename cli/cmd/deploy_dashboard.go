@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/output"
+	"github.com/klster/kates-cli/pkg/theme"
 )
 
 // ── Controller Interface for deploy.go ─────────────────────────────────────
@@ -118,8 +119,9 @@ type deployDashboardModel struct {
 	totalSteps  int
 	err         error
 
-	width  int
-	height int
+	width     int
+	height    int
+	compWidth int
 }
 
 func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardModel {
@@ -127,7 +129,7 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = lipgloss.NewStyle().Foreground(theme.Accent)
 
 	prog := progress.New(progress.WithDefaultGradient())
 
@@ -143,6 +145,7 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 		logsViewport:       logsVp,
 		componentsViewport: compVp,
 		totalSteps:         totalSteps,
+		compWidth:          60,
 	}
 
 	return m
@@ -280,8 +283,15 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			viewHeight = 5
 		}
 		
-		// Components pane is fixed at 60 columns
-		compWidth := 60
+		// Components pane is responsive
+		compWidth := msg.Width * 55 / 100
+		if compWidth > 70 {
+			compWidth = 70
+		}
+		if compWidth < 50 {
+			compWidth = 50
+		}
+		m.compWidth = compWidth
 		logsWidth := msg.Width - compWidth - 4 // 4 for spacing/margins
 		if logsWidth < 20 {
 			logsWidth = 20
@@ -389,19 +399,34 @@ func (m deployDashboardModel) View() string {
 
 	bar := m.progressBar.ViewAs(pct)
 
-	b.WriteString(fmt.Sprintf("\n📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps)\n\n", bar, pct*100, m.currentStep, m.totalSteps))
-
+	prevGroup := ""
 	for _, c := range m.components {
+		if c.Group != prevGroup && prevGroup != "" {
+			groupNames := map[string]string{"A": "Operators", "B": "Infrastructure", "C": "Applications"}
+			label := groupNames[c.Group]
+			if label == "" {
+				label = c.Group
+			}
+			sepLabel := fmt.Sprintf(" %s ", label)
+			sepWidth := m.compWidth - lipgloss.Width(sepLabel)
+			leftDash := sepWidth / 2
+			rightDash := sepWidth - leftDash
+			b.WriteString(fmt.Sprintf("\n%s%s%s\n\n",
+				output.DimStyle.Render(strings.Repeat("┄", leftDash)),
+				output.DimStyle.Render(sepLabel),
+				output.DimStyle.Render(strings.Repeat("┄", rightDash))))
+		}
+		prevGroup = c.Group
+
 		title := fmt.Sprintf("─ %s ", c.Name)
-		padding := 58 - lipgloss.Width(title)
+		padding := (m.compWidth - 2) - lipgloss.Width(title)
 		if padding < 0 {
 			padding = 0
 		}
 		b.WriteString(fmt.Sprintf("╭%s%s╮\n", title, strings.Repeat("─", padding)))
 
 		if !c.Active && !c.Done {
-			// Total inside width is 56. "◯ Pending..." is 12. Pad it to 56.
-			b.WriteString(fmt.Sprintf("│ %s │\n", padRight(output.DimStyle.Render("◯ Pending..."), 56)))
+			b.WriteString(fmt.Sprintf("│ %s │\n", padRight(output.DimStyle.Render("◯ Pending..."), m.compWidth-4)))
 		} else {
 			icon := m.spinner.View()
 			if c.Done {
@@ -424,8 +449,8 @@ func (m deployDashboardModel) View() string {
 			boldStyle := lipgloss.NewStyle().Bold(true)
 			leftPart := fmt.Sprintf("%s %s", icon, boldStyle.Render(c.Name))
 			rightPart := statusText
-			// We have "│ " (2) and " │" (2), leaving 56 for leftPart + spaces + rightPart
-			spaces := 56 - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
+			// We have "│ " (2) and " │" (2), leaving compWidth-4 for leftPart + spaces + rightPart
+			spaces := (m.compWidth - 4) - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
 			if spaces < 1 {
 				spaces = 1
 			}
@@ -450,7 +475,7 @@ func (m deployDashboardModel) View() string {
 					renderProgressBar(int(elapsed.Seconds()), int(c.Timeout.Seconds()), 15, false, true),
 					eM, eS, tM, tS)
 
-				tSpaces := 56 - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
+				tSpaces := (m.compWidth - 4) - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
 				if tSpaces < 1 {
 					tSpaces = 1
 				}
@@ -459,8 +484,12 @@ func (m deployDashboardModel) View() string {
 
 			for _, w := range c.Workloads {
 				name := w.name
-				if len(name) > 23 {
-					name = name[:20] + "..."
+				maxNameLen := (m.compWidth - 4) * 45 / 100
+				if maxNameLen < 18 {
+					maxNameLen = 18
+				}
+				if len(name) > maxNameLen {
+					name = name[:maxNameLen-3] + "..."
 				}
 				barReady := w.ready
 				barTotal := w.expected
@@ -484,9 +513,9 @@ func (m deployDashboardModel) View() string {
 				}
 
 				wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
-				wRight := fmt.Sprintf("[%s] %d/%d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
-				// We have "│ " (2) and " │" (2), leaving 56 for wLeft + wSpaces + wRight
-				wSpaces := 56 - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
+				wRight := fmt.Sprintf("[%s] %2d/%-2d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
+				// We have "│ " (2) and " │" (2), leaving compWidth-4 for wLeft + wSpaces + wRight
+				wSpaces := (m.compWidth - 4) - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
 				if wSpaces < 1 {
 					wSpaces = 1
 				}
@@ -494,7 +523,7 @@ func (m deployDashboardModel) View() string {
 			}
 		}
 
-		b.WriteString("╰──────────────────────────────────────────────────────────╯\n")
+		b.WriteString(fmt.Sprintf("╰%s╯\n", strings.Repeat("─", m.compWidth-2)))
 	}
 
 	// Calculate which line the active component starts at to auto-scroll

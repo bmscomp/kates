@@ -165,7 +165,7 @@ type TestRun struct {
 	Spec         *TestSpec     `json:"spec,omitempty"`
 	Results      []PhaseResult  `json:"results,omitempty"`
 	CdcPhases    map[string]int64 `json:"cdcPhases,omitempty"`
-	CdcPhase     string           `json:"cdcPhase,omitempty"`
+	CdcPhase     string           `json:"currentPhase,omitempty"`
 }
 
 type PhaseResult struct {

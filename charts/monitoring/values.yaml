@@ -85,6 +85,13 @@ kube-prometheus-stack:
   kubelet:
     enabled: true
 
+# Chaos alerting rules
+chaosAlerts:
+  enabled: false
+
+# Kafka namespace for PromQL expressions
+kafkaNamespace: kafka
+
 # Kates dashboards
 dashboards:
   enabled: true

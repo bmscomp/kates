@@ -200,6 +200,7 @@ public class CdcIntegrationService {
                             database.dbname: postgres
                             topic.prefix: cdc
                             plugin.name: pgoutput
+                            slot.name: connect_test_src_slot
                             table.include.list: public.connect_test_src
                             transforms: unwrap
                             transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState

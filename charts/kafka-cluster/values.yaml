@@ -2,6 +2,9 @@ clusterName: krafter
 kafkaVersion: "4.2.0"
 strimziVersion: "1.0.0"
 
+nameOverride: ""
+fullnameOverride: ""
+
 # ── Global Image Configuration ───────────────────────────────────────────────
 # Override these to pull all images from a private or air-gapped registry.
 # Example: global.imageRegistry: "my-registry.example.com"
@@ -397,8 +400,8 @@ users:
             host: "*"
           - resource:
               type: transactionalId
-              name: "connect-cluster-"
-              patternType: prefix
+              name: "*"
+              patternType: literal
             operations: ["Write", "Describe"]
             host: "*"
           - resource:
@@ -682,11 +685,6 @@ seaweedfs:
     tieredStorage: "kafka-tiered-storage"
     velero:        "velero-backups"
 
-  # Filer S3 gateway port (published in the kafka-seaweedfs-config ConfigMap).
-  filer:
-    s3:
-      port: 8333
-
   # Pass-through to the seaweedfs subchart.
   # Full schema: https://github.com/seaweedfs/seaweedfs/tree/master/k8s/charts/seaweedfs
   master:
@@ -696,6 +694,7 @@ seaweedfs:
     replicas: 1          # 3 for production HA
     storage: 100Gi       # increase to 500Gi+ in prod
 
+  # Filer S3 gateway (published in the kafka-seaweedfs-config ConfigMap).
   filer:
     replicas: 1
     s3:

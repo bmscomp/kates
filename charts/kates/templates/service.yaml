@@ -14,7 +14,7 @@ spec:
     {{- include "kates.selectorLabels" . | nindent 4 }}
   ports:
   - port: {{ .Values.service.port }}
-    targetPort: 8080
+    targetPort: http
     protocol: TCP
     name: http
     {{- if .Values.service.appProtocol }}
@@ -24,7 +24,7 @@ spec:
     nodePort: {{ .Values.service.nodePort }}
     {{- end }}
   - port: {{ .Values.grpc.port | default 9000 }}
-    targetPort: 9000
+    targetPort: grpc
     protocol: TCP
     name: grpc
     {{- if and (eq .Values.service.type "NodePort") .Values.grpc.nodePort }}

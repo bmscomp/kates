@@ -2,6 +2,9 @@
 # Kates Chaos Engineering — Default Values
 # Wraps LitmusChaos with Kafka/Kates-specific chaos infrastructure
 
+nameOverride: ""
+fullnameOverride: ""
+
 # Global settings
 global:
   imagePullPolicy: IfNotPresent

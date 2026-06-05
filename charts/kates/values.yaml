@@ -16,7 +16,7 @@ image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
   # -- Image tag
-  tag: "1.17.0"
+  tag: "latest"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -26,7 +26,6 @@ imagePullSecrets: []
 nameOverride: ""
 # -- Override the full release name
 fullnameOverride: ""
-# -- The cluster domain (extracted dynamically during deployment)
 # -- DNS policy for pods (ClusterFirst, Default, None, ClusterFirstWithHostNet)
 dnsPolicy: ""
 # -- Custom DNS configuration (nameservers, searches, options)
@@ -271,7 +270,7 @@ initContainers:
 # -- Kafka connection configuration
 kafka:
   # -- Kafka bootstrap servers
-  bootstrapServers: ""
+  bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
   # -- Client rack ID for rack-aware consumption
   clientRack: ""
   # -- Security protocol

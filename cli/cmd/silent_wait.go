@@ -8,9 +8,11 @@ import (
 	"time"
 )
 
-func waitComponentReadySilent(ctx context.Context, id, namespace, selector string, timeout time.Duration) error {
-	dl.StartComponent(id, timeout)
-
+// waitComponentReadySilent polls pods matching a label selector until all are
+// Running/Succeeded or the timeout expires. It does NOT call
+// dl.StartComponent/FinishComponent — the caller (deploy.go) is responsible
+// for managing the dashboard component lifecycle.
+func waitComponentReadySilent(ctx context.Context, namespace, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		out, err := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
@@ -27,24 +29,22 @@ func waitComponentReadySilent(ctx context.Context, id, namespace, selector strin
 				}
 			}
 			if count > 0 && allReady {
-				dl.FinishComponent(id, true)
 				return nil
 			}
 		}
 
 		select {
 		case <-ctx.Done():
-			dl.FinishComponent(id, false)
 			return ctx.Err()
 		case <-time.After(3 * time.Second):
 		}
 	}
-	dl.FinishComponent(id, false)
-	return fmt.Errorf("timeout waiting for %s to become ready", id)
+	return fmt.Errorf("timeout waiting for pods (selector=%s) to become ready", selector)
 }
 
-func waitCustomResourceReadySilent(ctx context.Context, id, kind, namespace, selector string, timeout time.Duration) error {
-	dl.StartComponent(id, timeout)
+// waitCustomResourceReadySilent polls custom resources matching a label selector
+// until all have Ready=True condition or the timeout expires.
+func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		out, err := exec.CommandContext(ctx, "kubectl", "get", kind, "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.conditions[?(@.type==\"Ready\")].status}{','}{end}").Output()
@@ -61,25 +61,22 @@ func waitCustomResourceReadySilent(ctx context.Context, id, kind, namespace, sel
 				}
 			}
 			if count > 0 && allReady {
-				dl.FinishComponent(id, true)
 				return nil
 			}
 		}
 		select {
 		case <-ctx.Done():
-			dl.FinishComponent(id, false)
 			return ctx.Err()
 		case <-time.After(3 * time.Second):
 		}
 	}
-	dl.FinishComponent(id, false)
-	return fmt.Errorf("timeout waiting for %s to become ready", id)
+	return fmt.Errorf("timeout waiting for %s to become ready", kind)
 }
 
-func waitKafkaUsersReadySilent(ctx context.Context, id, namespace string, timeout time.Duration) error {
-	return waitCustomResourceReadySilent(ctx, id, "kafkauser", namespace, "strimzi.io/cluster=krafter", timeout)
+func waitKafkaUsersReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {
+	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster=krafter", timeout)
 }
 
-func waitConnectorReadySilent(ctx context.Context, id, namespace string, timeout time.Duration) error {
-	return waitCustomResourceReadySilent(ctx, id, "kafkaconnector", namespace, "strimzi.io/cluster=krafter-connect", timeout)
+func waitConnectorReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {
+	return waitCustomResourceReadySilent(ctx, "kafkaconnector", namespace, "strimzi.io/cluster=connect-cluster", timeout)
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 )
 
 // ─── Color Palette ──────────────────────────────────────────
@@ -68,7 +70,14 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
-	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", 58))
+	termW := 72
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		termW = w - 4
+		if termW > 80 {
+			termW = 80
+		}
+	}
+	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", termW))
 
 	colHdrName := lipgloss.NewStyle().Width(28).Render("COMPONENT")
 	colHdrNs := lipgloss.NewStyle().Width(18).Render("NAMESPACE")
@@ -144,13 +153,13 @@ func printRow(icon, name, namespace, status string) {
 	const nsWidth = 18
 
 	// Bypass go-runewidth emoji miscalculations by hardcoding icon width to 2 cells
-	nameVisualLen := 2 + 1 + len(name)
+	nameVisualLen := 2 + 1 + runewidth.StringWidth(name)
 	namePad := nameWidth - nameVisualLen
 	if namePad < 1 {
 		namePad = 1
 	}
 	
-	nsPad := nsWidth - len(namespace)
+	nsPad := nsWidth - runewidth.StringWidth(namespace)
 	if nsPad < 1 {
 		nsPad = 1
 	}

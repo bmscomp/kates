@@ -338,7 +338,7 @@ func discoverHelmReleases(namespace string) []HelmRelease {
 
 func isKatesEcosystemChart(chart string) bool {
 	lower := strings.ToLower(chart)
-	prefixes := []string{"kafka-cluster", "kates", "kates-chaos", "chaos", "krafter"}
+	prefixes := []string{"kafka-cluster", "kates", "kates-chaos", "chaos", "krafter", "connect-cluster"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(lower, p) {
 			return true

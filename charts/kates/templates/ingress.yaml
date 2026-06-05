@@ -7,7 +7,11 @@ metadata:
     {{- include "kates.labels" . | nindent 4 }}
   annotations:
     {{- if and .Values.ingress.certManager.enabled .Values.ingress.certManager.issuerName }}
-    cert-manager.io/{{ lower .Values.ingress.certManager.issuerKind | default "cluster-issuer" }}: {{ .Values.ingress.certManager.issuerName | quote }}
+    {{- if eq .Values.ingress.certManager.issuerKind "Issuer" }}
+    cert-manager.io/issuer: {{ .Values.ingress.certManager.issuerName | quote }}
+    {{- else }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.issuerName | quote }}
+    {{- end }}
     {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}

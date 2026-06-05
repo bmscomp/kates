@@ -1,80 +1,198 @@
+{{- if .Values.restApi.service.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ include "connect-cluster.fullname" . }}-test-egress"
+  namespace: {{ include "connect-cluster.namespace" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  podSelector:
+    matchLabels:
+      kates.io/test-pod: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/name: {{ include "connect-cluster.fullname" . }}-connect
+      ports:
+        - port: 8083
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ include "connect-cluster.fullname" . }}
+      ports:
+        - port: 8083
+          protocol: TCP
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "connect-cluster.fullname" . }}-test
+  name: "{{ include "connect-cluster.fullname" . }}-test-connectivity"
   namespace: {{ include "connect-cluster.namespace" . }}
   labels:
     {{- include "connect-cluster.labels" . | nindent 4 }}
+    kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
+    helm.sh/hook-weight: "1"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
+  serviceAccountName: {{ include "connect-cluster.serviceAccountName" . }}
   restartPolicy: Never
-  containers:
-    - name: connect-health-check
-      image: curlimages/curl:8.7.1
-      command:
-        - sh
-        - -c
-        - |
-          set -e
-          echo "=== Kafka Connect REST API Health Check ==="
-          echo ""
-
-          REST_URL="http://{{ include "connect-cluster.fullname" . }}-rest-api.{{ include "connect-cluster.namespace" . }}.svc:{{ .Values.restApi.service.port | default 8083 }}"
-
-          echo "► Testing REST API reachability..."
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "${REST_URL}/")
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "✗ REST API returned HTTP ${HTTP_CODE} (expected 200)"
-            exit 1
-          fi
-          echo "✓ REST API is reachable (HTTP 200)"
-          echo ""
-
-          echo "► Fetching cluster info..."
-          curl -s "${REST_URL}/" | head -c 500
-          echo ""
-          echo ""
-
-          echo "► Listing connectors..."
-          CONNECTORS=$(curl -s --max-time 15 "${REST_URL}/connectors")
-          echo "  Connectors: ${CONNECTORS}"
-          echo ""
-
-          echo "► Listing installed plugins..."
-          PLUGINS=$(curl -s --max-time 15 "${REST_URL}/connector-plugins" | grep -o '"class":"[^"]*"' | head -20)
-          echo "  ${PLUGINS}"
-          echo ""
-
-          CONNECT_HOST="{{ include "connect-cluster.fullname" . }}-rest-api.{{ include "connect-cluster.namespace" . }}.svc"
-
-          # Check each connector status
-          for connector in $(curl -sf http://$CONNECT_HOST:{{ .Values.restApi.service.port | default 8083 }}/connectors 2>/dev/null | tr -d '[]"' | tr ',' '\n'); do
-            status=$(curl -sf http://$CONNECT_HOST:{{ .Values.restApi.service.port | default 8083 }}/connectors/$connector/status | grep -o '"state":"[A-Z]*"' | head -1 | grep -o '[A-Z]*')
-            if [ "$status" = "FAILED" ]; then
-              echo "FAIL: Connector $connector is in FAILED state"
-              exit 1
-            fi
-            echo "OK: Connector $connector is $status"
-          done
-
-          echo "=== All checks passed ==="
-      resources:
-        requests:
-          cpu: 50m
-          memory: 32Mi
-        limits:
-          cpu: 100m
-          memory: 64Mi
-      securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop:
-            - ALL
   securityContext:
     runAsNonRoot: true
-    runAsUser: 1000
+    runAsUser: 65534
+    fsGroup: 65534
     seccompProfile:
       type: RuntimeDefault
+  containers:
+    - name: connect-health
+      image: {{ .Values.testImages.kubectl }}
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          FAIL=0
+          PASS=0
+
+          ok()   { PASS=$((PASS+1)); echo "  ✓ $1"; }
+          fail() { FAIL=$((FAIL+1)); echo "  ✗ $1"; }
+          warn() { echo "  ⚠ $1"; }
+          info() { echo "  ℹ $1"; }
+
+          CONNECT="{{ include "connect-cluster.fullname" . }}"
+          NAMESPACE="{{ include "connect-cluster.namespace" . }}"
+
+          # ─── Tier 1: KafkaConnect CR Readiness ─────────────────────────────
+          echo ""
+          echo "=== Tier 1: KafkaConnect CR Readiness ==="
+          CR_STATUS=$(kubectl get kafkaconnect $CONNECT -n $NAMESPACE \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+
+          if [ "$CR_STATUS" = "True" ]; then
+            ok "KafkaConnect CR $CONNECT Ready=True"
+          elif [ -z "$CR_STATUS" ]; then
+            fail "KafkaConnect CR $CONNECT has no Ready condition (operator may not have reconciled)"
+          else
+            fail "KafkaConnect CR $CONNECT Ready=$CR_STATUS"
+            REASON=$(kubectl get kafkaconnect $CONNECT -n $NAMESPACE \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)
+            [ -n "$REASON" ] && info "Reason: $REASON"
+          fi
+
+          # ─── Tier 2: Worker Pod Health ──────────────────────────────────────
+          echo ""
+          echo "=== Tier 2: Worker Pod Health ==="
+          TOTAL=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/name=${CONNECT}-connect \
+            --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          READY=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/name=${CONNECT}-connect \
+            --no-headers 2>/dev/null | grep -c "Running" || true)
+
+          EXPECTED={{ .Values.replicas }}
+          echo "  Worker pods: $READY/$TOTAL running (expected $EXPECTED)"
+          if [ "$READY" -lt 1 ]; then
+            fail "No Connect worker pods running"
+          elif [ "$READY" -lt "$EXPECTED" ]; then
+            warn "Only $READY of $EXPECTED worker pods running"
+            PASS=$((PASS+1))
+          else
+            ok "All $EXPECTED worker pods running"
+          fi
+
+          # ─── Tier 3: REST API Health ────────────────────────────────────────
+          echo ""
+          echo "=== Tier 3: REST API Health ==="
+          REST_SVC="${CONNECT}-rest-api"
+          REST_URL="http://${REST_SVC}.${NAMESPACE}.svc:{{ .Values.restApi.service.port | default 8083 }}"
+
+          info "Testing REST API at $REST_URL ..."
+          CLUSTER_INFO=$(kubectl exec -n $NAMESPACE \
+            $(kubectl get pods -n $NAMESPACE -l strimzi.io/name=${CONNECT}-connect --no-headers -o name | head -1) \
+            -- curl -sf --connect-timeout 10 --max-time 30 "${REST_URL}/" 2>/dev/null || true)
+
+          if [ -n "$CLUSTER_INFO" ]; then
+            ok "REST API is reachable"
+            VERSION=$(echo "$CLUSTER_INFO" | grep -o '"version":"[^"]*"' | head -1 || true)
+            [ -n "$VERSION" ] && info "Connect $VERSION"
+          else
+            # Fallback: try from the test pod itself using the service
+            HTTP_CODE=$(wget -q -O /dev/null -S --timeout=10 "${REST_URL}/" 2>&1 | grep "HTTP/" | tail -1 | awk '{print $2}' || true)
+            if [ "$HTTP_CODE" = "200" ]; then
+              ok "REST API is reachable (HTTP 200)"
+            else
+              fail "REST API unreachable at $REST_URL (HTTP $HTTP_CODE)"
+            fi
+          fi
+
+          # ─── Tier 4: Connector Plugins ──────────────────────────────────────
+          echo ""
+          echo "=== Tier 4: Connector Plugins ==="
+          PLUGINS=$(kubectl exec -n $NAMESPACE \
+            $(kubectl get pods -n $NAMESPACE -l strimzi.io/name=${CONNECT}-connect --no-headers -o name | head -1) \
+            -- curl -sf --max-time 15 "${REST_URL}/connector-plugins" 2>/dev/null || true)
+
+          if [ -n "$PLUGINS" ]; then
+            PLUGIN_COUNT=$(echo "$PLUGINS" | grep -o '"class"' | wc -l | tr -d ' ')
+            ok "$PLUGIN_COUNT connector plugin(s) installed"
+            echo "$PLUGINS" | grep -o '"class":"[^"]*"' | sed 's/"class":"//;s/"//' | while read -r CLASS; do
+              info "  $CLASS"
+            done
+          else
+            warn "Could not list connector plugins"
+          fi
+
+          # ─── Tier 5: Connector Status ───────────────────────────────────────
+          echo ""
+          echo "=== Tier 5: Connector Status ==="
+          CONNECTORS=$(kubectl get kafkaconnectors -n $NAMESPACE \
+            -l strimzi.io/cluster=${CONNECT} \
+            -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+          if [ -z "$CONNECTORS" ]; then
+            info "No KafkaConnector CRs found (connectors may be created later)"
+          else
+            for CONN in $CONNECTORS; do
+              CONN_STATUS=$(kubectl get kafkaconnector $CONN -n $NAMESPACE \
+                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+              if [ "$CONN_STATUS" = "True" ]; then
+                ok "KafkaConnector $CONN: Ready"
+              elif [ -z "$CONN_STATUS" ]; then
+                warn "KafkaConnector $CONN: no Ready condition"
+              else
+                CONN_MSG=$(kubectl get kafkaconnector $CONN -n $NAMESPACE \
+                  -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)
+                fail "KafkaConnector $CONN: Ready=$CONN_STATUS"
+                [ -n "$CONN_MSG" ] && info "  Reason: $CONN_MSG"
+              fi
+            done
+          fi
+
+
+          # ─── Summary ─────────────────────────────────────────────────────────
+          echo ""
+          echo "───────────────────────────────────"
+          echo "  Connect Test Results: $PASS passed, $FAIL failed"
+          echo "───────────────────────────────────"
+          [ "$FAIL" -eq 0 ]
+      securityContext:
+        {{- include "connect-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}

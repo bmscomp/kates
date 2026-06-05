@@ -52,9 +52,15 @@ spec:
                   echo "Failed to fetch tests (HTTP $HTTP_CODE)"
                   exit 1
                 fi
-                echo "$BODY" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//' | while read ID; do
-                  echo "Deleting old test run: $ID"
-                  curl -s -X DELETE "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests/$ID"
+                echo "$BODY" | grep -o '"id":"[^"]*","createdAt":"[^"]*"' | while read PAIR; do
+                  ID=$(echo "$PAIR" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//')
+                  CREATED=$(echo "$PAIR" | grep -o '"createdAt":"[^"]*"' | sed 's/"createdAt":"//;s/"//')
+                  if [ "$CREATED" \< "$CUTOFF" ]; then
+                    echo "Deleting old test run: $ID (created $CREATED, before cutoff $CUTOFF)"
+                    curl -s -X DELETE "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests/$ID"
+                  else
+                    echo "Keeping test run: $ID (created $CREATED, after cutoff $CUTOFF)"
+                  fi
                 done
                 echo "Cleanup complete."
             volumeMounts:

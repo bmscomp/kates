@@ -125,32 +125,17 @@ resources:
     cpu: 4000m
 ```
 
-### External Configuration (Secrets & ConfigMaps)
+### Secret Access (Strimzi 1.0.0+)
 
-Mount secrets and/or ConfigMaps into Connect worker pods for use with FileConfigProvider:
+The `KubernetesSecretConfigProvider` is always enabled. Reference Kubernetes secrets
+in connector configs using:
 
 ```yaml
-externalConfiguration:
-  volumes:
-    # Secret volume (default type)
-    - name: pg-credentials
-      type: secret
-      secretName: connect-pg-credentials
-
-    # ConfigMap volume
-    - name: transform-scripts
-      type: configMap
-      configMapName: connect-transforms
-
-  env:
-    - name: MY_ENV_VAR
-      valueFrom:
-        secretKeyRef:
-          name: my-secret
-          key: value
+database.password: "${secrets:<namespace>/<secret-name>:<key>}"
 ```
 
-Volumes are mounted at `/mnt/<name>` and accessible via `${file:/mnt/<name>/<key>}` in connector configs.
+The Connect ServiceAccount is automatically granted RBAC permissions to read secrets
+in its namespace.
 
 ### Connectors
 

@@ -1,11 +1,11 @@
+{{- if .Values.chaosAlerts.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kafka-chaos-alerts
-  namespace: monitoring
+  namespace: {{ .Release.Namespace }}
   labels:
-    release: prometheus
-    app: kube-prometheus-stack
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
 spec:
   groups:
     - name: kafka-chaos-expected
@@ -13,7 +13,7 @@ spec:
         # Alert ONLY during active chaos experiments
         - alert: KafkaChaosExperimentActive
           expr: |
-            count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) > 0
+            count(kube_customresource_chaosengine_status_engine_status{namespace="{{ .Values.kafkaNamespace }}", status="initialized"} == 1) > 0
           for: 0m
           labels:
             severity: info
@@ -27,8 +27,8 @@ spec:
         # Pod restart during NO active chaos = real issue
         - alert: KafkaBrokerRestartUnexpected
           expr: |
-            increase(kube_pod_container_status_restarts_total{namespace="kafka", pod=~"krafter-pool-.*"}[5m]) > 0
-            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) == 0
+            increase(kube_pod_container_status_restarts_total{namespace="{{ .Values.kafkaNamespace }}", pod=~"krafter-pool-.*"}[5m]) > 0
+            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="{{ .Values.kafkaNamespace }}", status="initialized"} == 1) == 0
           for: 1m
           labels:
             severity: critical
@@ -39,8 +39,8 @@ spec:
         # High CPU after chaos completed = potential issue
         - alert: KafkaHighCPUPostChaos
           expr: |
-            sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="kafka", pod=~"krafter-pool-.*", container="kafka"}[5m])) > 0.8
-            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) == 0
+            sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="{{ .Values.kafkaNamespace }}", pod=~"krafter-pool-.*", container="kafka"}[5m])) > 0.8
+            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="{{ .Values.kafkaNamespace }}", status="initialized"} == 1) == 0
           for: 5m
           labels:
             severity: warning
@@ -51,8 +51,8 @@ spec:
         # Kafka cluster not ready after chaos completed
         - alert: KafkaClusterNotReadyPostChaos
           expr: |
-            kube_customresource_kafka_status_ready{namespace="kafka", name="krafter"} != 1
-            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="kafka", status="initialized"} == 1) == 0
+            kube_customresource_kafka_status_ready{namespace="{{ .Values.kafkaNamespace }}", name="krafter"} != 1
+            and on() count(kube_customresource_chaosengine_status_engine_status{namespace="{{ .Values.kafkaNamespace }}", status="initialized"} == 1) == 0
           for: 3m
           labels:
             severity: critical
@@ -89,7 +89,7 @@ spec:
         # GameDay workflow tracking
         - alert: GameDayWorkflowStarted
           expr: |
-            count(kube_workflow_status{namespace="kafka", workflow=~"kafka-gameday-.*"} == 1) > 0
+            count(kube_workflow_status{namespace="{{ .Values.kafkaNamespace }}", workflow=~"kafka-gameday-.*"} == 1) > 0
           for: 0m
           labels:
             severity: info
@@ -173,3 +173,4 @@ spec:
           annotations:
             summary: 'Kafka E2E latency spike: {{ "{{ $value }}" }}ms'
             description: 'End-to-end produce-consume latency exceeds 10s during or after chaos.'
+{{- end }}

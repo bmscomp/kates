@@ -437,8 +437,24 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 							},
 							{
 								Resource: GenAclResource{
+									Type:        "transactionalId",
+									Name:        "kates-connect-",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Write", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
 									Type:        "topic",
 									Name:        "cdc",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "__debezium",
 									PatternType: "prefix",
 								},
 								Operations: []string{"Read", "Write", "Create", "Describe"},
