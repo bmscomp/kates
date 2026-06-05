@@ -25,7 +25,7 @@ containerSecurityContext:
 # ── Image ─────────────────────────────────────────────────────────────────────
 image:
   repository: ghcr.io/bmscomp/kates
-  tag: "latest"
+  tag: "1.17.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

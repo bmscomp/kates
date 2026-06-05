@@ -40,20 +40,18 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 			releaseKey := e.Release + "/" + e.Namespace
 			if existingReleases[releaseKey] {
 				skipCount++
-				fmt.Printf("  %s  %-28s → %-18s %s\n",
-					e.Icon,
-					e.Name,
-					output.DimStyle.Render(e.Namespace),
-					output.DimStyle.Render("(already deployed, skip)"),
-				)
+				nameCol := output.PadRight(e.Icon+" "+e.Name, 32)
+				nsStyled := output.DimStyle.Render(e.Namespace)
+				nsPadded := output.PadRight(nsStyled, 18)
+				statusMsg := output.DimStyle.Render("(already deployed, skip)")
+				fmt.Printf("  %s → %s %s\n", nameCol, nsPadded, statusMsg)
 			} else {
 				deployCount++
-				fmt.Printf("  %s  %-28s → %-18s %s\n",
-					e.Icon,
-					e.Name,
-					output.AccentStyle.Render(e.Namespace),
-					output.SuccessStyle.Render("(will deploy)"),
-				)
+				nameCol := output.PadRight(e.Icon+" "+e.Name, 32)
+				nsStyled := output.AccentStyle.Render(e.Namespace)
+				nsPadded := output.PadRight(nsStyled, 18)
+				statusMsg := output.SuccessStyle.Render("(will deploy)")
+				fmt.Printf("  %s → %s %s\n", nameCol, nsPadded, statusMsg)
 			}
 		}
 		fmt.Println()

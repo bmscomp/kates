@@ -92,8 +92,8 @@ data:
       "uid": "kafka-broker-{{ include "kafka-cluster.clusterName" . }}"
     }
 {{- end }}
----
 {{- if and .Values.dashboards.enabled .Values.dashboards.kraftDashboard }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -152,8 +152,8 @@ data:
       "uid": "kafka-kraft-{{ include "kafka-cluster.clusterName" . }}"
     }
 {{- end }}
----
 {{- if and .Values.dashboards.enabled .Values.dashboards.cruiseControlDashboard }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -208,12 +208,12 @@ data:
       "uid": "kafka-cc-{{ include "kafka-cluster.clusterName" . }}"
     }
 {{- end }}
----
 {{- if and .Values.dashboards.enabled .Values.dashboards.connectDashboard }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: kafka-connect-dashboard
+  name: kafka-connect-overview-dashboard
   namespace: {{ .Values.dashboards.namespace | default "monitoring" }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}

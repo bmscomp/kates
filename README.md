@@ -239,9 +239,9 @@ Kates ships 9 Helm charts for modular deployment:
 
 | Chart | Version | App Version | Description |
 |-------|---------|-------------|-------------|
-| [`kates`](charts/kates/) | 0.4.1 | 1.11.0 | Kates backend & frontend |
+| [`kates`](charts/kates/) | 0.4.1 | 1.17.0 | Kates backend & frontend |
 | [`kafka-cluster`](charts/kafka-cluster/) | 0.1.1 | 4.2.0 | Strimzi KRaft cluster with zone-aware broker pools |
-| [`kates-chaos`](charts/kates-chaos/) | 1.2.0 | 1.11.0 | LitmusChaos wrapper with Kafka-specific RBAC |
+| [`kates-chaos`](charts/kates-chaos/) | 1.2.0 | 1.17.0 | LitmusChaos wrapper with Kafka-specific RBAC |
 | [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | Prometheus + Grafana with Kates dashboards |
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 2.2.5.Final | Apicurio Schema Registry |
 | [`klster-platform`](charts/klster-platform/) | 0.1.0 | 1.0.0 | Umbrella chart for the full platform |

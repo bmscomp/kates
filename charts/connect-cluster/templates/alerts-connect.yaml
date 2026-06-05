@@ -89,7 +89,7 @@ spec:
             cluster: {{ $clusterName }}
           annotations:
             summary: "Kafka Connect worker JVM heap usage above {{ .Values.alerts.thresholds.heapUsagePercent }}%"
-            description: "Worker {{ "{{" }} $labels.pod {{ "}}" }} heap is at {{ "{{" }} printf \"%.0f\" (mul $value 100) {{ "}}" }}% for 5+ minutes. Consider increasing -Xmx."
+            description: "Worker {{ "{{" }} $labels.pod {{ "}}" }} heap is at {{ "{{" }} $value | humanizePercentage {{ "}}" }} for 5+ minutes. Consider increasing -Xmx."
 
         - alert: KafkaConnectSourceLag
           expr: kafka_connect_source_task_metrics_source_record_poll_total == 0

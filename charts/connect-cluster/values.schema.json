@@ -51,7 +51,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["scram-sha-512", "tls", "tls-external", "plain"]
+              "enum": ["scram-sha-512", "scram-sha-256", "tls", "tls-external", "plain", "oauth"]
             },
             "username": { "type": "string" },
             "secretName": { "type": "string" }
@@ -146,29 +146,7 @@
         "path": { "type": "string" }
       }
     },
-    "externalConfiguration": {
-      "type": "object",
-      "properties": {
-        "volumes": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["name"],
-            "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "type": {
-                "type": "string",
-                "enum": ["secret", "configMap"],
-                "default": "secret"
-              },
-              "secretName": { "type": "string" },
-              "configMapName": { "type": "string" }
-            }
-          }
-        },
-        "env": { "type": "array" }
-      }
-    },
+
     "databaseEgress": {
       "type": "array",
       "items": {

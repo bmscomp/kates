@@ -30,7 +30,7 @@ spec:
           spec:
             securityContext:
               +(runAsNonRoot): true
-              +(runAsUser): 1000
+              +(runAsUser): 100
               +(fsGroup): 1000
 
     # ── Mutate: auto-inject container-level security context ──────────────────
