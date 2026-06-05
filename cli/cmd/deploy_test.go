@@ -451,3 +451,221 @@ func TestDeployCommand_KafkaConnectIdempotent(t *testing.T) {
 		}
 	}
 }
+
+func TestDeployCommand_UpgradeFlag(t *testing.T) {
+	deployTopology = "single"
+	deployNamespace = "kates-test"
+	deployForceUpgrade = true
+	deployWithStrimzi = true
+	deployWithChaos = false
+	deployWithMonitoring = false
+	deployWithCertManager = false
+	deployWithKyverno = false
+	deployWithKafkaConnect = false
+
+	var executedCommands []string
+	var mu sync.Mutex
+
+	runExecFn = func(ctx context.Context, name string, args ...string) error { return nil }
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error { return nil }
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		mu.Lock()
+		executedCommands = append(executedCommands, "helm "+strings.Join(args, " "))
+		mu.Unlock()
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool {
+		if deployForceUpgrade {
+			return false
+		}
+		return true // Pretend it's deployed
+	}
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	_ = deployCmd.Flags().Set("upgrade", "true")
+	defer func() { deployForceUpgrade = false }()
+
+	err := runDeploy(deployCmd, []string{})
+	if err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+
+	foundUpgrade := false
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm upgrade --install krafter") {
+			foundUpgrade = true
+			break
+		}
+	}
+	if !foundUpgrade {
+		t.Error("Expected helm upgrade to run even if already deployed, because --upgrade is set")
+	}
+}
+
+func TestDeployCommand_OnlyFlag(t *testing.T) {
+	deployTopology = "single"
+	deployNamespace = "kates-test"
+	deployOnly = []string{"krafter"}
+	deployWithStrimzi = true
+	deployWithChaos = false
+	deployWithMonitoring = false
+	deployWithCertManager = false
+	deployWithKyverno = false
+	deployWithKafkaConnect = false
+
+	var executedCommands []string
+	var mu sync.Mutex
+
+	runExecFn = func(ctx context.Context, name string, args ...string) error { return nil }
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error { return nil }
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		mu.Lock()
+		executedCommands = append(executedCommands, "helm "+strings.Join(args, " "))
+		mu.Unlock()
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	_ = deployCmd.Flags().Set("only", "krafter")
+	defer func() { deployOnly = nil }()
+
+	err := runDeploy(deployCmd, []string{})
+	if err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+
+	foundKrafter := false
+	foundStrimzi := false
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "krafter") {
+			foundKrafter = true
+		}
+		if strings.Contains(cmd, "strimzi-operator") {
+			foundStrimzi = true
+		}
+	}
+	if !foundKrafter {
+		t.Error("Expected krafter to be deployed")
+	}
+	if foundStrimzi {
+		t.Error("Expected strimzi to NOT be deployed, due to --only flag")
+	}
+}
+
+func TestDeployCommand_DestroyTeardown(t *testing.T) {
+	deployTopology = "single"
+	deployNamespace = "kates-test"
+	deployDestroy = true
+	deployDestroyYes = true
+	deployWithStrimzi = true
+	deployWithChaos = false
+	deployWithMonitoring = false
+	deployWithCertManager = false
+	deployWithKyverno = false
+	deployWithKafkaConnect = false
+
+	var executedCommands []string
+	var mu sync.Mutex
+
+	runExecFn = func(ctx context.Context, name string, args ...string) error { return nil }
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error { return nil }
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		mu.Lock()
+		executedCommands = append(executedCommands, "helm "+strings.Join(args, " "))
+		mu.Unlock()
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool { return true }
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	_ = deployCmd.Flags().Set("destroy", "true")
+	_ = deployCmd.Flags().Set("yes", "true")
+	defer func() {
+		deployDestroy = false
+		deployDestroyYes = false
+	}()
+
+	err := runDeploy(deployCmd, []string{})
+	if err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+
+	foundUninstall := false
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm uninstall krafter") {
+			foundUninstall = true
+			break
+		}
+	}
+	if !foundUninstall {
+		t.Error("Expected helm uninstall to run for teardown")
+	}
+}
+
+func TestDeployCommand_DryRun(t *testing.T) {
+	deployTopology = "single"
+	deployNamespace = "kates-test"
+	deployDryRun = true
+	deployWithStrimzi = true
+	deployWithChaos = false
+	deployWithMonitoring = false
+	deployWithCertManager = false
+	deployWithKyverno = false
+	deployWithKafkaConnect = false
+
+	var executedCommands []string
+	var mu sync.Mutex
+
+	runExecFn = func(ctx context.Context, name string, args ...string) error { return nil }
+	runExecStdinFn = func(ctx context.Context, name string, args []string, stdinData string) error { return nil }
+	runHelmFn = func(ctx context.Context, args ...string) error {
+		mu.Lock()
+		executedCommands = append(executedCommands, "helm "+strings.Join(args, " "))
+		mu.Unlock()
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+
+	_ = deployCmd.Flags().Set("topology", deployTopology)
+	_ = deployCmd.Flags().Set("dry-run", "true")
+	defer func() { deployDryRun = false }()
+
+	err := runDeploy(deployCmd, []string{})
+	if err != nil {
+		t.Fatalf("runDeploy failed: %v", err)
+	}
+
+	if len(executedCommands) > 0 {
+		t.Errorf("Expected 0 helm commands on dry-run, got %d", len(executedCommands))
+	}
+}
+
+func TestDeployCommand_ProfileDefaults(t *testing.T) {
+	deployProfile = "minimal"
+	deployWithStrimzi = false // profile should override this
+	deployTopology = ""       // profile should override this
+
+	// Reset flags before checking profile
+	deployCmd.Flags().Lookup("topology").Changed = false
+	deployCmd.Flags().Lookup("with-strimzi").Changed = false
+
+	_ = deployCmd.Flags().Set("profile", "minimal")
+	defer func() { deployProfile = "" }()
+
+	err := applyProfile(deployProfile, deployCmd)
+	if err != nil {
+		t.Fatalf("applyProfile failed: %v", err)
+	}
+
+	if deployTopology != "single" {
+		t.Errorf("Expected profile 'minimal' to set topology to 'single', got %s", deployTopology)
+	}
+	if !deployWithStrimzi {
+		t.Error("Expected profile 'minimal' to set with-strimzi to true")
+	}
+}

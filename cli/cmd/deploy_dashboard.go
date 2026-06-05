@@ -319,8 +319,8 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logs = append(m.logs, l)
 			}
 		}
-		if len(m.logs) > 100 {
-			m.logs = m.logs[len(m.logs)-100:]
+		if len(m.logs) > 500 {
+			m.logs = m.logs[len(m.logs)-500:]
 		}
 		m.logsViewport.SetContent(strings.Join(m.logs, "\n"))
 		m.logsViewport.GotoBottom()
