@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -20,21 +21,31 @@ func TestCleanCommand_SingleTopology(t *testing.T) {
 	cleanNamespace = "kates-single-test"
 
 	var executedCommands []string
+	var mu sync.Mutex
 
 	// Mock cleanRunFn to simulate that everything exists
 	cleanRunFn = func(ctx context.Context, name string, args ...string) error {
 		cmdStr := name + " " + strings.Join(args, " ")
+		mu.Lock()
 		executedCommands = append(executedCommands, cmdStr)
-		// Return nil for helm status and kubectl get namespace to simulate presence
-		if (name == "helm" && args[0] == "status") || (name == "kubectl" && args[0] == "get" && args[1] == "namespace") {
-			return nil
-		}
+		mu.Unlock()
 		return nil
 	}
 
 	cleanRunOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		cmdStr := name + " " + strings.Join(args, " ")
+		mu.Lock()
 		executedCommands = append(executedCommands, cmdStr)
+		mu.Unlock()
+		if name == "helm" && args[0] == "list" {
+			return []byte(`[{"name":"chaos","namespace":"kates-single-test"},{"name":"kates","namespace":"kates-single-test"},{"name":"apicurio","namespace":"kates-single-test"},{"name":"jaeger","namespace":"kates-single-test"},{"name":"krafter","namespace":"kates-single-test"},{"name":"monitoring","namespace":"kates-single-test"},{"name":"postgresql","namespace":"kates-single-test"}]`), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "namespaces" {
+			return []byte("kates-single-test"), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "crd" {
+			return []byte("kafkas.kafka.strimzi.io"), nil
+		}
 		if name == "kubectl" && args[0] == "get" && strings.HasPrefix(args[1], "kafkas") {
 			// Mock finding one stuck CR name "my-kafka"
 			return []byte("my-kafka"), nil
@@ -59,7 +70,12 @@ func TestCleanCommand_SingleTopology(t *testing.T) {
 	foundSingleHelmUninstall := false
 	foundIsolatedHelmUninstall := false
 
-	for _, cmd := range executedCommands {
+	mu.Lock()
+	cmds := make([]string, len(executedCommands))
+	copy(cmds, executedCommands)
+	mu.Unlock()
+
+	for _, cmd := range cmds {
 		if strings.Contains(cmd, "kubectl delete namespace kates-single-test") {
 			foundSingleNSDelete = true
 		}
@@ -88,8 +104,8 @@ func TestCleanCommand_SingleTopology(t *testing.T) {
 	}
 
 	foundCRDDelete := false
-	for _, cmd := range executedCommands {
-		if strings.Contains(cmd, "kubectl delete crd kafkas.kafka.strimzi.io") {
+	for _, cmd := range cmds {
+		if strings.Contains(cmd, "kubectl delete crd") && strings.Contains(cmd, "kafkas.kafka.strimzi.io") {
 			foundCRDDelete = true
 		}
 	}
@@ -109,19 +125,30 @@ func TestCleanCommand_IsolatedTopology(t *testing.T) {
 	cleanMonitoringNS = "monitoring-iso-test"
 
 	var executedCommands []string
+	var mu sync.Mutex
 
 	cleanRunFn = func(ctx context.Context, name string, args ...string) error {
 		cmdStr := name + " " + strings.Join(args, " ")
+		mu.Lock()
 		executedCommands = append(executedCommands, cmdStr)
-		if (name == "helm" && args[0] == "status") || (name == "kubectl" && args[0] == "get" && args[1] == "namespace") {
-			return nil
-		}
+		mu.Unlock()
 		return nil
 	}
 
 	cleanRunOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		cmdStr := name + " " + strings.Join(args, " ")
+		mu.Lock()
 		executedCommands = append(executedCommands, cmdStr)
+		mu.Unlock()
+		if name == "helm" && args[0] == "list" {
+			return []byte(`[{"name":"chaos","namespace":"chaos-iso-test"},{"name":"kates","namespace":"app-iso-test"},{"name":"apicurio","namespace":"kafka-iso-test"}]`), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "namespaces" {
+			return []byte("chaos-iso-test app-iso-test kafka-iso-test"), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "crd" {
+			return []byte(""), nil
+		}
 		return []byte(""), nil
 	}
 
@@ -141,7 +168,12 @@ func TestCleanCommand_IsolatedTopology(t *testing.T) {
 	foundSingleNSDelete := false
 	foundAppHelmUninstall := false
 
-	for _, cmd := range executedCommands {
+	mu.Lock()
+	cmds := make([]string, len(executedCommands))
+	copy(cmds, executedCommands)
+	mu.Unlock()
+
+	for _, cmd := range cmds {
 		if strings.Contains(cmd, "kubectl delete namespace app-iso-test") {
 			foundAppNSDelete = true
 		}
@@ -182,19 +214,30 @@ func TestCleanCommand_DefaultBothTopology(t *testing.T) {
 	cleanMonitoringNS = "monitoring-iso-def"
 
 	var executedCommands []string
+	var mu sync.Mutex
 
 	cleanRunFn = func(ctx context.Context, name string, args ...string) error {
 		cmdStr := name + " " + strings.Join(args, " ")
+		mu.Lock()
 		executedCommands = append(executedCommands, cmdStr)
-		if (name == "helm" && args[0] == "status") || (name == "kubectl" && args[0] == "get" && args[1] == "namespace") {
-			return nil
-		}
+		mu.Unlock()
 		return nil
 	}
 
 	cleanRunOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		cmdStr := name + " " + strings.Join(args, " ")
+		mu.Lock()
 		executedCommands = append(executedCommands, cmdStr)
+		mu.Unlock()
+		if name == "helm" && args[0] == "list" {
+			return []byte(`[{"name":"kates","namespace":"kates-single-def"},{"name":"kates","namespace":"app-iso-def"}]`), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "namespaces" {
+			return []byte("kates-single-def app-iso-def"), nil
+		}
+		if name == "kubectl" && args[0] == "get" && args[1] == "crd" {
+			return []byte(""), nil
+		}
 		return []byte(""), nil
 	}
 
@@ -212,7 +255,12 @@ func TestCleanCommand_DefaultBothTopology(t *testing.T) {
 	foundSingleNSDelete := false
 	foundIsolatedNSDelete := false
 
-	for _, cmd := range executedCommands {
+	mu.Lock()
+	cmds := make([]string, len(executedCommands))
+	copy(cmds, executedCommands)
+	mu.Unlock()
+
+	for _, cmd := range cmds {
 		if strings.Contains(cmd, "kubectl delete namespace kates-single-def") {
 			foundSingleNSDelete = true
 		}
