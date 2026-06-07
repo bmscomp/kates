@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -55,6 +57,11 @@ func init() {
 type helmRelease struct {
 	Name      string
 	Namespace string
+}
+
+type helmReleaseJSON struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 var (
@@ -260,30 +267,74 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrText).Render("  Scanning cluster..."))
 
 	var installed []helmRelease
-	for _, r := range allReleases {
-		c, cn := context.WithTimeout(ctx, 3*time.Second)
-		if cleanRun(c, "helm", "status", r.Name, "-n", r.Namespace) == nil {
-			installed = append(installed, r)
+	helmOut, helmErr := cleanRunOutput(ctx, "helm", "list", "-A", "-o", "json")
+	if helmErr == nil {
+		var list []helmReleaseJSON
+		if err := json.Unmarshal(helmOut, &list); err == nil {
+			for _, r := range allReleases {
+				for _, l := range list {
+					if l.Name == r.Name && l.Namespace == r.Namespace {
+						installed = append(installed, r)
+						break
+					}
+				}
+			}
 		}
-		cn()
+	} else {
+		// Fallback to sequential scanning
+		for _, r := range allReleases {
+			c, cn := context.WithTimeout(ctx, 3*time.Second)
+			if cleanRun(c, "helm", "status", r.Name, "-n", r.Namespace) == nil {
+				installed = append(installed, r)
+			}
+			cn()
+		}
 	}
 
 	var existingNS []string
-	for _, ns := range managedNamespaces {
-		c, cn := context.WithTimeout(ctx, 3*time.Second)
-		if cleanRun(c, "kubectl", "get", "namespace", ns) == nil {
-			existingNS = append(existingNS, ns)
+	nsOut, nsErr := cleanRunOutput(ctx, "kubectl", "get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}")
+	if nsErr == nil {
+		nsList := strings.Fields(strings.TrimSpace(string(nsOut)))
+		for _, ns := range managedNamespaces {
+			for _, ens := range nsList {
+				if ens == ns {
+					existingNS = append(existingNS, ns)
+					break
+				}
+			}
 		}
-		cn()
+	} else {
+		// Fallback to sequential scanning
+		for _, ns := range managedNamespaces {
+			c, cn := context.WithTimeout(ctx, 3*time.Second)
+			if cleanRun(c, "kubectl", "get", "namespace", ns) == nil {
+				existingNS = append(existingNS, ns)
+			}
+			cn()
+		}
 	}
 
 	var existingCRDs []string
-	for _, crd := range allCRDs {
-		c, cn := context.WithTimeout(ctx, 3*time.Second)
-		if cleanRun(c, "kubectl", "get", "crd", crd) == nil {
-			existingCRDs = append(existingCRDs, crd)
+	crdOut, crdErr := cleanRunOutput(ctx, "kubectl", "get", "crd", "-o", "jsonpath={.items[*].metadata.name}")
+	if crdErr == nil {
+		crdList := strings.Fields(strings.TrimSpace(string(crdOut)))
+		for _, crd := range allCRDs {
+			for _, ecrd := range crdList {
+				if ecrd == crd {
+					existingCRDs = append(existingCRDs, crd)
+					break
+				}
+			}
 		}
-		cn()
+	} else {
+		// Fallback to sequential scanning
+		for _, crd := range allCRDs {
+			c, cn := context.WithTimeout(ctx, 3*time.Second)
+			if cleanRun(c, "kubectl", "get", "crd", crd) == nil {
+				existingCRDs = append(existingCRDs, crd)
+			}
+			cn()
+		}
 	}
 
 	if len(installed) == 0 && len(existingNS) == 0 && len(existingCRDs) == 0 {
@@ -362,57 +413,101 @@ func runClean(cmd *cobra.Command, args []string) error {
 	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
 	errStyle := lipgloss.NewStyle().Foreground(clrRed)
 
-	// ── 1. Delete Operator CRs FIRST (while operators are still running) ──
-	// Operators handle finalizer removal. If we delete operators first,
-	// finalizers become orphaned and namespaces hang in Terminating forever.
-	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-		Render("  Step 1: Removing operator custom resources..."))
+	// Filter operator CRD types actually present in cluster
+	var activeCRDTypes []string
 	for _, crdType := range operatorCRDTypes {
-		for _, ns := range managedNamespaces {
-			dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
-			cleanRun(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found")
-			dCancel()
+		for _, ecrd := range existingCRDs {
+			if ecrd == crdType {
+				activeCRDTypes = append(activeCRDTypes, crdType)
+				break
+			}
 		}
+	}
+
+	// ── 1. Delete Operator CRs FIRST (while operators are still running) ──
+	if len(activeCRDTypes) > 0 && len(existingNS) > 0 {
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 1: Removing operator custom resources..."))
+		var crWg sync.WaitGroup
+		for _, crdType := range activeCRDTypes {
+			for _, ns := range existingNS {
+				crWg.Add(1)
+				go func(crd, namespace string) {
+					defer crWg.Done()
+					dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
+					defer dCancel()
+					_ = cleanRun(dCtx, "kubectl", "delete", crd, "--all", "-n", namespace, "--ignore-not-found")
+				}(crdType, ns)
+			}
+		}
+		crWg.Wait()
 	}
 	// Wait briefly for operators to process finalizer removal.
 	cleanSleepFn(5 * time.Second)
 
 	// ── 2. Strip orphaned finalizers on any remaining stuck resources ──
-	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-		Render("  Step 2: Stripping orphaned finalizers..."))
-	for _, crdType := range operatorCRDTypes {
-		for _, ns := range managedNamespaces {
-			pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
-			// Get any remaining resources and patch their finalizers to empty
-			out, _ := cleanRunOutput(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
-			pCancel()
-			names := strings.Fields(strings.TrimSpace(string(out)))
-			for _, name := range names {
-				fCtx, fCancel := context.WithTimeout(ctx, 5*time.Second)
-				cleanRun(fCtx, "kubectl", "patch", crdType, name, "-n", ns,
-					"--type", "merge", "-p", `{"metadata":{"finalizers":[]}}`)
-				fCancel()
+	if len(activeCRDTypes) > 0 && len(existingNS) > 0 {
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 2: Stripping orphaned finalizers..."))
+		var finWg sync.WaitGroup
+		for _, crdType := range activeCRDTypes {
+			for _, ns := range existingNS {
+				finWg.Add(1)
+				go func(crd, namespace string) {
+					defer finWg.Done()
+					pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
+					out, err := cleanRunOutput(pCtx, "kubectl", "get", crd, "-n", namespace, "-o", "jsonpath={.items[*].metadata.name}")
+					pCancel()
+					if err != nil {
+						return
+					}
+					names := strings.Fields(strings.TrimSpace(string(out)))
+					if len(names) > 0 {
+						var patchWg sync.WaitGroup
+						for _, name := range names {
+							patchWg.Add(1)
+							go func(n string) {
+								defer patchWg.Done()
+								fCtx, fCancel := context.WithTimeout(ctx, 5*time.Second)
+								defer fCancel()
+								_ = cleanRun(fCtx, "kubectl", "patch", crd, n, "-n", namespace,
+									"--type", "merge", "-p", `{"metadata":{"finalizers":[]}}`)
+							}(name)
+						}
+						patchWg.Wait()
+					}
+				}(crdType, ns)
 			}
 		}
+		finWg.Wait()
 	}
 
 	// ── 3. Uninstall Helm releases (apps → core → operators) ──
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-		Render("  Step 3: Uninstalling Helm releases..."))
-	for _, r := range installed {
-		label := fmt.Sprintf("  Uninstalling %-16s from %s", r.Name, r.Namespace)
-		fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
+	if len(installed) > 0 {
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 3: Uninstalling Helm releases..."))
+		var helmWg sync.WaitGroup
+		var printMutex sync.Mutex
+		for _, r := range installed {
+			helmWg.Add(1)
+			go func(rel helmRelease) {
+				defer helmWg.Done()
+				uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
+				out, err := cleanRunOutput(uCtx, "helm", "uninstall", rel.Name, "-n", rel.Namespace)
+				uCancel()
 
-		uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
-		out, err := cleanRunOutput(uCtx, "helm", "uninstall", r.Name, "-n", r.Namespace)
-		uCancel()
-
-		if err != nil {
-			fmt.Println(errStyle.Render("  ✖ " + strings.TrimSpace(string(out))))
-		} else {
-			fmt.Println(okStyle.Render("  ✔"))
+				printMutex.Lock()
+				defer printMutex.Unlock()
+				label := fmt.Sprintf("  Uninstalling %-16s from %s", rel.Name, rel.Namespace)
+				if err != nil {
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), errStyle.Render("  ✖ "+strings.TrimSpace(string(out))))
+				} else {
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
+				}
+			}(r)
 		}
+		helmWg.Wait()
 	}
 
 	// ── 4. Delete cluster-scoped resources ──
@@ -427,40 +522,46 @@ func runClean(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
 			Render("  Step 4: Deleting namespaces..."))
+		var nsWg sync.WaitGroup
+		var printMutex sync.Mutex
 		for _, ns := range existingNS {
-			label := fmt.Sprintf("  Deleting namespace %s", ns)
-			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
+			nsWg.Add(1)
+			go func(namespace string) {
+				defer nsWg.Done()
+				nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
+				err := cleanRun(nCtx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found")
+				nCancel()
 
-			nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
-			err := cleanRun(nCtx, "kubectl", "delete", "namespace", ns, "--ignore-not-found")
-			nCancel()
-
-			if err != nil {
-				fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
-			} else {
-				fmt.Println(okStyle.Render("  ✔"))
-			}
+				printMutex.Lock()
+				defer printMutex.Unlock()
+				label := fmt.Sprintf("  Deleting namespace %s", namespace)
+				if err != nil {
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
+				} else {
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
+				}
+			}(ns)
 		}
+		nsWg.Wait()
 	}
 
 	// ── 6. Delete CustomResourceDefinitions (CRDs) ──
 	if len(existingCRDs) > 0 {
 		fmt.Println()
 		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-			Render("  Step 5: Deleting CustomResourceDefinitions (CRDs)..."))
-		for _, crd := range existingCRDs {
-			label := fmt.Sprintf("  Deleting CRD %s", crd)
-			fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
+			Render("  Step 5: Deleting CustomResourceDefinitions (CRDs) in batch..."))
+		label := fmt.Sprintf("  Deleting %d CRDs", len(existingCRDs))
+		fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
 
-			cCtx, cCancel := context.WithTimeout(ctx, 30*time.Second)
-			err := cleanRun(cCtx, "kubectl", "delete", "crd", crd, "--ignore-not-found")
-			cCancel()
+		args := append([]string{"delete", "crd", "--ignore-not-found"}, existingCRDs...)
+		cCtx, cCancel := context.WithTimeout(ctx, 1*time.Minute)
+		err := cleanRun(cCtx, "kubectl", args...)
+		cCancel()
 
-			if err != nil {
-				fmt.Println(errStyle.Render("  ✖"))
-			} else {
-				fmt.Println(okStyle.Render("  ✔"))
-			}
+		if err != nil {
+			fmt.Println(errStyle.Render("  ✖"))
+		} else {
+			fmt.Println(okStyle.Render("  ✔"))
 		}
 	}
 
