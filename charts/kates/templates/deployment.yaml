@@ -146,6 +146,8 @@ spec:
         - name: JAVA_TOOL_OPTIONS
           value: {{ .Values.jvm.options | quote }}
         {{- end }}
+        - name: QUARKUS_OTEL_ENABLED
+          value: {{ .Values.monitoring.enabled | quote }}
         {{- if .Values.apiKey.enabled }}
         - name: KATES_API_KEY
           valueFrom:

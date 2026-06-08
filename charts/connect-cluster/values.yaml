@@ -20,7 +20,7 @@ testImages:
 # -- Number of Kafka Connect worker replicas
 replicas: 3
 # -- Kafka Connect image (leave empty to use Strimzi default)
-image: "ghcr.io/bmscomp/connect:"
+image: "ghcr.io/bmscomp/connect:latest"
 # -- Kafka version
 version: "4.2.0"
 # -- Group ID for the Connect cluster
