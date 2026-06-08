@@ -45,9 +45,7 @@ spec:
         - port: 53
           protocol: TCP
     - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/kind: Kafka
+        - namespaceSelector: {}
       ports:
         {{- range .Values.networkPolicy.kafkaPorts | default (list 9092 9093) }}
         - protocol: TCP

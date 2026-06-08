@@ -16,7 +16,7 @@ image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
   # -- Image tag
-  tag: ""
+  tag: "v1.18.1"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -694,3 +694,8 @@ kyvernoPolicy:
       - validate-readonly-rootfs
       - require-resource-limits
       - disallow-latest-tag
+
+# -- Monitoring integration
+monitoring:
+  # -- Enable telemetry export (Jaeger)
+  enabled: true
