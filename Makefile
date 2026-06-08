@@ -691,9 +691,7 @@ connect-chart-all: connect-chart-lint connect-chart-template connect-chart-packa
 connect-deploy:
 	@echo "🔌 Deploying Kafka Connect cluster (ENV=$(ENV))..."
 	@OVERLAY=""; \
-	if [ "$(ENV)" = "kind" ] && [ -f "$(CONNECT_CHART_DIR)/values-kind.yaml" ]; then \
-		OVERLAY="-f $(CONNECT_CHART_DIR)/values-kind.yaml"; \
-	elif [ -f "$(CONNECT_CHART_DIR)/values-$(ENV).yaml" ]; then \
+	if [ -f "$(CONNECT_CHART_DIR)/values-$(ENV).yaml" ]; then \
 		OVERLAY="-f $(CONNECT_CHART_DIR)/values-$(ENV).yaml"; \
 	fi; \
 	helm upgrade --install connect-cluster $(CONNECT_CHART_DIR) \

@@ -964,9 +964,7 @@ stringData:
 						"--timeout", "10m",
 					}
 
-					if isKind {
-						connectArgs = append(connectArgs, "-f", "charts/connect-cluster/values-kind.yaml")
-					}
+					connectArgs = append(connectArgs, "-f", "charts/connect-cluster/values-generic.yaml")
 
 					if deployHA {
 						connectArgs = append(connectArgs, "--set", "replicas=3")
