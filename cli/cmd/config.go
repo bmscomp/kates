@@ -62,6 +62,8 @@ var ctxShowCmd = &cobra.Command{
 var ctxSetURL string
 var ctxSetOutput string
 var ctxSetAPIKey string
+var ctxSetProxy string
+var ctxSetInsecure bool
 
 var ctxSetCmd = &cobra.Command{
 	Use:   "set <name>",
@@ -81,7 +83,13 @@ var ctxSetCmd = &cobra.Command{
 		if out == "" {
 			out = "table"
 		}
-		cfg.Contexts[name] = Context{URL: ctxSetURL, Output: out, APIKey: ctxSetAPIKey}
+		cfg.Contexts[name] = Context{
+			URL:      ctxSetURL,
+			Output:   out,
+			APIKey:   ctxSetAPIKey,
+			ProxyURL: ctxSetProxy,
+			Insecure: ctxSetInsecure,
+		}
 
 		// Auto-select if first context
 		if len(cfg.Contexts) == 1 {
@@ -250,6 +258,8 @@ func init() {
 	ctxSetCmd.Flags().StringVar(&ctxSetURL, "url", "", "Kates API base URL (required)")
 	ctxSetCmd.Flags().StringVar(&ctxSetOutput, "output", "", "Default output format for this context")
 	ctxSetCmd.Flags().StringVar(&ctxSetAPIKey, "api-key", "", "API key for authentication")
+	ctxSetCmd.Flags().StringVar(&ctxSetProxy, "proxy", "", "Proxy server URL (e.g., http://proxy:8080)")
+	ctxSetCmd.Flags().BoolVar(&ctxSetInsecure, "insecure", false, "Skip TLS certificate verification (useful for SSL proxies)")
 
 	ctxExportCmd.Flags().StringVar(&ctxExportFlag, "name", "", "Export only a specific context")
 	ctxImportCmd.Flags().StringVar(&ctxImportFile, "file", "", "YAML file to import (reads stdin if omitted)")

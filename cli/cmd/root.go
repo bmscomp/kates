@@ -22,9 +22,11 @@ var (
 )
 
 type Context struct {
-	URL    string `yaml:"url"`
-	Output string `yaml:"output,omitempty"`
-	APIKey string `yaml:"api-key,omitempty"`
+	URL      string `yaml:"url"`
+	Output   string `yaml:"output,omitempty"`
+	APIKey   string `yaml:"api-key,omitempty"`
+	ProxyURL string `yaml:"proxy-url,omitempty"`
+	Insecure bool   `yaml:"insecure,omitempty"`
 }
 
 type Config struct {
@@ -239,11 +241,13 @@ var rootCmd = &cobra.Command{
 				apiKeyFlag = ctx.APIKey
 			}
 		}
-		if apiKeyFlag != "" {
-			apiClient = client.NewWithAPIKey(apiURL, apiKeyFlag)
-		} else {
-			apiClient = client.New(apiURL)
+		opts := client.ClientOptions{
+			BaseURL:  apiURL,
+			APIKey:   apiKeyFlag,
+			ProxyURL: ctx.ProxyURL,
+			Insecure: ctx.Insecure,
 		}
+		apiClient = client.NewWithOptions(opts)
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,

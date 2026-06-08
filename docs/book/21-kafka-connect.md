@@ -51,7 +51,7 @@ graph TB
 | Scaling | ❌ Tied to broker chart values | ✅ Independent replica count |
 | Failure blast radius | ❌ Bad connector config blocks broker chart | ✅ Connect failures isolated |
 | CI/CD pipeline | ❌ Single chart = single pipeline | ✅ Separate lint/test/package/push |
-| Environment overlays | ❌ Shared values file | ✅ Dedicated `values-kind.yaml`, `values-prod.yaml` |
+| Environment overlays | ❌ Shared values file | ✅ Dedicated `values-generic.yaml`, `values-prod.yaml` |
 
 ## Helm Chart Structure
 
@@ -61,7 +61,7 @@ The `connect-cluster` chart lives at `charts/connect-cluster/` and produces two 
 charts/connect-cluster/
 ├── Chart.yaml                          # v1.0.0, appVersion 4.2.0
 ├── values.yaml                         # Production defaults
-├── values-kind.yaml                    # Kind cluster overlay
+├── values-generic.yaml                    # Kind cluster overlay
 ├── values-dev.yaml                     # Development overlay
 ├── values-prod.yaml                    # Production overlay
 ├── values.schema.json                  # Input validation

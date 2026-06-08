@@ -3,12 +3,14 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -20,27 +22,49 @@ type Client struct {
 	APIKey     string
 }
 
-func New(baseURL string) *Client {
+type ClientOptions struct {
+	BaseURL  string
+	APIKey   string
+	ProxyURL string
+	Insecure bool
+}
+
+func NewWithOptions(opts ClientOptions) *Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 15 * time.Second,
+		}).DialContext,
+		DisableKeepAlives: true,
+	}
+
+	if opts.ProxyURL != "" {
+		if proxyURL, err := url.Parse(opts.ProxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	}
+	if opts.Insecure {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
 	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
+		BaseURL: strings.TrimRight(opts.BaseURL, "/"),
+		APIKey:  opts.APIKey,
 		HTTPClient: &http.Client{
-			Timeout: 60 * time.Second,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{
-					Timeout:   30 * time.Second,
-					KeepAlive: 15 * time.Second,
-				}).DialContext,
-				DisableKeepAlives: true,
-			},
+			Timeout:   60 * time.Second,
+			Transport: transport,
 		},
 		MaxRetries: 3,
 	}
 }
 
+func New(baseURL string) *Client {
+	return NewWithOptions(ClientOptions{BaseURL: baseURL})
+}
+
 func NewWithAPIKey(baseURL, apiKey string) *Client {
-	c := New(baseURL)
-	c.APIKey = apiKey
-	return c
+	return NewWithOptions(ClientOptions{BaseURL: baseURL, APIKey: apiKey})
 }
 
 type APIError struct {
