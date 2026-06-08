@@ -974,6 +974,24 @@ stringData:
 						connectArgs = append(connectArgs, "--set", "replicas=1")
 					}
 
+					monitoringEnabled := deployWithMonitoring
+					if monitoringEnabled {
+						// Cleverly detect if CRDs are actually present before enabling monitoring on Connect
+						out, err := exec.CommandContext(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found").CombinedOutput()
+						if err != nil || len(bytes.TrimSpace(out)) == 0 {
+							monitoringEnabled = false
+							dl.Printf("    ⚠️  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
+						}
+					}
+
+					if !monitoringEnabled {
+						connectArgs = append(connectArgs,
+							"--set", "alerts.enabled=false",
+							"--set", "podMonitors.enabled=false",
+							"--set", "dashboards.enabled=false",
+						)
+					}
+
 					if err := runHelmFn(ctx, connectArgs...); err != nil {
 						return err
 					}
@@ -1011,7 +1029,7 @@ spec:
     enabled: true
     maxRestarts: 10
   config:
-    database.hostname: postgresql.database.svc
+    database.hostname: postgresql.%s.svc
     database.port: "5432"
     database.user: debezium
     database.password: "${secrets:%s/connect-pg-credentials:password}"
@@ -1025,7 +1043,7 @@ spec:
     decimal.handling.mode: double
     tombstones.on.delete: "true"
     schema.history.internal.kafka.bootstrap.servers: krafter-kafka-bootstrap.%s.svc:9092
-    schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, kafkaNS, kafkaNS)
+    schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, deployDbNS, kafkaNS, kafkaNS)
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
 						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", output.WarningStyle.Render("⚠"), err)
 						dl.FinishComponent("kafka-connector", false)
@@ -1055,12 +1073,12 @@ spec:
     maxRestarts: 10
   config:
     topics: "test-sink-topic"
-    connection.url: "jdbc:postgresql://postgresql.database.svc:5432/kates"
+    connection.url: "jdbc:postgresql://postgresql.%s.svc:5432/orders"
     connection.username: "${secrets:%s/connect-pg-credentials:username}"
     connection.password: "${secrets:%s/connect-pg-credentials:password}"
     insert.mode: "insert"
     auto.create: "true"
-    auto.evolve: "true"`, kafkaNS, kafkaNS, kafkaNS)
+    auto.evolve: "true"`, kafkaNS, deployDbNS, kafkaNS, kafkaNS)
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, sinkYaml); err != nil {
 						dl.Printf("    %s Failed to deploy JDBC Sink connector: %v\n", output.WarningStyle.Render("⚠"), err)
 					} else {
@@ -1148,6 +1166,7 @@ data:
 					"-f", valuesFile,
 					"-f", chartOverlay("charts/kates"),
 					"--set", "kafka.bootstrapServers="+bootstrap,
+					"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring),
 					"--timeout", "8m"); err != nil {
 					return err
 				}

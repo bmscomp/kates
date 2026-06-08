@@ -6,12 +6,14 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.bmscomp.kates.api.ApiError;
 
 /**
@@ -23,8 +25,40 @@ import com.bmscomp.kates.api.ApiError;
 @Tag(name = "Resilience")
 public class ResilienceResource {
 
+    private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(ResilienceResource.class);
+
     @Inject
     ResilienceOrchestrator orchestrator;
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    private StreamingOutput executeWithKeepAlive(ResilienceTestRequest request, String scenarioId) {
+        return os -> {
+            java.util.concurrent.CompletableFuture<ResilienceReport> future = 
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> orchestrator.execute(request));
+            
+            while (!future.isDone()) {
+                try {
+                    os.write(" ".getBytes());
+                    os.flush();
+                    Thread.sleep(10000);
+                } catch (Exception e) {
+                    future.cancel(true);
+                    return;
+                }
+            }
+            
+            try {
+                ResilienceReport report = future.get();
+                Object payload = scenarioId != null ? Map.of("scenario", scenarioId, "report", report) : report;
+                objectMapper.writeValue(os, payload);
+                os.flush();
+            } catch (Exception e) {
+                LOG.error("Failed to execute resilience test", e);
+            }
+        };
+    }
 
     @POST
     @Operation(
@@ -43,8 +77,8 @@ public class ResilienceResource {
                     .build();
         }
 
-        ResilienceReport report = orchestrator.execute(request);
-        return Response.ok(report).build();
+        StreamingOutput stream = executeWithKeepAlive(request, null);
+        return Response.ok(stream).build();
     }
 
     @GET
@@ -95,7 +129,7 @@ public class ResilienceResource {
                     .build();
         }
 
-        ResilienceReport report = orchestrator.execute(request);
-        return Response.ok(Map.of("scenario", id, "report", report)).build();
+        StreamingOutput stream = executeWithKeepAlive(request, id);
+        return Response.ok(stream).build();
     }
 }

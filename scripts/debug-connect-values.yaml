@@ -1,0 +1,23 @@
+replicas: 1
+image: "ghcr.io/bmscomp/connect:3.0.2"
+kafka:
+  bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  tls:
+    enabled: false
+  authentication:
+    type: "scram-sha-512"
+    username: "kates-connect"
+databaseEgress:
+  - namespace: "database"
+    port: 5432
+    podSelector:
+      app.kubernetes.io/name: postgresql
+
+# Disable monitoring CRDs since they might not be installed in the cluster
+alerts:
+  enabled: false
+podMonitors:
+  enabled: false
+dashboards:
+  enabled: false
+

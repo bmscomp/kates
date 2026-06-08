@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -25,6 +26,10 @@ func New(baseURL string) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 60 * time.Second,
 			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 15 * time.Second,
+				}).DialContext,
 				DisableKeepAlives: true,
 			},
 		},

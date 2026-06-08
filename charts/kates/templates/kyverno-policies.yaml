@@ -249,8 +249,7 @@ spec:
               spec:
                 containers:
                   - livenessProbe:
-                      httpGet:
-                        path: "?*"
+                      (httpGet | tcpSocket | exec | grpc): "?*"
 
     - name: require-readiness-probe
       match:
@@ -266,8 +265,7 @@ spec:
               spec:
                 containers:
                   - readinessProbe:
-                      httpGet:
-                        path: "?*"
+                      (httpGet | tcpSocket | exec | grpc): "?*"
 
     # ── Validate: disallow latest tag ─────────────────────────────────────────
     - name: disallow-latest-tag
