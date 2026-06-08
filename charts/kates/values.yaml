@@ -16,7 +16,7 @@ image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
   # -- Image tag
-  tag: "latest"
+  tag: ""
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -427,7 +427,7 @@ postgresql:
   # -- PostgreSQL image
   image:
     repository: postgres
-    tag: "17-alpine"
+    tag: ""
   # -- Database authentication
   auth:
     # -- Database name
