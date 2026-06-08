@@ -29,9 +29,11 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
             "/openapi");
 
     @ConfigProperty(name = "kates.api.security-enabled", defaultValue = "true")
+    @io.quarkus.runtime.annotations.StaticInitSafe
     boolean securityEnabled;
 
     @ConfigProperty(name = "kates.api.key", defaultValue = "")
+    @io.quarkus.runtime.annotations.StaticInitSafe
     String apiKey;
 
     @Override

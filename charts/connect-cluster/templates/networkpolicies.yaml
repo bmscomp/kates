@@ -31,10 +31,19 @@ spec:
         - podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
+        # Allow ingress from all sources for health probes (kubelet)
+        - namespaceSelector: {}
       ports:
         - port: 8083
           protocol: TCP
   egress:
+    # Allow DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
     - to:
         - podSelector:
             matchLabels:
@@ -67,6 +76,7 @@ spec:
         - port: {{ .port | default 5432 }}
           protocol: TCP
     {{- end }}
+    # Allow API Server egress
     - to: []
       ports:
         - port: 443

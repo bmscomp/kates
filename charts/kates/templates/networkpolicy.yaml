@@ -13,6 +13,14 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Allow Kubelet probes (and other general ingress for now to prevent probe drops)
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
     {{- with .Values.networkPolicy.ingressRules }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -54,6 +62,11 @@ spec:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.prometheus.namespace | default "monitoring" }}
       ports:
         - port: {{ .Values.networkPolicy.prometheus.port | default 9090 }}
+          protocol: TCP
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 8889
           protocol: TCP
     {{- with .Values.networkPolicy.egressRules }}
     {{- toYaml . | nindent 4 }}
