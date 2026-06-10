@@ -99,3 +99,21 @@ capabilities:
   drop:
     - ALL
 {{- end }}
+
+{{/*
+Kafka bootstrap servers FQDN (SASL_PLAINTEXT port 9092).
+Usage: {{ include "connect-cluster.bootstrapServers" . }}
+*/}}
+{{- define "connect-cluster.bootstrapServers" -}}
+{{- if .Values.kafka.bootstrapServers -}}
+{{- .Values.kafka.bootstrapServers -}}
+{{- else -}}
+{{- $svc := printf "%s-kafka-bootstrap" (.Values.kafka.clusterName | default "krafter") -}}
+{{- if .Values.kafka.tls.enabled -}}
+{{- printf "%s.%s.svc.%s:9093" $svc (include "connect-cluster.namespace" .) (include "connect-cluster.clusterDomain" .) -}}
+{{- else -}}
+{{- printf "%s.%s.svc.%s:9092" $svc (include "connect-cluster.namespace" .) (include "connect-cluster.clusterDomain" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+

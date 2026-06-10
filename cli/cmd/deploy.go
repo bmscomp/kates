@@ -459,12 +459,25 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			// ---------------------------------------------------------
 			// GROUP A: Operators & CRDs (Parallel)
 			// ---------------------------------------------------------
+			deployStrimzi := false
+			if deployWithStrimzi {
+				deployStrimzi = !isHelmReleaseDeployedFn(ctx, "strimzi-operator", "strimzi-operator")
+			}
+			deployCertManager := false
+			if deployWithCertManager {
+				deployCertManager = !isHelmReleaseDeployedFn(ctx, "cert-manager", "cert-manager")
+			}
+			deployKyverno := false
+			if deployWithKyverno {
+				deployKyverno = !isHelmReleaseDeployedFn(ctx, "kyverno", "kyverno")
+			}
+
 			g, gCtx := errgroup.WithContext(ctx)
 
 			// Deploy Strimzi Operator
 			if deployWithStrimzi {
 				g.Go(func() error {
-					if isHelmReleaseDeployedFn(gCtx, "strimzi-operator", "strimzi-operator") {
+					if !deployStrimzi {
 						dl.Println("⏭️  Strimzi Operator already deployed. Skipping.")
 						dl.FinishComponent("strimzi", true)
 						advanceStep()
@@ -476,8 +489,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 kind: Namespace
 metadata:
   name: strimzi-operator`)
+					clusterDomain := report.Network.ClusterDomain
+					if clusterDomain == "" {
+						clusterDomain = "cluster.local"
+					}
 					err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator",
 						"--set", "watchAnyNamespace=true",
+						"--set", "kubernetesServiceDnsDomain="+clusterDomain,
 						"--set", "replicas=1",
 						"--set", "resources.limits.memory=768Mi",
 						"--set", "resources.requests.memory=768Mi",
@@ -494,7 +512,7 @@ metadata:
 			// Deploy Cert-Manager
 			if deployWithCertManager {
 				g.Go(func() error {
-					if isHelmReleaseDeployedFn(gCtx, "cert-manager", "cert-manager") {
+					if !deployCertManager {
 						dl.Println("⏭️  Cert-Manager already deployed. Skipping.")
 						dl.FinishComponent("cert-manager", true)
 						advanceStep()
@@ -611,7 +629,7 @@ spec:
 			// Deploy Kyverno
 			if deployWithKyverno {
 				g.Go(func() error {
-					if isHelmReleaseDeployedFn(gCtx, "kyverno", "kyverno") {
+					if !deployKyverno {
 						dl.Println("⏭️  Kyverno already deployed. Skipping.")
 						dl.FinishComponent("kyverno", true)
 						advanceStep()
@@ -657,7 +675,7 @@ spec:
 
 			// ── Sequential Readiness Waits for Group A ──
 			if deployWithStrimzi && !isTesting {
-				if isHelmReleaseDeployedFn(ctx, "strimzi-operator", "strimzi-operator") {
+				if !deployStrimzi {
 					// Already skipped above, but ensure progress isn't blocked
 				} else {
 					dl.StartComponent("strimzi", 5*time.Minute)
@@ -670,7 +688,7 @@ spec:
 				}
 			}
 			if deployWithCertManager && !isTesting {
-				if isHelmReleaseDeployedFn(ctx, "cert-manager", "cert-manager") {
+				if !deployCertManager {
 					// already handled
 				} else {
 					dl.StartComponent("cert-manager", 10*time.Minute)
@@ -683,7 +701,7 @@ spec:
 				}
 			}
 			if deployWithKyverno && !isTesting {
-				if isHelmReleaseDeployedFn(ctx, "kyverno", "kyverno") {
+				if !deployKyverno {
 					// already handled
 				} else {
 					dl.StartComponent("kyverno", 5*time.Minute)
@@ -832,8 +850,6 @@ metadata:
 
 					// (Values files are already appended above so these overrides take precedence)
 
-
-
 					if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
 						return err
 					}
@@ -942,20 +958,21 @@ stringData:
   username: debezium`, kafkaNS)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
+				connectDomain := report.Network.ClusterDomain
+				if connectDomain == "" {
+					connectDomain = "cluster.local"
+				}
+				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+
 				if !isHelmReleaseDeployedFn(ctx, "connect-cluster", kafkaNS) {
 					dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", kafkaNS)
 
-					connectDomain := report.Network.ClusterDomain
-					if connectDomain == "" {
-						connectDomain = "cluster.local"
-					}
 					registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
 						kafkaNS, connectDomain)
 
 					connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
 						"-n", kafkaNS, "--create-namespace",
-						"--set", "kafka.bootstrapServers=krafter-kafka-bootstrap." + kafkaNS + ".svc:9092",
-						"--set", "kafka.tls.enabled=false",
+						"--set", "clusterDomain=" + connectDomain,
 						"--set", "schemaRegistry.enabled=true",
 						"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
 						"--set", "databaseEgress[0].namespace=" + deployDbNS,
@@ -1040,8 +1057,11 @@ spec:
     snapshot.mode: initial
     decimal.handling.mode: double
     tombstones.on.delete: "true"
-    schema.history.internal.kafka.bootstrap.servers: krafter-kafka-bootstrap.%s.svc:9092
-    schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, deployDbNS, kafkaNS, kafkaNS)
+    schema.history.internal.kafka.bootstrap.servers: %s
+    schema.history.internal.kafka.security.protocol: SASL_PLAINTEXT
+    schema.history.internal.kafka.sasl.mechanism: SCRAM-SHA-512
+    schema.history.internal.kafka.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-connect\" password=\"${secrets:%s/kates-connect:password}\";"
+    schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, deployDbNS, kafkaNS, bootstrap, kafkaNS)
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
 						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", output.WarningStyle.Render("⚠"), err)
 						dl.FinishComponent("kafka-connector", false)
