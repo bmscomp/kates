@@ -16,14 +16,14 @@ spec:
   {{- end }}
   version: {{ .Values.version }}
   replicas: {{ .Values.replicas }}
-  bootstrapServers: {{ .Values.kafka.bootstrapServers }}
+  bootstrapServers: {{ include "connect-cluster.bootstrapServers" . }}
   authentication:
     type: {{ .Values.kafka.authentication.type | default "scram-sha-512" }}
     {{- if or (eq (.Values.kafka.authentication.type | default "scram-sha-512") "scram-sha-512") (eq (.Values.kafka.authentication.type | default "scram-sha-512") "scram-sha-256") }}
     username: {{ .Values.kafka.authentication.username | default "kates-connect" }}
     passwordSecret:
       secretName: {{ .Values.kafka.authentication.secretName | default .Values.kafka.authentication.username | default "kates-connect" }}
-      password: password
+      password: {{ .Values.kafka.authentication.secretKey | default "password" }}
     {{- else if eq .Values.kafka.authentication.type "tls" }}
     certificateAndKey:
       secretName: {{ .Values.kafka.authentication.certificateSecret | default "kates-connect-tls" }}

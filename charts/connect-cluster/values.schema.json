@@ -35,7 +35,7 @@
       "properties": {
         "bootstrapServers": {
           "type": "string",
-          "minLength": 1,
+          "minLength": 0,
           "description": "Kafka bootstrap servers (host:port)"
         },
         "tls": {

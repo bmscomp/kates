@@ -131,6 +131,18 @@ spec:
         operations: ["Read", "Describe"]
         host: "*"
       - resource:
+          type: group
+          name: "connect-"
+          patternType: prefix
+        operations: ["Read", "Describe"]
+        host: "*"
+      - resource:
+          type: topic
+          name: "test-"
+          patternType: prefix
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
+      - resource:
           type: cluster
         operations: ["Describe"]
         host: "*"

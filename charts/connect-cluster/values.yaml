@@ -34,8 +34,10 @@ clusterDomain: cluster.local
 # in the same namespace as this Connect cluster. Adjust these if Kafka is deployed
 # elsewhere or has a different name.
 kafka:
-  # -- Bootstrap servers for the Kafka cluster
-  bootstrapServers: "krafter-kafka-bootstrap:9092"
+  # -- Kafka cluster name
+  clusterName: "krafter"
+  # -- Bootstrap servers for the Kafka cluster (leave empty to compute automatically)
+  bootstrapServers: ""
   tls:
     enabled: false
     # -- Secret containing the CA certificate for Kafka
@@ -46,6 +48,8 @@ kafka:
     username: "kates-connect"
     # -- Secret containing the authentication password (defaults to username if empty)
     secretName: "kates-connect"
+    # -- Key in the Secret containing the authentication password
+    secretKey: "password"
 
 # ── Scheduling ──────────────────────────────────────────────────────────────
 topologySpreadConstraints:
