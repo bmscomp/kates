@@ -18,11 +18,11 @@ litmus-core:
   operator:
     image:
       repository: docker.io/litmuschaos/chaos-operator
-      tag: "3.28.0"
+      tag: ""
   runner:
     image:
       repository: docker.io/litmuschaos/chaos-runner
-      tag: "3.28.0"
+      tag: ""
 
 # RBAC for chaos experiments in target namespaces
 rbac:
