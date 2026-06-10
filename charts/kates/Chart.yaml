@@ -3,7 +3,7 @@ name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 version: 0.4.3
-appVersion: ""
+appVersion: "1.18.3"
 keywords:
   - kafka
   - testing

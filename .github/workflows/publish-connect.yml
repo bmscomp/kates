@@ -263,7 +263,7 @@ jobs:
           docker images "${IMAGE}" --format "{{.Size}}"
   update-charts:
     name: Update Helm Charts
-    needs: [verify]
+    needs: [meta, verify]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

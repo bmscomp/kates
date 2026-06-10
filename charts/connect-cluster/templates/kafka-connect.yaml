@@ -12,7 +12,7 @@ metadata:
     strimzi.io/use-connector-resources: "true"
 spec:
   {{- if .Values.image }}
-  image: {{ .Values.image }}
+  image: "{{ .Values.image }}"
   {{- end }}
   version: {{ .Values.version }}
   replicas: {{ .Values.replicas }}
