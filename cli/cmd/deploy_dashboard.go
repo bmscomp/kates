@@ -400,30 +400,26 @@ func (m deployDashboardModel) View() string {
 	bar := m.progressBar.ViewAs(pct)
 
 	prevGroup := ""
-	for _, c := range m.components {
-		if c.Group != prevGroup && prevGroup != "" {
+	for i, c := range m.components {
+		isFirstInGroup := (c.Group != prevGroup)
+		isLastInGroup := (i == len(m.components)-1 || m.components[i+1].Group != c.Group)
+
+		if isFirstInGroup {
 			groupNames := map[string]string{"A": "Operators", "B": "Infrastructure", "C": "Applications"}
 			label := groupNames[c.Group]
 			if label == "" {
 				label = c.Group
 			}
-			sepLabel := fmt.Sprintf(" %s ", label)
-			sepWidth := m.compWidth - lipgloss.Width(sepLabel)
-			leftDash := sepWidth / 2
-			rightDash := sepWidth - leftDash
-			b.WriteString(fmt.Sprintf("\n%s%s%s\n\n",
-				output.DimStyle.Render(strings.Repeat("┄", leftDash)),
-				output.DimStyle.Render(sepLabel),
-				output.DimStyle.Render(strings.Repeat("┄", rightDash))))
+			title := fmt.Sprintf("─ %s ", label)
+			padding := (m.compWidth - 2) - lipgloss.Width(title)
+			if padding < 0 {
+				padding = 0
+			}
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(fmt.Sprintf("╭%s%s╮\n", title, strings.Repeat("─", padding)))
 		}
-		prevGroup = c.Group
-
-		title := fmt.Sprintf("─ %s ", c.Name)
-		padding := (m.compWidth - 2) - lipgloss.Width(title)
-		if padding < 0 {
-			padding = 0
-		}
-		b.WriteString(fmt.Sprintf("╭%s%s╮\n", title, strings.Repeat("─", padding)))
 
 		if !c.Active && !c.Done {
 			b.WriteString(fmt.Sprintf("│ %s │\n", padRight(output.DimStyle.Render("◯ Pending..."), m.compWidth-4)))
@@ -523,7 +519,17 @@ func (m deployDashboardModel) View() string {
 			}
 		}
 
-		b.WriteString(fmt.Sprintf("╰%s╯\n", strings.Repeat("─", m.compWidth-2)))
+		if isLastInGroup {
+			b.WriteString(fmt.Sprintf("╰%s╯\n", strings.Repeat("─", m.compWidth-2)))
+		} else {
+			// Optional: draw an inner separator or just a blank line between components?
+			// Let's just draw an inner separator for clarity if there are workloads, otherwise just list them.
+			// Actually, if we just list them tightly, it's very clean, similar to the requested design.
+			// Let's add a subtle inner dashed line if we want, or just nothing.
+			// I'll leave it without an inner separator to match standard bubble tea layouts.
+		}
+
+		prevGroup = c.Group
 	}
 
 	// Calculate which line the active component starts at to auto-scroll

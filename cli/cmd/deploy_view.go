@@ -79,10 +79,16 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	}
 	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", termW))
 
-	colHdrName := lipgloss.NewStyle().Width(28).Render("COMPONENT")
-	colHdrNs := lipgloss.NewStyle().Width(18).Render("NAMESPACE")
-	colHdrStat := lipgloss.NewStyle().Render("STATUS")
-	colHeaders := lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render(fmt.Sprintf("  %s%s%s", colHdrName, colHdrNs, colHdrStat))
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	var colHeaders string
+	if isTTY {
+		colHeaders = lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render("  COMPONENT\x1b[31GNAMESPACE\x1b[49GSTATUS")
+	} else {
+		colHdrName := lipgloss.NewStyle().Width(28).Render("COMPONENT")
+		colHdrNs := lipgloss.NewStyle().Width(18).Render("NAMESPACE")
+		colHdrStat := lipgloss.NewStyle().Render("STATUS")
+		colHeaders = lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render(fmt.Sprintf("  %s%s%s", colHdrName, colHdrNs, colHdrStat))
+	}
 
 	for _, g := range []string{"A", "B", "C"} {
 		if len(groups[g]) == 0 {
@@ -152,21 +158,18 @@ func printRow(icon, name, namespace, status string) {
 	const nameWidth = 28
 	const nsWidth = 18
 
-	// Bypass go-runewidth emoji miscalculations by hardcoding icon width to 2 cells
-	nameVisualLen := 2 + 1 + runewidth.StringWidth(name)
-	namePad := nameWidth - nameVisualLen
-	if namePad < 1 {
-		namePad = 1
-	}
-	
-	nsPad := nsWidth - runewidth.StringWidth(namespace)
-	if nsPad < 1 {
-		nsPad = 1
-	}
-
 	nameStr := icon + " " + name
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr) + strings.Repeat(" ", namePad)
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(namespace) + strings.Repeat(" ", nsPad)
+	
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	
+	var nameCol, nsCol string
+	if isTTY {
+		nameCol = lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr)
+		nsCol = lipgloss.NewStyle().Foreground(clrDim).Render(namespace)
+	} else {
+		nameCol = lipgloss.NewStyle().Bold(true).Foreground(clrText).Width(nameWidth).Render(nameStr)
+		nsCol = lipgloss.NewStyle().Foreground(clrDim).Width(nsWidth).Render(namespace)
+	}
 
 	// Status column
 	var statusStr string
@@ -179,7 +182,11 @@ func printRow(icon, name, namespace, status string) {
 		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render("⏭ Skipped")
 	}
 
-	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
+	if isTTY {
+		fmt.Printf("  %s\x1b[31G%s\x1b[49G%s\n", nameCol, nsCol, statusStr)
+	} else {
+		fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
+	}
 }
 
 // visualWidth returns the true terminal display width of a string using
