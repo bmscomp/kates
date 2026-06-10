@@ -427,7 +427,7 @@ postgresql:
   # -- PostgreSQL image
   image:
     repository: postgres
-    tag: "1.18.3"
+    tag: "16"
   # -- Database authentication
   auth:
     # -- Database name

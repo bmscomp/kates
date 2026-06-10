@@ -311,7 +311,7 @@ jobs:
           
           # Update kates chart
           sed -i "s/appVersion: .*/appVersion: \"${CLEAN_VERSION}\"/" charts/kates/Chart.yaml
-          sed -i "s/tag: .*/tag: \"${CLEAN_VERSION}\"/" charts/kates/values.yaml
+          awk '/repository: ghcr.io\/bmscomp\/kates/ {print; getline; sub(/tag: .*/, "tag: \"'${CLEAN_VERSION}'\""); print; next} 1' charts/kates/values.yaml > tmp.yaml && mv tmp.yaml charts/kates/values.yaml
           
           # Update kates-chaos chart
           sed -i "s/appVersion: .*/appVersion: \"${CLEAN_VERSION}\"/" charts/kates-chaos/Chart.yaml
