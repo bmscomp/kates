@@ -1,5 +1,5 @@
 # Stage 1: Build the KATES CLI (Go)
-FROM golang:1.25-alpine AS cli-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS cli-builder
 ENV GOTOOLCHAIN=auto
 WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
@@ -14,16 +14,18 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -o /kates .
 
 # Stage 2: Build the Java application
-FROM eclipse-temurin:25-jdk AS builder
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk AS builder
 WORKDIR /build
 
 COPY kates/pom.xml .
 COPY kates/.mvn .mvn
 COPY kates/mvnw .
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
+RUN --mount=type=cache,target=/root/.m2 \
+  chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
 COPY kates/src src
-RUN ./mvnw package -DskipTests -B
+RUN --mount=type=cache,target=/root/.m2 \
+  ./mvnw package -DskipTests -B
 
 # Stage 3: Runtime — Java app + CLI on PATH
 FROM eclipse-temurin:25-jre

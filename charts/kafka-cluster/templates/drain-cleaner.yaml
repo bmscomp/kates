@@ -149,5 +149,5 @@ webhooks:
     failurePolicy: Ignore
     namespaceSelector:
       matchLabels:
-        kubernetes.io/metadata.name: {{ $namespace }}
+        kates.io/namespace: {{ $namespace }}
 {{- end }}

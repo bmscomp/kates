@@ -17,26 +17,28 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
   egress:
     - to:
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
     - to:
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $kafkaNamespace }}
+              strimzi.io/kind: Kafka
     - to:
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $katesNamespace }}
+              app.kubernetes.io/name: kates
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
+        - namespaceSelector: {}
       ports:
         - protocol: UDP
           port: 53

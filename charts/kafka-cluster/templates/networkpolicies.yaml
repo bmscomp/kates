@@ -85,9 +85,15 @@ spec:
         - namespaceSelector: {}
           podSelector:
             matchLabels:
-              app: apicurio-registry
+              app.kubernetes.io/name: apicurio-registry
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: KafkaConnect
       ports:
         - port: 9092
+          protocol: TCP
+        - port: 9093
           protocol: TCP
     - from:
         - namespaceSelector: {}
@@ -106,9 +112,7 @@ spec:
         - port: 9094
           protocol: TCP
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $monitoringNs }}
+        - namespaceSelector: {}
       ports:
         - port: 9404
           protocol: TCP
@@ -205,14 +209,22 @@ spec:
           protocol: TCP
     # Allow egress to the target Kafka application namespace pods
     - to:
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $namespace }}
+              strimzi.io/cluster: {{ $clusterName }}
+    # Allow egress to Kafka Connect pods across all namespaces
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: KafkaConnect
     # Allow egress to its own namespace pods
     - to:
-        - namespaceSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicies.operatorNamespace | default "strimzi-operator" }}
+              strimzi.io/kind: cluster-operator
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -270,9 +282,7 @@ spec:
         - port: 9090
           protocol: TCP
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $monitoringNs }}
+        - namespaceSelector: {}
       ports:
         - port: 9404
           protocol: TCP
@@ -329,9 +339,7 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $monitoringNs }}
+        - namespaceSelector: {}
       ports:
         - port: 9404
           protocol: TCP
@@ -369,9 +377,7 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $monitoringNs }}
+        - namespaceSelector: {}
       ports:
         - port: 8080
           protocol: TCP
@@ -411,9 +417,7 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $monitoringNs }}
+        - namespaceSelector: {}
       ports:
         - port: 9404
           protocol: TCP

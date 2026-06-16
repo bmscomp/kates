@@ -34,6 +34,7 @@ var (
 	cleanTopology     string
 	cleanNamespace    string
 	cleanKafkaNS      string
+	cleanConnectNS    string
 	cleanDbNS         string
 	cleanAppNS        string
 	cleanChaosNS      string
@@ -46,6 +47,7 @@ func init() {
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
 	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	cleanCmd.Flags().StringVar(&cleanKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	cleanCmd.Flags().StringVar(&cleanConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
@@ -213,6 +215,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"chaos", cleanNamespace},
 			helmRelease{"kates", cleanNamespace},
 			helmRelease{"apicurio", cleanNamespace},
+			helmRelease{"connect-cluster", cleanNamespace},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanNamespace},
@@ -229,6 +232,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"chaos", cleanChaosNS},
 			helmRelease{"kates", cleanAppNS},
 			helmRelease{"apicurio", cleanKafkaNS},
+			helmRelease{"connect-cluster", cleanConnectNS},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanMonitoringNS},
@@ -237,7 +241,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"postgresql", cleanDbNS},
 		)
 		managedNamespaces = append(managedNamespaces,
-			cleanKafkaNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS, cleanDbNS,
+			cleanKafkaNS, cleanConnectNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS, cleanDbNS,
 		)
 		strimziNS = append(strimziNS, cleanKafkaNS)
 	}

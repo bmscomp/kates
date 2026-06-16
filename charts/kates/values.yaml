@@ -342,16 +342,12 @@ networkPolicy:
   # -- Ingress rules
   ingressRules:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+        - namespaceSelector: {}
       ports:
         - port: 8080
           protocol: TCP
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
+        - namespaceSelector: {}
       ports:
         - port: 8080
           protocol: TCP

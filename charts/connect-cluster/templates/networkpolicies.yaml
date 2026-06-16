@@ -17,9 +17,7 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+        - namespaceSelector: {}
       ports:
         - port: 9404
           protocol: TCP
@@ -28,7 +26,8 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: kates
-        - podSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
         # Allow ingress from all sources for health probes (kubelet)
@@ -46,6 +45,9 @@ spec:
           protocol: TCP
     - to:
         - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ .Values.kafka.clusterName }}
       ports:
         {{- range .Values.networkPolicy.kafkaPorts | default (list 9092 9093) }}
         - protocol: TCP
@@ -53,18 +55,17 @@ spec:
         {{- end }}
     {{- if .Values.schemaRegistry.enabled }}
     - to:
-        - podSelector:
+        - namespaceSelector: {}
+          podSelector:
             matchLabels:
-              app: apicurio-registry
+              app.kubernetes.io/name: apicurio-registry
       ports:
         - port: {{ .Values.schemaRegistry.port | default 80 }}
           protocol: TCP
     {{- end }}
     {{- range (default (list) .Values.databaseEgress) }}
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .namespace }}
+        - namespaceSelector: {}
           {{- with .podSelector }}
           podSelector:
             matchLabels:
@@ -103,9 +104,7 @@ spec:
     - Ingress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $namespace }}
+        - namespaceSelector: {}
           podSelector:
             matchLabels:
               strimzi.io/name: {{ $clusterName }}
