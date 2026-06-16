@@ -1,0 +1,17 @@
+# Generic cluster overlay for connect-cluster
+# Disables components that require extra operators (like Prometheus CRDs)
+
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+tracing:
+  enabled: false

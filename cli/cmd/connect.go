@@ -251,10 +251,7 @@ var connectScaleCmd = &cobra.Command{
 }
 
 func init() {
-	defaultNS := "kafka"
-	if envNS := os.Getenv("KATES_KAFKA_NS"); envNS != "" {
-		defaultNS = envNS
-	}
+	defaultNS := detectConnectNamespace()
 	kafkaConnectCmd.PersistentFlags().StringVarP(&connectNamespace, "namespace", "n", defaultNS, "Namespace where Kafka Connect is deployed")
 
 	kafkaConnectCmd.AddCommand(connectStatusCmd)
@@ -271,4 +268,28 @@ func init() {
 	kafkaConnectCmd.AddCommand(connectConfigCmd)
 	kafkaConnectCmd.AddCommand(connectDeleteCmd)
 	kafkaConnectCmd.AddCommand(connectScaleCmd)
+}
+
+// detectConnectNamespace resolves the namespace where Kafka Connect is deployed.
+// Priority: KATES_CONNECT_NS env → live cluster auto-detect → KATES_KAFKA_NS env → "kafka".
+func detectConnectNamespace() string {
+	if envNS := os.Getenv("KATES_CONNECT_NS"); envNS != "" {
+		return envNS
+	}
+
+	// Auto-detect from cluster: find the namespace of any KafkaConnect CR
+	out, err := exec.Command("kubectl", "get", "kafkaconnect", "-A",
+		"-o", "jsonpath={.items[0].metadata.namespace}").Output()
+	if err == nil {
+		ns := strings.TrimSpace(string(out))
+		if ns != "" {
+			return ns
+		}
+	}
+
+	// Backwards compatibility fallback
+	if envNS := os.Getenv("KATES_KAFKA_NS"); envNS != "" {
+		return envNS
+	}
+	return "kafka"
 }

@@ -106,6 +106,7 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 func TestDeployCommand_IsolatedTopology(t *testing.T) {
 	deployTopology = "isolated"
 	deployKafkaNS = "kafka-sys"
+	deployConnectNS = "connect-sys"
 	deployAppNS = "app-sys"
 	deployChaosNS = "chaos-sys"
 	deployWithSchemaRegistry = "apicurio"
@@ -157,8 +158,8 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 		}
 		if strings.Contains(cmd, "helm upgrade --install connect-cluster") {
 			foundKafkaConnect = true
-			if !strings.Contains(cmd, "-n kafka-sys") {
-				t.Errorf("Expected Connect to be deployed in kafka-sys namespace, got: %s", cmd)
+			if !strings.Contains(cmd, "-n connect-sys") {
+				t.Errorf("Expected Connect to be deployed in connect-sys namespace, got: %s", cmd)
 			}
 		}
 		if strings.Contains(cmd, "helm upgrade --install kates") {

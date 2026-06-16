@@ -450,6 +450,8 @@ networkPolicies:
     - kates
     - litmus
   monitoringNamespace: kafka
+  # Namespace where Kafka Connect is deployed (for cross-namespace ingress)
+  connectNamespace: connect
   # Namespace where the Strimzi Operator is deployed (for its NetworkPolicy)
   operatorNamespace: strimzi-operator
 

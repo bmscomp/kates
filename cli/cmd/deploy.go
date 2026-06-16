@@ -45,6 +45,7 @@ var (
 	deployTopology           string
 	deployNamespace          string
 	deployKafkaNS            string
+	deployConnectNS          string
 	deployDbNS               string
 	deployAppNS              string
 	deployChaosNS            string
@@ -68,14 +69,15 @@ func init() {
 	deployCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
 	deployCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	deployCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	deployCmd.Flags().StringVar(&deployConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
 
 	// Component flags
-	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "none", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
-	deployCmd.Flags().BoolVar(&deployHA, "ha", false, "Enable High Availability (Multi-AZ)")
+	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "apicurio", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
+	deployCmd.Flags().BoolVar(&deployHA, "ha", true, "Enable High Availability (Multi-AZ)")
 	deployCmd.Flags().BoolVar(&deployWithChaos, "with-chaos", true, "Deploy LitmusChaos engine")
 	deployCmd.Flags().BoolVar(&deployWithMonitoring, "with-monitoring", true, "Deploy monitoring components (Prometheus/Grafana/Jaeger)")
 	deployCmd.Flags().BoolVar(&deployWithCertManager, "with-cert-manager", true, "Deploy Cert-Manager for TLS certificate management")
@@ -100,7 +102,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
 		var components []string
 
-		form := huh.NewForm(
+		form1 := huh.NewForm(
 			// ── Group 1: What to deploy ──────────────────────────────────────────
 			huh.NewGroup(
 				huh.NewSelect[string]().
@@ -115,8 +117,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				huh.NewSelect[string]().
 					Title("Schema Registry").
 					Options(
-						huh.NewOption("None", "none"),
 						huh.NewOption("Apicurio", "apicurio"),
+						huh.NewOption("None", "none"),
 					).
 					Value(&deployWithSchemaRegistry),
 
@@ -138,35 +140,68 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					).
 					Value(&components),
 			),
+		).WithTheme(ThemeKates())
 
-			// ── Group 2: Namespace configuration (isolated topology only) ────────
-			huh.NewGroup(
+		if err := form1.Run(); err != nil {
+			return err
+		}
+
+		// ── Form 2: Namespace configuration ──────────────────────────────────
+		// Built after Form 1 completes so that `components` is fully populated.
+		// This avoids a huh library issue where MultiSelect values from a
+		// previous group aren't reliably available in WithHideFunc closures
+		// of subsequent groups within the same form.
+		if deployTopology != "single" {
+			var nsGroups []*huh.Group
+
+			// Core namespaces (always shown for isolated topology)
+			nsGroups = append(nsGroups, huh.NewGroup(
 				huh.NewInput().
 					Title("Kafka Namespace").
 					Description("Namespace for Strimzi operator and Kafka cluster").
 					Value(&deployKafkaNS),
 				huh.NewInput().
-					Title("Database Namespace").
-					Description("Namespace for PostgreSQL CDC database").
-					Value(&deployDbNS),
-				huh.NewInput().
 					Title("Kates App Namespace").
 					Description("Namespace for the Kates backend service").
 					Value(&deployAppNS),
-				huh.NewInput().
-					Title("Monitoring Namespace").
-					Description("Namespace for Jaeger and monitoring components").
-					Value(&deployMonitoringNS),
-				huh.NewInput().
-					Title("Chaos Namespace").
-					Description("Namespace for Litmus Chaos engine").
-					Value(&deployChaosNS),
-			).WithHideFunc(func() bool { return deployTopology == "single" }),
-		).WithTheme(ThemeKates())
+			))
 
-		err := form.Run()
-		if err != nil {
-			return err
+			// Conditional namespace groups based on selected components
+			if sliceContains(components, "monitoring") {
+				nsGroups = append(nsGroups, huh.NewGroup(
+					huh.NewInput().
+						Title("Monitoring Namespace").
+						Description("Namespace for Jaeger and monitoring components").
+						Value(&deployMonitoringNS),
+				))
+			}
+
+			if sliceContains(components, "chaos") {
+				nsGroups = append(nsGroups, huh.NewGroup(
+					huh.NewInput().
+						Title("Chaos Namespace").
+						Description("Namespace for Litmus Chaos engine").
+						Value(&deployChaosNS),
+				))
+			}
+
+			if sliceContains(components, "kafka-connect") {
+				nsGroups = append(nsGroups, huh.NewGroup(
+					huh.NewInput().
+						Title("Kafka Connect Namespace").
+						Description("Namespace for Kafka Connect cluster (separate from Kafka)").
+						Value(&deployConnectNS),
+					huh.NewInput().
+						Title("Database Namespace").
+						Description("Namespace for PostgreSQL CDC database").
+						Value(&deployDbNS),
+				))
+			}
+
+			form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates())
+			if err := form2.Run(); err != nil {
+				return err
+			}
 		}
 
 		deployWithChaos = false
@@ -200,6 +235,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	} else {
 		PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kafka", deployKafkaNS))
 		if deployWithKafkaConnect {
+			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kafka Connect", deployConnectNS))
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Database", deployDbNS))
 		}
 		PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kates App", deployAppNS))
@@ -317,11 +353,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve namespaces before building entries
-	var kafkaNS, appNS, chaosNS, jaegerNS string
+	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS string
 	if deployTopology == "single" {
-		kafkaNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
-		kafkaNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployAppNS, deployChaosNS, deployMonitoringNS
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS
 	}
 
 	// ── Build shared component registry (single source of truth) ──
@@ -338,7 +374,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: kafkaNS, Group: "B"})
 	if deployWithKafkaConnect {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: deployDbNS, Group: "B"})
-		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: kafkaNS, Group: "B"})
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: connectNS, Group: "B"})
 	}
 	if deployWithMonitoring {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: jaegerNS, Group: "B"})
@@ -420,9 +456,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		dashboard.RegisterComponent("postgres", "PostgreSQL", "B",
 			Target{deployDbNS, "app.kubernetes.io/instance=postgresql"})
 		dashboard.RegisterComponent("kafka-connect", "Kafka Connect", "B",
-			Target{kafkaNS, "strimzi.io/kind=KafkaConnect"})
+			Target{connectNS, "strimzi.io/kind=KafkaConnect"})
 		dashboard.RegisterComponent("kafka-connector", "CDC Connector", "B",
-			Target{kafkaNS, "strimzi.io/cluster=connect-cluster"})
+			Target{connectNS, "strimzi.io/cluster=connect-cluster"})
 	}
 	if deployWithSchemaRegistry == "apicurio" {
 		dashboard.RegisterComponent("apicurio", "Apicurio Registry", "C", Target{kafkaNS, "app.kubernetes.io/instance=apicurio"})
@@ -826,6 +862,7 @@ metadata:
 					kafkaArgs = append(kafkaArgs,
 						"-f", valuesFile,
 						"--set", "global.clusterDomain="+clusterDomain,
+						"--set", "networkPolicies.connectNamespace="+connectNS,
 						"--timeout", "10m",
 					)
 					if isKind {
@@ -944,8 +981,66 @@ metadata:
 				}
 			}
 
-			// 3. Kafka Connect (separate chart)
+			// 3. Kafka Connect (separate chart — deployed in connectNS)
 			if deployWithKafkaConnect {
+				// Ensure connect namespace exists (idempotent — won't fail if already present)
+				dl.Println("    - Ensuring connect namespace exists...")
+				connectNsYaml := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s`, connectNS)
+				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectNsYaml)
+
+				connectDomain := report.Network.ClusterDomain
+				if connectDomain == "" {
+					connectDomain = "cluster.local"
+				}
+				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+
+				// Copy kates-connect secret and kafka-metrics ConfigMap from kafka namespace to connect namespace (cross-namespace)
+				if connectNS != kafkaNS {
+					// Copy kafka-metrics ConfigMap (required by KafkaConnect metricsConfig)
+					dl.Println("    - Copying kafka-metrics ConfigMap to connect namespace...")
+					metricsData, metricsErr := exec.CommandContext(ctx, "kubectl", "get", "configmap", "kafka-metrics",
+						"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}").Output()
+					if metricsErr == nil && len(metricsData) > 0 {
+						// Build a clean ConfigMap without Helm ownership annotations
+						// to avoid field-manager conflicts on kubectl apply.
+						var indented strings.Builder
+						for _, line := range strings.Split(string(metricsData), "\n") {
+							indented.WriteString("    " + line + "\n")
+						}
+						metricsYaml := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kafka-metrics\n  namespace: %s\ndata:\n  kafka-metrics-config.yml: |\n%s", connectNS, indented.String())
+						if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, metricsYaml); err != nil {
+							// Fallback: force ownership with server-side apply (handles leftover
+							// field-manager conflicts from prior broken deploys)
+							dl.Println("    - Retrying with server-side apply (--force-conflicts)...")
+							runExecStdinFn(ctx, "kubectl", []string{"apply", "--server-side", "--force-conflicts", "-f", "-"}, metricsYaml)
+						}
+					} else {
+						dl.Printf("    ⚠️  ConfigMap 'kafka-metrics' not found in namespace %s\n", kafkaNS)
+					}
+
+					dl.Println("    - Copying kates-connect credentials to connect namespace...")
+					pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
+						"-n", kafkaNS, "-o", "jsonpath={.data.password}")
+					pwBytes, pwErr := pwCmd.Output()
+
+					if pwErr == nil && len(pwBytes) > 0 {
+						connectSecretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: kates-connect
+  namespace: %s
+type: Opaque
+data:
+  password: %s`, connectNS, string(pwBytes))
+						runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectSecretYaml)
+					} else {
+						dl.Printf("    ⚠️  Secret 'kates-connect' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+					}
+				}
+
 				dl.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
 				pgSecretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -955,24 +1050,37 @@ metadata:
 type: Opaque
 stringData:
   password: debezium
-  username: debezium`, kafkaNS)
+  username: debezium`, connectNS)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
-				connectDomain := report.Network.ClusterDomain
-				if connectDomain == "" {
-					connectDomain = "cluster.local"
+				connectDeployed := isHelmReleaseDeployedFn(ctx, "connect-cluster", connectNS)
+				if connectDeployed && !isTesting {
+					// Helm says deployed, but verify pods actually exist.
+					// A previous deploy may have installed the chart but the
+					// workload never started (e.g. missing ConfigMap).
+					podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
+						"-n", connectNS, "-l", "strimzi.io/kind=KafkaConnect",
+						"-o", "jsonpath={.items}").Output()
+					if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
+						dl.Println("    ⚠️  Kafka Connect release exists but no pods found — upgrading...")
+						connectDeployed = false
+					}
 				}
-				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
-
-				if !isHelmReleaseDeployedFn(ctx, "connect-cluster", kafkaNS) {
-					dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", kafkaNS)
+				if !connectDeployed {
+					dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", connectNS)
 
 					registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
 						kafkaNS, connectDomain)
 
+					// Use the same FQDN pattern as the kates backend for bootstrap servers
+					bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+
 					connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
-						"-n", kafkaNS, "--create-namespace",
+						"-n", connectNS, "--create-namespace",
+						"-f", chartOverlay("charts/connect-cluster"),
 						"--set", "clusterDomain=" + connectDomain,
+						"--set", "kafka.namespace=" + kafkaNS,
+						"--set", "kafka.bootstrapServers=" + bootstrap,
 						"--set", "schemaRegistry.enabled=true",
 						"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
 						"--set", "databaseEgress[0].namespace=" + deployDbNS,
@@ -981,7 +1089,21 @@ stringData:
 						"--timeout", "10m",
 					}
 
-					connectArgs = append(connectArgs, "-f", "charts/connect-cluster/values-generic.yaml")
+					// Enable NetworkPolicy on non-Kind clusters (same as kates backend)
+					if !isKind {
+						connectArgs = append(connectArgs, "--set", "networkPolicy.enabled=true")
+					}
+
+					// When Connect is in a different namespace than Kafka, brokers advertise
+					// short hostnames (e.g. krafter-brokers-0.krafter-kafka-brokers.kafka.svc)
+					// that only resolve within the kafka namespace DNS search domain.
+					// Add the kafka namespace to Connect pod DNS search list.
+					if connectNS != kafkaNS {
+						kafkaSvcDomain := fmt.Sprintf("%s.svc.%s", kafkaNS, connectDomain)
+						connectArgs = append(connectArgs,
+							"--set", "dnsConfig.searches[0]="+kafkaSvcDomain,
+						)
+					}
 
 					if deployHA {
 						connectArgs = append(connectArgs, "--set", "replicas=3")
@@ -1018,7 +1140,7 @@ stringData:
 
 				if !isTesting {
 					dl.StartComponent("kafka-connect", 15*time.Minute)
-					if err := waitComponentReadySilent(ctx, kafkaNS, "strimzi.io/kind=KafkaConnect", 15*time.Minute); err != nil {
+					if err := waitComponentReadySilent(ctx, connectNS, "strimzi.io/kind=KafkaConnect", 15*time.Minute); err != nil {
 						dl.FinishComponent("kafka-connect", false)
 						return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
 					}
@@ -1027,7 +1149,7 @@ stringData:
 				}
 
 				// Deploy Debezium connector
-				checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", kafkaNS, "--no-headers").CombinedOutput()
+				checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers").CombinedOutput()
 				if checkErr != nil || strings.Contains(string(checkOut), "not found") {
 					dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
 					connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -1061,7 +1183,7 @@ spec:
     schema.history.internal.kafka.security.protocol: SASL_PLAINTEXT
     schema.history.internal.kafka.sasl.mechanism: SCRAM-SHA-512
     schema.history.internal.kafka.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-connect\" password=\"${secrets:%s/kates-connect:password}\";"
-    schema.history.internal.kafka.topic: cdc-schema-history`, kafkaNS, deployDbNS, kafkaNS, bootstrap, kafkaNS)
+    schema.history.internal.kafka.topic: cdc-schema-history`, connectNS, deployDbNS, connectNS, bootstrap, connectNS)
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
 						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", output.WarningStyle.Render("⚠"), err)
 						dl.FinishComponent("kafka-connector", false)
@@ -1073,7 +1195,7 @@ spec:
 				}
 
 				// Deploy JDBC Sink connector
-				sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", kafkaNS, "--no-headers").CombinedOutput()
+				sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers").CombinedOutput()
 				if sinkCheckErr != nil || strings.Contains(string(sinkCheckOut), "not found") {
 					dl.Println("    - Deploying JDBC Sink connector...")
 					sinkYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -1096,7 +1218,7 @@ spec:
     connection.password: "${secrets:%s/connect-pg-credentials:password}"
     insert.mode: "insert"
     auto.create: "true"
-    auto.evolve: "true"`, kafkaNS, deployDbNS, kafkaNS, kafkaNS)
+    auto.evolve: "true"`, connectNS, deployDbNS, connectNS, connectNS)
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, sinkYaml); err != nil {
 						dl.Printf("    %s Failed to deploy JDBC Sink connector: %v\n", output.WarningStyle.Render("⚠"), err)
 					} else {
@@ -1108,7 +1230,7 @@ spec:
 
 				if !isTesting {
 					dl.StartComponent("kafka-connector", 10*time.Minute)
-					if err := waitConnectorReadySilent(ctx, kafkaNS, 10*time.Minute); err != nil {
+					if err := waitConnectorReadySilent(ctx, connectNS, 10*time.Minute); err != nil {
 						dl.FinishComponent("kafka-connector", false)
 						return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
 					}
@@ -1379,11 +1501,19 @@ func runHelmDefault(ctx context.Context, args ...string) error {
 }
 
 func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string) bool {
-	// Create context with short timeout
+	// Check that the release exists AND is in "deployed" status.
+	// helm status exits 0 even for failed releases, so we must inspect
+	// the actual status to avoid skipping re-installation of broken releases.
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
-	return cmd.Run() == nil
+	out, err := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json").Output()
+	if err != nil {
+		return false
+	}
+	// Look for "status":"deployed" in the JSON output.
+	// Helm may output with or without spaces after colons, so check both.
+	s := string(out)
+	return strings.Contains(s, `"status":"deployed"`) || strings.Contains(s, `"status": "deployed"`)
 }
 
 // cleanupStaleClusterResource removes a cluster-scoped resource if it belongs
@@ -1419,4 +1549,13 @@ func applyManifestWithNamespace(ctx context.Context, file, namespace string) err
 	// Strip hardcoded namespace lines so -n flag takes effect
 	stripped := nsLineRegex.ReplaceAllString(string(data), "")
 	return runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-", "-n", namespace}, stripped)
+}
+
+func sliceContains(s []string, v string) bool {
+	for _, item := range s {
+		if item == v {
+			return true
+		}
+	}
+	return false
 }
