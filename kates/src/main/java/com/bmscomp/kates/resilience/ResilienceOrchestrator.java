@@ -8,6 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
 
 import org.jboss.logging.Logger;
@@ -50,6 +51,7 @@ public class ResilienceOrchestrator {
     @Inject
     ProbeExecutor probeExecutor;
 
+    @ActivateRequestContext
     public ResilienceReport execute(ResilienceTestRequest request) {
         ResilienceReport report = new ResilienceReport();
 

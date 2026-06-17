@@ -32,9 +32,7 @@ spec:
           protocol: TCP
     {{- if .Values.postgresql.enabled }}
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+        - namespaceSelector: {}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "kates.postgresql.fullname" . }}
@@ -57,9 +55,7 @@ spec:
         - port: {{ .Values.networkPolicy.kafka.port | default 9092 }}
           protocol: TCP
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.prometheus.namespace | default "monitoring" }}
+        - namespaceSelector: {}
       ports:
         - port: {{ .Values.networkPolicy.prometheus.port | default 9090 }}
           protocol: TCP
@@ -91,9 +87,7 @@ spec:
     - Ingress
   ingress:
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+        - namespaceSelector: {}
           podSelector:
             matchLabels:
               {{- include "kates.selectorLabels" . | nindent 14 }}

@@ -94,7 +94,6 @@ func runUpgrade() error {
 	}
 
 	// ── 6. Build ─────────────────────────────────────────────────────────────
-	fmt.Println("    ⚙  Building from source...")
 	buildDate := time.Now().UTC().Format(time.RFC3339)
 	ldflags := fmt.Sprintf("-s -w -X github.com/klster/kates-cli/cmd.Version=%s -X github.com/klster/kates-cli/cmd.Commit=%s -X github.com/klster/kates-cli/cmd.BuildDate=%s",
 		gitBranch+"-"+gitCommit, gitCommit, buildDate)
@@ -104,10 +103,41 @@ func runUpgrade() error {
 
 	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", tmpBin, ".")
 	buildCmd.Dir = srcDir
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("build failed: %w", err)
+	// Capture stderr for error reporting but don't print live
+	// (go build is noisy only on failure)
+	var buildStderr strings.Builder
+	buildCmd.Stderr = &buildStderr
+
+	// Spinner with elapsed time
+	spinFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	buildStart := time.Now()
+	done := make(chan struct{})
+	go func() {
+		i := 0
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				elapsed := time.Since(buildStart).Round(time.Second)
+				fmt.Printf("\r    %s  Building from source... %s", spinFrames[i%len(spinFrames)], elapsed)
+				i++
+				time.Sleep(150 * time.Millisecond)
+			}
+		}
+	}()
+
+	buildErr := buildCmd.Run()
+	close(done)
+	// Clear the spinner line
+	fmt.Printf("\r%s\r", strings.Repeat(" ", 60))
+
+	if buildErr != nil {
+		fmt.Println("    ❌ Build failed")
+		if errOut := buildStderr.String(); errOut != "" {
+			fmt.Fprint(os.Stderr, errOut)
+		}
+		return fmt.Errorf("build failed: %w", buildErr)
 	}
 
 	// Verify the binary exists and is executable

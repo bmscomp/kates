@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,6 +38,7 @@ func init() {
 	deployStatusCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
 	deployStatusCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	deployStatusCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
@@ -150,11 +152,11 @@ type k8sWorkload struct {
 func runDeployStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	var kafkaNS, appNS, chaosNS, jaegerNS, dbNS string
+	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS string
 	if deployTopology == "single" {
-		kafkaNS, appNS, chaosNS, jaegerNS, dbNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
-		kafkaNS, appNS, chaosNS, jaegerNS, dbNS = deployKafkaNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS
 	}
 
 	components := []struct {
@@ -169,9 +171,9 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 		{"A", "☸️", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
 		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
 		{"A", "🛡️", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
-		{"B", "📨", "Kafka (krafter)", "krafter", kafkaNS, "kafka", "krafter"},
+		{"B", "📨", "Kafka (krafter)", "krafter", kafkaNS, "kafkas.kafka.strimzi.io", "krafter"},
 		{"B", "🐘", "PostgreSQL (CDC)", "postgresql", dbNS, "statefulset", "postgresql"},
-		{"B", "🔗", "Kafka Connect", "connect-cluster", kafkaNS, "kafkaconnect", "connect-cluster"},
+		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster"},
 		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
 		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
 		{"C", "📦", "Kates Backend", "kates", appNS, "pod", "-l app.kubernetes.io/instance=kates"},
@@ -274,11 +276,17 @@ func getHealthStatus(ctx context.Context, kind, resource, namespace string) (str
 			return "Healthy", fmt.Sprintf("%d/%d pods running", running, len(lines))
 		}
 		return "Degraded", fmt.Sprintf("%d/%d pods running", running, len(lines))
-	} else if kind == "kafka" || kind == "kafkaconnect" {
+	} else if kind == "kafkas.kafka.strimzi.io" || kind == "kafkaconnects.kafka.strimzi.io" {
 		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			return "Unknown", "CRD not found"
+			errMsg := strings.TrimSpace(stderr.String())
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			return "Unknown", "Error: " + errMsg
 		}
 		status := strings.TrimSpace(string(out))
 		if status == "True" {
@@ -660,7 +668,7 @@ func (m interactiveStatusModel) View() string {
 			statusStr = lipgloss.NewStyle().Foreground(clrDim).Render("[◯ Pending]")
 		}
 
-		pad := 30 - visualWidth(compName)
+		pad := 30 - (2 + 1 + visualWidth(c.Name))
 		if pad < 1 {
 			pad = 1
 		}
@@ -788,7 +796,10 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 
 func printStatusRow(s ComponentStatus) {
 	nameStr := s.Icon + " " + s.Name
-	nameLen := visualWidth(nameStr)
+	// Emoji icons render as 2 cells in terminals, but runewidth often
+	// miscounts them (e.g. ☸️ with VS16 reports width 1 instead of 2).
+	// Use a fixed 2-cell icon slot + 1 space + text width for padding.
+	nameLen := 2 + 1 + visualWidth(s.Name)
 	namePad := 25 - nameLen
 	if namePad < 1 {
 		namePad = 1

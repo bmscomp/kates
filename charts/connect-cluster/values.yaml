@@ -36,6 +36,8 @@ clusterDomain: cluster.local
 kafka:
   # -- Kafka cluster name
   clusterName: "krafter"
+  # -- Namespace where the Kafka cluster is deployed (leave empty if same namespace as Connect)
+  namespace: ""
   # -- Bootstrap servers for the Kafka cluster (leave empty to compute automatically)
   bootstrapServers: ""
   tls:
@@ -56,7 +58,7 @@ topologySpreadConstraints:
   enabled: true
   maxSkew: 1
   topologyKey: topology.kubernetes.io/zone
-  whenUnsatisfiable: DoNotSchedule
+  whenUnsatisfiable: ScheduleAnyway
   additional: []
 
 podDisruptionBudget:

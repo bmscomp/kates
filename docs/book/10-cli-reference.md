@@ -25,6 +25,27 @@ make cli-build
 
 Kates CLI uses a config file at `~/.kates.yaml` for managing server contexts.
 
+### Proxy Configuration
+
+The Kates CLI fully supports HTTP proxies. You can either use standard proxy environment variables or configure it persistently per context.
+
+**Option 1: Context Proxy (Recommended)**
+```bash
+# Configure a specific proxy for a single environment context
+kates ctx set prod --url https://kates.company.com --proxy http://proxy-server.internal:8080
+
+# If the proxy uses self-signed SSL interception, bypass certificate validation:
+kates ctx set prod --url https://kates.company.com --proxy http://proxy-server.internal:8080 --insecure
+```
+
+**Option 2: Global Environment Variables**
+The CLI natively respects standard OS proxy variables:
+```bash
+export HTTP_PROXY="http://proxy-server.internal:8080"
+export HTTPS_PROXY="http://proxy-server.internal:8080"
+export NO_PROXY="localhost,127.0.0.1"
+```
+
 ### Context Management
 
 ```bash
