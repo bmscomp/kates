@@ -1,0 +1,74 @@
+# Simple deploy overlay — namespace-scoped, no cluster-admin required.
+# Pre-requisites: Strimzi operator + CRDs installed by admin.
+#
+# Usage: kates deploy --simple --namespace <ns>
+
+# ── Disable cluster-scoped resources ──────────────────────────────────────────
+crdUpgrade:
+  enabled: false
+
+drainCleaner:
+  enabled: false
+
+podSecurityPolicy:
+  enabled: false
+
+# ── Disable monitoring (requires Prometheus CRDs / operator) ──────────────────
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+kafkaExporter:
+  enabled: false
+
+# ── Disable network policies (cross-namespace references) ────────────────────
+networkPolicies:
+  enabled: false
+
+# ── Disable features requiring external operators ─────────────────────────────
+backup:
+  enabled: false
+
+externalSecrets:
+  enabled: false
+
+tieredStorage:
+  enabled: false
+
+# ── Simplify for single-namespace dev/test ────────────────────────────────────
+cruiseControl:
+  enabled: false
+
+rebalance:
+  enabled: false
+
+topologySpreadConstraints:
+  enabled: false
+
+# ── Simplified listeners (no external access needed) ──────────────────────────
+kafka:
+  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+      authentication:
+        type: scram-sha-512
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:
+        type: tls
+
+# ── Entity Operator — fast reconciliation for dev ─────────────────────────────
+entityOperator:
+  topicOperator:
+    reconciliationIntervalMs: 10000
+  userOperator:
+    reconciliationIntervalMs: 10000

@@ -31,6 +31,7 @@ Examples:
 var (
 	cleanForce        bool
 	cleanVerbose      bool
+	cleanSimple       bool
 	cleanTopology     string
 	cleanNamespace    string
 	cleanKafkaNS      string
@@ -44,6 +45,7 @@ var (
 func init() {
 	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Skip confirmation prompt")
 	cleanCmd.Flags().BoolVarP(&cleanVerbose, "verbose", "v", false, "Show full command output during cleanup")
+	cleanCmd.Flags().BoolVar(&cleanSimple, "simple", false, "Clean a simple deploy (namespace-scoped only, preserves namespace and CRDs)")
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
 	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	cleanCmd.Flags().StringVar(&cleanKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
@@ -131,6 +133,116 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
 	time.Sleep(500 * time.Millisecond)
+
+	// ── Simple mode: only uninstall Helm releases and Strimzi CRs in target namespace ──
+	if cleanSimple {
+		ns := cleanNamespace
+		fmt.Println(lipgloss.NewStyle().Foreground(clrText).
+			Render(fmt.Sprintf("  Simple mode: cleaning namespace %s (preserving namespace and CRDs)", ns)))
+
+		// Strimzi CRD types to clean up in namespace
+		simpleCRDTypes := []string{
+			"kafkaconnectors.kafka.strimzi.io",
+			"kafkaconnects.kafka.strimzi.io",
+			"kafkatopics.kafka.strimzi.io",
+			"kafkausers.kafka.strimzi.io",
+			"kafkas.kafka.strimzi.io",
+		}
+
+		simpleReleases := []helmRelease{
+			{"connect-cluster", ns},
+			{"apicurio", ns},
+			{"krafter", ns},
+			{"postgresql", ns},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if !cleanForce {
+			var confirmed bool
+			err := huh.NewConfirm().
+				Title(fmt.Sprintf("Remove all Kates simple deploy resources from namespace %s?", ns)).
+				Description("Helm releases and Strimzi CRs will be deleted. Namespace and CRDs are preserved.").
+				Affirmative("Yes, clean").
+				Negative("Cancel").
+				Value(&confirmed).
+				WithTheme(ThemeKates()).
+				Run()
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Render("  Cancelled."))
+				return nil
+			}
+		}
+
+		okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
+		errStyle := lipgloss.NewStyle().Foreground(clrRed)
+
+		// Step 1: Delete Strimzi CRs
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 1: Removing Strimzi custom resources..."))
+		for _, crdType := range simpleCRDTypes {
+			dCtx, dCancel := context.WithTimeout(ctx, 30*time.Second)
+			_ = cleanRun(dCtx, "kubectl", "delete", crdType, "--all", "-n", ns, "--ignore-not-found")
+			dCancel()
+		}
+		cleanSleepFn(5 * time.Second)
+
+		// Step 2: Strip orphaned finalizers
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 2: Stripping orphaned finalizers..."))
+		for _, crdType := range simpleCRDTypes {
+			pCtx, pCancel := context.WithTimeout(ctx, 10*time.Second)
+			out, err := cleanRunOutput(pCtx, "kubectl", "get", crdType, "-n", ns, "-o", "jsonpath={.items[*].metadata.name}")
+			pCancel()
+			if err != nil {
+				continue
+			}
+			for _, name := range strings.Fields(strings.TrimSpace(string(out))) {
+				fCtx, fCancel := context.WithTimeout(ctx, 5*time.Second)
+				_ = cleanRun(fCtx, "kubectl", "patch", crdType, name, "-n", ns,
+					"--type", "merge", "-p", `{"metadata":{"finalizers":[]}}`)
+				fCancel()
+			}
+		}
+
+		// Step 3: Uninstall Helm releases
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
+			Render("  Step 3: Uninstalling Helm releases..."))
+		var printMutex sync.Mutex
+		var helmWg sync.WaitGroup
+		for _, r := range simpleReleases {
+			helmWg.Add(1)
+			go func(rel helmRelease) {
+				defer helmWg.Done()
+				uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
+				out, err := cleanRunOutput(uCtx, "helm", "uninstall", rel.Name, "-n", rel.Namespace)
+				uCancel()
+
+				printMutex.Lock()
+				defer printMutex.Unlock()
+				label := fmt.Sprintf("  Uninstalling %-20s from %s", rel.Name, rel.Namespace)
+				if err != nil {
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), errStyle.Render("  ✖ "+strings.TrimSpace(string(out))))
+				} else {
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
+				}
+			}(r)
+		}
+		helmWg.Wait()
+
+		fmt.Println()
+		elapsed := time.Since(startTime).Round(time.Second)
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
+			Render(fmt.Sprintf("  ✅ Simple deploy cleaned from %s in %s.", ns, elapsed)))
+		fmt.Println()
+		return nil
+	}
 
 	// Operator CRD resource types that may carry finalizers or webhooks.
 	operatorCRDTypes := []string{

@@ -598,16 +598,59 @@ See [Chapter 10b: Lab](10b-lab.md) for the full guide.
 Deploy the Kates stack (Kafka, Kates, Chaos, Schema Registry).
 
 ```bash
+# Full deploy (interactive)
 kates deploy
+
+# Full deploy (single namespace)
+kates deploy --topology single --namespace kates-stack
+
+# Simple deploy: Kafka + Connect + PostgreSQL in a single namespace (no admin required)
+kates deploy --simple --namespace my-kafka-ns
+
+# Simple deploy with HA and schema registry
+kates deploy --simple --namespace my-kafka-ns --ha --with-schema-registry apicurio
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--simple` | `false` | Namespace-scoped deploy (no cluster-admin). Requires pre-installed Strimzi operator and pre-existing namespace. |
+| `--topology` | `isolated` | `isolated`, `single`, or `simple` (interactive) |
+| `--namespace` | `kates-stack` | Target namespace (used with `single` or `simple`) |
+| `--ha` | `true` | Enable High Availability (Multi-AZ) |
+| `--with-schema-registry` | `apicurio` | `none`, `apicurio`, or `confluent` |
+| `--with-kafka-connect` | `false` | Deploy Kafka Connect + PostgreSQL CDC |
+| `--with-chaos` | `true` | Deploy LitmusChaos engine |
+| `--with-monitoring` | `true` | Deploy monitoring (Prometheus/Grafana) |
+| `--with-cert-manager` | `true` | Deploy Cert-Manager |
+| `--with-strimzi` | `true` | Deploy Strimzi Operator |
+| `--with-kyverno` | `false` | Deploy Kyverno |
+| `-i, --interactive` | `false` | Interactive UI form |
+| `--dry-run` | `false` | Show plan only |
+| `-P, --port-forward` | `false` | Port-forward after deploy |
+| `--verbose` | `false` | Show commands |
 
 ### clean
 
 Remove all Kates-managed resources and namespaces.
 
 ```bash
+# Full clean (interactive)
 kates clean
+
+# Clean a simple deploy (preserves namespace and CRDs)
+kates clean --simple --namespace my-kafka-ns
+
+# Force clean without confirmation
+kates clean --simple --namespace my-kafka-ns --force
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--simple` | `false` | Clean a simple deploy only (preserves namespace and CRDs) |
+| `--force` | `false` | Skip confirmation prompt |
+| `--topology` | `` | `isolated`, `single`, or empty (cleans both) |
+| `--namespace` | `kates-stack` | Target namespace |
+| `-v, --verbose` | `false` | Show command output |
 
 ### detect
 
