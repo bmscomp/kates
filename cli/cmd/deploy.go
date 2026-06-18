@@ -145,38 +145,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		PrintPhaseHeader(1, "Simple Deploy Mode (namespace-scoped, no admin required)")
 		PrintPhaseItem(fmt.Sprintf("Target namespace: %s", deployNamespace))
 
-		// Pre-flight validation
+		// Pre-flight validation (no admin required)
 		ctx := context.Background()
 		if err := validateSimplePrerequisites(ctx, deployNamespace); err != nil {
 			return err
 		}
 
-		// Cluster introspection (read-only, no admin needed)
-		PrintPhaseHeader(2, "Running Cluster Introspection")
-		executor := defaultExecutor
-		collector := detect.NewCollector(executor)
-		if err := collector.Preflight(); err != nil {
-			return fmt.Errorf("cluster unreachable: %w", err)
-		}
-		report, err := collector.Collect(ctx)
-		if err != nil {
-			return fmt.Errorf("introspection failed: %w", err)
-		}
-		analyzer := detect.NewAnalyzer(executor)
-		analyzer.Analyze(report, detect.ParsedReqs{})
-
-		valuesFile := ".build/values-detected.yaml"
-		os.MkdirAll(".build", 0755)
-		f, err := os.Create(valuesFile)
-		if err != nil {
-			return fmt.Errorf("failed to create values file: %v", err)
-		}
-		detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
-		f.Close()
-
-		isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
-
-		return runSimpleDeploy(cmd, report, deployNamespace, valuesFile, isKind)
+		return runSimpleDeploy(cmd, deployNamespace)
 	}
 
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
@@ -242,7 +217,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				return err
 			}
 			deployNamespace = nsInput
-			// Re-enter runDeploy which will hit the deploySimple block above
 			deployTopology = "single"
 			deployWithStrimzi = false
 			deployWithCertManager = false
@@ -262,30 +236,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				return err
 			}
 
-			PrintPhaseHeader(2, "Running Cluster Introspection")
-			executor := defaultExecutor
-			collector := detect.NewCollector(executor)
-			if err := collector.Preflight(); err != nil {
-				return fmt.Errorf("cluster unreachable: %w", err)
-			}
-			report, err := collector.Collect(ctx)
-			if err != nil {
-				return fmt.Errorf("introspection failed: %w", err)
-			}
-			analyzer := detect.NewAnalyzer(executor)
-			analyzer.Analyze(report, detect.ParsedReqs{})
-
-			valuesFile := ".build/values-detected.yaml"
-			os.MkdirAll(".build", 0755)
-			f, err := os.Create(valuesFile)
-			if err != nil {
-				return fmt.Errorf("failed to create values file: %v", err)
-			}
-			detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
-			f.Close()
-
-			isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
-			return runSimpleDeploy(cmd, report, deployNamespace, valuesFile, isKind)
+			return runSimpleDeploy(cmd, deployNamespace)
 		}
 
 		// ── Form 2: Namespace configuration ──────────────────────────────────

@@ -12,7 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
 )
 
@@ -78,9 +77,9 @@ func validateSimplePrerequisites(ctx context.Context, namespace string) error {
 		if err != nil || strings.TrimSpace(string(out)) != "yes" {
 			return fmt.Errorf(
 				"insufficient permissions: cannot %s %s in namespace %q.\n\n"+
-					"  Simple deploy requires 'admin' role in the target namespace.\n"+
+					"  Simple deploy requires 'edit' role in the target namespace.\n"+
 					"  Ask your cluster admin to grant it:\n\n"+
-					"    kubectl create rolebinding <name> --clusterrole=admin --user=<you> -n %s\n",
+					"    kubectl create rolebinding <name> --clusterrole=edit --user=<you> -n %s\n",
 				check.verb, check.resource, namespace, namespace)
 		}
 	}
@@ -113,7 +112,7 @@ func validateSimplePrerequisites(ctx context.Context, namespace string) error {
 // runSimpleDeploy orchestrates a namespace-scoped deployment where all
 // components (PostgreSQL, Kafka, Connect, connectors, Apicurio) are
 // deployed into a single pre-existing namespace.
-func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace string, valuesFile string, isKind bool) error {
+func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 	deployStartTime := time.Now()
 
 	fmt.Println()
@@ -122,9 +121,21 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 45)))
 
-	clusterDomain := report.Network.ClusterDomain
-	if clusterDomain == "" {
-		clusterDomain = "cluster.local"
+	// ── Detect cluster domain from DNS (no admin required) ─────────
+	clusterDomain := "cluster.local"
+	if out, err := exec.CommandContext(context.Background(), "kubectl", "exec", "-n", namespace,
+		"--", "cat", "/etc/resolv.conf").Output(); err == nil {
+		// This will fail if no pods exist yet, that's fine — use default
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, "search") && strings.Contains(line, "svc.") {
+				for _, field := range strings.Fields(line) {
+					if strings.HasPrefix(field, "svc.") {
+						clusterDomain = strings.TrimPrefix(field, "svc.")
+						break
+					}
+				}
+			}
+		}
 	}
 
 	// ── Step count ──────────────────────────────────────────────────────
@@ -252,40 +263,73 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 			}
 
 			// ─────────────────────────────────────────────────────────
-			// (b) Kafka cluster
+			// (b) Kafka cluster (direct CR application)
 			// ─────────────────────────────────────────────────────────
-			deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", namespace) || deploySimpleUpgrade
+			deployKafka := !isSimpleComponentDeployed(ctx, namespace, "kafka", "krafter") || deploySimpleUpgrade
 			if deployKafka {
 				dl.Println("\n📦 Deploying Kafka Cluster (Namespace: " + namespace + ")...")
 
-				runHelmFn(ctx, "dependency", "update", "charts/kafka-cluster")
-
-				kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster",
-					"-n", namespace,
-					"-f", "charts/kafka-cluster/values-simple.yaml",
-					"-f", valuesFile,
-					"--set", "global.clusterDomain=" + clusterDomain,
-					"--set", "networkPolicies.connectNamespace=" + namespace,
-					"--timeout", "10m",
-				}
-
+				replicas := 1
+				minISR := 1
+				replicationFactor := 1
 				if deployHA {
-					kafkaArgs = append(kafkaArgs,
-						"--set", "kafka.replicas=3",
-						"--set", "kafka.config.default\\.replication\\.factor=3",
-						"--set", "kafka.config.min\\.insync\\.replicas=2",
-						"--set", "zookeeper.replicas=3",
-					)
-				} else {
-					kafkaArgs = append(kafkaArgs,
-						"--set", "kafka.replicas=1",
-						"--set", "kafka.config.default\\.replication\\.factor=1",
-						"--set", "kafka.config.min\\.insync\\.replicas=1",
-						"--set", "zookeeper.replicas=1",
-					)
+					replicas = 3
+					minISR = 2
+					replicationFactor = 3
 				}
 
-				if err := runHelmFn(ctx, kafkaArgs...); err != nil {
+				kafkaCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: krafter
+  namespace: %s
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 4.2.0
+    replicas: %d
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+        authentication:
+          type: scram-sha-512
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: tls
+    authorization:
+      type: simple
+      superUsers:
+        - kates-backend
+    config:
+      auto.create.topics.enable: false
+      default.replication.factor: %d
+      min.insync.replicas: %d
+      offsets.topic.replication.factor: %d
+      transaction.state.log.replication.factor: %d
+      transaction.state.log.min.isr: %d
+      log.retention.hours: 24
+      log.cleanup.policy: delete
+      log.segment.bytes: 1073741824
+      message.max.bytes: 10485760
+      unclean.leader.election.enable: false
+      group.share.enable: true
+    template:
+      pod:
+        terminationGracePeriodSeconds: 45
+  entityOperator:
+    topicOperator:
+      reconciliationIntervalMs: 10000
+    userOperator:
+      reconciliationIntervalMs: 10000`, namespace, replicas, replicationFactor, minISR, replicationFactor, replicationFactor, minISR)
+
+				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, kafkaCR); err != nil {
 					return fmt.Errorf("Kafka deploy failed: %w", err)
 				}
 			} else {
@@ -386,60 +430,93 @@ stringData:
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
 			// ─────────────────────────────────────────────────────────
-			// (g) Kafka Connect
+			// (g) Kafka Connect (direct CR application)
 			// ─────────────────────────────────────────────────────────
-			connectDeployed := isHelmReleaseDeployedFn(ctx, "connect-cluster", namespace)
-			if connectDeployed && !isTesting && !deploySimpleUpgrade {
-				// Verify pods actually exist
-				podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
-					"-n", namespace, "-l", "strimzi.io/kind=KafkaConnect",
-					"-o", "jsonpath={.items}").Output()
-				if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
-					dl.Println("    ⚠️  Kafka Connect release exists but no pods found — upgrading...")
-					connectDeployed = false
+			connectDeployed := isSimpleComponentDeployed(ctx, namespace, "kafkaconnect", "connect-cluster")
+			if connectDeployed && !deploySimpleUpgrade {
+				if !isTesting {
+					podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
+						"-n", namespace, "-l", "strimzi.io/kind=KafkaConnect",
+						"-o", "jsonpath={.items}").Output()
+					if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
+						dl.Println("    ⚠️  Kafka Connect CR exists but no pods — re-applying...")
+						connectDeployed = false
+					}
 				}
 			}
 			if !connectDeployed || deploySimpleUpgrade {
 				dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", namespace)
 
 				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
-				registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
-					namespace, clusterDomain)
-
-				connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
-					"-n", namespace,
-					"-f", "charts/connect-cluster/values-simple.yaml",
-					"--set", "clusterDomain=" + clusterDomain,
-					"--set", "kafka.namespace=" + namespace,
-					"--set", "kafka.bootstrapServers=" + bootstrap,
-					"--set", "schemaRegistry.enabled=true",
-					"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
-					"--set", "databaseEgress[0].namespace=" + namespace,
-					"--set", "databaseEgress[0].port=5432",
-					"--set", "databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
-					"--timeout", "10m",
-				}
-
-				// Note: values-simple.yaml disables networkPolicy but this override
-				// enables namespace-scoped policies on non-Kind clusters.
-				if !isKind {
-					connectArgs = append(connectArgs, "--set", "networkPolicy.enabled=true")
-				}
-
+				connectReplicas := 1
 				if deployHA {
-					connectArgs = append(connectArgs, "--set", "replicas=3")
-				} else {
-					connectArgs = append(connectArgs, "--set", "replicas=1")
+					connectReplicas = 3
 				}
 
-				// Always disable monitoring in simple mode
-				connectArgs = append(connectArgs,
-					"--set", "alerts.enabled=false",
-					"--set", "podMonitors.enabled=false",
-					"--set", "dashboards.enabled=false",
-				)
+				registryURL := ""
+				if deployWithSchemaRegistry == "apicurio" {
+					registryURL = fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7", namespace, clusterDomain)
+				}
 
-				if err := runHelmFn(ctx, connectArgs...); err != nil {
+				extraConfig := ""
+				if registryURL != "" {
+					extraConfig = fmt.Sprintf(`
+      key.converter: io.apicurio.registry.utils.converter.AvroConverter
+      key.converter.apicurio.registry.url: %s
+      key.converter.apicurio.registry.auto-register: "true"
+      value.converter: io.apicurio.registry.utils.converter.AvroConverter
+      value.converter.apicurio.registry.url: %s
+      value.converter.apicurio.registry.auto-register: "true"
+      schema.registry.url: %s`, registryURL, registryURL, registryURL)
+				}
+
+				connectCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: connect-cluster
+  namespace: %s
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: 4.2.0
+  replicas: %d
+  bootstrapServers: %s
+  authentication:
+    type: scram-sha-512
+    username: kates-connect
+    passwordSecret:
+      secretName: kates-connect
+      password: password
+  config:
+    group.id: kates-connect
+    offset.storage.topic: connect-offsets
+    config.storage.topic: connect-configs
+    status.storage.topic: connect-status
+    offset.storage.replication.factor: 1
+    config.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+    config.providers: secrets
+    config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider%s
+  build:
+    output:
+      type: docker
+      image: localhost:5001/kates-connect:latest
+      pushSecret: ""
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-postgres
+            version: 3.1.1.Final
+      - name: debezium-jdbc
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-jdbc
+            version: 3.1.1.Final`, namespace, connectReplicas, bootstrap, extraConfig)
+
+				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectCR); err != nil {
 					return fmt.Errorf("Kafka Connect deploy failed: %w", err)
 				}
 			} else {
@@ -596,7 +673,6 @@ spec:
 					bootstrapKates := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
 					if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
 						"-n", namespace,
-						"-f", valuesFile,
 						"-f", "charts/kates/values-simple.yaml",
 						"--set", "kafka.bootstrapServers="+bootstrapKates,
 						"--set", "monitoring.enabled=false",
@@ -642,4 +718,12 @@ spec:
 	}
 
 	return deployErr
+}
+
+// isSimpleComponentDeployed checks if a Strimzi CR or Helm release exists in the namespace.
+func isSimpleComponentDeployed(ctx context.Context, namespace, kind, name string) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := exec.CommandContext(checkCtx, "kubectl", "get", kind, name, "-n", namespace).Run()
+	return err == nil
 }
