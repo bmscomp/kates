@@ -16,6 +16,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Simple deploy configuration flags (registered in deploy.go init())
+var (
+	deploySimplePgUser         string
+	deploySimplePgPassword     string
+	deploySimpleUpgrade        bool
+	deploySimpleWithConnectors bool
+	deploySimpleWithBackend    bool
+)
+
 // validateSimplePrerequisites runs pre-flight checks for simple deploy mode.
 // It verifies: namespace exists, Strimzi CRDs installed, Strimzi operator
 // running (warn-only), and helm binary available.
@@ -57,6 +66,47 @@ func validateSimplePrerequisites(ctx context.Context, namespace string) error {
 				"    https://helm.sh/docs/intro/install/\n")
 	}
 
+	// 5. Check user has sufficient RBAC in the namespace
+	rbacChecks := []struct{ resource, verb string }{
+		{"deployments", "create"},
+		{"services", "create"},
+		{"secrets", "create"},
+		{"configmaps", "create"},
+	}
+	for _, check := range rbacChecks {
+		out, err := exec.CommandContext(ctx, "kubectl", "auth", "can-i", check.verb, check.resource, "-n", namespace).Output()
+		if err != nil || strings.TrimSpace(string(out)) != "yes" {
+			return fmt.Errorf(
+				"insufficient permissions: cannot %s %s in namespace %q.\n\n"+
+					"  Simple deploy requires 'admin' role in the target namespace.\n"+
+					"  Ask your cluster admin to grant it:\n\n"+
+					"    kubectl create rolebinding <name> --clusterrole=admin --user=<you> -n %s\n",
+				check.verb, check.resource, namespace, namespace)
+		}
+	}
+
+	// 6. Check Strimzi CRD version compatibility
+	versionOut, vErr := exec.CommandContext(ctx, "kubectl", "get", "crd", "kafkas.kafka.strimzi.io",
+		"-o", "jsonpath={.spec.versions[*].name}").Output()
+	if vErr == nil {
+		versions := strings.Fields(strings.TrimSpace(string(versionOut)))
+		hasV1 := false
+		for _, v := range versions {
+			if v == "v1beta2" || v == "v1" {
+				hasV1 = true
+				break
+			}
+		}
+		if !hasV1 {
+			return fmt.Errorf(
+				"Strimzi CRD version incompatible.\n\n"+
+					"  Kates requires Strimzi CRDs with v1beta2 or v1 API version.\n"+
+					"  Found versions: %s\n"+
+					"  Please upgrade your Strimzi operator.\n",
+				strings.Join(versions, ", "))
+		}
+	}
+
 	return nil
 }
 
@@ -83,9 +133,14 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 	totalSteps++ // kafka
 	totalSteps++ // kafka-users
 	totalSteps++ // kafka-connect
-	totalSteps++ // kafka-connector
+	if deploySimpleWithConnectors {
+		totalSteps++ // kafka-connector
+	}
 	if deployWithSchemaRegistry == "apicurio" {
 		totalSteps++ // apicurio
+	}
+	if deploySimpleWithBackend {
+		totalSteps++ // kates
 	}
 
 	// ── Dashboard setup ────────────────────────────────────────────────
@@ -101,11 +156,17 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 		Target{namespace, "app.kubernetes.io/name=entity-operator"})
 	dashboard.RegisterComponent("kafka-connect", "Kafka Connect", "B",
 		Target{namespace, "strimzi.io/kind=KafkaConnect"})
-	dashboard.RegisterComponent("kafka-connector", "CDC Connector", "B",
-		Target{namespace, "strimzi.io/cluster=connect-cluster"})
+	if deploySimpleWithConnectors {
+		dashboard.RegisterComponent("kafka-connector", "CDC Connector", "B",
+			Target{namespace, "strimzi.io/cluster=connect-cluster"})
+	}
 	if deployWithSchemaRegistry == "apicurio" {
 		dashboard.RegisterComponent("apicurio", "Apicurio Registry", "C",
 			Target{namespace, "app.kubernetes.io/instance=apicurio"})
+	}
+	if deploySimpleWithBackend {
+		dashboard.RegisterComponent("kates", "Kates Backend", "D",
+			Target{namespace, "app.kubernetes.io/instance=kates"})
 	}
 
 	var pOptions []tea.ProgramOption
@@ -134,6 +195,25 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 		sharedEntries = append(sharedEntries,
 			DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: namespace, Group: "C"})
 	}
+	if deploySimpleWithBackend {
+		sharedEntries = append(sharedEntries,
+			DeploySummaryEntry{Icon: "🚀", Name: "Kates Backend", Release: "kates", Namespace: namespace, Group: "D"})
+	}
+
+	// ── Dry-run: show preview and exit ──
+	if deployDryRun {
+		dryCtx, dryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer dryCancel()
+		existingReleases := make(map[string]bool)
+		for _, e := range sharedEntries {
+			key := e.Release + "/" + e.Namespace
+			if isHelmReleaseDeployedFn(dryCtx, e.Release, e.Namespace) {
+				existingReleases[key] = true
+			}
+		}
+		renderDeployPreview(sharedEntries, existingReleases)
+		return nil
+	}
 
 	// ── Deploy goroutine ───────────────────────────────────────────────
 	var deployErr error
@@ -148,7 +228,7 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 			// ─────────────────────────────────────────────────────────
 			// (a) PostgreSQL
 			// ─────────────────────────────────────────────────────────
-			deployPG := !isHelmReleaseDeployedFn(ctx, "postgresql", namespace)
+			deployPG := !isHelmReleaseDeployedFn(ctx, "postgresql", namespace) || deploySimpleUpgrade
 			if deployPG {
 				dl.Println("\n📦 Deploying PostgreSQL (Namespace: " + namespace + ")...")
 
@@ -158,8 +238,8 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 				if err := runHelmFn(ctx, "upgrade", "--install", "postgresql", "bitnami/postgresql",
 					"-n", namespace,
 					"--set", "auth.postgresPassword=postgres",
-					"--set", "auth.username=debezium",
-					"--set", "auth.password=debezium",
+					"--set", "auth.username="+deploySimplePgUser,
+					"--set", "auth.password="+deploySimplePgPassword,
 					"--set", "auth.database=orders",
 					"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
 					"--timeout", "5m"); err != nil {
@@ -174,7 +254,7 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 			// ─────────────────────────────────────────────────────────
 			// (b) Kafka cluster
 			// ─────────────────────────────────────────────────────────
-			deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", namespace)
+			deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", namespace) || deploySimpleUpgrade
 			if deployKafka {
 				dl.Println("\n📦 Deploying Kafka Cluster (Namespace: " + namespace + ")...")
 
@@ -239,7 +319,7 @@ func runSimpleDeploy(cmd *cobra.Command, report *detect.DetectReport, namespace 
 						for i := 0; i < 5; i++ {
 							err := exec.CommandContext(ctx, "kubectl", "exec", "-n", namespace, "postgresql-0", "--",
 								"env", "PGPASSWORD=postgres", "psql", "-U", "postgres", "-c",
-								"ALTER ROLE debezium SUPERUSER REPLICATION;").Run()
+								"ALTER ROLE "+deploySimplePgUser+" SUPERUSER REPLICATION;").Run()
 							if err == nil {
 								break
 							}
@@ -301,15 +381,15 @@ metadata:
   namespace: %s
 type: Opaque
 stringData:
-  password: debezium
-  username: debezium`, namespace)
+  password: %s
+  username: %s`, namespace, deploySimplePgPassword, deploySimplePgUser)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
 			// ─────────────────────────────────────────────────────────
 			// (g) Kafka Connect
 			// ─────────────────────────────────────────────────────────
 			connectDeployed := isHelmReleaseDeployedFn(ctx, "connect-cluster", namespace)
-			if connectDeployed && !isTesting {
+			if connectDeployed && !isTesting && !deploySimpleUpgrade {
 				// Verify pods actually exist
 				podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
 					"-n", namespace, "-l", "strimzi.io/kind=KafkaConnect",
@@ -319,7 +399,7 @@ stringData:
 					connectDeployed = false
 				}
 			}
-			if !connectDeployed {
+			if !connectDeployed || deploySimpleUpgrade {
 				dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", namespace)
 
 				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
@@ -340,7 +420,8 @@ stringData:
 					"--timeout", "10m",
 				}
 
-				// Enable NetworkPolicy on non-Kind clusters
+				// Note: values-simple.yaml disables networkPolicy but this override
+				// enables namespace-scoped policies on non-Kind clusters.
 				if !isKind {
 					connectArgs = append(connectArgs, "--set", "networkPolicy.enabled=true")
 				}
@@ -383,13 +464,14 @@ stringData:
 			// ─────────────────────────────────────────────────────────
 			// (i) Deploy Debezium and JDBC Sink connectors
 			// ─────────────────────────────────────────────────────────
-			bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
+			if deploySimpleWithConnectors {
+				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
 
-			// Debezium connector
-			checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", namespace, "--no-headers").CombinedOutput()
-			if checkErr != nil || strings.Contains(string(checkOut), "not found") {
-				dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
-				connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
+				// Debezium connector
+				checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", namespace, "--no-headers").CombinedOutput()
+				if checkErr != nil || strings.Contains(string(checkOut), "not found") {
+					dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
+					connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
 metadata:
   name: debezium-postgres-source
@@ -421,21 +503,21 @@ spec:
     schema.history.internal.kafka.sasl.mechanism: SCRAM-SHA-512
     schema.history.internal.kafka.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-connect\" password=\"${secrets:%s/kates-connect:password}\";"
     schema.history.internal.kafka.topic: cdc-schema-history`, namespace, namespace, namespace, bootstrap, namespace)
-				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
-					dl.Printf("    %s Failed to deploy Debezium connector: %v\n", output.WarningStyle.Render("⚠"), err)
-					dl.FinishComponent("kafka-connector", false)
+					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectorYaml); err != nil {
+						dl.Printf("    %s Failed to deploy Debezium connector: %v\n", output.WarningStyle.Render("⚠"), err)
+						dl.FinishComponent("kafka-connector", false)
+					} else {
+						dl.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", output.SuccessStyle.Render("✔"))
+					}
 				} else {
-					dl.Printf("    %s Debezium PostgreSQL CDC connector deployed\n", output.SuccessStyle.Render("✔"))
+					dl.Printf("    %s Debezium connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
 				}
-			} else {
-				dl.Printf("    %s Debezium connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
-			}
 
-			// JDBC Sink connector
-			sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", namespace, "--no-headers").CombinedOutput()
-			if sinkCheckErr != nil || strings.Contains(string(sinkCheckOut), "not found") {
-				dl.Println("    - Deploying JDBC Sink connector...")
-				sinkYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
+				// JDBC Sink connector
+				sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", namespace, "--no-headers").CombinedOutput()
+				if sinkCheckErr != nil || strings.Contains(string(sinkCheckOut), "not found") {
+					dl.Println("    - Deploying JDBC Sink connector...")
+					sinkYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
 metadata:
   name: jdbc-sink-connector
@@ -456,33 +538,35 @@ spec:
     insert.mode: "insert"
     auto.create: "true"
     auto.evolve: "true"`, namespace, namespace, namespace, namespace)
-				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, sinkYaml); err != nil {
-					dl.Printf("    %s Failed to deploy JDBC Sink connector: %v\n", output.WarningStyle.Render("⚠"), err)
+					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, sinkYaml); err != nil {
+						dl.Printf("    %s Failed to deploy JDBC Sink connector: %v\n", output.WarningStyle.Render("⚠"), err)
+					} else {
+						dl.Printf("    %s JDBC Sink connector deployed\n", output.SuccessStyle.Render("✔"))
+					}
 				} else {
-					dl.Printf("    %s JDBC Sink connector deployed\n", output.SuccessStyle.Render("✔"))
+					dl.Printf("    %s JDBC Sink connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
 				}
-			} else {
-				dl.Printf("    %s JDBC Sink connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
-			}
 
-			// ─────────────────────────────────────────────────────────
-			// (j) Wait for connectors
-			// ─────────────────────────────────────────────────────────
-			if !isTesting {
-				dl.StartComponent("kafka-connector", 10*time.Minute)
-				if err := waitConnectorReadySilent(ctx, namespace, 10*time.Minute); err != nil {
-					dl.FinishComponent("kafka-connector", false)
-					return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
+				// ─────────────────────────────────────────────────────────
+				// (j) Wait for connectors
+				// ─────────────────────────────────────────────────────────
+				if !isTesting {
+					dl.StartComponent("kafka-connector", 10*time.Minute)
+					if err := waitConnectorReadySilent(ctx, namespace, 10*time.Minute); err != nil {
+						dl.FinishComponent("kafka-connector", false)
+						return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
+					}
+					dl.FinishComponent("kafka-connector", true)
 				}
-				dl.FinishComponent("kafka-connector", true)
+				advanceStep()
 			}
-			advanceStep()
 
 			// ─────────────────────────────────────────────────────────
 			// (k) Apicurio Registry (optional)
 			// ─────────────────────────────────────────────────────────
 			if deployWithSchemaRegistry == "apicurio" {
-				if !isHelmReleaseDeployedFn(ctx, "apicurio", namespace) {
+				deployApicurio := !isHelmReleaseDeployedFn(ctx, "apicurio", namespace) || deploySimpleUpgrade
+				if deployApicurio {
 					dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", namespace)
 					dl.StartComponent("apicurio", 5*time.Minute)
 					if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry",
@@ -496,6 +580,42 @@ spec:
 				} else {
 					dl.Println("⏭️  Apicurio already deployed.")
 					dl.FinishComponent("apicurio", true)
+					advanceStep()
+				}
+			}
+
+			// ─────────────────────────────────────────────────────────
+			// (l) Kates Backend (optional)
+			// ─────────────────────────────────────────────────────────
+			if deploySimpleWithBackend {
+				deployBackend := !isHelmReleaseDeployedFn(ctx, "kates", namespace) || deploySimpleUpgrade
+				if deployBackend {
+					dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", namespace)
+					dl.StartComponent("kates", 8*time.Minute)
+
+					bootstrapKates := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
+					if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
+						"-n", namespace,
+						"-f", valuesFile,
+						"-f", "charts/kates/values-simple.yaml",
+						"--set", "kafka.bootstrapServers="+bootstrapKates,
+						"--set", "monitoring.enabled=false",
+						"--timeout", "8m"); err != nil {
+						dl.FinishComponent("kates", false)
+						return fmt.Errorf("Kates Backend deploy failed: %w", err)
+					}
+
+					if !isTesting {
+						if err := waitComponentReadySilent(ctx, namespace, "app.kubernetes.io/instance=kates", 8*time.Minute); err != nil {
+							dl.FinishComponent("kates", false)
+							return fmt.Errorf("Kates Backend failed to become ready: %w", err)
+						}
+					}
+					dl.FinishComponent("kates", true)
+					advanceStep()
+				} else {
+					dl.Println("⏭️  Kates Backend already deployed. Skipping.")
+					dl.FinishComponent("kates", true)
 					advanceStep()
 				}
 			}

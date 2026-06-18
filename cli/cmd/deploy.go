@@ -40,7 +40,22 @@ Examples:
   kates deploy --with-schema-registry apicurio
 
   # Simple deploy: Kafka + Connect + PostgreSQL in a single namespace (no admin required)
-  kates deploy --simple --namespace my-kafka-ns`,
+  kates deploy --simple --namespace my-kafka-ns
+
+  # Simple deploy with custom PostgreSQL credentials
+  kates deploy --simple --namespace my-ns --pg-user myuser --pg-password mysecret
+
+  # Simple deploy without connectors (just Kafka + PG infrastructure)
+  kates deploy --simple --namespace my-ns --with-connectors=false
+
+  # Simple deploy with Kates backend included
+  kates deploy --simple --namespace my-ns --with-kates-backend
+
+  # Upgrade an existing simple deployment
+  kates deploy --simple --namespace my-ns --upgrade
+
+  # Dry-run to preview what would be deployed
+  kates deploy --simple --namespace my-ns --dry-run`,
 	RunE: runDeploy,
 }
 
@@ -94,6 +109,11 @@ func init() {
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
 	deployCmd.Flags().BoolVar(&deploySimple, "simple", false, "Namespace-scoped deploy (Kafka + PostgreSQL + Connect). Requires pre-installed Strimzi operator and pre-existing namespace.")
+	deployCmd.Flags().StringVar(&deploySimplePgUser, "pg-user", "debezium", "PostgreSQL username for CDC (simple mode)")
+	deployCmd.Flags().StringVar(&deploySimplePgPassword, "pg-password", "debezium", "PostgreSQL password for CDC (simple mode)")
+	deployCmd.Flags().BoolVar(&deploySimpleUpgrade, "upgrade", false, "Force upgrade of already-deployed components (simple mode)")
+	deployCmd.Flags().BoolVar(&deploySimpleWithConnectors, "with-connectors", true, "Deploy Debezium + JDBC Sink connectors (simple mode)")
+	deployCmd.Flags().BoolVar(&deploySimpleWithBackend, "with-kates-backend", false, "Deploy the Kates backend app (simple mode)")
 
 	rootCmd.AddCommand(deployCmd)
 }
