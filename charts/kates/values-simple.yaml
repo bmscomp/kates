@@ -1,0 +1,49 @@
+# Simple deploy overlay — namespace-scoped, no cluster-admin required.
+# Deploys kates with namespace-scoped Role instead of ClusterRole.
+#
+# Usage: kates deploy --simple --namespace <ns> --with-kates-backend
+
+# ── Use namespace-scoped Role instead of ClusterRole ────────────────────────
+rbac:
+  create: true
+  # Signal the template to create a Role instead of a ClusterRole.
+  # This avoids the need for cluster-admin privileges.
+  namespaceScoped: true
+
+# ── Disable monitoring (requires Prometheus CRDs / operator) ────────────────
+monitoring:
+  enabled: false
+
+metrics:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  grafanaDashboard:
+    enabled: false
+
+# ── Disable features requiring external operators ───────────────────────────
+kyvernoPolicy:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+backup:
+  enabled: false
+
+migration:
+  enabled: false
+
+cleanup:
+  enabled: false
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+# ── Ingress disabled (use port-forward for simple mode) ─────────────────────
+ingress:
+  enabled: false

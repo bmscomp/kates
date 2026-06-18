@@ -1,5 +1,60 @@
 {{- if .Values.serviceAccount.create }}
 {{- if .Values.rbac.create }}
+{{- if .Values.rbac.namespaceScoped }}
+{{- /* Namespace-scoped Role for simple deploy mode */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kates.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log", "persistentvolumeclaims", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkanodepools", "kafkatopics", "kafkausers", "kafkaconnects", "kafkamirrormaker2s", "kafkarebalances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkaconnectors", "kafkatopics"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["core.strimzi.io"]
+    resources: ["strimzipodsets"]
+    verbs: ["get", "list"]
+  {{- with .Values.rbac.extraRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kates.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kates.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- /* Cluster-scoped ClusterRole for full deploy mode */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -55,5 +110,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kates.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}
 {{- end }}

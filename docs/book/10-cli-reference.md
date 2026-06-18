@@ -609,6 +609,21 @@ kates deploy --simple --namespace my-kafka-ns
 
 # Simple deploy with HA and schema registry
 kates deploy --simple --namespace my-kafka-ns --ha --with-schema-registry apicurio
+
+# Simple deploy with custom PG credentials
+kates deploy --simple --namespace my-ns --pg-user myuser --pg-password mysecret
+
+# Simple deploy without connectors
+kates deploy --simple --namespace my-ns --with-connectors=false
+
+# Simple deploy with Kates backend
+kates deploy --simple --namespace my-ns --with-kates-backend
+
+# Upgrade existing simple deployment
+kates deploy --simple --namespace my-ns --upgrade
+
+# Dry-run preview
+kates deploy --simple --namespace my-ns --dry-run
 ```
 
 | Flag | Default | Description |
@@ -619,11 +634,16 @@ kates deploy --simple --namespace my-kafka-ns --ha --with-schema-registry apicur
 | `--ha` | `true` | Enable High Availability (Multi-AZ) |
 | `--with-schema-registry` | `apicurio` | `none`, `apicurio`, or `confluent` |
 | `--with-kafka-connect` | `false` | Deploy Kafka Connect + PostgreSQL CDC |
+| `--with-connectors` | `true` | Deploy Debezium + JDBC Sink connectors (simple mode) |
+| `--with-kates-backend` | `false` | Deploy the Kates backend app (simple mode) |
 | `--with-chaos` | `true` | Deploy LitmusChaos engine |
 | `--with-monitoring` | `true` | Deploy monitoring (Prometheus/Grafana) |
 | `--with-cert-manager` | `true` | Deploy Cert-Manager |
 | `--with-strimzi` | `true` | Deploy Strimzi Operator |
 | `--with-kyverno` | `false` | Deploy Kyverno |
+| `--pg-user` | `debezium` | PostgreSQL username for CDC (simple mode) |
+| `--pg-password` | `debezium` | PostgreSQL password for CDC (simple mode) |
+| `--upgrade` | `false` | Force upgrade of already-deployed components (simple mode) |
 | `-i, --interactive` | `false` | Interactive UI form |
 | `--dry-run` | `false` | Show plan only |
 | `-P, --port-forward` | `false` | Port-forward after deploy |

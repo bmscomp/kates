@@ -46,6 +46,8 @@ serviceAccount:
 rbac:
   # -- Create ClusterRole and ClusterRoleBinding
   create: true
+  # -- Use namespace-scoped Role instead of ClusterRole (for simple deploy)
+  namespaceScoped: false
   # -- Extra RBAC rules (e.g. for Litmus Chaos integration)
   extraRules: []
 
