@@ -37,7 +37,10 @@ Examples:
   kates deploy --topology isolated --kafka-ns kafka-system --app-ns kates-app --chaos-ns litmus-system
 
   # Deploy with Apicurio Schema Registry
-  kates deploy --with-schema-registry apicurio`,
+  kates deploy --with-schema-registry apicurio
+
+  # Simple deploy: Kafka + Connect + PostgreSQL in a single namespace (no admin required)
+  kates deploy --simple --namespace my-kafka-ns`,
 	RunE: runDeploy,
 }
 
@@ -63,6 +66,7 @@ var (
 	deployVerbose            bool
 	deployPortForward        bool
 	deployDryRun             bool
+	deploySimple             bool
 )
 
 func init() {
@@ -89,6 +93,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
+	deployCmd.Flags().BoolVar(&deploySimple, "simple", false, "Namespace-scoped deploy (Kafka + PostgreSQL + Connect). Requires pre-installed Strimzi operator and pre-existing namespace.")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -98,6 +103,61 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	PrintDeployBanner()
 
 	dl = &DashboardController{}
+
+	// ── Simple mode: namespace-scoped deploy without cluster-admin ──
+	if deploySimple {
+		// Override incompatible flags for simple mode
+		deployTopology = "single"
+		deployWithStrimzi = false
+		deployWithCertManager = false
+		deployWithKyverno = false
+		deployWithChaos = false
+		deployWithMonitoring = false
+		deployWithKafkaConnect = true
+		if !cmd.Flags().Changed("ha") {
+			deployHA = false
+		}
+		if !cmd.Flags().Changed("with-schema-registry") {
+			deployWithSchemaRegistry = "apicurio"
+		}
+
+		fmt.Println()
+		PrintPhaseHeader(1, "Simple Deploy Mode (namespace-scoped, no admin required)")
+		PrintPhaseItem(fmt.Sprintf("Target namespace: %s", deployNamespace))
+
+		// Pre-flight validation
+		ctx := context.Background()
+		if err := validateSimplePrerequisites(ctx, deployNamespace); err != nil {
+			return err
+		}
+
+		// Cluster introspection (read-only, no admin needed)
+		PrintPhaseHeader(2, "Running Cluster Introspection")
+		executor := defaultExecutor
+		collector := detect.NewCollector(executor)
+		if err := collector.Preflight(); err != nil {
+			return fmt.Errorf("cluster unreachable: %w", err)
+		}
+		report, err := collector.Collect(ctx)
+		if err != nil {
+			return fmt.Errorf("introspection failed: %w", err)
+		}
+		analyzer := detect.NewAnalyzer(executor)
+		analyzer.Analyze(report, detect.ParsedReqs{})
+
+		valuesFile := ".build/values-detected.yaml"
+		os.MkdirAll(".build", 0755)
+		f, err := os.Create(valuesFile)
+		if err != nil {
+			return fmt.Errorf("failed to create values file: %v", err)
+		}
+		detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
+		f.Close()
+
+		isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
+
+		return runSimpleDeploy(cmd, report, deployNamespace, valuesFile, isKind)
+	}
 
 	if deployInteractive || cmd.Flags().NFlag() == 0 {
 		var components []string
@@ -111,6 +171,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Options(
 						huh.NewOption("Isolated Namespaces (kafka, kates, monitoring, litmus)", "isolated"),
 						huh.NewOption("Single Namespace (kates-stack)", "single"),
+						huh.NewOption("Simple (single ns, no admin — Kafka+Connect+PG only)", "simple"),
 					).
 					Value(&deployTopology),
 
@@ -144,6 +205,67 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 		if err := form1.Run(); err != nil {
 			return err
+		}
+
+		if deployTopology == "simple" {
+			deploySimple = true
+			var nsInput string = deployNamespace
+			nsForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Target Namespace").
+						Description("Pre-existing namespace for all components (requires Strimzi operator pre-installed)").
+						Value(&nsInput),
+				),
+			).WithTheme(ThemeKates())
+			if err := nsForm.Run(); err != nil {
+				return err
+			}
+			deployNamespace = nsInput
+			// Re-enter runDeploy which will hit the deploySimple block above
+			deployTopology = "single"
+			deployWithStrimzi = false
+			deployWithCertManager = false
+			deployWithKyverno = false
+			deployWithChaos = false
+			deployWithMonitoring = false
+			deployWithKafkaConnect = true
+			if !cmd.Flags().Changed("ha") {
+				deployHA = false
+			}
+			if !cmd.Flags().Changed("with-schema-registry") {
+				deployWithSchemaRegistry = "apicurio"
+			}
+
+			ctx := context.Background()
+			if err := validateSimplePrerequisites(ctx, deployNamespace); err != nil {
+				return err
+			}
+
+			PrintPhaseHeader(2, "Running Cluster Introspection")
+			executor := defaultExecutor
+			collector := detect.NewCollector(executor)
+			if err := collector.Preflight(); err != nil {
+				return fmt.Errorf("cluster unreachable: %w", err)
+			}
+			report, err := collector.Collect(ctx)
+			if err != nil {
+				return fmt.Errorf("introspection failed: %w", err)
+			}
+			analyzer := detect.NewAnalyzer(executor)
+			analyzer.Analyze(report, detect.ParsedReqs{})
+
+			valuesFile := ".build/values-detected.yaml"
+			os.MkdirAll(".build", 0755)
+			f, err := os.Create(valuesFile)
+			if err != nil {
+				return fmt.Errorf("failed to create values file: %v", err)
+			}
+			detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
+			f.Close()
+
+			isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
+			return runSimpleDeploy(cmd, report, deployNamespace, valuesFile, isKind)
 		}
 
 		// ── Form 2: Namespace configuration ──────────────────────────────────

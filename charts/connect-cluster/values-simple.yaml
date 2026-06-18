@@ -1,0 +1,29 @@
+# Simple deploy overlay — namespace-scoped, no cluster-admin required.
+# Pre-requisites: Strimzi operator + CRDs installed by admin.
+#
+# Usage: kates deploy --simple --namespace <ns>
+
+# ── Single replica for dev/test ───────────────────────────────────────────────
+replicas: 1
+
+# ── Disable monitoring (requires Prometheus CRDs / operator) ──────────────────
+alerts:
+  enabled: false
+
+podMonitors:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+# ── Disable network policies ─────────────────────────────────────────────────
+networkPolicy:
+  enabled: false
+
+# ── Disable tracing (requires Jaeger) ─────────────────────────────────────────
+tracing:
+  enabled: false
+
+# ── Disable topology spread for single-namespace ──────────────────────────────
+topologySpreadConstraints:
+  enabled: false
