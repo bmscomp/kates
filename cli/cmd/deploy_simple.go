@@ -287,11 +287,9 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 			if deployKafka {
 				dl.Println("\n📦 Deploying Kafka Cluster (Namespace: " + namespace + ")...")
 
-				replicas := 1
 				minISR := 1
 				replicationFactor := 1
 				if deployHA {
-					replicas = 3
 					minISR = 2
 					replicationFactor = 3
 				}
@@ -307,7 +305,6 @@ metadata:
 spec:
   kafka:
     version: 4.2.0
-    replicas: %d
     listeners:
       - name: plain
         port: 9092
@@ -345,7 +342,7 @@ spec:
     topicOperator:
       reconciliationIntervalMs: 10000
     userOperator:
-      reconciliationIntervalMs: 10000`, namespace, replicas, replicationFactor, minISR, replicationFactor, replicationFactor, minISR)
+      reconciliationIntervalMs: 10000`, namespace, replicationFactor, minISR, replicationFactor, replicationFactor, minISR)
 
 				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, kafkaCR); err != nil {
 					return fmt.Errorf("Kafka deploy failed: %w", err)
