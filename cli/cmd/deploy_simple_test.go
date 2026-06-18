@@ -180,8 +180,13 @@ func TestSimpleDeploy_HAMode(t *testing.T) {
 	if !strings.Contains(kafkaYAML, "default.replication.factor: 3") {
 		t.Error("HA mode should have replication factor 3")
 	}
-	if !strings.Contains(kafkaYAML, "replicas: 3") {
-		t.Error("HA mode should have 3 replicas on Kafka CR")
+	// Replicas are on KafkaNodePool CRs, not on Kafka CR when node-pools are enabled
+	brokerPoolYAML, bFound := findYAML(*stdinYAMLs, "name: brokers")
+	if !bFound {
+		t.Fatal("KafkaNodePool brokers not applied in HA mode")
+	}
+	if !strings.Contains(brokerPoolYAML, "replicas: 3") {
+		t.Error("HA mode should have 3 replicas on broker NodePool")
 	}
 
 	// Verify KafkaConnect CR has 3 replicas in HA mode
@@ -215,8 +220,13 @@ func TestSimpleDeploy_NonHAMode(t *testing.T) {
 	if !strings.Contains(kafkaYAML, "default.replication.factor: 1") {
 		t.Error("non-HA mode should have replication factor 1")
 	}
-	if !strings.Contains(kafkaYAML, "replicas: 1") {
-		t.Error("non-HA mode should have 1 replica on Kafka CR")
+	// Replicas are on KafkaNodePool CRs, not on Kafka CR when node-pools are enabled
+	brokerPoolYAML, bFound := findYAML(*stdinYAMLs, "name: brokers")
+	if !bFound {
+		t.Fatal("KafkaNodePool brokers not applied in non-HA mode")
+	}
+	if !strings.Contains(brokerPoolYAML, "replicas: 1") {
+		t.Error("non-HA mode should have 1 replica on broker NodePool")
 	}
 
 	connectYAML, found := findYAML(*stdinYAMLs, "kind: KafkaConnect")
