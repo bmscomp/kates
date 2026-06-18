@@ -624,6 +624,12 @@ kates deploy --simple --namespace my-ns --upgrade
 
 # Dry-run preview
 kates deploy --simple --namespace my-ns --dry-run
+
+# Dev mode with minimal resources (1 broker, 1 controller)
+kates deploy --simple --namespace dev-kafka --dev
+
+# Dev mode with HA (3 brokers, 3 controllers, still minimal resources)
+kates deploy --simple --namespace dev-kafka --dev --ha
 ```
 
 | Flag | Default | Description |
@@ -644,6 +650,7 @@ kates deploy --simple --namespace my-ns --dry-run
 | `--pg-user` | `debezium` | PostgreSQL username for CDC (simple mode) |
 | `--pg-password` | `debezium` | PostgreSQL password for CDC (simple mode) |
 | `--upgrade` | `false` | Force upgrade of already-deployed components (simple mode) |
+| `--dev` | `false` | Minimal resources for dev/local (1 broker, 1 controller, ~2.5Gi total) |
 | `-i, --interactive` | `false` | Interactive UI form |
 | `--dry-run` | `false` | Show plan only |
 | `-P, --port-forward` | `false` | Port-forward after deploy |
