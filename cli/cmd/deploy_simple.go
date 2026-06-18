@@ -22,6 +22,7 @@ var (
 	deploySimpleUpgrade        bool
 	deploySimpleWithConnectors bool
 	deploySimpleWithBackend    bool
+	deploySimpleDev            bool
 )
 
 // validateSimplePrerequisites runs pre-flight checks for simple deploy mode.
@@ -138,6 +139,11 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 		}
 	}
 
+	if deploySimpleDev {
+		fmt.Println(lipgloss.NewStyle().Foreground(clrAccent).
+			Render("🧪 Dev mode: minimal resources (1 broker, 1 controller)"))
+	}
+
 	// ── Step count ──────────────────────────────────────────────────────
 	totalSteps := 0
 	totalSteps++ // postgresql
@@ -246,14 +252,26 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 				runHelmFn(ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
 				runHelmFn(ctx, "repo", "update", "bitnami")
 
-				if err := runHelmFn(ctx, "upgrade", "--install", "postgresql", "bitnami/postgresql",
+				pgArgs := []string{
+					"upgrade", "--install", "postgresql", "bitnami/postgresql",
 					"-n", namespace,
 					"--set", "auth.postgresPassword=postgres",
-					"--set", "auth.username="+deploySimplePgUser,
-					"--set", "auth.password="+deploySimplePgPassword,
+					"--set", "auth.username=" + deploySimplePgUser,
+					"--set", "auth.password=" + deploySimplePgPassword,
 					"--set", "auth.database=orders",
 					"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
-					"--timeout", "5m"); err != nil {
+					"--timeout", "5m",
+				}
+				if deploySimpleDev {
+					pgArgs = append(pgArgs,
+						"--set", "primary.resources.requests.memory=128Mi",
+						"--set", "primary.resources.requests.cpu=100m",
+						"--set", "primary.resources.limits.memory=256Mi",
+						"--set", "primary.resources.limits.cpu=250m",
+						"--set", "primary.persistence.size=1Gi",
+					)
+				}
+				if err := runHelmFn(ctx, pgArgs...); err != nil {
 					return fmt.Errorf("PostgreSQL deploy failed: %w", err)
 				}
 			} else {
@@ -332,6 +350,125 @@ spec:
 				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, kafkaCR); err != nil {
 					return fmt.Errorf("Kafka deploy failed: %w", err)
 				}
+
+				// Apply KafkaNodePool CRs
+				controllerReplicas := 1
+				controllerMemReq := "1Gi"
+				controllerMemLim := "1Gi"
+				controllerCPUReq := "500m"
+				controllerCPULim := "1000m"
+				controllerJvmXms := "512m"
+				controllerJvmXmx := "512m"
+				controllerStorage := "5Gi"
+
+				if deploySimpleDev {
+					controllerMemReq = "512Mi"
+					controllerMemLim = "512Mi"
+					controllerCPUReq = "100m"
+					controllerCPULim = "500m"
+					controllerJvmXms = "256m"
+					controllerJvmXmx = "256m"
+					controllerStorage = "1Gi"
+				}
+				if deployHA {
+					controllerReplicas = 3
+				}
+
+				controllerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: controllers
+  namespace: %s
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  replicas: %d
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: %s
+        deleteClaim: true
+  resources:
+    requests:
+      memory: %s
+      cpu: %s
+    limits:
+      memory: %s
+      cpu: %s
+  jvmOptions:
+    -Xms: %s
+    -Xmx: %s`, namespace, controllerReplicas, controllerStorage,
+					controllerMemReq, controllerCPUReq, controllerMemLim, controllerCPULim,
+					controllerJvmXms, controllerJvmXmx)
+
+				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, controllerPoolCR); err != nil {
+					return fmt.Errorf("KafkaNodePool controllers deploy failed: %w", err)
+				}
+
+				// Broker NodePool
+				brokerReplicas := 1
+				brokerMemReq := "2Gi"
+				brokerMemLim := "2Gi"
+				brokerCPUReq := "500m"
+				brokerCPULim := "1000m"
+				brokerJvmXms := "1024m"
+				brokerJvmXmx := "1024m"
+				brokerStorage := "10Gi"
+
+				if deploySimpleDev {
+					brokerMemReq = "1Gi"
+					brokerMemLim = "1Gi"
+					brokerCPUReq = "250m"
+					brokerCPULim = "500m"
+					brokerJvmXms = "512m"
+					brokerJvmXmx = "512m"
+					brokerStorage = "5Gi"
+				}
+				if deployHA {
+					brokerReplicas = 3
+				}
+
+				brokerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: brokers
+  namespace: %s
+  labels:
+    strimzi.io/cluster: krafter
+spec:
+  replicas: %d
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: %s
+        deleteClaim: true
+  resources:
+    requests:
+      memory: %s
+      cpu: %s
+    limits:
+      memory: %s
+      cpu: %s
+  jvmOptions:
+    -Xms: %s
+    -Xmx: %s`, namespace, brokerReplicas, brokerStorage,
+					brokerMemReq, brokerCPUReq, brokerMemLim, brokerCPULim,
+					brokerJvmXms, brokerJvmXmx)
+
+				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, brokerPoolCR); err != nil {
+					return fmt.Errorf("KafkaNodePool brokers deploy failed: %w", err)
+				}
+
+				dl.Printf("    %s KafkaNodePools applied (controllers: %d, brokers: %d)\n",
+					output.SuccessStyle.Render("✔"), controllerReplicas, brokerReplicas)
 			} else {
 				dl.Println("⏭️  Kafka Cluster already deployed. Skipping.")
 				dl.FinishComponent("kafka", true)
@@ -470,6 +607,21 @@ stringData:
       schema.registry.url: %s`, registryURL, registryURL, registryURL)
 				}
 
+				connectResources := ""
+				if deploySimpleDev {
+					connectResources = `
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 512m`
+				}
+
 				connectCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaConnect
 metadata:
@@ -514,7 +666,7 @@ spec:
           - type: maven
             group: io.debezium
             artifact: debezium-connector-jdbc
-            version: 3.1.1.Final`, namespace, connectReplicas, bootstrap, extraConfig)
+            version: 3.1.1.Final%s`, namespace, connectReplicas, bootstrap, extraConfig, connectResources)
 
 				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectCR); err != nil {
 					return fmt.Errorf("Kafka Connect deploy failed: %w", err)

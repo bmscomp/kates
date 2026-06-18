@@ -55,7 +55,13 @@ Examples:
   kates deploy --simple --namespace my-ns --upgrade
 
   # Dry-run to preview what would be deployed
-  kates deploy --simple --namespace my-ns --dry-run`,
+  kates deploy --simple --namespace my-ns --dry-run
+
+  # Dev mode with minimal resources (1 broker, 1 controller)
+  kates deploy --simple --namespace dev-kafka --dev
+
+  # Dev mode with HA
+  kates deploy --simple --namespace dev-kafka --dev --ha`,
 	RunE: runDeploy,
 }
 
@@ -114,6 +120,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deploySimpleUpgrade, "upgrade", false, "Force upgrade of already-deployed components (simple mode)")
 	deployCmd.Flags().BoolVar(&deploySimpleWithConnectors, "with-connectors", true, "Deploy Debezium + JDBC Sink connectors (simple mode)")
 	deployCmd.Flags().BoolVar(&deploySimpleWithBackend, "with-kates-backend", false, "Deploy the Kates backend app (simple mode)")
+	deployCmd.Flags().BoolVar(&deploySimpleDev, "dev", false, "Minimal resources for dev/local environments (simple mode)")
 
 	rootCmd.AddCommand(deployCmd)
 }
