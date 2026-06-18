@@ -58,7 +58,7 @@ spec:
       # Pre-flight check
       - name: preflight-check
         container:
-          image: bitnami/kubectl:latest
+          image: soldevelo/kubectl:latest
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash"]
           args:
@@ -96,7 +96,7 @@ spec:
             - name: experiment
             - name: duration
         container:
-          image: bitnami/kubectl:latest
+          image: soldevelo/kubectl:latest
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash"]
           args:
@@ -142,7 +142,7 @@ spec:
       # Verify cluster recovery
       - name: verify-cluster
         container:
-          image: bitnami/kubectl:latest
+          image: soldevelo/kubectl:latest
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash"]
           args:

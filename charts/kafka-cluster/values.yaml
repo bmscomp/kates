@@ -481,7 +481,7 @@ tieredStorage:
 
 crdUpgrade:
   enabled: true
-  image: "bitnami/kubectl:latest"
+  image: "soldevelo/kubectl:latest"
 
 dashboards:
   enabled: true

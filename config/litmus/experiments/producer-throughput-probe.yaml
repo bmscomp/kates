@@ -45,7 +45,7 @@ spec:
                 criteria: ">="
                 value: "10.0"  # Minimum 10 records/sec
               source:
-                image: bitnami/kubectl:latest
+                image: soldevelo/kubectl:latest
                 hostNetwork: false
 ---
 # Standalone producer throughput ConfigMap for reuse

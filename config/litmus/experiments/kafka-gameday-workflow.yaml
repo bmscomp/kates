@@ -192,7 +192,7 @@ spec:
           - name: experiment-type
           - name: extra-env
       container:
-        image: bitnami/kubectl:latest
+        image: soldevelo/kubectl:latest
         imagePullPolicy: IfNotPresent
         command: ["/bin/bash"]
         args:
@@ -255,7 +255,7 @@ spec:
         parameters:
           - name: phase
       container:
-        image: bitnami/kubectl:latest
+        image: soldevelo/kubectl:latest
         imagePullPolicy: IfNotPresent
         command: ["/bin/bash"]
         args:
@@ -300,7 +300,7 @@ spec:
         parameters:
           - name: phase
       container:
-        image: bitnami/kubectl:latest
+        image: soldevelo/kubectl:latest
         imagePullPolicy: IfNotPresent
         command: ["/bin/bash"]
         args:
@@ -333,7 +333,7 @@ spec:
     # Final report
     - name: chaos-report
       container:
-        image: bitnami/kubectl:latest
+        image: soldevelo/kubectl:latest
         imagePullPolicy: IfNotPresent
         command: ["/bin/bash"]
         args:

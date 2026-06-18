@@ -83,7 +83,7 @@ spec:
                 criteria: contains
                 value: "PASS"
               source:
-                image: bitnami/kubectl:latest
+                image: soldevelo/kubectl:latest
                 hostNetwork: false
 ---
 # Consumer latency monitoring ConfigMap
