@@ -379,7 +379,7 @@ spec:
 						controllerReplicas = 3
 					}
 
-					controllerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+					controllerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: controllers
@@ -438,7 +438,7 @@ spec:
 						brokerReplicas = 3
 					}
 
-					brokerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+					brokerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: brokers
@@ -690,7 +690,7 @@ stringData:
     -Xmx: 512m`
 				}
 
-				connectCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+				connectCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnect
 metadata:
   name: connect-cluster
