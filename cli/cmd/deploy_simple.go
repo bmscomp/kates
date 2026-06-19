@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -242,59 +243,65 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 		defer p.Quit()
 
 		deployErr = func() error {
-			// ─────────────────────────────────────────────────────────
-			// (a) PostgreSQL
-			// ─────────────────────────────────────────────────────────
+			// ── Phase 1: Deploy PG + Kafka + Apicurio in parallel ──
+			var pgErr, kafkaErr, apicurioErr error
 			deployPG := !isHelmReleaseDeployedFn(ctx, "postgresql", namespace) || deploySimpleUpgrade
-			if deployPG {
-				dl.Println("\n📦 Deploying PostgreSQL (Namespace: " + namespace + ")...")
-
-				runHelmFn(ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
-				runHelmFn(ctx, "repo", "update", "bitnami")
-
-				pgArgs := []string{
-					"upgrade", "--install", "postgresql", "bitnami/postgresql",
-					"-n", namespace,
-					"--set", "auth.postgresPassword=postgres",
-					"--set", "auth.username=" + deploySimplePgUser,
-					"--set", "auth.password=" + deploySimplePgPassword,
-					"--set", "auth.database=orders",
-					"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
-					"--timeout", "5m",
-				}
-				if deploySimpleDev {
-					pgArgs = append(pgArgs,
-						"--set", "primary.resources.requests.memory=128Mi",
-						"--set", "primary.resources.requests.cpu=100m",
-						"--set", "primary.resources.limits.memory=256Mi",
-						"--set", "primary.resources.limits.cpu=250m",
-						"--set", "primary.persistence.size=1Gi",
-					)
-				}
-				if err := runHelmFn(ctx, pgArgs...); err != nil {
-					return fmt.Errorf("PostgreSQL deploy failed: %w", err)
-				}
-			} else {
-				dl.Println("⏭️  PostgreSQL already deployed. Skipping.")
-				dl.FinishComponent("postgres", true)
-				advanceStep()
-			}
-
-			// ─────────────────────────────────────────────────────────
-			// (b) Kafka cluster (direct CR application)
-			// ─────────────────────────────────────────────────────────
 			deployKafka := !isSimpleComponentDeployed(ctx, namespace, "kafka", "krafter") || deploySimpleUpgrade
-			if deployKafka {
-				dl.Println("\n📦 Deploying Kafka Cluster (Namespace: " + namespace + ")...")
 
-				minISR := 1
-				replicationFactor := 1
-				if deployHA {
-					minISR = 2
-					replicationFactor = 3
+			var phase1WG sync.WaitGroup
+
+			// ── goroutine 1: PostgreSQL ──
+			phase1WG.Add(1)
+			go func() {
+				defer phase1WG.Done()
+				if deployPG {
+					dl.Println("\n📦 Deploying PostgreSQL (Namespace: " + namespace + ")...")
+
+					runHelmFn(ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
+					runHelmFn(ctx, "repo", "update", "bitnami")
+
+					pgArgs := []string{
+						"upgrade", "--install", "postgresql", "bitnami/postgresql",
+						"-n", namespace,
+						"--set", "auth.postgresPassword=postgres",
+						"--set", "auth.username=" + deploySimplePgUser,
+						"--set", "auth.password=" + deploySimplePgPassword,
+						"--set", "auth.database=orders",
+						"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
+						"--timeout", "5m",
+					}
+					if deploySimpleDev {
+						pgArgs = append(pgArgs,
+							"--set", "primary.resources.requests.memory=128Mi",
+							"--set", "primary.resources.requests.cpu=100m",
+							"--set", "primary.resources.limits.memory=256Mi",
+							"--set", "primary.resources.limits.cpu=250m",
+							"--set", "primary.persistence.size=1Gi",
+						)
+					}
+					pgErr = runHelmFn(ctx, pgArgs...)
+				} else {
+					dl.Println("⏭️  PostgreSQL already deployed. Skipping.")
+					dl.FinishComponent("postgres", true)
+					advanceStep()
 				}
+			}()
 
-				kafkaCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
+			// ── goroutine 2: Kafka CR + NodePools ──
+			phase1WG.Add(1)
+			go func() {
+				defer phase1WG.Done()
+				if deployKafka {
+					dl.Println("\n📦 Deploying Kafka Cluster (Namespace: " + namespace + ")...")
+
+					minISR := 1
+					replicationFactor := 1
+					if deployHA {
+						minISR = 2
+						replicationFactor = 3
+					}
+
+					kafkaCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: krafter
@@ -344,34 +351,35 @@ spec:
     userOperator:
       reconciliationIntervalMs: 10000`, namespace, replicationFactor, minISR, replicationFactor, replicationFactor, minISR)
 
-				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, kafkaCR); err != nil {
-					return fmt.Errorf("Kafka deploy failed: %w", err)
-				}
+					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, kafkaCR); err != nil {
+						kafkaErr = fmt.Errorf("Kafka deploy failed: %w", err)
+						return
+					}
 
-				// Apply KafkaNodePool CRs
-				controllerReplicas := 1
-				controllerMemReq := "1Gi"
-				controllerMemLim := "1Gi"
-				controllerCPUReq := "500m"
-				controllerCPULim := "1000m"
-				controllerJvmXms := "512m"
-				controllerJvmXmx := "512m"
-				controllerStorage := "5Gi"
+					// Apply KafkaNodePool CRs
+					controllerReplicas := 1
+					controllerMemReq := "1Gi"
+					controllerMemLim := "1Gi"
+					controllerCPUReq := "500m"
+					controllerCPULim := "1000m"
+					controllerJvmXms := "512m"
+					controllerJvmXmx := "512m"
+					controllerStorage := "5Gi"
 
-				if deploySimpleDev {
-					controllerMemReq = "512Mi"
-					controllerMemLim = "512Mi"
-					controllerCPUReq = "100m"
-					controllerCPULim = "500m"
-					controllerJvmXms = "256m"
-					controllerJvmXmx = "256m"
-					controllerStorage = "1Gi"
-				}
-				if deployHA {
-					controllerReplicas = 3
-				}
+					if deploySimpleDev {
+						controllerMemReq = "512Mi"
+						controllerMemLim = "512Mi"
+						controllerCPUReq = "100m"
+						controllerCPULim = "500m"
+						controllerJvmXms = "256m"
+						controllerJvmXmx = "256m"
+						controllerStorage = "1Gi"
+					}
+					if deployHA {
+						controllerReplicas = 3
+					}
 
-				controllerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+					controllerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
   name: controllers
@@ -399,37 +407,38 @@ spec:
   jvmOptions:
     -Xms: %s
     -Xmx: %s`, namespace, controllerReplicas, controllerStorage,
-					controllerMemReq, controllerCPUReq, controllerMemLim, controllerCPULim,
-					controllerJvmXms, controllerJvmXmx)
+						controllerMemReq, controllerCPUReq, controllerMemLim, controllerCPULim,
+						controllerJvmXms, controllerJvmXmx)
 
-				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, controllerPoolCR); err != nil {
-					return fmt.Errorf("KafkaNodePool controllers deploy failed: %w", err)
-				}
+					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, controllerPoolCR); err != nil {
+						kafkaErr = fmt.Errorf("KafkaNodePool controllers deploy failed: %w", err)
+						return
+					}
 
-				// Broker NodePool
-				brokerReplicas := 1
-				brokerMemReq := "2Gi"
-				brokerMemLim := "2Gi"
-				brokerCPUReq := "500m"
-				brokerCPULim := "1000m"
-				brokerJvmXms := "1024m"
-				brokerJvmXmx := "1024m"
-				brokerStorage := "10Gi"
+					// Broker NodePool
+					brokerReplicas := 1
+					brokerMemReq := "2Gi"
+					brokerMemLim := "2Gi"
+					brokerCPUReq := "500m"
+					brokerCPULim := "1000m"
+					brokerJvmXms := "1024m"
+					brokerJvmXmx := "1024m"
+					brokerStorage := "10Gi"
 
-				if deploySimpleDev {
-					brokerMemReq = "1Gi"
-					brokerMemLim = "1Gi"
-					brokerCPUReq = "250m"
-					brokerCPULim = "500m"
-					brokerJvmXms = "512m"
-					brokerJvmXmx = "512m"
-					brokerStorage = "5Gi"
-				}
-				if deployHA {
-					brokerReplicas = 3
-				}
+					if deploySimpleDev {
+						brokerMemReq = "1Gi"
+						brokerMemLim = "1Gi"
+						brokerCPUReq = "250m"
+						brokerCPULim = "500m"
+						brokerJvmXms = "512m"
+						brokerJvmXmx = "512m"
+						brokerStorage = "5Gi"
+					}
+					if deployHA {
+						brokerReplicas = 3
+					}
 
-				brokerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
+					brokerPoolCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
   name: brokers
@@ -457,41 +466,128 @@ spec:
   jvmOptions:
     -Xms: %s
     -Xmx: %s`, namespace, brokerReplicas, brokerStorage,
-					brokerMemReq, brokerCPUReq, brokerMemLim, brokerCPULim,
-					brokerJvmXms, brokerJvmXmx)
+						brokerMemReq, brokerCPUReq, brokerMemLim, brokerCPULim,
+						brokerJvmXms, brokerJvmXmx)
 
-				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, brokerPoolCR); err != nil {
-					return fmt.Errorf("KafkaNodePool brokers deploy failed: %w", err)
-				}
-
-				dl.Printf("    %s KafkaNodePools applied (controllers: %d, brokers: %d)\n",
-					output.SuccessStyle.Render("✔"), controllerReplicas, brokerReplicas)
-			} else {
-				dl.Println("⏭️  Kafka Cluster already deployed. Skipping.")
-				dl.FinishComponent("kafka", true)
-				advanceStep()
-			}
-
-			// ─────────────────────────────────────────────────────────
-			// (c) Wait for Kafka readiness
-			// ─────────────────────────────────────────────────────────
-			if !isTesting {
-				if deployKafka {
-					dl.StartComponent("kafka", 15*time.Minute)
-					if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/cluster=krafter", 15*time.Minute); err != nil {
-						return fmt.Errorf("kafka readiness failed: %w", err)
+					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, brokerPoolCR); err != nil {
+						kafkaErr = fmt.Errorf("KafkaNodePool brokers deploy failed: %w", err)
+						return
 					}
+
+					dl.Printf("    %s KafkaNodePools applied (controllers: %d, brokers: %d)\n",
+						output.SuccessStyle.Render("✔"), controllerReplicas, brokerReplicas)
+				} else {
+					dl.Println("⏭️  Kafka Cluster already deployed. Skipping.")
 					dl.FinishComponent("kafka", true)
 					advanceStep()
 				}
+			}()
 
-				// Wait for PostgreSQL
-				if deployPG {
-					dl.StartComponent("postgres", 5*time.Minute)
-					if err := waitComponentReadySilent(ctx, namespace, "app.kubernetes.io/instance=postgresql", 5*time.Minute); err != nil {
-						dl.FinishComponent("postgres", false)
-						dl.Printf("    %s PostgreSQL not ready: %v\n", output.WarningStyle.Render("⚠"), err)
+			// ── goroutine 3: Apicurio (if schema registry enabled) ──
+			if deployWithSchemaRegistry == "apicurio" {
+				phase1WG.Add(1)
+				go func() {
+					defer phase1WG.Done()
+					deployApicurio := !isHelmReleaseDeployedFn(ctx, "apicurio", namespace) || deploySimpleUpgrade
+					if deployApicurio {
+						dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", namespace)
+						dl.StartComponent("apicurio", 5*time.Minute)
+						if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry",
+							"-n", namespace,
+							"--timeout", "5m"); err != nil {
+							dl.FinishComponent("apicurio", false)
+							apicurioErr = fmt.Errorf("Apicurio deploy failed: %w", err)
+							return
+						}
+						dl.FinishComponent("apicurio", true)
+						advanceStep()
 					} else {
+						dl.Println("⏭️  Apicurio already deployed.")
+						dl.FinishComponent("apicurio", true)
+						advanceStep()
+					}
+				}()
+			}
+
+			phase1WG.Wait()
+
+			if pgErr != nil {
+				return fmt.Errorf("PostgreSQL deploy failed: %w", pgErr)
+			}
+			if kafkaErr != nil {
+				return kafkaErr
+			}
+			if apicurioErr != nil {
+				return apicurioErr
+			}
+
+			// ── Phase 2: Wait for Kafka + PG readiness in parallel ──
+			if !isTesting {
+				var kafkaWaitErr, pgWaitErr error
+				var phase2WG sync.WaitGroup
+
+				// Kafka wait + users/topics goroutine
+				phase2WG.Add(1)
+				go func() {
+					defer phase2WG.Done()
+					if deployKafka {
+						dl.StartComponent("kafka", 10*time.Minute)
+						if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/cluster=krafter", 10*time.Minute); err != nil {
+							kafkaWaitErr = fmt.Errorf("kafka readiness failed: %w", err)
+							return
+						}
+						dl.FinishComponent("kafka", true)
+						advanceStep()
+					}
+
+					// Apply users/topics (needs Kafka ready)
+					dl.Println("    - Applying Kafka users and topics...")
+					applyManifestWithNamespace(ctx, "config/kafka/kafka-users.yaml", namespace)
+					applyManifestWithNamespace(ctx, "config/kafka/kafka-topics.yaml", namespace)
+
+					// Wait for Entity Operator (reduced to 3min)
+					dl.Println("    - Waiting for Entity Operator to start...")
+					eoDeadline := time.Now().Add(3 * time.Minute)
+					for time.Now().Before(eoDeadline) {
+						eoOut, _ := exec.CommandContext(ctx,
+							"kubectl", "get", "pods", "-n", namespace,
+							"-l", "app.kubernetes.io/name=entity-operator",
+							"--no-headers",
+							"-o", "custom-columns=PHASE:.status.phase",
+						).Output()
+						if strings.Contains(string(eoOut), "Running") {
+							dl.Printf("    %s Entity Operator running\n", output.AccentStyle.Render("✔"))
+							break
+						}
+						select {
+						case <-ctx.Done():
+							kafkaWaitErr = ctx.Err()
+							return
+						case <-time.After(5 * time.Second):
+						}
+					}
+
+					// Wait for KafkaUsers (reduced to 3min)
+					dl.StartComponent("kafka-users", 3*time.Minute)
+					err := waitKafkaUsersReadySilent(ctx, namespace, 3*time.Minute)
+					if err != nil {
+						dl.Printf("    %s KafkaUsers not all ready — downstream deploys will retry\n", output.WarningStyle.Render("⚠"))
+					}
+					dl.FinishComponent("kafka-users", true)
+					advanceStep()
+				}()
+
+				// PostgreSQL wait goroutine
+				phase2WG.Add(1)
+				go func() {
+					defer phase2WG.Done()
+					if deployPG {
+						dl.StartComponent("postgres", 5*time.Minute)
+						if err := waitComponentReadySilent(ctx, namespace, "app.kubernetes.io/instance=postgresql", 5*time.Minute); err != nil {
+							dl.FinishComponent("postgres", false)
+							pgWaitErr = fmt.Errorf("PostgreSQL not ready: %w", err)
+							return
+						}
 						dl.FinishComponent("postgres", true)
 						// Grant superuser and replication to debezium after DB is ready
 						for i := 0; i < 5; i++ {
@@ -503,54 +599,31 @@ spec:
 							}
 							time.Sleep(2 * time.Second)
 						}
+						advanceStep()
 					}
-					advanceStep()
+				}()
+
+				phase2WG.Wait()
+
+				if kafkaWaitErr != nil {
+					return kafkaWaitErr
 				}
+				// PG wait is non-fatal (just warn)
+				if pgWaitErr != nil {
+					dl.Printf("    %s %v\n", output.WarningStyle.Render("⚠"), pgWaitErr)
+				}
+			} else {
+				// In test mode, skip waits but still apply users/topics
+				dl.Println("    - Applying Kafka users and topics...")
+				applyManifestWithNamespace(ctx, "config/kafka/kafka-users.yaml", namespace)
+				applyManifestWithNamespace(ctx, "config/kafka/kafka-topics.yaml", namespace)
+				dl.FinishComponent("kafka-users", true)
+				advanceStep()
 			}
 
-			// ─────────────────────────────────────────────────────────
-			// (d) Apply kafka users and topics
-			// ─────────────────────────────────────────────────────────
-			dl.Println("    - Applying Kafka users and topics...")
-			applyManifestWithNamespace(ctx, "config/kafka/kafka-users.yaml", namespace)
-			applyManifestWithNamespace(ctx, "config/kafka/kafka-topics.yaml", namespace)
+			// ── Phase 3: PG secret + Connect (needs both Kafka + PG) ──
 
-			// ─────────────────────────────────────────────────────────
-			// (e) Wait for Entity Operator and KafkaUsers
-			// ─────────────────────────────────────────────────────────
-			if !isTesting {
-				dl.Println("    - Waiting for Entity Operator to start...")
-				eoDeadline := time.Now().Add(5 * time.Minute)
-				for time.Now().Before(eoDeadline) {
-					eoOut, _ := exec.CommandContext(ctx,
-						"kubectl", "get", "pods", "-n", namespace,
-						"-l", "app.kubernetes.io/name=entity-operator",
-						"--no-headers",
-						"-o", "custom-columns=PHASE:.status.phase",
-					).Output()
-					if strings.Contains(string(eoOut), "Running") {
-						dl.Printf("    %s Entity Operator running\n", output.AccentStyle.Render("✔"))
-						break
-					}
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-time.After(5 * time.Second):
-					}
-				}
-
-				dl.StartComponent("kafka-users", 8*time.Minute)
-				err := waitKafkaUsersReadySilent(ctx, namespace, 8*time.Minute)
-				if err != nil {
-					dl.Printf("    %s KafkaUsers not all ready after 8m — downstream deploys will retry secret lookup\n", output.WarningStyle.Render("⚠"))
-				}
-			}
-			dl.FinishComponent("kafka-users", true)
-			advanceStep()
-
-			// ─────────────────────────────────────────────────────────
-			// (f) Create PG credentials secret
-			// ─────────────────────────────────────────────────────────
+			// Create PG credentials secret
 			dl.Println("    - Creating PostgreSQL credentials secret for Kafka Connect...")
 			pgSecretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -563,9 +636,7 @@ stringData:
   username: %s`, namespace, deploySimplePgPassword, deploySimplePgUser)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
-			// ─────────────────────────────────────────────────────────
-			// (g) Kafka Connect (direct CR application)
-			// ─────────────────────────────────────────────────────────
+			// Kafka Connect CR deploy
 			connectDeployed := isSimpleComponentDeployed(ctx, namespace, "kafkaconnect", "connect-cluster")
 			if connectDeployed && !deploySimpleUpgrade {
 				if !isTesting {
@@ -674,12 +745,10 @@ spec:
 				advanceStep()
 			}
 
-			// ─────────────────────────────────────────────────────────
-			// (h) Wait for Kafka Connect readiness
-			// ─────────────────────────────────────────────────────────
+			// Wait for Kafka Connect readiness (reduced to 10min)
 			if !isTesting {
-				dl.StartComponent("kafka-connect", 15*time.Minute)
-				if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/kind=KafkaConnect", 15*time.Minute); err != nil {
+				dl.StartComponent("kafka-connect", 10*time.Minute)
+				if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/kind=KafkaConnect", 10*time.Minute); err != nil {
 					dl.FinishComponent("kafka-connect", false)
 					return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
 				}
@@ -687,9 +756,7 @@ spec:
 				advanceStep()
 			}
 
-			// ─────────────────────────────────────────────────────────
-			// (i) Deploy Debezium and JDBC Sink connectors
-			// ─────────────────────────────────────────────────────────
+			// Deploy connectors (if enabled)
 			if deploySimpleWithConnectors {
 				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
 
@@ -773,9 +840,7 @@ spec:
 					dl.Printf("    %s JDBC Sink connector already exists — skipping\n", output.SuccessStyle.Render("✔"))
 				}
 
-				// ─────────────────────────────────────────────────────────
-				// (j) Wait for connectors
-				// ─────────────────────────────────────────────────────────
+				// Wait for connectors
 				if !isTesting {
 					dl.StartComponent("kafka-connector", 10*time.Minute)
 					if err := waitConnectorReadySilent(ctx, namespace, 10*time.Minute); err != nil {
@@ -787,32 +852,7 @@ spec:
 				advanceStep()
 			}
 
-			// ─────────────────────────────────────────────────────────
-			// (k) Apicurio Registry (optional)
-			// ─────────────────────────────────────────────────────────
-			if deployWithSchemaRegistry == "apicurio" {
-				deployApicurio := !isHelmReleaseDeployedFn(ctx, "apicurio", namespace) || deploySimpleUpgrade
-				if deployApicurio {
-					dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", namespace)
-					dl.StartComponent("apicurio", 5*time.Minute)
-					if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry",
-						"-n", namespace,
-						"--timeout", "5m"); err != nil {
-						dl.FinishComponent("apicurio", false)
-						return fmt.Errorf("Apicurio deploy failed: %w", err)
-					}
-					dl.FinishComponent("apicurio", true)
-					advanceStep()
-				} else {
-					dl.Println("⏭️  Apicurio already deployed.")
-					dl.FinishComponent("apicurio", true)
-					advanceStep()
-				}
-			}
-
-			// ─────────────────────────────────────────────────────────
-			// (l) Kates Backend (optional)
-			// ─────────────────────────────────────────────────────────
+			// ── Phase 4: Kates Backend (if enabled) ──
 			if deploySimpleWithBackend {
 				deployBackend := !isHelmReleaseDeployedFn(ctx, "kates", namespace) || deploySimpleUpgrade
 				if deployBackend {
