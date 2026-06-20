@@ -41,6 +41,7 @@ type DeploySummaryEntry struct {
 	Status    string        // "deployed", "skipped", "failed"
 	Error     string        // error message if failed
 	Duration  time.Duration // per-component deploy time
+	CRDKind   string        // if set, fall back to 'kubectl get <CRDKind> <Release>' when Helm check fails
 }
 
 // RenderDeployDashboard renders the full deployment summary using lipgloss.
@@ -99,7 +100,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
 		for _, e := range groups[g] {
-			status := getComponentStatus(ctx, e.Release, e.Namespace)
+			status := getComponentStatus(ctx, e)
 			printRow(e.Icon, e.Name, e.Namespace, status)
 		}
 	}
@@ -144,13 +145,23 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	fmt.Println()
 }
 
-func getComponentStatus(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
-	if cmd.Run() == nil {
+func getComponentStatus(ctx context.Context, entry DeploySummaryEntry) string {
+	// First, try Helm release check.
+	helmCtx, helmCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer helmCancel()
+	if exec.CommandContext(helmCtx, "helm", "status", entry.Release, "-n", entry.Namespace).Run() == nil {
 		return "ready"
 	}
+
+	// Fall back to kubectl for CR-based components (e.g. Strimzi KafkaConnect, Kafka).
+	if entry.CRDKind != "" {
+		crCtx, crCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer crCancel()
+		if exec.CommandContext(crCtx, "kubectl", "get", entry.CRDKind, entry.Release, "-n", entry.Namespace).Run() == nil {
+			return "ready"
+		}
+	}
+
 	return "skip"
 }
 
