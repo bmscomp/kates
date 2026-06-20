@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,17 +16,222 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // Simple deploy configuration flags (registered in deploy.go init())
 var (
 	deploySimplePgUser         string
 	deploySimplePgPassword     string
+	deploySimplePgDatabase     string
 	deploySimpleUpgrade        bool
 	deploySimpleWithConnectors bool
 	deploySimpleWithBackend    bool
 	deploySimpleDev            bool
+
+	// JVM overrides (empty = auto-compute from cluster capacity)
+	deploySimpleBrokerJvmXms     string
+	deploySimpleBrokerJvmXmx     string
+	deploySimpleControllerJvmXms string
+	deploySimpleControllerJvmXmx string
+	deploySimpleConnectJvmXms    string
+	deploySimpleConnectJvmXmx    string
+
+	// Image and version overrides
+	deploySimpleConnectImage  string
+	deploySimpleKafkaVersion  string
+	deploySimpleClusterDomain string
+	deploySimpleConfigFile    string
 )
+
+// simpleConfig holds optional overrides loaded from a .kates.yaml config file.
+// Any non-empty field overrides the compiled-in default (but CLI flags take
+// highest precedence).
+type simpleConfig struct {
+	Images struct {
+		Connect    string `yaml:"connect"`
+		PostgreSQL string `yaml:"postgresql"`
+	} `yaml:"images"`
+	Kafka struct {
+		Version string `yaml:"version"`
+	} `yaml:"kafka"`
+	JVM struct {
+		BrokerXms     string `yaml:"brokerXms"`
+		BrokerXmx     string `yaml:"brokerXmx"`
+		ControllerXms string `yaml:"controllerXms"`
+		ControllerXmx string `yaml:"controllerXmx"`
+		ConnectXms    string `yaml:"connectXms"`
+		ConnectXmx    string `yaml:"connectXmx"`
+	} `yaml:"jvm"`
+	ClusterDomain string `yaml:"clusterDomain"`
+	PGDatabase    string `yaml:"pgDatabase"`
+}
+
+// loadSimpleConfig reads .kates.yaml from the current directory, then
+// ~/.kates.yaml as fallback. Returns an empty config if neither exists.
+func loadSimpleConfig(explicitPath string) simpleConfig {
+	var cfg simpleConfig
+	paths := []string{}
+	if explicitPath != "" {
+		paths = append(paths, explicitPath)
+	} else {
+		paths = append(paths, ".kates.yaml")
+		if home, err := os.UserHomeDir(); err == nil {
+			paths = append(paths, filepath.Join(home, ".kates.yaml"))
+		}
+	}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		_ = yaml.Unmarshal(data, &cfg)
+		return cfg
+	}
+	return cfg
+}
+
+// resolveParam returns the first non-empty value from: CLI flag, config file,
+// normal default, or dev default (when --dev is set).
+func resolveParam(flag, cfgVal, normal, dev string) string {
+	if flag != "" {
+		return flag
+	}
+	if cfgVal != "" {
+		return cfgVal
+	}
+	if deploySimpleDev && dev != "" {
+		return dev
+	}
+	return normal
+}
+
+// autoComputeJVM determines JVM heap sizes based on the cluster's total
+// allocatable memory (in GiB). Returns sensible defaults if totalMemGi is 0.
+func autoComputeJVM(totalMemGi int) (brokerXms, brokerXmx, controllerXms, controllerXmx, connectXms, connectXmx string) {
+	// Defaults
+	brokerXms, brokerXmx = "1024m", "1024m"
+	controllerXms, controllerXmx = "512m", "512m"
+	connectXms, connectXmx = "256m", "512m"
+
+	if totalMemGi == 0 {
+		return
+	}
+
+	// Scale JVM sizes based on available cluster memory
+	// Small cluster (≤8Gi): dev-like sizing
+	// Medium cluster (8-32Gi): standard sizing
+	// Large cluster (>32Gi): generous sizing
+	switch {
+	case totalMemGi <= 8:
+		brokerXms, brokerXmx = "512m", "512m"
+		controllerXms, controllerXmx = "256m", "256m"
+		connectXms, connectXmx = "256m", "256m"
+	case totalMemGi <= 32:
+		brokerXms, brokerXmx = "1024m", "1024m"
+		controllerXms, controllerXmx = "512m", "512m"
+		connectXms, connectXmx = "256m", "512m"
+	default:
+		brokerXms, brokerXmx = "2048m", "2048m"
+		controllerXms, controllerXmx = "1024m", "1024m"
+		connectXms, connectXmx = "512m", "1024m"
+	}
+	return
+}
+
+// getClusterMemoryGiB queries Kubernetes nodes for total allocatable memory.
+// Returns 0 if the query fails (e.g. no permissions to list nodes).
+func getClusterMemoryGiB() int {
+	out, err := exec.Command("kubectl", "get", "nodes",
+		"-o", "jsonpath={.items[*].status.allocatable.memory}").Output()
+	if err != nil {
+		return 0
+	}
+	totalKi := 0
+	for _, field := range strings.Fields(strings.TrimSpace(string(out))) {
+		field = strings.TrimSpace(field)
+		if strings.HasSuffix(field, "Ki") {
+			v, _ := strconv.Atoi(strings.TrimSuffix(field, "Ki"))
+			totalKi += v
+		} else if strings.HasSuffix(field, "Mi") {
+			v, _ := strconv.Atoi(strings.TrimSuffix(field, "Mi"))
+			totalKi += v * 1024
+		} else if strings.HasSuffix(field, "Gi") {
+			v, _ := strconv.Atoi(strings.TrimSuffix(field, "Gi"))
+			totalKi += v * 1024 * 1024
+		}
+	}
+	return totalKi / (1024 * 1024) // KiB → GiB
+}
+
+// parseMem converts a Kubernetes memory string (e.g. "512Mi", "1Gi", "1024m")
+// to megabytes for JVM heap comparison. Returns 0 on parse failure.
+func parseMem(s string) int {
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "Gi") {
+		v, _ := strconv.Atoi(strings.TrimSuffix(s, "Gi"))
+		return v * 1024
+	}
+	if strings.HasSuffix(s, "Mi") {
+		v, _ := strconv.Atoi(strings.TrimSuffix(s, "Mi"))
+		return v
+	}
+	if strings.HasSuffix(s, "m") {
+		v, _ := strconv.Atoi(strings.TrimSuffix(s, "m"))
+		return v
+	}
+	v, _ := strconv.Atoi(s)
+	return v
+}
+
+// detectClusterDomainLightweight finds a running pod in any namespace and
+// parses its /etc/resolv.conf to determine the cluster domain.
+// Returns "cluster.local" as fallback if detection fails.
+func detectClusterDomainLightweight() string {
+	domain := "cluster.local"
+
+	// Find a running pod in any namespace
+	out, err := exec.Command("kubectl", "get", "pods", "--all-namespaces",
+		"--field-selector=status.phase=Running",
+		"-o", "jsonpath={.items[0].metadata.namespace}/{.items[0].metadata.name}").Output()
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return domain
+	}
+
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "/", 2)
+	if len(parts) != 2 {
+		return domain
+	}
+	ns, podName := parts[0], parts[1]
+
+	// Read resolv.conf from that pod
+	resolvOut, err := exec.Command("kubectl", "exec", "-n", ns, podName,
+		"--", "cat", "/etc/resolv.conf").Output()
+	if err != nil {
+		return domain
+	}
+
+	// Parse "search" line for "svc.<domain>" entry
+	for _, line := range strings.Split(string(resolvOut), "\n") {
+		if !strings.Contains(line, "search") {
+			continue
+		}
+		for _, field := range strings.Fields(line) {
+			if strings.HasPrefix(field, "svc.") {
+				return strings.TrimPrefix(field, "svc.")
+			}
+			// Also handle <ns>.svc.<domain> format
+			prefix := ns + ".svc."
+			if strings.HasPrefix(field, prefix) {
+				return strings.TrimPrefix(field, prefix)
+			}
+		}
+	}
+	return domain
+}
+
+// kafkaClusterName is the Strimzi Kafka cluster name used by simple deploy.
+const kafkaClusterName = "krafter"
 
 // validateSimplePrerequisites runs pre-flight checks for simple deploy mode.
 // It verifies: namespace exists, Strimzi CRDs installed, Strimzi operator
@@ -123,22 +330,38 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 45)))
 
-	// ── Detect cluster domain from DNS (no admin required) ─────────
+	// ── Load config file (.kates.yaml) ──────────────────────────────
+	cfg := loadSimpleConfig(deploySimpleConfigFile)
+
+	// ── Detect cluster domain ───────────────────────────────────────
 	clusterDomain := "cluster.local"
-	if out, err := exec.CommandContext(context.Background(), "kubectl", "exec", "-n", namespace,
-		"--", "cat", "/etc/resolv.conf").Output(); err == nil {
-		// This will fail if no pods exist yet, that's fine — use default
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.Contains(line, "search") && strings.Contains(line, "svc.") {
-				for _, field := range strings.Fields(line) {
-					if strings.HasPrefix(field, "svc.") {
-						clusterDomain = strings.TrimPrefix(field, "svc.")
-						break
-					}
-				}
-			}
-		}
+	if deploySimpleClusterDomain != "" {
+		clusterDomain = deploySimpleClusterDomain
+	} else if cfg.ClusterDomain != "" {
+		clusterDomain = cfg.ClusterDomain
+	} else {
+		// Lightweight detection: find any running pod across all namespaces
+		// and parse its /etc/resolv.conf (no admin, no TTY needed)
+		clusterDomain = detectClusterDomainLightweight()
 	}
+
+	// ── Resolve parameterized values (CLI > config > auto > default) ──
+	kafkaVersion := resolveParam(deploySimpleKafkaVersion, cfg.Kafka.Version, "4.2.0", "")
+	connectImage := resolveParam(deploySimpleConnectImage, cfg.Images.Connect, "ghcr.io/bmscomp/connect:3.0.2", "")
+	pgDatabase := resolveParam(deploySimplePgDatabase, cfg.PGDatabase, "orders", "")
+
+	// Auto-compute JVM based on cluster capacity (admin-free: kubectl get nodes)
+	clusterMemGi := getClusterMemoryGiB()
+	autoBrokerXms, autoBrokerXmx, autoCtrlXms, autoCtrlXmx, autoConnXms, autoConnXmx := autoComputeJVM(clusterMemGi)
+	brokerJvmXms := resolveParam(deploySimpleBrokerJvmXms, cfg.JVM.BrokerXms, autoBrokerXms, "512m")
+	brokerJvmXmx := resolveParam(deploySimpleBrokerJvmXmx, cfg.JVM.BrokerXmx, autoBrokerXmx, "512m")
+	controllerJvmXms := resolveParam(deploySimpleControllerJvmXms, cfg.JVM.ControllerXms, autoCtrlXms, "256m")
+	controllerJvmXmx := resolveParam(deploySimpleControllerJvmXmx, cfg.JVM.ControllerXmx, autoCtrlXmx, "256m")
+	connectJvmXms := resolveParam(deploySimpleConnectJvmXms, cfg.JVM.ConnectXms, autoConnXms, "256m")
+	connectJvmXmx := resolveParam(deploySimpleConnectJvmXmx, cfg.JVM.ConnectXmx, autoConnXmx, "512m")
+
+	// Compute Kafka bootstrap URL from cluster name, namespace and domain
+	kafkaBootstrap := fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s:9092", kafkaClusterName, namespace, clusterDomain)
 
 	if deploySimpleDev {
 		fmt.Println(lipgloss.NewStyle().Foreground(clrAccent).
@@ -169,7 +392,7 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 	dashboard.RegisterComponent("postgres", "PostgreSQL", "A",
 		Target{namespace, "app.kubernetes.io/instance=postgresql"})
 	dashboard.RegisterComponent("kafka", "Kafka Cluster", "A",
-		Target{namespace, "strimzi.io/cluster=krafter"})
+		Target{namespace, "strimzi.io/cluster=" + kafkaClusterName})
 	dashboard.RegisterComponent("kafka-users", "Kafka Users", "A",
 		Target{namespace, "app.kubernetes.io/name=entity-operator"})
 	dashboard.RegisterComponent("kafka-connect", "Kafka Connect", "B",
@@ -206,8 +429,8 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 	var sharedEntries []DeploySummaryEntry
 	sharedEntries = append(sharedEntries,
 		DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: namespace, Group: "A"},
-		DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: namespace, Group: "A"},
-		DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: namespace, Group: "B"},
+		DeploySummaryEntry{Icon: "📨", Name: "Kafka (" + kafkaClusterName + ")", Release: kafkaClusterName, Namespace: namespace, Group: "A", CRDKind: "kafka"},
+		DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: namespace, Group: "B", CRDKind: "kafkaconnect"},
 	)
 	if deployWithSchemaRegistry == "apicurio" {
 		sharedEntries = append(sharedEntries,
@@ -227,6 +450,8 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 			key := e.Release + "/" + e.Namespace
 			if isHelmReleaseDeployedFn(dryCtx, e.Release, e.Namespace) {
 				existingReleases[key] = true
+			} else if e.CRDKind != "" && isSimpleComponentDeployed(dryCtx, e.Namespace, e.CRDKind, e.Release) {
+				existingReleases[key] = true
 			}
 		}
 		renderDeployPreview(sharedEntries, existingReleases)
@@ -243,10 +468,10 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 		defer p.Quit()
 
 		deployErr = func() error {
-			// ── Phase 1: Deploy PG + Kafka + Apicurio in parallel ──
-			var pgErr, kafkaErr, apicurioErr error
+			// ── Phase 1: Deploy PG + Kafka in parallel ──
+			var pgErr, kafkaErr error
 			deployPG := !isHelmReleaseDeployedFn(ctx, "postgresql", namespace) || deploySimpleUpgrade
-			deployKafka := !isSimpleComponentDeployed(ctx, namespace, "kafka", "krafter") || deploySimpleUpgrade
+			deployKafka := !isSimpleComponentDeployed(ctx, namespace, "kafka", kafkaClusterName) || deploySimpleUpgrade
 
 			var phase1WG sync.WaitGroup
 
@@ -266,7 +491,7 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 						"--set", "auth.postgresPassword=postgres",
 						"--set", "auth.username=" + deploySimplePgUser,
 						"--set", "auth.password=" + deploySimplePgPassword,
-						"--set", "auth.database=orders",
+						"--set", "auth.database=" + pgDatabase,
 						"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
 						"--timeout", "5m",
 					}
@@ -304,14 +529,14 @@ func runSimpleDeploy(cmd *cobra.Command, namespace string) error {
 					kafkaCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
-  name: krafter
+  name: %s
   namespace: %s
   annotations:
     strimzi.io/node-pools: enabled
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    version: 4.2.0
+    version: %s
     listeners:
       - name: plain
         port: 9092
@@ -349,7 +574,7 @@ spec:
     topicOperator:
       reconciliationIntervalMs: 10000
     userOperator:
-      reconciliationIntervalMs: 10000`, namespace, replicationFactor, minISR, replicationFactor, replicationFactor, minISR)
+      reconciliationIntervalMs: 10000`, kafkaClusterName, namespace, kafkaVersion, replicationFactor, minISR, replicationFactor, replicationFactor, minISR)
 
 					if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, kafkaCR); err != nil {
 						kafkaErr = fmt.Errorf("Kafka deploy failed: %w", err)
@@ -362,8 +587,6 @@ spec:
 					controllerMemLim := "1Gi"
 					controllerCPUReq := "500m"
 					controllerCPULim := "1000m"
-					controllerJvmXms := "512m"
-					controllerJvmXmx := "512m"
 					controllerStorage := "5Gi"
 
 					if deploySimpleDev {
@@ -371,8 +594,6 @@ spec:
 						controllerMemLim = "512Mi"
 						controllerCPUReq = "100m"
 						controllerCPULim = "500m"
-						controllerJvmXms = "256m"
-						controllerJvmXmx = "256m"
 						controllerStorage = "1Gi"
 					}
 					if deployHA {
@@ -385,7 +606,7 @@ metadata:
   name: controllers
   namespace: %s
   labels:
-    strimzi.io/cluster: krafter
+    strimzi.io/cluster: %s
 spec:
   replicas: %d
   roles:
@@ -406,7 +627,7 @@ spec:
       cpu: %s
   jvmOptions:
     -Xms: %s
-    -Xmx: %s`, namespace, controllerReplicas, controllerStorage,
+    -Xmx: %s`, namespace, kafkaClusterName, controllerReplicas, controllerStorage,
 						controllerMemReq, controllerCPUReq, controllerMemLim, controllerCPULim,
 						controllerJvmXms, controllerJvmXmx)
 
@@ -421,8 +642,6 @@ spec:
 					brokerMemLim := "2Gi"
 					brokerCPUReq := "500m"
 					brokerCPULim := "1000m"
-					brokerJvmXms := "1024m"
-					brokerJvmXmx := "1024m"
 					brokerStorage := "10Gi"
 
 					if deploySimpleDev {
@@ -430,8 +649,6 @@ spec:
 						brokerMemLim = "1Gi"
 						brokerCPUReq = "250m"
 						brokerCPULim = "500m"
-						brokerJvmXms = "512m"
-						brokerJvmXmx = "512m"
 						brokerStorage = "5Gi"
 					}
 					if deployHA {
@@ -444,7 +661,7 @@ metadata:
   name: brokers
   namespace: %s
   labels:
-    strimzi.io/cluster: krafter
+    strimzi.io/cluster: %s
 spec:
   replicas: %d
   roles:
@@ -465,7 +682,7 @@ spec:
       cpu: %s
   jvmOptions:
     -Xms: %s
-    -Xmx: %s`, namespace, brokerReplicas, brokerStorage,
+    -Xmx: %s`, namespace, kafkaClusterName, brokerReplicas, brokerStorage,
 						brokerMemReq, brokerCPUReq, brokerMemLim, brokerCPULim,
 						brokerJvmXms, brokerJvmXmx)
 
@@ -483,32 +700,6 @@ spec:
 				}
 			}()
 
-			// ── goroutine 3: Apicurio (if schema registry enabled) ──
-			if deployWithSchemaRegistry == "apicurio" {
-				phase1WG.Add(1)
-				go func() {
-					defer phase1WG.Done()
-					deployApicurio := !isHelmReleaseDeployedFn(ctx, "apicurio", namespace) || deploySimpleUpgrade
-					if deployApicurio {
-						dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", namespace)
-						dl.StartComponent("apicurio", 5*time.Minute)
-						if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry",
-							"-n", namespace,
-							"--timeout", "5m"); err != nil {
-							dl.FinishComponent("apicurio", false)
-							apicurioErr = fmt.Errorf("Apicurio deploy failed: %w", err)
-							return
-						}
-						dl.FinishComponent("apicurio", true)
-						advanceStep()
-					} else {
-						dl.Println("⏭️  Apicurio already deployed.")
-						dl.FinishComponent("apicurio", true)
-						advanceStep()
-					}
-				}()
-			}
-
 			phase1WG.Wait()
 
 			if pgErr != nil {
@@ -516,9 +707,6 @@ spec:
 			}
 			if kafkaErr != nil {
 				return kafkaErr
-			}
-			if apicurioErr != nil {
-				return apicurioErr
 			}
 
 			// ── Phase 2: Wait for Kafka + PG readiness in parallel ──
@@ -532,12 +720,20 @@ spec:
 					defer phase2WG.Done()
 					if deployKafka {
 						dl.StartComponent("kafka", 10*time.Minute)
-						if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/cluster=krafter", 10*time.Minute); err != nil {
+						if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/cluster="+kafkaClusterName, 10*time.Minute); err != nil {
+							dl.FinishComponent("kafka", false)
 							kafkaWaitErr = fmt.Errorf("kafka readiness failed: %w", err)
 							return
 						}
 						dl.FinishComponent("kafka", true)
 						advanceStep()
+					} else {
+						// Even on re-deploy, verify Kafka is actually ready before
+						// applying users/topics that require Entity Operator
+						if err := waitComponentReadySilent(ctx, namespace, "strimzi.io/cluster="+kafkaClusterName, 3*time.Minute); err != nil {
+							kafkaWaitErr = fmt.Errorf("Kafka cluster not ready — cannot proceed: %w", err)
+							return
+						}
 					}
 
 					// Apply users/topics (needs Kafka ready)
@@ -621,6 +817,29 @@ spec:
 				advanceStep()
 			}
 
+			// ── Deploy Apicurio after KafkaUser secrets exist ──
+			if deployWithSchemaRegistry == "apicurio" {
+				deployApicurio := !isHelmReleaseDeployedFn(ctx, "apicurio", namespace) || deploySimpleUpgrade
+				if deployApicurio {
+					dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", namespace)
+					dl.StartComponent("apicurio", 5*time.Minute)
+					apicurioBootstrap := kafkaBootstrap
+					if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry",
+						"-n", namespace,
+						"--set", "global.kafka.bootstrapServers[0]="+apicurioBootstrap,
+						"--timeout", "5m"); err != nil {
+						dl.FinishComponent("apicurio", false)
+						return fmt.Errorf("Apicurio deploy failed: %w", err)
+					}
+					dl.FinishComponent("apicurio", true)
+					advanceStep()
+				} else {
+					dl.Println("⏭️  Apicurio already deployed.")
+					dl.FinishComponent("apicurio", true)
+					advanceStep()
+				}
+			}
+
 			// ── Phase 3: PG secret + Connect (needs both Kafka + PG) ──
 
 			// Create PG credentials secret
@@ -635,6 +854,35 @@ stringData:
   password: %s
   username: %s`, namespace, deploySimplePgPassword, deploySimplePgUser)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
+
+			// Grant Connect service account access to read the PG credentials secret
+			// (required by KubernetesSecretConfigProvider)
+			dl.Println("    - Granting Connect service account secret access...")
+			rbacYaml := fmt.Sprintf(`apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: connect-secret-reader
+  namespace: %s
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["connect-pg-credentials", "kates-connect"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: connect-secret-reader
+  namespace: %s
+subjects:
+  - kind: ServiceAccount
+    name: connect-cluster-connect
+    namespace: %s
+roleRef:
+  kind: Role
+  name: connect-secret-reader
+  apiGroup: rbac.authorization.k8s.io`, namespace, namespace, namespace)
+			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, rbacYaml)
 
 			// Kafka Connect CR deploy
 			connectDeployed := isSimpleComponentDeployed(ctx, namespace, "kafkaconnect", "connect-cluster")
@@ -652,7 +900,7 @@ stringData:
 			if !connectDeployed || deploySimpleUpgrade {
 				dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", namespace)
 
-				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
+				bootstrap := kafkaBootstrap
 				connectReplicas := 1
 				if deployHA {
 					connectReplicas = 3
@@ -666,18 +914,15 @@ stringData:
 				extraConfig := ""
 				if registryURL != "" {
 					extraConfig = fmt.Sprintf(`
-      key.converter: io.apicurio.registry.utils.converter.AvroConverter
-      key.converter.apicurio.registry.url: %s
-      key.converter.apicurio.registry.auto-register: "true"
-      value.converter: io.apicurio.registry.utils.converter.AvroConverter
-      value.converter.apicurio.registry.url: %s
-      value.converter.apicurio.registry.auto-register: "true"
-      schema.registry.url: %s`, registryURL, registryURL, registryURL)
+    schema.registry.url: %s`, registryURL)
 				}
 
-				connectResources := ""
+				connectResources := fmt.Sprintf(`
+  jvmOptions:
+    -Xms: %s
+    -Xmx: %s`, connectJvmXms, connectJvmXmx)
 				if deploySimpleDev {
-					connectResources = `
+					connectResources = fmt.Sprintf(`
   resources:
     requests:
       memory: 512Mi
@@ -686,8 +931,13 @@ stringData:
       memory: 1Gi
       cpu: 500m
   jvmOptions:
-    -Xms: 256m
-    -Xmx: 512m`
+    -Xms: %s
+    -Xmx: %s`, connectJvmXms, connectJvmXmx)
+				}
+
+				connectReplicationFactor := 1
+				if deployHA {
+					connectReplicationFactor = 3
 				}
 
 				connectCR := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -698,9 +948,13 @@ metadata:
   annotations:
     strimzi.io/use-connector-resources: "true"
 spec:
-  version: 4.2.0
+  version: %s
   replicas: %d
   bootstrapServers: %s
+  groupId: kates-connect
+  offsetStorageTopic: kates-connect-offsets
+  configStorageTopic: kates-connect-configs
+  statusStorageTopic: kates-connect-status
   authentication:
     type: scram-sha-512
     username: kates-connect
@@ -708,33 +962,14 @@ spec:
       secretName: kates-connect
       password: password
   config:
-    group.id: kates-connect
-    offset.storage.topic: connect-offsets
-    config.storage.topic: connect-configs
-    status.storage.topic: connect-status
-    offset.storage.replication.factor: 1
-    config.storage.replication.factor: 1
-    status.storage.replication.factor: 1
+    offset.storage.replication.factor: %d
+    config.storage.replication.factor: %d
+    status.storage.replication.factor: %d
     config.providers: secrets
     config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider%s
-  build:
-    output:
-      type: docker
-      image: localhost:5001/kates-connect:latest
-      pushSecret: ""
-    plugins:
-      - name: debezium-postgres
-        artifacts:
-          - type: maven
-            group: io.debezium
-            artifact: debezium-connector-postgres
-            version: 3.1.1.Final
-      - name: debezium-jdbc
-        artifacts:
-          - type: maven
-            group: io.debezium
-            artifact: debezium-connector-jdbc
-            version: 3.1.1.Final%s`, namespace, connectReplicas, bootstrap, extraConfig, connectResources)
+  image: %s%s`, namespace, kafkaVersion, connectReplicas, bootstrap,
+					connectReplicationFactor, connectReplicationFactor, connectReplicationFactor,
+					extraConfig, connectImage, connectResources)
 
 				if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectCR); err != nil {
 					return fmt.Errorf("Kafka Connect deploy failed: %w", err)
@@ -758,7 +993,7 @@ spec:
 
 			// Deploy connectors (if enabled)
 			if deploySimpleWithConnectors {
-				bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
+				bootstrap := kafkaBootstrap
 
 				// Debezium connector
 				checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", namespace, "--no-headers").CombinedOutput()
@@ -859,11 +1094,10 @@ spec:
 					dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", namespace)
 					dl.StartComponent("kates", 8*time.Minute)
 
-					bootstrapKates := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", namespace, clusterDomain)
 					if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
 						"-n", namespace,
 						"-f", "charts/kates/values-simple.yaml",
-						"--set", "kafka.bootstrapServers="+bootstrapKates,
+						"--set", "kafka.bootstrapServers="+kafkaBootstrap,
 						"--set", "monitoring.enabled=false",
 						"--timeout", "8m"); err != nil {
 						dl.FinishComponent("kates", false)
