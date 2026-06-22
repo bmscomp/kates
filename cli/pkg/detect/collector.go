@@ -219,6 +219,12 @@ func (c *Collector) getHelmVersion() (string, int) {
 	return "v" + out, major
 }
 
+// ParseNodes returns node information (CPU, memory, zone) from the cluster.
+// This is a lightweight call that only runs kubectl get nodes, no admin needed.
+func (c *Collector) ParseNodes() ([]NodeInfo, error) {
+	return c.parseNodes()
+}
+
 func (c *Collector) parseNodes() ([]NodeInfo, error) {
 	out, err := c.exec.Exec("kubectl", "get", "nodes", "-o", "json")
 	if err != nil {

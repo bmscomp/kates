@@ -117,10 +117,25 @@ func init() {
 	deployCmd.Flags().BoolVar(&deploySimple, "simple", false, "Namespace-scoped deploy (Kafka + PostgreSQL + Connect). Requires pre-installed Strimzi operator and pre-existing namespace.")
 	deployCmd.Flags().StringVar(&deploySimplePgUser, "pg-user", "debezium", "PostgreSQL username for CDC (simple mode)")
 	deployCmd.Flags().StringVar(&deploySimplePgPassword, "pg-password", "debezium", "PostgreSQL password for CDC (simple mode)")
+	deployCmd.Flags().StringVar(&deploySimplePgDatabase, "pg-database", "", "PostgreSQL database name (default: orders)")
 	deployCmd.Flags().BoolVar(&deploySimpleUpgrade, "upgrade", false, "Force upgrade of already-deployed components (simple mode)")
 	deployCmd.Flags().BoolVar(&deploySimpleWithConnectors, "with-connectors", true, "Deploy Debezium + JDBC Sink connectors (simple mode)")
 	deployCmd.Flags().BoolVar(&deploySimpleWithBackend, "with-kates-backend", false, "Deploy the Kates backend app (simple mode)")
 	deployCmd.Flags().BoolVar(&deploySimpleDev, "dev", false, "Minimal resources for dev/local environments (simple mode)")
+
+	// JVM tuning flags (empty = auto-computed from cluster capacity)
+	deployCmd.Flags().StringVar(&deploySimpleBrokerJvmXms, "broker-jvm-xms", "", "Kafka broker JVM -Xms (auto-computed if empty)")
+	deployCmd.Flags().StringVar(&deploySimpleBrokerJvmXmx, "broker-jvm-xmx", "", "Kafka broker JVM -Xmx (auto-computed if empty)")
+	deployCmd.Flags().StringVar(&deploySimpleControllerJvmXms, "controller-jvm-xms", "", "Kafka controller JVM -Xms (auto-computed if empty)")
+	deployCmd.Flags().StringVar(&deploySimpleControllerJvmXmx, "controller-jvm-xmx", "", "Kafka controller JVM -Xmx (auto-computed if empty)")
+	deployCmd.Flags().StringVar(&deploySimpleConnectJvmXms, "connect-jvm-xms", "", "Kafka Connect JVM -Xms (auto-computed if empty)")
+	deployCmd.Flags().StringVar(&deploySimpleConnectJvmXmx, "connect-jvm-xmx", "", "Kafka Connect JVM -Xmx (auto-computed if empty)")
+
+	// Image and version overrides
+	deployCmd.Flags().StringVar(&deploySimpleConnectImage, "connect-image", "", "Kafka Connect container image (default: ghcr.io/bmscomp/connect:latest)")
+	deployCmd.Flags().StringVar(&deploySimpleKafkaVersion, "kafka-version", "", "Kafka version (default: 4.2.0)")
+	deployCmd.Flags().StringVar(&deploySimpleClusterDomain, "cluster-domain", "", "Kubernetes cluster domain (auto-detected if empty)")
+	deployCmd.Flags().StringVar(&deploySimpleConfigFile, "config", "", "Path to .kates.yaml config file for image/JVM overrides")
 
 	rootCmd.AddCommand(deployCmd)
 }
