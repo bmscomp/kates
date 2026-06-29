@@ -897,6 +897,32 @@ kates kyverno audit <policy>
 kates kyv audit disallow-privilege-escalation
 ```
 
+#### kyverno detect
+
+Introspect the cluster and recommend Kyverno policies based on workloads, ingress, and namespace structures. It detects third-party policies and suggests Kates-native baseline policies.
+
+```bash
+kates kyverno detect
+```
+
+#### kyverno apply
+
+Automatically apply Kyverno policies based on cluster detection recommendations. Can optionally install the Kyverno Admission Controller if missing.
+
+```bash
+kates kyverno apply
+kates kyverno apply --dry-run
+kates kyverno apply --mode Enforce --yes --with-netpol
+```
+
+| Flag | Description |
+|---|---|
+| `--mode` | Validation mode: `Audit` or `Enforce` (default: `Audit`) |
+| `--with-cosign` | Enable Cosign image signature verification |
+| `--with-netpol` | Enable NetworkPolicy generation |
+| `--yes`, `-y` | Skip confirmation prompt |
+| `--dry-run` | Show what would be applied without executing |
+
 ---
 
 ### kafka
