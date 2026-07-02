@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -949,9 +948,11 @@ metadata:
 
 			}
 
-			dl.Println("    - Applying Kafka users and topics...")
-			applyManifestWithNamespace(ctx, "config/kafka/kafka-users.yaml", kafkaNS)
-			applyManifestWithNamespace(ctx, "config/kafka/kafka-topics.yaml", kafkaNS)
+			// Kafka users and topics are managed declaratively by the Helm chart
+			// (charts/kafka-cluster templates/users.yaml + templates/topics.yaml).
+			// Applying them again via raw manifests causes MethodNotAllowed (HTTP 405)
+			// field-ownership conflicts with Helm's server-side apply.
+			dl.Println("    - Kafka users and topics managed by Helm chart")
 
 			if !isTesting {
 				dl.Println("    - Waiting for Entity Operator to start...")
@@ -1534,21 +1535,6 @@ func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS str
 		defer delCancel()
 		exec.CommandContext(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found").Run()
 	}
-}
-
-// applyManifestWithNamespace reads a YAML file, strips any hardcoded
-// `namespace:` fields from metadata, and applies it to the given namespace.
-// This ensures manifests work correctly regardless of deployment topology.
-var nsLineRegex = regexp.MustCompile(`(?m)^\s+namespace:\s+\S+\s*$`)
-
-func applyManifestWithNamespace(ctx context.Context, file, namespace string) error {
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", file, err)
-	}
-	// Strip hardcoded namespace lines so -n flag takes effect
-	stripped := nsLineRegex.ReplaceAllString(string(data), "")
-	return runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-", "-n", namespace}, stripped)
 }
 
 func sliceContains(s []string, v string) bool {

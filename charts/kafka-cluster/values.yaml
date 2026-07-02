@@ -297,6 +297,14 @@ topics:
         cleanup.policy: delete
         retention.ms: "86400000"
         min.insync.replicas: "2"
+    # Test sink topic for Kafka Connect sink connector validation
+    - name: test-sink-topic
+      partitions: 3
+      replicas: 3
+      config:
+        retention.ms: "86400000"
+        min.insync.replicas: "2"
+        cleanup.policy: delete
 
 users:
   # -- Enable managed user provisioning
