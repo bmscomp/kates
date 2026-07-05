@@ -1,9 +1,11 @@
-{{- if .Values.kafkaUser.enabled }}
+{{- $kafkaNS := include "kafka-ui.kafkaNamespace" . -}}
+{{- $releaseNS := include "kafka-ui.namespace" . -}}
+{{- if and .Values.kafkaUser.enabled (eq $kafkaNS $releaseNS) }}
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
   name: {{ .Values.kafkaUser.name | default "kafka-ui" }}
-  namespace: {{ include "kafka-ui.kafkaNamespace" . }}
+  namespace: {{ $kafkaNS }}
   labels:
     strimzi.io/cluster: {{ .Values.kafka.clusterName }}
     {{- include "kafka-ui.labels" . | nindent 4 }}
