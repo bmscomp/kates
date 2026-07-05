@@ -1,0 +1,42 @@
+{{- $kafkaNS := include "kafka-ui.kafkaNamespace" . -}}
+{{- $releaseNS := include "kafka-ui.namespace" . -}}
+{{- if and .Values.kafkaUser.enabled (eq $kafkaNS $releaseNS) }}
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: {{ .Values.kafkaUser.name | default "kafka-ui" }}
+  namespace: {{ $kafkaNS }}
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.clusterName }}
+    {{- include "kafka-ui.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  authentication:
+    type: scram-sha-512
+  {{- with .Values.kafkaUser.quotas }}
+  quotas:
+    producerByteRate: {{ .producerByteRate }}
+    consumerByteRate: {{ .consumerByteRate }}
+    requestPercentage: {{ .requestPercentage }}
+  {{- end }}
+  authorization:
+    type: simple
+    acls:
+      {{- range .Values.kafkaUser.acls }}
+      - resource:
+          type: {{ .resource.type }}
+          {{- if .resource.name }}
+          name: {{ .resource.name | quote }}
+          {{- end }}
+          {{- if .resource.patternType }}
+          patternType: {{ .resource.patternType }}
+          {{- end }}
+        operations:
+          {{- range .operations }}
+          - {{ . }}
+          {{- end }}
+        host: "*"
+        type: allow
+      {{- end }}
+{{- end }}

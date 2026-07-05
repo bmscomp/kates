@@ -49,6 +49,7 @@ var (
 	deployAppNS              string
 	deployChaosNS            string
 	deployMonitoringNS       string
+	deployKafkaUINS          string
 	deployWithSchemaRegistry string
 	deployHA                 bool
 	deployWithChaos          bool
@@ -62,6 +63,7 @@ var (
 	deployVerbose            bool
 	deployPortForward        bool
 	deployDryRun             bool
+	deployWithKafkaUI        bool
 )
 
 func init() {
@@ -73,6 +75,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
+	deployCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
 
 	// Component flags
 	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "apicurio", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
@@ -84,6 +87,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithSecretManager, "with-secret-manager", false, "Deploy Secret Manager (e.g., External Secrets Operator)")
 	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
 	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
+	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
@@ -132,6 +136,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Options(
 						huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
 						huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
+						huh.NewOption("🖥️  Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
 						huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
 						huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
 						huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
@@ -197,6 +202,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				))
 			}
 
+			if sliceContains(components, "kafka-ui") {
+				nsGroups = append(nsGroups, huh.NewGroup(
+					huh.NewInput().
+						Title("Kafka UI Namespace").
+						Description("Namespace for the Kafka UI dashboard").
+						Value(&deployKafkaUINS),
+				))
+			}
+
 			form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates())
 			if err := form2.Run(); err != nil {
 				return err
@@ -208,6 +222,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		deployWithCertManager = false
 		deployWithKyverno = false
 		deployWithStrimzi = false
+		deployWithKafkaUI = false
 
 		for _, c := range components {
 			switch c {
@@ -215,6 +230,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				deployWithStrimzi = true
 			case "kafka-connect":
 				deployWithKafkaConnect = true
+			case "kafka-ui":
+				deployWithKafkaUI = true
 			case "chaos":
 				deployWithChaos = true
 			case "monitoring":
@@ -238,6 +255,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Database", deployDbNS))
 		}
 		PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kates App", deployAppNS))
+		if deployWithKafkaUI {
+			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kafka UI", deployKafkaUINS))
+		}
 		if deployWithMonitoring {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Monitoring", deployMonitoringNS))
 		}
@@ -266,6 +286,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	if deployWithKyverno {
 		PrintPhaseSuccess("Kyverno (Policies)")
+	}
+	if deployWithKafkaUI {
+		PrintPhaseSuccess("Kafka UI (Dashboard)")
 	}
 
 	// 3. Cluster Detection
@@ -351,12 +374,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return chartDir + "/values-generic.yaml"
 	}
 
+	fileExists := func(path string) bool {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+
 	// Resolve namespaces before building entries
-	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS string
+	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, kafkaUINS string
 	if deployTopology == "single" {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, kafkaUINS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, kafkaUINS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployKafkaUINS
 	}
 
 	// ── Build shared component registry (single source of truth) ──
@@ -382,6 +410,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: kafkaNS, Group: "C"})
 	}
 	sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: appNS, Group: "C"})
+	if deployWithKafkaUI {
+		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🖥️", Name: "Kafka UI", Release: "kafka-ui", Namespace: kafkaUINS, Group: "C"})
+	}
 	if deployWithChaos {
 		sharedEntries = append(sharedEntries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: chaosNS, Group: "C"})
 	}
@@ -425,6 +456,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		totalSteps++
 	}
 	totalSteps++ // kates
+	if deployWithKafkaUI {
+		totalSteps++
+	}
 	if deployWithChaos {
 		totalSteps++
 	}
@@ -463,6 +497,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		dashboard.RegisterComponent("apicurio", "Apicurio Registry", "C", Target{kafkaNS, "app.kubernetes.io/instance=apicurio"})
 	}
 	dashboard.RegisterComponent("kates", "Kates Backend", "C", Target{appNS, "app.kubernetes.io/instance=kates"})
+	if deployWithKafkaUI {
+		dashboard.RegisterComponent("kafka-ui", "Kafka UI", "C", Target{kafkaUINS, "app.kubernetes.io/name=kafka-ui"})
+	}
 	if deployWithChaos {
 		dashboard.RegisterComponent("chaos", "Litmus Chaos", "C", Target{chaosNS, "app.kubernetes.io/instance=chaos"})
 	}
@@ -1324,6 +1361,63 @@ data:
 				dl.Println("⏭️  Kates Backend already deployed.")
 				dl.FinishComponent("kates", true)
 				advanceStep()
+			}
+
+			// Deploy Kafka UI
+			if deployWithKafkaUI {
+				if !isHelmReleaseDeployedFn(ctx, "kafka-ui", kafkaUINS) {
+					dl.Printf("\n🖥️  Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
+					dl.StartComponent("kafka-ui", 5*time.Minute)
+
+					// Cross-namespace secret copy (KafkaUser secret lives in Kafka NS)
+					if kafkaUINS != kafkaNS {
+						nsYaml := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+spec: {}`, kafkaUINS)
+						runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+
+						dl.Println("    - Copying kafka-ui SASL credentials to UI namespace...")
+						pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kafka-ui",
+							"-n", kafkaNS, "-o", "jsonpath={.data.password}")
+						pwBytes, pwErr := pwCmd.Output()
+						if pwErr == nil && len(pwBytes) > 0 {
+							secretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-ui
+  namespace: %s
+type: Opaque
+data:
+  password: %s`, kafkaUINS, string(pwBytes))
+							runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
+						} else {
+							dl.Printf("    ⚠️  Secret 'kafka-ui' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+						}
+					}
+
+					helmArgs := []string{
+						"upgrade", "--install", "kafka-ui", "charts/kafka-ui",
+						"-n", kafkaUINS, "--create-namespace",
+						"--set", "kafka.clusterName=" + clusterName,
+						"--set", "kafka.namespace=" + kafkaNS,
+						"--timeout", "5m",
+					}
+					if overlay := chartOverlay("charts/kafka-ui"); fileExists(overlay) {
+						helmArgs = append(helmArgs, "-f", overlay)
+					}
+					if err := runHelmFn(ctx, helmArgs...); err != nil {
+						dl.FinishComponent("kafka-ui", false)
+						return err
+					}
+					dl.FinishComponent("kafka-ui", true)
+					advanceStep()
+				} else {
+					dl.Println("⏭️  Kafka UI already deployed.")
+					dl.FinishComponent("kafka-ui", true)
+					advanceStep()
+				}
 			}
 
 			// Deploy Chaos

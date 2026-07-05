@@ -1,0 +1,20 @@
+apiVersion: v2
+name: kafka-ui
+description: A Helm chart for deploying Kafka UI with Strimzi SCRAM-SHA-512 authentication
+type: application
+version: 0.1.0
+appVersion: "v0.7.2"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+  - https://github.com/provectus/kafka-ui
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+keywords:
+  - kafka
+  - kafka-ui
+  - monitoring
+  - strimzi
+  - dashboard

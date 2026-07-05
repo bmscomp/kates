@@ -1,0 +1,38 @@
+
+Kafka UI has been deployed!
+
+{{- if eq .Values.service.type "NodePort" }}
+
+Access Kafka UI via NodePort:
+
+  export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  echo "http://${NODE_IP}:{{ .Values.service.nodePort | default 30081 }}"
+
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+Access Kafka UI via LoadBalancer:
+
+  export LB_IP=$(kubectl get svc {{ include "kafka-ui.fullname" . }} -n {{ include "kafka-ui.namespace" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  echo "http://${LB_IP}:{{ .Values.service.port }}"
+
+{{- else }}
+
+Access Kafka UI via port-forward:
+
+  kubectl port-forward svc/{{ include "kafka-ui.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ include "kafka-ui.namespace" . }}
+  echo "http://localhost:{{ .Values.service.port }}"
+
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Or via Ingress:
+
+  {{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+  {{- end }}
+{{- end }}
+
+Kafka cluster: {{ .Values.kafka.clusterName }}
+Bootstrap:     {{ include "kafka-ui.bootstrapServers" . }}
+KafkaUser:     {{ .Values.kafkaUser.name }}
