@@ -75,7 +75,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kates", "Namespace for Kafka UI when topology is 'isolated'")
+	deployCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
 
 	// Component flags
 	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "apicurio", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
