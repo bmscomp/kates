@@ -13,7 +13,11 @@ spec:
     - Ingress
     - Egress
   ingress:
-    - ports:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
         - port: {{ .Values.containerPort }}
           protocol: TCP
   egress:

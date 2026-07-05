@@ -54,7 +54,7 @@ spec:
       ports:
         - port: 9091
           protocol: TCP
-    # Plain listener (SCRAM) — from kates, apicurio, litmus
+    # Plain listener (SCRAM) — from kates, apicurio, litmus, connect
     - from:
         - namespaceSelector:
             matchLabels:
@@ -65,6 +65,31 @@ spec:
         - podSelector:
             matchLabels:
               app: apicurio-registry
+        # Kafka Connect — same namespace (raw manifest deployment)
+        - podSelector:
+            matchLabels:
+              app: kates-connect
+        # Kafka Connect — cross-namespace (Helm chart deployment in connect ns)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: connect
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: KafkaConnect
+      ports:
+        - port: 9092
+          protocol: TCP
+    # In-namespace clients — Entity Operator, Kafka Exporter, Kafka UI
+    - from:
+        - podSelector:
+            matchLabels:
+              strimzi.io/name: krafter-entity-operator
+        - podSelector:
+            matchLabels:
+              strimzi.io/name: krafter-kafka-exporter
+        - podSelector:
+            matchLabels:
+              app: kafka-ui
       ports:
         - port: 9092
           protocol: TCP
@@ -239,6 +264,122 @@ spec:
         - port: 6443
           protocol: TCP
 ---
+# Entity Operator (Topic + User Operators): allow broker access + K8s API + health probes
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: entity-operator
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+      strimzi.io/name: krafter-entity-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Health/readiness probes + metrics from monitoring
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+  egress:
+    # To Kafka brokers (inter-broker + client ports)
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+      ports:
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+    # To Kubernetes API server
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# Kafka Exporter: allow Prometheus scraping + outbound to brokers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-exporter
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+      strimzi.io/name: krafter-kafka-exporter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Prometheus metrics scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9404
+          protocol: TCP
+  egress:
+    # To Kafka brokers (needs client port for consumer group / topic metadata)
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: krafter
+      ports:
+        - port: 9092
+          protocol: TCP
+    # To Kubernetes API
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Kafka UI: allow external access + outbound to brokers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-ui
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      app: kafka-ui
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # External access (NodePort / browser)
+    - from: []
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # To Kafka brokers
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: Kafka
+      ports:
+        - port: 9092
+          protocol: TCP
+    # To Kubernetes API (for SASL credential reads)
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+---
 # Kafka Connect: allow Prometheus metrics + REST from kates + outbound to brokers
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -277,6 +418,14 @@ spec:
               strimzi.io/kind: Kafka
       ports:
         - port: 9092
+          protocol: TCP
+    # To Apicurio Schema Registry (Avro/Protobuf/JSON Schema converter support)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: apicurio-registry
+      ports:
+        - port: 8080
           protocol: TCP
     # To Kubernetes API
     - to: []

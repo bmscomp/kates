@@ -338,7 +338,7 @@ faultTolerance:
 # -- NetworkPolicy configuration
 networkPolicy:
   # -- Enable NetworkPolicy
-  enabled: false
+  enabled: true
   # -- Ingress rules
   ingressRules:
     - from:

@@ -41,4 +41,4 @@ config:
   replicationFactor: 1
 
 networkPolicy:
-  enabled: false
+  enabled: true

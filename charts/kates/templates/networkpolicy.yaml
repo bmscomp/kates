@@ -32,8 +32,7 @@ spec:
           protocol: TCP
     {{- if .Values.postgresql.enabled }}
     - to:
-        - namespaceSelector: {}
-          podSelector:
+        - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "kates.postgresql.fullname" . }}
               app.kubernetes.io/component: database
@@ -50,17 +49,23 @@ spec:
           protocol: TCP
     {{- end }}
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
       ports:
         - port: {{ .Values.networkPolicy.kafka.port | default 9092 }}
           protocol: TCP
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: {{ .Values.networkPolicy.prometheus.port | default 9090 }}
           protocol: TCP
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 8889
           protocol: TCP
@@ -87,8 +92,7 @@ spec:
     - Ingress
   ingress:
     - from:
-        - namespaceSelector: {}
-          podSelector:
+        - podSelector:
             matchLabels:
               {{- include "kates.selectorLabels" . | nindent 14 }}
       ports:
