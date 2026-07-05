@@ -40,7 +40,7 @@ var wellKnownPorts = []struct {
 	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (plain)", 9092, 9092, ""},
 	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (TLS)", 9093, 9093, ""},
 	{"kafka/apicurio", "Apicurio Schema Registry", 80, 8081, "http://localhost:8081/ui"},
-	{"kafka/kafka-ui", "Kafka UI", 8080, 8085, "http://localhost:8085"},
+	{"kafka-ui/kafka-ui", "Kafka UI", 8080, 8085, "http://localhost:8085"},
 	{"monitoring/monitoring-grafana", "Grafana", 80, 3000, "http://localhost:3000"},
 	{"monitoring/monitoring-kube-prometheus-prometheus", "Prometheus", 9090, 9090, "http://localhost:9090"},
 	{"monitoring/monitoring-kube-prometheus-alertmanager", "Alertmanager", 9093, 9094, "http://localhost:9094"},
@@ -261,6 +261,9 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 			actualNS = portsAppNS
 		case "monitoring", "jaeger":
 			actualNS = portsMonitoringNS
+		case "kafka-ui":
+			// kafka-ui can live in kafka, kates, or its own namespace
+			actualNS = portsKafkaNS
 		default:
 			actualNS = defaultNS
 		}
@@ -281,6 +284,23 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 				URL:       wk.URL,
 			})
 			seen[wk.Label] = true
+		} else {
+			// Fallback: scan all discovered services for this service name
+			for key := range discovered {
+				if strings.HasSuffix(key, "/"+svc) {
+					parts := strings.SplitN(key, "/", 2)
+					specs = append(specs, portForwardSpec{
+						Label:     wk.Label,
+						Namespace: parts[0],
+						Resource:  "service/" + svc,
+						Remote:    wk.Remote,
+						Local:     wk.Local,
+						URL:       wk.URL,
+					})
+					seen[wk.Label] = true
+					break
+				}
+			}
 		}
 	}
 	return specs
