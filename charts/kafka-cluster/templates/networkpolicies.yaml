@@ -132,6 +132,22 @@ spec:
       ports:
         - port: 9404
           protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.operatorNamespace | default .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
+      ports:
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+        - port: 2181
+          protocol: TCP
   egress:
     - to:
         - podSelector:
@@ -235,6 +251,15 @@ spec:
           podSelector:
             matchLabels:
               strimzi.io/cluster: {{ $clusterName }}
+      ports:
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+        - port: 2181
+          protocol: TCP
     # Allow egress to Kafka Connect pods across all namespaces
     - to:
         - namespaceSelector:
@@ -243,6 +268,9 @@ spec:
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
+      ports:
+        - port: 8083
+          protocol: TCP
     # Allow egress to its own namespace pods
     - to:
         - namespaceSelector:
