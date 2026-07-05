@@ -1,0 +1,4 @@
+# Generic cluster overlay for kafka-ui
+# Disables components that require extra operators (like Prometheus CRDs)
+networkPolicy:
+  enabled: false

@@ -1,0 +1,144 @@
+# -- Image configuration
+image:
+  repository: provectuslabs/kafka-ui
+  tag: ""  # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# -- Number of replicas
+replicas: 1
+
+# -- Override names
+nameOverride: ""
+fullnameOverride: ""
+namespaceOverride: ""
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  nodePort: ""
+  annotations: {}
+
+# -- Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  #   - host: kafka-ui.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  tls: []
+
+# -- Kafka cluster connection
+kafka:
+  clusterName: "krafter"
+  # -- Namespace where the Kafka cluster lives (defaults to release namespace)
+  namespace: ""
+  # -- Override bootstrap servers (auto-computed from clusterName if empty)
+  bootstrapServers: ""
+  # -- Kubernetes cluster domain
+  clusterDomain: "cluster.local"
+  tls:
+    enabled: false
+    trustedCertificateSecret: ""
+    certificateKey: "ca.crt"
+
+# -- Kafka UI application authentication (login to the web UI itself)
+auth:
+  enabled: false
+  type: "DISABLED"
+  # type: "LOGIN_FORM"
+  # username: "admin"
+  # passwordSecret: ""
+
+# -- KafkaUser (Strimzi-managed SCRAM-SHA-512 credentials for connecting to Kafka)
+kafkaUser:
+  # -- Enable KafkaUser CRD creation
+  enabled: true
+  # -- Name of the KafkaUser and its auto-generated Secret
+  name: "kafka-ui"
+  # -- Quotas to limit Kafka UI resource usage
+  quotas:
+    producerByteRate: 1048576
+    consumerByteRate: 52428800
+    requestPercentage: 10
+  # -- ACL rules — read-only monitor by default
+  acls:
+    - resource:
+        type: topic
+        name: "*"
+        patternType: literal
+      operations: ["Describe", "Read"]
+    - resource:
+        type: group
+        name: "*"
+        patternType: literal
+      operations: ["Describe", "Read"]
+    - resource:
+        type: cluster
+      operations: ["Describe"]
+
+# -- NetworkPolicy configuration
+networkPolicy:
+  # -- Enable NetworkPolicy creation
+  enabled: true
+  # -- Namespace of the ingress controller (for browser access restriction)
+  ingressNamespace: "ingress-nginx"
+
+# -- Pod resource requests and limits
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+# -- Liveness probe configuration
+livenessProbe:
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+# -- Readiness probe configuration
+readinessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 10
+
+# -- Pod-level security context
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1000
+
+# -- Container-level security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# -- Extra environment variables
+extraEnv: []
+
+# -- Extra labels to add to all resources
+extraLabels: {}
+
+# -- Logging
+logging:
+  root: INFO
+  provectus: INFO
