@@ -11,7 +11,7 @@ dashboards:
   enabled: false
 
 networkPolicy:
-  enabled: false
+  enabled: true
 
 tracing:
   enabled: false

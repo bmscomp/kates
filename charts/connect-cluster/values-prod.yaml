@@ -57,3 +57,17 @@ networkPolicy:
   kafkaPorts:
     - 9093
   monitoringNamespace: monitoring
+
+databaseEgress:
+  - namespace: database
+    port: 5432
+    podSelector:
+      app.kubernetes.io/name: postgresql
+  - namespace: database
+    port: 3306
+    podSelector:
+      app.kubernetes.io/name: mysql
+  - namespace: database
+    port: 27017
+    podSelector:
+      app.kubernetes.io/name: mongodb

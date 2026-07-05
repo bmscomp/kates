@@ -17,16 +17,22 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 9404
           protocol: TCP
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
           podSelector:
             matchLabels:
               app.kubernetes.io/name: kates
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
@@ -44,7 +50,9 @@ spec:
         - port: 53
           protocol: TCP
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
           podSelector:
             matchLabels:
               strimzi.io/cluster: {{ .Values.kafka.clusterName }}
@@ -55,7 +63,9 @@ spec:
         {{- end }}
     {{- if .Values.schemaRegistry.enabled }}
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
           podSelector:
             matchLabels:
               app.kubernetes.io/name: apicurio-registry
@@ -65,7 +75,9 @@ spec:
     {{- end }}
     {{- range (default (list) .Values.databaseEgress) }}
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
           {{- with .podSelector }}
           podSelector:
             matchLabels:
@@ -88,7 +100,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-kafka-connect-ingress
+  name: allow-connect-ingress-{{ .port | default 5432 }}
   namespace: {{ .namespace }}
   labels:
     {{- include "connect-cluster.labels" $ | nindent 4 }}
@@ -104,7 +116,9 @@ spec:
     - Ingress
   ingress:
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "connect-cluster.namespace" $ }}
           podSelector:
             matchLabels:
               strimzi.io/name: {{ $clusterName }}
