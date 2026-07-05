@@ -1,5 +1,6 @@
 {{- if .Values.users.enabled }}
 {{- range .Values.users.items }}
+{{- if not (and (eq .name "kafka-ui") (not $.Values.kafkaUI.managedUser)) }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -23,5 +24,6 @@ spec:
     acls:
       {{- toYaml .acls | nindent 6 }}
   {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

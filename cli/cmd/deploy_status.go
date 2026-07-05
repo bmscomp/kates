@@ -152,11 +152,11 @@ type k8sWorkload struct {
 func runDeployStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS string
+	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string
 	if deployTopology == "single" {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
 	} else {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS, deployKafkaUINS
 	}
 
 	components := []struct {
@@ -177,6 +177,7 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
 		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
 		{"C", "📦", "Kates Backend", "kates", appNS, "pod", "-l app.kubernetes.io/instance=kates"},
+		{"C", "🖥️", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
 		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
 	}
 

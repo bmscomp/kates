@@ -306,6 +306,11 @@ topics:
         min.insync.replicas: "2"
         cleanup.policy: delete
 
+# -- Kafka UI managed resources (set to false when using the standalone kafka-ui chart)
+kafkaUI:
+  # -- Manage the kafka-ui KafkaUser from this chart
+  managedUser: true
+
 users:
   # -- Enable managed user provisioning
   enabled: true
@@ -462,6 +467,8 @@ networkPolicies:
   connectNamespace: connect
   # Namespace where the Strimzi Operator is deployed (for its NetworkPolicy)
   operatorNamespace: strimzi-operator
+  # -- Manage kafka-ui NetworkPolicy from this chart (set false when using standalone kafka-ui chart)
+  kafkaUI: true
 
 tieredStorage:
   enabled: false

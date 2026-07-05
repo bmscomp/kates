@@ -1,0 +1,12 @@
+# Kind (local development) overlay for kafka-ui
+service:
+  type: NodePort
+  nodePort: 30081
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi

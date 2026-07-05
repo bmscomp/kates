@@ -251,7 +251,7 @@ spec:
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
----
+{{- if .Values.networkPolicies.kafkaUI }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -283,6 +283,7 @@ spec:
       ports:
         - port: 443
           protocol: TCP
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -1,0 +1,66 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kafka-ui.fullname" . }}
+  namespace: {{ include "kafka-ui.namespace" . }}
+  labels:
+    {{- include "kafka-ui.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kafka-ui.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Ingress controller (browser access via Ingress resource)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- if eq .Values.service.type "NodePort" }}
+    # NodePort direct access (browser via node IP)
+    - from: []
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+    # Prometheus metrics scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # To Kafka brokers (SASL_PLAINTEXT and TLS listeners)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "kafka-ui.kafkaNamespace" . }}
+          podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ .Values.kafka.clusterName }}
+      ports:
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+    # Kubernetes API server (for Secret reads and health checks)
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+{{- end }}
