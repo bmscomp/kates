@@ -113,7 +113,8 @@ readinessProbe:
 # -- Pod-level security context
 podSecurityContext:
   runAsNonRoot: true
-  fsGroup: 1000
+  runAsUser: 1001
+  fsGroup: 1001
 
 # -- Container-level security context
 securityContext:
