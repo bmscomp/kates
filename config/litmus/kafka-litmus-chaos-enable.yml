@@ -21,9 +21,48 @@ spec:
     - Ingress
     - Egress
   ingress:
-    - {}
+    # Same namespace
+    - from:
+        - podSelector: {}
+    # From kafka namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+    # From kates namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
   egress:
-    - {}
+    # Same namespace
+    - to:
+        - podSelector: {}
+    # To kafka namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+    # To kates namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kubernetes API server
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
 ---
 apiVersion: v1
 kind: ConfigMap

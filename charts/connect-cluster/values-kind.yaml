@@ -11,7 +11,13 @@ dashboards:
   enabled: false
 
 networkPolicy:
-  enabled: false
+  enabled: true
+
+databaseEgress:
+  - namespace: database
+    port: 5432
+    podSelector:
+      app.kubernetes.io/name: postgresql
 
 tracing:
   enabled: false

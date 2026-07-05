@@ -70,23 +70,33 @@ spec:
         - port: 9093
           protocol: TCP
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
           podSelector:
             matchLabels:
               app.kubernetes.io/name: kates
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: litmus
           podSelector:
             matchLabels:
               app.kubernetes.io/name: litmus
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
           podSelector:
             matchLabels:
               app: kafka-ui
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
           podSelector:
             matchLabels:
               app.kubernetes.io/name: apicurio-registry
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: connect
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
@@ -96,11 +106,15 @@ spec:
         - port: 9093
           protocol: TCP
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
           podSelector:
             matchLabels:
               app.kubernetes.io/name: kates
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: litmus
           podSelector:
             matchLabels:
               app.kubernetes.io/name: litmus
@@ -112,7 +126,9 @@ spec:
         - port: 9094
           protocol: TCP
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 9404
           protocol: TCP
@@ -188,8 +204,12 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Allow HTTP ingress to port 8080 (metrics & health probes) from all sources (including node kubelet)
-    - ports:
+    # Metrics from monitoring namespace + health probes from kubelet
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
         - port: 8080
           protocol: TCP
   egress:
@@ -209,19 +229,25 @@ spec:
           protocol: TCP
     # Allow egress to the target Kafka application namespace pods
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
           podSelector:
             matchLabels:
               strimzi.io/cluster: {{ $clusterName }}
     # Allow egress to Kafka Connect pods across all namespaces
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: connect
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
     # Allow egress to its own namespace pods
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: strimzi-operator
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
@@ -282,7 +308,9 @@ spec:
         - port: 9090
           protocol: TCP
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 9404
           protocol: TCP
@@ -339,7 +367,9 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 9404
           protocol: TCP
@@ -377,7 +407,9 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 8080
           protocol: TCP
@@ -417,7 +449,9 @@ spec:
     - Egress
   ingress:
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
       ports:
         - port: 9404
           protocol: TCP
@@ -432,6 +466,57 @@ spec:
     - to: []
       ports:
         - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-connect
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: KafkaConnect
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Prometheus metrics scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9404
+          protocol: TCP
+    # Connect REST API (status & management from kates backend)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kates
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kates
+      ports:
+        - port: 8083
+          protocol: TCP
+  egress:
+    # To Kafka brokers (SCRAM plain listener)
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: Kafka
+      ports:
+        - port: 9092
+          protocol: TCP
+    # To Kubernetes API
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
           protocol: TCP
 
 {{- end }}
