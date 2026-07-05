@@ -136,6 +136,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					Options(
 						huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
 						huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
+						huh.NewOption("🖥️  Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
 						huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
 						huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
 						huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
@@ -201,6 +202,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				))
 			}
 
+			if sliceContains(components, "kafka-ui") {
+				nsGroups = append(nsGroups, huh.NewGroup(
+					huh.NewInput().
+						Title("Kafka UI Namespace").
+						Description("Namespace for the Kafka UI dashboard").
+						Value(&deployKafkaUINS),
+				))
+			}
+
 			form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates())
 			if err := form2.Run(); err != nil {
 				return err
@@ -212,6 +222,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		deployWithCertManager = false
 		deployWithKyverno = false
 		deployWithStrimzi = false
+		deployWithKafkaUI = false
 
 		for _, c := range components {
 			switch c {
@@ -219,6 +230,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				deployWithStrimzi = true
 			case "kafka-connect":
 				deployWithKafkaConnect = true
+			case "kafka-ui":
+				deployWithKafkaUI = true
 			case "chaos":
 				deployWithChaos = true
 			case "monitoring":
@@ -242,6 +255,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Database", deployDbNS))
 		}
 		PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kates App", deployAppNS))
+		if deployWithKafkaUI {
+			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Kafka UI", deployKafkaUINS))
+		}
 		if deployWithMonitoring {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Monitoring", deployMonitoringNS))
 		}
@@ -270,6 +286,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	if deployWithKyverno {
 		PrintPhaseSuccess("Kyverno (Policies)")
+	}
+	if deployWithKafkaUI {
+		PrintPhaseSuccess("Kafka UI (Dashboard)")
 	}
 
 	// 3. Cluster Detection
