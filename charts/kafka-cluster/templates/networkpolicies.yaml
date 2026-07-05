@@ -90,13 +90,13 @@ spec:
               app: kafka-ui
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.apicurioNamespace | default .Release.Namespace }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: apicurio-registry
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: connect
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.connectNamespace | default "connect" }}
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
@@ -231,7 +231,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
           podSelector:
             matchLabels:
               strimzi.io/cluster: {{ $clusterName }}
@@ -239,7 +239,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: connect
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.connectNamespace | default "connect" }}
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
@@ -247,7 +247,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: strimzi-operator
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.operatorNamespace | default .Release.Namespace }}
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator

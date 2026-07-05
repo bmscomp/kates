@@ -120,6 +120,8 @@ resources:
 schemaRegistry:
   enabled: false
   serviceName: apicurio-apicurio-registry
+  # -- Namespace where the Schema Registry is deployed (leave empty if same as Kafka)
+  namespace: ""
   port: 80
   path: /apis/ccompat/v7
 
@@ -134,6 +136,8 @@ schemaRegistry:
 # ── Network Policy ──────────────────────────────────────────────────────────
 networkPolicy:
   enabled: true
+  # -- Namespace where the Strimzi Operator is deployed (leave empty if same as Kafka)
+  strimziOperatorNamespace: ""
   kafkaPorts:
     - 9092
     - 9093

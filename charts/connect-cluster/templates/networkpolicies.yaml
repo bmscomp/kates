@@ -32,7 +32,7 @@ spec:
               app.kubernetes.io/name: kates
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.strimziOperatorNamespace | default (include "connect-cluster.kafkaNamespace" .) }}
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
@@ -52,7 +52,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ include "connect-cluster.kafkaNamespace" . }}
           podSelector:
             matchLabels:
               strimzi.io/cluster: {{ .Values.kafka.clusterName }}
@@ -65,7 +65,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ .Values.schemaRegistry.namespace | default (include "connect-cluster.kafkaNamespace" .) }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: apicurio-registry
