@@ -722,3 +722,13 @@ seaweedfs:
       httpsPort: 0
       allowEmptyFolder: false
       enableAuth: false    # enable in prod with TLS + external cert
+
+# ── Secret Synchronization (Kyverno) ──────────────────────────────────────────
+# Automatically synchronizes KafkaUser secrets to their respective component namespaces.
+# Requires Kyverno to be installed in the cluster.
+secretSync:
+  enabled: true
+  namespaces:
+    katesBackend: kates
+    katesConnect: connect
+    kafkaUI: kafka-ui
