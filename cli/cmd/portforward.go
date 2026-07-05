@@ -40,7 +40,7 @@ var wellKnownPorts = []struct {
 	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (plain)", 9092, 9092, ""},
 	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (TLS)", 9093, 9093, ""},
 	{"kafka/apicurio", "Apicurio Schema Registry", 80, 8081, "http://localhost:8081/ui"},
-	{"kates/kafka-ui", "Kafka UI", 8080, 8085, "http://localhost:8085"},
+	{"kafka/kafka-ui", "Kafka UI", 8080, 8085, "http://localhost:8085"},
 	{"monitoring/monitoring-grafana", "Grafana", 80, 3000, "http://localhost:3000"},
 	{"monitoring/monitoring-kube-prometheus-prometheus", "Prometheus", 9090, 9090, "http://localhost:9090"},
 	{"monitoring/monitoring-kube-prometheus-alertmanager", "Alertmanager", 9093, 9094, "http://localhost:9094"},
