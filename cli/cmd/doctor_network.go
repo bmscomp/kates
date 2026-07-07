@@ -64,6 +64,9 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
+	// Detect cluster DNS domain (fall back to "cluster.local" if detection fails)
+	clusterDomain := detectClusterDomain(ctx)
+
 	// Styles
 	title := lipgloss.NewStyle().Bold(true).Foreground(clrText)
 	separator := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("━", 50))
@@ -84,17 +87,17 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 		ns   string
 	}{
 		{
-			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.cluster.local", doctorKafkaNS),
+			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s", doctorKafkaNS, clusterDomain),
 			desc: "Kafka Bootstrap",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("connect-cluster-connect-api.%s.svc.cluster.local", doctorConnectNS),
+			host: fmt.Sprintf("connect-cluster-connect-api.%s.svc.%s", doctorConnectNS, clusterDomain),
 			desc: "Connect REST API",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("apicurio-apicurio-registry.%s.svc.cluster.local", doctorKafkaNS),
+			host: fmt.Sprintf("apicurio-apicurio-registry.%s.svc.%s", doctorKafkaNS, clusterDomain),
 			desc: "Schema Registry",
 			ns:   doctorAppNS,
 		},
@@ -118,31 +121,31 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 		ns   string
 	}{
 		{
-			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.cluster.local", doctorKafkaNS),
+			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s", doctorKafkaNS, clusterDomain),
 			port: "9092",
 			desc: "Kafka Plain",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.cluster.local", doctorKafkaNS),
+			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s", doctorKafkaNS, clusterDomain),
 			port: "9093",
 			desc: "Kafka TLS",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("connect-cluster-connect-api.%s.svc.cluster.local", doctorConnectNS),
+			host: fmt.Sprintf("connect-cluster-connect-api.%s.svc.%s", doctorConnectNS, clusterDomain),
 			port: "8083",
 			desc: "Connect REST API",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("apicurio-apicurio-registry.%s.svc.cluster.local", doctorKafkaNS),
+			host: fmt.Sprintf("apicurio-apicurio-registry.%s.svc.%s", doctorKafkaNS, clusterDomain),
 			port: "80",
 			desc: "Schema Registry",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("postgresql.%s.svc.cluster.local", doctorDbNS),
+			host: fmt.Sprintf("postgresql.%s.svc.%s", doctorDbNS, clusterDomain),
 			port: "5432",
 			desc: "PostgreSQL",
 			ns:   doctorAppNS,
@@ -418,6 +421,60 @@ func printNetworkCheck(c networkCheck) {
 		detail := lipgloss.NewStyle().Foreground(clrOrange).Italic(true).Render(c.Detail)
 		fmt.Printf("%s%s%s %s\n", indent, icon, name, detail)
 	}
+}
+
+// ─── Cluster domain detection ───────────────────────────────
+
+// detectClusterDomain discovers the cluster DNS domain by reading
+// /etc/resolv.conf from an ephemeral pod. Falls back to "cluster.local".
+func detectClusterDomain(ctx context.Context) string {
+	domain := "cluster.local"
+
+	detectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	podName := doctorPodName()
+	out, err := exec.CommandContext(detectCtx, "kubectl", "run", "--rm", "-i", "--restart=Never",
+		"--image=busybox:1.36", podName, "-n", "default",
+		"--", "cat", "/etc/resolv.conf").CombinedOutput()
+	if err != nil || len(out) == 0 {
+		return domain
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "search ") {
+			continue
+		}
+		fields := strings.Fields(line)[1:]
+
+		// Priority: find entry starting exactly with "svc."
+		var found string
+		for _, f := range fields {
+			if strings.HasPrefix(f, "svc.") {
+				found = strings.TrimPrefix(f, "svc.")
+				break
+			}
+		}
+
+		// Fallback: strip namespace.svc. prefix
+		if found == "" {
+			for _, f := range fields {
+				idx := strings.Index(f, ".svc.")
+				if idx != -1 {
+					found = f[idx+5:]
+					break
+				}
+			}
+		}
+
+		if found != "" {
+			domain = found
+		}
+		break
+	}
+
+	return domain
 }
 
 // ─── Utility helpers ────────────────────────────────────────

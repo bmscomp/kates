@@ -21,6 +21,17 @@ func TermWidth() int {
 	return 120
 }
 
+// ColumnWidth returns the width available for a column after reserving
+// 'reserved' characters, with a guaranteed minimum of 'minWidth'.
+// Use this instead of duplicating terminal-width calculations.
+func ColumnWidth(reserved, minWidth int) int {
+	w := TermWidth() - reserved
+	if w < minWidth {
+		return minWidth
+	}
+	return w
+}
+
 var (
 	// Out is the standard output writer, defaulting to os.Stdout.
 	// Can be overridden for testing.
