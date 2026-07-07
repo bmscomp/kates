@@ -1,0 +1,39 @@
+{{- $networkPolicy := .Values.networkPolicy | default (dict) }}
+{{- $prometheusKafkaEgress := $networkPolicy.prometheusKafkaEgress | default (dict) }}
+{{- $enabled := $prometheusKafkaEgress.enabled | default true }}
+{{- if $enabled }}
+{{- $kafkaNamespace := $prometheusKafkaEgress.kafkaNamespace | default .Values.kafkaNamespace }}
+{{- $ports := $prometheusKafkaEgress.ports | default (list 9404) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-prometheus-kafka-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kafkaNamespace | quote }}
+          podSelector:
+            matchExpressions:
+              - key: strimzi.io/kind
+                operator: In
+                values:
+                  - Kafka
+                  - KafkaConnect
+                  - KafkaMirrorMaker
+                  - KafkaMirrorMaker2
+      ports:
+{{- range $ports }}
+        - protocol: TCP
+          port: {{ . }}
+{{- end }}
+{{- end }}

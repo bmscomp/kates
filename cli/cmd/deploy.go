@@ -734,10 +734,38 @@ spec:
 					}
 
 					// Wait for Kyverno CRDs before anything downstream tries to use them.
+					// `kubectl wait --for=condition=Established` can fail early on some
+					// clusters with transient "no .status.conditions" races right after CRD
+					// creation. Poll explicitly and tolerate empty status until established.
 					dl.Println("    - Waiting for Kyverno CRDs to be established...")
-					return runExecFn(gCtx, "kubectl", "wait", "--for=condition=Established",
-						"crd", "clusterpolicies.kyverno.io",
-						"--timeout=180s")
+					kyvernoCRDs := []string{
+						"clusterpolicies.kyverno.io",
+						"policies.kyverno.io",
+					}
+					deadline := time.Now().Add(180 * time.Second)
+					for _, crd := range kyvernoCRDs {
+						for {
+							out, checkErr := exec.CommandContext(gCtx,
+								"kubectl", "get", "crd", crd,
+								"-o", "jsonpath={.status.conditions[?(@.type==\"Established\")].status}",
+							).Output()
+							if checkErr == nil && strings.Contains(string(out), "True") {
+								break
+							}
+							if time.Now().After(deadline) {
+								if checkErr != nil {
+									return fmt.Errorf("kyverno CRD %s did not become Established: %w", crd, checkErr)
+								}
+								return fmt.Errorf("kyverno CRD %s did not become Established before timeout", crd)
+							}
+							select {
+							case <-gCtx.Done():
+								return gCtx.Err()
+							case <-time.After(2 * time.Second):
+							}
+						}
+					}
+					return nil
 				})
 			}
 
@@ -1060,11 +1088,38 @@ metadata:
 					}
 
 					dl.Println("    - Copying kates-connect credentials to connect namespace...")
-					pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-						"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-					pwBytes, pwErr := pwCmd.Output()
+					var pwBytes []byte
+					var jaasBytes []byte
+					secretDeadline := time.Now().Add(2 * time.Minute)
+					for {
+						pwOut, pwErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
+							"-n", kafkaNS, "-o", "jsonpath={.data.password}").Output()
+						if pwErr == nil && len(strings.TrimSpace(string(pwOut))) > 0 {
+							pwBytes = bytes.TrimSpace(pwOut)
+							jaasOut, jaasErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
+								"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}").Output()
+							if jaasErr == nil {
+								jaasBytes = bytes.TrimSpace(jaasOut)
+							}
+							break
+						}
+						if time.Now().After(secretDeadline) {
+							break
+						}
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(5 * time.Second):
+						}
+					}
 
-					if pwErr == nil && len(pwBytes) > 0 {
+					if len(pwBytes) > 0 {
+						var dataLines strings.Builder
+						dataLines.WriteString(fmt.Sprintf("  password: %s\n", string(pwBytes)))
+						if len(jaasBytes) > 0 {
+							dataLines.WriteString(fmt.Sprintf("  sasl.jaas.config: %s\n", string(jaasBytes)))
+						}
+
 						connectSecretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
 metadata:
@@ -1072,10 +1127,10 @@ metadata:
   namespace: %s
 type: Opaque
 data:
-  password: %s`, connectNS, string(pwBytes))
+%s`, connectNS, dataLines.String())
 						runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectSecretYaml)
 					} else {
-						dl.Printf("    ⚠️  Secret 'kates-connect' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+						dl.Printf("    ⚠️  Secret 'kates-connect' not found in namespace %s after waiting — KafkaUser may not be ready\n", kafkaNS)
 					}
 				}
 
@@ -1344,6 +1399,7 @@ data:
 					"-f", valuesFile,
 					"-f", chartOverlay("charts/kates"),
 					"--set", "kafka.bootstrapServers="+bootstrap,
+					"--set", "kafka.topicNamespace="+kafkaNS,
 					"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring),
 					"--timeout", "8m"); err != nil {
 					return err

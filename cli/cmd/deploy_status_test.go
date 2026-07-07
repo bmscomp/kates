@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"strings"
@@ -37,9 +38,15 @@ func TestDeployStatusCommand(t *testing.T) {
 		t.Errorf("Expected output to contain 'Kates Deployment Status', got: \n%s", output)
 	}
 
-	// Verify the correct namespace is populated
-	if !strings.Contains(output, "kates-test-ns") {
-		t.Errorf("Expected output to contain namespace 'kates-test-ns', got: \n%s", output)
+	// Verify the expected namespace is populated.
+	// In clusters where a release name is unique, deploy status resolves and shows the
+	// discovered Helm namespace instead of the requested one.
+	expectedNamespace := "kates-test-ns"
+	if st, ns, ok := lookupHelmRelease(loadHelmReleaseIndex(context.Background()), "kates", expectedNamespace); ok && st == "deployed" {
+		expectedNamespace = ns
+	}
+	if !strings.Contains(output, expectedNamespace) {
+		t.Errorf("Expected output to contain namespace %q, got: \n%s", expectedNamespace, output)
 	}
 
 	// Verify some component groups are present
@@ -243,4 +250,49 @@ func TestParseWorkloadHealth(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLookupHelmRelease(t *testing.T) {
+	index := map[string][]helmStatusRelease{
+		"monitoring": {
+			{Name: "monitoring", Namespace: "monitoring", Status: "deployed"},
+		},
+		"kafka-ui": {
+			{Name: "kafka-ui", Namespace: "kafka-ui", Status: "deployed"},
+		},
+		"shared": {
+			{Name: "shared", Namespace: "ns-a", Status: "deployed"},
+			{Name: "shared", Namespace: "ns-b", Status: "deployed"},
+		},
+	}
+
+	t.Run("exact namespace match", func(t *testing.T) {
+		status, ns, ok := lookupHelmRelease(index, "monitoring", "monitoring")
+		if !ok {
+			t.Fatal("expected exact release lookup to succeed")
+		}
+		if status != "deployed" || ns != "monitoring" {
+			t.Fatalf("unexpected lookup result: status=%q ns=%q", status, ns)
+		}
+	})
+
+	t.Run("unique release fallback to discovered namespace", func(t *testing.T) {
+		status, ns, ok := lookupHelmRelease(index, "kafka-ui", "kafka")
+		if !ok {
+			t.Fatal("expected unique release fallback lookup to succeed")
+		}
+		if status != "deployed" || ns != "kafka-ui" {
+			t.Fatalf("unexpected lookup result: status=%q ns=%q", status, ns)
+		}
+	})
+
+	t.Run("ambiguous release without exact namespace", func(t *testing.T) {
+		_, ns, ok := lookupHelmRelease(index, "shared", "missing-ns")
+		if ok {
+			t.Fatal("expected ambiguous release lookup to fail without exact namespace")
+		}
+		if ns != "missing-ns" {
+			t.Fatalf("expected unresolved namespace to remain unchanged, got %q", ns)
+		}
+	})
 }

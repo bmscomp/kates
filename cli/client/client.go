@@ -30,8 +30,15 @@ type ClientOptions struct {
 }
 
 func NewWithOptions(opts ClientOptions) *Client {
+	proxyFn := http.ProxyFromEnvironment
+	if shouldBypassProxy(opts.BaseURL) {
+		// Local endpoints should bypass env proxies by default to avoid
+		// accidental routing through corporate/local proxy daemons.
+		proxyFn = nil
+	}
+
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxyFn,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 15 * time.Second,
@@ -57,6 +64,27 @@ func NewWithOptions(opts ClientOptions) *Client {
 		},
 		MaxRetries: 3,
 	}
+}
+
+func shouldBypassProxy(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+
+	host := strings.TrimSpace(u.Hostname())
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 func New(baseURL string) *Client {

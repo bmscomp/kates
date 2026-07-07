@@ -113,7 +113,9 @@
           "zone": { "type": "string" },
           "replicas": { "type": "integer", "minimum": 1, "maximum": 100 },
           "storageSize": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
-          "storageClass": { "type": "string" }
+          "storageClass": { "type": "string" },
+          "resources": { "$ref": "#/$defs/resources" },
+          "jvmOptions": { "$ref": "#/$defs/jvmOptions" }
         }
       }
     },

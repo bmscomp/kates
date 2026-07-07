@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 )
@@ -39,16 +43,71 @@ var connectConnectorsCmd = &cobra.Command{
 	Use:   "connectors",
 	Short: "List all KafkaConnector CRs",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		argsCmd := []string{"get", "kafkaconnector", "-n", connectNamespace}
 		if outputMode == "json" {
-			argsCmd = append(argsCmd, "-o", "json")
+			out, err := exec.CommandContext(context.Background(), "kubectl", "get", "kafkaconnector", "-n", connectNamespace, "-o", "json").Output()
+			if err != nil {
+				return fmt.Errorf("failed to get kafkaconnector: %w", err)
+			}
+			fmt.Print(string(out))
+			return nil
 		}
-		out, err := exec.CommandContext(context.Background(), "kubectl", argsCmd...).Output()
+
+		out, err := exec.CommandContext(context.Background(), "kubectl", "get", "kafkaconnector", "-n", connectNamespace, "-o", "json").Output()
 		if err != nil {
 			return fmt.Errorf("failed to get kafkaconnector: %w", err)
 		}
-		fmt.Print(string(out))
-		return nil
+
+		var list kafkaConnectorList
+		if err := json.Unmarshal(out, &list); err != nil {
+			// Keep old behavior as fallback when JSON parsing fails.
+			fallback, fbErr := exec.CommandContext(context.Background(), "kubectl", "get", "kafkaconnector", "-n", connectNamespace).Output()
+			if fbErr != nil {
+				return fmt.Errorf("failed to parse connector output (%v) and fallback list failed: %w", err, fbErr)
+			}
+			fmt.Print(string(fallback))
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tCLUSTER\tCONNECTOR CLASS\tMAX TASKS\tREADY\tRUNNING TASKS\tTASK STATES")
+		for _, item := range list.Items {
+			running := 0
+			statesSet := map[string]struct{}{}
+			for _, task := range item.Status.ConnectorStatus.Tasks {
+				if strings.EqualFold(task.State, "RUNNING") {
+					running++
+				}
+				if task.State != "" {
+					statesSet[task.State] = struct{}{}
+				}
+			}
+			states := make([]string, 0, len(statesSet))
+			for s := range statesSet {
+				states = append(states, s)
+			}
+			sort.Strings(states)
+			taskStates := "-"
+			if len(states) > 0 {
+				taskStates = strings.Join(states, ",")
+			}
+
+			maxTasks := item.Spec.TasksMax
+			runningTasks := strconv.Itoa(running)
+			if maxTasks > 0 {
+				runningTasks = fmt.Sprintf("%d/%d", running, maxTasks)
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				item.Metadata.Name,
+				item.Metadata.Labels["strimzi.io/cluster"],
+				item.Spec.Class,
+				maxTasks,
+				isReadyConditionTrue(item.Status.Conditions),
+				runningTasks,
+				taskStates,
+			)
+		}
+		return w.Flush()
 	},
 }
 
@@ -77,15 +136,45 @@ var connectTasksCmd = &cobra.Command{
 	Short: "Show task-level status for a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		out, err := exec.CommandContext(context.Background(), "kubectl", "get", "kafkaconnector", args[0], "-n", connectNamespace, "-o", "jsonpath={.status.connectorStatus.tasks}").Output()
+		out, err := exec.CommandContext(context.Background(), "kubectl", "get", "kafkaconnector", args[0], "-n", connectNamespace, "-o", "json").Output()
 		if err != nil {
 			return fmt.Errorf("failed to get tasks for connector %s: %w", args[0], err)
 		}
-		if string(out) == "" {
-			fmt.Println("No tasks found or connector status unavailable.")
+
+		var connector kafkaConnector
+		if err := json.Unmarshal(out, &connector); err != nil {
+			return fmt.Errorf("failed to parse connector %s status: %w", args[0], err)
+		}
+
+		tasks := connector.Status.ConnectorStatus.Tasks
+		if outputMode == "json" {
+			b, err := json.Marshal(tasks)
+			if err != nil {
+				return fmt.Errorf("failed to marshal tasks: %w", err)
+			}
+			fmt.Println(string(b))
 			return nil
 		}
-		fmt.Println(string(out))
+
+		if len(tasks) == 0 {
+			connectorState := connector.Status.ConnectorStatus.Connector.State
+			if connectorState == "" {
+				connectorState = "UNKNOWN"
+			}
+			fmt.Printf("No tasks currently reported for connector %s (connector state: %s, ready: %s).\n",
+				args[0],
+				connectorState,
+				isReadyConditionTrue(connector.Status.Conditions),
+			)
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tSTATE\tWORKER ID\tVERSION")
+		for _, task := range tasks {
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", task.ID, task.State, task.WorkerID, task.Version)
+		}
+		w.Flush()
 		return nil
 	},
 }
@@ -292,4 +381,49 @@ func detectConnectNamespace() string {
 		return envNS
 	}
 	return "kafka"
+}
+
+type kafkaConnectorList struct {
+	Items []kafkaConnector `json:"items"`
+}
+
+type kafkaConnector struct {
+	Metadata struct {
+		Name   string            `json:"name"`
+		Labels map[string]string `json:"labels"`
+	} `json:"metadata"`
+	Spec struct {
+		Class    string `json:"class"`
+		TasksMax int    `json:"tasksMax"`
+	} `json:"spec"`
+	Status struct {
+		Conditions      []statusCondition `json:"conditions"`
+		ConnectorStatus struct {
+			Connector struct {
+				State string `json:"state"`
+			} `json:"connector"`
+			Tasks []connectorTask `json:"tasks"`
+		} `json:"connectorStatus"`
+	} `json:"status"`
+}
+
+type statusCondition struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
+}
+
+type connectorTask struct {
+	ID       int    `json:"id"`
+	State    string `json:"state"`
+	WorkerID string `json:"worker_id"`
+	Version  string `json:"version"`
+}
+
+func isReadyConditionTrue(conditions []statusCondition) string {
+	for _, c := range conditions {
+		if c.Type == "Ready" {
+			return c.Status
+		}
+	}
+	return "Unknown"
 }

@@ -412,8 +412,25 @@ Phases: pre-flight → baseline → chaos-inject → observe → recover → pos
 make registry-status
 
 # Manually pull and load
-./pull-images.sh
-./load-images-to-kind.sh
+./scripts/pull-images.sh
+./scripts/load-images-to-kind.sh
+```
+
+If you're behind an HTTP/HTTPS proxy, set `HTTP_PROXY`, `HTTPS_PROXY`, and
+`NO_PROXY` in your shell or `proxy/proxy.conf` before running
+`./scripts/load-images-to-kind.sh`.
+
+If you are not using `load-images-to-kind.sh`, run `./scripts/start-cluster.sh`
+(or `make cluster`) after setting proxy variables. This reconciles containerd
+proxy settings on Kind nodes so regular Kubernetes image pulls use the proxy.
+
+Direct proxy flags are supported too:
+
+```bash
+./scripts/start-cluster.sh \
+  --http-proxy http://proxy.example.com:8080 \
+  --https-proxy http://proxy.example.com:8080 \
+  --no-proxy "localhost,127.0.0.1,.svc,.cluster.local"
 ```
 
 ### Kafka Pods Not Starting

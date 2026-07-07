@@ -120,6 +120,8 @@ resources:
 schemaRegistry:
   enabled: false
   serviceName: apicurio-apicurio-registry
+  # -- Namespace where the Schema Registry is deployed (leave empty if same as Kafka)
+  namespace: ""
   port: 80
   path: /apis/ccompat/v7
 
@@ -134,6 +136,8 @@ schemaRegistry:
 # ── Network Policy ──────────────────────────────────────────────────────────
 networkPolicy:
   enabled: true
+  # -- Namespace where the Strimzi Operator is deployed (leave empty if same as Kafka)
+  strimziOperatorNamespace: ""
   kafkaPorts:
     - 9092
     - 9093
@@ -226,24 +230,83 @@ autoRestart:
   maxRestarts: 10
 
 connectors: []
-  # - name: cdc-orders
-  #   class: io.debezium.connector.postgresql.PostgresConnector
-  #   tasksMax: 1
-  #   state: running          # running | paused | stopped
-  #   autoRestart:            # per-connector override (optional)
-  #     enabled: true
-  #     maxRestarts: 20
-  #   config:
-  #     database.hostname: postgresql.database.svc
-  #     database.port: "5432"
-  #     database.user: "${file:/mnt/pg-credentials/username}"
-  #     database.password: "${file:/mnt/pg-credentials/password}"
-  #     database.dbname: orders
-  #     topic.prefix: cdc.orders
-  #     schema.include.list: public
-  #     plugin.name: pgoutput
-  #     slot.name: debezium_orders
 
+# ── Test Connectors ─────────────────────────────────────────────────────────
+# These connectors are ONLY deployed when running `helm test`, and they are
+# automatically deleted when the test succeeds. Use this for testing/examples.
+testConnectors:
+  - name: debezium-postgres-source-working-example
+    class: io.debezium.connector.postgresql.PostgresConnector
+    tasksMax: 1
+    config:
+      database.hostname: "postgresql.database.svc"
+      database.port: "5432"
+      database.user: "${secrets:connect/connect-pg-credentials:username}"
+      database.password: "${secrets:connect/connect-pg-credentials:password}"
+      database.dbname: "orders"
+      topic.prefix: "cdc"
+      schema.include.list: "public"
+      table.include.list: "public.demo_orders"
+      plugin.name: "pgoutput"
+      publication.name: "dbz_demo_orders_pub"
+      publication.autocreate.mode: "filtered"
+      slot.name: "debezium_demo_orders"
+      snapshot.mode: "initial"
+      decimal.handling.mode: "double"
+      tombstones.on.delete: "false"
+      schema.history.internal.kafka.bootstrap.servers: "krafter-kafka-bootstrap.kafka.svc:9092"
+      schema.history.internal.kafka.security.protocol: "SASL_PLAINTEXT"
+      schema.history.internal.kafka.sasl.mechanism: "SCRAM-SHA-512"
+      schema.history.internal.kafka.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-connect\" password=\"${secrets:connect/kates-connect:password}\";"
+      schema.history.internal.kafka.topic: "cdc-schema-history"
+
+  - name: jdbc-sink-from-cdc-working-example
+    class: io.debezium.connector.jdbc.JdbcSinkConnector
+    tasksMax: 1
+    config:
+      topics: "cdc.public.demo_orders"
+      connection.url: "jdbc:postgresql://postgresql.database.svc:5432/orders"
+      connection.username: "${secrets:connect/connect-pg-credentials:username}"
+      connection.password: "${secrets:connect/connect-pg-credentials:password}"
+      table.name.format: "demo_orders_replica"
+      insert.mode: "upsert"
+      primary.key.mode: "record_key"
+      primary.key.fields: "id"
+      delete.enabled: "true"
+      schema.evolution: "basic"
+
+  - name: jdbc-sink-working-example
+    class: io.debezium.connector.jdbc.JdbcSinkConnector
+    tasksMax: 1
+    config:
+      topics: "kates-results"
+      connection.url: "jdbc:postgresql://postgresql.database.svc:5432/orders"
+      connection.username: "${secrets:connect/connect-pg-credentials:username}"
+      connection.password: "${secrets:connect/connect-pg-credentials:password}"
+      insert.mode: "insert"
+      auto.create: "true"
+      auto.evolve: "true"
+      delete.enabled: "false"
+
+  - name: jdbc-source-working-example
+    class: io.aiven.connect.jdbc.JdbcSourceConnector
+    tasksMax: 1
+    config:
+      connection.url: "jdbc:postgresql://postgresql.database.svc:5432/orders"
+      connection.user: "${secrets:connect/connect-pg-credentials:username}"
+      connection.password: "${secrets:connect/connect-pg-credentials:password}"
+      mode: "bulk"
+      query: "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+      topic.prefix: "kates-jdbc-source-"
+      poll.interval.ms: "30000"
+
+testTopics:
+  - name: cdc-public-demo-orders
+    topicName: cdc.public.demo_orders
+    partitions: 3
+    replicas: 3
+    config:
+      min.insync.replicas: "2"
 # ── RBAC ────────────────────────────────────────────────────────────────────
 serviceAccount:
   # -- Create a dedicated ServiceAccount for Connect pods

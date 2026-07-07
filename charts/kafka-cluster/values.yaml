@@ -151,6 +151,18 @@ brokerPools: []
   #   replicas: 1
   #   storageSize: 100Gi
   #   storageClass: "std-room-ext"
+  #   # Optional per-pool overrides (fallback to brokerDefaults when omitted)
+  #   resources:
+  #     requests:
+  #       cpu: 1500m
+  #       memory: 8Gi
+  #     limits:
+  #       cpu: 1500m
+  #       memory: 8Gi
+  #   jvmOptions:
+  #     -Xms: 2048m
+  #     -Xmx: 2048m
+  #     gcLoggingEnabled: true
 
 brokerDefaults:
   deleteClaim: false
@@ -465,8 +477,12 @@ networkPolicies:
   monitoringNamespace: kafka
   # Namespace where Kafka Connect is deployed (for cross-namespace ingress)
   connectNamespace: connect
-  # Namespace where the Strimzi Operator is deployed (for its NetworkPolicy)
-  operatorNamespace: strimzi-operator
+  # Namespace where standalone Kafka UI is deployed
+  kafkaUINamespace: kafka-ui
+  # Namespace where the Strimzi Operator is deployed (leave empty for "strimzi-operator")
+  operatorNamespace: ""
+  # Namespace where Apicurio Registry is deployed (leave empty for Release.Namespace)
+  apicurioNamespace: ""
   # -- Manage kafka-ui NetworkPolicy from this chart (set false when using standalone kafka-ui chart)
   kafkaUI: true
 
@@ -609,7 +625,7 @@ strimzi-kafka-operator:
     namespace: kafka
     label: grafana_dashboard
     labelValue: "1"
-  generateNetworkPolicy: true
+  generateNetworkPolicy: false
   generatePodDisruptionBudget: true
 
 lifecycle:

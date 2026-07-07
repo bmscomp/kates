@@ -19,18 +19,21 @@ CHART_DIR="${ROOT_DIR}/charts/kafka-cluster"
 RELEASE_NAME="kafka-cluster"
 NAMESPACE="kafka"
 DETECTED_VALUES="${ROOT_DIR}/.build/values-detected.yaml"
+AUTO_OVERLAY=""
 
 # Parse arguments
 AUTO_APPROVE=false
 EXTRA_VALUES=""
 SKIP_TESTS=false
+RUN_TESTS=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y)       AUTO_APPROVE=true; shift ;;
         --values|-f)    EXTRA_VALUES="$2"; shift 2 ;;
         --skip-tests)   SKIP_TESTS=true; shift ;;
+        --run-tests)    RUN_TESTS=true; SKIP_TESTS=false; shift ;;
         -h|--help)
-            echo "Usage: $0 [--yes] [--values extra.yaml] [--skip-tests]"
+            echo "Usage: $0 [--yes] [--values extra.yaml] [--skip-tests] [--run-tests]"
             echo ""
             echo "Deploy Kafka to any Kubernetes cluster using auto-detected configuration."
             echo ""
@@ -38,6 +41,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -y, --yes          Skip review prompt (non-interactive)"
             echo "  -f, --values FILE  Merge additional values overlay on top of detected values"
             echo "  --skip-tests       Skip Helm test after deployment"
+            echo "  --run-tests        Force Helm tests even when auto-skip would apply (e.g. Kind)"
             echo "  -h, --help         Show this help"
             exit 0
             ;;
@@ -83,6 +87,36 @@ if [ -n "${EXTRA_VALUES}" ]; then
         error "Extra values file not found: ${EXTRA_VALUES}"
         exit 1
     fi
+fi
+
+# Resolve environment/provider overlay automatically.
+# Priority: explicit ENV (from Makefile) -> detected provider.
+TARGET_ENV="${ENV:-}"
+if [ -z "${TARGET_ENV}" ]; then
+    TARGET_ENV=$(awk '/^# Provider:/{print $3; exit}' "${DETECTED_VALUES}" 2>/dev/null || true)
+fi
+
+if [ -n "${TARGET_ENV}" ]; then
+    if [ -f "${CHART_DIR}/values-${TARGET_ENV}.yaml" ]; then
+        AUTO_OVERLAY="${CHART_DIR}/values-${TARGET_ENV}.yaml"
+    elif [ "${TARGET_ENV}" = "kind" ] && [ -f "${CHART_DIR}/values-kind.yaml" ]; then
+        AUTO_OVERLAY="${CHART_DIR}/values-kind.yaml"
+    elif [ "${TARGET_ENV}" = "generic" ] && [ -f "${CHART_DIR}/values-generic.yaml" ]; then
+        AUTO_OVERLAY="${CHART_DIR}/values-generic.yaml"
+    fi
+fi
+
+if [ -n "${AUTO_OVERLAY}" ]; then
+    info "Auto overlay: ${AUTO_OVERLAY} (env/provider=${TARGET_ENV})"
+fi
+
+# In many corporate Kind setups, Helm test images from GHCR fail certificate
+# validation. Keep deployment green by skipping tests by default on Kind unless
+# explicitly forced with --run-tests.
+if [ "${TARGET_ENV}" = "kind" ] && [ "${SKIP_TESTS}" != true ] && [ "${RUN_TESTS}" != true ]; then
+    warn "Kind environment detected — skipping Helm tests by default"
+    warn "Use --run-tests to force Helm tests on Kind"
+    SKIP_TESTS=true
 fi
 
 if [ "${AUTO_APPROVE}" != true ]; then
@@ -160,6 +194,7 @@ done
 
 # Build values chain
 VALUES_ARGS=(-f "${DETECTED_VALUES}")
+[ -n "${AUTO_OVERLAY}" ] && VALUES_ARGS+=(-f "${AUTO_OVERLAY}")
 [ -n "${EXTRA_VALUES}" ] && VALUES_ARGS+=(-f "${EXTRA_VALUES}")
 
 info "  Release:    ${RELEASE_NAME}"

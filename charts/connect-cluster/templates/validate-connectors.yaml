@@ -2,7 +2,8 @@
   Helm pre-install/pre-upgrade hook that validates connector configurations.
   Catches missing required fields before they reach the Strimzi operator.
 */ -}}
-{{- if gt (len (default (list) .Values.connectors)) 0 }}
+{{- $allConnectors := concat (default (list) .Values.connectors) (default (list) .Values.testConnectors) }}
+{{- if gt (len $allConnectors) 0 }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,7 +25,7 @@ data:
     echo "=== Kafka Connect Connector Validation ==="
     echo ""
 
-    {{- range $i, $connector := .Values.connectors }}
+    {{- range $i, $connector := $allConnectors }}
     echo "▸ Validating connector: {{ $connector.name }}"
 
     # Required: name must be a valid Kubernetes name

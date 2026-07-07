@@ -34,20 +34,19 @@ kube-prometheus-stack:
       image:
         tag: v3.9.1
         pullPolicy: Always
-      replicas: 2
+      replicas: 1
       resources:
         requests:
-          cpu: 500m
+          cpu: 200m
           memory: 1Gi
         limits:
-          cpu: 2
+          cpu: 1
           memory: 4Gi
       retention: 30d
       storageSpec:
         volumeClaimTemplate:
           spec:
             accessModes: ["ReadWriteOnce"]
-            storageClassName: ""
             resources:
               requests:
                 storage: 50Gi
@@ -69,7 +68,6 @@ kube-prometheus-stack:
         volumeClaimTemplate:
           spec:
             accessModes: ["ReadWriteOnce"]
-            storageClassName: ""
             resources:
               requests:
                 storage: 5Gi
@@ -89,6 +87,7 @@ kube-prometheus-stack:
       pullPolicy: Always
 
   prometheus-node-exporter:
+    hostNetwork: false
     image:
       tag: v1.8.2
       pullPolicy: Always

@@ -2,6 +2,8 @@
 {{- $clusterName := include "kafka-cluster.clusterName" . -}}
 {{- $namespace := include "kafka-cluster.namespace" . -}}
 {{- $monitoringNs := .Values.networkPolicies.monitoringNamespace -}}
+{{- $operatorNamespace := .Values.networkPolicies.operatorNamespace | default "strimzi-operator" -}}
+{{- $kafkaUINamespace := .Values.networkPolicies.kafkaUINamespace | default "kafka-ui" -}}
 {{- if .Values.networkPolicies.defaultDeny }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -90,13 +92,19 @@ spec:
               app: kafka-ui
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ $kafkaUINamespace }}
+          podSelector:
+            matchLabels:
+              app: kafka-ui
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.apicurioNamespace | default .Release.Namespace }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: apicurio-registry
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: connect
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.connectNamespace | default "connect" }}
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
@@ -131,6 +139,22 @@ spec:
               kubernetes.io/metadata.name: monitoring
       ports:
         - port: 9404
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $operatorNamespace }}
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
+      ports:
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+        - port: 2181
           protocol: TCP
   egress:
     - to:
@@ -193,7 +217,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: strimzi-operator
-  namespace: {{ .Values.networkPolicies.operatorNamespace | default "strimzi-operator" }}
+  namespace: {{ $operatorNamespace }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
 spec:
@@ -204,12 +228,9 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Metrics from monitoring namespace + health probes from kubelet
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
+    # Keep open for kubelet probes and metrics scraping.
+    # Kubelet probes originate from node network, not pod namespaces.
+    - ports:
         - port: 8080
           protocol: TCP
   egress:
@@ -231,26 +252,41 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ $namespace }}
           podSelector:
             matchLabels:
               strimzi.io/cluster: {{ $clusterName }}
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+        - port: 2181
+          protocol: TCP
     # Allow egress to Kafka Connect pods across all namespaces
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: connect
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.connectNamespace | default "connect" }}
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
+      ports:
+        - port: 8083
+          protocol: TCP
     # Allow egress to its own namespace pods
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: strimzi-operator
+              kubernetes.io/metadata.name: {{ $operatorNamespace }}
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
+---
 {{- if .Values.networkPolicies.kafkaUI }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
