@@ -92,6 +92,16 @@ chaosAlerts:
 # Kafka namespace for PromQL expressions
 kafkaNamespace: kafka
 
+# NetworkPolicy exceptions for clusters with namespace default-deny
+networkPolicy:
+  prometheusKafkaEgress:
+    enabled: true
+    # Namespace containing Strimzi Kafka pods exposing tcp-prometheus on 9404
+    kafkaNamespace: kafka
+    # Ports Prometheus is allowed to scrape on Kafka-related pods
+    ports:
+      - 9404
+
 # Kates dashboards
 dashboards:
   enabled: true

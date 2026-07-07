@@ -14,6 +14,8 @@ Hands-on tutorials for learning Kates — from your first test to advanced chaos
 | 6 | [CI/CD Integration](06-cicd-integration.md) | Advanced | 30 min |
 | 7 | [Kyverno & Security](07-kyverno-security.md) | Intermediate | 30 min |
 | 8 | [Deploy, Detect & Clean](08-deploy-and-detect.md) | Beginner → Intermediate | 25 min |
+| 9 | [Kafka Connect Working Examples (CDC + JDBC)](09-kafka-connect-working-examples.md) | Intermediate | 35 min |
+| 10 | [Kafka Connect Source/Sink Quick Runbook](kafka-connect-simple-source-sink-demo.md) | Intermediate | 15 min |
 
 ## Prerequisites
 

@@ -24,9 +24,9 @@ spec:
         {{- end }}
         deleteClaim: {{ $.Values.brokerDefaults.deleteClaim }}
   jvmOptions:
-    {{- toYaml $.Values.brokerDefaults.jvmOptions | nindent 4 }}
+    {{- toYaml (default $.Values.brokerDefaults.jvmOptions .jvmOptions) | nindent 4 }}
   resources:
-    {{- toYaml $.Values.brokerDefaults.resources | nindent 4 }}
+    {{- toYaml (default $.Values.brokerDefaults.resources .resources) | nindent 4 }}
   template:
     pod:
       {{- if .zone }}
@@ -93,4 +93,3 @@ spec:
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" $ | nindent 8 }}
 {{- end }}
-

@@ -80,6 +80,17 @@ ghcr.io/bmscomp/connect:abc1234        # commit SHA
 
 ## Usage with Strimzi
 
+## Tutorials and Working Examples
+
+- End-to-end tutorial (CDC + JDBC examples): [`docs/tutorials/09-kafka-connect-working-examples.md`](tutorials/09-kafka-connect-working-examples.md)
+- Existing quick runbook: [`docs/tutorials/kafka-connect-simple-source-sink-demo.md`](tutorials/kafka-connect-simple-source-sink-demo.md)
+- Example manifests:
+  - `config/kafka-connect/working-example-cdc-topic.yaml`
+  - `config/kafka-connect/working-example-debezium-postgres-source.yaml`
+  - `config/kafka-connect/working-example-jdbc-sink-from-cdc.yaml`
+  - `config/kafka-connect/working-example-jdbc-sink.yaml`
+  - `config/kafka-connect/working-example-jdbc-source.yaml`
+
 ### Using the pre-built image (recommended)
 
 ```yaml

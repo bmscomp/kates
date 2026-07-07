@@ -50,5 +50,5 @@ dashboards:
   label: grafana_dashboard
   labelValue: "1"
 
-generateNetworkPolicy: true
+generateNetworkPolicy: false
 generatePodDisruptionBudget: true

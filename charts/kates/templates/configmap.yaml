@@ -6,6 +6,7 @@ metadata:
     {{- include "kates.labels" . | nindent 4 }}
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: {{ .Values.kafka.bootstrapServers | quote }}
+  KATES_CDC_TOPIC_NAMESPACE: {{ .Values.kafka.topicNamespace | quote }}
   KATES_KAFKA_SECURITY_PROTOCOL: {{ .Values.kafka.security.protocol | quote }}
   {{- if .Values.kafka.sasl.enabled }}
   KATES_KAFKA_SASL_MECHANISM: {{ .Values.kafka.sasl.mechanism | quote }}

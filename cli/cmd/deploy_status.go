@@ -43,6 +43,7 @@ func init() {
 	deployStatusCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
 
 	deployStatusCmd.Flags().BoolVarP(&deployStatusInteractive, "interactive", "i", false, "Enable interactive Bubble Tea status loader")
 	deployStatusCmd.Flags().StringVarP(&deployStatusOutput, "output", "o", "table", "Output format: table or json")
@@ -149,6 +150,12 @@ type k8sWorkload struct {
 	} `json:"status"`
 }
 
+type helmStatusRelease struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Status    string `json:"status"`
+}
+
 func runDeployStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
@@ -158,6 +165,8 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS, deployKafkaUINS
 	}
+
+	helmIndex := loadHelmReleaseIndex(ctx)
 
 	components := []struct {
 		Group     string
@@ -224,9 +233,9 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 				Release:   c.Release,
 				Namespace: c.Namespace,
 			}
-			st.HelmStatus = getHelmStatus(ctx, c.Release, c.Namespace)
+			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, c.Release, c.Namespace)
 			if st.HelmStatus == "deployed" {
-				st.Health, st.Details = getHealthStatus(ctx, c.Kind, c.Resource, c.Namespace)
+				st.Health, st.Details = getHealthStatus(ctx, c.Kind, c.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
 				st.Details = "Not deployed"
@@ -244,8 +253,61 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 
 // ── V1 Existing Logic (Retained for default sequential flow) ──
 
+func loadHelmReleaseIndex(ctx context.Context) map[string][]helmStatusRelease {
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(checkCtx, "helm", "list", "-A", "-o", "json")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return nil
+	}
+
+	var releases []helmStatusRelease
+	if err := json.Unmarshal(out, &releases); err != nil {
+		return nil
+	}
+
+	index := make(map[string][]helmStatusRelease, len(releases))
+	for _, rel := range releases {
+		index[rel.Name] = append(index[rel.Name], rel)
+	}
+	return index
+}
+
+func lookupHelmRelease(index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string, ok bool) {
+	if index == nil {
+		return "", namespace, false
+	}
+
+	releases, exists := index[release]
+	if !exists || len(releases) == 0 {
+		return "", namespace, false
+	}
+
+	for _, rel := range releases {
+		if rel.Namespace == namespace {
+			return strings.ToLower(rel.Status), namespace, true
+		}
+	}
+
+	// Fallback: if a release name is unique cluster-wide, trust that namespace.
+	if len(releases) == 1 {
+		return strings.ToLower(releases[0].Status), releases[0].Namespace, true
+	}
+
+	return "", namespace, false
+}
+
+func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string) {
+	if st, ns, ok := lookupHelmRelease(index, release, namespace); ok {
+		return st, ns
+	}
+	return getHelmStatus(ctx, release, namespace), namespace
+}
+
 func getHelmStatus(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
 	if err := cmd.Run(); err == nil {
@@ -317,7 +379,7 @@ func getHealthStatus(ctx context.Context, kind, resource, namespace string) (str
 // ── V2 Enhanced Logic (Used in Interactive and JSON output modes) ──
 
 func getHelmStatusV2(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
 	if err := cmd.Run(); err == nil {
@@ -530,6 +592,7 @@ func runJSONStatus(ctx context.Context, components []struct {
 }) ([]ComponentStatus, error) {
 	var wg sync.WaitGroup
 	statuses := make([]ComponentStatus, len(components))
+	helmIndex := loadHelmReleaseIndex(ctx)
 
 	for i, c := range components {
 		wg.Add(1)
@@ -550,9 +613,9 @@ func runJSONStatus(ctx context.Context, components []struct {
 				Release:   comp.Release,
 				Namespace: comp.Namespace,
 			}
-			st.HelmStatus = getHelmStatusV2(ctx, comp.Release, comp.Namespace)
+			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, comp.Release, comp.Namespace)
 			if st.HelmStatus == "deployed" {
-				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, comp.Namespace)
+				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
 				st.Details = "Not deployed"
@@ -648,7 +711,11 @@ func (m interactiveStatusModel) View() string {
 			prevGroup = c.Group
 		}
 
-		compName := c.Icon + " " + c.Name
+		iconStr := c.Icon
+		if visualWidth(iconStr) == 1 {
+			iconStr += " "
+		}
+		compName := iconStr + " " + c.Name
 		nameStyle := lipgloss.NewStyle().Foreground(clrText)
 		var statusStr string
 
@@ -691,6 +758,7 @@ func runInteractiveStatus(ctx context.Context, components []struct {
 }) ([]ComponentStatus, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	helmIndex := loadHelmReleaseIndex(ctx)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -727,9 +795,9 @@ func runInteractiveStatus(ctx context.Context, components []struct {
 				Release:   comp.Release,
 				Namespace: comp.Namespace,
 			}
-			st.HelmStatus = getHelmStatusV2(ctx, comp.Release, comp.Namespace)
+			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, comp.Release, comp.Namespace)
 			if st.HelmStatus == "deployed" {
-				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, comp.Namespace)
+				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
 				st.Details = "Not deployed"
@@ -796,7 +864,11 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 }
 
 func printStatusRow(s ComponentStatus) {
-	nameStr := s.Icon + " " + s.Name
+	iconStr := s.Icon
+	if visualWidth(iconStr) == 1 {
+		iconStr += " "
+	}
+	nameStr := iconStr + " " + s.Name
 	// Emoji icons render as 2 cells in terminals, but runewidth often
 	// miscounts them (e.g. ☸️ with VS16 reports width 1 instead of 2).
 	// Use a fixed 2-cell icon slot + 1 space + text width for padding.
