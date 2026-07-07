@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/klster/kates-cli/internal/kubectl"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -61,12 +62,14 @@ var kyvernoDetectCmd = &cobra.Command{
 }
 
 func checkKyvernoInstalled() bool {
-	checkCmd := exec.Command("kubectl", "get", "crd", "clusterpolicies.kyverno.io", "--no-headers")
-	return checkCmd.Run() == nil
+	kc := kubectl.New("")
+	return kc.CRDExists(context.Background(), "clusterpolicies.kyverno.io")
 }
 
 func discoverExistingPolicies() map[string]string {
-	out, err := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.status.ready}{\"\\n\"}{end}").Output()
+	kc := kubectl.New("")
+	ctx := context.Background()
+	out, err := kc.Output(ctx, "get", "clusterpolicies", "-o", `jsonpath={range .items[*]}{.metadata.name}={.status.ready}{"\n"}{end}`)
 	policies := make(map[string]string)
 	if err != nil {
 		return policies
@@ -86,6 +89,9 @@ func discoverExistingPolicies() map[string]string {
 }
 
 func generateRecommendations(existing map[string]string) []policyRec {
+	kc := kubectl.New("")
+	ctx := context.Background()
+
 	recs := []policyRec{
 		{
 			Name: "Pod Security Standards",
@@ -106,7 +112,7 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	}
 
 	// Detect if custom registries are used
-	regOut, _ := exec.Command("kubectl", "get", "pods", "-A", "-o", "jsonpath={.items[*].spec.containers[*].image}").Output()
+	regOut, _ := kc.Output(ctx, "get", "pods", "-A", "-o", "jsonpath={.items[*].spec.containers[*].image}")
 	images := string(regOut)
 	if strings.Contains(images, "ghcr.io") || strings.Contains(images, "docker.io") {
 		recs = append(recs, policyRec{
@@ -120,7 +126,7 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	}
 
 	// Detect if NetworkPolicies exist
-	netpolOut, _ := exec.Command("kubectl", "get", "netpol", "-A", "--no-headers").Output()
+	netpolOut, _ := kc.Output(ctx, "get", "netpol", "-A", "--no-headers")
 	if len(strings.TrimSpace(string(netpolOut))) == 0 {
 		recs = append(recs, policyRec{
 			Name: "NetworkPolicy Generation",
@@ -133,7 +139,7 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	}
 
 	// Detect dev/staging namespaces for PolicyExceptions
-	nsOut, _ := exec.Command("kubectl", "get", "ns", "-o", "jsonpath={.items[*].metadata.name}").Output()
+	nsOut, _ := kc.Output(ctx, "get", "ns", "-o", "jsonpath={.items[*].metadata.name}")
 	ns := string(nsOut)
 	if strings.Contains(ns, "-dev") || strings.Contains(ns, "-staging") || strings.Contains(ns, "sandbox") {
 		recs = append(recs, policyRec{
@@ -159,8 +165,7 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	}
 
 	// Detect Kafka/Strimzi CRDs
-	crdOut, _ := exec.Command("kubectl", "get", "crd", "kafkatopics.kafka.strimzi.io", "--no-headers").Output()
-	if len(strings.TrimSpace(string(crdOut))) > 0 {
+	if kc.CRDExists(ctx, "kafkatopics.kafka.strimzi.io") {
 		recs = append(recs, policyRec{
 			Name: "Kafka Topic Standards",
 			Description: "Enforce minimum replication factors and retention policies on KafkaTopics",

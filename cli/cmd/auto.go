@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/klster/kates-cli/internal/helm"
 	"github.com/klster/kates-cli/output"
 	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
@@ -108,10 +108,8 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	}
 
 	output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", autoChartDir))
-	depCmd := exec.Command("helm", "dependency", "build", autoChartDir)
-	depCmd.Stdout = os.Stdout
-	depCmd.Stderr = os.Stderr
-	if err := depCmd.Run(); err != nil {
+	hc := helm.New("")
+	if err := hc.DependencyBuild(context.Background(), autoChartDir); err != nil {
 		return fmt.Errorf("helm dependency build failed: %w", err)
 	}
 
@@ -133,10 +131,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 
 	output.Hint(fmt.Sprintf("🚀 Executing: helm %s", strings.Join(helmArgs, " ")))
 
-	deployCmd := exec.Command("helm", helmArgs...)
-	deployCmd.Stdout = os.Stdout
-	deployCmd.Stderr = os.Stderr
-	if err := deployCmd.Run(); err != nil {
+	if _, err := hc.Run(context.Background(), helmArgs...); err != nil {
 		return fmt.Errorf("helm upgrade failed: %w", err)
 	}
 
@@ -157,10 +152,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 			}
 
 			output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", monitoringChartDir))
-			monDepCmd := exec.Command("helm", "dependency", "build", monitoringChartDir)
-			monDepCmd.Stdout = os.Stdout
-			monDepCmd.Stderr = os.Stderr
-			if err := monDepCmd.Run(); err != nil {
+			if err := hc.DependencyBuild(context.Background(), monitoringChartDir); err != nil {
 				output.Error(fmt.Sprintf("Monitoring helm dependency build failed: %v", err))
 				output.Warn("Continuing without monitoring — Kafka cluster is deployed successfully")
 			} else {
@@ -176,10 +168,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 				}
 
 				output.Hint(fmt.Sprintf("📊 Executing: helm %s", strings.Join(monHelmArgs, " ")))
-				monDeployCmd := exec.Command("helm", monHelmArgs...)
-				monDeployCmd.Stdout = os.Stdout
-				monDeployCmd.Stderr = os.Stderr
-				if err := monDeployCmd.Run(); err != nil {
+				if _, err := hc.Run(context.Background(), monHelmArgs...); err != nil {
 					output.Error(fmt.Sprintf("Monitoring deployment failed: %v", err))
 					output.Warn("Kafka cluster is deployed successfully but monitoring failed — you can retry with: make monitoring-generic")
 				} else {

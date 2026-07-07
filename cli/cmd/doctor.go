@@ -3,9 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/klster/kates-cli/internal/kubectl"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -24,6 +24,7 @@ var doctorCmd = &cobra.Command{
 	Example: "  kates doctor",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
+		kc := kubectl.New("")
 		var checks []checkResult
 
 		output.Banner("Kates Doctor", "Pre-flight cluster readiness")
@@ -102,25 +103,24 @@ var doctorCmd = &cobra.Command{
 		}
 
 		// Kyverno Checks
-		crdOut, _ := exec.Command("kubectl", "get", "crd", "clusterpolicies.kyverno.io", "--no-headers").Output()
-		if len(crdOut) > 0 {
+		if kc.CRDExists(ctx, "clusterpolicies.kyverno.io") {
 			checks = append(checks, checkResult{"Kyverno Installed", true, "CRD present", ""})
 			
-			podOut, _ := exec.Command("kubectl", "get", "pods", "-n", "kyverno", "-l", "app.kubernetes.io/component=admission-controller", "--field-selector=status.phase=Running", "--no-headers").Output()
+			podOut, _ := kc.Output(ctx, "get", "pods", "-n", "kyverno", "-l", "app.kubernetes.io/component=admission-controller", "--field-selector=status.phase=Running", "--no-headers")
 			if len(podOut) > 0 {
 				checks = append(checks, checkResult{"Kyverno Ready", true, "Admission controller running", ""})
 			} else {
 				checks = append(checks, checkResult{"Kyverno Ready", false, "Admission controller not running", "Check pod events in 'kyverno' namespace or run 'kubectl get pods -n kyverno'."})
 			}
 
-			polOut, _ := exec.Command("kubectl", "get", "clusterpolicies", "--no-headers").Output()
+			polOut, _ := kc.Output(ctx, "get", "clusterpolicies", "--no-headers")
 			if len(polOut) > 0 {
 				checks = append(checks, checkResult{"Kyverno Policies", true, fmt.Sprintf("%d policies active", len(strings.Split(strings.TrimSpace(string(polOut)), "\n"))), ""})
 			} else {
 				checks = append(checks, checkResult{"Kyverno Policies", false, "No active policies", "Run 'kates kyverno apply' to configure recommended policies."})
 			}
 
-			polRepOut, _ := exec.Command("kubectl", "get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}{\"\\n\"}{end}").Output()
+			polRepOut, _ := kc.Output(ctx, "get", "clusterpolicyreports,policyreports", "-A", "-o", `jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}{"\n"}{end}`)
 			outStr := strings.TrimSpace(string(polRepOut))
 			if len(outStr) > 0 {
 				failures := strings.Split(outStr, "\n")
@@ -144,46 +144,48 @@ var doctorCmd = &cobra.Command{
 }
 
 func renderChecks(checks []checkResult) {
-	rows := make([][]string, 0, len(checks))
-	passed := 0
-	
-	// Print a clean table
-	for _, c := range checks {
-		status := "PASS"
-		if !c.Passed {
-			status = "FAILED"
-			if strings.Contains(c.Name, "Kyverno") {
-				status = "WARN" // Kyverno is optional but recommended
+	output.Render(outputMode == "json", checks, func() {
+		rows := make([][]string, 0, len(checks))
+		passed := 0
+		
+		// Print a clean table
+		for _, c := range checks {
+			status := "PASS"
+			if !c.Passed {
+				status = "FAILED"
+				if strings.Contains(c.Name, "Kyverno") {
+					status = "WARN" // Kyverno is optional but recommended
+				}
+			} else {
+				passed++
 			}
+			rows = append(rows, []string{c.Name, status, c.Detail})
+		}
+		output.Table([]string{"Check", "Status", "Detail"}, rows)
+
+		// Print Remediations separately for clarity and deep verbosity
+		hasRemediations := false
+		for _, c := range checks {
+			if !c.Passed && c.Remediation != "" {
+				if !hasRemediations {
+					output.SubHeader("Remediations")
+					hasRemediations = true
+				}
+				output.Hint(fmt.Sprintf("%s: %s", output.KeyStyle.Render(c.Name), c.Remediation))
+			}
+		}
+		if hasRemediations {
+			fmt.Println()
+		}
+
+		summary := fmt.Sprintf("%d/%d checks passed", passed, len(checks))
+		if passed == len(checks) {
+			output.Success("✓ " + summary + " — cluster is ready for testing!")
 		} else {
-			passed++
+			output.Warn("⚠ " + summary + " — review failing checks above")
 		}
-		rows = append(rows, []string{c.Name, status, c.Detail})
-	}
-	output.Table([]string{"Check", "Status", "Detail"}, rows)
-
-	// Print Remediations separately for clarity and deep verbosity
-	hasRemediations := false
-	for _, c := range checks {
-		if !c.Passed && c.Remediation != "" {
-			if !hasRemediations {
-				output.SubHeader("Remediations")
-				hasRemediations = true
-			}
-			output.Hint(fmt.Sprintf("%s: %s", output.KeyStyle.Render(c.Name), c.Remediation))
-		}
-	}
-	if hasRemediations {
 		fmt.Println()
-	}
-
-	summary := fmt.Sprintf("%d/%d checks passed", passed, len(checks))
-	if passed == len(checks) {
-		output.Success("✓ " + summary + " — cluster is ready for testing!")
-	} else {
-		output.Warn("⚠ " + summary + " — review failing checks above")
-	}
-	fmt.Println()
+	})
 }
 
 func init() {

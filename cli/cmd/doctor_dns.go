@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/klster/kates-cli/internal/kubectl"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +45,8 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
+	kc := kubectl.New("")
+
 	title := lipgloss.NewStyle().Bold(true).Foreground(clrText)
 	separator := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("━", 50))
 	success := lipgloss.NewStyle().Foreground(clrGreen).Render("✅")
@@ -62,6 +65,7 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	podName := fmt.Sprintf("kates-dns-test-%d", rand.Intn(100000))
 	
 	// We use the "default" namespace because the application namespace might not exist yet
+	// This ephemeral pod run needs exec.CommandContext because it requires interactive stdin
 	resolvConfOut, err := exec.CommandContext(ctx, "kubectl", "run", "--rm", "-i", "--restart=Never",
 		"--image=busybox:1.36", podName, "-n", "default",
 		"--", "cat", "/etc/resolv.conf").CombinedOutput()
@@ -116,11 +120,11 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	// Check Kates backend Deployment
 	checkCount++
 	if doctorAppNS != doctorKafkaNS {
-		katesPatchNeeded := checkDeploymentDNS(ctx, "kates", doctorAppNS, requiredKafkaSearch)
+		katesPatchNeeded := checkDeploymentDNS(ctx, kc, "kates", doctorAppNS, requiredKafkaSearch)
 		if katesPatchNeeded {
 			if doctorDnsFix {
 				fmt.Printf("  %s kates backend (namespace: %s) is missing DNS search domain.\n", warning, doctorAppNS)
-				err := patchDeploymentDNS(ctx, "kates", doctorAppNS, requiredKafkaSearch)
+				err := patchDeploymentDNS(ctx, kc, "kates", doctorAppNS, requiredKafkaSearch)
 				if err != nil {
 					fmt.Printf("     %s Failed to patch kates deployment: %v\n", fail, err)
 				} else {
@@ -140,11 +144,11 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	// Check KafkaConnect CR
 	checkCount++
 	if doctorConnectNS != doctorKafkaNS {
-		connectPatchNeeded := checkKafkaConnectDNS(ctx, "connect-cluster", doctorConnectNS, requiredKafkaSearch)
+		connectPatchNeeded := checkKafkaConnectDNS(ctx, kc, "connect-cluster", doctorConnectNS, requiredKafkaSearch)
 		if connectPatchNeeded {
 			if doctorDnsFix {
 				fmt.Printf("  %s connect-cluster (namespace: %s) is missing DNS search domain.\n", warning, doctorConnectNS)
-				err := patchKafkaConnectDNS(ctx, "connect-cluster", doctorConnectNS, requiredKafkaSearch)
+				err := patchKafkaConnectDNS(ctx, kc, "connect-cluster", doctorConnectNS, requiredKafkaSearch)
 				if err != nil {
 					fmt.Printf("     %s Failed to patch connect-cluster: %v\n", fail, err)
 				} else {
@@ -171,8 +175,8 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func checkDeploymentDNS(ctx context.Context, name, ns, requiredSearch string) bool {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "deployment", name, "-n", ns, "-o", "jsonpath={.spec.template.spec.dnsConfig.searches}").Output()
+func checkDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, requiredSearch string) bool {
+	out, err := kc.Output(ctx, "get", "deployment", name, "-n", ns, "-o", "jsonpath={.spec.template.spec.dnsConfig.searches}")
 	if err != nil {
 		// Ignore if deployment doesn't exist
 		return false
@@ -184,8 +188,8 @@ func checkDeploymentDNS(ctx context.Context, name, ns, requiredSearch string) bo
 	return false
 }
 
-func checkKafkaConnectDNS(ctx context.Context, name, ns, requiredSearch string) bool {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnect", name, "-n", ns, "-o", "jsonpath={.spec.template.pod.dnsConfig.searches}").Output()
+func checkKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, requiredSearch string) bool {
+	out, err := kc.Output(ctx, "get", "kafkaconnect", name, "-n", ns, "-o", "jsonpath={.spec.template.pod.dnsConfig.searches}")
 	if err != nil {
 		return false
 	}
@@ -196,14 +200,14 @@ func checkKafkaConnectDNS(ctx context.Context, name, ns, requiredSearch string) 
 	return false
 }
 
-func patchDeploymentDNS(ctx context.Context, name, ns, searchDomain string) error {
+func patchDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, searchDomain string) error {
 	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"dnsConfig":{"searches":["%s"]}}}}}`, searchDomain)
-	_, err := exec.CommandContext(ctx, "kubectl", "patch", "deployment", name, "-n", ns, "--type=strategic", "-p", patch).CombinedOutput()
+	_, err := kc.Run(ctx, "patch", "deployment", name, "-n", ns, "--type=strategic", "-p", patch)
 	return err
 }
 
-func patchKafkaConnectDNS(ctx context.Context, name, ns, searchDomain string) error {
+func patchKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, searchDomain string) error {
 	patch := fmt.Sprintf(`{"spec":{"template":{"pod":{"dnsConfig":{"searches":["%s"]}}}}}`, searchDomain)
-	_, err := exec.CommandContext(ctx, "kubectl", "patch", "kafkaconnect", name, "-n", ns, "--type=merge", "-p", patch).CombinedOutput()
+	_, err := kc.Run(ctx, "patch", "kafkaconnect", name, "-n", ns, "--type=merge", "-p", patch)
 	return err
 }
