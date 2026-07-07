@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -42,6 +43,78 @@ func TestNew(t *testing.T) {
 	}
 	if c.HTTPClient == nil {
 		t.Error("HTTPClient should not be nil")
+	}
+}
+
+func TestNewWithOptions_BypassesProxyForLoopbackBaseURL(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9000")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9000")
+	t.Setenv("ALL_PROXY", "http://127.0.0.1:9000")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	c := NewWithOptions(ClientOptions{BaseURL: "http://localhost:8080"})
+	transport, ok := c.HTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", c.HTTPClient.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("proxy function should be nil for loopback base URL")
+	}
+}
+
+func TestNewWithOptions_UsesEnvProxyForNonLoopbackBaseURL(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9000")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:9000")
+	t.Setenv("ALL_PROXY", "http://127.0.0.1:9000")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	c := NewWithOptions(ClientOptions{BaseURL: "https://kates.example.com"})
+	transport, ok := c.HTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", c.HTTPClient.Transport)
+	}
+	if transport.Proxy == nil {
+		t.Fatal("proxy function should not be nil for non-loopback base URL")
+	}
+
+	req := &http.Request{URL: &url.URL{Scheme: "https", Host: "kates.example.com"}}
+	proxyURL, err := transport.Proxy(req)
+	if err != nil {
+		t.Fatalf("proxy lookup error: %v", err)
+	}
+	if proxyURL == nil {
+		t.Fatal("expected env proxy URL, got nil")
+	}
+	if proxyURL.String() != "http://127.0.0.1:9000" {
+		t.Fatalf("proxy URL = %q, want %q", proxyURL.String(), "http://127.0.0.1:9000")
+	}
+}
+
+func TestNewWithOptions_ExplicitProxyOverridesLoopbackBypass(t *testing.T) {
+	c := NewWithOptions(ClientOptions{
+		BaseURL:  "http://127.0.0.1:8080",
+		ProxyURL: "http://proxy.internal:8080",
+	})
+	transport, ok := c.HTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", c.HTTPClient.Transport)
+	}
+	if transport.Proxy == nil {
+		t.Fatal("proxy function should not be nil when explicit proxy is set")
+	}
+
+	req := &http.Request{URL: &url.URL{Scheme: "http", Host: "127.0.0.1:8080"}}
+	proxyURL, err := transport.Proxy(req)
+	if err != nil {
+		t.Fatalf("proxy lookup error: %v", err)
+	}
+	if proxyURL == nil {
+		t.Fatal("expected explicit proxy URL, got nil")
+	}
+	if proxyURL.String() != "http://proxy.internal:8080" {
+		t.Fatalf("proxy URL = %q, want %q", proxyURL.String(), "http://proxy.internal:8080")
 	}
 }
 

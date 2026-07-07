@@ -271,6 +271,8 @@ initContainers:
 kafka:
   # -- Kafka bootstrap servers
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  # -- Namespace where CDC integration test KafkaTopic CRs are managed (empty = auto-detect)
+  topicNamespace: ""
   # -- Client rack ID for rack-aware consumption
   clientRack: ""
   # -- Security protocol

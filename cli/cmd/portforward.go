@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -153,13 +155,18 @@ func runPorts(ctx context.Context) {
 			pfArg,
 			"-n", spec.Namespace,
 		)
+		// Detach from the current process group so forwards survive after
+		// `kates ports` exits and the shell returns to prompt.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 		if err == nil {
 			cmd.Stdout = devNull
 			cmd.Stderr = devNull
 		}
 		cmd.Stdin = nil
-		_ = cmd.Start()
+		if err := cmd.Start(); err == nil && cmd.Process != nil {
+			_ = cmd.Process.Release()
+		}
 	}
 
 	// Verify reachability
@@ -170,6 +177,9 @@ func runPorts(ctx context.Context) {
 	errStyle := lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
 
 	allOk := true
+	katesAPIForwardActive := false
+	katesAPINS := ""
+	katesAPILocalPort := 0
 	for _, spec := range specs {
 		addr := fmt.Sprintf("127.0.0.1:%d", spec.Local)
 		success := false
@@ -182,6 +192,11 @@ func runPorts(ctx context.Context) {
 		}
 
 		if success {
+			if spec.Label == "Kates REST API" {
+				katesAPIForwardActive = true
+				katesAPINS = spec.Namespace
+				katesAPILocalPort = spec.Local
+			}
 			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
 				okStyle.Render("✔"),
 				spec.Label,
@@ -199,6 +214,12 @@ func runPorts(ctx context.Context) {
 		}
 	}
 
+	// Keep local CLI context in sync with the forwarded API endpoint so follow-up
+	// commands (health/resilience/tests) work without manual ctx/api-key edits.
+	if katesAPIForwardActive {
+		syncContextToPortForward(ctx, katesAPINS, katesAPILocalPort)
+	}
+
 	fmt.Println()
 	if allOk {
 		fmt.Printf("    %s %s\n", okStyle.Render("✓"), boldStyle.Render("Port forwards established successfully!"))
@@ -207,6 +228,205 @@ func runPorts(ctx context.Context) {
 		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
 		fmt.Printf("      %s\n\n", output.DimStyle.Render("Check if the pods are ready or run 'kates clean' to reset."))
 	}
+}
+
+func syncContextToPortForward(ctx context.Context, appNS string, localPort int) {
+	endpoint := fmt.Sprintf("http://localhost:%d", localPort)
+	cfg := loadConfig()
+	ctxName := resolveContextName(cfg)
+	existingKey := ""
+	if existing, ok := cfg.Contexts[ctxName]; ok {
+		existingKey = strings.TrimSpace(existing.APIKey)
+	}
+
+	apiKey, source, keyErr := resolveWorkingAPIKey(ctx, endpoint, appNS, existingKey)
+	cfg = applyPortForwardContext(cfg, ctxName, endpoint, apiKey)
+	if err := saveConfig(cfg); err != nil {
+		fmt.Printf("    %s Failed to persist context sync: %v\n", output.WarningStyle.Render("⚠"), err)
+		return
+	}
+
+	if apiKey != "" {
+		if source == "" {
+			source = "resolved"
+		}
+		fmt.Printf("    %s Synced context %q → %s (API key source: %s)\n", output.SuccessStyle.Render("✓"), ctxName, endpoint, source)
+		return
+	}
+
+	fmt.Printf("    %s Synced context %q → %s\n", output.SuccessStyle.Render("✓"), ctxName, endpoint)
+	if keyErr != nil {
+		fmt.Printf("      %s\n", output.DimStyle.Render("API key was not refreshed automatically (secret not found or not readable)."))
+	}
+}
+
+func resolveContextName(cfg Config) string {
+	name := cfg.CurrentContext
+	if contextFlag != "" {
+		name = contextFlag
+	}
+	if strings.TrimSpace(name) == "" {
+		return "local"
+	}
+	return name
+}
+
+func resolveWorkingAPIKey(ctx context.Context, endpoint, namespace, existingKey string) (string, string, error) {
+	secretKey, secretErr := fetchKatesAPIKey(ctx, namespace)
+	if secretKey != "" && isAPIKeyAccepted(endpoint, secretKey) {
+		return secretKey, "secret", nil
+	}
+
+	podKey, podErr := fetchKatesAPIKeyFromRunningPod(ctx, namespace)
+	if podKey != "" && isAPIKeyAccepted(endpoint, podKey) {
+		return podKey, "running-pod", nil
+	}
+
+	if strings.TrimSpace(existingKey) != "" && isAPIKeyAccepted(endpoint, existingKey) {
+		return existingKey, "existing-context", nil
+	}
+
+	// Best-effort fallback when validation cannot succeed (e.g., API temporarily down).
+	if secretKey != "" {
+		if secretErr != nil {
+			return secretKey, "secret-unverified", secretErr
+		}
+		return secretKey, "secret-unverified", nil
+	}
+	if podKey != "" {
+		if podErr != nil {
+			return podKey, "running-pod-unverified", podErr
+		}
+		return podKey, "running-pod-unverified", nil
+	}
+	if strings.TrimSpace(existingKey) != "" {
+		return existingKey, "existing-context-unverified", nil
+	}
+
+	if secretErr != nil {
+		return "", "", secretErr
+	}
+	if podErr != nil {
+		return "", "", podErr
+	}
+	return "", "", fmt.Errorf("no usable API key source")
+}
+
+func fetchKatesAPIKey(ctx context.Context, namespace string) (string, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(
+		checkCtx,
+		"kubectl",
+		"get", "secret", "kates-api-key",
+		"-n", namespace,
+		"-o", "go-template={{index .data \"api-key\"}}",
+	).Output()
+	if err != nil {
+		return "", err
+	}
+
+	encoded := strings.TrimSpace(string(out))
+	if encoded == "" {
+		return "", fmt.Errorf("secret kates-api-key has empty api-key")
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	apiKey := strings.TrimSpace(string(decoded))
+	if apiKey == "" {
+		return "", fmt.Errorf("decoded api-key is empty")
+	}
+	return apiKey, nil
+}
+
+func fetchKatesAPIKeyFromRunningPod(ctx context.Context, namespace string) (string, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	podOut, err := exec.CommandContext(
+		checkCtx,
+		"kubectl",
+		"get", "pods",
+		"-n", namespace,
+		"-l", "app.kubernetes.io/instance=kates",
+		"-o", "jsonpath={.items[0].metadata.name}",
+	).Output()
+	if err != nil {
+		return "", err
+	}
+
+	podName := strings.TrimSpace(string(podOut))
+	if podName == "" {
+		return "", fmt.Errorf("no running kates pod found in namespace %q", namespace)
+	}
+
+	out, err := exec.CommandContext(
+		checkCtx,
+		"kubectl", "exec",
+		"-n", namespace,
+		podName,
+		"--",
+		"printenv", "KATES_API_KEY",
+	).Output()
+	if err != nil {
+		return "", err
+	}
+
+	key := strings.TrimSpace(string(out))
+	if key == "" {
+		return "", fmt.Errorf("running pod %q has empty KATES_API_KEY", podName)
+	}
+	return key, nil
+}
+
+func isAPIKeyAccepted(endpoint, apiKey string) bool {
+	if strings.TrimSpace(endpoint) == "" || strings.TrimSpace(apiKey) == "" {
+		return false
+	}
+
+	checkURL := strings.TrimRight(endpoint, "/") + "/api/health"
+	req, err := http.NewRequest(http.MethodGet, checkURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func applyPortForwardContext(cfg Config, ctxName, endpoint, apiKey string) Config {
+	if cfg.Contexts == nil {
+		cfg.Contexts = map[string]Context{}
+	}
+	if strings.TrimSpace(ctxName) == "" {
+		ctxName = "local"
+	}
+
+	active := cfg.Contexts[ctxName]
+	if active.Output == "" {
+		active.Output = "table"
+	}
+	if endpoint != "" {
+		active.URL = endpoint
+	}
+	if apiKey != "" {
+		active.APIKey = apiKey
+	}
+
+	cfg.Contexts[ctxName] = active
+	cfg.CurrentContext = ctxName
+	return cfg
 }
 
 // discoverServices returns a set of "namespace/service-name" strings for all

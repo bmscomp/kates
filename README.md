@@ -498,6 +498,30 @@ All images are defined in `images.env` — the single source of truth.
 make registry-status                   # Check registry contents
 ```
 
+Behind a corporate proxy, define `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`
+either in your shell or in `proxy/proxy.conf` before running
+`./scripts/load-images-to-kind.sh`. The script now forwards these variables into
+Kind node `ctr pull` commands.
+
+If you do not use the load script, run `make cluster` (or
+`./scripts/start-cluster.sh`) after setting proxy variables. Cluster startup now
+reconciles containerd proxy settings on all Kind nodes so normal pod image pulls
+work through the proxy as well.
+
+You can also pass proxy params directly:
+
+```bash
+./scripts/start-cluster.sh \
+  --http-proxy http://proxy.example.com:8080 \
+  --https-proxy http://proxy.example.com:8080 \
+  --no-proxy "localhost,127.0.0.1,.svc,.cluster.local"
+```
+
+Note: loopback proxies from environment/proxy.conf (for example
+`http://127.0.0.1:9000`) are ignored by default because Kind nodes cannot reach
+their own loopback as your host proxy. If you pass a loopback URL explicitly
+via `--http-proxy/--https-proxy`, it is rewritten to `host.docker.internal`.
+
 ---
 
 ## Makefile Targets

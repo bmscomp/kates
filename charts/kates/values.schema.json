@@ -322,6 +322,7 @@
                     "type": "string",
                     "minLength": 0
                 },
+                "topicNamespace": { "type": "string" },
                 "clientRack": { "type": "string" },
                 "security": {
                     "type": "object",

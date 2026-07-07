@@ -3,6 +3,10 @@ service:
   type: NodePort
   nodePort: 30081
 
+kafkaUser:
+  # Managed by the krafter chart in this stack; avoid Helm ownership conflicts.
+  enabled: false
+
 resources:
   requests:
     cpu: 100m

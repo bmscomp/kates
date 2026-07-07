@@ -1,7 +1,7 @@
 {{- $kafkaNS := include "kafka-ui.kafkaNamespace" . -}}
 {{- $releaseNS := include "kafka-ui.namespace" . -}}
 {{- if and .Values.kafkaUser.enabled (eq $kafkaNS $releaseNS) }}
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
   name: {{ .Values.kafkaUser.name | default "kafka-ui" }}

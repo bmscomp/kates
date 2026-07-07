@@ -399,6 +399,76 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 					},
 				},
 				{
+					Name: "kafka-ui",
+					Authentication: GenUserAuth{
+						Type: "scram-sha-512",
+					},
+					Quotas: &GenUserQuotas{
+						ProducerByteRate:  1048576,
+						ConsumerByteRate:  52428800,
+						RequestPercentage: 10,
+					},
+					Authorization: &GenUserAuthz{
+						Type: "simple",
+						Acls: []GenAcl{
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "*",
+									PatternType: "literal",
+								},
+								Operations: []string{"Describe", "Read"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "group",
+									Name:        "*",
+									PatternType: "literal",
+								},
+								Operations: []string{"Describe", "Read"},
+							},
+							{
+								Resource: GenAclResource{
+									Type: "cluster",
+								},
+								Operations: []string{"Describe"},
+							},
+						},
+					},
+				},
+				{
+					Name: "apicurio-registry",
+					Authentication: GenUserAuth{
+						Type: "scram-sha-512",
+					},
+					Quotas: &GenUserQuotas{
+						ProducerByteRate:  10485760,
+						ConsumerByteRate:  20971520,
+						RequestPercentage: 15,
+					},
+					Authorization: &GenUserAuthz{
+						Type: "simple",
+						Acls: []GenAcl{
+							{
+								Resource: GenAclResource{
+									Type:        "topic",
+									Name:        "__apicurio",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Write", "Create", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "group",
+									Name:        "apicurio",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Describe"},
+							},
+						},
+					},
+				},
+				{
 					Name: "kates-connect",
 					Authentication: GenUserAuth{
 						Type: "scram-sha-512",
@@ -463,6 +533,14 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 								Resource: GenAclResource{
 									Type:        "group",
 									Name:        "kates-connect",
+									PatternType: "prefix",
+								},
+								Operations: []string{"Read", "Describe"},
+							},
+							{
+								Resource: GenAclResource{
+									Type:        "group",
+									Name:        "connect-",
 									PatternType: "prefix",
 								},
 								Operations: []string{"Read", "Describe"},

@@ -2,7 +2,6 @@
 # Usage: helm upgrade --install ... -f values-dev.yaml -f values-kind.yaml
 
 image:
-  # Kind requires pre-loaded images, so Never pull from registry
   pullPolicy: IfNotPresent
 
 resources:

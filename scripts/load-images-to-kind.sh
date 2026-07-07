@@ -18,19 +18,66 @@ bold "Loading Images into Kind Cluster"
 info "Platform: ${PLATFORM}"
 echo ""
 
+# Source proxy configuration if present (KEY=VALUE format).
+# This keeps behavior aligned with start-cluster.sh.
+if [ -f "${SCRIPT_DIR}/../proxy/proxy.conf" ]; then
+    info "Loading proxy configuration from proxy/proxy.conf"
+    set -a
+    source "${SCRIPT_DIR}/../proxy/proxy.conf"
+    set +a
+fi
+
+_first_non_empty() {
+    local first="${1:-}"
+    local second="${2:-}"
+    if [ -n "${first}" ]; then
+        echo "${first}"
+    else
+        echo "${second}"
+    fi
+}
+
+HTTP_PROXY_VALUE="$(_first_non_empty "${HTTP_PROXY:-}" "${http_proxy:-}")"
+HTTPS_PROXY_VALUE="$(_first_non_empty "${HTTPS_PROXY:-}" "${https_proxy:-}")"
+NO_PROXY_VALUE="$(_first_non_empty "${NO_PROXY:-}" "${no_proxy:-}")"
+
+DOCKER_EXEC_PROXY_ENV=()
+if [ -n "${HTTP_PROXY_VALUE}" ]; then
+    DOCKER_EXEC_PROXY_ENV+=(-e "HTTP_PROXY=${HTTP_PROXY_VALUE}" -e "http_proxy=${HTTP_PROXY_VALUE}")
+fi
+if [ -n "${HTTPS_PROXY_VALUE}" ]; then
+    DOCKER_EXEC_PROXY_ENV+=(-e "HTTPS_PROXY=${HTTPS_PROXY_VALUE}" -e "https_proxy=${HTTPS_PROXY_VALUE}")
+fi
+if [ -n "${NO_PROXY_VALUE}" ]; then
+    DOCKER_EXEC_PROXY_ENV+=(-e "NO_PROXY=${NO_PROXY_VALUE}" -e "no_proxy=${NO_PROXY_VALUE}")
+fi
+
+if [ ${#DOCKER_EXEC_PROXY_ENV[@]} -gt 0 ]; then
+    info "Proxy environment detected; forwarding proxy vars to Kind node pulls"
+fi
+
 TOTAL=0
 SKIPPED=0
 LOADED=0
 FAILED=0
 
 # Get all Kind node names
-NODES=($(kind get nodes --name "${KIND_CLUSTER_NAME}" 2>/dev/null))
+NODES=()
+while IFS= read -r node; do
+    [ -n "${node}" ] && NODES+=("${node}")
+done < <(kind get nodes --name "${KIND_CLUSTER_NAME}" 2>/dev/null)
 if [ ${#NODES[@]} -eq 0 ]; then
     error "No Kind nodes found for cluster '${KIND_CLUSTER_NAME}'"
     exit 1
 fi
 info "Nodes: ${NODES[*]}"
 echo ""
+
+_docker_exec_node() {
+    local node=$1
+    shift
+    docker exec "${DOCKER_EXEC_PROXY_ENV[@]}" "${node}" "$@"
+}
 
 # Check if image already present on the control-plane node
 _already_in_kind() {
@@ -44,11 +91,17 @@ _already_in_kind() {
 # Pull image into all Kind nodes via ctr
 _ctr_pull() {
     local image=$1
-    local plat_flag=$2   # e.g. "--platform linux/arm64" or ""
+    local platform=$2
     local all_ok=true
+    local pull_args=()
+
+    if [ -n "${platform}" ]; then
+        pull_args+=(--platform "${platform}")
+    fi
+
     for node in "${NODES[@]}"; do
-        if ! docker exec "${node}" ctr --namespace=k8s.io images pull \
-            ${plat_flag} "${image}" 2>&1; then
+        if ! _docker_exec_node "${node}" ctr --namespace=k8s.io images pull \
+            "${pull_args[@]}" "${image}" 2>&1; then
             all_ok=false
         fi
     done
@@ -67,7 +120,7 @@ load_image() {
     fi
 
     echo "  pulling into Kind nodes..."
-    if _ctr_pull "${image}" "--platform ${PLATFORM}"; then
+    if _ctr_pull "${image}" "${PLATFORM}"; then
         info "  ✓ loaded"
         LOADED=$((LOADED + 1))
     else
@@ -95,20 +148,20 @@ load_scarf_image() {
     fi
 
     echo "  pulling into Kind nodes (scarf.sh)..."
-    if _ctr_pull "${scarf_src}" "--platform ${PLATFORM}"; then
+    if _ctr_pull "${scarf_src}" "${PLATFORM}"; then
         # Tag scarf URL → canonical so both refs are available
         for node in "${NODES[@]}"; do
-            docker exec "${node}" ctr --namespace=k8s.io images tag \
+            _docker_exec_node "${node}" ctr --namespace=k8s.io images tag \
                 "${scarf_src}" "${canonical}" 2>/dev/null || true
         done
         info "  ✓ loaded (scarf)"
         LOADED=$((LOADED + 1))
     else
         echo "  → retrying via canonical: ${canonical}"
-        if _ctr_pull "${canonical}" "--platform ${PLATFORM}"; then
+        if _ctr_pull "${canonical}" "${PLATFORM}"; then
             # Tag canonical → scarf URL so pod image refs using the scarf URL also resolve
             for node in "${NODES[@]}"; do
-                docker exec "${node}" ctr --namespace=k8s.io images tag \
+                _docker_exec_node "${node}" ctr --namespace=k8s.io images tag \
                     "${canonical}" "${scarf_src}" 2>/dev/null || true
             done
             info "  ✓ loaded (via canonical)"
