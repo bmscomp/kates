@@ -63,11 +63,6 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	for _, e := range entries {
 		groups[e.Group] = append(groups[e.Group], e)
 	}
-	groupNames := map[string]string{
-		"A": "Operators & CRDs",
-		"B": "Core Infrastructure",
-		"C": "Applications",
-	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
 	termW := 72
@@ -95,7 +90,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 			continue
 		}
 		fmt.Println()
-		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, groupNames[g])))
+		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, componentGroupNames[g])))
 		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
 		for _, e := range groups[g] {

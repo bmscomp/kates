@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/klster/kates-cli/tui"
@@ -43,7 +42,7 @@ var kafkaBrokersCmd = &cobra.Command{
 
 		clusterLabel := "Kafka Cluster"
 		if info.ClusterID != "" {
-			clusterLabel += "  " + dimStyle.Render(info.ClusterID)
+			clusterLabel += "  " + output.DimStyle.Render(info.ClusterID)
 		}
 		output.Banner(clusterLabel, fmt.Sprintf("%v brokers", info.BrokerCount))
 
@@ -62,9 +61,9 @@ var kafkaBrokersCmd = &cobra.Command{
 			idStr := fmt.Sprintf("%v", b.ID)
 			role := ""
 			if idStr == controllerID {
-				role = leaderStyle.Render("★ CONTROLLER")
+				role = output.WarningStyle.Render("★ CONTROLLER")
 			} else {
-				role = dimStyle.Render("follower")
+				role = output.DimStyle.Render("follower")
 			}
 			rack := fmt.Sprintf("%v", b.Rack)
 			if rack == "<nil>" || rack == "" {
@@ -105,7 +104,7 @@ var kafkaTopicsCmd = &cobra.Command{
 
 		label := fmt.Sprintf("Kafka Topics (%d)", len(topics))
 		if filterFlag != "" {
-			label += dimStyle.Render("  filter: " + filterFlag)
+			label += output.DimStyle.Render("  filter: " + filterFlag)
 		}
 		output.Header(label)
 
@@ -153,7 +152,7 @@ var kafkaTopicCmd = &cobra.Command{
 		internal, _ := detail["internal"].(bool)
 		internalLabel := ""
 		if internal {
-			internalLabel = "  " + dimStyle.Render("(internal)")
+			internalLabel = "  " + output.DimStyle.Render("(internal)")
 		}
 		partitions := fmt.Sprintf("%v", detail["partitions"])
 		rf := fmt.Sprintf("%v", detail["replicationFactor"])
@@ -239,7 +238,7 @@ var kafkaGroupsCmd = &cobra.Command{
 			case "STABLE":
 				stateLabel = healthyBadge("● STABLE")
 			case "EMPTY":
-				stateLabel = dimStyle.Render("○ EMPTY")
+				stateLabel = output.DimStyle.Render("○ EMPTY")
 			case "DEAD", "DEAD_MEMBER":
 				stateLabel = errorBadge("✖ DEAD")
 			}
@@ -282,7 +281,7 @@ var kafkaGroupCmd = &cobra.Command{
 		if state == "STABLE" {
 			stateLabel = healthyBadge("● STABLE")
 		} else if state == "EMPTY" {
-			stateLabel = dimStyle.Render("○ EMPTY")
+			stateLabel = output.DimStyle.Render("○ EMPTY")
 		} else {
 			stateLabel = warnBadge("⚠ " + state)
 		}
@@ -352,7 +351,7 @@ var kafkaConsumeCmd = &cobra.Command{
 		for _, r := range records {
 			key := fmt.Sprintf("%v", r.Key)
 			if key == "<nil>" {
-				key = dimStyle.Render("(null)")
+				key = output.DimStyle.Render("(null)")
 			}
 			value := fmt.Sprintf("%v", r.Value)
 			if len(value) > 80 {
@@ -385,7 +384,7 @@ var kafkaProduceCmd = &cobra.Command{
 		value := produceValue
 
 		if value == "" {
-			fmt.Print(promptStyle.Render("Value (or pipe via stdin): "))
+			fmt.Print(output.AccentStyle.Render("Value (or pipe via stdin): "))
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
 				value = scanner.Text()
@@ -408,7 +407,7 @@ var kafkaProduceCmd = &cobra.Command{
 
 		output.Success(fmt.Sprintf(
 			"Produced to %s — partition %v, offset %v",
-			leaderStyle.Render(meta.Topic),
+			output.WarningStyle.Render(meta.Topic),
 			meta.Partition,
 			meta.Offset,
 		))
@@ -457,7 +456,7 @@ var kafkaCreateTopicCmd = &cobra.Command{
 		rf := fmt.Sprintf("%v", result["replicationFactor"])
 		output.Success(fmt.Sprintf(
 			"Created topic %s — partitions: %s, replication-factor: %s",
-			leaderStyle.Render(name), partitions, rf,
+			output.WarningStyle.Render(name), partitions, rf,
 		))
 		return nil
 	},
@@ -495,7 +494,7 @@ var kafkaAlterTopicCmd = &cobra.Command{
 
 		output.Success(fmt.Sprintf(
 			"Updated %s config(s) on topic %s",
-			strconv.Itoa(len(cfg)), leaderStyle.Render(name),
+			strconv.Itoa(len(cfg)), output.WarningStyle.Render(name),
 		))
 
 		rows := make([][]string, 0, len(cfg))
@@ -518,7 +517,7 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 
 		if !deleteTopicYes {
 			fmt.Printf("%s Delete topic %s? This cannot be undone. [y/N] ",
-				errorBadge("⚠"), leaderStyle.Render(name))
+				errorBadge("⚠"), output.WarningStyle.Render(name))
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
 				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
@@ -539,7 +538,7 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 			return cmdErr("Failed to delete topic: " + err.Error())
 		}
 
-		output.Success(fmt.Sprintf("Deleted topic %s", leaderStyle.Render(name)))
+		output.Success(fmt.Sprintf("Deleted topic %s", output.WarningStyle.Render(name)))
 		return nil
 	},
 }
@@ -567,46 +566,40 @@ func consumeTail(topic string) error {
 				continue
 			}
 			seen[key] = true
-			keyStr := dimStyle.Render(fmt.Sprintf("[p%v @%v]", r.Partition, r.Offset))
+			keyStr := output.DimStyle.Render(fmt.Sprintf("[p%v @%v]", r.Partition, r.Offset))
 			valueStr := fmt.Sprintf("%v", r.Value)
 			fmt.Printf("%s %s\n", keyStr, valueStr)
 		}
 	}
 }
 
-var (
-	leaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
-	dimStyle    = lipgloss.NewStyle().Faint(true)
-	promptStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
-)
-
 func healthyBadge(s string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render(s)
+	return output.SuccessStyle.Render(s)
 }
 
 func warnBadge(s string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(s)
+	return output.WarningStyle.Render(s)
 }
 
 func topicTypeLabel(name string, internal bool) string {
 	if internal {
-		return dimStyle.Render("internal")
+		return output.DimStyle.Render("internal")
 	}
 	lower := strings.ToLower(name)
 	switch {
 	case strings.HasSuffix(lower, "-test"):
 		return output.AccentStyle.Render("test")
 	case strings.HasPrefix(lower, "kates-"):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("system")
+		return output.AccentStyle.Render("system")
 	case strings.HasPrefix(lower, "strimzi."):
-		return dimStyle.Render("strimzi")
+		return output.DimStyle.Render("strimzi")
 	default:
 		return ""
 	}
 }
 
 func errorBadge(s string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(s)
+	return output.ErrorStyle.Render(s)
 }
 
 func highlightLag(lag string) string {

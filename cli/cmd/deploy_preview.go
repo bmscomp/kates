@@ -12,11 +12,6 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 	output.Header("🔍 Deployment Preview (Dry Run)")
 	fmt.Println()
 
-	groupNames := map[string]string{
-		"A": "Operators & CRDs",
-		"B": "Core Infrastructure",
-		"C": "Applications",
-	}
 	groupOrder := []string{"A", "B", "C"}
 
 	var deployCount, skipCount int
@@ -33,7 +28,7 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 			continue
 		}
 
-		output.SubHeader(fmt.Sprintf("Group %s — %s", group, groupNames[group]))
+		output.SubHeader(fmt.Sprintf("Group %s — %s", group, componentGroupNames[group]))
 
 		for _, e := range groupEntries {
 			namespaces[e.Namespace] = true

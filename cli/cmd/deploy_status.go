@@ -156,6 +156,16 @@ type helmStatusRelease struct {
 	Status    string `json:"status"`
 }
 
+type componentSpec struct {
+	Group     string
+	Icon      string
+	Name      string
+	Release   string
+	Namespace string
+	Kind      string
+	Resource  string
+}
+
 func runDeployStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
@@ -168,15 +178,7 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 
 	helmIndex := loadHelmReleaseIndex(ctx)
 
-	components := []struct {
-		Group     string
-		Icon      string
-		Name      string
-		Release   string
-		Namespace string
-		Kind      string
-		Resource  string
-	}{
+	components := []componentSpec{
 		{"A", "☸️", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
 		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
 		{"A", "🛡️", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
@@ -378,16 +380,6 @@ func getHealthStatus(ctx context.Context, kind, resource, namespace string) (str
 
 // ── V2 Enhanced Logic (Used in Interactive and JSON output modes) ──
 
-func getHelmStatusV2(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
-	if err := cmd.Run(); err == nil {
-		return "deployed"
-	}
-	return "missing"
-}
-
 func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (string, string, interface{}) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -581,30 +573,14 @@ func parseWorkloadHealth(data []byte) (string, string, WorkloadDetail) {
 
 // ── Parallel Runner for JSON Output ──
 
-func runJSONStatus(ctx context.Context, components []struct {
-	Group     string
-	Icon      string
-	Name      string
-	Release   string
-	Namespace string
-	Kind      string
-	Resource  string
-}) ([]ComponentStatus, error) {
+func runJSONStatus(ctx context.Context, components []componentSpec) ([]ComponentStatus, error) {
 	var wg sync.WaitGroup
 	statuses := make([]ComponentStatus, len(components))
 	helmIndex := loadHelmReleaseIndex(ctx)
 
 	for i, c := range components {
 		wg.Add(1)
-		go func(idx int, comp struct {
-			Group     string
-			Icon      string
-			Name      string
-			Release   string
-			Namespace string
-			Kind      string
-			Resource  string
-		}) {
+		go func(idx int, comp componentSpec) {
 			defer wg.Done()
 			st := ComponentStatus{
 				Group:     comp.Group,
@@ -636,16 +612,8 @@ type compStatusUpdateMsg struct {
 }
 
 type interactiveStatusModel struct {
-	components []struct {
-		Group     string
-		Icon      string
-		Name      string
-		Release   string
-		Namespace string
-		Kind      string
-		Resource  string
-	}
-	statuses []ComponentStatus
+	components []componentSpec
+	statuses   []ComponentStatus
 	checking []bool
 	done     []bool
 	spinner  spinner.Model
@@ -698,16 +666,10 @@ func (m interactiveStatusModel) View() string {
 		Render(" ⎈ Gathering Kates Deployment Status "))
 	b.WriteString("\n")
 
-	groupNames := map[string]string{
-		"A": "Operators & CRDs",
-		"B": "Core Infrastructure",
-		"C": "Applications",
-	}
-
 	prevGroup := ""
 	for i, c := range m.components {
 		if c.Group != prevGroup {
-			b.WriteString(fmt.Sprintf("\n  %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(groupNames[c.Group])))
+			b.WriteString(fmt.Sprintf("\n  %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(componentGroupNames[c.Group])))
 			prevGroup = c.Group
 		}
 
@@ -747,15 +709,7 @@ func (m interactiveStatusModel) View() string {
 	return b.String()
 }
 
-func runInteractiveStatus(ctx context.Context, components []struct {
-	Group     string
-	Icon      string
-	Name      string
-	Release   string
-	Namespace string
-	Kind      string
-	Resource  string
-}) ([]ComponentStatus, error) {
+func runInteractiveStatus(ctx context.Context, components []componentSpec) ([]ComponentStatus, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	helmIndex := loadHelmReleaseIndex(ctx)
@@ -779,15 +733,7 @@ func runInteractiveStatus(ctx context.Context, components []struct {
 	// Launch checks concurrently
 	for i, c := range components {
 		m.checking[i] = true
-		go func(idx int, comp struct {
-			Group     string
-			Icon      string
-			Name      string
-			Release   string
-			Namespace string
-			Kind      string
-			Resource  string
-		}) {
+		go func(idx int, comp componentSpec) {
 			st := ComponentStatus{
 				Group:     comp.Group,
 				Icon:      comp.Icon,
@@ -830,11 +776,6 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 	for _, s := range statuses {
 		groups[s.Group] = append(groups[s.Group], s)
 	}
-	groupNames := map[string]string{
-		"A": "Operators & CRDs",
-		"B": "Core Infrastructure",
-		"C": "Applications",
-	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
 	termW := 105
@@ -853,7 +794,7 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 			continue
 		}
 		fmt.Println()
-		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, groupNames[g])))
+		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, componentGroupNames[g])))
 		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
 		for _, s := range groups[g] {

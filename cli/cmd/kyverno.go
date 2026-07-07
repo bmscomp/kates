@@ -1,11 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/klster/kates-cli/internal/kubectl"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -64,24 +65,20 @@ var kyvernoStatusCmd = &cobra.Command{
 	Short:   "Show all Kyverno ClusterPolicies with status and rule counts",
 	Example: "  kates kyverno status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		kc := kubectl.New("")
+		ctx := context.Background()
+
 		output.Banner("Kyverno Policy Status", "Cluster-wide admission policies")
 		fmt.Println()
 
 		// Check if Kyverno is installed
-		checkCmd := exec.Command("kubectl", "get", "crd", "clusterpolicies.kyverno.io", "--no-headers")
-		if err := checkCmd.Run(); err != nil {
+		if !kc.CRDExists(ctx, "clusterpolicies.kyverno.io") {
 			output.Error("Kyverno is not installed in this cluster")
 			output.Hint("Install with: helm install kyverno kyverno/kyverno -n kyverno --create-namespace")
 			return nil
 		}
 
 		// Get policies as JSON
-		out, err := exec.Command("kubectl", "get", "clusterpolicies", "-o", "json").Output()
-		if err != nil {
-			output.Error("Failed to query ClusterPolicies: " + err.Error())
-			return nil
-		}
-
 		var result struct {
 			Items []struct {
 				Metadata struct {
@@ -100,8 +97,8 @@ var kyvernoStatusCmd = &cobra.Command{
 				} `json:"status"`
 			} `json:"items"`
 		}
-		if err := json.Unmarshal(out, &result); err != nil {
-			output.Error("Failed to parse policy data: " + err.Error())
+		if err := kc.JSON(ctx, &result, "get", "clusterpolicies"); err != nil {
+			output.Error("Failed to query ClusterPolicies: " + err.Error())
 			return nil
 		}
 
@@ -156,7 +153,7 @@ var kyvernoStatusCmd = &cobra.Command{
 		fmt.Println()
 
 		// Show violation summary
-		violationOut, err := exec.Command("kubectl", "get", "policyreport", "-A", "--no-headers").Output()
+		violationOut, err := kc.Output(ctx, "get", "policyreport", "-A", "--no-headers")
 		if err == nil && len(violationOut) > 0 {
 			totalPass, totalFail := 0, 0
 			nsFails := map[string]int{}
@@ -197,6 +194,9 @@ var kyvernoViolationsCmd = &cobra.Command{
 	Example: `  kates kyverno violations
   kates kyverno violations --namespace kafka`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		kc := kubectl.New("")
+		ctx := context.Background()
+
 		output.Banner("Kyverno Violations", "Policy audit report")
 		fmt.Println()
 
@@ -207,7 +207,7 @@ var kyvernoViolationsCmd = &cobra.Command{
 			kubectlArgs = append(kubectlArgs, "-A")
 		}
 
-		out, err := exec.Command("kubectl", kubectlArgs...).Output()
+		out, err := kc.Output(ctx, kubectlArgs...)
 		if err != nil {
 			output.Error("Failed to query PolicyReports: " + err.Error())
 			return nil
@@ -290,14 +290,15 @@ var kyvernoEnforceCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: "  kates kyverno enforce kates-pod-security-standards",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		kc := kubectl.New("")
+		ctx := context.Background()
 		policyName := args[0]
 		patchJSON := `{"spec":{"validationFailureAction":"Enforce"}}`
 
-		patchCmd := exec.Command("kubectl", "patch", "clusterpolicy", policyName,
+		_, err := kc.Run(ctx, "patch", "clusterpolicy", policyName,
 			"--type=merge", "-p", patchJSON)
-		out, err := patchCmd.CombinedOutput()
 		if err != nil {
-			output.Error(fmt.Sprintf("Failed to enforce policy '%s': %s", policyName, string(out)))
+			output.Error(fmt.Sprintf("Failed to enforce policy '%s': %v", policyName, err))
 			return nil
 		}
 		output.Success(fmt.Sprintf("  Policy '%s' switched to Enforce mode", policyName))
@@ -315,14 +316,15 @@ var kyvernoAuditCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: "  kates kyverno audit kates-pod-security-standards",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		kc := kubectl.New("")
+		ctx := context.Background()
 		policyName := args[0]
 		patchJSON := `{"spec":{"validationFailureAction":"Audit"}}`
 
-		patchCmd := exec.Command("kubectl", "patch", "clusterpolicy", policyName,
+		_, err := kc.Run(ctx, "patch", "clusterpolicy", policyName,
 			"--type=merge", "-p", patchJSON)
-		out, err := patchCmd.CombinedOutput()
 		if err != nil {
-			output.Error(fmt.Sprintf("Failed to switch policy '%s' to Audit: %s", policyName, string(out)))
+			output.Error(fmt.Sprintf("Failed to switch policy '%s' to Audit: %v", policyName, err))
 			return nil
 		}
 		output.Success(fmt.Sprintf("  Policy '%s' switched to Audit mode", policyName))

@@ -405,8 +405,7 @@ func (m deployDashboardModel) View() string {
 		isLastInGroup := (i == len(m.components)-1 || m.components[i+1].Group != c.Group)
 
 		if isFirstInGroup {
-			groupNames := map[string]string{"A": "Operators", "B": "Infrastructure", "C": "Applications"}
-			label := groupNames[c.Group]
+			label := componentGroupNames[c.Group]
 			if label == "" {
 				label = c.Group
 			}

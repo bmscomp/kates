@@ -1,0 +1,88 @@
+# golangci-lint configuration for the Kates CLI
+# https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    # Standard Go linters
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    # Function length / complexity
+    - funlen
+    - gocyclo
+
+linters-settings:
+  funlen:
+    lines: 100
+    statements: 60
+  gocyclo:
+    min-complexity: 30
+
+issues:
+  # Report all issues found (no cap per linter)
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # Exclude test files from funlen — test functions are often long by nature
+    - path: _test\.go
+      linters:
+        - funlen
+
+    # Exclude existing large files from funlen until they are refactored.
+    # This lets the linter pass on the current codebase while still catching
+    # new large functions in new files.
+    - path: deploy\.go
+      linters:
+        - funlen
+    - path: security\.go
+      linters:
+        - funlen
+    - path: cluster\.go
+      linters:
+        - funlen
+    - path: clean\.go
+      linters:
+        - funlen
+    - path: deploy_status\.go
+      linters:
+        - funlen
+    - path: helm_test_cmd\.go
+      linters:
+        - funlen
+    - path: kafka\.go
+      linters:
+        - funlen
+    - path: connect\.go
+      linters:
+        - funlen
+    - path: test\.go
+      linters:
+        - funlen
+    - path: doctor_network\.go
+      linters:
+        - funlen
+    - path: disruption\.go
+      linters:
+        - funlen
+    - path: portforward\.go
+      linters:
+        - funlen
+    - path: watch\.go
+      linters:
+        - funlen
+    - path: deploy_dashboard\.go
+      linters:
+        - funlen
+    - path: upgrade\.go
+      linters:
+        - funlen
+    - path: kyverno\.go
+      linters:
+        - funlen

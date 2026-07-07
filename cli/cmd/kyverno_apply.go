@@ -1,12 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/klster/kates-cli/internal/helm"
+	"github.com/klster/kates-cli/internal/kubectl"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,9 @@ It uses Helm to apply the exact configuration needed.`,
   kates kyverno apply --dry-run
   kates kyverno apply --mode Enforce --yes --with-netpol`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		kc := kubectl.New("")
+		ctx := context.Background()
+
 		output.Banner("Kyverno Policy Application", "Deploying Cluster Policies")
 
 		// 1. Detect and build Helm args
@@ -43,22 +47,22 @@ It uses Helm to apply the exact configuration needed.`,
 			output.Hint("Installing Kyverno first...")
 			
 			if !kyvernoApplyDryRun {
-				exec.Command("helm", "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/").Run()
-				exec.Command("helm", "repo", "update", "kyverno").Run()
-				installCmd := exec.Command("helm", "upgrade", "--install", "kyverno", "kyverno/kyverno",
+				hc := helm.New("")
+				hc.Run(ctx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
+				hc.Run(ctx, "repo", "update", "kyverno")
+				out, err := hc.Run(ctx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
 					"--version", "3.6.4", "-n", "kyverno", "--create-namespace",
 					"--set", "admissionController.replicas=1",
 					"--set", "backgroundController.replicas=1",
 					"--set", "cleanupController.replicas=1",
 					"--set", "reportsController.replicas=1",
 					"--timeout", "5m", "--wait")
-				out, err := installCmd.CombinedOutput()
 				if err != nil {
-					output.Error("Failed to install Kyverno: " + string(out))
+					output.Error("Failed to install Kyverno: " + out + err.Error())
 					return err
 				}
 				output.Success("Kyverno Admission Controller deployed")
-				exec.Command("kubectl", "wait", "--for=condition=Established", "crd", "clusterpolicies.kyverno.io", "--timeout=60s").Run()
+				kc.Run(ctx, "wait", "--for=condition=Established", "crd", "clusterpolicies.kyverno.io", "--timeout=60s")
 			}
 		}
 
@@ -74,7 +78,7 @@ It uses Helm to apply the exact configuration needed.`,
 		}
 
 		// Also check dev namespaces
-		nsOut, _ := exec.Command("kubectl", "get", "ns", "-o", "jsonpath={.items[*].metadata.name}").Output()
+		nsOut, _ := kc.Output(ctx, "get", "ns", "-o", "jsonpath={.items[*].metadata.name}")
 		ns := string(nsOut)
 		if strings.Contains(ns, "-dev") || strings.Contains(ns, "-staging") || strings.Contains(ns, "sandbox") {
 			helmArgs = append(helmArgs, "--set", "kyvernoPolicy.policyExceptions.enabled=true")
@@ -127,10 +131,9 @@ It uses Helm to apply the exact configuration needed.`,
 
 		// 2. Apply via Helm
 		output.Hint("Applying policies...")
-		applyCmd := exec.Command("helm", helmArgs...)
-		applyCmd.Stdout = os.Stdout
-		applyCmd.Stderr = os.Stderr
-		if err := applyCmd.Run(); err != nil {
+		hc := helm.New("")
+		hc.Verbose = true
+		if _, err := hc.Run(ctx, helmArgs...); err != nil {
 			output.Error("Failed to apply policies")
 			return err
 		}
@@ -141,9 +144,8 @@ It uses Helm to apply the exact configuration needed.`,
 		output.Hint("Waiting for policies to be ready...")
 		time.Sleep(3 * time.Second) // wait for admission controller to process CRs
 		
-		statusCmd := exec.Command("kubectl", "get", "clusterpolicies", "--no-headers")
-		out, _ := statusCmd.Output()
-		count := len(strings.Split(strings.TrimSpace(string(out)), "\n"))
+		statusOut, _ := kc.Output(ctx, "get", "clusterpolicies", "--no-headers")
+		count := len(strings.Split(strings.TrimSpace(string(statusOut)), "\n"))
 		
 		output.Success(fmt.Sprintf("%d policies are now active in %s mode.", count, kyvernoApplyMode))
 		output.Hint("Run 'kates kyverno status' for details.")

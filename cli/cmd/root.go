@@ -35,7 +35,11 @@ type Config struct {
 }
 
 func configPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not determine home directory: %v\n", err)
+		return ".kates.yaml"
+	}
 	return filepath.Join(home, ".kates.yaml")
 }
 
@@ -46,7 +50,9 @@ func loadConfig() Config {
 	}
 	data, err := os.ReadFile(configPath())
 	if err == nil {
-		yaml.Unmarshal(data, &cfg)
+		if yamlErr := yaml.Unmarshal(data, &cfg); yamlErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to parse config %s: %v\n", configPath(), yamlErr)
+		}
 	}
 	if cfg.Contexts == nil {
 		cfg.Contexts = map[string]Context{}

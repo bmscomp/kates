@@ -9,6 +9,12 @@ import (
 	"golang.org/x/term"
 )
 
+var componentGroupNames = map[string]string{
+	"A": "Operators & CRDs",
+	"B": "Core Infrastructure",
+	"C": "Applications",
+}
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 func spinnerFrame(tick int) string {

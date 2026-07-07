@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -889,7 +888,7 @@ Returns exit code 2 when critical alerts are configured (useful for CI/CD health
 				"alerts":            filtered,
 			})
 			if result.CriticalCount > 0 {
-				os.Exit(2)
+				return &silentErr{msg: "critical alerts detected"}
 			}
 			return nil
 		}
@@ -951,7 +950,7 @@ Returns exit code 2 when critical alerts are configured (useful for CI/CD health
 		}
 
 		if result.CriticalCount > 0 {
-			os.Exit(2)
+			return &silentErr{msg: "critical alerts detected"}
 		}
 		return nil
 	},
