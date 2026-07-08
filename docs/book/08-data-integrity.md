@@ -287,3 +287,119 @@ Integrity tests are only meaningful if the topic configuration matches productio
 - Same `min.insync.replicas`
 - Same `acks` mode
 - Same number of partitions
+
+## Complete Walkthrough
+
+This section walks through a full data integrity verification from start to finish, showing exactly what to expect at each stage.
+
+### Step 1 — Run the INTEGRITY Test
+
+```bash
+kates test create \
+  --type INTEGRITY \
+  --records 100000 \
+  --acks all \
+  --enable-idempotence \
+  --enable-crc \
+  --wait \
+  --label walkthrough=demo
+```
+
+### Step 2 — Observe Output During the Test
+
+While the test runs, you'll see real-time progress:
+
+```
+  ▸ Integrity Test (INTEGRITY)
+    Topic:       kates-integrity-f8a2c1d3
+    Records:     100,000
+    Acks:        all
+    Idempotent:  true
+    CRC:         enabled
+
+    Phase 1/4: Producing...
+      [████████████████████████████████████████] 100,000/100,000 (100%)
+      Produced:  100,000 records in 6.2s (16,129 rec/s)
+      ACK gaps:  0
+
+    Phase 2/4: Waiting for cluster stabilization... (5s)
+
+    Phase 3/4: Consuming...
+      [████████████████████████████████████████] 100,000/100,000 (100%)
+      Consumed:  100,000 records in 3.8s (26,315 rec/s)
+
+    Phase 4/4: Verifying sequences...
+```
+
+### Step 3 — Read the Verification Report
+
+```bash
+kates test get <id>
+```
+
+A successful run produces:
+
+```
+  ✓ Data Integrity Verification Report
+  ┌────────────────────┬────────────┐
+  │ Field              │ Value      │
+  ├────────────────────┼────────────┤
+  │ Produced           │ 100,000    │
+  │ ACKed              │ 100,000    │
+  │ Consumed           │ 100,000    │
+  │ Lost               │ 0          │
+  │ Duplicated         │ 0          │
+  │ Out-of-Order       │ 0          │
+  │ CRC Failures       │ 0          │
+  │ Corrupted          │ 0          │
+  │ Mode               │ idempotent │
+  │ Verdict            │ PASS ✅    │
+  └────────────────────┴────────────┘
+```
+
+### Step 4 — Interpret Each Field
+
+| Field | Meaning | Expected Value | Concern If... |
+|-------|---------|:--------------:|---------------|
+| **Produced** | Total messages submitted to the Kafka producer | Matches `--records` | Lower than expected: producer errors or timeouts |
+| **ACKed** | Messages confirmed persisted by the broker | Equal to Produced | Less than Produced: broker rejected or timed out messages |
+| **Consumed** | Messages read back from the topic | Equal to ACKed | Less than ACKed: **data loss detected** |
+| **Lost** | ACKed messages that were not consumed | `0` | Any non-zero value: serious durability issue |
+| **Duplicated** | Messages received more than once | `0` (with idempotency) | Non-zero without idempotency is expected; non-zero with idempotency is a bug |
+| **Out-of-Order** | Messages received in wrong sequence within a partition | `0` | Non-zero: possible log truncation or unclean election |
+| **CRC Failures** | Messages whose CRC32 checksum didn't match | `0` | Non-zero: data corruption in transit or at rest |
+| **Corrupted** | Messages with unparseable payload | `0` | Non-zero: serialization issue or disk corruption |
+
+### Step 5 — What a Failure Looks Like
+
+If the test detects data loss, the output changes to:
+
+```
+  ✗ Data Integrity Verification Report
+  ┌────────────────────┬───────────────────────────────────┐
+  │ Field              │ Value                             │
+  ├────────────────────┼───────────────────────────────────┤
+  │ Produced           │ 100,000                           │
+  │ ACKed              │ 99,998                            │
+  │ Consumed           │ 99,995                            │
+  │ Lost               │ 3                                 │
+  │ Duplicated         │ 0                                 │
+  │ Lost Ranges        │ [23401-23401], [67882-67883]      │
+  │ CRC Failures       │ 1                                 │
+  │ Corrupted          │ 1                                 │
+  │ Verdict            │ DATA_LOSS ❌                      │
+  └────────────────────┴───────────────────────────────────┘
+
+  Investigation pointers:
+    • Lost messages at seq 23401: single gap — likely broker crash during ACK
+    • Lost messages at seq 67882-67883: consecutive gap — possible log truncation
+    • CRC failure: message payload corrupted — check disk health
+```
+
+### What to Investigate on Failure
+
+1. **Check `acks` setting** — if `acks=1`, the leader may have crashed before replication. Switch to `acks=all`.
+2. **Check `min.insync.replicas`** — if set to `1`, a single broker failure can cause data loss. Set to `2`.
+3. **Check for unclean leader election** — run `kubectl logs <broker-pod> -n kafka | grep 'unclean'`. Disable `unclean.leader.election.enable` in production.
+4. **Check disk health** — CRC failures suggest disk corruption. Run `kubectl exec <broker-pod> -n kafka -- df -h` and check for I/O errors in `dmesg`.
+5. **Check timeline events** — run `kates test get <id> --timeline` to see exactly when failures occurred relative to broker events.

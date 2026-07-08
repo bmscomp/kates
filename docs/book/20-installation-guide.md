@@ -47,8 +47,10 @@ You need a running Kubernetes cluster with:
 | **Storage** | 150 GB | 300+ GB | Each broker stores 50 GB of log data by default. Use SSDs if possible — Kafka is I/O-heavy. |
 | **StorageClass** | 1 | 1 per zone | PersistentVolumeClaims (PVCs) need a StorageClass to provision disks. For zone-aware deployments, each zone gets its own class. |
 
-> [!IMPORTANT]
-> If you are using a **managed Kubernetes service** (EKS, GKE, AKS), the StorageClasses are usually pre-configured (e.g., `gp3` on AWS, `standard-rw` on GKE). For local Kind clusters, you must create them manually — see section 3.1.
+::: {.callout-important}
+If you are using a **managed Kubernetes service** (EKS, GKE, AKS), the StorageClasses are usually pre-configured (e.g., `gp3` on AWS, `standard-rw` on GKE). For local Kind clusters, you must create them manually — see section 3.1.
+:::
+
 
 ### 1.3 Namespaces
 
@@ -102,8 +104,10 @@ When `kyvernoPolicy.enabled=true` is set in the kafka-cluster Helm chart values,
 | `kates-image-verification` | Verifies Cosign container image signatures from trusted registries |
 | `kates-generate-network-policies` | Automatically generates default-deny NetworkPolicies in new namespaces |
 
-> [!TIP]
-> Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Chapter 17: Security & Compliance](17-security.md) for details on each policy.
+::: {.callout-tip}
+Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Chapter 17: Security & Compliance](17-security.md) for details on each policy.
+:::
+
 
 ---
 
@@ -297,8 +301,10 @@ The CLI automatically:
 - Provisions Kafka users and topics after the cluster is Ready
 - Shows a Bubble Tea progress UI with per-component status
 
-> [!TIP]
-> Use `kates deploy` for interactive development. Use direct Helm commands (below) in CI pipelines where you need fine-grained control.
+::: {.callout-tip}
+Use `kates deploy` for interactive development. Use direct Helm commands (below) in CI pipelines where you need fine-grained control.
+:::
+
 
 **Alternative — Direct Helm installation:**
 
@@ -358,8 +364,10 @@ You should see pods appear in this order:
 | 7 | `krafter-cruise-control-*` | Partition rebalancer |
 | 8 | `krafter-kafka-exporter-*` | Prometheus metrics exporter |
 
-> [!NOTE]
-> The initial deployment takes **3–8 minutes**. The operator generates TLS certificates, configures the KRaft quorum, and waits for each broker to join the cluster sequentially. This is normal.
+::: {.callout-note}
+The initial deployment takes **3–8 minutes**. The operator generates TLS certificates, configures the KRaft quorum, and waits for each broker to join the cluster sequentially. This is normal.
+:::
+
 
 ---
 
@@ -688,8 +696,10 @@ Every template file in the chart and what it produces:
 | `_helpers.tpl` | Template helper functions (labels, names, images) | N/A |
 | `NOTES.txt` | Post-install usage instructions | N/A |
 
-> [!NOTE]
-> Many resources are opt-in via boolean flags in `values.yaml`. A minimal installation with only core CRDs creates ~15 resources. A full production deployment with all features enabled creates 50+ resources.
+::: {.callout-note}
+Many resources are opt-in via boolean flags in `values.yaml`. A minimal installation with only core CRDs creates ~15 resources. A full production deployment with all features enabled creates 50+ resources.
+:::
+
 
 ---
 
@@ -776,8 +786,10 @@ kafka:
             service.beta.kubernetes.io/aws-load-balancer-type: nlb
 ```
 
-> [!WARNING]
-> When adding or removing listeners, the Strimzi operator performs a **rolling restart** of all brokers. Plan listener changes during a maintenance window.
+::: {.callout-warning}
+When adding or removing listeners, the Strimzi operator performs a **rolling restart** of all brokers. Plan listener changes during a maintenance window.
+:::
+
 
 ### 9.4 Bootstrap Addresses
 
@@ -859,8 +871,10 @@ Each `KafkaUser` CR produces a Kubernetes `Secret` with the same name. The secre
 kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d
 ```
 
-> [!IMPORTANT]
-> Secrets are only created after the Kafka cluster reaches `Ready` state. If secrets are missing, check that the Entity Operator pod is running (see [Section 16: Troubleshooting](#16-troubleshooting)).
+::: {.callout-important}
+Secrets are only created after the Kafka cluster reaches `Ready` state. If secrets are missing, check that the Entity Operator pod is running (see [Section 16: Troubleshooting](#16-troubleshooting)).
+:::
+
 
 ---
 
@@ -952,8 +966,10 @@ networkPolicies:
 
 After `helm upgrade`, the broker NetworkPolicy is regenerated with the new ingress rule.
 
-> [!CAUTION]
-> The `allowedClientNamespaces` setting uses `namespaceSelector` with broad pod selectors. Only add namespaces you trust, as **all pods** in the namespace will be able to reach Kafka brokers.
+::: {.callout-caution}
+The `allowedClientNamespaces` setting uses `namespaceSelector` with broad pod selectors. Only add namespaces you trust, as **all pods** in the namespace will be able to reach Kafka brokers.
+:::
+
 
 ### 11.5 Disabling Network Policies
 
@@ -964,8 +980,10 @@ networkPolicies:
   enabled: false
 ```
 
-> [!WARNING]
-> Never disable network policies in production. They are a critical layer of defense-in-depth.
+::: {.callout-warning}
+Never disable network policies in production. They are a critical layer of defense-in-depth.
+:::
+
 
 ---
 
@@ -1088,8 +1106,10 @@ crdUpgrade:
   image: "bitnami/kubectl:latest"  # Image with kubectl binary
 ```
 
-> [!NOTE]
-> The Job runs with a dedicated `ServiceAccount` and `ClusterRole` scoped only to CRD read/write. It cleans itself up after success (`hook-delete-policy: before-hook-creation,hook-succeeded`).
+::: {.callout-note}
+The Job runs with a dedicated `ServiceAccount` and `ClusterRole` scoped only to CRD read/write. It cleans itself up after success (`hook-delete-policy: before-hook-creation,hook-succeeded`).
+:::
+
 
 ### 13.2 Drain Cleaner
 
@@ -1114,8 +1134,10 @@ drainCleaner:
       cpu: 100m
 ```
 
-> [!TIP]
-> Enable Drain Cleaner in any environment where nodes are regularly drained — EKS managed node groups, GKE node auto-upgrades, or spot/preemptible instances.
+::: {.callout-tip}
+Enable Drain Cleaner in any environment where nodes are regularly drained — EKS managed node groups, GKE node auto-upgrades, or spot/preemptible instances.
+:::
+
 
 ### 13.3 Tiered Storage
 
@@ -1147,8 +1169,10 @@ tieredStorage:
     localRetentionMs: 86400000   # 1 day on local disk
 ```
 
-> [!WARNING]
-> Tiered storage requires Kafka 3.6+. Enabling it on older versions will cause broker startup failures.
+::: {.callout-warning}
+Tiered storage requires Kafka 3.6+. Enabling it on older versions will cause broker startup failures.
+:::
+
 
 ### 13.4 SeaweedFS
 
@@ -1197,8 +1221,10 @@ backup:
   storageLocation: default      # Points to SeaweedFS BSL
 ```
 
-> [!CAUTION]
-> Do **not** set `snapshotVolumes: true`. Broker PVC snapshots are crash-consistent and can corrupt data on restore. See the README section "Why NetBackup is Incompatible with Kafka" for the full rationale.
+::: {.callout-caution}
+Do **not** set `snapshotVolumes: true`. Broker PVC snapshots are crash-consistent and can corrupt data on restore. See the README section "Why NetBackup is Incompatible with Kafka" for the full rationale.
+:::
+
 
 ### 13.6 External Secrets Operator
 
@@ -1255,8 +1281,10 @@ podSecurityPolicy:
   excludeStrimziPods: true  # Don't mutate Strimzi-managed pods (operator handles them)
 ```
 
-> [!TIP]
-> Always start with `action: Audit`. Run `kubectl get policyreport -A` to see which pods would be blocked, then fix them before switching to `Enforce`.
+::: {.callout-tip}
+Always start with `action: Audit`. Run `kubectl get policyreport -A` to see which pods would be blocked, then fix them before switching to `Enforce`.
+:::
+
 
 ### 13.8 Cruise Control & Rebalance
 
@@ -1318,8 +1346,10 @@ kafka:
 
 **`replace-key`** means Strimzi generates a new CA key pair on renewal. This is more secure than `renew-certificate` (which reuses the existing key) but causes a rolling restart as all pods receive new certificates.
 
-> [!NOTE]
-> The `KafkaCertificateExpiringSoon` alert (see [Section 12.2](#122-prometheusrule-alerts-17-alerts)) fires 30 days before expiry. With a 180-day renewal window, you should never see this alert under normal operations — if you do, Strimzi's automatic renewal may be stuck.
+::: {.callout-note}
+The `KafkaCertificateExpiringSoon` alert (see [Section 12.2](#122-prometheusrule-alerts-17-alerts)) fires 30 days before expiry. With a 180-day renewal window, you should never see this alert under normal operations — if you do, Strimzi's automatic renewal may be stuck.
+:::
+
 
 ### 13.10 Helm Test Suite (9 Tiers)
 
@@ -1356,8 +1386,10 @@ helm test kafka-cluster -n kafka --timeout 120s
 helm test kafka-cluster -n kafka --filter name=krafter-test-produce-consume
 ```
 
-> [!TIP]
-> If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authentication — check that the user secret exists and the SCRAM password is populated. Run `kates kafka users` to verify user status.
+::: {.callout-tip}
+If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authentication — check that the user secret exists and the SCRAM password is populated. Run `kates kafka users` to verify user status.
+:::
+
 
 ---
 
@@ -1395,8 +1427,10 @@ The operator performs a **rolling restart** — one broker at a time, maintainin
 
 The operator upgrades brokers one at a time, waiting for ISR to heal before proceeding to the next broker.
 
-> [!WARNING]
-> Always test Kafka version upgrades in a staging environment first. Some versions change log format or protocol versions, which can affect client compatibility.
+::: {.callout-warning}
+Always test Kafka version upgrades in a staging environment first. Some versions change log format or protocol versions, which can affect client compatibility.
+:::
+
 
 ---
 
@@ -1408,8 +1442,10 @@ The operator upgrades brokers one at a time, waiting for ISR to heal before proc
 helm uninstall kafka-cluster -n kafka
 ```
 
-> [!CAUTION]
-> By default, the chart sets `helm.sh/resource-policy: keep` on the `Kafka` CR, `KafkaNodePool` CRs, `KafkaTopic` CRs, and `KafkaUser` CRs. This means `helm uninstall` **will not delete your data** or Kafka resources. This is intentional — it prevents accidental data loss.
+::: {.callout-caution}
+By default, the chart sets `helm.sh/resource-policy: keep` on the `Kafka` CR, `KafkaNodePool` CRs, `KafkaTopic` CRs, and `KafkaUser` CRs. This means `helm uninstall` **will not delete your data** or Kafka resources. This is intentional — it prevents accidental data loss.
+:::
+
 
 ### 15.2 Full Removal (Including Data)
 

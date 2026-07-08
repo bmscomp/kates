@@ -1,0 +1,9 @@
+# Quarto build output
+_book/
+_freeze/
+
+# Mermaid cache
+.quarto/
+
+/.quarto/
+**/*.quarto_ipynb

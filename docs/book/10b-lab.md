@@ -175,8 +175,10 @@ Press `W` to cycle the warmup count (0 → 1 → 2 → 3 → 4 → 5 → off):
 
 When you press `Enter`, Lab runs 2 silent warmup iterations (results discarded) then runs the real measured iteration. This ensures the JVM is fully warmed up before collecting data.
 
-> [!TIP]
-> For stress tests with `acks=all`, set warmup to **2**. For quick load tests, **1** is usually enough.
+::: {.callout-tip}
+For stress tests with `acks=all`, set warmup to **2**. For quick load tests, **1** is usually enough.
+:::
+
 
 ## Median Mode (`m`)
 
@@ -190,8 +192,10 @@ Press `m` to start:
 
 After all 3 runs complete, a single iteration is added to the history with the middle throughput/P99 value. This gives you a **stable, reproducible** metric for parameter comparisons.
 
-> [!NOTE]
-> Median mode and warmup combine: if warmup is set to 2 and you press `m`, Lab runs 2+3+2+3+2+3 = 15 iterations internally but records only 1 aggregated result. For faster sessions, set warmup to 0 when using median mode — the first of 3 runs provides the warmup naturally.
+::: {.callout-note}
+Median mode and warmup combine: if warmup is set to 2 and you press `m`, Lab runs 2+3+2+3+2+3 = 15 iterations internally but records only 1 aggregated result. For faster sessions, set warmup to 0 when using median mode — the first of 3 runs provides the warmup naturally.
+:::
+
 
 ## Export & Sessions
 

@@ -23,12 +23,14 @@
 
 ---
 
+> 📖 **[Read the Kates Definitive Guide](docs/book/README.md)** — 21 chapters covering performance theory, chaos engineering, security, deployment, and operations.
+
 ## ✨ Feature Highlights
 
 |  |  |  |
 |:--|:--|:--|
-| 🧪 **7 Test Types** | 🌪️ **Chaos Engineering** | 📊 **Full Observability** |
-| Load, Stress, Spike, Endurance, Breakpoint, Exactly-Once, Idempotency | 10 disruption types with safety guardrails and automatic rollback | Prometheus + Grafana + Jaeger with 10 dashboards & 20 alert rules |
+| 🧪 **8 Test Types** | 🌪️ **Chaos Engineering** | 📊 **Full Observability** |
+| Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, Integrity | 10 disruption types with safety guardrails and automatic rollback | Prometheus + Grafana + Jaeger with 10 dashboards & 20 alert rules |
 | 🏗️ **One-Command Deploy** | 🔒 **Security Auditing** | 🚀 **CI/CD Native** |
 | `kates deploy -i` — interactive wizard deploys the entire stack in minutes | TLS inspection, NetworkPolicy analysis, Kyverno compliance, penetration testing | Quality gates, JUnit export, badge generation, webhook notifications |
 
@@ -56,7 +58,7 @@ Simulate real-world geographic failures locally on a 3-node Kind Kubernetes clus
 Kates includes **active finalizer stripping and CR purging guardrails** built directly into its cleanup command, ensuring your local development cluster remains completely clean and free of namespace teardown locks without manual troubleshooting.
 
 ### 4. Continuous Chaos Engineering
-Leverage **7 pre-configured, production-parity chaos playbooks** driven by LitmusChaos. Run real-time performance-chaos correlation tests where you inject disruptions (e.g., broker pod kills, network latency spikes, disk fill-ups) while active performance workloads are running. Kates evaluates the throughput and latency degradation, outputting a precise SLA grade (A-F) based on customizable service level thresholds.
+Leverage **6 pre-configured, production-parity chaos playbooks** driven by LitmusChaos. Run real-time performance-chaos correlation tests where you inject disruptions (e.g., broker pod kills, network latency spikes, disk fill-ups) while active performance workloads are running. Kates evaluates the throughput and latency degradation, outputting a precise SLA grade (A-F) based on customizable service level thresholds.
 
 ### 5. OpenTelemetry & High-Observability
 The suite comes fully integrated with **OpenTelemetry (OTLP)**. Auto-instrumented JAX-RS REST endpoints, Kafka clients, and database transactions flow into **Jaeger Tracing** and **Prometheus**. Kates auto-provisions over **10 custom Grafana dashboards** and 20+ proactive alerting rules out-of-the-box.

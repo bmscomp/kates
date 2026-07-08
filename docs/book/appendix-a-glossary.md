@@ -25,11 +25,13 @@ Quick reference for terms used throughout this book.
 | **Entity Operator** | Strimzi component running both the Topic Operator and User Operator in a single pod |
 | **Game Day** | A structured chaos engineering session with defined hypotheses, controlled experiments, and documented findings |
 | **GameDay** | An automated 7-phase validation pipeline (pre-flight → baseline → chaos → observe → recover → post-flight → report) run via `make gameday` |
+| **GraalVM Native Image** | An ahead-of-time compilation technology that compiles Java applications into standalone native binaries. Reduces startup time from seconds to milliseconds. The Kates backend supports native image builds for faster cold starts |
 | **gRPC** | Google Remote Procedure Call — a high-performance binary protocol using HTTP/2 and Protocol Buffers for service-to-service communication |
 | **Heatmap** | A visualization showing the full latency distribution over time. Each row is one second; each column is a latency bucket |
 | **Idempotency** | Kafka producer feature that deduplicates retried messages, preventing duplicates in the log |
 | **Isolated Topology** | A Kates deployment mode where the Strimzi Operator runs in a dedicated `strimzi-operator` namespace separate from the Kafka application namespace |
 | **ISR** | In-Sync Replicas — the set of replicas fully caught up with the partition leader. Writes require acknowledgment from all ISR members when `acks=all` |
+| **JFR** | Java Flight Recorder — a low-overhead JVM profiling tool built into the JDK. Captures CPU, memory, GC, and thread events for post-mortem analysis of performance issues. Enable with `-XX:StartFlightRecording` |
 | **JMX** | Java Management Extensions — the standard monitoring interface for JVM applications. Kafka exports metrics via JMX |
 | **Kafka Exporter** | Strimzi component that exposes consumer lag and topic offset metrics not available through JMX |
 | **KafkaNodePool** | Strimzi CRD for managing groups of Kafka nodes with the same role and configuration (e.g., broker pools per zone) |
@@ -39,8 +41,10 @@ Quick reference for terms used throughout this book.
 | **KRaft** | Kafka Raft — Kafka's built-in consensus protocol that replaces ZooKeeper for metadata management |
 | **Kyverno** | A Kubernetes-native policy engine that operates as an admission webhook for mutating, validating, and generating resources |
 | **LitmusChaos** | A Kubernetes-native chaos engineering framework that uses CRDs to define and manage chaos experiments |
+| **Loom / Virtual Threads** | A Java 21+ feature that provides lightweight threads managed by the JVM rather than the OS. Quarkus uses virtual threads for non-blocking I/O, enabling millions of concurrent connections without thread pool exhaustion |
 | **mTLS** | Mutual TLS — both client and server present certificates for authentication. Used on the TLS listener (port 9093) |
 | **NetworkPolicy** | Kubernetes resource that controls pod-to-pod network traffic. The kafka namespace uses default-deny with explicit allow rules |
+| **OTLP** | OpenTelemetry Protocol — the standard wire protocol for exporting traces, metrics, and logs from instrumented applications. Kates uses OTLP to export trace spans to Jaeger (see [Ch. 9](09-observability.md#distributed-tracing)) |
 | **P50 / P95 / P99** | Percentile latency metrics. P99 = 99% of requests completed within this time. P99 is more useful than averages for understanding worst-case behavior |
 | **Partition** | A topic is divided into partitions for parallelism. Each partition is an ordered, immutable sequence of records |
 | **PDB** | Pod Disruption Budget — Kubernetes resource limiting how many pods in a set can be unavailable simultaneously. Set to `maxUnavailable: 1` for Kafka |
@@ -64,5 +68,6 @@ Quick reference for terms used throughout this book.
 | **Strimzi** | A Kubernetes operator for managing Apache Kafka clusters declaratively via CRDs |
 | **StrimziPodSet** | Strimzi's replacement for StatefulSets — provides finer-grained control over pod lifecycle and rolling updates |
 | **Throughput** | The rate of successful message delivery, typically measured in records/second or MB/second |
+| **Trogdor** | Apache Kafka's native fault injection framework, used internally for testing Kafka itself. Unlike LitmusChaos (which operates at the Kubernetes pod level), Trogdor injects faults directly into the Kafka process |
 | **Tiered Storage** | Kafka feature (KIP-405) that offloads cold log segments to object storage (e.g., S3/MinIO), reducing local disk requirements |
 | **Velero** | Kubernetes backup tool used for daily PVC snapshots and pre-upgrade backups of the Kafka namespace |

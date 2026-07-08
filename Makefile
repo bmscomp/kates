@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
 
 .DEFAULT_GOAL := help
 
@@ -964,3 +964,21 @@ logs:
 	@kubectl logs -f -l app.kubernetes.io/name=grafana -n kafka --prefix --tail=20 2>/dev/null &
 	@kubectl logs -f -l app=kafka-ui -n kafka --prefix --tail=20 2>/dev/null &
 	@wait
+
+# ─── Book Generation ─────────────────────────────────────────────────────────
+
+book-html: ## Generate HTML book site
+	@echo "📖 Building HTML book..."
+	@cd docs/book && quarto render --to html
+	@echo "✅ HTML book generated at docs/book/_book/"
+	@echo "   Open: open docs/book/_book/index.html"
+
+book-pdf: ## Generate PDF book
+	@echo "📖 Building PDF book..."
+	@cd docs/book && quarto render --to pdf
+	@echo "✅ PDF book generated at docs/book/_book/"
+
+book-clean: ## Clean book build artifacts
+	@echo "🧹 Cleaning book build artifacts..."
+	@rm -rf docs/book/_book docs/book/_freeze docs/book/.quarto
+	@echo "✅ Clean"

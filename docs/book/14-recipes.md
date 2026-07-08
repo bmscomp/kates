@@ -34,6 +34,26 @@ kates test apply -f upgrade-suite.yaml --wait
 kates report diff <baseline-id> <new-id>
 ```
 
+Expected output:
+
+```
+  ▸ Report Diff: a1b2c3d4 vs e5f6a7b8
+  ┌─────────────────────┬───────────┬───────────┬────────┐
+  │ Metric              │ Baseline  │ New       │ Delta  │
+  ├─────────────────────┼───────────┼───────────┼────────┤
+  │ P99 Latency (ms)    │ 12.4      │ 13.1      │ +5.6%  │
+  │ Throughput (rec/s)   │ 18,432    │ 17,891    │ -2.9%  │
+  │ Error Rate           │ 0.000%    │ 0.000%    │  0.0%  │
+  │ Data Loss            │ 0         │ 0         │  0     │
+  └─────────────────────┴───────────┴───────────┴────────┘
+  ✓ All metrics within 10% tolerance
+```
+
+::: {.callout-tip}
+If you see `No test found for ID` errors, make sure you noted the test IDs from Step 1 output before starting the upgrade. Test IDs are printed after each `kates test apply` or `kates test create` command.
+:::
+
+
 ### Suggested Scenario File
 
 ```yaml
@@ -107,6 +127,25 @@ kates trend --type LOAD --metric p99LatencyMs --days 30
 kates trend --type LOAD --metric throughputRecordsPerSec --days 30
 ```
 
+Expected output:
+
+```
+  ▸ Trend: LOAD / p99LatencyMs (30 days, 30 runs)
+    Min: 8.2ms  Max: 14.1ms  Avg: 10.5ms
+    ▁▁▂▁▁▁▂▁▃▁▁▁▂▁▁▁▁▂▁▁▁▁▁▁▁▇▁▁▁▁
+                                 ↑ anomaly (run #26)
+
+  ▸ Trend: LOAD / throughputRecordsPerSec (30 days, 30 runs)
+    Min: 15,201  Max: 19,843  Avg: 18,102
+    ▇▇▆▇▇▇▆▇▅▇▇▇▆▇▇▇▇▆▇▇▇▇▇▇▇▂▇▇▇▇
+                                 ↑ anomaly (run #26)
+```
+
+::: {.callout-tip}
+If the schedule doesn't trigger, verify the Kates scheduler pod is running with `kubectl get pods -n kates -l app=kates-scheduler`. The cron expression uses UTC — adjust for your timezone.
+:::
+
+
 A sudden spike in the sparkline indicates a regression. Use `kates report diff` to compare the anomalous run against its predecessor.
 
 ---
@@ -168,6 +207,23 @@ EOF
 kates resilience run --config resilience.json
 ```
 
+Expected output:
+
+```
+  ▸ Resilience Test: kafka-pod-kill
+    Steady-state baseline:    P99=11.2ms  Throughput=18,500 rec/s
+    During chaos:             P99=342.1ms Throughput=12,100 rec/s
+    Recovery time:            8.4s
+    Post-recovery:            P99=12.8ms  Throughput=18,200 rec/s
+    Data loss:                0 messages
+    Verdict:                  PASS ✅
+```
+
+::: {.callout-tip}
+If `--fail-on-sla-breach` causes immediate failure, your SLA thresholds may be too tight for disruption tests. Use `kates disruption playbook <name> --show-defaults` to see the recommended thresholds for each playbook.
+:::
+
+
 ---
 
 ## Recipe 4: Investigate a Latency Regression
@@ -213,6 +269,27 @@ Heatmap patterns to look for:
 kates cluster check -o json
 ```
 
+Expected output:
+
+```json
+{
+  "clusterHealthy": false,
+  "underReplicatedPartitions": 3,
+  "isrChanges": 12,
+  "offlinePartitions": 0,
+  "brokers": [
+    {"id": 0, "bytesInPerSec": 52428800, "requestRate": 1240},
+    {"id": 1, "bytesInPerSec": 15728640, "requestRate": 310},
+    {"id": 2, "bytesInPerSec": 16777216, "requestRate": 340}
+  ]
+}
+```
+
+::: {.callout-tip}
+If the diff shows degraded throughput but the heatmap has no obvious pattern, check the GC logs. Run `kubectl logs <broker-pod> -n kafka | grep 'GC pause'` — JVM garbage collection pauses are a common hidden cause of latency spikes.
+:::
+
+
 If under-replicated partitions or ISR changes occurred during the test, the cluster was under stress.
 
 ---
@@ -248,6 +325,28 @@ Combine with trend analysis to track capacity changes over time as your cluster 
 ```bash
 kates trend --type CAPACITY --metric throughputRecordsPerSec --days 90
 ```
+
+Expected output:
+
+```
+  ▸ Capacity Test Results
+  ┌───────┬────────────┬───────────────┬──────────────┐
+  │ Phase │ Producers  │ Throughput    │ P99 Latency  │
+  ├───────┼────────────┼───────────────┼──────────────┤
+  │ 1     │ 2          │ 9,800 rec/s   │ 8.1ms        │
+  │ 2     │ 4          │ 18,200 rec/s  │ 11.4ms       │
+  │ 3     │ 8          │ 32,100 rec/s  │ 18.7ms       │
+  │ 4     │ 16         │ 41,500 rec/s  │ 45.2ms       │
+  │ 5     │ 32         │ 38,900 rec/s  │ 210.5ms  ⚠   │
+  └───────┴────────────┴───────────────┴──────────────┘
+  Sustainable capacity: Phase 4 (16 producers, 41,500 rec/s)
+  Degradation detected at Phase 5: P99 exceeded SLA threshold
+```
+
+::: {.callout-tip}
+If capacity results seem unexpectedly low, check that no resource quotas or Kafka user throttling limits are active. Run `kubectl get kafkauser -n kafka -o yaml` and verify the `quotas` section isn't constraining your test user.
+:::
+
 
 ---
 
@@ -301,3 +400,23 @@ After completion, compare all four runs:
 ```bash
 kates report compare <id1>,<id2>,<id3>,<id4>
 ```
+
+Expected output:
+
+```
+  ▸ Comparison: 4 runs
+  ┌───────────────────────┬───────────────┬──────────────┬───────────────────┐
+  │ Scenario              │ Throughput    │ P99 Latency  │ Error Rate        │
+  ├───────────────────────┼───────────────┼──────────────┼───────────────────┤
+  │ Defaults              │ 14,200 rec/s  │ 18.3ms       │ 0.000%            │
+  │ High Batch + Linger   │ 22,800 rec/s  │ 52.1ms       │ 0.000%            │
+  │ LZ4 Compression       │ 19,500 rec/s  │ 15.7ms       │ 0.000%            │
+  │ Full Optimization     │ 28,100 rec/s  │ 48.9ms       │ 0.000%            │
+  └───────────────────────┴───────────────┴──────────────┴───────────────────┘
+  Best throughput:  Full Optimization (28,100 rec/s, +97.9% vs Defaults)
+  Best latency:    LZ4 Compression (15.7ms, -14.2% vs Defaults)
+```
+
+::: {.callout-tip}
+If all four runs show nearly identical throughput, the bottleneck is likely not the producer configuration. Check network bandwidth between producers and brokers with `kubectl exec <broker-pod> -n kafka -- cat /proc/net/dev` and verify the cluster isn't network-bound.
+:::

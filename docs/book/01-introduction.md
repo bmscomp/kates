@@ -122,3 +122,13 @@ kates report show <id>
 ```
 
 For a complete setup guide, see [Chapter 12: Deployment Guide](12-deployment.md). For hands-on tutorials, see the [Tutorials](../tutorials/) directory.
+
+## What Kates Is Not
+
+To set expectations clearly:
+
+- **Not a Confluent Platform replacement** — Kates is a testing and validation tool, not a managed Kafka distribution. It works alongside Confluent, Strimzi, or any Kafka deployment.
+- **Not a general-purpose load tester** — Kates understands Kafka semantics (ISR tracking, consumer rebalancing, partition leadership). Use k6, Gatling, or Locust for HTTP/gRPC load testing.
+- **Not a Kafka management UI** — for browsing topics, consumer groups, and cluster state in a web interface, use [Kafka UI](https://github.com/provectus/kafka-ui) (which Kates deploys alongside).
+- **Not a production monitoring system** — Kates is designed for testing and validation environments. For production monitoring, use Prometheus + Grafana directly (which Kates also deploys for its own observability).
+

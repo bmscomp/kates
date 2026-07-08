@@ -395,3 +395,20 @@ erDiagram
 | V5–V9 | Various | Connection pooling, batch optimizations, additional indexes |
 | V10 | `V10__add_composite_indexes.sql` | Composite indexes for test_type + status queries |
 | V11 | `V11__labels_jsonb.sql` | JSONB labels column for flexible test categorization |
+
+## Graceful Degradation
+
+Distributed systems fail in partial ways. Kates is designed to degrade gracefully rather than crash catastrophically when its dependencies become unavailable.
+
+| Failure Scenario | What Happens | Recovery |
+|------------------|-------------|----------|
+| **Kafka unreachable** | Running tests fail with a connection error. The CLI reports `Kafka: ❌ Disconnected` in health checks. No new tests can be created until Kafka is reachable. Existing test results in PostgreSQL remain accessible. | The backend reconnects automatically when Kafka becomes available. No manual intervention required. |
+| **PostgreSQL down** | Test results from running tests are buffered in the `kates-results` Kafka topic. The backend cannot persist results or serve historical data via the API. The CLI's `test list`, `report show`, and `trend` commands return errors. | On reconnect, the backend replays unconsumed results from the Kafka topic, so no test data is lost. The replay window is limited by the topic's retention period (default: 7 days). |
+| **Test interrupted mid-run** | The backend marks the test as `INTERRUPTED` and saves whatever results were collected before the interruption. Partial reports are available via `kates report show`. The test's Kafka consumer group offsets are committed, so no duplicate processing occurs on restart. | You can re-run the test. The interrupted run remains in history for comparison. |
+| **Kates backend crashes during a test** | The Kafka producer/consumer threads stop. In-flight messages may not be acknowledged. When the backend restarts (Kubernetes will restart the pod), it reads test state from PostgreSQL and the `kates-results` topic to reconstruct the last known state. | Kubernetes restarts the pod automatically. Tests that were running are marked as `INTERRUPTED` on recovery. |
+
+::: {.callout-note}
+The backend's resilience depends on Kafka's durability guarantees. Because test results are written to `kates-results` (RF=3, `acks=all`) before being persisted to PostgreSQL, the Kafka topic serves as a durable write-ahead log. This is a deliberate architectural choice — Kafka is the source of truth, PostgreSQL is the queryable projection.
+:::
+
+
