@@ -1,4 +1,6 @@
-# Kates Chaos Engineering — Deployment Guide
+# Kates Chaos Chart — Deployment Guide
+
+> **This document covers the `kates-chaos` Helm chart deployment and configuration.** For chaos engineering theory and methodology, see [Chapter 6: Chaos Engineering Theory](book/06-chaos-theory.md) and [Chapter 7: Chaos Engineering Practice](book/07-chaos-practice.md).
 
 Comprehensive guide for deploying the **kates-chaos** Helm chart on any Kubernetes cluster. This chart wraps [LitmusChaos 3.27.0](https://litmuschaos.io/) with Kafka-specific RBAC, experiment definitions, monitoring, and secrets management.
 

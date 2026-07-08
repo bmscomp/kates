@@ -333,5 +333,6 @@ The release workflows require these GitHub repository secrets:
 | `COSIGN_PRIVATE_KEY` | `publish-docker.yml` | Cosign signing key for image signatures |
 | `COSIGN_PASSWORD` | `publish-docker.yml` | Passphrase for the Cosign key |
 
-> [!NOTE]
-> `GITHUB_TOKEN` is automatically provided by GitHub Actions. Only `COSIGN_*` secrets need manual configuration in the repository settings, and only if image signing is enabled.
+::: {.callout-note}
+`GITHUB_TOKEN` is automatically provided by GitHub Actions. Only `COSIGN_*` secrets need manual configuration in the repository settings, and only if image signing is enabled.
+:::

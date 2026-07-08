@@ -1,9 +1,8 @@
-# Kafka Connect Source/Sink Demo Plan (Default Cluster Context)
+# Tutorial 10: Kafka Connect Source/Sink Quick Runbook
 
-For the full tutorial that documents all working Kafka Connect examples (CDC topic, Debezium source, JDBC sink from CDC, generic JDBC sink, and generic JDBC source), use:
+A minimal end-to-end runbook: insert a row in PostgreSQL, verify Debezium publishes it to Kafka, and confirm the JDBC sink writes it to a replica table.
 
-- [09-kafka-connect-working-examples.md](09-kafka-connect-working-examples.md)
-
+For the full tutorial with all connector types and detailed explanations, see [Tutorial 9](09-kafka-connect-working-examples.md). For architecture and theory, see [Chapter 21](../book/21-kafka-connect.md).
 This runbook demonstrates a full end-to-end flow:
 - Insert one row in PostgreSQL
 - Verify Debezium source connector publishes to Kafka topic
@@ -38,9 +37,8 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
 ## 3. Apply Demo Resources
 
 ```bash
-# Migrated to helm test: helm test connect-cluster -n connect
-# Migrated to helm test: helm test connect-cluster -n connect
-# Migrated to helm test: helm test connect-cluster -n connect
+# Deploy CDC topic and connectors via helm test
+helm test connect-cluster -n connect
 ```
 
 ## 4. Wait for Connectors to be Ready

@@ -245,3 +245,51 @@ During rebalancing, **all consumers in the group stop processing**. This "stop-t
 | **Recovery time** | Time from failure to all ISRs fully expanded |
 
 These metrics form the foundation of SLA grading in Kates disruption tests.
+
+## Game Day Pipeline
+
+A fully automated Game Day follows a 7-phase pipeline. Each phase has a clear entry gate and exit criteria:
+
+```mermaid
+flowchart LR
+    P["1. Pre-flight\n• Cluster healthy\n• Backups verified\n• Team notified"] --> B["2. Baseline\n• Run LOAD test\n• Record metrics\n• Confirm steady state"]
+    B --> C["3. Chaos\n• Inject fault\n• Monitor impact\n• Record timeline"]
+    C --> O["4. Observe\n• Track recovery\n• Measure RTO/RPO\n• Check data integrity"]
+    O --> R["5. Recover\n• Verify ISR restored\n• Confirm zero data loss\n• Check consumer lag"]
+    R --> PF["6. Post-flight\n• Re-run LOAD test\n• Compare vs baseline\n• Grade against SLA"]
+    PF --> RE["7. Report\n• Generate summary\n• File improvement tickets\n• Schedule retest"]
+```
+
+The `make gameday` command automates this entire pipeline. Each phase is logged with timestamps and can be reviewed after completion:
+
+```bash
+# Run the full 7-phase pipeline
+make gameday
+
+# Run with a specific disruption playbook
+make gameday PLAYBOOK=leader-cascade
+
+# Dry run (pre-flight only, no chaos injected)
+make gameday DRY_RUN=true
+```
+
+## Fault Injection Approaches
+
+Kates supports multiple fault injection backends. Choose based on your environment and needs:
+
+| Feature | LitmusChaos | Trogdor | Manual kubectl |
+|---------|:-----------:|:-------:|:--------------:|
+| **Scope** | General-purpose Kubernetes chaos | Kafka-specific fault injection | Ad-hoc pod/network operations |
+| **Installation** | Helm chart + CRDs | Bundled with Kafka (Confluent) | None (built into Kubernetes) |
+| **Kafka awareness** | Low — operates at pod/network level | High — understands partitions, brokers, topics | None |
+| **Experiment types** | Pod kill, network chaos, CPU/memory stress, disk fill | Broker bounce, network degrade, produce/consume workloads | Pod delete, node drain, network policy changes |
+| **Scheduling** | CronWorkflows via Argo or native ChaosSchedule | Trogdor coordinator API | Cron jobs or CI/CD triggers |
+| **Observability** | ChaosResult CRDs + Prometheus metrics | Trogdor status API | Manual log inspection |
+| **Blast radius control** | Annotations, labels, namespace selectors | Agent-level targeting | Manual — requires discipline |
+| **Reproducibility** | Declarative YAML ChaosExperiments | Declarative JSON task specs | Script-dependent |
+| **Best for** | Production chaos with safety guardrails | Kafka-internal workload simulation | Quick smoke tests, debugging |
+| **Kates integration** | Native — `kates disruption run` uses LitmusChaos | Partial — can be triggered via `chaosSpec` | Manual — run alongside Kates tests |
+
+::: {.callout-tip}
+For most Kates users, **LitmusChaos** is the recommended default. It provides the best balance of safety, observability, and Kubernetes-native integration. Use Trogdor when you need Kafka-internal fault injection (e.g., simulating slow brokers at the protocol level), and manual kubectl for quick one-off debugging sessions.
+:::

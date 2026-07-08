@@ -1,6 +1,8 @@
-# 09: Kafka Connect Working Examples (CDC + JDBC)
+# Tutorial 9: Kafka Connect Working Examples (CDC + JDBC)
 
-This tutorial turns the working example manifests in `config/kafka-connect` into an end-to-end guide you can run in a real cluster.
+This tutorial walks through deploying production-ready Kafka Connect connectors on your cluster — a CDC pipeline with Debezium and JDBC sink/source connectors. By the end, you'll see a row inserted in PostgreSQL automatically replicate to a Kafka topic and then to a replica table.
+
+> For Kafka Connect architecture and deployment theory, see [Chapter 21: Kafka Connect & CDC Pipelines](../book/21-kafka-connect.md).
 
 ## What You Will Deploy
 
@@ -70,10 +72,12 @@ kubectl exec -n "${DB_NS}" postgresql-0 -- /bin/bash -lc \
 ### 2) Apply CDC Topic and Connectors
 
 ```bash
-# Migrated to helm test: helm test connect-cluster -n connect
-# Migrated to helm test: helm test connect-cluster -n connect
-# Migrated to helm test: helm test connect-cluster -n connect
+# Deploy all working example connectors via helm test
+helm test connect-cluster -n "${CONNECT_NS}"
 ```
+
+> [!TIP]
+> The connector manifests are packaged as Helm test hooks. Running `helm test` applies the KafkaTopic and KafkaConnector CRDs that were previously applied manually with `kubectl apply`.
 
 ### 3) Wait Until Ready
 
@@ -107,7 +111,8 @@ Expected result: one row for `id=1001` in `demo_orders_replica`.
 Apply the standalone sink example:
 
 ```bash
-# Migrated to helm test: helm test connect-cluster -n connect
+# Deploy the standalone JDBC sink via helm test
+helm test connect-cluster -n "${CONNECT_NS}"
 kubectl wait -n "${CONNECT_NS}" --for=condition=Ready kafkaconnector/jdbc-sink-working-example --timeout=300s
 kubectl describe kafkaconnector -n "${CONNECT_NS}" jdbc-sink-working-example
 ```
@@ -121,7 +126,8 @@ Notes:
 Apply the source template:
 
 ```bash
-# Migrated to helm test: helm test connect-cluster -n connect
+# Deploy the JDBC source via helm test
+helm test connect-cluster -n "${CONNECT_NS}"
 kubectl wait -n "${CONNECT_NS}" --for=condition=Ready kafkaconnector/jdbc-source-working-example --timeout=300s
 kubectl describe kafkaconnector -n "${CONNECT_NS}" jdbc-source-working-example
 ```

@@ -1,6 +1,39 @@
 # Chapter 17: Security & Compliance
 
-This chapter covers every security layer in the Kates platform — from Kafka authentication to Kubernetes NetworkPolicies. Use it as a reference when auditing your deployment or onboarding new services.
+A Kafka cluster is a high-value target. It carries your business data, your audit trails, and your event streams. A misconfigured listener, an overly-permissive ACL, or a missing network policy can expose all of it. This chapter covers every security layer in the Kates platform — not just *what* is configured, but *why* each layer exists and what would happen without it.
+
+Use this chapter as a reference when auditing your deployment, onboarding new services, or designing your own security posture for production.
+
+## Threat Model
+
+Before diving into configurations, it helps to understand what you're defending against. A Kafka cluster on Kubernetes has four primary attack surfaces:
+
+```mermaid
+graph TD
+    subgraph Threats["Attack Surfaces"]
+        T1["Network Sniffing<br/>Plaintext listeners expose<br/>message content on the wire"]
+        T2["Unauthorized Access<br/>Missing ACLs allow any<br/>authenticated user to read/write<br/>any topic"]
+        T3["Credential Compromise<br/>SCRAM passwords in Kubernetes<br/>Secrets can be extracted<br/>by anyone with Secret read access"]
+        T4["Operator Privilege Escalation<br/>The Strimzi operator has<br/>broad cluster permissions —<br/>compromise gives cluster admin"]
+    end
+
+    subgraph Mitigations["Kates Mitigations"]
+        M1["TLS listener (port 9093)<br/>encrypts all traffic"]
+        M2["Per-user ACLs with<br/>minimum required permissions"]
+        M3["Kyverno secret sync +<br/>RBAC limiting Secret access"]
+        M4["NetworkPolicies isolating<br/>operator namespace"]
+    end
+
+    T1 --> M1
+    T2 --> M2
+    T3 --> M3
+    T4 --> M4
+```
+
+::: {.callout-important}
+The default performance test listener (`plain`, port 9092) uses SCRAM authentication but **no TLS encryption**. This is intentional — TLS adds measurable CPU overhead, and performance baselines should isolate Kafka throughput from encryption cost. For production deployments, always use the `tls` listener (port 9093) or the `external` listener (port 9094, which enables TLS by default).
+:::
+
 
 ## Security Architecture Overview
 
@@ -39,17 +72,21 @@ graph TB
 
 ## Authentication
 
+Authentication answers the question: *"Who are you?"* Every connection to Kafka must prove its identity before it can do anything.
+
 ### Kafka Listeners
 
-Each listener enforces a specific authentication mechanism:
+Each listener enforces a specific authentication mechanism. The choice of listener determines both the security properties and the performance characteristics of the connection:
 
-| Listener | Port | Auth | Protocol | Clients |
-|----------|------|------|----------|---------|
-| `plain` | 9092 | SCRAM-SHA-512 | SASL_PLAINTEXT | Kates, Kafka UI, Apicurio |
-| `tls` | 9093 | mTLS (certificate) | SASL_SSL | Encrypted internal |
-| `external` | 9094 | SCRAM-SHA-512 | SASL_SSL | External tools, CI |
+| Listener | Port | Auth | Protocol | Clients | When to Use |
+|----------|------|------|----------|---------|-------------|
+| `plain` | 9092 | SCRAM-SHA-512 | SASL_PLAINTEXT | Kates, Kafka UI, Apicurio | Performance testing baselines (no TLS overhead) |
+| `tls` | 9093 | mTLS (certificate) | SASL_SSL | Encrypted internal | When you need wire encryption between services |
+| `external` | 9094 | SCRAM-SHA-512 | SASL_SSL | External tools, CI | Access from outside the Kubernetes cluster |
 
 ### SCRAM-SHA-512
+
+SCRAM (Salted Challenge Response Authentication Mechanism) is a password-based authentication protocol that never sends the password over the wire. Instead, the client and server exchange salted hashes in a challenge-response sequence. SHA-512 provides strong hashing — brute-forcing a SCRAM-SHA-512 password is computationally expensive.
 
 Strimzi generates SCRAM credentials automatically when you create a `KafkaUser` resource. The password is stored in a Kubernetes Secret with the same name as the user:
 
@@ -57,6 +94,33 @@ Strimzi generates SCRAM credentials automatically when you create a `KafkaUser` 
 # View generated password
 kubectl get secret kafka-ui -n kafka -o jsonpath='{.data.password}' | base64 -d
 ```
+
+::: {.callout-warning}
+Kubernetes Secrets are base64-encoded, **not encrypted**. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password. This is why namespace-level RBAC and NetworkPolicies are not optional — they're the outer wall protecting your credentials.
+:::
+
+
+### Password Rotation
+
+Strimzi does not automatically rotate SCRAM passwords, but you can trigger a rotation without downtime:
+
+```bash
+# Step 1: Delete the existing Secret (Strimzi will regenerate it)
+kubectl delete secret kates-backend -n kafka
+
+# Step 2: Wait for the Entity Operator to reconcile (typically < 30 seconds)
+kubectl wait --for=condition=Ready kafkauser/kates-backend -n kafka --timeout=60s
+
+# Step 3: Verify the new password was generated
+kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d
+```
+
+If your application runs in a different namespace and uses a Kyverno-synced copy of the secret, the sync policy will automatically propagate the new password. The application will pick up the new credentials on its next reconnection cycle.
+
+::: {.callout-caution}
+During the brief window between deleting the old Secret and the Entity Operator creating the new one, any application that restarts will fail to authenticate. Time your rotations during low-traffic periods, and ensure your application has retry logic for authentication failures.
+:::
+
 
 ### Cross-Namespace Credential Synchronization
 
@@ -96,9 +160,11 @@ spec:
 
 ### mTLS (Mutual TLS)
 
-The TLS listener requires both server and client certificates. Strimzi issues client certificates via the Clients CA when a `KafkaUser` uses `authentication.type: tls`.
+The TLS listener requires both server and client certificates. Strimzi issues client certificates via the Clients CA when a `KafkaUser` uses `authentication.type: tls`. This provides the strongest authentication — both sides cryptographically verify each other's identity, and the connection is encrypted end-to-end.
 
 ## Authorization
+
+Authentication tells Kafka who you are. Authorization tells Kafka what you're allowed to do. Without authorization, an authenticated user can read any topic, join any consumer group, and modify any configuration — a single compromised credential becomes a full breach.
 
 ### ACL Model
 
@@ -111,6 +177,8 @@ graph LR
     ACL -->|"allows/denies"| Resource["Topic / Group / Cluster"]
 ```
 
+Every Kafka operation (produce, consume, describe, create, delete) is checked against the ACL list. If no matching rule is found, the operation is denied by default. This is a **deny-by-default** model — you must explicitly grant every permission.
+
 ### User Permissions Matrix
 
 | User | Principal | Access Level | Resources | Quotas |
@@ -120,9 +188,14 @@ graph LR
 | `apicurio-registry` | CN=apicurio-registry | Scoped R/W | `__apicurio*` topics, `apicurio*` groups | 10MB/s produce, 20MB/s consume |
 | `litmus-chaos` | CN=litmus-chaos | Full CRUD | All topics, `litmus*` groups, cluster describe | None |
 
+::: {.callout-note}
+The `kates-backend` user has superUser status because it needs to create test topics, manage consumer groups, and read cluster metadata during benchmark runs. In a production deployment, you would scope this down to only the specific topics and operations Kates requires.
+:::
+
+
 ### Adding a New Service
 
-To onboard a new service, create a `KafkaUser` CR:
+When you onboard a new service to your Kafka cluster, follow the principle of least privilege — grant only the permissions the service actually needs. Here's a template:
 
 ```yaml
 apiVersion: kafka.strimzi.io/v1
@@ -155,6 +228,8 @@ spec:
         operations: ["Read", "Describe"]
         host: "*"
 ```
+
+The `patternType: prefix` is key — it means the service can access any topic or group starting with `my-service` (e.g., `my-service-events`, `my-service-results`). This is more maintainable than listing individual topics, especially as your service evolves.
 
 ### Granting Full Cluster Rights (Super-User)
 
@@ -203,7 +278,7 @@ kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -
 
 ## Certificate Management
 
-Strimzi manages two independent CA hierarchies:
+Strimzi manages two independent CA hierarchies — one for cluster-internal communication and one for client authentication:
 
 ```mermaid
 graph TD
@@ -222,6 +297,8 @@ graph TD
 | Renewal window | 180 days before expiry | Ample time for rollout |
 | Renewal policy | `replace-key` | New key pair on renewal (stronger than key reuse) |
 
+The `replace-key` renewal policy means that on each renewal, Strimzi generates an entirely new private key rather than reusing the existing one. This is more secure — if the old key was compromised, the new certificate uses a fresh key pair.
+
 ### Rotation Monitoring
 
 Strimzi sets the `NotAfter` date on each certificate. Monitor with:
@@ -231,11 +308,43 @@ kubectl get secret krafter-cluster-ca-cert -n kafka \
   -o jsonpath='{.data.ca\.crt}' | base64 -d | openssl x509 -noout -dates
 ```
 
-Set up a Prometheus alert for certificates expiring within 30 days.
+Set up a Prometheus alert for certificates expiring within 30 days:
+
+```yaml
+- alert: KafkaCertificateExpiringSoon
+  expr: |
+    (kube_secret_created{namespace="kafka", secret=~".*-ca-cert"} + 157680000)
+    - time() < 2592000
+  for: 1h
+  labels:
+    severity: warning
+  annotations:
+    summary: "Kafka CA certificate expires within 30 days"
+    description: "Secret {{ $labels.secret }} in namespace {{ $labels.namespace }} will expire soon. Trigger a certificate renewal."
+```
+
+## Audit Logging
+
+Kafka provides configurable audit logging for tracking who accessed what, and when. To enable audit logging on the krafter cluster, add the following to your Kafka CR's `config` section:
+
+```yaml
+config:
+  # Log all authorization decisions (allow and deny)
+  authorizer.class.name: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+  # Log authorization decisions at DEBUG level
+  log4j.logger.kafka.authorizer.logger: "DEBUG, authorizerAppender"
+```
+
+Once enabled, every produce, consume, and admin operation generates an audit entry that includes the principal, the resource, the operation, and the decision (ALLOWED or DENIED). These logs are invaluable during security incident investigations.
+
+::: {.callout-tip}
+For lighter-weight auditing, Kates automatically logs all CLI operations to the `kates-audit` topic. You can inspect the audit trail with `kates kafka consume kates-audit --from-beginning`.
+:::
+
 
 ## Network Policies
 
-The `kafka` namespace enforces **default-deny** for both ingress and egress:
+Network policies are your last line of defense. Even if an attacker compromises a pod in your cluster, network policies prevent that pod from reaching the Kafka brokers unless it's explicitly allowed. The `kafka` namespace enforces **default-deny** for both ingress and egress:
 
 ```mermaid
 graph TD
@@ -278,6 +387,8 @@ graph TD
 
 ### Testing Network Policies
 
+Don't trust that your network policies work — verify them. These two commands test both the positive and negative cases:
+
 ```bash
 # Verify a pod CAN reach brokers (should succeed from kates namespace)
 kubectl exec deployment/kates -n kates -- \
@@ -288,11 +399,13 @@ kubectl run test --rm -it --image=busybox -- \
   nc -zv krafter-kafka-bootstrap.kafka 9092
 ```
 
+The first command should succeed (the Kates backend is explicitly allowed). The second should time out (the default namespace has no ingress rule to the brokers). If both succeed, your network policies are not enforcing correctly.
+
 ## Container Security
 
 ### Security Contexts
 
-Kafka containers run with hardened security contexts:
+Every container in the Kates platform runs with a hardened security context. These settings follow the Kubernetes Pod Security Standards (PSS) at the **restricted** level:
 
 ```yaml
 template:
@@ -310,14 +423,14 @@ template:
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
-| `runAsNonRoot` | true | Prevents running as UID 0 |
-| `readOnlyRootFilesystem` | true | No writes outside mounted volumes |
-| `allowPrivilegeEscalation` | false | Blocks `setuid` / `setgid` binaries |
-| `drop: ALL` | — | Removes all Linux capabilities |
+| `runAsNonRoot` | true | Prevents running as UID 0 — even if the container image specifies `USER root` |
+| `readOnlyRootFilesystem` | true | No writes outside mounted volumes — prevents attackers from dropping malware |
+| `allowPrivilegeEscalation` | false | Blocks `setuid` / `setgid` binaries — prevents privilege escalation within the container |
+| `drop: ALL` | — | Removes all Linux capabilities — no raw sockets, no network admin, no filesystem mounts |
 
 ### Quotas as Security
 
-Per-user quotas prevent denial-of-service from misbehaving clients:
+Per-user quotas prevent denial-of-service from misbehaving clients. Without quotas, a single runaway producer can saturate broker network bandwidth, disk I/O, and CPU — degrading performance for every other client on the cluster.
 
 | User | Produce Rate | Consume Rate | CPU Share |
 |------|:------------:|:------------:|:---------:|
@@ -325,9 +438,14 @@ Per-user quotas prevent denial-of-service from misbehaving clients:
 | `apicurio-registry` | 10 MB/s | 20 MB/s | 15% |
 | `litmus-chaos` | Unlimited | Unlimited | Unlimited |
 
+::: {.callout-note}
+The `litmus-chaos` user intentionally has no quotas. Chaos experiments sometimes need to generate burst traffic to test broker behavior under pressure. Limiting the chaos agent would defeat the purpose.
+:::
+
+
 ## Kyverno Policy Integration & Admission Control
 
-The Kates platform integrates **Kyverno** as a Kubernetes-native policy engine for enforcing security standards via admission control. Kyverno policies operate as dynamic admission webhooks — intercepting every resource creation and modification request before it reaches the API server.
+The Kates platform integrates **Kyverno** as a Kubernetes-native policy engine for enforcing security standards via admission control. Think of Kyverno as a security guard at the door of your cluster — it inspects every resource creation and modification request and either fixes it, approves it, or rejects it.
 
 ```mermaid
 graph LR
@@ -354,7 +472,7 @@ Kates ships four `ClusterPolicy` resources, deployed conditionally when `kyverno
 
 ### Pod Security Standards (Mutate + Validate)
 
-The `kates-pod-security-standards` policy combines **mutation** (auto-patching) with **validation** (enforcement). This two-phase approach means pods are first automatically patched to comply, then validated to ensure compliance:
+The `kates-pod-security-standards` policy combines **mutation** (auto-patching) with **validation** (enforcement). This two-phase approach is deliberate: mutation silently fixes common mistakes so developers don't have to remember every security setting, while validation catches anything mutation couldn't fix.
 
 **Mutation rules** (applied first):
 
@@ -377,12 +495,14 @@ The `kates-pod-security-standards` policy combines **mutation** (auto-patching) 
 | `validate-readonly-rootfs` | Rejects writable root filesystems |
 | `require-resource-limits` | Requires `memory` limits and `cpu` requests |
 
-> [!NOTE]
-> Mutation uses the `+(key)` conditional anchor syntax — values are injected only if the field is not already set. This prevents Kyverno from overwriting explicitly declared security contexts.
+::: {.callout-note}
+Mutation uses the `+(key)` conditional anchor syntax — values are injected only if the field is not already set. This prevents Kyverno from overwriting explicitly declared security contexts. If a developer explicitly sets `runAsUser: 5000`, Kyverno respects that choice.
+:::
+
 
 ### Cosign Image Verification
 
-The `kates-image-verification` policy enforces **supply chain security** by verifying container image signatures before admission:
+The `kates-image-verification` policy enforces **supply chain security** by verifying container image signatures before admission. This protects against tampered images — even if an attacker pushes a malicious image to your registry, it won't be admitted unless it carries a valid Cosign signature from your trusted key.
 
 ```yaml
 kyvernoPolicy:
@@ -407,7 +527,7 @@ The `kates-generate-network-policies` policy implements **zero-trust networking*
 2. **`default-deny-egress`** — blocks all outbound traffic
 3. **`allow-dns-egress`** — allows DNS resolution to `kube-system` on port 53
 
-These policies are synchronized (`synchronize: true`) — Kyverno continuously reconciles them if they are manually deleted.
+These policies are synchronized (`synchronize: true`) — Kyverno continuously reconciles them if they are manually deleted. This means even if someone accidentally (or maliciously) deletes the default-deny policies, they're automatically recreated.
 
 ### Namespace Exclusions
 
@@ -459,6 +579,11 @@ All Kyverno policies support two operational modes, controlled by the `kyvernoPo
 | `Audit` (default) | Violations are logged in `PolicyReport` CRDs but pods are **not blocked** | Initial rollout, observability, compliance auditing |
 | `Enforce` | Non-compliant pods are **rejected** at admission | Production hardening, strict compliance |
 
+::: {.callout-tip}
+Start with `Audit` mode. Review the `PolicyReport` violations with `kates kyverno violations` to see what would break, then switch to `Enforce` once you've resolved all legitimate violations. Jumping straight to `Enforce` on a running cluster is a recipe for cascading failures.
+:::
+
+
 Switch modes at runtime using the Kates CLI (see below) or by patching the Helm values.
 
 ### Kates CLI: `kyverno` Subcommands
@@ -487,25 +612,28 @@ kates kyverno audit kates-pod-security-standards
 | `kates kyverno enforce <policy>` | — | Patches a ClusterPolicy's `validationFailureAction` to `Enforce` |
 | `kates kyverno audit <policy>` | — | Patches a ClusterPolicy's `validationFailureAction` to `Audit` |
 
-> [!TIP]
-> **Cross-references:**
-> - For Kyverno installation instructions, see [Chapter 20: Installation Guide](20-installation-guide.md#kyverno-optional).
-> - For Kyverno upgrade procedures, see [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md).
-> - For a full index of Kyverno-related troubleshooting, see [Appendix B: Troubleshooting](appendix-b-troubleshooting.md#deployment-issues).
+::: {.callout-tip}
+**Cross-references:**
+- For Kyverno installation instructions, see [Chapter 20: Installation Guide](20-installation-guide.md#kyverno-optional).
+- For Kyverno upgrade procedures, see [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md).
+- For a full index of Kyverno-related troubleshooting, see [Appendix B: Troubleshooting](appendix-b-troubleshooting.md#deployment-issues).
+:::
+
 
 ## Security Checklist
 
-Use this checklist when auditing your deployment:
+Use this checklist when auditing your deployment. Each item links to the section that explains how to verify it:
 
-- [ ] All listeners require authentication (no anonymous access)
-- [ ] `superUsers` list contains only the Kates backend principal
-- [ ] Each service has its own `KafkaUser` with minimum required ACLs
-- [ ] Network policies enforce default-deny in the `kafka` namespace
-- [ ] Containers run as non-root with read-only root filesystem
-- [ ] Certificate renewal alerts are configured
-- [ ] Per-user quotas limit blast radius from runaway clients
-- [ ] `deleteClaim: false` on all PVCs (data survives pod deletion)
-- [ ] Secrets are not committed to source control (Strimzi auto-generates)
+- [ ] All listeners require authentication (no anonymous access) — see [Authentication](#authentication)
+- [ ] `superUsers` list contains only the Kates backend principal — see [User Permissions Matrix](#user-permissions-matrix)
+- [ ] Each service has its own `KafkaUser` with minimum required ACLs — see [Adding a New Service](#adding-a-new-service)
+- [ ] Network policies enforce default-deny in the `kafka` namespace — see [Network Policies](#network-policies)
+- [ ] Containers run as non-root with read-only root filesystem — see [Container Security](#container-security)
+- [ ] Certificate renewal alerts are configured — see [Rotation Monitoring](#rotation-monitoring)
+- [ ] Per-user quotas limit blast radius from runaway clients — see [Quotas as Security](#quotas-as-security)
+- [ ] `deleteClaim: false` on all PVCs (data survives pod deletion) — see [Chapter 15](15-kafka-deployment.md)
+- [ ] Secrets are not committed to source control (Strimzi auto-generates) — see [SCRAM-SHA-512](#scram-sha-512)
+- [ ] Audit logging is enabled for authorization decisions — see [Audit Logging](#audit-logging)
 
 ### Validating Policy Compliance
 

@@ -361,3 +361,145 @@ kates test scaffold --type INTEGRITY_CHAOS -o chaos-integrity.yaml
 ```
 
 The scaffold output includes all available fields with comments explaining each one. Edit the generated file and run it with `kates test apply -f`.
+
+## Common Mistakes
+
+These are the most frequently encountered errors when writing scenario files. Each entry shows the error message you'll see and how to fix it.
+
+### 1. Missing Required Field (`testType`)
+
+**Error:**
+
+```
+  ✗ Validation error in scenario #1:
+    Missing required field: 'type'
+    at: scenarios[0].type
+```
+
+**Cause:** The `type` field is the only required field in a scenario definition, but it's easy to forget when copying from examples.
+
+**Fix:** Add the `type` field to every scenario:
+
+```yaml
+scenarios:
+  - name: "My Test"
+    type: LOAD          # ← required
+    spec:
+      records: 100000
+```
+
+### 2. Invalid Test Type Name
+
+**Error:**
+
+```
+  ✗ Validation error in scenario "My Test":
+    Invalid test type: 'load'
+    Valid types: LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY
+    at: scenarios[0].type
+```
+
+**Cause:** Test type names are case-sensitive and must be uppercase. Common mistakes include `load` (lowercase), `Load` (mixed case), or `LATENCY` (not a valid type — use `ROUND_TRIP`).
+
+**Fix:** Use the exact uppercase type name:
+
+```yaml
+scenarios:
+  - name: "My Test"
+    type: LOAD           # ✅ correct
+    # type: load         # ❌ wrong — lowercase
+    # type: LATENCY      # ❌ wrong — not a valid type
+```
+
+### 3. SLA Threshold Format Error
+
+**Error:**
+
+```
+  ✗ Validation error in scenario "Baseline Load Test":
+    Invalid value for 'maxP99LatencyMs': '50ms'
+    Expected: numeric value (integer or float), got: string
+    at: scenarios[0].validate.maxP99LatencyMs
+```
+
+**Cause:** SLA threshold values must be plain numbers, not strings with units. The field name already indicates the unit (e.g., `maxP99LatencyMs` implies milliseconds).
+
+**Fix:** Remove the unit suffix and any quotes around the number:
+
+```yaml
+validate:
+  maxP99LatencyMs: 50          # ✅ correct — plain number
+  # maxP99LatencyMs: "50ms"    # ❌ wrong — string with unit
+  # maxP99LatencyMs: "50"      # ❌ wrong — quoted string
+  minThroughputRecPerSec: 10000  # ✅ correct
+```
+
+### 4. Records Count Too Low for Meaningful Results
+
+**Error (warning):**
+
+```
+  ⚠ Warning in scenario "Quick Check":
+    Record count (100) is very low for test type LOAD.
+    Recommended minimum: 10,000 for LOAD, 50,000 for INTEGRITY.
+    Results may not be statistically meaningful.
+```
+
+**Cause:** Low record counts produce unreliable metrics. P99 latency with only 100 records means you're measuring the single slowest message — not a meaningful percentile.
+
+**Fix:** Use appropriate record counts per test type:
+
+```yaml
+scenarios:
+  - name: "Proper Load Test"
+    type: LOAD
+    spec:
+      records: 100000        # ✅ good — 100K for load tests
+      # records: 100         # ❌ too low — unreliable P99
+
+  - name: "Proper Integrity Test"
+    type: INTEGRITY
+    spec:
+      records: 100000        # ✅ good — 100K for integrity tests
+      # records: 1000        # ❌ too low — may miss intermittent issues
+```
+
+| Test Type | Recommended Minimum | Why |
+|-----------|:-------------------:|-----|
+| LOAD | 10,000 | Enough samples for stable percentile calculations |
+| STRESS | 50,000 | Need sustained load to detect saturation |
+| INTEGRITY | 50,000 | Higher counts catch intermittent data loss |
+| ROUND_TRIP | 5,000 | Latency measurement is per-message, so fewer needed |
+| CAPACITY | N/A (auto) | Capacity tests auto-scale — don't override |
+
+### 5. Conflicting Spec Fields
+
+**Error:**
+
+```
+  ✗ Validation error in scenario "Endurance Run":
+    Conflicting fields: 'records' and 'durationSeconds' are both set.
+    Use 'records' for count-based tests or 'durationSeconds' for time-based tests, not both.
+    at: scenarios[0].spec
+```
+
+**Cause:** You set both `records: 100000` and `durationSeconds: 300` in the same scenario. Kates doesn't know whether to stop after 100K records or after 5 minutes.
+
+**Fix:** Choose one termination condition:
+
+```yaml
+scenarios:
+  # Option A: count-based (stop after N records)
+  - name: "Count-Based Test"
+    type: LOAD
+    spec:
+      records: 100000
+      # durationSeconds: 300   # ← remove this
+
+  # Option B: time-based (stop after N seconds)
+  - name: "Time-Based Test"
+    type: ENDURANCE
+    spec:
+      durationSeconds: 300
+      # records: 100000        # ← remove this
+```

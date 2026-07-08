@@ -68,6 +68,59 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Ch 18](18-upgrade-playbook.md#post-upgrade--api-migration) |
 | Performance regression after Kafka upgrade | New version defaults changed — compare baseline tests | [Ch 18](18-upgrade-playbook.md#procedure) |
 
+## Connectivity Debugging Flowchart
+
+When you can't connect to Kafka, work through this decision tree:
+
+```mermaid
+flowchart TD
+    A["Can't connect to Kafka"] --> B{"Are Kafka pods running?"}
+    B -->|No| B1["Check pod status:<br/>kubectl get pods -n kafka"]
+    B1 --> B2{"Pods in Pending?"}
+    B2 -->|Yes| B3["Check StorageClass and PVCs:<br/>kubectl get pvc -n kafka"]
+    B2 -->|No| B4["Check pod logs:<br/>kubectl logs &lt;pod&gt; -n kafka --previous"]
+    
+    B -->|Yes| C{"Can you reach the bootstrap service?"}
+    C -->|No| C1{"Is a NetworkPolicy blocking?"}
+    C1 -->|Yes| C2["Add an ingress rule for<br/>your namespace → port 9092<br/>See Ch. 17"]
+    C1 -->|No| C3["Check DNS resolution:<br/>nslookup krafter-kafka-bootstrap.kafka"]
+    C3 --> C4{"DNS resolves?"}
+    C4 -->|No| C5["Check CoreDNS pods:<br/>kubectl get pods -n kube-system"]
+    C4 -->|Yes| C6["Check port-forward or NodePort:<br/>kubectl port-forward svc/krafter-kafka-bootstrap 9092:9092 -n kafka"]
+    
+    C -->|Yes| D{"Authentication succeeds?"}
+    D -->|No| D1["Check SCRAM credentials:<br/>kubectl get secret &lt;user&gt; -n kafka"]
+    D1 --> D2["Verify KafkaUser reconciled:<br/>kubectl get kafkauser -n kafka"]
+    
+    D -->|Yes| E["Connection works!<br/>Check application config"]
+```
+
+## When to Escalate
+
+Not every problem is a Kates problem. Use this guide to determine where to focus your investigation:
+
+| Symptom Pattern | Likely Layer | What to Check |
+|-----------------|-------------|---------------|
+| `kates health` shows all components UP, but tests fail | **Kafka** | Check broker logs, partition health, ISR state |
+| CLI commands return "connection refused" or timeout | **Kates backend** | Check Kates pod status, port-forward, service endpoints |
+| Pods stuck in `Pending`, `CrashLoopBackOff`, or `ImagePullBackOff` | **Kubernetes** | Check node resources, StorageClass, image registry access |
+| Kyverno rejecting pod creation | **Kyverno policies** | Run `kates kyverno violations` to identify which rule is failing |
+| Latency numbers are unreasonably high for all tests | **Infrastructure** | Check node CPU/memory pressure, disk I/O, network bandwidth |
+| Everything works locally but fails in CI | **CI environment** | Check resource limits, network access, Docker-in-Docker configuration |
+
+::: {.callout-tip}
+When filing an issue, include the output of `kates doctor` — it runs 13 diagnostic checks and gives you a single summary of system health.
+:::
+
+
+## Common Issues (Additional)
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes" | Missing `ClusterRoleBinding` for the Kates service account — the backend can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
+| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check Kates backend logs for consumer errors |
+| `kates trend` shows no data even after running tests | Tests completed but trend queries require at least 2 data points of the same test type | Run the same test type at least twice. Trend analysis needs historical data to draw a line |
+
 ## Quick Diagnostic Commands
 
 ```bash
@@ -101,3 +154,4 @@ kates kyverno violations
 # Kyverno violations (specific namespace)
 kates kyverno violations --namespace kafka
 ```
+

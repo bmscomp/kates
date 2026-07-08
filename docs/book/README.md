@@ -46,6 +46,9 @@ Hands-on step-by-step guides for specific workflows:
 | [Observability](../tutorials/05-observability.md) | Setting up dashboards and alerts |
 | [CI/CD Integration](../tutorials/06-cicd-integration.md) | Automated testing in pipelines |
 | [Kyverno & Security](../tutorials/07-kyverno-security.md) | Policy enforcement, security auditing, and compliance checks |
+| [Deploy, Detect & Clean](../tutorials/08-deploy-and-detect.md) | Interactive deployment wizard, latency detection, and lifecycle management |
+| [Kafka Connect Working Examples](../tutorials/09-kafka-connect-working-examples.md) | CDC + JDBC connector setup with Debezium |
+| [Kafka Connect Source/Sink Demo](../tutorials/kafka-connect-simple-source-sink-demo.md) | Minimal source-to-sink runbook |
 
 ## Who This Book Is For
 
@@ -56,4 +59,32 @@ Hands-on step-by-step guides for specific workflows:
 
 ## How to Read This Book
 
-Start with chapters 1–3 for context. If you're focused on **performance testing**, read chapters 4–5 then 13 for scenario files. For **chaos engineering**, read chapters 6–8. Chapters 9–12 are reference material you'll return to repeatedly. Chapter 14 provides practical recipes for common workflows. Chapter 15 is the **Kafka operations manual** — read it when deploying, upgrading, or troubleshooting the cluster. Chapters 16–19 cover advanced topics: gRPC integration, security hardening, upgrade procedures, and multi-tenant operations. **Chapter 20 is the step-by-step installation guide** — start here if you're deploying the kafka-cluster Helm chart for the first time. **Chapter 21 covers Kafka Connect and CDC pipelines** — read it when deploying Debezium connectors, configuring exactly-once semantics, or operating Connect clusters in production. The appendices provide quick reference for terminology and troubleshooting.
+Don't read this book cover-to-cover. Pick a reading path based on what you need:
+
+### 🎯 "I want to understand Kafka performance"
+1. [Ch. 4: Performance Theory](04-performance-theory.md) — why averages lie, percentiles, coordinated omission (~10 min)
+2. [Ch. 5: Test Types Deep Dive](05-test-types.md) — all 8 test types explained (~15 min)
+3. [Ch. 9: Observability](09-observability.md) — reading dashboards, heatmaps, trend analysis (~15 min)
+
+### 🚀 "I want to deploy Kates"
+1. [Ch. 20: Installation Guide](20-installation-guide.md) — full step-by-step with prerequisites (~30 min)
+2. [Ch. 12: Deployment Guide](12-deployment.md) — architecture decisions, resource sizing, cloud deployment (~15 min)
+3. [Ch. 3: The Cluster Under Test](03-cluster.md) — understanding what you just deployed (~10 min)
+
+### 💥 "I want to run chaos experiments"
+1. [Ch. 6: Chaos Engineering Theory](06-chaos-theory.md) — principles and methodology (~10 min)
+2. [Ch. 7: Chaos Engineering Practice](07-chaos-practice.md) — disruption types and playbooks (~20 min)
+3. [Ch. 8: Data Integrity Verification](08-data-integrity.md) — proving zero message loss (~10 min)
+
+### 🔒 "I want to harden security"
+1. [Ch. 17: Security & Compliance](17-security.md) — threat model, ACLs, network policies, Kyverno (~20 min)
+2. [Ch. 15: Kafka Deployment Engineering](15-kafka-deployment.md) — broker security, certificates (~15 min)
+3. [Tutorial 7: Kyverno & Security](../tutorials/07-kyverno-security.md) — hands-on policy enforcement (~20 min)
+
+### 📋 "I just need a reference"
+- [Ch. 10: CLI Reference](10-cli-reference.md) — all commands with examples and workflows
+- [Ch. 11: REST API Reference](11-api-reference.md) — backend endpoints and data models
+- [Ch. 16: gRPC API Reference](16-grpc-api.md) — protobuf service definitions
+- [Appendix A: Glossary](appendix-a-glossary.md) — terms and abbreviations
+- [Appendix B: Troubleshooting](appendix-b-troubleshooting.md) — symptom → cause → fix
+

@@ -255,6 +255,119 @@ rate(kafka_server_brokertopicmetrics_bytesin_total{topic=~"my-service.*"}[5m])
 
 Consider adding per-tenant Grafana dashboards using the `app.kubernetes.io/part-of` label.
 
+## Tenant Onboarding Workflow
+
+The following flowchart shows the end-to-end tenant onboarding process:
+
+```mermaid
+flowchart TD
+    A["1. Create KafkaUser"] --> B["2. Set ACLs\n(prefix-scoped)"]
+    B --> C["3. Configure Quotas\n(produce/consume/CPU)"]
+    C --> D["4. Create Topics\n(with naming convention)"]
+    D --> E["5. Sync Credentials\n(mount Strimzi secret)"]
+    E --> F["6. Add NetworkPolicy\n(allow namespace)"]
+    F --> G["7. Verify Access\n(produce/consume test)"]
+    G --> H{"Verification\nPassed?"}
+    H -->|Yes| I["Tenant Ready ✅"]
+    H -->|No| J["Debug & Retry"]
+    J --> A
+```
+
+### Quick-Start Script
+
+Automate the onboarding steps with the Kates CLI:
+
+```bash
+# Onboard a new service in one command
+kates tenant onboard my-service \
+  --produce-rate 10MB \
+  --consume-rate 20MB \
+  --cpu-percent 15 \
+  --topics events,commands,dlq \
+  --namespace my-service-namespace
+
+# Verify the onboarding
+kates tenant verify my-service
+```
+
+Expected output:
+
+```
+  ▸ Onboarding: my-service
+    ✓ KafkaUser created (scram-sha-512)
+    ✓ ACLs configured (prefix: my-service)
+    ✓ Quotas set (produce=10MB/s, consume=20MB/s, cpu=15%)
+    ✓ Topics created: my-service-events, my-service-commands, my-service-dlq
+    ✓ Secret generated: my-service (namespace: kafka)
+    ✓ NetworkPolicy updated
+    ✓ Connectivity verified (produce + consume OK)
+  Tenant my-service is ready ✅
+```
+
+## Quota Monitoring
+
+Use these PromQL queries to track per-tenant resource usage and detect quota breaches before they impact application performance.
+
+### Per-User Bandwidth Monitoring
+
+```promql
+# Produce bandwidth per user (bytes/sec)
+sum by (user) (
+  rate(kafka_server_fetch_session_cache_metrics_produce_throttle_time_total{user=~".+"}[5m])
+) > 0
+
+# Actual produce rate vs quota — shows how close each user is to their limit
+rate(kafka_server_brokertopicmetrics_bytesin_total{topic=~"my-service.*"}[5m])
+  / on() group_left() (10 * 1024 * 1024)  # divide by quota (10MB/s)
+```
+
+### Per-User CPU Usage
+
+```promql
+# Request handler utilization per user (percentage of broker request handler pool)
+sum by (user) (
+  rate(kafka_server_request_handler_pool_usage{user=~".+"}[5m])
+) * 100
+```
+
+### Throttling Detection
+
+```promql
+# Detect users being actively throttled (produce or fetch)
+sum by (user) (
+  rate(kafka_server_throttle_time_total{user=~".+"}[5m])
+) > 0
+```
+
+### Grafana Alert Rules
+
+Set up alerts for quota breaches:
+
+```yaml
+# In your Grafana alert rules
+groups:
+  - name: kafka-tenant-quotas
+    rules:
+      - alert: TenantNearQuotaLimit
+        expr: |
+          sum by (user) (rate(kafka_server_brokertopicmetrics_bytesin_total[5m]))
+          / on(user) group_left() kafka_user_quota_produce_bytes_rate > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenant {{ $labels.user }} is using >80% of produce quota"
+
+      - alert: TenantThrottled
+        expr: |
+          sum by (user) (rate(kafka_server_throttle_time_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenant {{ $labels.user }} is being throttled for >10 minutes"
+```
+
 ## Decommissioning a Tenant
 
 ```bash
