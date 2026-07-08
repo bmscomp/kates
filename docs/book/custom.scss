@@ -1,0 +1,67 @@
+/*-- scss:defaults --*/
+
+// Kates brand colors
+$primary: #2563eb;        // Kates blue
+$secondary: #7c3aed;      // Purple accent
+$success: #10b981;        // Green for healthy/pass
+$warning: #f59e0b;        // Amber for warnings
+$danger: #ef4444;         // Red for errors/fail
+$info: #06b6d4;           // Cyan for info
+
+// Typography
+$font-family-sans-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+$font-family-monospace: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+$headings-font-weight: 600;
+
+// Code blocks
+$code-block-bg: #1e293b;
+$code-block-border: #334155;
+$code-font-size: 0.875rem;
+
+/*-- scss:rules --*/
+
+// Book title styling
+.quarto-title-block .quarto-title {
+  font-weight: 700;
+}
+
+// Sidebar styling
+.sidebar nav .sidebar-title {
+  font-weight: 600;
+}
+
+// Part headers in sidebar
+.sidebar-item-section .sidebar-item-text {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+// Callout styling — make them more visually distinct
+.callout {
+  border-radius: 6px;
+  margin: 1.25rem 0;
+}
+
+// Mermaid diagram centering
+.mermaid {
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+// Table styling
+table {
+  font-size: 0.9rem;
+}
+
+th {
+  font-weight: 600;
+}
+
+// Chapter navigation
+.page-navigation {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bs-border-color);
+}

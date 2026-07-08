@@ -396,11 +396,15 @@ graph LR
 | Egress | Kafka namespace pods | All | Operator → broker/controller admin API and reconciliation |
 | Egress | Own namespace pods | All | Intra-namespace communication |
 
-> [!IMPORTANT]
-> The operator ingress on port `8080` is intentionally open to **all sources** (not scoped to a specific namespace). This is required because Kubelet health probes originate from the node's host network — not from a pod with namespace labels. Restricting ingress to a namespace selector would silently block liveness and readiness checks, causing the operator pod to be restarted by the Kubelet.
+::: {.callout-important}
+The operator ingress on port `8080` is intentionally open to **all sources** (not scoped to a specific namespace). This is required because Kubelet health probes originate from the node's host network — not from a pod with namespace labels. Restricting ingress to a namespace selector would silently block liveness and readiness checks, causing the operator pod to be restarted by the Kubelet.
+:::
 
-> [!CAUTION]
-> **Do not set `generateNetworkPolicy: true` in the Strimzi Helm values** unless you also provide explicit egress rules in `operatorNetworkPolicy.egress`. When enabled with no egress rules, Strimzi creates an operator NetworkPolicy with empty egress — Kubernetes interprets this as "deny all outgoing traffic." The operator cannot reach the Kafka controllers' admin API (port 9090), causing the Kafka CR to remain `NotReady` indefinitely. Set `generateNetworkPolicy: false` and manage operator network policies manually.
+
+::: {.callout-caution}
+**Do not set `generateNetworkPolicy: true` in the Strimzi Helm values** unless you also provide explicit egress rules in `operatorNetworkPolicy.egress`. When enabled with no egress rules, Strimzi creates an operator NetworkPolicy with empty egress — Kubernetes interprets this as "deny all outgoing traffic." The operator cannot reach the Kafka controllers' admin API (port 9090), causing the Kafka CR to remain `NotReady` indefinitely. Set `generateNetworkPolicy: false` and manage operator network policies manually.
+:::
+
 
 ## Operational Components
 

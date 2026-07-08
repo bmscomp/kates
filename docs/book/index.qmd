@@ -1,0 +1,51 @@
+---
+title-block-banner: false
+---
+
+# Preface {.unnumbered}
+
+::: {.callout-note appearance="simple"}
+**You are reading the Kates Definitive Guide** — 21 chapters covering everything from performance theory and chaos engineering to security, deployment, and operations.
+:::
+
+## What This Book Covers
+
+**Kates** (Kafka Advanced Testing & Engineering Suite) is a Kubernetes-native platform for performance testing, chaos engineering, and operational resilience auditing of Apache Kafka clusters.
+
+This guide takes you from first principles to production operations:
+
+- **Part I — Foundations**: Architecture, cluster topology, and the theory behind performance measurement
+- **Part II — Testing**: All 8 test types, chaos engineering (theory and practice), and data integrity verification
+- **Part III — Observability & CLI**: Monitoring, dashboards, the CLI, REST API, and gRPC API
+- **Part IV — Deployment & Operations**: Installation, deployment, security, upgrades, multi-tenancy, and Kafka Connect
+
+## Who This Book Is For
+
+| Reader | Start Here | Focus On |
+|--------|-----------|----------|
+| **Platform Engineer** deploying Kafka | Ch. 15 → Ch. 20 → Ch. 12 | Deployment, installation, and infrastructure |
+| **SRE / Reliability Engineer** | Ch. 6 → Ch. 7 → Ch. 9 | Chaos engineering, observability, and resilience |
+| **Performance Engineer** | Ch. 4 → Ch. 5 → Ch. 10 | Performance theory, test types, and CLI workflows |
+| **Security Engineer** | Ch. 17 → Appendix B | Security, compliance, and troubleshooting |
+| **Developer** using the API | Ch. 11 → Ch. 16 → Ch. 13 | REST API, gRPC API, and scenario files |
+
+## Conventions
+
+Throughout this book:
+
+- Commands prefixed with `$` are run in your terminal
+- Commands prefixed with `kubectl` assume you have a kubeconfig pointing at your cluster
+- `kates` commands assume the CLI is installed and configured with a context
+- Code blocks with a filename header are files you create or edit
+- Mermaid diagrams illustrate architecture and workflows inline
+
+::: {.callout-tip}
+Each chapter is self-contained. You can read them in order or jump to the topic you need.
+:::
+
+## Source Code
+
+The complete source code for Kates is available on GitHub:
+
+- **Repository**: [github.com/bmscomp/kates](https://github.com/bmscomp/kates)
+- **License**: Apache 2.0

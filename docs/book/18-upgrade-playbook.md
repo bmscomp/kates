@@ -203,8 +203,10 @@ kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/c
 kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/policyreport/wgpolicyk8s.io_policyreports.yaml
 ```
 
-> [!WARNING]
-> Always upgrade CRDs before the controller. If the new controller version expects CRD fields that don't exist yet, the admission webhook may fail open or reject all requests.
+::: {.callout-warning}
+Always upgrade CRDs before the controller. If the new controller version expects CRD fields that don't exist yet, the admission webhook may fail open or reject all requests.
+:::
+
 
 **Step 3 — Upgrade the Kyverno controller via Helm:**
 
@@ -256,8 +258,10 @@ kubectl get policyexceptions -A
 kubectl get policyexceptions -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
 ```
 
-> [!IMPORTANT]
-> Kyverno v2 introduced the `PolicyException` CRD with a different API shape than v1 exceptions. When upgrading from Kyverno 1.x to 2.x, migrate any existing exception configurations to the new `kyverno.io/v2` API. Refer to the [Kyverno migration guide](https://kyverno.io/docs/upgrading/) for details.
+::: {.callout-important}
+Kyverno v2 introduced the `PolicyException` CRD with a different API shape than v1 exceptions. When upgrading from Kyverno 1.x to 2.x, migrate any existing exception configurations to the new `kyverno.io/v2` API. Refer to the [Kyverno migration guide](https://kyverno.io/docs/upgrading/) for details.
+:::
+
 
 ## Pre-Upgrade Checklist
 
@@ -291,3 +295,129 @@ Run through this before any upgrade:
 | Brokers stuck in CrashLoop | Config incompatible with new version | Check `kubectl logs`, fix config, re-apply |
 | Topics not reconciling | Topic Operator API version mismatch | Migrate CRDs to `v1` |
 | PDB blocks rollout | Only 1 broker at a time, slow progress | Wait — this is intentional safety behavior |
+
+## Rollback Procedures
+
+Rollback is a critical part of any upgrade plan. Each component has different rollback characteristics.
+
+### Kafka Version Rollback
+
+**Step 1 — Revert the Kafka version in the CR:**
+
+```yaml
+# Revert kafka.yaml to the previous version
+spec:
+  kafka:
+    version: <previous-version>  # e.g., 3.9.0
+```
+
+```bash
+kubectl apply -f config/kafka/kafka.yaml
+```
+
+**Step 2 — Monitor the rolling restart:**
+
+```bash
+kubectl get pods -n kafka -w
+watch kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[0].type}={.status.conditions[0].status}'
+```
+
+**Step 3 — Post-rollback validation:**
+
+```bash
+# Verify broker version
+kubectl exec krafter-kafka-0 -n kafka -- /opt/kafka/bin/kafka-broker-api-versions.sh \
+  --bootstrap-server localhost:9092 | head -1
+
+# Run integrity test
+kates test create --type INTEGRITY --records 50000 --wait --label rollback=kafka
+
+# Verify no data loss
+kates test get <id>
+```
+
+::: {.callout-warning}
+Kafka version rollback is **NOT possible** after upgrading the KRaft metadata format (`kafka-storage.sh format` with a newer metadata version). KRaft metadata format changes are irreversible — the brokers cannot read older metadata formats. Always test the new version thoroughly in staging before upgrading the metadata format in production.
+:::
+
+
+### Strimzi Operator Rollback
+
+**Step 1 — Rollback via Helm:**
+
+```bash
+# List Helm history
+helm history strimzi-kafka-operator -n kafka
+
+# Rollback to previous revision
+helm rollback strimzi-kafka-operator <previous-revision> -n kafka
+```
+
+**Step 2 — Verify the operator is running:**
+
+```bash
+kubectl get pods -n kafka | grep strimzi-cluster-operator
+kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
+```
+
+**Step 3 — Post-rollback validation:**
+
+```bash
+# Check all Kafka CRs are reconciled
+kubectl get kafka,kafkatopic,kafkauser -n kafka
+
+# Run a quick smoke test
+kates test create --type LOAD --records 10000 --wait --label rollback=strimzi
+```
+
+::: {.callout-warning}
+If the new Strimzi version migrated CRDs to a new API version (e.g., `v1beta2` → `v1`), rolling back the operator will **not** revert the CRDs. You must manually restore the CRDs from backup or re-apply the old CRD definitions.
+:::
+
+
+### Kates Application Rollback
+
+**Step 1 — Rollback the deployment:**
+
+```bash
+# Use Kubernetes rollout undo
+kubectl rollout undo deployment/kates -n kates
+
+# Or rollback to a specific revision
+kubectl rollout undo deployment/kates -n kates --to-revision=<N>
+```
+
+**Step 2 — Verify the rollback:**
+
+```bash
+# Check pod status
+kubectl get pods -n kates
+
+# Verify the version
+kubectl get deployment kates -n kates -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Run a health check
+kates cluster check
+```
+
+**Step 3 — Post-rollback validation:**
+
+```bash
+# Ensure scheduled tests still trigger
+kates schedule list
+
+# Run a baseline test
+kates test create --type LOAD --records 50000 --wait --label rollback=kates
+```
+
+### Rollback Decision Matrix
+
+| Component | Rollback Method | Time Estimate | Risk Level |
+|-----------|----------------|:-------------:|:----------:|
+| Kafka version | CR version revert + rolling restart | 10–30 min | Medium |
+| KRaft metadata format | **Not reversible** | N/A | ⛔ Critical |
+| Strimzi operator | Helm rollback | 2–5 min | Low |
+| Strimzi CRD migration | Manual CRD restore from backup | 5–15 min | High |
+| Kates application | `kubectl rollout undo` | 1–2 min | Low |
+| Monitoring stack | Helm rollback | 2–5 min | Low |
+| Kyverno | Helm rollback + CRD restore | 5–10 min | Medium |

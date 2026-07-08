@@ -1,0 +1,76 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "Kates — The Definitive Guide"
+  subtitle: "Kafka Advanced Testing & Engineering Suite"
+  description: |
+    A comprehensive guide to performance testing, chaos engineering,
+    and operational resilience for Apache Kafka — from theory to practice.
+  author: "The Kates Team"
+  date: today
+  date-format: "MMMM YYYY"
+  cover-image: ../assets/kates-logo.png
+
+  chapters:
+    - index.qmd
+    - part: "Part I — Foundations"
+      chapters:
+        - 01-introduction.md
+        - 02-architecture.md
+        - 03-cluster.md
+        - 04-performance-theory.md
+
+    - part: "Part II — Testing"
+      chapters:
+        - 05-test-types.md
+        - 06-chaos-theory.md
+        - 07-chaos-practice.md
+        - 08-data-integrity.md
+
+    - part: "Part III — Observability & CLI"
+      chapters:
+        - 09-observability.md
+        - 10-cli-reference.md
+        - 10b-lab.md
+        - 11-api-reference.md
+        - 16-grpc-api.md
+
+    - part: "Part IV — Deployment & Operations"
+      chapters:
+        - 12-deployment.md
+        - 13-scenario-files.md
+        - 14-recipes.md
+        - 15-kafka-deployment.md
+        - 17-security.md
+        - 18-upgrade-playbook.md
+        - 19-multi-tenancy.md
+        - 20-installation-guide.md
+        - 21-kafka-connect.md
+
+    - part: "Appendices"
+      chapters:
+        - appendix-a-glossary.md
+        - appendix-b-troubleshooting.md
+        - appendix-c-cicd.md
+
+format:
+  pdf:
+    documentclass: scrbook
+    papersize: a4
+    fontsize: 11pt
+    colorlinks: true
+    linkcolor: "NavyBlue"
+    urlcolor: "NavyBlue"
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    top-level-division: chapter
+    fig-pos: "H"
+    geometry:
+      - top=30mm
+      - bottom=30mm
+      - left=25mm
+      - right=25mm
+    pdf-engine: xelatex

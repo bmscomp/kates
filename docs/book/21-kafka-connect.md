@@ -157,8 +157,10 @@ Connect stores its state in three compacted Kafka topics:
 
 These topics are automatically created by Connect workers on first startup. The `config.storage.replication.factor` is set to 3 to match the broker replication factor.
 
-> [!IMPORTANT]
-> Never delete the offsets topic. If deleted, all source connectors lose their position and will re-snapshot their entire database on restart.
+::: {.callout-important}
+Never delete the offsets topic. If deleted, all source connectors lose their position and will re-snapshot their entire database on restart.
+:::
+
 
 ### Authentication
 
@@ -312,8 +314,10 @@ connectors:
 | `tombstones.on.delete: true` | — | Produces a null-value record after a delete — enables downstream compaction |
 | `decimal.handling.mode: double` | — | Avoids Avro precision issues with `NUMERIC` columns |
 
-> [!WARNING]
-> The `tasksMax` for a Debezium PostgreSQL connector must always be `1`. PostgreSQL logical replication uses a single replication slot per connector — multiple tasks would cause duplicate events or slot conflicts.
+::: {.callout-warning}
+The `tasksMax` for a Debezium PostgreSQL connector must always be `1`. PostgreSQL logical replication uses a single replication slot per connector — multiple tasks would cause duplicate events or slot conflicts.
+:::
+
 
 ### External Configuration (Secrets)
 
@@ -328,8 +332,10 @@ externalConfiguration:
 
 This mounts the secret at `/mnt/pg-credentials/` inside each worker pod. Connectors reference values using the `${dir:/mnt/pg-credentials:password}` syntax (Kafka's `DirectoryConfigProvider`).
 
-> [!TIP]
-> ConfigMap volumes are also supported. Use `type: configMap` and `configMapName` for non-sensitive data like SMT scripts or external lookup tables.
+::: {.callout-tip}
+ConfigMap volumes are also supported. Use `type: configMap` and `configMapName` for non-sensitive data like SMT scripts or external lookup tables.
+:::
+
 
 ## Multi-AZ Deployment Strategy
 
@@ -397,8 +403,10 @@ sequenceDiagram
 | AZ recovers | Workers rejoin, framework rebalances to restore even distribution |
 | Offset continuity | ✅ Preserved — offsets stored in shared Kafka topic |
 
-> [!NOTE]
-> Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. This is an acceptable tradeoff for seamless failover — CDC downtime during a rebalance is typically under 30 seconds.
+::: {.callout-note}
+Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. This is an acceptable tradeoff for seamless failover — CDC downtime during a rebalance is typically under 30 seconds.
+:::
+
 
 ### Scheduling Configuration
 
@@ -695,8 +703,10 @@ extraConfig:
 | `producer.acks` | `all` | Wait for all ISR replicas to acknowledge |
 | `producer.enable.idempotence` | `true` | Deduplicates retried produce requests at the broker |
 
-> [!IMPORTANT]
-> EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the Connect producer. The krafter cluster satisfies both by default.
+::: {.callout-important}
+EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the Connect producer. The krafter cluster satisfies both by default.
+:::
+
 
 ### When to Disable EOS
 
@@ -760,8 +770,10 @@ This chain:
 2. Adds `op` and `source.ts_ms` as header fields for consumers
 3. Renames `cdc.public.orders` → `events.orders`
 
-> [!TIP]
-> The `ExtractNewRecordState` SMT is almost always recommended for Debezium connectors. Without it, downstream consumers must understand the full Debezium envelope schema.
+::: {.callout-tip}
+The `ExtractNewRecordState` SMT is almost always recommended for Debezium connectors. Without it, downstream consumers must understand the full Debezium envelope schema.
+:::
+
 
 ---
 
@@ -823,8 +835,10 @@ http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompa
 | FULL | Both backward and forward compatible | Strictest — safest for mission-critical data |
 | NONE | Any change allowed | Development only |
 
-> [!WARNING]
-> Changing the converter from `JsonConverter` to `AvroConverter` on an existing connector requires reprocessing all data. The existing JSON records in Kafka are not automatically re-serialized. Plan a migration window with a new topic prefix.
+::: {.callout-warning}
+Changing the converter from `JsonConverter` to `AvroConverter` on an existing connector requires reprocessing all data. The existing JSON records in Kafka are not automatically re-serialized. Plan a migration window with a new topic prefix.
+:::
+
 
 ---
 
@@ -867,8 +881,10 @@ connectors:
 | `errors.log.enable` | `true` | Log errors to Connect worker logs |
 | `errors.log.include.messages` | `true` | Include the problematic record in the log (disable for sensitive data) |
 
-> [!CAUTION]
-> Setting `errors.tolerance: all` without a DLQ silently drops bad records. Always configure a DLQ topic when using tolerant error handling.
+::: {.callout-caution}
+Setting `errors.tolerance: all` without a DLQ silently drops bad records. Always configure a DLQ topic when using tolerant error handling.
+:::
+
 
 ---
 
@@ -979,8 +995,10 @@ kubectl create secret generic connect-pg-credentials \
 kubectl rollout restart deployment -n kafka -l strimzi.io/kind=KafkaConnect
 ```
 
-> [!IMPORTANT]
-> Update the database password in PostgreSQL **before** updating the Kubernetes Secret. If you update the Secret first, Connect workers will restart and immediately fail authentication.
+::: {.callout-important}
+Update the database password in PostgreSQL **before** updating the Kubernetes Secret. If you update the Secret first, Connect workers will restart and immediately fail authentication.
+:::
+
 
 ---
 
@@ -1016,8 +1034,10 @@ Connect's internal producer sends records to Kafka. These settings control batch
 | `snapshot.fetch.size` | Debezium | 2048 | 10000 | Rows per SELECT during snapshot |
 | `batch.size` | JDBC Sink | 3000 | 5000–10000 | Rows per INSERT batch |
 
-> [!TIP]
-> Monitor `kafka_connect_source_task_source_record_poll_rate` and `kafka_connect_source_task_source_record_write_rate` in Grafana. If poll rate >> write rate, the producer is the bottleneck — increase `producer.batch.size` and enable compression.
+::: {.callout-tip}
+Monitor `kafka_connect_source_task_source_record_poll_rate` and `kafka_connect_source_task_source_record_write_rate` in Grafana. If poll rate >> write rate, the producer is the bottleneck — increase `producer.batch.size` and enable compression.
+:::
+
 
 ---
 
@@ -1098,8 +1118,10 @@ This is useful for:
 - Feeding analytics databases
 - Maintaining read replicas across cloud regions
 
-> [!NOTE]
-> Cross-database sync introduces eventual consistency. The sink always lags behind the source by the time it takes to process through Kafka. Monitor `kafka_consumergroup_lag` to measure the delay.
+::: {.callout-note}
+Cross-database sync introduces eventual consistency. The sink always lags behind the source by the time it takes to process through Kafka. Monitor `kafka_consumergroup_lag` to measure the delay.
+:::
+
 
 ---
 
@@ -1148,8 +1170,10 @@ helm upgrade connect-cluster charts/connect-cluster \
   --set image=ghcr.io/bmscomp/connect:3.0.2
 ```
 
-> [!WARNING]
-> If the new Debezium version changed the internal offset format, rolling back may cause connectors to fail with deserialization errors. Always test in staging first.
+::: {.callout-warning}
+If the new Debezium version changed the internal offset format, rolling back may cause connectors to fail with deserialization errors. Always test in staging first.
+:::
+
 
 ---
 
@@ -1190,8 +1214,10 @@ kates deploy --with-kafka-connect --ha
 # 4. If offsets topic is also lost, connectors re-snapshot
 ```
 
-> [!TIP]
-> The internal topics (`*-offsets`, `*-configs`, `*-status`) are the only persistent state for the Connect cluster. As long as these topics survive in Kafka (with RF=3), the Connect cluster is fully rebuildable from the Helm chart alone.
+::: {.callout-tip}
+The internal topics (`*-offsets`, `*-configs`, `*-status`) are the only persistent state for the Connect cluster. As long as these topics survive in Kafka (with RF=3), the Connect cluster is fully rebuildable from the Helm chart alone.
+:::
+
 
 ### Backup Strategy
 

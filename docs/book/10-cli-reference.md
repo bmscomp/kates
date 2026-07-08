@@ -13,13 +13,118 @@ make cli-build
 # Binaries in cli/dist/ for macOS (amd64/arm64) and Linux (amd64/arm64)
 ```
 
-> [!NOTE]
-> **macOS:** `make cli-install` automatically strips `com.apple.provenance` / `com.apple.quarantine` extended attributes and ad-hoc codesigns the binary. If you install manually (e.g. `cp` instead of `make`), the kernel may SIGKILL the binary. Fix with:
-> ```bash
-> sudo xattr -dr com.apple.provenance /usr/local/bin/kates
-> sudo xattr -dr com.apple.quarantine /usr/local/bin/kates
-> sudo codesign -f -s - /usr/local/bin/kates
-> ```
+::: {.callout-note}
+**macOS:** `make cli-install` automatically strips `com.apple.provenance` / `com.apple.quarantine` extended attributes and ad-hoc codesigns the binary. If you install manually (e.g. `cp` instead of `make`), the kernel may SIGKILL the binary. Fix with:
+```bash
+sudo xattr -dr com.apple.provenance /usr/local/bin/kates
+sudo xattr -dr com.apple.quarantine /usr/local/bin/kates
+sudo codesign -f -s - /usr/local/bin/kates
+```
+:::
+
+
+## Common Workflows
+
+Before diving into individual commands, here are the workflows you'll use most often. Each one chains multiple commands into a real-world task — they're the reason the CLI exists as a unified tool rather than a collection of scripts.
+
+### Workflow 1: Performance Regression Check
+
+Before upgrading Kafka from 3.8 to 3.9, you want to know if the new version regresses performance. The idea is simple: capture a baseline on the current version, perform the upgrade, run the same test again, and diff the results. If P99 latency or throughput moves outside your tolerance, you have a data-backed reason to investigate before the upgrade reaches production.
+
+```bash
+# 1. Verify the cluster is healthy before starting
+kates health
+
+# 2. Run a baseline load test on the current Kafka version
+kates test create --type LOAD --records 100000 --wait
+# → note the test ID, e.g. t-a1b2c3
+
+# 3. Perform the Kafka upgrade (outside of Kates)
+
+# 4. Run the same load test on the new version
+kates test create --type LOAD --records 100000 --wait
+# → note the new test ID, e.g. t-d4e5f6
+
+# 5. Compare the two runs side by side
+kates report diff t-a1b2c3 t-d4e5f6
+```
+
+### Workflow 2: Investigating Consumer Lag
+
+A consumer group's lag is climbing and you need to diagnose why. Is it a slow consumer? An overloaded broker? A hot partition? This workflow narrows the problem from "lag is high" to a specific root cause in under two minutes.
+
+```bash
+# 1. Find which consumer groups are lagging
+kates kafka groups
+
+# 2. Drill into the lagging group for per-partition detail
+kates kafka group my-lagging-group
+
+# 3. Check broker health — is one broker overloaded?
+kates cluster watch
+
+# 4. If a specific broker looks hot, check its load distribution
+kates report brokers <latest-test-id>
+```
+
+### Workflow 3: Chaos Resilience Validation
+
+You want to prove your cluster can survive a broker failure — not just "it stays up" but "it recovers within your SLA window and doesn't lose data." This workflow runs a chaos test while monitoring live throughput, then examines the recovery timeline.
+
+```bash
+# 1. Run a chaos test that kills a broker during a load test
+kates disruption run --config broker-kill.json
+
+# 2. In another terminal, watch live throughput during the test
+kates top
+
+# 3. After the test completes, check results and recovery time
+kates disruption status <id>
+
+# 4. Export the latency heatmap for detailed post-mortem analysis
+kates report export <test-id> --format heatmap -o heatmap.json
+```
+
+### Workflow 4: Pre-Production Cluster Validation
+
+You've just deployed a new Kafka cluster and want to validate it end-to-end before handing it to application teams. This workflow runs progressively deeper checks: first a quick health check, then a deep diagnostic, then a topology audit, and finally a sustained endurance run to shake out issues that only appear under sustained load.
+
+```bash
+# 1. Quick system health check
+kates health
+
+# 2. Deep diagnostic — checks Kubernetes, Strimzi, connectivity, and more
+kates doctor
+
+# 3. Verify the broker/controller layout and zone distribution
+kates cluster topology
+
+# 4. Run a 30-minute endurance test to stress-test under sustained load
+kates test create --type ENDURANCE --duration 1800 --wait
+
+# 5. Check the endurance results against historical baselines
+kates trend --type ENDURANCE --metric p99LatencyMs --days 30
+```
+
+### Workflow 5: CI/CD Quality Gate
+
+You want every pull request to prove it doesn't regress Kafka performance. This workflow integrates into your CI pipeline — it runs a scenario file, exports JUnit results, and exits non-zero if the grade drops below your threshold.
+
+```bash
+# 1. Run the scenario defined in your repo
+kates test apply -f ci/load-test.yaml --wait
+
+# 2. Export results as JUnit XML for your CI system
+kates report export <id> --format junit -o results.xml
+
+# 3. Gate: fail the build if the grade is below B
+kates gate -f ci/load-test.yaml --min-grade B
+```
+
+::: {.callout-tip}
+See [Appendix C: CI/CD Integration](appendix-c-cicd.md) for complete GitHub Actions, GitLab CI, and Jenkins pipeline examples.
+:::
+
 
 ## Configuration
 
@@ -87,7 +192,11 @@ contexts:
 
 ## Commands
 
-### health
+### Health, Status & Diagnostics
+
+These are the commands you reach for first. Whether you're starting your day, triaging an incident, or validating a deployment, health and status commands give you a quick read on whether the system is behaving. Run `kates health` before and after any significant change — it's cheap and tells you immediately if something broke.
+
+#### health
 
 Check system health, Kafka connectivity, and engine status.
 
@@ -95,15 +204,38 @@ Check system health, Kafka connectivity, and engine status.
 kates health
 ```
 
-### status
+Expected output:
 
-Quick one-line system status.
+```
+ Kates Health Check
+
+  Component          Status    Details
+  ─────────────────────────────────────────────────────
+  API Server         ● UP      v1.17.0 (uptime 4d 12h)
+  Kafka Cluster      ● UP      3 brokers, 0 under-replicated
+  Schema Registry    ● UP      Apicurio 2.2.5.Final
+  Test Engine        ● IDLE    No tests running
+  Database           ● UP      PostgreSQL 16.3
+  Monitoring         ● UP      Prometheus + Grafana
+
+  Overall: ● HEALTHY
+```
+
+#### status
+
+Quick one-line system status — useful for scripting and prompts.
 
 ```bash
 kates status
 ```
 
-### version
+Expected output:
+
+```
+● HEALTHY | 3 brokers | 42 topics | 0 running tests | v1.17.0
+```
+
+#### version
 
 Show CLI, API, and runtime version information.
 
@@ -111,9 +243,51 @@ Show CLI, API, and runtime version information.
 kates version
 ```
 
+#### doctor
+
+Aliases: `preflight`, `check`
+
+Pre-flight cluster readiness checklist. The doctor command performs a deep diagnostic of your environment: Kubernetes connectivity, Strimzi operator status, Kafka AdminClient reachability, storage provisioner health, and namespace configuration. It's the first command to run when something "feels wrong" but `kates health` reports healthy — doctor checks the infrastructure layers that health doesn't.
+
+```bash
+kates doctor
+kates preflight
+kates check
+```
+
+Expected output:
+
+```
+ Kates Doctor — Environment Diagnostics
+
+  Check                          Result
+  ──────────────────────────────────────────────────────
+  Kubernetes API                 ✔ Reachable (v1.32.4)
+  kubectl context                ✔ kind-panda
+  Strimzi Operator               ✔ Running (0.45.0)
+  Kafka Cluster CR               ✔ Ready (3 brokers)
+  KRaft Controller               ✔ Active (broker-0)
+  AdminClient connectivity       ✔ Connected
+  Schema Registry                ✔ Healthy
+  Prometheus                     ✔ Scraping 12 targets
+  Grafana                        ✔ 10 dashboards loaded
+  Namespace: kafka               ✔ Exists
+  Namespace: kates               ✔ Exists
+  StorageClass: standard         ✔ Available
+  PVC health                     ✔ 3/3 Bound
+
+  Result: 13/13 checks passed ✔
+```
+
+**See also:** [Chapter 12: Deployment](12-deployment.md) for environment setup, [Appendix B: Troubleshooting](appendix-b-troubleshooting.md) for common diagnostic failures.
+
 ---
 
-### cluster
+### Cluster Commands
+
+Cluster commands give you direct visibility into the Kafka cluster without leaving the Kates CLI. Instead of switching between `kafka-topics.sh`, `kafka-consumer-groups.sh`, and `kubectl`, you can inspect topics, groups, brokers, and ACLs from a single interface. These commands query both the Kubernetes API and the Kafka AdminClient to give you a unified picture of cluster state.
+
+#### cluster
 
 Kafka cluster metadata and inspection.
 
@@ -143,6 +317,34 @@ kates cluster topology
 kates cluster alerts
 ```
 
+#### cluster info
+
+Display cluster metadata including broker list, controller identity, cluster ID, and Kafka version.
+
+```bash
+kates cluster info
+```
+
+Expected output:
+
+```
+ Kafka Cluster Info
+
+  Cluster ID:    dQw4w9WgXcQ
+  Kafka Version: 4.2.0
+  Mode:          KRaft (no ZooKeeper)
+  Controller:    broker-0 (id: 0)
+
+  Brokers (3):
+  ID   Host                           Port   Rack    Role
+  ──   ────                           ────   ────    ────
+  0    panda-broker-0.kafka.svc       9092   alpha   broker,controller
+  1    panda-broker-1.kafka.svc       9092   sigma   broker
+  2    panda-broker-2.kafka.svc       9092   gamma   broker
+
+  Topics: 42 | Partitions: 186 | Consumer Groups: 7
+```
+
 #### cluster check
 
 Run a comprehensive Kafka cluster health check. Reports broker count, controller identity, topic/partition counts, consumer groups, and partition health (under-replicated, offline). Problems are displayed inline.
@@ -156,11 +358,46 @@ Output statuses: `● HEALTHY`, `▲ WARNING`, `✖ CRITICAL`.
 
 #### cluster topology
 
-Display the full Strimzi/Kafka cluster topology with 26 data sections. Requires the Kates backend to be deployed on Kubernetes with access to Strimzi CRDs and Kafka AdminClient APIs.
+Display the full Strimzi/Kafka cluster topology with 26 data sections. Requires the Kates backend to be deployed on Kubernetes with access to Strimzi CRDs and Kafka AdminClient APIs. This is the most comprehensive view of your cluster — use it to verify broker/controller layout after deployment or to audit infrastructure before a load test.
 
 ```bash
 kates cluster topology
 kates cluster topology -o json
+```
+
+Expected output (abbreviated — full output includes 26 sections):
+
+```
+ Kates Cluster Topology — 26 Sections
+
+ ── 1. Kubernetes Platform ─────────────────────────
+  Version:     v1.32.4
+  Provider:    kind
+  Nodes:       3 (panda-worker, panda-worker2, panda-worker3)
+
+ ── 2. Strimzi Operator ────────────────────────────
+  Version:     0.45.0
+  Replicas:    1/1 Ready
+  Watching:    All namespaces
+
+ ── 3. Kafka Cluster ───────────────────────────────
+  Name:        panda
+  Namespace:   kafka
+  Replicas:    3
+  Status:      Ready
+  Listeners:   PLAIN (9092), TLS (9093)
+
+ ── 6. Controllers ─────────────────────────────────
+  Active:      broker-0 (id: 0, zone: alpha)
+  Mode:        KRaft
+
+ ── 7. Brokers ─────────────────────────────────────
+  ID  Pod                  Zone    CPU    Memory   Disk
+  0   panda-broker-0       alpha   120m   1.2Gi    4.8Gi
+  1   panda-broker-1       sigma   95m    1.1Gi    4.6Gi
+  2   panda-broker-2       gamma   110m   1.2Gi    4.7Gi
+
+  ... (19 more sections)
 ```
 
 | # | Section | Source |
@@ -240,11 +477,13 @@ kates cluster watch --interval 10
 |------|---------|-------------|
 | `--interval` | 5 | Refresh interval in seconds |
 
+**See also:** [Chapter 3: Cluster Setup](03-cluster.md) for cluster architecture, [Chapter 9: Observability](09-observability.md) for Grafana dashboards.
+
 ---
 
-### test
+### Test Commands
 
-Manage performance test runs.
+Test commands are the core of Kates. They let you create, monitor, and manage performance test runs against your Kafka cluster. Whether you're running a quick load test to sanity-check throughput or a multi-hour endurance test to catch memory leaks and log-roll spikes, the workflow is always the same: create a test, optionally watch it in real time, then inspect the results. For repeatable, version-controlled test definitions, use `test apply` with YAML scenario files instead of inline flags.
 
 #### test list
 
@@ -349,11 +588,13 @@ Generate a YAML scaffold template for any test type.
 | `INTEGRITY` | Data integrity verification |
 | `INTEGRITY_CHAOS` | Integrity + chaos injection |
 
+**See also:** [Chapter 5: Test Types](05-test-types.md) for the theory behind each test type, [Chapter 13: Scenario Files](13-scenario-files.md) for YAML scenario syntax.
+
 ---
 
-### report
+### Report Commands
 
-View and export test reports.
+After a test completes, reports are where the numbers become answers. Report commands let you view full results, export them for CI pipelines, diff two runs side by side, and drill into per-broker metrics to find hot spots. The `report diff` command is particularly powerful — it highlights exactly where two runs diverge, making it the go-to tool for before/after comparisons during upgrades, tuning, and regression checks.
 
 #### report show
 
@@ -362,6 +603,38 @@ kates report show <id>
 ```
 
 Display the full report for a test run.
+
+Expected output:
+
+```
+ Test Report — t-a1b2c3
+
+  Type:       LOAD
+  Status:     DONE
+  Duration:   32.4s
+  Backend:    native-loom
+  Topic:      kates-perf-test-a1b2c3 (6 partitions, RF=3)
+
+  ── Producer Metrics ──────────────────────────────
+  Records Sent:          100,000
+  Throughput:            3,086 rec/s (3.02 MB/s)
+  Avg Latency:           4.12 ms
+  P50 Latency:           3.00 ms
+  P95 Latency:           8.00 ms
+  P99 Latency:           22.00 ms
+  Max Latency:           186.00 ms
+
+  ── Consumer Metrics ──────────────────────────────
+  Records Consumed:      100,000
+  Consumer Throughput:   3,102 rec/s (3.04 MB/s)
+  Integrity:             ✔ 100.00% (0 lost, 0 duplicates)
+
+  ── SLA Verdict ───────────────────────────────────
+  Grade: A
+  P99 ≤ 50ms:           ✔ PASS (22.00ms)
+  Throughput ≥ 1000:     ✔ PASS (3,086 rec/s)
+  Data Loss = 0:         ✔ PASS
+```
 
 #### report summary
 
@@ -413,9 +686,15 @@ kates report brokers <id>
 
 Per-broker metrics for a test run.
 
+**See also:** [Chapter 9: Observability](09-observability.md) for heatmap interpretation and Grafana integration, [Chapter 4: Performance Theory](04-performance-theory.md) for understanding percentile metrics.
+
 ---
 
-### trend
+### Trend Analysis
+
+Trend analysis is how you move from "this test looks fine" to "performance has been stable for weeks." The trend command queries historical test results and renders sparkline charts showing how a metric has changed over time. It's essential for catching slow regressions that no single test run would reveal — a P99 that creeps from 15ms to 25ms over a month is invisible in individual reports but obvious in a trend chart.
+
+#### trend
 
 Historical performance trend analysis.
 
@@ -424,17 +703,36 @@ kates trend --type LOAD --metric p99LatencyMs --days 30
 kates trend --type LOAD --metric throughputRecordsPerSec --days 7
 ```
 
+Expected output:
+
+```
+ Performance Trend — LOAD / p99LatencyMs / 30 days
+
+  Date         P99 (ms)   Trend
+  ──────────────────────────────────────────
+  2026-06-09   18.0       ▁▁▁▂▂
+  2026-06-16   19.5       ▁▁▂▂▃
+  2026-06-23   21.0       ▁▂▂▃▃
+  2026-06-30   20.0       ▁▂▂▂▃
+  2026-07-07   22.0       ▂▂▃▃▃
+
+  30-day avg: 20.1ms | Min: 17.5ms | Max: 24.0ms
+  Trend: → stable (±8.2% variance)
+```
+
 | Flag | Description |
 |------|-------------|
 | `--type` | Test type to analyze |
 | `--metric` | Metric name: `p99LatencyMs`, `avgLatencyMs`, `throughputRecordsPerSec` |
 | `--days` | Lookback period in days |
 
+**See also:** [Chapter 4: Performance Theory](04-performance-theory.md) for statistical significance and why single runs are insufficient.
+
 ---
 
-### disruption
+### Disruption Commands
 
-Kubernetes-aware disruption testing.
+Disruption commands run controlled chaos experiments against your Kafka cluster. They inject real faults — broker kills, network partitions, disk pressure — while measuring the impact on throughput, latency, and data integrity. Every disruption follows a lifecycle: validate the plan, establish a steady-state baseline, inject the fault, observe recovery, and produce a verdict. The `--dry-run` flag lets you validate plans without actually breaking anything.
 
 #### disruption run
 
@@ -499,23 +797,27 @@ kates disruption watch <id>
 
 Real-time SSE progress stream for disruption tests.
 
+**See also:** [Chapter 6: Chaos Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chapter 7: Chaos Practice](07-chaos-practice.md) for step-by-step chaos test walkthroughs.
+
 ---
 
-### resilience
+### Resilience
 
-Combined performance + chaos testing.
+Combined performance + chaos testing. Resilience tests run a load workload and inject disruptions simultaneously, then grade the cluster's ability to maintain SLA under fault conditions. This is the highest-level chaos primitive — it combines what you'd otherwise do manually with `test create` + `disruption run`.
 
 ```bash
 kates resilience run --config resilience-test.json
 ```
 
+**See also:** [Chapter 7: Chaos Practice](07-chaos-practice.md) for resilience test configuration.
+
 ---
 
-### schedule
+### Schedule Commands
+
+Schedule commands let you automate recurring test runs on a cron schedule. Instead of manually running load tests every night, you define a schedule once and Kates executes it automatically. Each run produces a full report, so you can combine schedules with `kates trend` to build continuous performance baselines over weeks or months.
 
 Aliases: `s`, `sched`
-
-Automated recurring test schedules.
 
 #### schedule list
 
@@ -558,9 +860,15 @@ Aliases: `rm`
 kates schedule delete <id>
 ```
 
+**See also:** [Chapter 14: Recipes](14-recipes.md) for schedule-based regression detection patterns.
+
 ---
 
-### dashboard
+### Observability & Monitoring
+
+Observability commands give you real-time and historical visibility into what Kates and Kafka are doing. The `dashboard` command opens a full-screen TUI with live metrics, `top` shows running tests like `kubectl top` shows pods, and `watch` streams a single test's progress. These are the commands you keep running in a side terminal during performance tests and chaos experiments.
+
+#### dashboard
 
 Full-screen monitoring dashboard.
 
@@ -569,7 +877,7 @@ kates dashboard
 kates dash
 ```
 
-### top
+#### top
 
 Live view of running tests.
 
@@ -577,11 +885,13 @@ Live view of running tests.
 kates top
 ```
 
+**See also:** [Chapter 9: Observability](09-observability.md) for Grafana dashboards and Prometheus alert rules.
+
 ---
 
-### lab
+### Interactive Lab
 
-Interactive performance tuning workbench. Opens a full-screen TUI for iterative parameter tuning with live results, sparklines, A/B comparison, auto-sweep, and CSV export.
+The lab is an interactive performance tuning workbench. It opens a full-screen TUI where you can iterate on test parameters — tweak batch size, change acks mode, adjust partition count — and immediately see the impact on throughput and latency via live sparklines. It supports A/B comparison, auto-sweep across parameter ranges, and CSV export of all iterations.
 
 ```bash
 kates lab
@@ -593,23 +903,56 @@ See [Chapter 10b: Lab](10b-lab.md) for the full guide.
 
 ---
 
-### deploy
+### Deployment & Lifecycle
+
+Deployment commands manage the full lifecycle of the Kates stack — from initial deployment to teardown. The `deploy` command can set up the entire stack (Kafka, Kates backend, monitoring, chaos engine) with a single interactive wizard, while `clean` tears everything down cleanly, including finalizer stripping for Strimzi CRDs that can otherwise block namespace deletion.
+
+#### deploy
 
 Deploy the Kates stack (Kafka, Kates, Chaos, Schema Registry).
 
 ```bash
 kates deploy
+kates deploy -i
 ```
 
-### clean
+#### deploy status
+
+Show the current deployment status of all Kates-managed components.
+
+```bash
+kates deploy status
+```
+
+Expected output:
+
+```
+ Kates Deployment Status
+
+  Component             Namespace    Status     Version
+  ─────────────────────────────────────────────────────
+  Strimzi Operator      kafka        ● Running  0.45.0
+  Kafka Cluster         kafka        ● Ready    4.2.0
+  Kates Backend         kates        ● Running  1.17.0
+  PostgreSQL            kates        ● Running  16.3
+  Prometheus            monitoring   ● Running  2.54.0
+  Grafana               monitoring   ● Running  11.6.0
+  Jaeger                monitoring   ● Running  1.62.0
+  LitmusChaos           litmus       ● Running  3.14.0
+
+  Overall: 8/8 components healthy
+```
+
+#### clean
 
 Remove all Kates-managed resources and namespaces.
 
 ```bash
 kates clean
+kates clean --force
 ```
 
-### detect
+#### detect
 
 Aliases: `preflight-cluster`, `cluster-check`
 
@@ -621,7 +964,7 @@ kates preflight-cluster
 kates cluster-check
 ```
 
-### ports
+#### ports
 
 Port-forward all Kates services to localhost.
 
@@ -629,19 +972,7 @@ Port-forward all Kates services to localhost.
 kates ports
 ```
 
-### doctor
-
-Aliases: `preflight`, `check`
-
-Pre-flight cluster readiness checklist.
-
-```bash
-kates doctor
-kates preflight
-kates check
-```
-
-### auto
+#### auto
 
 Auto-detect cluster configuration and deploy Kafka.
 
@@ -649,7 +980,7 @@ Auto-detect cluster configuration and deploy Kafka.
 kates auto
 ```
 
-### operator
+#### operator
 
 Run the Kates Environment Operator.
 
@@ -657,7 +988,7 @@ Run the Kates Environment Operator.
 kates operator
 ```
 
-### init
+#### init
 
 Initialize a new Kates workspace with config, scenarios, and CI gate.
 
@@ -665,7 +996,7 @@ Initialize a new Kates workspace with config, scenarios, and CI gate.
 kates init
 ```
 
-### upgrade
+#### upgrade
 
 Build from source and install a new version of the Kates CLI.
 
@@ -673,13 +1004,15 @@ Build from source and install a new version of the Kates CLI.
 kates upgrade
 ```
 
+**See also:** [Chapter 12: Deployment](12-deployment.md) for detailed deployment topologies and configuration, [Chapter 20: Installation Guide](20-installation-guide.md) for step-by-step setup.
+
 ---
 
-### security
+### Security Commands
+
+Security commands audit, test, and enforce security posture across your Kafka cluster. They cover TLS inspection, ACL verification, penetration testing, compliance mapping, and drift detection. The security suite produces a letter grade (A–F) for your cluster's security posture, making it easy to track improvements over time and gate CI/CD pipelines on minimum security standards.
 
 Aliases: `sec`
-
-Kafka security auditing, ACL testing, TLS inspection, and penetration testing.
 
 ```bash
 kates security
@@ -837,13 +1170,15 @@ kates security trend
 kates sec trend
 ```
 
+**See also:** [Chapter 17: Security](17-security.md) for in-depth security auditing and hardening.
+
 ---
 
-### kyverno
+### Kyverno Policy Commands
+
+Kyverno commands let you manage Kubernetes admission policies for your Kafka cluster. They provide visibility into which policies are active, which workloads are violating them, and tools to switch between Audit and Enforce modes. The `kyverno detect` command can even scan your cluster and recommend policies based on what it finds.
 
 Aliases: `kyv`, `policy`
-
-Kyverno policy engine management.
 
 ```bash
 kates kyverno
@@ -923,9 +1258,15 @@ kates kyverno apply --mode Enforce --yes --with-netpol
 | `--yes`, `-y` | Skip confirmation prompt |
 | `--dry-run` | Show what would be applied without executing |
 
+**See also:** [Chapter 17: Security](17-security.md) for Kyverno policy deep dive and custom policy authoring.
+
 ---
 
-### kafka
+### Kafka Client Commands
+
+Kafka commands give you direct visibility into the cluster without leaving the Kates CLI. Instead of switching between `kafka-topics.sh`, `kafka-consumer-groups.sh`, and `kubectl`, you can inspect topics, groups, brokers, and ACLs from a single interface. The `kafka tui` command opens a full-screen interactive explorer for browsing topics, consuming messages, and inspecting consumer groups — it's the fastest way to poke around a cluster.
+
+#### kafka
 
 Interactive Kafka client.
 
@@ -947,6 +1288,24 @@ List all topics with partition, replication, and ISR health.
 
 ```bash
 kates kafka topics
+```
+
+Expected output:
+
+```
+ Kafka Topics (42 total)
+
+  Topic                          Partitions   RF   ISR    Status
+  ─────────────────────────────────────────────────────────────────
+  orders.events                  6            3    6/6    ● Healthy
+  user.signups                   3            3    3/3    ● Healthy
+  payments.processed             6            3    6/6    ● Healthy
+  inventory.updates              3            3    3/3    ● Healthy
+  kates-perf-test-a1b2c3         6            3    6/6    ● Healthy
+  __consumer_offsets              50           3    50/50  ● Healthy
+  ...
+
+  Summary: 42 topics, 186 partitions, 0 under-replicated
 ```
 
 #### kafka topic
@@ -1039,9 +1398,15 @@ Launch interactive Kafka explorer (full-screen TUI).
 kates kafka tui
 ```
 
+**See also:** [Chapter 3: Cluster Setup](03-cluster.md) for Kafka cluster architecture, [Chapter 15: Kafka Deployment](15-kafka-deployment.md) for production Kafka configuration.
+
 ---
 
-### benchmark
+### Analysis & Optimization Commands
+
+Analysis commands take raw test results and turn them into actionable recommendations. The `benchmark` command runs a full battery of tests and grades your cluster with a letter score. The `advisor` analyzes a specific run and suggests configuration improvements. The `explain` command produces a plain-English summary — useful when you need to share results with people who don't want to read latency tables.
+
+#### benchmark
 
 Aliases: `bench`
 
@@ -1052,7 +1417,7 @@ kates benchmark
 kates bench
 ```
 
-### advisor
+#### advisor
 
 Analyze test results and recommend configuration improvements.
 
@@ -1061,7 +1426,7 @@ kates advisor <run-id>
 kates advisor abc123
 ```
 
-### explain
+#### explain
 
 Aliases: `why`, `interpret`
 
@@ -1073,7 +1438,7 @@ kates why <id>
 kates interpret <id>
 ```
 
-### replay
+#### replay
 
 Re-run a previous test with the same parameters.
 
@@ -1082,9 +1447,37 @@ kates replay <id>
 kates replay abc123
 ```
 
+#### gate
+
+Aliases: `ci`, `quality-gate`
+
+CI quality gate — run a test and exit non-zero if grade is below threshold.
+
+```bash
+kates gate
+kates ci
+kates quality-gate
+kates gate -f scenario.yaml --min-grade B
+```
+
+#### baseline
+
+The baseline command sets a specific test run as the performance reference point for future regression detection. Once set, you can run `baseline regression <id>` to compare any new test against the baseline and see exactly where performance has changed. Baselines work hand-in-hand with trend analysis — trends show long-term drift, baselines catch acute regressions. The typical workflow is: run a comprehensive test on a known-good configuration, set it as baseline, then compare every subsequent run against it.
+
+```bash
+kates baseline set <id>
+kates baseline regression <id>
+```
+
+**See also:** [Chapter 4: Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [Appendix C: CI/CD Integration](appendix-c-cicd.md) for quality gate examples.
+
 ---
 
-### tune
+### Tuning Commands
+
+Tuning commands automate the tedious process of testing different Kafka configurations. Instead of manually running five tests with different `acks` settings, `tune run TUNE_ACKS` does it for you and presents a comparison table. Each tuning type sweeps across a specific configuration dimension — replication factor, batch size, compression codec, or partition count — so you can find the optimal setting for your workload.
+
+#### tune
 
 Configuration & tuning tests.
 
@@ -1130,9 +1523,11 @@ List available tuning tests.
 kates tune types
 ```
 
+**See also:** [Chapter 10b: Lab](10b-lab.md) for the interactive tuning workbench, [Chapter 5: Test Types](05-test-types.md) for understanding how tuning tests differ from standard tests.
+
 ---
 
-### profile
+### Profile Commands
 
 Save, compare, and assert named performance profiles.
 
@@ -1177,7 +1572,11 @@ kates profile assert baseline def456
 
 ---
 
-### cost
+### Cost Estimation
+
+The cost command estimates the cloud infrastructure costs associated with running a given test configuration at production scale. It factors in broker instance types, storage volumes, network transfer, and test duration to produce a rough cost estimate. Use it to answer questions like "how much would it cost to run this endurance test for 24 hours on EKS?" before committing real resources. Costs are estimated, not exact — they use published on-demand pricing for common cloud providers.
+
+#### cost
 
 Estimate cloud costs for test configurations.
 
@@ -1202,7 +1601,11 @@ kates cost estimate --records 1000000 --record-size 1024 --duration 3600
 
 ---
 
-### snapshot
+### Snapshot Commands
+
+Snapshot commands capture the full state of your Kafka cluster — topics, partitions, consumer groups, broker configs, ACLs — at a point in time. The primary use case is before/after comparison: take a snapshot before a change, make the change, take another snapshot, then diff them. The diff shows exactly what changed: new topics, altered configs, shifted partition leaders. Snapshots are stored server-side, so they persist across CLI sessions.
+
+#### snapshot
 
 Capture, list, and compare cluster state snapshots.
 
@@ -1236,21 +1639,15 @@ kates snapshot diff <name1> <name2>
 kates snapshot diff pre-upgrade post-upgrade
 ```
 
+**See also:** [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md) for using snapshots during Kafka version upgrades.
+
 ---
 
-### gate
+### Flow Pipelines
 
-Aliases: `ci`, `quality-gate`
+A flow is a declarative multi-step pipeline defined in YAML. Flows let you chain multiple Kates operations — tests, disruptions, reports, gates — into a single automated sequence. Each step can depend on the output of previous steps, and the pipeline stops on first failure. Use flows for complex validation sequences that would otherwise require a shell script: "run a load test, then a chaos test, then diff the results, then gate on grade B or better."
 
-CI quality gate — run a test and exit non-zero if grade is below threshold.
-
-```bash
-kates gate
-kates ci
-kates quality-gate
-```
-
-### flow
+#### flow
 
 Declarative multi-step pipeline orchestrator.
 
@@ -1270,15 +1667,26 @@ kates flow run -f pipeline.yaml
 |------|-------------|
 | `-f` | Path to flow pipeline YAML file |
 
-### badge
+---
 
-Generate status badges for README files (shields.io-compatible).
+### Badge Generation
+
+The badge command generates shields.io-compatible SVG badges that display your cluster's latest performance grade, security score, or build status. Embed them in your repository's README, wiki pages, or internal dashboards. Badges are generated from the most recent test or audit results — they update automatically when you run new tests. Supported badge types include `build`, `performance`, `security`, and `health`.
 
 ```bash
 kates badge
+kates badge --type build --output badge.svg
+kates badge --type performance --output perf-badge.svg
+kates badge --type security --output sec-badge.svg
 ```
 
-### webhook
+---
+
+### Webhook Notifications
+
+Webhooks send HTTP POST notifications to external endpoints when specific events occur in Kates. Supported events include `test.completed`, `test.failed`, `disruption.completed`, `schedule.triggered`, and `security.audit.completed`. Use webhooks to integrate Kates with Slack, PagerDuty, Microsoft Teams, or any system that accepts incoming webhooks. Each webhook registration binds a name, a URL, and an optional event filter — if no event filter is specified, the webhook fires for all events.
+
+#### webhook
 
 Manage webhook notifications for test completion events.
 
@@ -1301,6 +1709,7 @@ Register a webhook.
 ```bash
 kates webhook add <name> <url>
 kates webhook add slack-alerts https://hooks.slack.com/services/...
+kates webhook add pagerduty https://events.pagerduty.com/integration/...
 ```
 
 #### webhook remove
@@ -1317,7 +1726,9 @@ kates webhook delete <name>
 
 ---
 
-### docs
+### Developer & Help Commands
+
+#### docs
 
 Man-style documentation for all Kates commands.
 
@@ -1327,7 +1738,7 @@ kates docs test create
 kates docs security audit
 ```
 
-### tldr
+#### tldr
 
 Quick command reference cheatsheet.
 
@@ -1337,7 +1748,7 @@ kates tldr security
 kates tldr kafka
 ```
 
-### changelog
+#### changelog
 
 Generate changelog from audit events.
 
