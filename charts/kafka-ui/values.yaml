@@ -1,8 +1,18 @@
 # -- Image configuration
 image:
-  repository: provectuslabs/kafka-ui
-  tag: ""  # defaults to Chart.appVersion
+  # -- Container image repository (migrated from deprecated provectuslabs/kafka-ui)
+  repository: ghcr.io/kafbat/kafka-ui
+  # -- Image tag — defaults to Chart.appVersion when empty
+  tag: ""
+  # -- Image pull policy
   pullPolicy: IfNotPresent
+  # -- Optional image digest for pinned deployments (overrides tag when set)
+  # digest: "sha256:abc123..."
+  digest: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+#  - name: ghcr-credentials
 
 # -- Number of replicas
 replicas: 1
@@ -44,6 +54,25 @@ kafka:
     enabled: false
     trustedCertificateSecret: ""
     certificateKey: "ca.crt"
+
+# -- Schema Registry integration (shows schemas in Kafka UI)
+schemaRegistry:
+  enabled: false
+  # -- Schema Registry URL (e.g., Apicurio Registry)
+  url: ""
+  # -- Authentication for Schema Registry
+  auth:
+    enabled: false
+    username: ""
+    password: ""
+
+# -- Kafka Connect integration (shows connectors in Kafka UI)
+kafkaConnect:
+  enabled: false
+  # -- Display name for the Connect cluster in the UI
+  name: "connect-cluster"
+  # -- Kafka Connect REST API URL
+  url: ""
 
 # -- Kafka UI application authentication (login to the web UI itself)
 auth:
@@ -87,6 +116,11 @@ networkPolicy:
   # -- Namespace of the ingress controller (for browser access restriction)
   ingressNamespace: "ingress-nginx"
 
+# -- Pod annotations (e.g., Prometheus scraping)
+podAnnotations: {}
+#  prometheus.io/scrape: "true"
+#  prometheus.io/port: "8080"
+
 # -- Pod resource requests and limits
 resources:
   requests:
@@ -109,6 +143,14 @@ readinessProbe:
   periodSeconds: 10
   timeoutSeconds: 10
   failureThreshold: 10
+
+# -- Startup probe configuration (useful for slow-starting environments)
+startupProbe:
+  enabled: false
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
 
 # -- Pod-level security context
 podSecurityContext:
@@ -138,6 +180,9 @@ extraEnv: []
 
 # -- Extra labels to add to all resources
 extraLabels: {}
+
+# -- Extra Kafka UI YAML config merged into config.yml
+extraConfig: {}
 
 # -- Logging
 logging:

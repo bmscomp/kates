@@ -25,6 +25,19 @@ data:
             {{- if .Values.kafka.tls.enabled }}
             ssl.truststore.type: PEM
             {{- end }}
+          {{- if .Values.schemaRegistry.enabled }}
+          schemaRegistry: {{ include "kafka-ui.schemaRegistryUrl" . }}
+          {{- if .Values.schemaRegistry.auth.enabled }}
+          schemaRegistryAuth:
+            username: {{ .Values.schemaRegistry.auth.username }}
+            password: {{ .Values.schemaRegistry.auth.password }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.kafkaConnect.enabled }}
+          kafkaConnect:
+            - name: {{ .Values.kafkaConnect.name | default "connect-cluster" }}
+              address: {{ include "kafka-ui.kafkaConnectUrl" . }}
+          {{- end }}
 
     auth:
       type: {{ .Values.auth.type | default "DISABLED" }}
@@ -32,3 +45,6 @@ data:
       health:
         ldap:
           enabled: false
+    {{- with .Values.extraConfig }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

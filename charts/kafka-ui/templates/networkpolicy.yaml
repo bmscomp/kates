@@ -58,6 +58,26 @@ spec:
           protocol: TCP
         - port: 9093
           protocol: TCP
+    {{- if .Values.schemaRegistry.enabled }}
+    # To Schema Registry (Apicurio)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "kafka-ui.kafkaNamespace" . }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.kafkaConnect.enabled }}
+    # To Kafka Connect REST API
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "kafka-ui.kafkaNamespace" . }}
+      ports:
+        - port: 8083
+          protocol: TCP
+    {{- end }}
     # Kubernetes API server (for Secret reads and health checks)
     - to: []
       ports:
