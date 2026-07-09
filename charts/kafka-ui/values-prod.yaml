@@ -24,5 +24,14 @@ kafka:
   tls:
     enabled: true
 
+schemaRegistry:
+  enabled: true
+  # url: "http://apicurio-registry.kafka.svc:8080/apis/ccompat/v7"
+
+kafkaConnect:
+  enabled: true
+  name: "connect-cluster"
+  # url: "http://connect-cluster-connect-api.kafka.svc:8083"
+
 networkPolicy:
   enabled: true
