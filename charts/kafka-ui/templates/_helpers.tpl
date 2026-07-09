@@ -92,6 +92,42 @@ Kafka bootstrap servers FQDN.
 {{- end -}}
 
 {{/*
+Container image reference.
+Returns repository@digest when digest is set, repository:tag otherwise.
+*/}}
+{{- define "kafka-ui.image" -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Schema Registry URL — auto-computed from namespace if not explicitly set.
+*/}}
+{{- define "kafka-ui.schemaRegistryUrl" -}}
+{{- if .Values.schemaRegistry.url -}}
+{{- .Values.schemaRegistry.url -}}
+{{- else -}}
+{{- $clusterDomain := .Values.kafka.clusterDomain | default "cluster.local" -}}
+{{- printf "http://apicurio-apicurio-registry.%s.svc.%s:8080/apis/ccompat/v7" (include "kafka-ui.kafkaNamespace" .) $clusterDomain -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Kafka Connect URL — auto-computed from namespace if not explicitly set.
+*/}}
+{{- define "kafka-ui.kafkaConnectUrl" -}}
+{{- if .Values.kafkaConnect.url -}}
+{{- .Values.kafkaConnect.url -}}
+{{- else -}}
+{{- $clusterDomain := .Values.kafka.clusterDomain | default "cluster.local" -}}
+{{- printf "http://connect-cluster-connect-api.%s.svc.%s:8083" (include "kafka-ui.kafkaNamespace" .) $clusterDomain -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 KafkaUser secret name — the Strimzi-generated SCRAM credential.
 */}}
 {{- define "kafka-ui.secretName" -}}

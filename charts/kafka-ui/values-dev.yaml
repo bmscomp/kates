@@ -1,4 +1,19 @@
 # Development overlay for kafka-ui
+# Enables Schema Registry and Kafka Connect integration for full visibility.
+
+schemaRegistry:
+  enabled: true
+
+kafkaConnect:
+  enabled: true
+
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
 resources:
   requests:
     cpu: 100m
