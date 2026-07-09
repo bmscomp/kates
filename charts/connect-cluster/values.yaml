@@ -196,7 +196,7 @@ livenessProbe:
 build: {}
   # output:
   #   type: docker
-  #   image: "ghcr.io/bmscomp/connect:custom"
+  #   image: "ghcr.io/bmscomp/connect:3.6.0"
   #   pushSecret: my-registry-credentials
   # plugins:
   #   # --- Cloud Storage ---
