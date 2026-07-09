@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kates
-  namespace: kafka
+  namespace: kates
   labels:
     app: kates
     app.kubernetes.io/name: kates

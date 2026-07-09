@@ -409,7 +409,7 @@ kates-undeploy:
 	@echo "✅ Kates removed"
 
 CLUSTER_NAME   ?= panda
-KATES_NS       ?= kafka
+KATES_NS       ?= kates
 KATES_IMAGE    ?= kates:latest
 CHART_REGISTRY ?= oci://ghcr.io/klster/charts
 CHART_DIR      := charts/kates
