@@ -374,10 +374,26 @@ users:
             operations: ["Read", "Write", "Create", "Describe"]
             host: "*"
           - resource:
+              type: topic
+              name: "kafkasql-"
+              patternType: prefix
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource:
               type: group
               name: "apicurio"
               patternType: prefix
             operations: ["Read", "Describe"]
+            host: "*"
+          - resource:
+              type: cluster
+            operations: ["Create", "Describe"]
+            host: "*"
+          - resource:
+              type: transactionalId
+              name: "apicurio"
+              patternType: prefix
+            operations: ["Write", "Describe"]
             host: "*"
     - name: litmus-chaos
       authentication:

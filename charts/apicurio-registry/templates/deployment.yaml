@@ -72,6 +72,35 @@ spec:
                   name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
                   key: sasl.jaas.config
             {{- end }}
+            {{- if and .Values.global.kafka.securityProtocol .Values.global.kafka.saslJaasConfigSecretName }}
+            - name: REGISTRY_KAFKASQL_CONSUMER_SECURITY_PROTOCOL
+              value: {{ .Values.global.kafka.securityProtocol | quote }}
+            - name: REGISTRY_KAFKASQL_CONSUMER_SASL_MECHANISM
+              value: {{ .Values.global.kafka.saslMechanism | quote }}
+            - name: REGISTRY_KAFKASQL_CONSUMER_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
+                  key: sasl.jaas.config
+            - name: REGISTRY_KAFKASQL_PRODUCER_SECURITY_PROTOCOL
+              value: {{ .Values.global.kafka.securityProtocol | quote }}
+            - name: REGISTRY_KAFKASQL_PRODUCER_SASL_MECHANISM
+              value: {{ .Values.global.kafka.saslMechanism | quote }}
+            - name: REGISTRY_KAFKASQL_PRODUCER_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
+                  key: sasl.jaas.config
+            - name: REGISTRY_KAFKASQL_ADMIN_SECURITY_PROTOCOL
+              value: {{ .Values.global.kafka.securityProtocol | quote }}
+            - name: REGISTRY_KAFKASQL_ADMIN_SASL_MECHANISM
+              value: {{ .Values.global.kafka.saslMechanism | quote }}
+            - name: REGISTRY_KAFKASQL_ADMIN_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
+                  key: sasl.jaas.config
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
