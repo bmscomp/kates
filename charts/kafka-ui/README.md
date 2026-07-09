@@ -9,77 +9,44 @@ A Helm chart for deploying [Kafbat Kafka UI](https://github.com/kafbat/kafka-ui)
 The following diagram shows how Kafka UI integrates with the existing Kates platform components. Kafka UI acts as a unified observability layer, connecting to the Kafka brokers for topic and consumer group inspection, to Apicurio Schema Registry for schema visibility, and to Kafka Connect for connector management.
 
 ```mermaid
-graph TB
-    subgraph Browser["Browser / Ingress"]
-        USER["👤 User"]
+flowchart LR
+    USER(["👤 User<br/>Browser"])
+
+    USER -- "HTTP :8080 · NodePort :30081" --> KAFKAUI
+
+    subgraph KAFKA_NS["kafka namespace"]
+        direction TB
+
+        KAFKAUI["🖥️ Kafka UI<br/>kafbat/kafka-ui:v1.5.0"]
+
+        KAFKAUI -- "SCRAM-SHA-512<br/>:9092 · :9093" --> BROKERS
+        KAFKAUI -- "HTTP :8080<br/>/apis/ccompat/v7" --> APICURIO
+        KAFKAUI -- "REST :8083" --> CONNECT
+
+        BROKERS["🟢 Kafka Brokers<br/>α · γ · σ<br/>krafter-kafka-bootstrap"]
+
+        APICURIO["🟠 Apicurio Registry<br/>Schema Registry<br/>Avro · JSON Schema · Protobuf"]
+
+        CONNECT["🔴 Kafka Connect<br/>REST API :8083<br/>Debezium CDC · JDBC Sink"]
+
+        CONNECT -- "produce / consume" --> BROKERS
+        APICURIO -- "schema storage" --> BROKERS
+
+        SECRET[/"🔑 Secret: kafka-ui<br/>SCRAM-SHA-512"/]
+        EO["🟣 Entity Operator<br/>Strimzi"]
+
+        EO -. "creates" .-> SECRET
+        SECRET -. "mounts password" .-> KAFKAUI
     end
 
-    subgraph K8S["Kubernetes Cluster — kafka namespace"]
-        subgraph UI["Kafka UI Pod"]
-            KAFKAUI["Kafbat Kafka UI<br/>ghcr.io/kafbat/kafka-ui:v1.5.0"]
-        end
-
-        subgraph Strimzi["Strimzi Operator"]
-            EO["Entity Operator"]
-        end
-
-        subgraph Kafka["Kafka Cluster — krafter"]
-            B1["Broker α<br/>:9092 / :9093"]
-            B2["Broker γ<br/>:9092 / :9093"]
-            B3["Broker σ<br/>:9092 / :9093"]
-        end
-
-        subgraph Registry["Schema Registry"]
-            APICURIO["Apicurio Registry<br/>:8080/apis/ccompat/v7"]
-        end
-
-        subgraph Connect["Kafka Connect"]
-            CW["Connect Workers<br/>REST API :8083"]
-            subgraph Connectors["Connectors"]
-                CDC["Debezium CDC<br/>PostgreSQL · MySQL · MongoDB"]
-                JDBC["JDBC Sink"]
-            end
-        end
-
-        SECRET["Secret: kafka-ui<br/>SCRAM-SHA-512 password"]
-        KAFKAUSER["KafkaUser CR<br/>kafka-ui"]
-    end
-
-    USER -->|"HTTP :8080<br/>NodePort :30081"| KAFKAUI
-
-    KAFKAUI -->|"SASL_PLAINTEXT<br/>SCRAM-SHA-512<br/>:9092"| B1
-    KAFKAUI -->|":9092"| B2
-    KAFKAUI -->|":9092"| B3
-
-    KAFKAUI -->|"HTTP GET<br/>/apis/ccompat/v7"| APICURIO
-    KAFKAUI -->|"HTTP REST<br/>:8083"| CW
-
-    CW --> CDC
-    CW --> JDBC
-    CDC -->|"CDC events"| B1
-    JDBC -->|"Sink reads"| B2
-
-    APICURIO -->|"Schema storage"| B3
-
-    EO -->|"Creates"| SECRET
-    EO -->|"Manages"| KAFKAUSER
-    KAFKAUI -.->|"Mounts password"| SECRET
-
-    classDef kafka fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    classDef ui fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    classDef registry fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef connect fill:#fce4ec,stroke:#c62828,stroke-width:2px
-    classDef strimzi fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
-    classDef user fill:#fffde7,stroke:#f9a825,stroke-width:2px
-    classDef secret fill:#eceff1,stroke:#546e7a,stroke-width:1px,stroke-dasharray: 5 5
-
-    class B1,B2,B3 kafka
-    class KAFKAUI ui
-    class APICURIO registry
-    class CW,CDC,JDBC connect
-    class EO strimzi
-    class USER user
-    class SECRET,KAFKAUSER secret
+    style KAFKAUI fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+    style BROKERS fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    style APICURIO fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c
+    style CONNECT fill:#fce4ec,stroke:#c62828,stroke-width:2px,color:#b71c1c
+    style EO fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,color:#4a148c
+    style SECRET fill:#eceff1,stroke:#546e7a,stroke-width:1px,stroke-dasharray: 5 5,color:#37474f
+    style USER fill:#fffde7,stroke:#f9a825,stroke-width:2px,color:#f57f17
+    style KAFKA_NS fill:#fafafa,stroke:#bdbdbd,stroke-width:1px
 ```
 
 ### Data Flow Summary
@@ -92,6 +59,7 @@ graph TB
 | Kafka UI → Kafka Connect | HTTP REST | 8083 | Connector CRUD, task status, restart operations |
 | Entity Operator → Secret | Internal | — | Auto-generates SCRAM-SHA-512 credentials from the KafkaUser CR |
 | Kafka UI → Secret | Volume mount | — | Reads the password for broker authentication |
+
 
 ## Prerequisites
 
