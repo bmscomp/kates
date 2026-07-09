@@ -8,7 +8,7 @@ Production-ready Kafka Connect image with pre-installed CDC, Schema Registry, an
 
 ```bash
 # Pull from GHCR
-docker pull ghcr.io/bmscomp/connect:3.0.2
+docker pull ghcr.io/bmscomp/connect:3.6.0
 
 # Or build locally
 make connect-build
@@ -35,12 +35,15 @@ make connect-build
 
 | Plugin | Version | Purpose |
 |--------|---------|---------|
-| **Debezium PostgreSQL** | 3.1.1.Final | CDC from PostgreSQL (logical replication) |
-| **Debezium MySQL** | 3.1.1.Final | CDC from MySQL/MariaDB (binlog) |
-| **Debezium MongoDB** | 3.1.1.Final | CDC from MongoDB (change streams) |
-| **Debezium SQL Server** | 3.1.1.Final | CDC from SQL Server (CT tables) |
-| **Apicurio Registry Converter** | 3.0.6 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
-| **Confluent JDBC Connector** | 10.8.0 | Source/Sink for any JDBC-compatible database |
+| **Debezium PostgreSQL** | 3.6.0.Final | CDC from PostgreSQL (logical replication) |
+| **Debezium MySQL** | 3.6.0.Final | CDC from MySQL/MariaDB (binlog) |
+| **Debezium MongoDB** | 3.6.0.Final | CDC from MongoDB (change streams) |
+| **Debezium SQL Server** | 3.6.0.Final | CDC from SQL Server (CT tables) |
+| **Debezium Oracle** | 3.6.0.Final | CDC from Oracle (LogMiner/XStream) |
+| **Debezium Db2** | 3.6.0.Final | CDC from IBM Db2 (ASN capture) |
+| **Debezium Scripting** | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
+| **Apicurio Registry Converter** | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
+| **Debezium JDBC Sink** | 3.6.0.Final | Upsert sink for SQL databases |
 
 ## Building the Image
 

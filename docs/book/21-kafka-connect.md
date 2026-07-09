@@ -141,7 +141,7 @@ sequenceDiagram
 |---------|---------|---------|
 | `groupId` | `kates-connect-cluster` | All workers sharing this ID form a single cluster |
 | `replicas` | 3 (prod) / 1 (kind) | Number of worker pods |
-| `image` | `ghcr.io/bmscomp/connect:3.0.2` | Pre-built image with Debezium + Apicurio plugins |
+| `image` | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built image with Debezium + Apicurio plugins |
 | `bootstrapServers` | `krafter-kafka-bootstrap:9093` | TLS-encrypted connection to Kafka |
 | `version` | 4.2.0 | Kafka protocol version |
 
@@ -241,16 +241,62 @@ When a connector fails, Strimzi will restart it up to `maxRestarts` times with e
 
 ### The Connect Image
 
-The pre-built Connect image (`ghcr.io/bmscomp/connect:3.0.2`) bundles the following plugins:
+The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.0`) bundles the following plugins:
 
 | Plugin | Version | Use Case |
 |--------|---------|----------|
-| Debezium PostgreSQL | 3.0.2.Final | WAL-based CDC from PostgreSQL |
-| Debezium MySQL | 3.0.2.Final | Binlog-based CDC from MySQL |
-| Debezium MongoDB | 3.0.2.Final | Change stream CDC from MongoDB |
-| Debezium SQL Server | 3.0.2.Final | Change Tracking CDC from SQL Server |
-| Apicurio Registry Converter | 2.5.11.Final | Schema Registry integration (Avro, JSON Schema, Protobuf) |
-| Aiven JDBC Connector | 6.12.0 | Poll-based source/sink for SQL databases |
+| Debezium PostgreSQL | 3.6.0.Final | WAL-based CDC from PostgreSQL |
+| Debezium MySQL | 3.6.0.Final | Binlog-based CDC from MySQL |
+| Debezium MongoDB | 3.6.0.Final | Change stream CDC from MongoDB |
+| Debezium SQL Server | 3.6.0.Final | Change Tracking CDC from SQL Server |
+| Debezium Oracle | 3.6.0.Final | CDC from Oracle LogMiner/XStream |
+| Debezium Db2 | 3.6.0.Final | CDC from IBM Db2 ASN capture |
+| Debezium Scripting | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
+| Apicurio Registry Converter | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
+| Debezium JDBC Sink | 3.6.0.Final | Upsert sink for SQL databases |
+
+### Extending the Image with Additional Plugins
+
+While the pre-built image contains the most common CDC connectors, you may need additional plugins (e.g., S3 Sink, Elasticsearch Sink). There are two ways to add plugins at runtime without rebuilding the Docker image:
+
+#### 1. Using Strimzi `spec.build` (Recommended)
+
+Strimzi can download plugins from Maven Central and build a new image automatically during operator reconciliation. Enable this in `values.yaml`:
+
+```yaml
+build:
+  output:
+    type: docker
+    image: "ghcr.io/bmscomp/connect:custom"
+    pushSecret: my-registry-credentials
+  plugins:
+    - name: camel-s3-sink
+      artifacts:
+        - type: maven
+          group: org.apache.camel.kafkaconnector
+          artifact: camel-aws-s3-sink-kafka-connector
+          version: "4.8.3"
+```
+
+#### 2. Using the Init Container Script
+
+For environments where Strimzi image builds aren't possible, use the provided plugin loader script as an init container to download JARs at pod startup:
+
+```yaml
+template:
+  pod:
+    metadata: {}
+    initContainers:
+      - name: plugin-loader
+        image: ghcr.io/bmscomp/connect:3.6.0
+        command: ["/bin/bash", "-c", "curl -sfL https://raw.githubusercontent.com/bmscomp/kates/main/scripts/connect-plugin-loader.sh | bash"]
+        env:
+          - name: EXTRA_PLUGINS
+            value: "org.apache.camel.kafkaconnector:camel-aws-s3-sink-kafka-connector:4.8.3"
+        volumeMounts:
+          - name: extra-plugins
+            mountPath: /plugins
+```
 
 ### PostgreSQL CDC Pipeline
 
@@ -1167,7 +1213,7 @@ helm rollback connect-cluster -n kafka
 # Or pin to previous image
 helm upgrade connect-cluster charts/connect-cluster \
   --namespace kafka --reuse-values \
-  --set image=ghcr.io/bmscomp/connect:3.0.2
+  --set image=ghcr.io/bmscomp/connect:3.6.0
 ```
 
 ::: {.callout-warning}
@@ -1325,8 +1371,8 @@ Fix the connector configs in `values.yaml` and re-run `helm upgrade`.
 |-----------|---------|-------|
 | Kafka Connect | 4.2.0 | Matches broker version |
 | Strimzi Operator | 1.0.0 | Manages KafkaConnect CR |
-| Debezium | 3.0.2.Final | CDC connectors for PostgreSQL, MySQL, MongoDB, SQL Server |
-| Apicurio Converter | 2.5.11.Final | Schema Registry integration |
-| Aiven JDBC | 6.12.0 | Apache 2.0 licensed JDBC connector |
-| Connect Image | `ghcr.io/bmscomp/connect:3.0.2` | Pre-built with all plugins |
+| Debezium | 3.6.0.Final | CDC connectors for PostgreSQL, MySQL, MongoDB, SQL Server, Oracle, Db2 |
+| Apicurio Converter | 3.3.0 | Schema Registry integration |
+| Debezium JDBC | 3.6.0.Final | Apache 2.0 licensed JDBC sink connector |
+| Connect Image | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built with all plugins |
 | Helm Chart | 1.0.0 | `charts/connect-cluster` |

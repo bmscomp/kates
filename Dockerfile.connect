@@ -9,8 +9,9 @@ FROM quay.io/strimzi/kafka:1.0.0-kafka-4.2.0 AS base
 #
 FROM eclipse-temurin:21-jre-alpine AS download
 
-ARG DEBEZIUM_VERSION=3.0.2.Final
-ARG APICURIO_VERSION=2.5.11.Final
+ARG DEBEZIUM_VERSION=3.6.0.Final
+ARG APICURIO_VERSION=3.3.0
+ARG GROOVY_VERSION=5.0.7
 
 RUN apk add --no-cache curl tar
 
@@ -40,6 +41,18 @@ RUN mkdir -p debezium-sqlserver && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-sqlserver/${DEBEZIUM_VERSION}/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz" \
     | tar -xz -C debezium-sqlserver --strip-components=1
 
+# Oracle — CDC via Oracle LogMiner or XStream
+# Note: The Oracle JDBC driver (ojdbc11.jar) is not included due to licensing.
+# Users must provide it separately or download it at runtime.
+RUN mkdir -p debezium-oracle && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-oracle/${DEBEZIUM_VERSION}/debezium-connector-oracle-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-oracle --strip-components=1
+
+# Db2 — CDC via IBM Db2 ASN capture
+RUN mkdir -p debezium-db2 && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-db2/${DEBEZIUM_VERSION}/debezium-connector-db2-${DEBEZIUM_VERSION}-plugin.tar.gz" \
+    | tar -xz -C debezium-db2 --strip-components=1
+
 # JDBC Sink Connector — Write events to relational databases
 RUN mkdir -p debezium-jdbc && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jdbc/${DEBEZIUM_VERSION}/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz" \
@@ -51,17 +64,28 @@ RUN mkdir -p debezium-jdbc && \
 RUN mkdir -p apicurio-converter && \
     curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-utils-converter/${APICURIO_VERSION}/apicurio-registry-utils-converter-${APICURIO_VERSION}.jar" \
     -o apicurio-converter/apicurio-registry-utils-converter.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-serdes-avro-serde/${APICURIO_VERSION}/apicurio-registry-serdes-avro-serde-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-serdes-avro-serde.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-serdes-jsonschema-serde/${APICURIO_VERSION}/apicurio-registry-serdes-jsonschema-serde-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-serdes-jsonschema-serde.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-serdes-protobuf-serde/${APICURIO_VERSION}/apicurio-registry-serdes-protobuf-serde-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-serdes-protobuf-serde.jar
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-avro-serde-kafka/${APICURIO_VERSION}/apicurio-registry-avro-serde-kafka-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-avro-serde-kafka.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-jsonschema-serde-kafka/${APICURIO_VERSION}/apicurio-registry-jsonschema-serde-kafka-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-jsonschema-serde-kafka.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-protobuf-serde-kafka/${APICURIO_VERSION}/apicurio-registry-protobuf-serde-kafka-${APICURIO_VERSION}.jar" \
+    -o apicurio-converter/apicurio-registry-protobuf-serde-kafka.jar
+
+# Debezium Scripting SMT and Groovy JSR-223 Engine
+RUN mkdir -p debezium-scripting && \
+    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-scripting/${DEBEZIUM_VERSION}/debezium-scripting-${DEBEZIUM_VERSION}.tar.gz" \
+    | tar -xz -C debezium-scripting --strip-components=1 && \
+    curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/groovy/${GROOVY_VERSION}/groovy-${GROOVY_VERSION}.jar" \
+    -o debezium-scripting/groovy-${GROOVY_VERSION}.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-jsr223/${GROOVY_VERSION}/groovy-jsr223-${GROOVY_VERSION}.jar" \
+    -o debezium-scripting/groovy-jsr223-${GROOVY_VERSION}.jar && \
+    curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-json/${GROOVY_VERSION}/groovy-json-${GROOVY_VERSION}.jar" \
+    -o debezium-scripting/groovy-json-${GROOVY_VERSION}.jar
 
 # ─── Stage 2: Final production image ─────────────────────────────────────────
 FROM base
 
-ARG DEBEZIUM_VERSION=3.0.2.Final
+ARG DEBEZIUM_VERSION=3.1.3.Final
 
 USER root:root
 COPY --from=download /plugins/ /opt/kafka/plugins/
@@ -69,7 +93,7 @@ USER 1001
 
 # ─── OCI Image Labels (https://github.com/opencontainers/image-spec) ─────────
 LABEL org.opencontainers.image.title="connect"
-LABEL org.opencontainers.image.description="Enterprise Kafka Connect image with Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), and Aiven JDBC connectors. Built on Strimzi Kafka 4.2.0."
+LABEL org.opencontainers.image.description="Enterprise Kafka Connect image with Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server, Oracle, Db2), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), and JDBC Sink. Built on Strimzi Kafka 4.2.0."
 LABEL org.opencontainers.image.source="https://github.com/bmscomp/kates"
 LABEL org.opencontainers.image.url="https://github.com/bmscomp/kates/pkgs/container/connect"
 LABEL org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/kafka-connect.md"

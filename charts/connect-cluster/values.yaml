@@ -20,7 +20,7 @@ testImages:
 # -- Number of Kafka Connect worker replicas
 replicas: 3
 # -- Kafka Connect image (leave empty to use Strimzi default)
-image: "ghcr.io/bmscomp/connect:3.0.2"
+image: "ghcr.io/bmscomp/connect:3.6.0"
 # -- Kafka version
 version: "4.2.0"
 # -- Group ID for the Connect cluster
@@ -196,21 +196,56 @@ livenessProbe:
 build: {}
   # output:
   #   type: docker
-  #   image: "ghcr.io/bmscomp/connect:"
+  #   image: "ghcr.io/bmscomp/connect:custom"
   #   pushSecret: my-registry-credentials
   # plugins:
-  #   - name: debezium-postgres
+  #   # --- Cloud Storage ---
+  #   - name: camel-s3-sink
+  #     artifacts:
+  #       - type: maven
+  #         group: org.apache.camel.kafkaconnector
+  #         artifact: camel-aws-s3-sink-kafka-connector
+  #         version: "4.8.3"
+  #
+  #   # --- Search / Analytics ---
+  #   - name: elasticsearch-sink
+  #     artifacts:
+  #       - type: maven
+  #         group: io.confluent
+  #         artifact: kafka-connect-elasticsearch
+  #         version: "14.1.0"
+  #
+  #   # --- Data Warehouse ---
+  #   - name: bigquery-sink
+  #     artifacts:
+  #       - type: maven
+  #         group: com.wepay.kcbq
+  #         artifact: kcbq-connector
+  #         version: "2.5.0"
+  #
+  #   # --- HTTP / Webhooks ---
+  #   - name: http-sink
+  #     artifacts:
+  #       - type: maven
+  #         group: io.aiven
+  #         artifact: aiven-kafka-connect-http
+  #         version: "0.6.0"
+  #
+  #   # --- JDBC (Aiven alternative) ---
+  #   - name: aiven-jdbc
+  #     artifacts:
+  #       - type: maven
+  #         group: io.aiven
+  #         artifact: jdbc-connector-for-apache-kafka
+  #         version: "6.11.1"
+  #
+  #   # --- Incubating Debezium ---
+  #   - name: debezium-vitess
   #     artifacts:
   #       - type: maven
   #         group: io.debezium
-  #         artifact: debezium-connector-postgres
-  #         version: 2.5.0.Final
-  #   - name: apicurio-converter
-  #     artifacts:
-  #       - type: maven
-  #         group: io.apicurio
-  #         artifact: apicurio-registry-distro-connect-converter
-  #         version: 2.6.5.Final
+  #         artifact: debezium-connector-vitess
+  #         version: "3.6.0.Final"
 
 # ── Metrics ─────────────────────────────────────────────────────────────────
 metricsConfig:
