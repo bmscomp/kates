@@ -11,10 +11,10 @@ kafkaUser:
 
 schemaRegistry:
   enabled: true
-  url: "http://apicurio-apicurio-registry.kafka.svc:8080/apis/ccompat/v7"
+  url: "http://apicurio-apicurio-registry.kafka.svc:80/apis/ccompat/v7"
 
 kafkaConnect:
-  enabled: true
+  enabled: false
   name: "connect-cluster"
   url: "http://connect-cluster-connect-api.kafka.svc:8083"
 
