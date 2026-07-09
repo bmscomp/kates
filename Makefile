@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
 
 .DEFAULT_GOAL := help
 
@@ -144,10 +144,58 @@ ENV ?= kind
 # Deploy Kafka (shorthand for kafka-deploy)
 kafka: kafka-deploy
 
-# Deploy Kafka UI only
+# Deploy Kafka UI only (legacy script — applies raw manifests)
 ui:
-	@echo "🖥️ Deploying Kafka UI..."
+	@echo "🖥️ Deploying Kafka UI (raw manifests)..."
 	./scripts/deploy-kafka-ui.sh
+
+# ── Kafka UI Helm Chart ─────────────────────────────────────────────────────
+UI_CHART_DIR := charts/kafka-ui
+
+ui-chart-lint:
+	@echo "🔍 Linting Kafka UI chart..."
+	helm lint $(UI_CHART_DIR)
+	@echo "✅ Kafka UI chart lint passed"
+
+ui-chart-template:
+	@echo "📄 Rendering Kafka UI templates (ENV=$(ENV))..."
+	@OVERLAY=""; \
+	if [ -f "$(UI_CHART_DIR)/values-$(ENV).yaml" ]; then \
+		OVERLAY="-f $(UI_CHART_DIR)/values-$(ENV).yaml"; \
+	fi; \
+	helm template kafka-ui $(UI_CHART_DIR) \
+		--namespace kafka $$OVERLAY
+
+ui-deploy:
+	@echo "🖥️  Deploying Kafka UI via Helm (ENV=$(ENV))..."
+	@OVERLAY=""; \
+	if [ -f "$(UI_CHART_DIR)/values-$(ENV).yaml" ]; then \
+		OVERLAY="-f $(UI_CHART_DIR)/values-$(ENV).yaml"; \
+		echo "  Using overlay: values-$(ENV).yaml"; \
+	fi; \
+	helm upgrade --install kafka-ui $(UI_CHART_DIR) \
+		--namespace kafka --create-namespace \
+		$$OVERLAY \
+		--timeout 5m --wait
+	@echo "✅ Kafka UI deployed"
+
+ui-upgrade:
+	@echo "🔄 Upgrading Kafka UI (ENV=$(ENV))..."
+	@OVERLAY=""; \
+	if [ -f "$(UI_CHART_DIR)/values-$(ENV).yaml" ]; then \
+		OVERLAY="-f $(UI_CHART_DIR)/values-$(ENV).yaml"; \
+		echo "  Using overlay: values-$(ENV).yaml"; \
+	fi; \
+	helm upgrade kafka-ui $(UI_CHART_DIR) \
+		--namespace kafka --reuse-values \
+		$$OVERLAY \
+		--timeout 5m --wait
+	@echo "✅ Kafka UI upgraded"
+
+ui-undeploy:
+	@echo "🗑️  Removing Kafka UI..."
+	helm uninstall kafka-ui -n kafka 2>/dev/null || true
+	@echo "✅ Kafka UI removed"
 
 # Deploy Apicurio Registry
 apicurio:
@@ -878,7 +926,12 @@ help:
 	@echo "  kafka-deploy-generic-custom        - Generic + extra overlay (VALUES_FILE=...)"
 	@echo "  kafka-upgrade                      - Upgrade existing Kafka release (ENV=...)"
 	@echo "  kafka-undeploy                     - Remove Kafka Helm release + PVCs"
-	@echo "  ui                                 - Deploy Kafka UI"
+	@echo "  ui                                 - Deploy Kafka UI (raw manifests)"
+	@echo "  ui-deploy                          - Deploy Kafka UI via Helm (ENV=kind|dev|staging|prod)"
+	@echo "  ui-upgrade                         - Upgrade Kafka UI Helm release (ENV=...)"
+	@echo "  ui-undeploy                        - Remove Kafka UI Helm release"
+	@echo "  ui-chart-lint                      - Lint the kafka-ui chart"
+	@echo "  ui-chart-template                  - Render kafka-ui templates (ENV=...)"
 	@echo "  apicurio                           - Deploy Apicurio Registry"
 	@echo "  jaeger                             - Deploy Jaeger (distributed tracing)"
 	@echo "  kyverno                            - Deploy Kyverno policy engine"
