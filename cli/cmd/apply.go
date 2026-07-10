@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
@@ -301,54 +303,93 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 	return violations
 }
 
-func waitForTest(id, name string) (*client.TestRun, error) {
-	tick := 0
-	staleRetries := 0
-	for {
-		result, err := apiClient.GetTest(context.Background(), id)
-		if err != nil {
-			return nil, err
+type waitModel struct {
+	id     string
+	name   string
+	spin   spinner.Model
+	status string
+	result *client.TestRun
+	err    error
+}
+
+type waitResultMsg struct {
+	test *client.TestRun
+	err  error
+}
+
+func (m waitModel) Init() tea.Cmd {
+	return tea.Batch(m.spin.Tick, m.fetchTest())
+}
+
+func (m waitModel) fetchTest() tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(2 * time.Second)
+		res, err := apiClient.GetTest(context.Background(), m.id)
+		return waitResultMsg{test: res, err: err}
+	}
+}
+
+func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" || msg.String() == "q" {
+			m.err = fmt.Errorf("aborted")
+			return m, tea.Quit
 		}
-		status := strings.ToUpper(result.Status)
-		switch status {
-		case "DONE", "COMPLETED":
-			if isStaleResult(result.Results) && staleRetries < maxStaleRetries {
-				staleRetries++
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			if isStaleResult(result.Results) {
-				fmt.Printf("\r  %s %s → %s %s\n",
-					output.WarningStyle.Render("⚠"),
-					output.LightStyle.Render(name),
-					output.StatusBadge(status),
-					output.DimStyle.Render("(no data)"),
-				)
-			} else {
-				fmt.Printf("\r  %s %s → %s\n",
-					output.SuccessStyle.Render("✓"),
-					output.LightStyle.Render(name),
-					output.StatusBadge(status),
-				)
-			}
-			return result, nil
-		case "FAILED", "ERROR":
-			fmt.Printf("\r  %s %s → %s\n",
-				output.ErrorStyle.Render("✖"),
-				output.LightStyle.Render(name),
-				output.StatusBadge(status),
-			)
-			return result, nil
-		default:
-			fmt.Printf("\r  %s %s [%s]   ",
-				spinnerFrame(tick),
-				output.DimStyle.Render(name),
-				output.AccentStyle.Render(status),
-			)
-			tick++
-			time.Sleep(2 * time.Second)
+	case waitResultMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, tea.Quit
+		}
+		m.result = msg.test
+		m.status = strings.ToUpper(msg.test.Status)
+		if m.status == "DONE" || m.status == "COMPLETED" || m.status == "FAILED" || m.status == "ERROR" {
+			return m, tea.Quit
+		}
+		return m, m.fetchTest()
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m waitModel) View() string {
+	if m.result != nil {
+		if m.status == "DONE" || m.status == "COMPLETED" {
+			return fmt.Sprintf("  %s %s → %s\n", output.SuccessStyle.Render("✓"), output.LightStyle.Render(m.name), output.StatusBadge(m.status))
+		}
+		if m.status == "FAILED" || m.status == "ERROR" {
+			return fmt.Sprintf("  %s %s → %s\n", output.ErrorStyle.Render("✖"), output.LightStyle.Render(m.name), output.StatusBadge(m.status))
 		}
 	}
+	return fmt.Sprintf("  %s %s [%s]", m.spin.View(), output.DimStyle.Render(m.name), output.AccentStyle.Render(m.status))
+}
+
+func waitForTest(id, name string) (*client.TestRun, error) {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = output.AccentStyle
+
+	m := waitModel{
+		id:     id,
+		name:   name,
+		spin:   s,
+		status: "WAITING",
+	}
+
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	wm := finalModel.(waitModel)
+	if wm.err != nil {
+		return nil, wm.err
+	}
+	return wm.result, nil
 }
 
 func init() {

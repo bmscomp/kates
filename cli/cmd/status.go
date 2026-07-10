@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var statusCmd = &cobra.Command{
@@ -16,8 +18,24 @@ var statusCmd = &cobra.Command{
 		ctxName := cfg.CurrentContext
 		ctx := activeContext(cfg)
 
-		health, err := apiClient.Health(context.Background())
-		if err != nil {
+		var health *client.HealthResponse
+		var paged *client.PagedTests
+
+		g, gctx := errgroup.WithContext(context.Background())
+
+		g.Go(func() error {
+			var err error
+			health, err = apiClient.Health(gctx)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			paged, err = apiClient.ListTests(gctx, "", "", 0, 100)
+			return err
+		})
+
+		if err := g.Wait(); err != nil || health == nil {
 			fmt.Fprintf(output.Out, "  %s %s │ %s │ %s\n",
 				output.ErrorStyle.Render("✖"),
 				output.LightStyle.Render(ctxName),
@@ -37,8 +55,7 @@ var statusCmd = &cobra.Command{
 		running := 0
 		done := 0
 		failed := 0
-		paged, err := apiClient.ListTests(context.Background(), "", "", 0, 100)
-		if err == nil {
+		if paged != nil {
 			counts := CountStatuses(paged.Content)
 			running = counts.Running + counts.Pending
 			done = counts.Done

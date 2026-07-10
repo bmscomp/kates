@@ -614,11 +614,11 @@ type compStatusUpdateMsg struct {
 type interactiveStatusModel struct {
 	components []componentSpec
 	statuses   []ComponentStatus
-	checking []bool
-	done     []bool
-	spinner  spinner.Model
-	ctx      context.Context
-	cancel   context.CancelFunc
+	checking   []bool
+	done       []bool
+	spinner    spinner.Model
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 func (m interactiveStatusModel) Init() tea.Cmd {

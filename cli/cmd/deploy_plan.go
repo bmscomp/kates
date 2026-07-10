@@ -208,12 +208,12 @@ func printComponentSelection() {
 
 // resolvedNamespaces holds the resolved namespace values for each component group.
 type resolvedNamespaces struct {
-	kafka     string
-	connect   string
-	app       string
-	chaos     string
-	jaeger    string
-	kafkaUI   string
+	kafka   string
+	connect string
+	app     string
+	chaos   string
+	jaeger  string
+	kafkaUI string
 }
 
 // resolveNamespaces resolves namespace values based on the selected topology.

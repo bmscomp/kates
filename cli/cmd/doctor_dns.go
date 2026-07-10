@@ -36,7 +36,7 @@ func init() {
 	doctorDnsCmd.Flags().StringVar(&doctorKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka brokers")
 	doctorDnsCmd.Flags().StringVar(&doctorConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect")
 	doctorDnsCmd.Flags().StringVar(&doctorAppNS, "app-ns", "kates", "Namespace for Kates application")
-	
+
 	// Ensure we only add it if not already added by another init (though flags can be redefined if on different commands)
 	doctorCmd.AddCommand(doctorDnsCmd)
 }
@@ -63,7 +63,7 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 
 	// 1. Diagnose cluster DNS configuration
 	podName := fmt.Sprintf("kates-dns-test-%d", rand.Intn(100000))
-	
+
 	// We use the "default" namespace because the application namespace might not exist yet
 	// This ephemeral pod run needs exec.CommandContext because it requires interactive stdin
 	resolvConfOut, err := exec.CommandContext(ctx, "kubectl", "run", "--rm", "-i", "--restart=Never",
@@ -77,10 +77,10 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	}
 
 	resolvContent := string(resolvConfOut)
-	
+
 	var searches []string
 	var ndots string
-	
+
 	for _, line := range strings.Split(resolvContent, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "search ") {
@@ -107,10 +107,10 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 			clusterDomain = s
 		}
 	}
-	
+
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("🔍 Deployment Audit & Adaptation"))
-	
+
 	requiredKafkaSearch := fmt.Sprintf("%s.svc.%s", doctorKafkaNS, clusterDomain)
 
 	// We need to check if connect and kates are in a different namespace than kafka

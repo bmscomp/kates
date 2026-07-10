@@ -43,7 +43,7 @@ func NewWithOptions(opts ClientOptions) *Client {
 			Timeout:   30 * time.Second,
 			KeepAlive: 15 * time.Second,
 		}).DialContext,
-		DisableKeepAlives: true,
+		DisableKeepAlives: false,
 	}
 
 	if opts.ProxyURL != "" {

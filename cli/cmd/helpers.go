@@ -176,6 +176,7 @@ var hintPatterns = []struct {
 	{"OutOfMemoryError", "JVM ran out of memory — increase -Xmx in deployment config"},
 	{"NetworkException", "Network error communicating with broker — check cluster connectivity"},
 	{"UNKNOWN_TOPIC_OR_PARTITION", "Topic does not exist — create it or check topic name"},
+	{"ConnectRestException", "Invalid connector configuration — check the connector properties for missing or invalid values"},
 }
 
 func matchHints(errMsg string) []string {

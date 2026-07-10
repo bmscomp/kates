@@ -11,20 +11,20 @@ import (
 )
 
 type policyRec struct {
-	Name           string
-	Description    string
-	Recommended    bool
-	Reason         string
-	HelmFlag       string
-	HelmValue      string
-	Is3rdParty     bool
-	CurrentStatus  string
+	Name          string
+	Description   string
+	Recommended   bool
+	Reason        string
+	HelmFlag      string
+	HelmValue     string
+	Is3rdParty    bool
+	CurrentStatus string
 }
 
 var kyvernoDetectCmd = &cobra.Command{
-	Use:   "detect",
-	Short: "Detect cluster state and recommend Kyverno policies",
-	Long: `Introspects the cluster to find third-party policies and recommend built-in Kates policies based on workload signatures, ingress, and namespace structures.`,
+	Use:     "detect",
+	Short:   "Detect cluster state and recommend Kyverno policies",
+	Long:    `Introspects the cluster to find third-party policies and recommend built-in Kates policies based on workload signatures, ingress, and namespace structures.`,
 	Example: "  kates kyverno detect",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		output.Banner("Kyverno Policy Detection", "Cluster Introspection & Recommendations")
@@ -42,7 +42,7 @@ var kyvernoDetectCmd = &cobra.Command{
 
 		// 2. Discover existing policies (including 3rd party)
 		existingPolicies := discoverExistingPolicies()
-		
+
 		// 3. Generate Recommendations
 		recs := generateRecommendations(existingPolicies)
 
@@ -94,20 +94,20 @@ func generateRecommendations(existing map[string]string) []policyRec {
 
 	recs := []policyRec{
 		{
-			Name: "Pod Security Standards",
+			Name:        "Pod Security Standards",
 			Description: "Enforce restricted pod security standards (non-root, read-only fs)",
 			Recommended: true,
-			Reason: "Always recommended for baseline security",
-			HelmFlag: "kyvernoPolicy.enabled",
-			HelmValue: "true",
+			Reason:      "Always recommended for baseline security",
+			HelmFlag:    "kyvernoPolicy.enabled",
+			HelmValue:   "true",
 		},
 		{
-			Name: "Workload Standards",
+			Name:        "Workload Standards",
 			Description: "Require liveness/readiness probes and standard labels",
 			Recommended: true,
-			Reason: "Ensures operational reliability",
-			HelmFlag: "kyvernoPolicy.enabled",
-			HelmValue: "true",
+			Reason:      "Ensures operational reliability",
+			HelmFlag:    "kyvernoPolicy.enabled",
+			HelmValue:   "true",
 		},
 	}
 
@@ -116,12 +116,12 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	images := string(regOut)
 	if strings.Contains(images, "ghcr.io") || strings.Contains(images, "docker.io") {
 		recs = append(recs, policyRec{
-			Name: "Image Registry Restriction",
+			Name:        "Image Registry Restriction",
 			Description: "Restrict workloads to known container registries",
 			Recommended: true,
-			Reason: "Detected third-party image sources",
-			HelmFlag: "kyvernoPolicy.restrictRegistries",
-			HelmValue: "true",
+			Reason:      "Detected third-party image sources",
+			HelmFlag:    "kyvernoPolicy.restrictRegistries",
+			HelmValue:   "true",
 		})
 	}
 
@@ -129,12 +129,12 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	netpolOut, _ := kc.Output(ctx, "get", "netpol", "-A", "--no-headers")
 	if len(strings.TrimSpace(string(netpolOut))) == 0 {
 		recs = append(recs, policyRec{
-			Name: "NetworkPolicy Generation",
+			Name:        "NetworkPolicy Generation",
 			Description: "Auto-generate default-deny network policies for new namespaces",
 			Recommended: true,
-			Reason: "No existing NetworkPolicies detected",
-			HelmFlag: "kyvernoPolicy.networkPolicyGeneration.enabled",
-			HelmValue: "true",
+			Reason:      "No existing NetworkPolicies detected",
+			HelmFlag:    "kyvernoPolicy.networkPolicyGeneration.enabled",
+			HelmValue:   "true",
 		})
 	}
 
@@ -143,36 +143,36 @@ func generateRecommendations(existing map[string]string) []policyRec {
 	ns := string(nsOut)
 	if strings.Contains(ns, "-dev") || strings.Contains(ns, "-staging") || strings.Contains(ns, "sandbox") {
 		recs = append(recs, policyRec{
-			Name: "Policy Exceptions",
+			Name:        "Policy Exceptions",
 			Description: "Allow relaxations for dev/staging environments",
 			Recommended: true,
-			Reason: "Detected non-production namespaces",
-			HelmFlag: "kyvernoPolicy.policyExceptions.enabled",
-			HelmValue: "true",
+			Reason:      "Detected non-production namespaces",
+			HelmFlag:    "kyvernoPolicy.policyExceptions.enabled",
+			HelmValue:   "true",
 		})
 	}
 
 	// Cosign Verification
 	if strings.Contains(images, "ghcr.io") {
 		recs = append(recs, policyRec{
-			Name: "Cosign Image Verification",
+			Name:        "Cosign Image Verification",
 			Description: "Verify container image signatures",
 			Recommended: true,
-			Reason: "Detected GHCR images which support Cosign signing",
-			HelmFlag: "kyvernoPolicy.cosign.enabled",
-			HelmValue: "true",
+			Reason:      "Detected GHCR images which support Cosign signing",
+			HelmFlag:    "kyvernoPolicy.cosign.enabled",
+			HelmValue:   "true",
 		})
 	}
 
 	// Detect Kafka/Strimzi CRDs
 	if kc.CRDExists(ctx, "kafkatopics.kafka.strimzi.io") {
 		recs = append(recs, policyRec{
-			Name: "Kafka Topic Standards",
+			Name:        "Kafka Topic Standards",
 			Description: "Enforce minimum replication factors and retention policies on KafkaTopics",
 			Recommended: true,
-			Reason: "Detected Strimzi Kafka Topic CRDs",
-			HelmFlag: "kyvernoPolicy.kafka.enabled",
-			HelmValue: "true",
+			Reason:      "Detected Strimzi Kafka Topic CRDs",
+			HelmFlag:    "kyvernoPolicy.kafka.enabled",
+			HelmValue:   "true",
 		})
 	}
 
@@ -181,7 +181,7 @@ func generateRecommendations(existing map[string]string) []policyRec {
 
 func renderRecommendations(recs []policyRec, existing map[string]string) {
 	output.SubHeader("Policy Recommendations")
-	
+
 	rows := [][]string{}
 	for _, rec := range recs {
 		status := "NOT INSTALLED"
@@ -241,7 +241,7 @@ func renderRecommendations(recs []policyRec, existing map[string]string) {
 func buildApplyCommand(recs []policyRec) string {
 	cmd := "kates kyverno apply"
 	flags := make(map[string]bool)
-	
+
 	for _, rec := range recs {
 		if rec.Recommended {
 			if rec.HelmFlag == "kyvernoPolicy.networkPolicyGeneration.enabled" {
@@ -253,7 +253,7 @@ func buildApplyCommand(recs []policyRec) string {
 			}
 		}
 	}
-	
+
 	if flags["--with-netpol"] {
 		cmd += " --with-netpol"
 	}
@@ -263,7 +263,7 @@ func buildApplyCommand(recs []policyRec) string {
 	if flags["--with-kafka"] {
 		cmd += " --with-kafka"
 	}
-	
+
 	return cmd
 }
 
