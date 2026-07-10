@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
 
@@ -19,6 +20,17 @@ func TermWidth() int {
 		return w
 	}
 	return 120
+}
+
+var plainMode bool
+
+func SetPlain(plain bool) {
+	plainMode = plain
+	if plain {
+		lipgloss.SetColorProfile(termenv.Ascii)
+	} else {
+		lipgloss.SetColorProfile(termenv.TrueColor)
+	}
 }
 
 // ColumnWidth returns the width available for a column after reserving

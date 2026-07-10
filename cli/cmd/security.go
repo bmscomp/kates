@@ -39,64 +39,66 @@ var securityAuditCmd = &cobra.Command{
 		crdOut, _ := exec.Command("kubectl", "get", "crd", "clusterpolicies.kyverno.io", "--no-headers").Output()
 		if len(crdOut) > 0 {
 			checks = append(checks, map[string]interface{}{
-				"category": "policy",
-				"name": "Kyverno Admission Controller",
-				"status": "PASS",
-				"detail": "Kyverno is installed and protecting the cluster",
-				"severity": "HIGH",
+				"category":   "policy",
+				"name":       "Kyverno Admission Controller",
+				"status":     "PASS",
+				"detail":     "Kyverno is installed and protecting the cluster",
+				"severity":   "HIGH",
 				"compliance": "CIS 5.1",
 			})
-			
+
 			polOut, _ := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.spec.validationFailureAction}{\"\\n\"}{end}").Output()
 			policies := strings.Split(strings.TrimSpace(string(polOut)), "\n")
 			activeCount, enforceCount := 0, 0
 			for _, p := range policies {
-				if p == "" { continue }
+				if p == "" {
+					continue
+				}
 				activeCount++
 				if strings.Contains(p, "Enforce") {
 					enforceCount++
 				}
 			}
-			
+
 			if activeCount > 0 {
 				checks = append(checks, map[string]interface{}{
-					"category": "policy",
-					"name": "Active ClusterPolicies",
-					"status": "PASS",
-					"detail": fmt.Sprintf("%d active policies detected", activeCount),
-					"severity": "HIGH",
+					"category":   "policy",
+					"name":       "Active ClusterPolicies",
+					"status":     "PASS",
+					"detail":     fmt.Sprintf("%d active policies detected", activeCount),
+					"severity":   "HIGH",
 					"compliance": "CIS 5.2",
 				})
 			} else {
 				checks = append(checks, map[string]interface{}{
-					"category": "policy",
-					"name": "Active ClusterPolicies",
-					"status": "FAIL",
-					"detail": "No policies are active",
-					"severity": "HIGH",
+					"category":   "policy",
+					"name":       "Active ClusterPolicies",
+					"status":     "FAIL",
+					"detail":     "No policies are active",
+					"severity":   "HIGH",
 					"compliance": "CIS 5.2",
-					"fix": "Run 'kates kyverno apply' to deploy recommended policies.",
+					"fix":        "Run 'kates kyverno apply' to deploy recommended policies.",
 				})
 			}
-			
+
 			if enforceCount > 0 {
 				checks = append(checks, map[string]interface{}{
-					"category": "policy",
-					"name": "Policy Enforcement",
-					"status": "PASS",
-					"detail": fmt.Sprintf("%d policies are in Enforce mode", enforceCount),
-					"severity": "MEDIUM",
+					"category":   "policy",
+					"name":       "Policy Enforcement",
+					"status":     "PASS",
+					"detail":     fmt.Sprintf("%d policies are in Enforce mode", enforceCount),
+					"severity":   "MEDIUM",
 					"compliance": "CIS 5.3",
 				})
 			} else {
 				checks = append(checks, map[string]interface{}{
-					"category": "policy",
-					"name": "Policy Enforcement",
-					"status": "WARN",
-					"detail": "Policies are in Audit mode only",
-					"severity": "MEDIUM",
+					"category":   "policy",
+					"name":       "Policy Enforcement",
+					"status":     "WARN",
+					"detail":     "Policies are in Audit mode only",
+					"severity":   "MEDIUM",
 					"compliance": "CIS 5.3",
-					"fix": "Test workloads and run 'kates kyverno enforce <policy>' when ready.",
+					"fix":        "Test workloads and run 'kates kyverno enforce <policy>' when ready.",
 				})
 			}
 			// Detect workload violations and penalize grade
@@ -105,27 +107,35 @@ var securityAuditCmd = &cobra.Command{
 				outStr := strings.TrimSpace(string(polRepOut))
 				if len(outStr) > 0 {
 					failures := strings.Split(outStr, "\n")
-					
+
 					// Downgrade grade dynamically
 					gradeStr := fmt.Sprintf("%v", result["grade"])
-					if gradeStr == "A" { result["grade"] = "B" } else if gradeStr == "B" { result["grade"] = "C" } else if gradeStr == "C" { result["grade"] = "D" } else if gradeStr == "D" { result["grade"] = "F" }
-					
+					if gradeStr == "A" {
+						result["grade"] = "B"
+					} else if gradeStr == "B" {
+						result["grade"] = "C"
+					} else if gradeStr == "C" {
+						result["grade"] = "D"
+					} else if gradeStr == "D" {
+						result["grade"] = "F"
+					}
+
 					checks = append(checks, map[string]interface{}{
-						"category": "policy",
-						"name": "Workload Policy Violations",
-						"status": "FAIL",
-						"detail": fmt.Sprintf("%d workload violations detected", len(failures)),
-						"severity": "HIGH",
+						"category":   "policy",
+						"name":       "Workload Policy Violations",
+						"status":     "FAIL",
+						"detail":     fmt.Sprintf("%d workload violations detected", len(failures)),
+						"severity":   "HIGH",
 						"compliance": "CIS 5.4",
-						"fix": "Fix resource configurations. Example: " + failures[0],
+						"fix":        "Fix resource configurations. Example: " + failures[0],
 					})
 				} else {
 					checks = append(checks, map[string]interface{}{
-						"category": "policy",
-						"name": "Workload Policy Violations",
-						"status": "PASS",
-						"detail": "No workload violations detected",
-						"severity": "HIGH",
+						"category":   "policy",
+						"name":       "Workload Policy Violations",
+						"status":     "PASS",
+						"detail":     "No workload violations detected",
+						"severity":   "HIGH",
 						"compliance": "CIS 5.4",
 					})
 				}
@@ -133,13 +143,13 @@ var securityAuditCmd = &cobra.Command{
 
 		} else {
 			checks = append(checks, map[string]interface{}{
-				"category": "policy",
-				"name": "Kyverno Admission Controller",
-				"status": "FAIL",
-				"detail": "Kyverno is not installed",
-				"severity": "HIGH",
+				"category":   "policy",
+				"name":       "Kyverno Admission Controller",
+				"status":     "FAIL",
+				"detail":     "Kyverno is not installed",
+				"severity":   "HIGH",
 				"compliance": "CIS 5.1",
-				"fix": "Run 'kates kyverno apply' to install Kyverno and recommended policies.",
+				"fix":        "Run 'kates kyverno apply' to install Kyverno and recommended policies.",
 			})
 		}
 		result["checks"] = checks
@@ -244,7 +254,7 @@ var securityAuditCmd = &cobra.Command{
 					if fix == "" || fix == "<nil>" {
 						fix = "No specific remediation required."
 					}
-					
+
 					fmt.Printf("  %s  %s\n", statusIcon(status), output.KeyStyle.Render(name))
 					if auditVerbose {
 						detail := fmt.Sprintf("%v", check["detail"])

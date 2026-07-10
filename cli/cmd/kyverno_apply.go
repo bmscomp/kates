@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	kyvernoApplyMode     string
-	kyvernoApplyCosign   bool
-	kyvernoApplyNetpol   bool
-	kyvernoApplyKafka    bool
-	kyvernoApplyYes      bool
-	kyvernoApplyDryRun   bool
+	kyvernoApplyMode   string
+	kyvernoApplyCosign bool
+	kyvernoApplyNetpol bool
+	kyvernoApplyKafka  bool
+	kyvernoApplyYes    bool
+	kyvernoApplyDryRun bool
 )
 
 var kyvernoApplyCmd = &cobra.Command{
@@ -45,7 +45,7 @@ It uses Helm to apply the exact configuration needed.`,
 		if !checkKyvernoInstalled() {
 			output.Warn("Kyverno is not installed.")
 			output.Hint("Installing Kyverno first...")
-			
+
 			if !kyvernoApplyDryRun {
 				hc := helm.New("")
 				hc.Run(ctx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
@@ -143,10 +143,10 @@ It uses Helm to apply the exact configuration needed.`,
 		// 3. Validation Summary
 		output.Hint("Waiting for policies to be ready...")
 		time.Sleep(3 * time.Second) // wait for admission controller to process CRs
-		
+
 		statusOut, _ := kc.Output(ctx, "get", "clusterpolicies", "--no-headers")
 		count := len(strings.Split(strings.TrimSpace(string(statusOut)), "\n"))
-		
+
 		output.Success(fmt.Sprintf("%d policies are now active in %s mode.", count, kyvernoApplyMode))
 		output.Hint("Run 'kates kyverno status' for details.")
 		fmt.Println()

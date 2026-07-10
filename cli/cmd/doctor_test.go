@@ -20,11 +20,11 @@ func TestDoctorRenderChecks(t *testing.T) {
 	renderChecks(checks)
 
 	outStr := buf.String()
-	
+
 	if !strings.Contains(outStr, "API Reachable") {
 		t.Errorf("Expected output to contain 'API Reachable', got:\n%s", outStr)
 	}
-	
+
 	if !strings.Contains(outStr, "WARN") {
 		t.Errorf("Expected output to contain 'WARN' for failing Kyverno check, got:\n%s", outStr)
 	}
