@@ -41,6 +41,18 @@ data:
 
     auth:
       type: {{ .Values.auth.type | default "DISABLED" }}
+    {{- if and .Values.auth.enabled (eq .Values.auth.type "LOGIN_FORM") .Values.auth.username }}
+    spring:
+      security:
+        user:
+          name: {{ .Values.auth.username }}
+          password: ${KAFKA_UI_WEB_PASSWORD}
+    {{- end }}
+    {{- if and .Values.auth.rbac .Values.auth.rbac.enabled }}
+    rbac:
+      roles:
+        {{- toYaml .Values.auth.rbac.roles | nindent 8 }}
+    {{- end }}
     management:
       health:
         ldap:

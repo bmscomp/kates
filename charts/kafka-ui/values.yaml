@@ -76,11 +76,65 @@ kafkaConnect:
 
 # -- Kafka UI application authentication (login to the web UI itself)
 auth:
+  # -- Enable authentication for the Kafka UI (Basic Auth / LOGIN_FORM)
   enabled: false
+  # -- Type of authentication. Set to LOGIN_FORM for Basic Auth, or DISABLED to allow unauthenticated access.
   type: "DISABLED"
-  # type: "LOGIN_FORM"
-  # username: "admin"
-  # passwordSecret: ""
+  # -- Username for Basic Authentication (when type is LOGIN_FORM)
+  username: "admin"
+  # -- The name of the Kubernetes Secret containing the password (in a key named 'password')
+  passwordSecret: "kafka-ui-web-password"
+  
+  # -- Role-Based Access Control (RBAC) settings for Kafka UI
+  rbac:
+    enabled: false
+    # -- Define roles and permissions
+    # See documentation: https://docs.kafbat.io/docs/configuration/rbac
+    roles:
+      - name: "admin"
+        clusters:
+          - krafter
+        subjects:
+          - provider: "local"
+            type: "user"
+            value: "admin"
+        permissions:
+          - resource: applicationconfig
+            actions: all
+          - resource: clusterconfig
+            actions: all
+          - resource: topic
+            value: ".*"
+            actions: all
+          - resource: consumer
+            value: ".*"
+            actions: all
+          - resource: schema
+            value: ".*"
+            actions: all
+          - resource: connect
+            value: ".*"
+            actions: all
+      - name: "viewer"
+        clusters:
+          - krafter
+        subjects:
+          - provider: "local"
+            type: "user"
+            value: "viewer"
+        permissions:
+          - resource: topic
+            value: ".*"
+            actions: [VIEW, MESSAGES_READ]
+          - resource: consumer
+            value: ".*"
+            actions: [VIEW]
+          - resource: schema
+            value: ".*"
+            actions: [VIEW]
+          - resource: connect
+            value: ".*"
+            actions: [VIEW]
 
 # -- KafkaUser (Strimzi-managed SCRAM-SHA-512 credentials for connecting to Kafka)
 kafkaUser:
