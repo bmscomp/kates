@@ -8,6 +8,7 @@
 
 # Simplify Kafka listeners for local access — no external nodeport
 kafka:
+  metadataVersion: 3.7-IV4
   listeners:
     - name: plain
       port: 9092

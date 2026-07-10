@@ -417,7 +417,7 @@ type GeneratedValues struct {
 	PodMonitors        GenPodMonitors         `yaml:"podMonitors"`
 	Alerts             GenAlerts              `yaml:"alerts"`
 	NetPolicies        GenNetPolicies         `yaml:"networkPolicies"`
-	Users              GenUsers               `yaml:"users"`
+	Users              *GenUsers              `yaml:"users,omitempty"`
 	Topics             GenFeature             `yaml:"topics"`
 	CruiseControl      GenFeature             `yaml:"cruiseControl"`
 	KafkaExporter      GenFeature             `yaml:"kafkaExporter"`

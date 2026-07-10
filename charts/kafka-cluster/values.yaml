@@ -371,13 +371,19 @@ users:
               type: topic
               name: "__apicurio"
               patternType: prefix
-            operations: ["Read", "Write", "Create", "Describe"]
+            operations: ["All"]
             host: "*"
           - resource:
               type: topic
               name: "kafkasql-"
               patternType: prefix
-            operations: ["Read", "Write", "Create", "Describe"]
+            operations: ["All"]
+            host: "*"
+          - resource:
+              type: topic
+              name: "registry-"
+              patternType: prefix
+            operations: ["All"]
             host: "*"
           - resource:
               type: group
@@ -387,7 +393,7 @@ users:
             host: "*"
           - resource:
               type: cluster
-            operations: ["Create", "Describe"]
+            operations: ["Create", "Describe", "IdempotentWrite", "AlterConfigs", "DescribeConfigs"]
             host: "*"
           - resource:
               type: transactionalId

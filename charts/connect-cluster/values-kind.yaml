@@ -14,10 +14,14 @@ networkPolicy:
   enabled: true
 
 databaseEgress:
-  - namespace: database
+  - namespace: kates
     port: 5432
     podSelector:
       app.kubernetes.io/name: postgresql
 
 tracing:
   enabled: false
+
+schemaRegistry:
+  enabled: true
+  path: /apis/ccompat/v7

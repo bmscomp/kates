@@ -12,6 +12,9 @@ metadata:
 spec:
   kafka:
     version: {{ .Values.kafkaVersion }}
+    {{- if .Values.kafka.metadataVersion }}
+    metadataVersion: {{ .Values.kafka.metadataVersion }}
+    {{- end }}
     listeners:
       {{- toYaml .Values.kafka.listeners | nindent 6 }}
     authorization:

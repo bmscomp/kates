@@ -148,6 +148,8 @@ spec:
             matchLabels:
               strimzi.io/kind: cluster-operator
       ports:
+        - port: 9090
+          protocol: TCP
         - port: 9091
           protocol: TCP
         - port: 9092
@@ -193,6 +195,12 @@ spec:
     - Egress
   ingress:
     - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $operatorNamespace }}
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
         - podSelector:
             matchLabels:
               strimzi.io/cluster: {{ $clusterName }}

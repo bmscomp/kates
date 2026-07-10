@@ -1,5 +1,5 @@
 apiVersion: v2
-appVersion: 2.2.5.Final
+appVersion: 3.3.0
 dependencies:
 - condition: kafka.enabled
   name: kafka

@@ -286,6 +286,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	<-doneCh // Wait for deployment goroutine to fully exit
 
+	if deployErr != nil {
+		os.WriteFile("deploy-error.log", []byte(deployErr.Error()), 0644)
+	}
+
 	if deployErr == nil && len(finalEntries) > 0 {
 		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
 
@@ -339,6 +343,7 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 		}
 		if errMsg != "" {
 			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
+			return fmt.Errorf("%w: %s", err, errMsg)
 		}
 		return err
 	}
@@ -378,6 +383,7 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 		}
 		if errMsg != "" {
 			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
+			return fmt.Errorf("%w: %s", runErr, errMsg)
 		}
 		return runErr
 	}
