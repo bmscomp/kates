@@ -48,6 +48,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "kafka-ui.secretName" . }}
                   key: password
+            {{- if and .Values.auth.enabled (eq .Values.auth.type "LOGIN_FORM") .Values.auth.passwordSecret }}
+            - name: KAFKA_UI_WEB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.passwordSecret }}
+                  key: password
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

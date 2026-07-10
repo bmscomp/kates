@@ -283,8 +283,66 @@ kafkaConnect:
 
 If `url` is left empty, the chart auto-computes it as `http://connect-cluster-connect-api.<namespace>.svc.cluster.local:8083`.
 
-## Environment Profiles
+## Securing Kafka UI (Web UI Auth & RBAC)
 
+While the Strimzi Entity Operator secures the backend connection between Kafka UI and the brokers, you should also secure the frontend web interface so that unauthorized users cannot view topics or modify configurations. 
+
+This chart natively supports **Basic Authentication** (`LOGIN_FORM`) and **Role-Based Access Control (RBAC)**.
+
+### Basic Authentication
+
+To restrict access to the Kafka UI with a username and password, enable the `auth` block in your `values.yaml` and create a Kubernetes Secret containing the password.
+
+1. Create a Secret with your desired password:
+   ```bash
+   kubectl create secret generic kafka-ui-web-password \
+     --namespace kafka \
+     --from-literal=password="my-super-secret-password"
+   ```
+
+2. Configure `values.yaml` to use this Secret:
+   ```yaml
+   auth:
+     enabled: true
+     type: LOGIN_FORM
+     username: admin
+     passwordSecret: kafka-ui-web-password
+   ```
+
+When enabled, visitors will be greeted with a login screen before they can access the dashboard.
+
+### Role-Based Access Control (RBAC)
+
+RBAC allows you to restrict what authenticated users can see and do. **Note:** Kafbat UI only supports RBAC when using an external identity provider (`LDAP`, `OAUTH`, etc.). It is not supported for Basic Authentication (`LOGIN_FORM`).
+
+If you configure an external identity provider, you can define specific roles and assign them to users. For example:
+
+```yaml
+auth:
+  enabled: true
+  type: OAUTH
+  
+  rbac:
+    enabled: true
+    roles:
+      - name: "viewer"
+        clusters: ["krafter"]
+        subjects:
+          - provider: "OAUTH"
+            type: "user"
+            value: "viewer@example.com"
+        permissions:
+          - resource: topic
+            value: ".*"
+            actions: [VIEW, MESSAGES_READ]
+          - resource: consumer
+            value: ".*"
+            actions: [VIEW]
+```
+
+> **Zero-Trust Note**: The Kafka UI pod uses a `KafkaUser` custom resource to authenticate with the broker via SCRAM. Even if a malicious user bypasses the Web UI RBAC to attempt to delete a topic, the Strimzi Kafka cluster will reject the operation because the underlying `kafka-ui` backend service account only has `Describe` and `Read` ACLs at the broker level.
+
+## Environment Profiles
 The chart ships with four value overlays for different environments. Use the `-f` flag to apply them on top of the base `values.yaml`.
 
 | Profile | File | Description |
@@ -367,6 +425,17 @@ echo "https://kafka-ui.mycompany.com"
 | `schemaRegistry.auth.enabled` | `false` | Enable authentication |
 | `schemaRegistry.auth.username` | `""` | Auth username |
 | `schemaRegistry.auth.password` | `""` | Auth password |
+
+### Web UI Authentication & RBAC
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `auth.enabled` | `false` | Enable Web UI authentication |
+| `auth.type` | `DISABLED` | Authentication type (`DISABLED` or `LOGIN_FORM`) |
+| `auth.username` | `admin` | Username for Basic Auth |
+| `auth.passwordSecret` | `""` | Name of Kubernetes Secret containing the password |
+| `auth.rbac.enabled` | `false` | Enable Role-Based Access Control |
+| `auth.rbac.roles` | `[]` | List of RBAC roles and permissions |
 
 ### Kafka Connect
 

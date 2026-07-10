@@ -46,56 +46,22 @@ spec:
               path: /
               port: http
           env:
-            - name: KAFKA_BOOTSTRAP_SERVERS
+            - name: APICURIO_STORAGE_KIND
+              value: "kafkasql"
+            - name: APICURIO_KAFKASQL_TOPIC_CONFIGURATION_VERIFICATION_OVERRIDE_ENABLED
+              value: "true"
+            - name: APICURIO_KAFKASQL_BOOTSTRAP_SERVERS
               value: {{ include "apicurio-registry.kafkaBootstrapServers" . }}
             {{- if .Values.global.kafka.securityProtocol }}
-            - name: QUARKUS_KAFKA_STREAMS_SECURITY_PROTOCOL
-              value: {{ .Values.global.kafka.securityProtocol | quote }}
-            - name: KAFKA_SECURITY_PROTOCOL
+            - name: APICURIO_KAFKA_COMMON_SECURITY_PROTOCOL
               value: {{ .Values.global.kafka.securityProtocol | quote }}
             {{- end }}
             {{- if .Values.global.kafka.saslMechanism }}
-            - name: QUARKUS_KAFKA_STREAMS_SASL_MECHANISM
-              value: {{ .Values.global.kafka.saslMechanism | quote }}
-            - name: KAFKA_SASL_MECHANISM
+            - name: APICURIO_KAFKA_COMMON_SASL_MECHANISM
               value: {{ .Values.global.kafka.saslMechanism | quote }}
             {{- end }}
             {{- if .Values.global.kafka.saslJaasConfigSecretName }}
-            - name: QUARKUS_KAFKA_STREAMS_SASL_JAAS_CONFIG
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
-                  key: sasl.jaas.config
-            - name: KAFKA_SASL_JAAS_CONFIG
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
-                  key: sasl.jaas.config
-            {{- end }}
-            {{- if and .Values.global.kafka.securityProtocol .Values.global.kafka.saslJaasConfigSecretName }}
-            - name: REGISTRY_KAFKASQL_CONSUMER_SECURITY_PROTOCOL
-              value: {{ .Values.global.kafka.securityProtocol | quote }}
-            - name: REGISTRY_KAFKASQL_CONSUMER_SASL_MECHANISM
-              value: {{ .Values.global.kafka.saslMechanism | quote }}
-            - name: REGISTRY_KAFKASQL_CONSUMER_SASL_JAAS_CONFIG
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
-                  key: sasl.jaas.config
-            - name: REGISTRY_KAFKASQL_PRODUCER_SECURITY_PROTOCOL
-              value: {{ .Values.global.kafka.securityProtocol | quote }}
-            - name: REGISTRY_KAFKASQL_PRODUCER_SASL_MECHANISM
-              value: {{ .Values.global.kafka.saslMechanism | quote }}
-            - name: REGISTRY_KAFKASQL_PRODUCER_SASL_JAAS_CONFIG
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.kafka.saslJaasConfigSecretName }}
-                  key: sasl.jaas.config
-            - name: REGISTRY_KAFKASQL_ADMIN_SECURITY_PROTOCOL
-              value: {{ .Values.global.kafka.securityProtocol | quote }}
-            - name: REGISTRY_KAFKASQL_ADMIN_SASL_MECHANISM
-              value: {{ .Values.global.kafka.saslMechanism | quote }}
-            - name: REGISTRY_KAFKASQL_ADMIN_SASL_JAAS_CONFIG
+            - name: APICURIO_KAFKA_COMMON_SASL_JAAS_CONFIG
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.global.kafka.saslJaasConfigSecretName }}

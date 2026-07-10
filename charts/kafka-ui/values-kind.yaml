@@ -16,7 +16,7 @@ schemaRegistry:
 kafkaConnect:
   enabled: true
   name: "connect-cluster"
-  url: "http://connect-cluster-connect-api.kafka.svc:8083"
+  url: "http://connect-connect-cluster-rest-api.kafka.svc:8083"
 
 startupProbe:
   enabled: true
@@ -32,3 +32,12 @@ resources:
   limits:
     cpu: 500m
     memory: 1Gi
+
+auth:
+  enabled: true
+  type: LOGIN_FORM
+  username: admin
+  passwordSecret: kafka-ui-web-password
+  rbac:
+    enabled: false
+    roles: []
