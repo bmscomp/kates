@@ -15,7 +15,7 @@ func TestKyvernoDetectRecommendations(t *testing.T) {
 	}
 
 	recs := generateRecommendations(existing)
-	
+
 	if len(recs) < 2 {
 		t.Fatalf("Expected at least 2 recommendations, got %d", len(recs))
 	}
@@ -29,7 +29,7 @@ func TestKyvernoDetectRecommendations(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundPSS {
 		t.Error("Did not find Pod Security Standards recommendation")
 	}
@@ -57,9 +57,9 @@ func TestKyvernoApplyBuildCommand(t *testing.T) {
 		{Name: "NetPol", Recommended: true, HelmFlag: "kyvernoPolicy.networkPolicyGeneration.enabled"},
 		{Name: "Cosign", Recommended: false, HelmFlag: "kyvernoPolicy.cosign.enabled"},
 	}
-	
+
 	cmdStr := buildApplyCommand(recs)
-	
+
 	if !strings.Contains(cmdStr, "--with-netpol") {
 		t.Error("Expected cmd to contain --with-netpol")
 	}

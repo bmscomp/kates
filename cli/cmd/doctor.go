@@ -105,7 +105,7 @@ var doctorCmd = &cobra.Command{
 		// Kyverno Checks
 		if kc.CRDExists(ctx, "clusterpolicies.kyverno.io") {
 			checks = append(checks, checkResult{"Kyverno Installed", true, "CRD present", ""})
-			
+
 			podOut, _ := kc.Output(ctx, "get", "pods", "-n", "kyverno", "-l", "app.kubernetes.io/component=admission-controller", "--field-selector=status.phase=Running", "--no-headers")
 			if len(podOut) > 0 {
 				checks = append(checks, checkResult{"Kyverno Ready", true, "Admission controller running", ""})
@@ -147,7 +147,7 @@ func renderChecks(checks []checkResult) {
 	output.Render(outputMode == "json", checks, func() {
 		rows := make([][]string, 0, len(checks))
 		passed := 0
-		
+
 		// Print a clean table
 		for _, c := range checks {
 			status := "PASS"

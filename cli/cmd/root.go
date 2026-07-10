@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/klster/kates-cli/client"
+	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -18,6 +19,7 @@ var (
 	outputMode  string
 	contextFlag string
 	apiKeyFlag  string
+	plainOutput bool
 	apiClient   *client.Client
 )
 
@@ -240,6 +242,14 @@ var rootCmd = &cobra.Command{
 		if outputMode == "" {
 			outputMode = "table"
 		}
+		if !plainOutput {
+			if envPlain := os.Getenv("KATES_PLAIN"); envPlain == "true" || envPlain == "1" {
+				plainOutput = true
+			}
+		}
+
+		output.SetPlain(plainOutput)
+
 		if apiKeyFlag == "" {
 			if envKey := os.Getenv("KATES_API_KEY"); envKey != "" {
 				apiKeyFlag = envKey
@@ -299,6 +309,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&outputMode, "output", "o", "", "Output format: table or json")
 	rootCmd.PersistentFlags().StringVar(&contextFlag, "context", "", "Use a specific context instead of current")
 	rootCmd.PersistentFlags().StringVar(&apiKeyFlag, "api-key", "", "API key for authenticating with the server")
+	rootCmd.PersistentFlags().BoolVar(&plainOutput, "plain", false, "Disable interactive prompts and fancy UI formatting")
 	rootCmd.AddCommand(docsCmd)
 
 	defaultHelp := rootCmd.HelpFunc()

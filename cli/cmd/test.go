@@ -3,11 +3,15 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/klster/kates-cli/client"
 	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -309,6 +313,12 @@ var testCreateCmd = &cobra.Command{
   kates test create --type LOAD --records 100000 --consumers 4 --consumer-group perf-cg
   kates test create --type LOAD --records 100000 --throughput 10000 --fetch-min-bytes 1048576`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !plainOutput && cmd.Flags().NFlag() == 0 && term.IsTerminal(int(os.Stdout.Fd())) {
+			if err := runInteractiveTestCreate(); err != nil {
+				return err
+			}
+		}
+
 		upperType := strings.ToUpper(createType)
 		if !isValidTestType(upperType) {
 			return cmdErr(fmt.Sprintf("Unknown test type %q. Valid types: %s",
@@ -387,6 +397,50 @@ var testDeleteCmd = &cobra.Command{
 		output.Success("Test deleted: " + truncID(args[0]))
 		return nil
 	},
+}
+
+func runInteractiveTestCreate() error {
+	var recordsStr, durationStr string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Test Type").
+				Options(
+					huh.NewOption("LOAD (Maximum throughput)", "LOAD"),
+					huh.NewOption("STRESS (Find breaking point)", "STRESS"),
+					huh.NewOption("ENDURANCE (Sustained over time)", "ENDURANCE"),
+					huh.NewOption("VOLUME", "VOLUME"),
+				).
+				Value(&createType),
+			huh.NewInput().
+				Title("Number of Records").
+				Description("Leave blank if specifying duration").
+				Value(&recordsStr),
+			huh.NewInput().
+				Title("Duration (seconds)").
+				Description("Leave blank if specifying records").
+				Value(&durationStr),
+			huh.NewConfirm().
+				Title("Wait for completion?").
+				Value(&createWait),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		return err
+	}
+
+	if recordsStr != "" {
+		if val, err := strconv.Atoi(recordsStr); err == nil {
+			createRecords = val
+		}
+	}
+	if durationStr != "" {
+		if val, err := strconv.Atoi(durationStr); err == nil {
+			createDuration = val
+		}
+	}
+	return nil
 }
 
 func hasSpecOverrides() bool {

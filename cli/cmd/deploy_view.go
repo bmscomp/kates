@@ -154,9 +154,9 @@ func printRow(icon, name, namespace, status string) {
 	const nsWidth = 18
 
 	nameStr := icon + " " + name
-	
+
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-	
+
 	var nameCol, nsCol string
 	if isTTY {
 		nameCol = lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr)

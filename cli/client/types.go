@@ -156,14 +156,14 @@ type TopoUsers struct {
 
 // TestRun from GET /api/tests/:id and POST /api/tests
 type TestRun struct {
-	ID           string        `json:"id"`
-	TestType     string        `json:"testType"`
-	Status       string        `json:"status"`
-	Backend      string        `json:"backend"`
-	ScenarioName string        `json:"scenarioName"`
-	CreatedAt    string        `json:"createdAt"`
-	Spec         *TestSpec     `json:"spec,omitempty"`
-	Results      []PhaseResult  `json:"results,omitempty"`
+	ID           string           `json:"id"`
+	TestType     string           `json:"testType"`
+	Status       string           `json:"status"`
+	Backend      string           `json:"backend"`
+	ScenarioName string           `json:"scenarioName"`
+	CreatedAt    string           `json:"createdAt"`
+	Spec         *TestSpec        `json:"spec,omitempty"`
+	Results      []PhaseResult    `json:"results,omitempty"`
 	CdcPhases    map[string]int64 `json:"cdcPhases,omitempty"`
 	CdcPhase     string           `json:"currentPhase,omitempty"`
 }

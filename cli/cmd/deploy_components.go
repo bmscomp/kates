@@ -1035,4 +1035,3 @@ func (dc *deployContext) deployComponent(id, namespace, selector string, timeout
 	dc.advanceStep()
 	return nil
 }
-
