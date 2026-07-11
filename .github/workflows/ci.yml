@@ -27,7 +27,7 @@ permissions:
   checks: write
 
 env:
-  JAVA_VERSION: "25"
+  JAVA_VERSION: "21"
 
 jobs:
   changes:

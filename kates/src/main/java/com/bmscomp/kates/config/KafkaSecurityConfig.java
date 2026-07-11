@@ -32,7 +32,6 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
     "org.apache.kafka.common.security.scram.internals.ScramSaslServer",
     "org.apache.kafka.common.security.scram.internals.ScramSaslServer$ScramSaslServerFactory",
     "org.apache.kafka.common.security.plain.PlainLoginModule",
-    "org.apache.kafka.common.security.plain.internals.PlainSaslClient$PlainSaslClientFactory",
     "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule",
     "org.apache.kafka.common.security.oauthbearer.internals.OAuthBearerSaslClient$OAuthBearerSaslClientFactory"
 })
