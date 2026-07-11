@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -o /kates-cli .
 
 # Stage 2: Build the native executable (Mandrel)
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25 AS builder
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-21 AS builder
 USER root
 WORKDIR /build
 
@@ -37,12 +37,12 @@ RUN --mount=type=cache,target=/root/.m2 \
   else JNI_ARCH="$ARCH"; SNAPPY_ARCH="linux/$ARCH"; fi && \
   mkdir -p /build/native-libs && \
   ZSTD_JAR=$(find /root/.m2/repository/com/github/luben/zstd-jni -name "*.jar" | sort -V | tail -1) && \
-  LZ4_JAR=$(find /root/.m2/repository/net/jpountz/lz4/lz4 -name "*.jar" 2>/dev/null || find /root/.m2/repository/org/lz4/lz4-java -name "*.jar" | sort -V | tail -1) && \
+  LZ4_JAR=$(find /root/.m2/repository/org/lz4/lz4-java -name "*.jar" | sort -V | tail -1) && \
   SNAPPY_JAR=$(find /root/.m2/repository/org/xerial/snappy/snappy-java -name "*.jar" | sort -V | tail -1) && \
   echo "=== Extracting native libs (arch=$JNI_ARCH) ===" && \
-  if [ -n "$ZSTD_JAR" ]; then cd /tmp && jar xf "$ZSTD_JAR" "linux/$JNI_ARCH/" && cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  if [ -n "$LZ4_JAR" ]; then cd /tmp && jar xf "$LZ4_JAR" "net/jpountz/util/linux/$JNI_ARCH/" && cp -v net/jpountz/util/linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  if [ -n "$SNAPPY_JAR" ]; then cd /tmp && jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/$SNAPPY_ARCH/" && cp -v org/xerial/snappy/native/$SNAPPY_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
+  if [ -n "$ZSTD_JAR" ]; then cd /tmp && jar xf "$ZSTD_JAR" "linux/$JNI_ARCH/" && cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null && cd /build/native-libs/ && for f in libzstd-jni-*.so; do [ -e "$f" ] && cp "$f" libzstd-jni.so; done || true; fi && \
+  if [ -n "$LZ4_JAR" ]; then cd /tmp && jar xf "$LZ4_JAR" "linux/$JNI_ARCH/" 2>/dev/null || jar xf "$LZ4_JAR" "net/jpountz/util/linux/$JNI_ARCH/" 2>/dev/null && cp -v net/jpountz/util/linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
+  if [ -n "$SNAPPY_JAR" ]; then cd /tmp && jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/Linux/$JNI_ARCH/" 2>/dev/null || jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/$SNAPPY_ARCH/" 2>/dev/null && cp -v org/xerial/snappy/native/Linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v org/xerial/snappy/native/$SNAPPY_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
   ls -la /build/native-libs/
 
 
