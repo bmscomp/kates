@@ -633,34 +633,7 @@ public class TestOrchestrator {
                         .topic(topic)
                         .producerConfig(producerConfig)
                         .build());
-            case COMPARE_REBALANCE -> {
-                var tasks = new java.util.ArrayList<BenchmarkTask>();
-                tasks.add(produceTask(runId + "-produce", runId, topic, spec, producerConfig));
-                
-                // Classic consumer
-                tasks.add(BenchmarkTask.builder(runId + "-consume-classic", BenchmarkTask.WorkloadType.CONSUME)
-                        .runId(runId)
-                        .topic(topic)
-                        .partitions(spec.getPartitions())
-                        .maxMessages(spec.getNumRecords())
-                        .durationMs(spec.getDurationMs())
-                        .consumerGroup(runId + "-group-classic")
-                        .consumerConfig(java.util.Map.of("group.protocol", "classic"))
-                        .build());
-                        
-                // KIP-848 consumer
-                tasks.add(BenchmarkTask.builder(runId + "-consume-kip848", BenchmarkTask.WorkloadType.CONSUME)
-                        .runId(runId)
-                        .topic(topic)
-                        .partitions(spec.getPartitions())
-                        .maxMessages(spec.getNumRecords())
-                        .durationMs(spec.getDurationMs())
-                        .consumerGroup(runId + "-group-kip848")
-                        .consumerConfig(java.util.Map.of("group.protocol", "consumer"))
-                        .build());
-                        
-                yield tasks;
-            }
+
         };
     }
 

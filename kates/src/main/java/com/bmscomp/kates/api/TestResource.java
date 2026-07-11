@@ -81,43 +81,7 @@ public class TestResource {
         return Response.accepted(run).build();
     }
 
-    @POST
-    @Path("/compare-rebalance")
-    @Operation(summary = "Run KIP-848 vs Classic protocol comparison", description = "Executes the COMPARE_REBALANCE test and automatically triggers consumer chaos.")
-    public Response compareRebalance(@Valid CreateTestRequest request) {
-        request.setType(TestType.COMPARE_REBALANCE);
-        var result = orchestrator.executeTest(request);
-        if (result.isFailure()) {
-            return Response.status(400)
-                    .entity(ApiError.of(400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
-                    .build();
-        }
-        TestRun run = result.asSuccess().orElseThrow();
-        auditService.record("CREATE", "test", run.getId(), "COMPARE_REBALANCE test");
 
-        // Schedule chaos (e.g. POD_KILL) against consumers during the test
-        scheduler.schedule(() -> {
-            try {
-                FaultSpec classicFault = FaultSpec.builder("classic-chaos-" + run.getId())
-                        .targetNamespace("default")
-                        .targetLabel("app=kates-backend") // Replace with actual consumer labels in real scenario
-                        .disruptionType(DisruptionType.POD_KILL)
-                        .build();
-                chaosProvider.triggerFault(classicFault);
-                
-                FaultSpec kip848Fault = FaultSpec.builder("kip848-chaos-" + run.getId())
-                        .targetNamespace("default")
-                        .targetLabel("app=kates-backend") // Replace with actual consumer labels in real scenario
-                        .disruptionType(DisruptionType.POD_KILL)
-                        .build();
-                chaosProvider.triggerFault(kip848Fault);
-            } catch (Exception e) {
-                // Ignore chaos scheduling errors in this demo
-            }
-        }, 15, TimeUnit.SECONDS);
-
-        return Response.accepted(run).build();
-    }
 
     @POST
     @Path("/bulk")
