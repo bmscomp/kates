@@ -12,6 +12,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import io.smallrye.mutiny.Uni;
 
 import io.smallrye.common.annotation.Blocking;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -193,14 +194,12 @@ public class ClusterResource {
 
     @GET
     @Path("/check")
-    public Response clusterCheck() {
-        try {
-            return Response.ok(clusterHealthService.clusterHealthCheck()).build();
-        } catch (Exception e) {
-            return Response.serverError()
-                    .entity(ApiError.of(500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))
-                    .build();
-        }
+    public Uni<Response> clusterCheck() {
+        return clusterHealthService.clusterHealthCheck()
+                .map(report -> Response.ok(report).build())
+                .onFailure().recoverWithItem(e -> Response.serverError()
+                        .entity(ApiError.of(500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))
+                        .build());
     }
 
     @GET

@@ -14,8 +14,8 @@ import jakarta.inject.Inject;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
-import org.apache.kafka.clients.admin.GroupListing;
-import org.apache.kafka.clients.admin.ListGroupsOptions;
+import org.apache.kafka.clients.admin.ConsumerGroupListing;
+import org.apache.kafka.clients.admin.ListConsumerGroupsOptions;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
@@ -40,16 +40,16 @@ public class ConsumerGroupService {
     public List<Map<String, Object>> listConsumerGroups() {
         AdminClient client = adminService.getClient();
         try {
-            Collection<GroupListing> groups = client.listGroups(ListGroupsOptions.forConsumerGroups())
+            Collection<ConsumerGroupListing> groups = client.listConsumerGroups(new ListConsumerGroupsOptions())
                     .all()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<Map<String, Object>> result = new ArrayList<>();
-            for (GroupListing listing : groups) {
+            for (ConsumerGroupListing listing : groups) {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("groupId", listing.groupId());
-                item.put("state", listing.groupState().isPresent()
-                        ? listing.groupState().get().toString() : "UNKNOWN");
+                item.put("state", listing.state().isPresent()
+                        ? listing.state().get().toString() : "UNKNOWN");
                 result.add(item);
             }
             return result;
@@ -73,7 +73,7 @@ public class ConsumerGroupService {
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("groupId", desc.groupId());
-            result.put("state", desc.groupState().toString());
+            result.put("state", desc.state().toString());
             result.put("members", desc.members().size());
 
             Map<TopicPartition, OffsetAndMetadata> offsets = client.listConsumerGroupOffsets(groupId)

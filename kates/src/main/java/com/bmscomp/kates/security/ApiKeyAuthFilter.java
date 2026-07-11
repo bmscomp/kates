@@ -13,7 +13,7 @@ import jakarta.ws.rs.ext.Provider;
 import jakarta.annotation.Priority;
 import jakarta.ws.rs.Priorities;
 
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 @Provider
@@ -28,17 +28,21 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
             "/q/",
             "/openapi");
 
-    @ConfigProperty(name = "kates.api.security-enabled", defaultValue = "true")
-    @io.quarkus.runtime.annotations.StaticInitSafe
-    boolean securityEnabled;
+    private boolean isSecurityEnabled() {
+        return ConfigProvider.getConfig()
+                .getOptionalValue("kates.api.security-enabled", Boolean.class)
+                .orElse(true);
+    }
 
-    @ConfigProperty(name = "kates.api.key", defaultValue = "")
-    @io.quarkus.runtime.annotations.StaticInitSafe
-    String apiKey;
+    private String getApiKey() {
+        return ConfigProvider.getConfig()
+                .getOptionalValue("kates.api.key", String.class)
+                .orElse("");
+    }
 
     @Override
     public void filter(ContainerRequestContext ctx) throws IOException {
-        if (!securityEnabled) {
+        if (!isSecurityEnabled()) {
             return;
         }
 
@@ -55,6 +59,7 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
             return;
         }
 
+        String apiKey = getApiKey();
         if (apiKey.isBlank() || !apiKey.equals(token)) {
             LOG.warnf("Invalid API key for request to %s", path);
             ctx.abortWith(

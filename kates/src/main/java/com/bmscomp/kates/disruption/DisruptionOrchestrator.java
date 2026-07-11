@@ -254,6 +254,10 @@ public class DisruptionOrchestrator {
                 Thread.sleep(step.steadyStateSec() * 1000L);
             }
 
+            if (!safetyGuard.verifyClusterState()) {
+                throw new IllegalStateException("Cluster is not in a stable baseline state before injection");
+            }
+
             ReportSummary preMetrics = null;
             PrometheusMetricsCapture.MetricsSnapshot baseline = null;
             if (prometheusAvailable && step.steadyStateSec() > 0) {
@@ -314,6 +318,11 @@ public class DisruptionOrchestrator {
                         step.name(),
                         "Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
                 boolean recovered = session.awaitFirstReady(recoveryTimeoutSec, TimeUnit.SECONDS);
+
+                if (recovered) {
+                    LOG.info("  Verifying full cluster state recovery...");
+                    recovered = safetyGuard.verifyClusterState();
+                }
 
                 if (!recovered && plan.isAutoRollback()) {
                     LOG.warn("  Recovery timeout — triggering auto-rollback for " + step.name());

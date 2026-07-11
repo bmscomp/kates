@@ -14,11 +14,11 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.admin.DescribeConsumerGroupsResult;
-import org.apache.kafka.clients.admin.GroupListing;
+import org.apache.kafka.clients.admin.ConsumerGroupListing;
+import org.apache.kafka.clients.admin.ListConsumerGroupsResult;
+import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsResult;
-import org.apache.kafka.clients.admin.ListGroupsResult;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.GroupState;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,18 +43,16 @@ class ConsumerGroupServiceTest {
 
     @Test
     void listConsumerGroupsReturnsGroupsWithState() {
-        ListGroupsResult listResult = mock(ListGroupsResult.class);
-        GroupListing listing = new GroupListing(
-                "test-group",
-                java.util.Optional.of(org.apache.kafka.common.GroupType.CONSUMER),
-                "kafka",
-                java.util.Optional.of(GroupState.STABLE));
+        ListConsumerGroupsResult listResult = mock(ListConsumerGroupsResult.class);
+        ConsumerGroupListing listing = mock(ConsumerGroupListing.class);
+        when(listing.groupId()).thenReturn("test-group");
+        when(listing.state()).thenReturn(java.util.Optional.of(ConsumerGroupState.STABLE));
         when(listResult.all()).thenReturn(KafkaFuture.completedFuture(Collections.singletonList(listing)));
-        when(mockClient.listGroups(any(org.apache.kafka.clients.admin.ListGroupsOptions.class))).thenReturn(listResult);
+        when(mockClient.listConsumerGroups(any(org.apache.kafka.clients.admin.ListConsumerGroupsOptions.class))).thenReturn(listResult);
 
         ConsumerGroupDescription desc = mock(ConsumerGroupDescription.class);
         when(desc.groupId()).thenReturn("test-group");
-        when(desc.groupState()).thenReturn(GroupState.STABLE);
+        when(desc.state()).thenReturn(ConsumerGroupState.STABLE);
         when(desc.members()).thenReturn(Collections.emptyList());
 
         DescribeConsumerGroupsResult descResult = mock(DescribeConsumerGroupsResult.class);
@@ -71,7 +69,7 @@ class ConsumerGroupServiceTest {
     void describeConsumerGroupReturnsDetailWithLag() {
         ConsumerGroupDescription desc = mock(ConsumerGroupDescription.class);
         when(desc.groupId()).thenReturn("cg-1");
-        when(desc.groupState()).thenReturn(GroupState.STABLE);
+        when(desc.state()).thenReturn(ConsumerGroupState.STABLE);
         when(desc.members()).thenReturn(Collections.emptyList());
 
         DescribeConsumerGroupsResult descResult = mock(DescribeConsumerGroupsResult.class);

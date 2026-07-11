@@ -8,7 +8,11 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
 import io.fabric8.kubernetes.api.model.networking.v1.*;
+import io.fabric8.kubernetes.api.model.EphemeralContainer;
+import io.fabric8.kubernetes.api.model.EphemeralContainerBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 /**
@@ -53,6 +57,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     case ROLLING_RESTART -> executeRollingRestart(spec);
                     case SCALE_DOWN -> executeScaleDown(spec);
                     case LEADER_ELECTION -> executePodKill(spec);
+                    case CPU_STRESS -> executeCpuStress(spec);
+                    case IO_STRESS -> executeIoStress(spec);
                     default -> {
                         return ChaosOutcome.skipped(
                                 "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
@@ -199,6 +205,39 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 });
     }
 
+    private void executeCpuStress(FaultSpec spec) {
+        String podName = resolvePodName(spec);
+        LOG.info("CPU_STRESS: injecting stress-ng ephemeral container into " + podName);
+        injectEphemeralContainer(spec.targetNamespace(), podName, "chaos-cpu-stress", "polinux/stress",
+                "stress", "--cpu", String.valueOf(spec.cpuCores()), "--timeout", spec.chaosDurationSec() + "s");
+    }
+
+    private void executeIoStress(FaultSpec spec) {
+        String podName = resolvePodName(spec);
+        LOG.info("IO_STRESS: injecting stress-ng ephemeral container into " + podName);
+        injectEphemeralContainer(spec.targetNamespace(), podName, "chaos-io-stress", "polinux/stress",
+                "stress", "--io", String.valueOf(spec.ioWorkers()), "--timeout", spec.chaosDurationSec() + "s");
+    }
+
+    private void injectEphemeralContainer(String namespace, String podName, String containerName, String image, String... command) {
+        var podResource = client.pods().inNamespace(namespace).withName(podName);
+        var pod = podResource.get();
+        if (pod == null) {
+            throw new IllegalStateException("Pod not found: " + podName);
+        }
+
+        EphemeralContainer ec = new EphemeralContainerBuilder()
+                .withName(containerName)
+                .withImage(image)
+                .withCommand(command)
+                .build();
+
+        pod.getSpec().getEphemeralContainers().add(ec);
+        
+        // Use replace to update ephemeral containers (requires k8s 1.25+)
+        podResource.replace(pod);
+    }
+
     private String resolvePodName(FaultSpec spec) {
         if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
             return spec.targetPod();
@@ -236,6 +275,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
         return ChaosStatus.COMPLETED;
     }
 
+    @Retry(maxRetries = 3, delay = 2000)
+    @Timeout(15000)
     @Override
     public void cleanup(String engineName) {
         try {
@@ -247,9 +288,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
             LOG.info("Cleaned up Kates-managed NetworkPolicies");
         } catch (Exception e) {
             LOG.warn("Cleanup failed", e);
+            throw e; // throw to trigger retry
         }
     }
 
+    @Timeout(5000)
     @Override
     public boolean isAvailable() {
         try {

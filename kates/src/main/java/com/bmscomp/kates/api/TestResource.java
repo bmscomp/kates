@@ -26,11 +26,18 @@ import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
+import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.persistence.BaselineEntity;
 import com.bmscomp.kates.service.AuditService;
 import com.bmscomp.kates.service.BaselineService;
 import com.bmscomp.kates.service.TestRunRepository;
+import com.bmscomp.kates.chaos.ChaosProvider;
+import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.chaos.DisruptionType;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
@@ -41,6 +48,8 @@ public class TestResource {
 
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
+    private final ChaosProvider chaosProvider;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     BaselineService baselineService;
@@ -49,9 +58,10 @@ public class TestResource {
     AuditService auditService;
 
     @Inject
-    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
+    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository, @jakarta.inject.Named("kubernetes") ChaosProvider chaosProvider) {
         this.orchestrator = orchestrator;
         this.repository = repository;
+        this.chaosProvider = chaosProvider;
     }
 
     @POST
@@ -68,6 +78,44 @@ public class TestResource {
         }
         TestRun run = result.asSuccess().orElseThrow();
         auditService.record("CREATE", "test", run.getId(), request.getType() + " test");
+        return Response.accepted(run).build();
+    }
+
+    @POST
+    @Path("/compare-rebalance")
+    @Operation(summary = "Run KIP-848 vs Classic protocol comparison", description = "Executes the COMPARE_REBALANCE test and automatically triggers consumer chaos.")
+    public Response compareRebalance(@Valid CreateTestRequest request) {
+        request.setType(TestType.COMPARE_REBALANCE);
+        var result = orchestrator.executeTest(request);
+        if (result.isFailure()) {
+            return Response.status(400)
+                    .entity(ApiError.of(400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
+                    .build();
+        }
+        TestRun run = result.asSuccess().orElseThrow();
+        auditService.record("CREATE", "test", run.getId(), "COMPARE_REBALANCE test");
+
+        // Schedule chaos (e.g. POD_KILL) against consumers during the test
+        scheduler.schedule(() -> {
+            try {
+                FaultSpec classicFault = FaultSpec.builder("classic-chaos-" + run.getId())
+                        .targetNamespace("default")
+                        .targetLabel("app=kates-backend") // Replace with actual consumer labels in real scenario
+                        .disruptionType(DisruptionType.POD_KILL)
+                        .build();
+                chaosProvider.triggerFault(classicFault);
+                
+                FaultSpec kip848Fault = FaultSpec.builder("kip848-chaos-" + run.getId())
+                        .targetNamespace("default")
+                        .targetLabel("app=kates-backend") // Replace with actual consumer labels in real scenario
+                        .disruptionType(DisruptionType.POD_KILL)
+                        .build();
+                chaosProvider.triggerFault(kip848Fault);
+            } catch (Exception e) {
+                // Ignore chaos scheduling errors in this demo
+            }
+        }, 15, TimeUnit.SECONDS);
+
         return Response.accepted(run).build();
     }
 

@@ -10,6 +10,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletionStage;
+
+import io.smallrye.mutiny.Uni;
+import io.smallrye.mutiny.tuples.Tuple5;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -18,8 +22,8 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
-import org.apache.kafka.clients.admin.GroupListing;
-import org.apache.kafka.clients.admin.ListGroupsOptions;
+import org.apache.kafka.clients.admin.ConsumerGroupListing;
+import org.apache.kafka.clients.admin.ListConsumerGroupsOptions;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
@@ -188,73 +192,52 @@ public class ClusterHealthService {
 
     @Retry(maxRetries = 2, delay = 1000)
     @Timeout(60_000)
-    public Map<String, Object> clusterHealthCheck() {
+    public Uni<Map<String, Object>> clusterHealthCheck() {
         if (cachedHealthCheck != null && System.currentTimeMillis() < healthCacheExpiry) {
-            return cachedHealthCheck;
+            return Uni.createFrom().item(cachedHealthCheck);
         }
 
         AdminClient client = adminService.getClient();
         try {
-            Map<String, Object> report = new LinkedHashMap<>();
-
             DescribeClusterResult cluster = client.describeCluster();
 
-            var clusterIdFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return cluster.clusterId().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
-            var controllerFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return cluster.controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
-            var nodesFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return cluster.nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            Uni<String> clusterIdUni = Uni.createFrom().completionStage(cluster.clusterId().toCompletionStage());
+            Uni<Node> controllerUni = Uni.createFrom().completionStage(cluster.controller().toCompletionStage());
+            Uni<Collection<Node>> nodesUni = Uni.createFrom().completionStage(cluster.nodes().toCompletionStage());
+            Uni<Set<String>> topicsUni = Uni.createFrom().completionStage(client.listTopics().names().toCompletionStage());
+            Uni<Collection<ConsumerGroupListing>> groupsUni = Uni.createFrom().completionStage(
+                    client.listConsumerGroups(new ListConsumerGroupsOptions()).all().toCompletionStage());
+            
+            // Note: describeMetadataQuorum might not be supported on all versions, so we fall back gracefully.
+            Uni<org.apache.kafka.clients.admin.QuorumInfo> quorumUni = Uni.createFrom()
+                    .completionStage(client.describeMetadataQuorum().quorumInfo().toCompletionStage())
+                    .onFailure().recoverWithNull();
 
-            var topicsFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return client.listTopics().names().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            return Uni.combine().all().unis(clusterIdUni, controllerUni, nodesUni, topicsUni, groupsUni, quorumUni).asTuple()
+                    .chain(tuple -> processHealthTuple(client, tuple));
+        } catch (Exception e) {
+            return Uni.createFrom().failure(new RuntimeException("Failed to perform cluster health check", e));
+        }
+    }
 
-            var groupsFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return client.listGroups(ListGroupsOptions.forConsumerGroups())
-                            .all()
-                            .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            });
+    private Uni<Map<String, Object>> processHealthTuple(AdminClient client, io.smallrye.mutiny.tuples.Tuple6<String, Node, Collection<Node>, Set<String>, Collection<ConsumerGroupListing>, org.apache.kafka.clients.admin.QuorumInfo> tuple) {
+        String clusterId = tuple.getItem1();
+        Node controller = tuple.getItem2();
+        Collection<Node> nodes = tuple.getItem3();
+        Set<String> topics = tuple.getItem4();
+        Collection<ConsumerGroupListing> groups = tuple.getItem5();
+        org.apache.kafka.clients.admin.QuorumInfo quorum = tuple.getItem6();
 
-            CompletableFuture.allOf(clusterIdFuture, controllerFuture, nodesFuture, topicsFuture, groupsFuture).join();
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("clusterId", clusterId);
+        report.put("brokers", nodes.size());
+        report.put("controllerId", controller.id());
 
-            String clusterId = clusterIdFuture.join();
-            Node controller = controllerFuture.join();
-            Collection<Node> nodes = nodesFuture.join();
-            Set<String> topics = topicsFuture.join();
-            Collection<GroupListing> groups = groupsFuture.join();
+        Uni<Map<String, TopicDescription>> topicDescsUni = topics.isEmpty()
+                ? Uni.createFrom().item(Map.of())
+                : Uni.createFrom().completionStage(client.describeTopics(topics).allTopicNames().toCompletionStage());
 
-            report.put("clusterId", clusterId);
-            report.put("brokers", nodes.size());
-            report.put("controllerId", controller.id());
-
-            Map<String, TopicDescription> topicDescs = topics.isEmpty()
-                    ? Map.of()
-                    : client.describeTopics(topics).allTopicNames().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
+        return topicDescsUni.map(topicDescs -> {
             int totalPartitions = 0;
             int underReplicated = 0;
             int offlinePartitions = 0;
@@ -300,15 +283,30 @@ public class ClusterHealthService {
             } else if (underReplicated > 0) {
                 status = "WARNING";
             }
+            
+            if (quorum != null) {
+                Map<String, Object> quorumHealth = new LinkedHashMap<>();
+                quorumHealth.put("leaderId", quorum.leaderId());
+                quorumHealth.put("voters", quorum.voters().size());
+                quorumHealth.put("observers", quorum.observers().size());
+                
+                boolean hasLeader = quorum.leaderId() >= 0;
+                quorumHealth.put("hasLeader", hasLeader);
+                
+                if (!hasLeader) {
+                    status = "CRITICAL";
+                    quorumHealth.put("issue", "NO_LEADER");
+                }
+                report.put("kraftQuorum", quorumHealth);
+            }
+            
             report.put("status", status);
 
             cachedHealthCheck = report;
             healthCacheExpiry = System.currentTimeMillis() + CACHE_TTL_MS;
 
             return report;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to perform cluster health check", e);
-        }
+        });
     }
 }
 
