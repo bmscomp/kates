@@ -59,6 +59,9 @@ public class TestTypeDefaults {
     @ConfigProperty(name = "kates.tests.load.num-consumers", defaultValue = "1")
     int loadNumConsumers;
 
+    @ConfigProperty(name = "kates.tests.load.group-protocol", defaultValue = "classic")
+    String loadGroupProtocol;
+
     // STRESS — high concurrency, large batches
     @ConfigProperty(name = "kates.tests.stress.replication-factor", defaultValue = "3")
     int stressReplicationFactor;
@@ -98,6 +101,9 @@ public class TestTypeDefaults {
 
     @ConfigProperty(name = "kates.tests.stress.num-consumers", defaultValue = "1")
     int stressNumConsumers;
+
+    @ConfigProperty(name = "kates.tests.stress.group-protocol", defaultValue = "classic")
+    String stressGroupProtocol;
 
     // SPIKE — burst traffic, low-latency
     @ConfigProperty(name = "kates.tests.spike.replication-factor", defaultValue = "3")
@@ -139,6 +145,9 @@ public class TestTypeDefaults {
     @ConfigProperty(name = "kates.tests.spike.num-consumers", defaultValue = "1")
     int spikeNumConsumers;
 
+    @ConfigProperty(name = "kates.tests.spike.group-protocol", defaultValue = "classic")
+    String spikeGroupProtocol;
+
     // ENDURANCE — long-running, rate-limited
     @ConfigProperty(name = "kates.tests.endurance.replication-factor", defaultValue = "3")
     int enduranceReplicationFactor;
@@ -178,6 +187,9 @@ public class TestTypeDefaults {
 
     @ConfigProperty(name = "kates.tests.endurance.num-consumers", defaultValue = "1")
     int enduranceNumConsumers;
+
+    @ConfigProperty(name = "kates.tests.endurance.group-protocol", defaultValue = "classic")
+    String enduranceGroupProtocol;
 
     // VOLUME — large records, high batch size
     @ConfigProperty(name = "kates.tests.volume.replication-factor", defaultValue = "3")
@@ -219,6 +231,9 @@ public class TestTypeDefaults {
     @ConfigProperty(name = "kates.tests.volume.num-consumers", defaultValue = "1")
     int volumeNumConsumers;
 
+    @ConfigProperty(name = "kates.tests.volume.group-protocol", defaultValue = "classic")
+    String volumeGroupProtocol;
+
     // CAPACITY — max parallelism
     @ConfigProperty(name = "kates.tests.capacity.replication-factor", defaultValue = "3")
     int capacityReplicationFactor;
@@ -258,6 +273,9 @@ public class TestTypeDefaults {
 
     @ConfigProperty(name = "kates.tests.capacity.num-consumers", defaultValue = "1")
     int capacityNumConsumers;
+
+    @ConfigProperty(name = "kates.tests.capacity.group-protocol", defaultValue = "classic")
+    String capacityGroupProtocol;
 
     // ROUND_TRIP — latency-focused
     @ConfigProperty(name = "kates.tests.roundtrip.replication-factor", defaultValue = "3")
@@ -299,6 +317,9 @@ public class TestTypeDefaults {
     @ConfigProperty(name = "kates.tests.roundtrip.num-consumers", defaultValue = "1")
     int roundTripNumConsumers;
 
+    @ConfigProperty(name = "kates.tests.roundtrip.group-protocol", defaultValue = "classic")
+    String roundTripGroupProtocol;
+
     /**
      * Returns the effective configuration for a given test type.
      * Values are resolved from kates.tests.{type}.* with literal fallback defaults.
@@ -319,7 +340,8 @@ public class TestTypeDefaults {
                         loadThroughput,
                         loadDurationMs,
                         loadNumProducers,
-                        loadNumConsumers);
+                        loadNumConsumers,
+                        loadGroupProtocol);
             case STRESS ->
                 new TypeConfig(
                         stressReplicationFactor,
@@ -334,7 +356,8 @@ public class TestTypeDefaults {
                         stressThroughput,
                         stressDurationMs,
                         stressNumProducers,
-                        stressNumConsumers);
+                        stressNumConsumers,
+                        stressGroupProtocol);
             case SPIKE ->
                 new TypeConfig(
                         spikeReplicationFactor,
@@ -349,7 +372,8 @@ public class TestTypeDefaults {
                         spikeThroughput,
                         spikeDurationMs,
                         spikeNumProducers,
-                        spikeNumConsumers);
+                        spikeNumConsumers,
+                        spikeGroupProtocol);
             case ENDURANCE ->
                 new TypeConfig(
                         enduranceReplicationFactor,
@@ -364,7 +388,8 @@ public class TestTypeDefaults {
                         enduranceThroughput,
                         enduranceDurationMs,
                         enduranceNumProducers,
-                        enduranceNumConsumers);
+                        enduranceNumConsumers,
+                        enduranceGroupProtocol);
             case VOLUME ->
                 new TypeConfig(
                         volumeReplicationFactor,
@@ -379,7 +404,8 @@ public class TestTypeDefaults {
                         volumeThroughput,
                         volumeDurationMs,
                         volumeNumProducers,
-                        volumeNumConsumers);
+                        volumeNumConsumers,
+                        volumeGroupProtocol);
             case CAPACITY ->
                 new TypeConfig(
                         capacityReplicationFactor,
@@ -394,7 +420,8 @@ public class TestTypeDefaults {
                         capacityThroughput,
                         capacityDurationMs,
                         capacityNumProducers,
-                        capacityNumConsumers);
+                        capacityNumConsumers,
+                        capacityGroupProtocol);
             case ROUND_TRIP ->
                 new TypeConfig(
                         roundTripReplicationFactor,
@@ -409,7 +436,8 @@ public class TestTypeDefaults {
                         roundTripThroughput,
                         roundTripDurationMs,
                         roundTripNumProducers,
-                        roundTripNumConsumers);
+                        roundTripNumConsumers,
+                        roundTripGroupProtocol);
             case INTEGRITY, TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS, INTEGRATION_CDC ->
                 new TypeConfig(
                         loadReplicationFactor,
@@ -424,7 +452,8 @@ public class TestTypeDefaults {
                         loadThroughput,
                         loadDurationMs,
                         loadNumProducers,
-                        loadNumConsumers);
+                        loadNumConsumers,
+                        loadGroupProtocol);
         };
     }
 
@@ -457,7 +486,8 @@ public class TestTypeDefaults {
             int throughput,
             long durationMs,
             int numProducers,
-            int numConsumers) {
+            int numConsumers,
+            String groupProtocol) {
         public Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("replicationFactor", replicationFactor);
@@ -473,6 +503,7 @@ public class TestTypeDefaults {
             map.put("durationMs", durationMs);
             map.put("numProducers", numProducers);
             map.put("numConsumers", numConsumers);
+            map.put("groupProtocol", groupProtocol);
             return map;
         }
     }

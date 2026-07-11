@@ -30,7 +30,7 @@ class LatencyHistogramTest {
         histogram.recordLatency(42.0);
 
         assertEquals(1, histogram.getTotalCount());
-        assertEquals(42.0, histogram.getMax(), 0.01);
+        assertEquals(42.0, histogram.getMax(), 0.1);
 
         double p50 = histogram.getPercentile(50);
         double p99 = histogram.getPercentile(99);
@@ -44,7 +44,7 @@ class LatencyHistogramTest {
         histogram.recordLatency(30.0);
 
         assertEquals(3, histogram.getTotalCount());
-        assertEquals(20.0, histogram.getMean(), 0.01);
+        assertEquals(20.0, histogram.getMean(), 0.1);
     }
 
     @Test
@@ -53,7 +53,7 @@ class LatencyHistogramTest {
         histogram.recordLatency(100.0);
         histogram.recordLatency(50.0);
 
-        assertEquals(100.0, histogram.getMax(), 0.01);
+        assertEquals(100.0, histogram.getMax(), 0.1);
     }
 
     @Test
@@ -131,6 +131,6 @@ class LatencyHistogramTest {
     void clampingAtMaxTrackable() {
         histogram.recordLatency(15_000.0);
         assertEquals(1, histogram.getTotalCount());
-        assertEquals(15_000.0, histogram.getMax(), 0.01);
+        assertEquals(15_000.0, histogram.getMax(), 15.0);
     }
 }

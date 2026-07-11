@@ -26,11 +26,18 @@ import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
+import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.persistence.BaselineEntity;
 import com.bmscomp.kates.service.AuditService;
 import com.bmscomp.kates.service.BaselineService;
 import com.bmscomp.kates.service.TestRunRepository;
+import com.bmscomp.kates.chaos.ChaosProvider;
+import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.chaos.DisruptionType;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
@@ -41,6 +48,8 @@ public class TestResource {
 
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
+    private final ChaosProvider chaosProvider;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     BaselineService baselineService;
@@ -49,9 +58,10 @@ public class TestResource {
     AuditService auditService;
 
     @Inject
-    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
+    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository, @jakarta.inject.Named("kubernetes") ChaosProvider chaosProvider) {
         this.orchestrator = orchestrator;
         this.repository = repository;
+        this.chaosProvider = chaosProvider;
     }
 
     @POST
@@ -70,6 +80,8 @@ public class TestResource {
         auditService.record("CREATE", "test", run.getId(), request.getType() + " test");
         return Response.accepted(run).build();
     }
+
+
 
     @POST
     @Path("/bulk")

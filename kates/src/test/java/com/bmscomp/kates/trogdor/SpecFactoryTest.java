@@ -257,6 +257,7 @@ class SpecFactoryTest {
     void allTypesPopulateBootstrapServers() {
         TestSpec spec = new TestSpec();
         for (TestType type : TestType.values()) {
+
             List<TrogdorSpec> specs = specFactory.buildSpecs(type, spec, "bs-test");
             TrogdorSpec first = specs.get(0);
 

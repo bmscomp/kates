@@ -306,6 +306,10 @@ func (c *Client) CreateTest(ctx context.Context, request *CreateTestRequest) (*T
 	return postJSON[*TestRun](c, ctx, "/api/tests", request)
 }
 
+func (c *Client) CreateCompareRebalanceTest(ctx context.Context, request *CreateTestRequest) (*TestRun, error) {
+	return postJSON[*TestRun](c, ctx, "/api/tests/compare-rebalance", request)
+}
+
 func (c *Client) DeleteTest(ctx context.Context, id string) error {
 	return c.delete(ctx, "/api/tests/"+id)
 }

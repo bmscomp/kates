@@ -53,6 +53,7 @@ public class TestOrchestrator {
     private final Semaphore concurrencyGuard;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
     private final Map<String, List<LatencyHeatmapData.HeatmapRow>> heatmapRows = new ConcurrentHashMap<>();
+    private final Map<String, Long> runStartNanos = new ConcurrentHashMap<>();
 
     @Inject
     public TestOrchestrator(
@@ -145,6 +146,7 @@ public class TestOrchestrator {
         org.jboss.logging.MDC.put("runId", run.getId());
         org.jboss.logging.MDC.put("testType", type.name());
         org.jboss.logging.MDC.put("backend", backendName);
+        runStartNanos.put(run.getId(), System.nanoTime());
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
@@ -231,6 +233,7 @@ public class TestOrchestrator {
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
         fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
+        runStartNanos.put(run.getId(), System.nanoTime());
 
         try {
             createTestTopic(baseSpec, type);
@@ -370,7 +373,11 @@ public class TestOrchestrator {
             katesMetrics.recordTestCompleted(typeName, outcome);
             webhookService.fireTestCompleted(run);
 
-            if (run.getCreatedAt() != null) {
+            Long startNanos = runStartNanos.remove(runId);
+            if (startNanos != null) {
+                long durationNanos = System.nanoTime() - startNanos;
+                katesMetrics.recordTestDuration(typeName, java.time.Duration.ofNanos(durationNanos));
+            } else if (run.getCreatedAt() != null) {
                 try {
                     var start = java.time.Instant.parse(run.getCreatedAt());
                     katesMetrics.recordTestDuration(
@@ -448,6 +455,7 @@ public class TestOrchestrator {
             } catch (Exception e) {
                 LOG.warn("Shutdown: failed to update test run " + runId, e);
             }
+            runStartNanos.remove(runId);
         }
         activeHandles.clear();
     }
@@ -625,6 +633,7 @@ public class TestOrchestrator {
                         .topic(topic)
                         .producerConfig(producerConfig)
                         .build());
+
         };
     }
 
