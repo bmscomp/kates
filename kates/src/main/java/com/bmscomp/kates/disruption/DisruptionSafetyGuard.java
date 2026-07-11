@@ -4,6 +4,9 @@ import java.util.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
+
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -178,8 +181,37 @@ public class DisruptionSafetyGuard {
     }
 
     /**
+     * Verifies the cluster state by checking if all broker pods are running and ready.
+     * Use before/after chaos injection to ensure a stable baseline.
+     */
+    @Retry(maxRetries = 3, delay = 2000)
+    @Timeout(10000)
+    public boolean verifyClusterState() {
+        List<Pod> brokers = listBrokerPods();
+        if (brokers.isEmpty()) {
+            LOG.warn("Cluster state verification failed: no brokers found");
+            return false;
+        }
+
+        for (Pod pod : brokers) {
+            if (pod.getStatus() == null || !"Running".equals(pod.getStatus().getPhase())) {
+                LOG.warn("Cluster state verification failed: broker " + pod.getMetadata().getName() + " is not Running");
+                return false;
+            }
+            boolean ready = pod.getStatus().getConditions().stream()
+                    .anyMatch(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()));
+            if (!ready) {
+                LOG.warn("Cluster state verification failed: broker " + pod.getMetadata().getName() + " is not Ready");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Rolls back a fault injection. Called when recovery times out.
      */
+    @Retry(maxRetries = 3, delay = 2000)
     public void rollback(FaultSpec spec, String engineName) {
         if (spec.disruptionType() == null) return;
 
@@ -207,7 +239,8 @@ public class DisruptionSafetyGuard {
         }
     }
 
-    private void restoreReplicaCount(FaultSpec spec) {
+    @Retry(maxRetries = 3, delay = 2000)
+    void restoreReplicaCount(FaultSpec spec) {
         String[] parts = spec.targetLabel().split("=", 2);
         String labelKey = parts[0];
         String labelValue = parts.length > 1 ? parts[1] : "";
@@ -236,7 +269,8 @@ public class DisruptionSafetyGuard {
                 });
     }
 
-    private List<Pod> listBrokerPods() {
+    @Retry(maxRetries = 3, delay = 2000)
+    List<Pod> listBrokerPods() {
         try {
             String[] parts = kafkaLabel.split("=", 2);
             String labelKey = parts[0];
@@ -271,7 +305,8 @@ public class DisruptionSafetyGuard {
         return null;
     }
 
-    private boolean checkRbacPermissions(FaultSpec spec) {
+    @Retry(maxRetries = 2, delay = 1000)
+    boolean checkRbacPermissions(FaultSpec spec) {
         if (spec.disruptionType() == null) return true;
 
         try {

@@ -37,6 +37,7 @@ public class SpecFactory {
             case INTEGRITY, INTEGRATION_CDC -> buildLoadSpecs(spec, runId);
             case TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS ->
                 buildLoadSpecs(spec, runId);
+            case COMPARE_REBALANCE -> throw new UnsupportedOperationException("COMPARE_REBALANCE is not supported by Trogdor");
         };
     }
 

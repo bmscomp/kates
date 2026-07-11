@@ -94,6 +94,7 @@ public final class ProtoMapper {
             case TUNE_COMPRESSION -> com.bmscomp.kates.grpc.proto.TestType.TUNE_COMPRESSION;
             case TUNE_PARTITIONS -> com.bmscomp.kates.grpc.proto.TestType.TUNE_PARTITIONS;
             case INTEGRATION_CDC -> com.bmscomp.kates.grpc.proto.TestType.INTEGRATION_CDC;
+            case COMPARE_REBALANCE -> com.bmscomp.kates.grpc.proto.TestType.COMPARE_REBALANCE;
         };
     }
 
@@ -113,6 +114,7 @@ public final class ProtoMapper {
             case TUNE_COMPRESSION -> TestType.TUNE_COMPRESSION;
             case TUNE_PARTITIONS -> TestType.TUNE_PARTITIONS;
             case INTEGRATION_CDC -> TestType.INTEGRATION_CDC;
+            case COMPARE_REBALANCE -> TestType.COMPARE_REBALANCE;
             default -> null;
         };
     }
