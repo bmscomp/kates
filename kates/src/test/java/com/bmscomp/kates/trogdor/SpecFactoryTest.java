@@ -257,9 +257,7 @@ class SpecFactoryTest {
     void allTypesPopulateBootstrapServers() {
         TestSpec spec = new TestSpec();
         for (TestType type : TestType.values()) {
-            if (type == TestType.COMPARE_REBALANCE) {
-                continue;
-            }
+
             List<TrogdorSpec> specs = specFactory.buildSpecs(type, spec, "bs-test");
             TrogdorSpec first = specs.get(0);
 

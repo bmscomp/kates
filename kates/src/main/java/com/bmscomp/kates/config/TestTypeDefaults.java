@@ -438,7 +438,7 @@ public class TestTypeDefaults {
                         roundTripNumProducers,
                         roundTripNumConsumers,
                         roundTripGroupProtocol);
-            case INTEGRITY, TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS, INTEGRATION_CDC, COMPARE_REBALANCE ->
+            case INTEGRITY, TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS, INTEGRATION_CDC ->
                 new TypeConfig(
                         loadReplicationFactor,
                         loadPartitions,
