@@ -21,7 +21,6 @@ import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.service.TestRunRepository;
-import com.bmscomp.kates.webhook.WebhookService;
 
 class TestOrchestratorTest {
 
@@ -40,7 +39,6 @@ class TestOrchestratorTest {
                 typeDefaults,
                 mock(BenchmarkMetrics.class),
                 mock(KatesMetrics.class),
-                mock(WebhookService.class),
                 mock(Event.class),
                 "native",
                 "localhost:9092",

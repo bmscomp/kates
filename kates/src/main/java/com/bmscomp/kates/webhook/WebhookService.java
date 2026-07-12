@@ -54,30 +54,74 @@ public class WebhookService {
         LOG.infof("Unregistered webhook: %s", name);
     }
 
+    @jakarta.inject.Inject
+    jakarta.persistence.EntityManager em;
+
+    @jakarta.inject.Inject
+    WebhookService self;
+
     public List<WebhookRegistration> list() {
         return List.copyOf(registrations);
     }
 
-    public void fireTestCompleted(TestRun run) {
+    @jakarta.transaction.Transactional(jakarta.transaction.Transactional.TxType.REQUIRES_NEW)
+    public boolean checkAndMarkProcessed(String idempotencyKey) {
+        try {
+            if (em.find(ProcessedEventEntity.class, idempotencyKey) != null) {
+                return false;
+            }
+            em.persist(new ProcessedEventEntity(idempotencyKey));
+            em.flush();
+            return true;
+        } catch (Exception e) {
+            LOG.warn("Duplicate event detected (concurrent): " + idempotencyKey);
+            return false;
+        }
+    }
+
+    @org.eclipse.microprofile.reactive.messaging.Incoming("test-events-in")
+    public void onTestEvent(com.bmscomp.kates.domain.events.TestEvent event) {
+        String idempotencyKey = event.getTestId() + ":" + event.getStatus().name();
+        if (!self.checkAndMarkProcessed(idempotencyKey)) {
+            LOG.info("Skipping duplicate test event: " + idempotencyKey);
+            return;
+        }
+        if (event.getStatus() != com.bmscomp.kates.domain.TestResult.TaskStatus.DONE && 
+            event.getStatus() != com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED) {
+            return;
+        }
+
         if (registrations.isEmpty()) {
             return;
         }
 
         var payload = new WebhookPayload(
                 "test.completed",
-                run.getId(),
-                run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
-                run.getStatus().name(),
-                run.getCreatedAt());
+                event.getTestId(),
+                event.getTestType() != null ? event.getTestType() : "UNKNOWN",
+                event.getStatus().name(),
+                java.time.Instant.ofEpochMilli(event.getTimestamp()).toString());
 
         for (WebhookRegistration reg : registrations) {
             fireAsync(reg, payload);
         }
     }
 
+    @jakarta.transaction.Transactional(jakarta.transaction.Transactional.TxType.REQUIRES_NEW)
+    public void saveToDlq(WebhookRegistration reg, WebhookPayload payload, String errorMessage) {
+        try {
+            String jsonPayload = MAPPER.writeValueAsString(payload);
+            WebhookDlqEntity dlqEntity = new WebhookDlqEntity(reg.name(), reg.url(), jsonPayload, errorMessage);
+            em.persist(dlqEntity);
+        } catch (Exception e) {
+            LOG.error("Failed to persist DLQ event for webhook: " + reg.name(), e);
+        }
+    }
+
     private void fireAsync(WebhookRegistration reg, WebhookPayload payload) {
         Thread.startVirtualThread(() -> {
             int maxAttempts = 3;
+            String lastError = "Unknown error";
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
                     String json = MAPPER.writeValueAsString(payload);
@@ -95,10 +139,12 @@ public class WebhookService {
                         LOG.debugf("Webhook %s delivered (attempt %d): %d", reg.name(), attempt, response.statusCode());
                         return;
                     }
+                    lastError = "HTTP " + response.statusCode();
                     LOG.warnf(
                             "Webhook %s returned %d (attempt %d/%d)",
                             reg.name(), response.statusCode(), attempt, maxAttempts);
                 } catch (Exception e) {
+                    lastError = e.getMessage();
                     LOG.warnf(
                             "Webhook %s failed (attempt %d/%d): %s", reg.name(), attempt, maxAttempts, e.getMessage());
                 }
@@ -113,8 +159,9 @@ public class WebhookService {
                 }
             }
             LOG.errorf(
-                    "Webhook %s delivery failed after %d attempts for event %s",
+                    "Webhook %s delivery failed after %d attempts for event %s. Sending to DLQ.",
                     reg.name(), maxAttempts, payload.event());
+            self.saveToDlq(reg, payload, lastError);
         });
     }
 
