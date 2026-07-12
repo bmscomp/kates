@@ -45,7 +45,6 @@ public class TestOrchestrator {
     private final TestTypeDefaults typeDefaults;
     private final BenchmarkMetrics benchmarkMetrics;
     private final KatesMetrics katesMetrics;
-    private final WebhookService webhookService;
     private final Event<TestLifecycleEvent> lifecycleEvents;
     private final String defaultBackend;
     private final String bootstrapServers;
@@ -63,7 +62,6 @@ public class TestOrchestrator {
             TestTypeDefaults typeDefaults,
             BenchmarkMetrics benchmarkMetrics,
             KatesMetrics katesMetrics,
-            WebhookService webhookService,
             Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
@@ -74,7 +72,6 @@ public class TestOrchestrator {
         this.typeDefaults = typeDefaults;
         this.benchmarkMetrics = benchmarkMetrics;
         this.katesMetrics = katesMetrics;
-        this.webhookService = webhookService;
         this.lifecycleEvents = lifecycleEvents;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
@@ -142,7 +139,8 @@ public class TestOrchestrator {
         return com.bmscomp.kates.util.Result.success(run);
     }
 
-    private void executeAsync(TestRun run, TestType type, TestSpec spec, String backendName, BenchmarkBackend backend) {
+    @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeAsync")
+    void executeAsync(TestRun run, TestType type, TestSpec spec, String backendName, BenchmarkBackend backend) {
         org.jboss.logging.MDC.put("runId", run.getId());
         org.jboss.logging.MDC.put("testType", type.name());
         org.jboss.logging.MDC.put("backend", backendName);
@@ -210,6 +208,7 @@ public class TestOrchestrator {
      * Executes a multi-phase scenario: each phase runs sequentially,
      * using the resolved spec (base + phase overrides + type defaults).
      */
+    @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeScenario")
     com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
         TestScenario scenario = request.getScenario();
         TestType type = scenario.getType() != null ? scenario.getType() : request.getType();
@@ -371,7 +370,6 @@ public class TestOrchestrator {
             String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
             String outcome = anyFailed ? "failed" : "done";
             katesMetrics.recordTestCompleted(typeName, outcome);
-            webhookService.fireTestCompleted(run);
 
             Long startNanos = runStartNanos.remove(runId);
             if (startNanos != null) {
@@ -545,6 +543,7 @@ public class TestOrchestrator {
                         new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends())));
     }
 
+    @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.buildTasks")
     List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
         String topic = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
 

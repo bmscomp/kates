@@ -29,9 +29,42 @@ public class KubernetesChaosProvider implements ChaosProvider {
     @Inject
     KubernetesClient client;
 
+    @Inject
+    KubernetesChaosProvider self;
+
     @Override
     public String name() {
         return "kubernetes";
+    }
+
+    @Retry(maxRetries = 3, delay = 1000)
+    @org.eclipse.microprofile.faulttolerance.CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10000)
+    public void applyDisruption(FaultSpec spec, String engineName) throws Exception {
+        if (spec.disruptionType() == null) {
+            throw new IllegalArgumentException("No disruptionType set — use the builder");
+        }
+
+        if (spec.delayBeforeSec() > 0) {
+            Thread.sleep(spec.delayBeforeSec() * 1000L);
+        }
+
+        switch (spec.disruptionType()) {
+            case POD_KILL -> executePodKill(spec);
+            case POD_DELETE -> executePodDelete(spec);
+            case NETWORK_PARTITION -> executeNetworkPartition(spec);
+            case ROLLING_RESTART -> executeRollingRestart(spec);
+            case SCALE_DOWN -> executeScaleDown(spec);
+            case LEADER_ELECTION -> executePodKill(spec);
+            case CPU_STRESS -> executeCpuStress(spec);
+            case IO_STRESS -> executeIoStress(spec);
+            default -> throw new UnsupportedOperationException(
+                    "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
+        }
+
+        if (spec.chaosDurationSec() > 0 && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
+            Thread.sleep(spec.chaosDurationSec() * 1000L);
+            cleanup(engineName);
+        }
     }
 
     @Override
@@ -42,61 +75,20 @@ public class KubernetesChaosProvider implements ChaosProvider {
             String engineName = spec.experimentName() + "-" + System.currentTimeMillis();
 
             try {
-                if (spec.disruptionType() == null) {
-                    return ChaosOutcome.skipped("No disruptionType set — use the builder");
-                }
-
-                if (spec.delayBeforeSec() > 0) {
-                    Thread.sleep(spec.delayBeforeSec() * 1000L);
-                }
-
-                switch (spec.disruptionType()) {
-                    case POD_KILL -> executePodKill(spec);
-                    case POD_DELETE -> executePodDelete(spec);
-                    case NETWORK_PARTITION -> executeNetworkPartition(spec);
-                    case ROLLING_RESTART -> executeRollingRestart(spec);
-                    case SCALE_DOWN -> executeScaleDown(spec);
-                    case LEADER_ELECTION -> executePodKill(spec);
-                    case CPU_STRESS -> executeCpuStress(spec);
-                    case IO_STRESS -> executeIoStress(spec);
-                    default -> {
-                        return ChaosOutcome.skipped(
-                                "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
-                    }
-                }
-
-                if (spec.chaosDurationSec() > 0 && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
-                    Thread.sleep(spec.chaosDurationSec() * 1000L);
-                    cleanup(engineName);
-                }
-
+                self.applyDisruption(spec, engineName);
                 return ChaosOutcome.success(
                         engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return ChaosOutcome.failure(
-                        engineName,
-                        spec.experimentName(),
-                        start,
-                        Instant.now(),
-                        startNanos,
-                        "Interrupted",
-                        null,
-                        null,
-                        null);
+                        engineName, spec.experimentName(), start, Instant.now(), startNanos,
+                        "Interrupted", null, null, null);
             } catch (Exception e) {
-                LOG.error("Fault injection failed", e);
+                LOG.error("Fault injection failed after retries", e);
                 return ChaosOutcome.failure(
-                        engineName,
-                        spec.experimentName(),
-                        start,
-                        Instant.now(),
-                        startNanos,
-                        e.getMessage(),
-                        null,
-                        null,
-                        null);
+                        engineName, spec.experimentName(), start, Instant.now(), startNanos,
+                        e.getMessage(), null, null, null);
             }
         });
     }

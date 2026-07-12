@@ -22,6 +22,30 @@ public class TestRunRepository {
     @Transactional
     public void save(TestRun run) {
         em.merge(EntityMapper.toEntity(run));
+        
+        // Also persist an outbox event for state changes
+        try {
+            com.bmscomp.kates.domain.TestResult.TaskStatus status = run.getStatus();
+            com.bmscomp.kates.domain.events.TestEvent testEvent = new com.bmscomp.kates.domain.events.TestEvent(
+                run.getId(),
+                run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
+                status,
+                "",
+                System.currentTimeMillis()
+            );
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String payload = mapper.writeValueAsString(testEvent);
+            
+            com.bmscomp.kates.persistence.OutboxEventEntity outboxEvent = new com.bmscomp.kates.persistence.OutboxEventEntity(
+                run.getId(),
+                "TestRun",
+                "test.lifecycle",
+                payload
+            );
+            em.persist(outboxEvent);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to persist outbox event", e);
+        }
     }
 
     public Optional<TestRun> findById(String id) {
