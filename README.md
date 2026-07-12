@@ -23,16 +23,20 @@
 
 ---
 
-> 📖 **[Read the Kates Definitive Guide](docs/book/README.md)** — 21 chapters covering performance theory, chaos engineering, security, deployment, and operations.
+> **[Read the Kates Definitive Guide](docs/book/README.md)** — 21 chapters covering performance theory, chaos engineering, security, deployment, and operations.
 
-## ✨ Feature Highlights
+## Feature Highlights
 
-|  |  |  |
+Kates consolidates six core competencies into a single, cohesive platform. The following table summarizes these capabilities and their scope within the system.
+
+| Capability | Scope | Description |
 |:--|:--|:--|
-| 🧪 **8 Test Types** | 🌪️ **Chaos Engineering** | 📊 **Full Observability** |
-| Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, Integrity | 10 disruption types with safety guardrails and automatic rollback | Prometheus + Grafana + Jaeger with 10 dashboards & 20 alert rules |
-| 🏗️ **One-Command Deploy** | 🔒 **Security Auditing** | 🚀 **CI/CD Native** |
-| `kates deploy -i` — interactive wizard deploys the entire stack in minutes | TLS inspection, NetworkPolicy analysis, Kyverno compliance, penetration testing | Quality gates, JUnit export, badge generation, webhook notifications |
+| **Performance Testing** | 8 test types | Supports Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, and Integrity workloads, each configurable through MicroProfile Config with hierarchical defaults. |
+| **Chaos Engineering** | 10 disruption types | Provides fault injection with safety guardrails and automatic rollback, enabling controlled experiments against broker failures, network partitions, and resource exhaustion. |
+| **Observability** | End-to-end telemetry | Integrates Prometheus, Grafana, and Jaeger with 10 pre-built dashboards and 20 alert rules, providing metrics, logs, and distributed traces across the entire test lifecycle. |
+| **Deployment** | One-command provisioning | The `kates deploy -i` interactive wizard provisions the complete stack—including Kafka, monitoring, and chaos infrastructure—in a single operation. |
+| **Security Auditing** | Multi-layer analysis | Performs TLS inspection, NetworkPolicy analysis, Kyverno compliance checks, and active penetration testing to validate the security posture of the target cluster. |
+| **CI/CD Integration** | Pipeline-native | Exports results as JUnit XML, generates status badges, enforces quality gates with letter-grade thresholds, and delivers webhook notifications for automated pipelines. |
 
 ---
 
@@ -200,32 +204,34 @@ Bring up the entire production-grade stack with one command:
 make all
 ```
 
-This runs a 10-step automated pipeline:
+The `make all` target executes a deterministic, ten-step provisioning pipeline. Each step is idempotent and will skip work that has already been completed, making it safe to re-run after partial failures. The pipeline stages are ordered to satisfy infrastructure dependencies—monitoring must be operational before Kafka is deployed, so that broker metrics are captured from the first heartbeat.
 
-| Step | Action |
-|------|--------|
-| 1 | Create Kind cluster `panda` + local Docker registry |
-| 2 | Pull all images to local registry (`localhost:5001`) |
-| 3 | Load images from registry into Kind nodes |
-| 4 | Deploy Prometheus & Grafana |
-| 5 | Wait for monitoring readiness |
-| 6 | Deploy Strimzi Kafka (KRaft mode) |
-| 7 | Wait for Kafka readiness |
-| 8 | Deploy Kafka UI |
-| 9 | Deploy Apicurio Registry |
-| 10 | Deploy LitmusChaos |
+| Step | Action | Purpose |
+|:----:|:-------|:--------|
+| 1 | Create Kind cluster `panda` and local Docker registry | Provisions the Kubernetes control plane and a local OCI registry at `localhost:5001` to avoid external image pulls during development. |
+| 2 | Pull all images to local registry | Downloads container images defined in `images.env` into the local registry, ensuring reproducible builds independent of upstream availability. |
+| 3 | Load images from registry into Kind nodes | Transfers images from the local registry into the Kind node containerd cache, eliminating pull latency during pod scheduling. |
+| 4 | Deploy Prometheus and Grafana | Installs the monitoring stack with pre-configured scrape targets and auto-provisioned Grafana dashboards for Kafka and JVM metrics. |
+| 5 | Wait for monitoring readiness | Blocks until all monitoring pods report `Ready`, ensuring metrics collection is active before downstream services start. |
+| 6 | Deploy Strimzi Kafka (KRaft mode) | Installs the Strimzi operator and applies the Kafka custom resource with KRaft consensus, rack-aware broker pools, and zone-affinity storage. |
+| 7 | Wait for Kafka readiness | Blocks until all Kafka broker pods are `Ready` and the controller quorum is established, verifying cluster health before test workloads begin. |
+| 8 | Deploy Kafka UI | Installs a web-based Kafka management interface for topic inspection, consumer group monitoring, and message browsing. |
+| 9 | Deploy Apicurio Registry | Installs the Apicurio Schema Registry with KafkaSQL storage, enabling schema governance for Avro, Protobuf, and JSON Schema workloads. |
+| 10 | Deploy LitmusChaos | Installs the LitmusChaos operator and applies Kafka-specific RBAC, enabling fault injection experiments against the deployed cluster. |
 
 ### Access Points
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| Grafana | http://localhost:30080 | admin / admin |
-| Kafka UI | http://localhost:30081 | — |
-| Apicurio Registry | http://localhost:30082 | — |
-| Kates API | http://localhost:30083 | — |
-| Jaeger UI | http://localhost:30086 | — |
-| Prometheus | http://localhost:30090 | — |
-| Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
+Once the stack is provisioned, the following services are available via NodePort or port-forwarding. The table below lists each service endpoint, its corresponding URL, and any default credentials required for authentication.
+
+| Service | URL | Credentials | Notes |
+|:--------|:----|:------------|:------|
+| Grafana | http://localhost:30080 | admin / admin | Pre-loaded with 10 Kafka dashboards and 20 alert rules. |
+| Kafka UI | http://localhost:30081 | — | Read-only by default; write access requires `KAFKA_UI_AUTH` configuration. |
+| Apicurio Registry | http://localhost:30082 | — | Schema compatibility rules are enforced per-subject. |
+| Kates API | http://localhost:30083 | — | Protected by API key in production; disabled in dev/test profiles. |
+| Jaeger UI | http://localhost:30086 | — | Displays distributed traces for REST, Kafka, and JDBC operations. |
+| Prometheus | http://localhost:30090 | — | Exposes `/api/v1/query` for ad-hoc PromQL queries. |
+| Litmus UI | `make chaos-ui` then http://localhost:9091 | admin / litmus | Requires an explicit port-forward; not exposed by default. |
 
 ### Teardown
 ```bash
@@ -237,19 +243,19 @@ kates clean --force   # Using the CLI
 
 ## Helm Charts
 
-Kates ships 9 Helm charts for modular deployment:
+Kates ships 9 Helm charts for modular deployment. Each chart is independently versionable and can be installed in isolation or composed via the `klster-platform` umbrella chart. The table below enumerates each chart, its current version, the upstream application version it wraps, and its role within the platform.
 
 | Chart | Version | App Version | Description |
-|-------|---------|-------------|-------------|
-| [`kates`](charts/kates/) | 0.4.1 | 1.17.0 | Kates backend & frontend |
-| [`kafka-cluster`](charts/kafka-cluster/) | 0.1.1 | 4.2.0 | Strimzi KRaft cluster with zone-aware broker pools |
-| [`kates-chaos`](charts/kates-chaos/) | 1.2.0 | 1.17.0 | LitmusChaos wrapper with Kafka-specific RBAC |
-| [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | Prometheus + Grafana with Kates dashboards |
-| [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 2.2.5.Final | Apicurio Schema Registry |
-| [`klster-platform`](charts/klster-platform/) | 0.1.0 | 1.0.0 | Umbrella chart for the full platform |
-| [`headlamp`](charts/headlamp/) | 0.1.0 | 0.40.1 | Kubernetes Dashboard |
-| [`velero`](charts/velero/) | 11.3.2 | 1.17.1 | Velero backup |
-| [`minio`](charts/minio/) | 17.0.21 | 2025.7.23 | MinIO object storage |
+|:------|:--------|:------------|:------------|
+| [`kates`](charts/kates/) | 0.4.1 | 1.17.0 | The Kates backend (Quarkus REST/gRPC) and frontend, deployed as a single Kubernetes Deployment with ConfigMap-driven configuration. |
+| [`kafka-cluster`](charts/kafka-cluster/) | 0.1.1 | 4.2.0 | A Strimzi-managed KRaft Kafka cluster with zone-aware broker pools, SCRAM-SHA-512 authentication, and rack-affinity storage classes. |
+| [`kates-chaos`](charts/kates-chaos/) | 1.2.0 | 1.17.0 | A LitmusChaos wrapper that installs Kafka-specific RBAC, ChaosServiceAccounts, and pre-built experiment templates for broker and network faults. |
+| [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | The Prometheus and Grafana monitoring stack, pre-configured with scrape jobs, recording rules, and auto-provisioned dashboards for Kafka, JVM, and Strimzi metrics. |
+| [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 2.2.5.Final | Apicurio Schema Registry deployed with KafkaSQL persistence, providing schema validation and compatibility enforcement for Avro, Protobuf, and JSON Schema. |
+| [`klster-platform`](charts/klster-platform/) | 0.1.0 | 1.0.0 | An umbrella chart that composes all sub-charts into a single `helm install` operation for full-platform provisioning. |
+| [`headlamp`](charts/headlamp/) | 0.1.0 | 0.40.1 | A lightweight Kubernetes dashboard for visual cluster inspection and resource management. |
+| [`velero`](charts/velero/) | 11.3.2 | 1.17.1 | Velero backup and disaster recovery, configured for scheduled snapshots of persistent volumes and Kubernetes resources. |
+| [`minio`](charts/minio/) | 17.0.21 | 2025.7.23 | MinIO object storage, used as the S3-compatible backend for Velero backups and optional Kafka tiered storage. |
 
 ---
 
@@ -321,40 +327,46 @@ kates ctx current                                   # Print active context
 
 ## CLI Command Reference
 
-### 1. Setup & Lifecycle
+The Kates CLI is organized into twelve functional domains. Each domain groups related subcommands that operate on a specific concern—from cluster lifecycle management to security compliance auditing. The sections below provide a complete reference for every available command.
+
+### 1. Setup and Lifecycle
+
+These commands manage the end-to-end lifecycle of a Kates deployment, from initial provisioning through upgrade and teardown.
 
 | Command | Description |
-|---------|-------------|
-| `kates deploy -i` | Interactive deployment wizard — topology, components, namespaces |
-| `kates deploy --topology isolated --with-monitoring` | Non-interactive deploy with flags |
-| `kates clean` | Tear down the entire stack (with confirmation) |
-| `kates clean --force` | Tear down without confirmation (CI-friendly) |
-| `kates upgrade` | Upgrade the Kates stack to the latest version |
-| `kates init` | Initialize a new Kates workspace with config and scenarios |
-| `kates auto` | Auto-detect cluster and deploy Kafka |
-| `kates ports` | Port-forward all Kates services to localhost |
-| `kates ports --all` | Include monitoring + tracing ports |
+|:--------|:------------|
+| `kates deploy -i` | Launches the interactive deployment wizard, which prompts for topology mode, component selection, and namespace configuration before provisioning the stack. |
+| `kates deploy --topology isolated --with-monitoring` | Non-interactive deployment with explicit flags, suitable for scripted environments and CI/CD pipelines. |
+| `kates clean` | Tears down the entire stack with an interactive confirmation prompt to prevent accidental destruction. |
+| `kates clean --force` | Tears down the stack without confirmation, designed for automated CI/CD pipeline teardown stages. |
+| `kates upgrade` | Upgrades the deployed Kates stack to the latest chart version while preserving existing configuration and data. |
+| `kates init` | Initializes a new Kates workspace directory with default configuration files and example scenario definitions. |
+| `kates auto` | Auto-detects the current Kubernetes cluster and deploys Kafka with sensible defaults based on cluster capabilities. |
+| `kates ports` | Establishes port-forwarding for all core Kates services (API, Kafka UI, Grafana) to localhost. |
+| `kates ports --all` | Extends port-forwarding to include monitoring, tracing, and schema registry endpoints. |
 
 ### 2. Cluster Intelligence
 
-| Command | Description |
-|---------|-------------|
-| `kates detect` | Deep cluster compatibility report (zones, storage, network, operators) |
-| `kates detect --export report.pdf` | Export as PDF, HTML, Markdown, or JSON |
-| `kates cluster info` | Cluster metadata — brokers, controller, rack/AZ |
-| `kates cluster topics` | List all Kafka topics |
-| `kates cluster topics describe <t>` | Detailed topic metadata and partition health |
-| `kates cluster broker configs <id>` | Non-default broker config (grouped by source) |
-| `kates cluster check` | Comprehensive cluster health check |
-| `kates cluster groups` | List consumer groups with state and members |
-| `kates cluster diff` | Diff cluster state between snapshots |
-| `kates cluster watch` | Watch cluster events in real-time |
-| `kates cluster alerts` | View active alert rules |
-| `kates snapshot create` | Create a cluster state snapshot |
-| `kates snapshot list` | List all snapshots |
-| `kates snapshot diff <s1> <s2>` | Compare two snapshots |
+Cluster intelligence commands query the Kafka cluster and Kubernetes infrastructure to produce detailed reports on topology, health, configuration drift, and operational state.
 
-### 3. Health & Status
+| Command | Description |
+|:--------|:------------|
+| `kates detect` | Generates a deep cluster compatibility report covering availability zones, storage classes, network policies, and installed operators. |
+| `kates detect --export report.pdf` | Exports the compatibility report in PDF, HTML, Markdown, or JSON format for offline review and archival. |
+| `kates cluster info` | Displays cluster metadata including broker endpoints, controller quorum status, and rack/AZ assignments. |
+| `kates cluster topics` | Lists all Kafka topics with partition counts, replication factors, and ISR health indicators. |
+| `kates cluster topics describe <t>` | Provides detailed metadata for a specific topic, including per-partition leader assignments and replica state. |
+| `kates cluster broker configs <id>` | Reports non-default broker configuration entries, grouped by configuration source (static, dynamic, default). |
+| `kates cluster check` | Runs a comprehensive health check covering broker connectivity, controller availability, and under-replicated partitions. |
+| `kates cluster groups` | Lists all consumer groups with their current state, member count, and assigned topic partitions. |
+| `kates cluster diff` | Computes the difference between two cluster state snapshots to identify configuration drift or topology changes. |
+| `kates cluster watch` | Streams cluster events in real-time, displaying broker joins/leaves, partition reassignments, and ISR changes as they occur. |
+| `kates cluster alerts` | Lists all active Prometheus alert rules and their current firing status. |
+| `kates snapshot create` | Captures a point-in-time snapshot of the cluster state, including topic configurations, consumer group offsets, and broker metadata. |
+| `kates snapshot list` | Lists all previously captured snapshots with timestamps and summary statistics. |
+| `kates snapshot diff <s1> <s2>` | Compares two snapshots and reports additions, deletions, and modifications across all tracked resources. |
+
+### 3. Health and Status
 
 ```bash
 kates health            # System health, Kafka connectivity, and engine status
@@ -380,7 +392,7 @@ kates kafka produce <topic> --key k --value v          # Produce a record
 kates kafka tui                                        # Launch interactive full-screen explorer
 ```
 
-### 5. Test Execution & Scenario Files
+### 5. Test Execution and Scenario Files
 
 ```bash
 kates test create --type LOAD --records 100000    # Start a load test
@@ -394,29 +406,41 @@ kates scaffold list                                # Browse built-in scenario te
 kates scaffold export <name>                       # Export a template to a local file
 ```
 
-Available test types: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`.
+Kates supports seven distinct test types, each designed to evaluate a specific aspect of Kafka cluster behavior under controlled conditions. The following table describes each test type, its intended use case, and the primary metrics it targets.
 
-### 6. Analysis & Optimization
+| Test Type | Use Case | Primary Metrics |
+|:----------|:---------|:----------------|
+| `LOAD` | Measures steady-state throughput and latency under a sustained, uniform workload representative of normal production traffic. | Throughput (records/sec, MB/sec), P50/P95/P99 latency. |
+| `STRESS` | Evaluates cluster behavior under high concurrency with multiple parallel producers, identifying contention points and degradation thresholds. | Max throughput, error rate, producer queue time. |
+| `SPIKE` | Simulates sudden burst traffic patterns to assess the cluster's ability to absorb transient load surges without message loss or excessive latency. | Burst absorption rate, tail latency (P99.9), backpressure metrics. |
+| `ENDURANCE` | Validates stability over extended durations (hours) with rate-limited traffic, detecting memory leaks, log segment accumulation, and GC pauses. | Throughput stability, JVM heap trends, GC pause frequency. |
+| `VOLUME` | Tests high-throughput ingestion with large record sizes to stress network I/O, disk write bandwidth, and batch compression efficiency. | Disk write throughput, network utilization, compression ratio. |
+| `CAPACITY` | Determines maximum cluster capacity under full parallelism, pushing all brokers to saturation to identify the hardware ceiling. | Peak throughput, broker CPU/memory saturation, partition leader balance. |
+| `ROUND_TRIP` | Measures end-to-end latency from producer send to consumer receive, quantifying the complete data path including replication and ISR acknowledgment. | End-to-end latency (P50/P95/P99), replication lag. |
+
+### 6. Analysis and Optimization
+
+These commands provide post-hoc analysis of completed test runs, automated performance tuning recommendations, and regression detection against established baselines.
 
 | Command | Description |
-|---------|-------------|
-| `kates benchmark` | Run a full test battery (LOAD → STRESS → SPIKE) with letter-grade scorecard |
-| `kates gate -f scenario.yaml --min-grade B` | CI quality gate — exit non-zero if grade is below threshold |
-| `kates flow run -f pipeline.yaml` | Declarative multi-step pipeline orchestrator |
-| `kates advisor <id>` | Analyze results and recommend configuration improvements |
-| `kates explain <id>` | Plain-English summary and verdict for a test run |
-| `kates profile save <name> <id>` | Save a named performance profile |
-| `kates profile compare <a> <b>` | Compare two profiles |
-| `kates profile assert <name> --max-p99 50ms` | Assert profile meets thresholds |
-| `kates baseline set <id>` | Set a test as the regression baseline |
-| `kates baseline regression <id>` | Check for regressions against the baseline |
-| `kates cost estimate -f scenario.yaml` | Estimate cloud costs for a test configuration |
-| `kates tune run` | Automated performance tuning |
-| `kates replay <id>` | Re-run a previous test with the same parameters |
-| `kates diff <id1> <id2>` | Side-by-side comparison of two test runs |
-| `kates lab` | Interactive performance tuning laboratory |
+|:--------|:------------|
+| `kates benchmark` | Runs a full test battery (LOAD, STRESS, SPIKE) and produces a letter-grade scorecard (A through F) based on configurable SLA thresholds. |
+| `kates gate -f scenario.yaml --min-grade B` | CI quality gate that exits with a non-zero status code if the achieved grade falls below the specified threshold, blocking pipeline progression. |
+| `kates flow run -f pipeline.yaml` | Executes a declarative, multi-step pipeline defined in YAML, orchestrating sequential and parallel test phases with conditional branching. |
+| `kates advisor <id>` | Analyzes the results of a completed test run and generates actionable configuration recommendations (e.g., batch size, linger.ms, compression). |
+| `kates explain <id>` | Produces a plain-English summary and verdict for a test run, suitable for non-technical stakeholders and status reports. |
+| `kates profile save <name> <id>` | Persists a named performance profile from a test run for future comparison and regression analysis. |
+| `kates profile compare <a> <b>` | Generates a side-by-side comparison of two performance profiles, highlighting statistical differences in key metrics. |
+| `kates profile assert <name> --max-p99 50ms` | Asserts that a saved profile meets specified performance thresholds, returning a non-zero exit code on violation. |
+| `kates baseline set <id>` | Designates a specific test run as the regression baseline for subsequent comparisons. |
+| `kates baseline regression <id>` | Compares a test run against the established baseline and flags statistically significant regressions in throughput or latency. |
+| `kates cost estimate -f scenario.yaml` | Estimates cloud infrastructure costs for a given test configuration based on resource utilization models for AWS, GCP, and Azure. |
+| `kates tune run` | Initiates an automated tuning cycle that iteratively adjusts producer and broker configurations to optimize throughput within latency constraints. |
+| `kates replay <id>` | Re-executes a previous test with identical parameters, enabling controlled before/after comparisons following configuration changes. |
+| `kates diff <id1> <id2>` | Generates a side-by-side diff of two test runs, comparing throughput, latency distributions, error rates, and resource utilization. |
+| `kates lab` | Launches an interactive performance tuning laboratory with real-time feedback on configuration changes. |
 
-### 7. Reports & Trends
+### 7. Reports and Trends
 
 ```bash
 kates report show <id>              # Full report with SLA verdict
@@ -428,7 +452,7 @@ kates trend --type LOAD --metric p99LatencyMs --days 30     # P99 trend over 30 
 kates trend --type STRESS --metric throughput --days 7       # Throughput sparkline
 ```
 
-### 8. Chaos & Disruption
+### 8. Chaos and Disruption
 
 ```bash
 kates resilience --experiment pod-kill --duration 60s   # Chaos-performance correlation
@@ -441,7 +465,7 @@ kates chaos list                                         # Chaos experiment hist
 kates chaos show <id>                                    # Detailed chaos report
 ```
 
-### 9. Security & Compliance
+### 9. Security and Compliance
 
 ```bash
 kates security audit                                # Full posture scan with A-F grade
@@ -456,7 +480,7 @@ kates kyverno enforce <policy>                      # Enforce a policy
 kates kyverno audit                                 # Audit policies
 ```
 
-### 10. Schedules & Automation
+### 10. Schedules and Automation
 
 ```bash
 kates schedule list                                               # List all schedules
@@ -528,29 +552,31 @@ via `--http-proxy/--https-proxy`, it is rewritten to `host.docker.internal`.
 
 ## Makefile Targets
 
+The Makefile provides a comprehensive set of targets for managing the Kates platform lifecycle. Each target is idempotent and can be invoked independently or composed via dependency chains. The following table documents all available targets and their behavior.
+
 | Target | Description |
-|--------|-------------|
-| `make all` | Full setup (cluster + registry + images + all services) |
-| `make cluster` | Start Kind cluster only |
-| `make images` | Pull and load all images |
-| `make monitoring` | Deploy Prometheus & Grafana |
-| `make kafka` | Deploy Kafka (Strimzi) |
-| `make ui` | Deploy Kafka UI |
-| `make apicurio` | Deploy Apicurio Registry |
-| `make litmus` | Deploy LitmusChaos |
-| `make chaos-ui` | Port-forward Litmus UI |
-| `make chaos-experiments` | Apply chaos experiments |
-| `make velero` | Deploy Velero backup |
-| `make test` | Run Kafka performance test (1M messages) |
-| `make gameday` | Run automated GameDay validation pipeline |
-| `make chart-lint` | Lint Kates Helm chart |
-| `make ports` | Start port forwarding |
-| `make status` | Check cluster status |
-| `make destroy` | Destroy cluster |
+|:-------|:------------|
+| `make all` | Executes the full provisioning pipeline: cluster creation, image loading, and deployment of all services in dependency order. |
+| `make cluster` | Creates the Kind Kubernetes cluster with multi-zone node labels and the local Docker registry, without deploying any services. |
+| `make images` | Pulls all container images defined in `images.env` and loads them into the Kind node cache. |
+| `make monitoring` | Deploys the Prometheus and Grafana monitoring stack with auto-provisioned dashboards and alert rules. |
+| `make kafka` | Deploys the Strimzi operator and applies the Kafka cluster custom resource in KRaft mode with rack-aware broker pools. |
+| `make ui` | Deploys the Kafka UI web interface for topic and consumer group management. |
+| `make apicurio` | Deploys the Apicurio Schema Registry with KafkaSQL persistence and schema compatibility enforcement. |
+| `make litmus` | Deploys the LitmusChaos operator with Kafka-specific RBAC and pre-built experiment templates. |
+| `make chaos-ui` | Establishes a port-forward to the LitmusChaos web interface on `localhost:9091`. |
+| `make chaos-experiments` | Applies all pre-configured chaos experiment custom resources to the cluster. |
+| `make velero` | Deploys Velero backup with MinIO as the S3-compatible storage backend. |
+| `make test` | Runs a standard Kafka performance test producing 1 million messages to validate cluster throughput. |
+| `make gameday` | Executes an automated GameDay validation pipeline combining performance tests with chaos experiments. |
+| `make chart-lint` | Runs Helm lint validation against all Kates Helm charts to detect template errors. |
+| `make ports` | Starts port-forwarding for all core services to localhost. |
+| `make status` | Displays the current status of the Kind cluster, deployed services, and pod health. |
+| `make destroy` | Destroys the Kind cluster and removes all associated resources, including the local Docker registry. |
 
 ---
 
-## Monitoring & Observability
+## Monitoring and Observability
 
 Custom Grafana dashboards are auto-provisioned upon setup:
 - **Kafka Complete Monitoring** — all metrics, brokers, topics, zones, and JVM.
@@ -558,7 +584,7 @@ Custom Grafana dashboards are auto-provisioned upon setup:
 - **Kafka Performance Metrics** — topic growth, partitions, and broker count.
 - **Kafka Performance Test Results** — perf-test throughput and message counts.
 - **Kafka JVM Metrics** — heap memory, GC rate, and thread count per zone.
-- **Strimzi Operator & Kafka Connect** — reconciliation p99, success/failure rates, and Connect task health.
+- **Strimzi Operator and Kafka Connect** — reconciliation p99, success/failure rates, and Connect task health.
 
 ### Distributed Tracing
 OpenTelemetry traces are exported via OTLP to Jaeger. Auto-instrumented spans cover:
@@ -572,14 +598,16 @@ Access the Jaeger UI at http://localhost:30086 after deployment.
 
 ## Documentation
 
+The following resources provide comprehensive documentation for all aspects of the Kates platform, from theoretical foundations to operational procedures.
+
 | Resource | Description |
-|----------|-------------|
-| 📖 [The Definitive Guide](docs/book/README.md) | A complete 20-chapter book with 3 appendices covering theory, CLI, API, deployment, security, and more |
-| 🎓 [Tutorials](docs/tutorials/README.md) | Seven progressive step-by-step tutorials from first test to CI/CD integration |
-| 📚 [REST API Reference](kates/docs/api-reference.md) | JSON schemas, gRPC streams, and REST resources |
-| 💥 [Disruption Catalog](kates/docs/disruption-guide.md) | 10 disruption types with configuration models |
-| 📊 [Export Formats](kates/docs/export-formats.md) | CSV, JUnit XML, heatmaps, and metrics diffing |
-| 🚀 [Deployment Guide](kates/docs/deployment.md) | Local Kind, managed EKS/GKE, or bare-metal deployments |
+|:---------|:------------|
+| [The Definitive Guide](docs/book/README.md) | A complete 20-chapter book with 3 appendices covering performance testing theory, CLI usage, REST API integration, deployment topologies, security hardening, and operational procedures. |
+| [Tutorials](docs/tutorials/README.md) | Seven progressive, step-by-step tutorials that guide practitioners from running a first load test through building fully automated CI/CD quality gates. |
+| [REST API Reference](kates/docs/api-reference.md) | Complete API specification including JSON request/response schemas, gRPC service definitions, and REST resource documentation. |
+| [Disruption Catalog](kates/docs/disruption-guide.md) | Reference documentation for all 10 supported disruption types, including configuration models, blast radius parameters, and safety constraints. |
+| [Export Formats](kates/docs/export-formats.md) | Specification of all supported export formats: CSV for data analysis, JUnit XML for CI integration, latency heatmaps for visualization, and metrics diffs for regression detection. |
+| [Deployment Guide](kates/docs/deployment.md) | Deployment procedures for local Kind clusters, managed Kubernetes services (EKS, GKE, AKS), and bare-metal installations. |
 
 ---
 
