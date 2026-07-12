@@ -17,7 +17,14 @@ public class DatabaseMigrationValidator {
     @Inject
     Flyway flyway;
 
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.flyway.migrate-at-start", defaultValue = "true")
+    boolean migrateAtStart;
+
     void onStart(@Observes StartupEvent ev) {
+        if (!migrateAtStart) {
+            LOG.info("Flyway migration is disabled at startup. Skipping explicit validation.");
+            return;
+        }
         try {
             LOG.info("Running explicit Flyway validation checks...");
             flyway.validate();
