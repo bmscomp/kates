@@ -27,6 +27,7 @@ public class KubernetesChaosProviderTest {
     void setup() {
         provider = new KubernetesChaosProvider();
         provider.client = client;
+        provider.self = provider;
     }
 
     @Test

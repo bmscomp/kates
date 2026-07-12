@@ -101,6 +101,11 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-opentelemetry</artifactId>
         </dependency>
+        <!-- Reactive Messaging -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-reactive-messaging-kafka</artifactId>
+        </dependency>
 
 
         <!-- Structured JSON logging -->
