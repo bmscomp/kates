@@ -2,7 +2,7 @@
 
 > **This document covers the `kates-chaos` Helm chart deployment and configuration.** For chaos engineering theory and methodology, see [Chapter 6: Chaos Engineering Theory](book/06-chaos-theory.md) and [Chapter 7: Chaos Engineering Practice](book/07-chaos-practice.md).
 
-Comprehensive guide for deploying the **kates-chaos** Helm chart on any Kubernetes cluster. This chart wraps [LitmusChaos 3.27.0](https://litmuschaos.io/) with Kafka-specific RBAC, experiment definitions, monitoring, and secrets management.
+Comprehensive guide for deploying the **kates-chaos** Helm chart on any Kubernetes cluster. This chart wraps [LitmusChaos 3.28](https://litmuschaos.io/) with Kafka-specific RBAC, experiment definitions, monitoring, and secrets management.
 
 ## Prerequisites
 
@@ -89,7 +89,7 @@ helm dependency build
 cd ../..
 ```
 
-This downloads `litmus-3.27.0.tgz` into `charts/kates-chaos/charts/`.
+This downloads `litmus-core-3.28.1.tgz` into `charts/kates-chaos/charts/`.
 
 ### Step 4 — Install the Chart
 
@@ -103,6 +103,8 @@ helm upgrade --install chaos charts/kates-chaos \
 Or use the Makefile shorthand:
 
 ```bash
+# Note: installs into the kafka namespace (helm ... -n kafka --create-namespace),
+# unlike the manual commands above which use the litmus namespace
 make litmus-generic
 ```
 
@@ -115,7 +117,8 @@ kubectl get pods -n litmus
 # Run Helm test suite (portal, frontend, MongoDB, CRDs)
 helm test chaos -n litmus
 
-# Or via Makefile
+# Or via Makefile — note: the litmus-* targets install and test in the
+# kafka namespace, not litmus
 make litmus-test
 ```
 
@@ -410,10 +413,10 @@ kubectl describe pvc -n litmus
 
 **Cause**: The upstream Litmus chart defaults to a deprecated `bitnamilegacy/mongodb` image.
 
-**Fix**: Already handled by the chart — overrides to `bitnami/mongodb:7.0.28`. If issues persist, verify image availability:
+**Fix**: The stack pins MongoDB to `mongo:6.0` (see `images.env`); on Kind the external MongoDB StatefulSet is used because `bitnamilegacy/mongodb` is amd64-only. If issues persist, verify image availability:
 
 ```bash
-docker pull bitnami/mongodb:7.0.28
+docker pull mongo:6.0
 ```
 
 ### Subscriber CrashLoopBackOff
@@ -440,7 +443,7 @@ kubectl logs job/chaos-experiments -n litmus
 
 ```
 charts/kates-chaos/
-├── Chart.yaml                              # v1.0.0, depends on litmus 3.27.0
+├── Chart.yaml                              # v1.2.0, depends on litmus-core 3.28.1
 ├── values.yaml                             # Base defaults
 ├── values-kind.yaml                        # Kind cluster overlay (dev)
 ├── values-generic.yaml                     # Generic Kubernetes overlay (prod)

@@ -1,6 +1,6 @@
 # Kates Helm Chart
 
-Install [Kates](https://github.com/klster/kates) — Kafka Advanced Testing & Engineering Suite — on any Kubernetes cluster.
+Install [Kates](https://github.com/bmscomp/kates) — Kafka Advanced Testing & Engineering Suite — on any Kubernetes cluster.
 
 > **Schema validated** — `values.schema.json` catches invalid config at install time.
 
@@ -158,7 +158,7 @@ helm install kates ./charts/kates \
 ```bash
 helm install kates ./charts/kates \
   --namespace kates --create-namespace \
-  --set image.repository=ghcr.io/klster/kates \
+  --set image.repository=ghcr.io/bmscomp/kates \
   --set image.tag=1.0.0 \
   --set kafka.bootstrapServers=my-kafka:9092 \
   --set postgresql.enabled=false \

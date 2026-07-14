@@ -344,7 +344,7 @@ sequenceDiagram
 | CLI | Go | 1.25+ | Cross-platform binary |
 | CLI Framework | Cobra | Latest | Command parsing, help generation |
 | Cluster | Kind | Latest | Local Kubernetes simulation |
-| Kafka | Apache Kafka | 4.1.1 | KRaft mode, Share Groups |
+| Kafka | Apache Kafka | 4.2.0 | KRaft mode, Share Groups |
 | Operator | Strimzi | 1.0.0 | Kafka lifecycle management |
 | Chaos | LitmusChaos | Latest | Advanced chaos experiments |
 | Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |

@@ -18,6 +18,7 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 | 8 | [Data Integrity Verification](08-data-integrity.md) | Ensuring zero message loss under fault conditions |
 | 9 | [Observability & Monitoring](09-observability.md) | Metrics, dashboards, heatmaps, and trend analysis |
 | 10 | [CLI Reference](10-cli-reference.md) | Complete Kates CLI command reference with all subcommands and aliases |
+| 10b | [Lab — Interactive Performance Tuning](10b-lab.md) | The interactive TUI workbench for iterative tuning and result comparison |
 | 11 | [REST API Reference](11-api-reference.md) | Backend API endpoints and data models |
 | 12 | [Deployment Guide](12-deployment.md) | Installing and operating the full stack |
 | 13 | [Scenario Files & SLA Gates](13-scenario-files.md) | YAML scenario format, spec fields, and automated SLA enforcement |

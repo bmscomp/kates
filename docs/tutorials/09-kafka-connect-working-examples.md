@@ -6,13 +6,15 @@ This tutorial walks through deploying production-ready Kafka Connect connectors 
 
 ## What You Will Deploy
 
-| Manifest | Purpose |
+The working examples are defined as `testConnectors` in [`charts/connect-cluster/values.yaml`](../../charts/connect-cluster/values.yaml) and applied through the chart (`helm test connect-cluster` exercises them end to end):
+
+| Connector | Purpose |
 |---|---|
-| `config/kafka-connect/working-example-cdc-topic.yaml` | Creates the CDC topic `cdc.public.demo_orders` |
-| `config/kafka-connect/working-example-debezium-postgres-source.yaml` | Debezium source: PostgreSQL `public.demo_orders` -> Kafka |
-| `config/kafka-connect/working-example-jdbc-sink-from-cdc.yaml` | JDBC sink: `cdc.public.demo_orders` -> PostgreSQL `demo_orders_replica` |
-| `config/kafka-connect/working-example-jdbc-sink.yaml` | Generic JDBC sink from `kates-results` |
-| `config/kafka-connect/working-example-jdbc-source.yaml` | Generic JDBC source template (Aiven JDBC source plugin) |
+| CDC topic (`cdc.public.demo_orders`) | Created for the Debezium change stream |
+| `debezium-postgres-source-working-example` | Debezium source: PostgreSQL `public.demo_orders` -> Kafka |
+| `jdbc-sink-from-cdc-working-example` | JDBC sink: `cdc.public.demo_orders` -> PostgreSQL `demo_orders_replica` |
+| `jdbc-sink-working-example` | Generic JDBC sink from `kates-results` |
+| `jdbc-source-working-example` | Generic JDBC source template (Aiven JDBC source plugin) |
 
 ## Prerequisites
 
@@ -150,7 +152,7 @@ kubectl logs -n "${CONNECT_NS}" -l strimzi.io/name="${CONNECT_CLUSTER}-connect" 
 Most common issues:
 - Wrong namespace or cluster label in manifest metadata
 - Secret references still pointing to `connect` after namespace change
-- Missing JDBC source plugin class for `working-example-jdbc-source.yaml`
+- Missing JDBC source plugin class for the `jdbc-source-working-example` connector
 
 ## Cleanup
 

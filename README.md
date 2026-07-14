@@ -1,8 +1,9 @@
 <div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kates-wordmark-dark.svg" />
-    <img src="docs/assets/kates-wordmark.svg" width="500" alt="Kates — Kafka advanced testing and engineering suite" />
-  </picture>
+  <img src="docs/assets/kates-logo.png" width="140" alt="Kates Logo" />
+
+  <h1>Kates</h1>
+
+  <p><strong>Kafka Advanced Testing & Engineering Suite</strong></p>
 
   <p>
     A Kubernetes-native platform for performance testing, chaos engineering,<br/>
@@ -155,19 +156,19 @@ For the disruption pipeline, data-flow diagrams, and component deep-dives, see t
 
 ## Helm Charts
 
-Kates ships its platform as independently versioned Helm charts, composable via the `klster-platform` umbrella chart. Run `make readme-check` to verify this table against the chart sources.
+Kates ships its platform as independently versioned Helm charts, composable via the `kates-platform` umbrella chart. Run `make readme-check` to verify this table against the chart sources.
 
 <!-- chart-table:start -->
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
-| [`kates`](charts/kates/) | 0.4.3 | 1.20.0 | The Kates backend (Quarkus REST/gRPC) and frontend, deployed as a single Kubernetes Deployment with ConfigMap-driven configuration. |
+| [`kates`](charts/kates/) | 0.4.4 | 1.20.0 | The Kates backend (Quarkus REST/gRPC) and frontend, deployed as a single Kubernetes Deployment with ConfigMap-driven configuration. |
 | [`kafka-cluster`](charts/kafka-cluster/) | 0.1.1 | 4.2.0 | A Strimzi-managed KRaft Kafka cluster with zone-aware broker pools, SCRAM-SHA-512 authentication, and rack-affinity storage classes. |
 | [`connect-cluster`](charts/connect-cluster/) | 1.2.0 | 4.2.0 | A Strimzi-managed Kafka Connect cluster with a managed KafkaUser, least-privilege ACLs, default-deny NetworkPolicies, and in-chart JMX metrics. |
 | [`kafka-ui`](charts/kafka-ui/) | 0.2.0 | v1.5.0 | A web-based Kafka management interface for topic inspection, consumer group monitoring, and message browsing. |
 | [`kates-chaos`](charts/kates-chaos/) | 1.2.0 | 1.20.0 | A LitmusChaos wrapper that installs Kafka-specific RBAC, ChaosServiceAccounts, and pre-built experiment templates for broker and network faults. |
 | [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | The Prometheus and Grafana monitoring stack, pre-configured with scrape jobs, recording rules, and auto-provisioned dashboards for Kafka, JVM, and Strimzi metrics. |
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 3.3.0 | Apicurio Schema Registry deployed with KafkaSQL persistence, providing schema validation and compatibility enforcement for Avro, Protobuf, and JSON Schema. |
-| [`klster-platform`](charts/klster-platform/) | 0.1.0 | 1.0.0 | An umbrella chart that composes all sub-charts into a single `helm install` operation for full-platform provisioning. |
+| [`kates-platform`](charts/kates-platform/) | 0.2.0 | 1.0.0 | An umbrella chart that composes all sub-charts into a single `helm install` operation for full-platform provisioning. |
 | [`headlamp`](charts/headlamp/) | 0.1.0 | 0.40.1 | A lightweight Kubernetes dashboard for visual cluster inspection and resource management. |
 | [`velero`](charts/velero/) | 11.3.2 | 1.17.1 | Velero backup and disaster recovery, configured for scheduled snapshots of persistent volumes and Kubernetes resources. |
 | [`minio`](charts/minio/) | 17.0.21 | 2025.7.23 | MinIO object storage, used as the S3-compatible backend for Velero backups and optional Kafka tiered storage. |

@@ -13,11 +13,13 @@ Bring up the entire production-grade stack with one command:
 make all
 ```
 
-The `make all` target executes a deterministic, ten-step provisioning pipeline. Each step is
-idempotent and will skip work that has already been completed, making it safe to re-run after
-partial failures. The pipeline stages are ordered to satisfy infrastructure dependencies —
-monitoring must be operational before Kafka is deployed, so that broker metrics are captured
-from the first heartbeat.
+The `make all` target is an interactive orchestrator: it verifies the cluster is reachable,
+builds the Kates CLI if needed, prompts for a topology (single or isolated namespaces), and
+delegates provisioning to `kates deploy`. For a manual bring-up, the individual targets below
+compose the same stack step by step. Each step is idempotent and will skip work that has
+already been completed, making it safe to re-run after partial failures. The stages are
+ordered to satisfy infrastructure dependencies — monitoring must be operational before Kafka
+is deployed, so that broker metrics are captured from the first heartbeat.
 
 | Step | Action | Purpose |
 |:----:|:-------|:--------|
@@ -40,16 +42,14 @@ target is idempotent and can be invoked independently or composed via dependency
 
 | Target | Description |
 |:-------|:------------|
-| `make all` | Executes the full provisioning pipeline: cluster creation, image loading, and deployment of all services in dependency order. |
+| `make all` | Interactive full provisioning: cluster checks, CLI build, topology prompt, then `kates deploy`. |
 | `make cluster` | Creates the Kind Kubernetes cluster with multi-zone node labels and the local Docker registry, without deploying any services. |
-| `make images` | Pulls all container images defined in `images.env` and loads them into the Kind node cache. |
 | `make monitoring` | Deploys the Prometheus and Grafana monitoring stack with auto-provisioned dashboards and alert rules. |
 | `make kafka` | Deploys the Strimzi operator and applies the Kafka cluster custom resource in KRaft mode with rack-aware broker pools. |
 | `make ui` | Deploys the Kafka UI web interface for topic and consumer group management. |
 | `make apicurio` | Deploys the Apicurio Schema Registry with KafkaSQL persistence and schema compatibility enforcement. |
 | `make litmus` | Deploys the LitmusChaos operator with Kafka-specific RBAC and pre-built experiment templates. |
 | `make chaos-ui` | Establishes a port-forward to the LitmusChaos web interface on `localhost:9091`. |
-| `make chaos-experiments` | Applies all pre-configured chaos experiment custom resources to the cluster. |
 | `make velero` | Deploys Velero backup with MinIO as the S3-compatible storage backend. |
 | `make test` | Runs a standard Kafka performance test producing 1 million messages to validate cluster throughput. |
 | `make gameday` | Executes an automated GameDay validation pipeline combining performance tests with chaos experiments. |
@@ -65,7 +65,7 @@ All images are defined in `images.env` — the single source of truth.
 ```bash
 ./scripts/pull-images.sh               # Pull all images (skips cached)
 ./scripts/load-images-to-kind.sh       # Load into Kind (skips loaded)
-make registry-status                   # Check registry contents
+./scripts/registry-status.sh           # Check registry contents
 ```
 
 ## Working behind a corporate proxy

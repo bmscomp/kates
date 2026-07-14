@@ -3,7 +3,7 @@ name: kates-monitoring
 version: 1.0.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
-home: https://github.com/bmscomp/klster
+home: https://github.com/bmscomp/kates
 keywords:
   - monitoring
   - prometheus

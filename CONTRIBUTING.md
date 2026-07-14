@@ -32,7 +32,7 @@ This project follows a simple principle: be respectful and constructive. We welc
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.23+ | CLI development |
+| Go | 1.25+ | CLI development |
 | Java | 21+ | Backend (Quarkus) |
 | Maven | 3.9+ (wrapper included) | Backend build |
 | Docker | 24+ | Container images |
@@ -42,8 +42,8 @@ This project follows a simple principle: be respectful and constructive. We welc
 ### Quick Start
 
 ```bash
-git clone https://github.com/<your-fork>/klster.git
-cd klster
+git clone https://github.com/<your-fork>/kates.git
+cd kates
 
 # Backend
 cd kates
@@ -74,24 +74,24 @@ cd kates
 ## Project Structure
 
 ```
-klster/
+kates/
 ├── cli/                    # Go CLI (cobra + lipgloss)
 │   ├── cmd/                # Command implementations
 │   ├── client/             # API client + types
 │   └── output/             # Terminal formatting utilities
 ├── kates/                  # Java backend (Quarkus)
 │   ├── src/main/java/      # Application code
-│   │   └── com/klster/kates/
+│   │   └── com/bmscomp/kates/
 │   │       ├── api/        # REST resources
 │   │       ├── domain/     # Domain models
 │   │       ├── engine/     # Test orchestration
 │   │       ├── service/    # Business logic
 │   │       └── webhook/    # Webhook notifications
-│   └── docs/               # Documentation book
-├── infra/                  # Infrastructure scripts
-│   ├── kind/               # Kind cluster config
-│   ├── k8s/                # Kubernetes manifests
-│   └── scripts/            # Shell utilities
+│   └── docs/               # API and deployment docs
+├── charts/                 # Helm charts (kates, kafka-cluster, monitoring, …)
+├── config/                 # Kubernetes manifests and chaos experiments
+├── scripts/                # Cluster and image management shell utilities
+├── docs/                   # The Definitive Guide, tutorials, assets
 └── Makefile                # Top-level orchestration
 ```
 
