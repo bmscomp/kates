@@ -59,7 +59,7 @@ graph TB
 
 The `connect-cluster` chart lives at `charts/connect-cluster/` and produces the Strimzi `KafkaConnect` and `KafkaConnector` resources (plus an optional chart-managed `KafkaUser`):
 
-```
+```text
 charts/connect-cluster/
 ├── Chart.yaml                          # v1.2.0, appVersion 4.2.0
 ├── values.yaml                         # Production defaults
@@ -173,7 +173,6 @@ These topics are automatically created by Connect workers on first startup. The 
 ::: {.callout-important}
 Never delete the offsets topic. If deleted, all source connectors lose their position and will re-snapshot their entire database on restart.
 :::
-
 
 ### Authentication
 
@@ -368,7 +367,6 @@ connectors:
 The `tasksMax` for a Debezium PostgreSQL connector must always be `1`. PostgreSQL logical replication uses a single replication slot per connector — multiple tasks would cause duplicate events or slot conflicts.
 :::
 
-
 ### External Configuration (Secrets)
 
 The chart enables three Kafka config providers on every worker — `file`, `dir`, and `secrets` (Strimzi's `KubernetesSecretConfigProvider`):
@@ -519,7 +517,6 @@ extraConfig:
 EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the Connect producer. The krafter cluster satisfies both by default.
 :::
 
-
 ### When to Disable EOS
 
 | Scenario | Recommendation |
@@ -586,7 +583,6 @@ This chain:
 The `ExtractNewRecordState` SMT is almost always recommended for Debezium connectors. Without it, downstream consumers must understand the full Debezium envelope schema.
 :::
 
-
 ---
 
 ## Schema Registry Integration
@@ -634,7 +630,7 @@ config:
 
 The chart automatically computes the full Schema Registry URL from the service name, port, path, and cluster domain:
 
-```
+```text
 http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompat/v7
 ```
 
@@ -650,7 +646,6 @@ http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompa
 ::: {.callout-warning}
 Changing the converter from `JsonConverter` to `AvroConverter` on an existing connector requires reprocessing all data. The existing JSON records in Kafka are not automatically re-serialized. Plan a migration window with a new topic prefix.
 :::
-
 
 ---
 
@@ -696,7 +691,6 @@ connectors:
 ::: {.callout-caution}
 Setting `errors.tolerance: all` without a DLQ silently drops bad records. Always configure a DLQ topic when using tolerant error handling.
 :::
-
 
 ---
 
@@ -780,6 +774,5 @@ This is useful for:
 ::: {.callout-note}
 Cross-database sync introduces eventual consistency. The sink always lags behind the source by the time it takes to process through Kafka. Monitor `kafka_consumergroup_lag` to measure the delay.
 :::
-
 
 ---

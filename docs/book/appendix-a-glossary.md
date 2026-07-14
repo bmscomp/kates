@@ -23,8 +23,7 @@ Quick reference for terms used throughout this book.
 | **Drain Cleaner** | Strimzi component that intercepts Kubernetes node drain events and gracefully rolls Kafka pods instead of killing them |
 | **emptyDir** | A Kubernetes volume type that provides an empty directory backed by the node's filesystem. Used for ephemeral writable paths under read-only root filesystems |
 | **Entity Operator** | Strimzi component running both the Topic Operator and User Operator in a single pod |
-| **Game Day** | A structured chaos engineering session with defined hypotheses, controlled experiments, and documented findings |
-| **GameDay** | An automated 7-phase validation pipeline (pre-flight → baseline → chaos → observe → recover → post-flight → report) run via `make gameday` |
+| **Game Day** | A structured chaos engineering session with defined hypotheses, controlled experiments, and documented findings; Kates automates it as a 7-phase pipeline (pre-flight → baseline → chaos → observe → recover → post-flight → report) run via `make gameday` |
 | **GraalVM Native Image** | An ahead-of-time compilation technology that compiles Java applications into standalone native binaries. Reduces startup time from seconds to milliseconds. The Kates backend supports native image builds for faster cold starts |
 | **gRPC** | Google Remote Procedure Call — a high-performance binary protocol using HTTP/2 and Protocol Buffers for service-to-service communication |
 | **Heatmap** | A visualization showing the full latency distribution over time. Each row is one second; each column is a latency bucket |

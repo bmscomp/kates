@@ -33,6 +33,9 @@ jobs:
       - name: Verify book version matrix matches repo pins
         run: ./scripts/gen-version-matrix.sh --check
 
+      - name: Verify book style rules
+        run: ./scripts/check-book-style.sh
+
   link-check:
     name: Markdown Link Check
     runs-on: ubuntu-latest

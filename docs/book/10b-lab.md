@@ -20,7 +20,7 @@ kates lab
 
 Lab splits the terminal into two panes:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │  Kates Lab  ·  Interactive Performance Tuning  →  URL   │
 ├──────────────────────────┬──────────────────────────────┤
@@ -104,7 +104,7 @@ Each completed test creates an **iteration** — a snapshot of parameters and re
 
 While a test runs, the status bar shows the iteration number and elapsed time, updating every second:
 
-```
+```text
 ⏳ Running iteration #4…  (12s)
 ```
 
@@ -116,7 +116,7 @@ Throughput and latency metrics appear once the test completes.
 
 Press `d` to see a side-by-side comparison of the last two iterations (or the currently pinned pair):
 
-```
+```text
 Diff: #2 vs #3
 
 Metric            #2              #3              Change
@@ -137,7 +137,7 @@ The diff view highlights which parameters changed between the two iterations alo
 
 Press `c` to open the pin-select view, where you can pick **any** two iterations using `↑↓` for A and `←→` for B:
 
-```
+```text
 Select Iterations to Compare
 
   ↑↓ = iteration A    ←→ = iteration B
@@ -157,7 +157,7 @@ Auto-sweep systematically tests every value of a parameter while holding all oth
 2. Press `s`
 3. Lab runs a test for each value: 16384 → 32768 → 65536 → 131072 → 262144
 
-```
+```text
 ⟳ Sweep Batch Size = 65536 (3/5)
 ```
 
@@ -169,7 +169,7 @@ The JVM needs time to JIT-compile hot code paths. The first 1–3 runs in a fres
 
 Press `W` to cycle the warmup count (1 → 2 → 3 → 4 → 5 → off):
 
-```
+```text
 🔥 Warmup: 2 iteration(s) before measuring
 ```
 
@@ -179,14 +179,13 @@ When you press `Enter`, Lab runs 2 silent warmup iterations (results discarded) 
 For stress tests with `acks=all`, set warmup to **2**. For quick load tests, **1** is usually enough.
 :::
 
-
 ## Median Mode (`m`)
 
 Even after warmup, individual runs vary due to GC pauses, I/O scheduling, and OS jitter. Median mode runs the **same configuration 3 times** and records only the median result (by throughput), eliminating outliers.
 
 Press `m` to start:
 
-```
+```text
 📊 Median mode: running 2/3…
 ```
 
@@ -196,14 +195,13 @@ After all 3 runs complete, a single iteration is added to the history with the m
 Median mode ignores the warmup setting: pressing `m` always runs exactly 3 back-to-back tests, with no warmup iterations inserted. Warmup applies only to tests started with `Enter`. In practice the first of the 3 median runs absorbs most of the warmup effect anyway.
 :::
 
-
 ## Export & Sessions
 
 ### CSV Export (`e`)
 
 Exports all iterations with full parameters to a timestamped CSV file:
 
-```
+```text
 ~/kates-lab-20260313-213045.csv
 ```
 
@@ -227,7 +225,7 @@ Press `x` during a running test to cancel it immediately. Lab sends a `POST /api
 
 If a test fails (network error, timeout, etc.), the status bar shows:
 
-```
+```text
 ✖ connection refused  ·  press r to retry
 ```
 

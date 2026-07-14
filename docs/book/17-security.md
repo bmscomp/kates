@@ -34,7 +34,6 @@ graph TD
 The default performance test listener (`plain`, port 9092) uses SCRAM authentication but **no TLS encryption**. This is intentional — TLS adds measurable CPU overhead, and performance baselines should isolate Kafka throughput from encryption cost. For production deployments, always use the `tls` listener (port 9093) or the `external` listener (port 9094, which enables TLS by default).
 :::
 
-
 ## Security Architecture Overview
 
 ```mermaid
@@ -99,7 +98,6 @@ kubectl get secret kafka-ui -n kafka -o jsonpath='{.data.password}' | base64 -d
 Kubernetes Secrets are base64-encoded, **not encrypted**. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password. This is why namespace-level RBAC and NetworkPolicies are not optional — they're the outer wall protecting your credentials.
 :::
 
-
 ### Password Rotation
 
 Strimzi does not automatically rotate SCRAM passwords, but you can trigger a rotation without downtime:
@@ -115,16 +113,15 @@ kubectl wait --for=condition=Ready kafkauser/kates-backend -n kafka --timeout=60
 kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d
 ```
 
-If your application runs in a different namespace and uses a Kyverno-synced copy of the secret, the sync policy will automatically propagate the new password. The application will pick up the new credentials on its next reconnection cycle.
+If your application runs in a different namespace and uses a Kyverno-synced copy of the secret, the sync policy propagates the new password automatically, and the application picks up the new credentials on its next reconnection cycle.
 
 ::: {.callout-caution}
 During the brief window between deleting the old Secret and the Entity Operator creating the new one, any application that restarts will fail to authenticate. Time your rotations during low-traffic periods, and ensure your application has retry logic for authentication failures.
 :::
 
-
 ### Cross-Namespace Credential Synchronization
 
-When a `KafkaUser` is created, Strimzi generates the credential Secret only in the namespace where the Strimzi operator and Kafka cluster reside (usually `kafka`). 
+When a `KafkaUser` is created, Strimzi generates the credential Secret only in the namespace where the Strimzi operator and Kafka cluster reside (usually `kafka`).
 
 If your application runs in a different namespace (e.g., `kates`), you must securely synchronize this Secret. **Do not copy it manually**, as Strimzi may rotate the password. Instead, use a Kyverno `ClusterPolicy` to automatically clone and synchronize the Secret:
 
@@ -195,7 +192,6 @@ Every Kafka operation (produce, consume, describe, create, delete) is checked ag
 The `kates-backend` user has superUser status because it needs to create test topics, manage consumer groups, and read cluster metadata during benchmark runs. In a production deployment, you would scope this down to only the specific topics and operations Kates requires.
 :::
 
-
 ### Adding a New Service
 
 When you onboard a new service to your Kafka cluster, follow the principle of least privilege — grant only the permissions the service actually needs. Here's a template:
@@ -236,7 +232,7 @@ The `patternType: prefix` is key — it means the service can access any topic o
 
 ### Granting Full Cluster Rights (Super-User)
 
-If you need to create a service account (like an administrator or automated testing tool) that has **full rights** across the entire Kafka cluster, you must explicitly grant it `All` operations on the `cluster`, `topic`, and `group` resources. 
+If you need to create a service account (like an administrator or automated testing tool) that has **full rights** across the entire Kafka cluster, you must explicitly grant it `All` operations on the `cluster`, `topic`, and `group` resources.
 
 Create a file named `kafka-admin-user.yaml` with the following content:
 
@@ -274,7 +270,7 @@ Apply this file to your cluster:
 kubectl apply -f kafka-admin-user.yaml
 ```
 
-Once the Strimzi Operator processes the resource, it will automatically generate a Kubernetes Secret in the `kafka` namespace with the credentials. You can retrieve the generated SCRAM password using:
+Once the Strimzi Operator processes the resource, it generates a Kubernetes Secret in the `kafka` namespace with the credentials. You can retrieve the generated SCRAM password using:
 ```bash
 kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -d
 ```
@@ -330,7 +326,6 @@ Set up a Prometheus alert for certificates expiring within 30 days:
 This alert is an approximation, not a measurement of the certificate itself. `kube_secret_created` reports when the Secret was **first created** — not the certificate's `NotAfter` date — and the hardcoded `157680000` seconds mirrors the chart's 1825-day CA validity (`clusterCa.validityDays`). Strimzi renews certificates by updating the Secret in place, so the metric never resets: after the first in-place renewal the alert fires permanently, and it drifts silently if you change the validity period. Treat the `openssl x509 -noout -dates` check above as the source of truth.
 :::
 
-
 ## Audit Logging
 
 Kafka's authorizer can log every authorization decision — who accessed what, and when. The authorizer itself is already configured on the krafter cluster: Strimzi derives it from `spec.kafka.authorization` (`type: simple`), and it does not allow `authorizer.class.name` to be set directly in the `config` section — unsupported keys placed there are filtered out. What you control is the log level of `kafka.authorizer.logger`, which lives under `spec.kafka.logging` in the Kafka CR:
@@ -352,7 +347,6 @@ At the default `INFO` level the authorizer logs denied operations only. At `DEBU
 ::: {.callout-tip}
 For lighter-weight auditing, Kates records every mutating operation issued through the backend — test creates and deletes, topic changes, disruption runs — in its audit log. Inspect the trail with `kates audit`, filtering with `--type` and `--since`.
 :::
-
 
 ## Network Policies
 
@@ -460,7 +454,6 @@ Per-user quotas prevent denial-of-service from misbehaving clients. Without quot
 The `litmus-chaos` user intentionally has no quotas. Chaos experiments sometimes need to generate burst traffic to test broker behavior under pressure. Limiting the chaos agent would defeat the purpose.
 :::
 
-
 ## Kyverno Policy Integration & Admission Control
 
 The Kates platform integrates **Kyverno** as a Kubernetes-native policy engine for enforcing security standards via admission control. Think of Kyverno as a security guard at the door of your cluster — it inspects every resource creation and modification request and either fixes it, approves it, or rejects it.
@@ -516,7 +509,6 @@ The `kates-pod-security-standards` policy combines **mutation** (auto-patching) 
 ::: {.callout-note}
 Mutation uses the `+(key)` conditional anchor syntax — values are injected only if the field is not already set. This prevents Kyverno from overwriting explicitly declared security contexts. If a developer explicitly sets `runAsUser: 5000`, Kyverno respects that choice.
 :::
-
 
 ### Cosign Image Verification
 
@@ -601,7 +593,6 @@ All Kyverno policies support two operational modes, controlled by the `kyvernoPo
 Start with `Audit` mode. Review the `PolicyReport` violations with `kates kyverno violations` to see what would break, then switch to `Enforce` once you've resolved all legitimate violations. Jumping straight to `Enforce` on a running cluster is a recipe for cascading failures.
 :::
 
-
 Switch modes at runtime using the Kates CLI (see below) or by patching the Helm values.
 
 ### Kates CLI: `kyverno` Subcommands
@@ -637,7 +628,6 @@ kates kyverno audit kates-pod-security-standards
 - For a full index of Kyverno-related troubleshooting, see [Troubleshooting Index](appendix-b-troubleshooting.md#deployment-issues).
 :::
 
-
 ## Security Checklist
 
 Use this checklist when auditing your deployment. Each item links to the section that explains how to verify it:
@@ -655,13 +645,13 @@ Use this checklist when auditing your deployment. Each item links to the section
 
 ### Validating Policy Compliance
 
-To automate the verification of Kyverno policies, Strimzi operator health, and NetworkPolicy connectivity, you can use the built-in `make` target. This script will ensure your generic cluster is not blocking the Kafka deployment:
+To automate the verification of Kyverno policies, Strimzi operator health, and NetworkPolicy connectivity, you can use the built-in `make` target. The target verifies that your generic cluster is not blocking the Kafka deployment:
 
 ```bash
 make kafka-verify-policies
 ```
 
-This script will:
+The target performs these checks:
 1. Scan the `kafka` namespace events for any Kyverno rejections.
 2. Verify the Strimzi Operator is `Running`.
 3. Check the Kafka cluster CR status to ensure it successfully reached the `Ready` state.

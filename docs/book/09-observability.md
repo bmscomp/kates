@@ -80,7 +80,6 @@ Finally, open the **Replication** row of the **Kafka Performance Testing** dashb
 Get in the habit of following this sequence — cluster health → performance → internals → replication — after every test. It takes 60 seconds and catches problems that aggregate metrics hide. If a test result surprises you, the dashboards will almost always explain why.
 :::
 
-
 ---
 
 ## Kafka Grafana Dashboards
@@ -167,7 +166,7 @@ The **Strimzi Operator & Kafka Connect** dashboard (`strimzi-operator-dashboard.
 
 | Panel | Metric | Alert Level |
 |-------|--------|:---:|
-| Reconciliation p99 | `strimzi_reconciliations_duration_seconds_bucket` | > 120s = warning |
+| Reconciliation P99 | `strimzi_reconciliations_duration_seconds_bucket` | > 120s = warning |
 | Success/failure rate | `strimzi_reconciliations_{successful,failed}_total` | > 3 failures in 15m |
 | Queue depth | Pending reconciliations | > 20 = critical |
 | Resources per kind | `strimzi_resources{kind=...}` | Informational |
@@ -175,7 +174,7 @@ The **Strimzi Operator & Kafka Connect** dashboard (`strimzi-operator-dashboard.
 | Connect records/min | `kafka_connect_sink_task_sink_record_send_total` | Informational |
 | Connect error rate | `kafka_connect_task_error_total_errors_logged` | > 5 in 10m = warning |
 
-**Reconciliation p99** matters because Strimzi applies your desired state (topics, users, broker config) through a reconciliation loop. If reconciliations are slow, your configuration changes take longer to apply. **Queue depth** above 20 means the operator is overwhelmed — usually because too many resources changed simultaneously.
+**Reconciliation P99** matters because Strimzi applies your desired state (topics, users, broker config) through a reconciliation loop. If reconciliations are slow, your configuration changes take longer to apply. **Queue depth** above 20 means the operator is overwhelmed — usually because too many resources changed simultaneously.
 
 ---
 
@@ -193,8 +192,8 @@ This is your real-time view during active benchmark runs. Open it *while a test 
 |---|---|
 | Benchmark Status | Active runs, total records, total errors, SLA violations |
 | Throughput | Records/sec and MB/sec timeseries |
-| Latency | Percentiles (p50/p95/p99/p99.9) and max latency |
-| Phase Detail | Throughput by phase, latency by phase (p99), records by phase |
+| Latency | Percentiles (P50/P95/P99/P99.9) and max latency |
+| Phase Detail | Throughput by phase, latency by phase (P99), records by phase |
 | SLA & Errors | Error rate and SLA violations by metric/severity |
 
 **Template variables:** `$run_id`, `$test_type` — use these to drill down into a specific test run or compare different test types side by side.
@@ -208,10 +207,10 @@ Where the Benchmark dashboard shows one test, the Trend dashboard shows *all* te
 | Row | Panels |
 |---|---|
 | Throughput Trend | Peak throughput across runs |
-| Latency Trend | p99 and p99.9 latency trend |
+| Latency Trend | P99 and P99.9 latency trend |
 | Regression Detection | Total records per run |
-| Platform Stats | Tests completed (by outcome), test duration (p50/p95/p99), SLA pass/fail rate, records processed rate |
-| Disruptions | Disruption completion rate, disruption duration (p50/p95) |
+| Platform Stats | Tests completed (by outcome), test duration (P50/P95/P99), SLA pass/fail rate, records processed rate |
+| Disruptions | Disruption completion rate, disruption duration (P50/P95) |
 
 **Template variable:** `$test_type`
 
@@ -224,7 +223,7 @@ This dashboard monitors the Kates engine itself — not Kafka, not the test resu
 | Row | Panels |
 |---|---|
 | Pod Status | Pods ready, restart count, uptime, Postgres ready |
-| HTTP Server | Request rate (by method), error rate (4xx/5xx), request latency (p50/p95/p99) |
+| HTTP Server | Request rate (by method), error rate (4xx/5xx), request latency (P50/P95/P99) |
 | JVM | Heap memory (used/committed/max), GC pause duration, thread count (live/daemon/peak) |
 | Database | Agroal pool connections (active/available/max used), DB acquire time |
 | Resource Usage | CPU usage (per pod), memory RSS and working set |
@@ -243,7 +242,7 @@ This is the most specialized dashboard in the stack. It correlates LitmusChaos e
 | Kafka Health During Chaos | Broker pod status, restarts, CPU usage, memory usage |
 | Chaos Experiment History | Experiment duration over time |
 | RTO / RPO / Data Integrity | Producer RTO, consumer RTO, data loss %, RPO, E2E latency, producer throughput |
-| Kates During Chaos | Benchmark throughput overlay, p99 latency overlay, error rate during chaos |
+| Kates During Chaos | Benchmark throughput overlay, P99 latency overlay, error rate during chaos |
 
 The **RTO / RPO / Data Integrity** row is particularly valuable — it shows exactly how long your producers and consumers were unable to operate (RTO), how much data was at risk (RPO), and whether any messages were lost. These are the metrics that matter for disaster recovery SLAs.
 
@@ -262,7 +261,7 @@ Registered by `BenchmarkMetrics.java` and labeled with `run_id`, `test_type`, an
 | `kates_benchmark_active_runs` | Gauge | Number of active benchmark runs |
 | `kates_benchmark_throughput_rec_sec` | Gauge | Current throughput in records/sec |
 | `kates_benchmark_throughput_mb_sec` | Gauge | Current throughput in MB/sec |
-| `kates_benchmark_latency_ms` | Summary | Request latency distribution (p50/p95/p99/p99.9) |
+| `kates_benchmark_latency_ms` | Summary | Request latency distribution (P50/P95/P99/P99.9) |
 | `kates_benchmark_records_total` | Counter | Total records processed |
 | `kates_benchmark_errors_total` | Counter | Total errors |
 | `kates_benchmark_sla_violations` | Counter | SLA violation events |
@@ -274,12 +273,12 @@ Registered by `KatesMetrics.java` and persistent across benchmark runs. These me
 | Prometheus Metric | Type | Description |
 |---|---|---|
 | `kates_tests_completed_total` | Counter | Total tests completed (by test_type, outcome) |
-| `kates_tests_duration_seconds` | Timer | Test execution duration (p50/p95/p99) |
+| `kates_tests_duration_seconds` | Timer | Test execution duration (P50/P95/P99) |
 | `kates_tests_throughput_rec_sec` | Summary | Final throughput per completed test (records/sec) |
 | `kates_tests_throughput_mb_sec` | Summary | Final throughput per completed test (MB/sec) |
 | `kates_sla_evaluations_total` | Counter | SLA evaluation outcomes (pass/fail) |
 | `kates_disruptions_completed_total` | Counter | Disruption executions completed (by type, outcome) |
-| `kates_disruptions_duration_seconds` | Timer | Disruption execution duration (p50/p95) |
+| `kates_disruptions_duration_seconds` | Timer | Disruption execution duration (P50/P95) |
 | `kates_records_processed_total` | Counter | Cumulative records processed across all tests |
 
 ---
@@ -402,7 +401,7 @@ There is no output-file flag: when stdout is a terminal, the export is written t
 
 ### REST API
 
-```
+```text
 GET /api/tests/{id}/report/heatmap?format=json
 GET /api/tests/{id}/report/heatmap?format=csv
 ```
@@ -447,7 +446,7 @@ kates trend --type LOAD --metric throughputRecordsPerSec --days 30
 
 The CLI renders sparkline charts for quick visual assessment:
 
-```
+```text
   P99 Latency (ms) — LOAD tests, last 30 days
   ▁▁▂▁▁▁▂▁▃▁▁▁▁▂▁▁▁▅▂▁▁▁▁▂▁▁▁▃▁▁
   min: 8.2   avg: 12.5   max: 45.3   current: 11.8
@@ -530,7 +529,7 @@ Kates uses **OpenTelemetry** to propagate traces across the entire request lifec
 Tracing is configured in `application.properties`:
 
 | Property | Value | Purpose |
-|----------|-------|---------| 
+|----------|-------|---------|
 | `quarkus.otel.enabled` | `true` | Master switch for OpenTelemetry |
 | `quarkus.otel.exporter.otlp.endpoint` | `http://jaeger-collector.monitoring.svc:4317` | Jaeger collector address (`http://localhost:4317` in dev) |
 | `quarkus.otel.exporter.otlp.protocol` | `grpc` | Export spans via OTLP over gRPC |
@@ -541,11 +540,10 @@ Tracing is configured in `application.properties`:
 The `0.1` sampling rate in production means only 10% of requests generate traces. This is a deliberate trade-off — tracing adds overhead, and at high throughput you don't need every request traced to spot patterns. In development, 100% sampling is used so you can trace any request.
 :::
 
-
 ### What Gets Traced
 
 | Layer | Span Name Pattern | Details |
-|-------|-------------------|---------| 
+|-------|-------------------|---------|
 | JAX-RS | `GET /api/tests/{id}` | HTTP method + path |
 | Kafka Producer | `kates-results send` | Topic, partition, serialized size |
 | Kafka Consumer | `kates-dlq receive` | Topic, consumer group, lag |
@@ -605,7 +603,7 @@ This alert fires when a consumer group falls behind, meaning messages are being 
         description: "Consumer group {{ $labels.consumergroup }} has {{ $value }} messages lag."
 ```
 
-**When it fires:** Consumer lag exceeds 1 million messages for 15 continuous minutes (warning) or 10 million for 5 minutes (critical).  
+**When it fires:** Consumer lag exceeds 1 million messages for 15 continuous minutes (warning) or 10 million for 5 minutes (critical).
 **What to do:** Check that consumer pods are running (`kubectl get pods`). If they're healthy, consider scaling the consumer group or investigating whether the consumer is blocked on downstream dependencies.
 
 #### Offline Partitions
@@ -625,7 +623,7 @@ This is the most critical Kafka alert. Offline partitions mean messages can't be
         description: "{{ $value }} partitions are offline on cluster krafter."
 ```
 
-**When it fires:** Any partition has no leader for more than 2 minutes.  
+**When it fires:** Any partition has no leader for more than 2 minutes.
 **What to do:** Check which brokers are down (`kates cluster watch`). If a broker crashed, Kafka should elect new leaders automatically — if it doesn't within a couple of minutes, check the KRaft controller logs for election failures.
 
 #### Under-Replicated Partitions (Sustained)
@@ -645,7 +643,7 @@ Transient under-replication is normal during broker restarts. Sustained under-re
         description: "{{ $value }} partitions are under-replicated on {{ $labels.kubernetes_pod_name }}."
 ```
 
-**When it fires:** Any partition has ISR < replication factor for more than 5 minutes.  
+**When it fires:** Any partition has ISR < replication factor for more than 5 minutes.
 **What to do:** Check broker disk I/O and network throughput. Slow disks or saturated networks prevent followers from keeping up with the leader. Also verify that `min.insync.replicas` is correctly configured — see [The Cluster Under Test](03-cluster.md).
 
 ---

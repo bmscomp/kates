@@ -22,7 +22,6 @@ sudo codesign -f -s - /usr/local/bin/kates
 ```
 :::
 
-
 ## Common Workflows
 
 Before diving into individual commands, here are the workflows you'll use most often. Each one chains multiple commands into a real-world task — they're the reason the CLI exists as a unified tool rather than a collection of scripts.
@@ -37,13 +36,13 @@ kates health
 
 # 2. Run a baseline load test on the current Kafka version
 kates test create --type LOAD --records 100000 --wait
-# → note the test ID, e.g. t-a1b2c3
+# Note the test ID (e.g. t-a1b2c3)
 
 # 3. Perform the Kafka upgrade (outside of Kates)
 
 # 4. Run the same load test on the new version
 kates test create --type LOAD --records 100000 --wait
-# → note the new test ID, e.g. t-d4e5f6
+# Note the new test ID (e.g. t-d4e5f6)
 
 # 5. Compare the two runs side by side
 kates report diff t-a1b2c3 t-d4e5f6
@@ -125,7 +124,6 @@ kates gate --min-grade B --type LOAD --records 100000
 See [CI/CD Pipeline](appendix-c-cicd.md) for complete GitHub Actions, GitLab CI, and Jenkins pipeline examples.
 :::
 
-
 ## Configuration
 
 Kates CLI uses a config file at `~/.kates.yaml` for managing server contexts.
@@ -206,7 +204,7 @@ kates health
 
 Expected output:
 
-```
+```text
  Kates Health Dashboard — System Status: UP
 
   Engine
@@ -235,7 +233,7 @@ kates status
 
 Expected output:
 
-```
+```text
   ✓ local │ UP │ Kafka ✓ │ 12 configs │ 0 running │ 8 done │ 0 failed
 ```
 
@@ -251,7 +249,7 @@ kates version
 
 #### doctor
 
-Aliases: `preflight`, `check`
+Aliases: `pre-flight`, `check`
 
 Pre-flight cluster readiness checklist. The doctor command verifies that the Kates API is reachable, Kafka is connected, the broker count meets the 3-broker minimum, ISR health is clean, topics are listable, and benchmark backends are available. It also checks whether Kyverno is installed with active policies and no workload violations (Kyverno checks warn rather than fail — it's optional but recommended). Failing checks come with remediation hints. It's the first command to run when something "feels wrong" but `kates health` reports healthy.
 
@@ -263,7 +261,7 @@ kates check
 
 Expected output:
 
-```
+```text
  Kates Doctor — Pre-flight cluster readiness
 
   Check                Status   Detail
@@ -330,7 +328,7 @@ kates cluster info
 
 Expected output:
 
-```
+```text
  Kafka Cluster — Cluster ID: dQw4w9WgXcQ
 
   Overview
@@ -372,7 +370,7 @@ kates cluster topology -o json
 
 Expected output (abbreviated — full output includes all sections listed below):
 
-```
+```text
  Kafka Cluster Topology — Cluster: krafter  │  Kafka 4.2.0  │  KRaft Mode
 
   Kubernetes Platform
@@ -581,7 +579,7 @@ kates test scaffold export --all           # export every template
 
 | Template | Type | Description |
 |----------|------|-------------|
-| `quick-load` | LOAD | Quick smoke test — 50k records, 2 producers, p99 < 100ms gate |
+| `quick-load` | LOAD | Quick smoke test — 50k records, 2 producers, P99 < 100ms gate |
 | `production-load` | LOAD | Production-grade — 1M records, 8 producers, acks=all, lz4, strict SLA |
 | `stress-test` | STRESS | High-throughput stress — 5M records, 16 producers, find breaking points |
 | `endurance-soak` | ENDURANCE | 1-hour soak at 5k msg/s — detect GC pauses and log compaction issues |
@@ -608,7 +606,7 @@ Display the full report for a test run.
 
 Expected output:
 
-```
+```text
  Performance Report — Test: a1b2c3
 
   Throughput
@@ -710,7 +708,7 @@ kates trend phases --type SPIKE --days 30
 
 Expected output:
 
-```
+```text
  Trend Analysis — LOAD · p99LatencyMs · 30d window
 
   Baseline:   20.10
@@ -995,7 +993,7 @@ kates deploy status
 
 Expected output:
 
-```
+```text
   Operators & CRDs
     Strimzi Operator      [Healthy]
     Cert-Manager          [Healthy]
@@ -1025,7 +1023,7 @@ kates clean --force
 
 #### detect
 
-Aliases: `preflight-cluster`, `cluster-check`
+Aliases: `pre-flight-cluster`, `cluster-check`
 
 Deep cluster compatibility report for 3-AZ Kafka.
 
@@ -1363,7 +1361,7 @@ kates kafka topics
 
 Expected output:
 
-```
+```text
  Kafka Topics (42)
 
   Topic                    Type       Partitions   Rep. Factor   ISR Health

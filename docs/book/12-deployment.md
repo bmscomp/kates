@@ -11,7 +11,7 @@ This chapter walks you through those decisions. You'll start with the architectu
 ## Prerequisites
 
 | Tool | Version | Purpose |
-|------|---------|---------| 
+|------|---------|---------|
 | Docker | 20.10+ | Container runtime |
 | Kind | 0.20+ | Local Kubernetes cluster |
 | kubectl | 1.28+ | Kubernetes CLI |
@@ -48,7 +48,6 @@ The Kates stack uses four namespaces by default:
 ::: {.callout-tip}
 For local Kind deployments, the multi-namespace layout still works — `make all` prompts you to choose between a single-namespace topology (everything in `kates-stack`) and the isolated multi-namespace topology, and the underlying `kates deploy` command defaults to `--topology isolated`. The only time single-namespace makes sense is throwaway CI environments where fast teardown (`kubectl delete namespace`) matters more than isolation.
 :::
-
 
 ### NodePort vs Ingress vs LoadBalancer
 
@@ -145,7 +144,6 @@ The following table shows resource requirements per component. Use this to right
 ::: {.callout-important}
 The **Minimal** profile (16 GB) runs everything but leaves almost no headroom. If your laptop has 16 GB of RAM, close memory-heavy applications (browsers, IDEs with large projects) before running `make all`. Docker Desktop should be configured with at least 10 GB of memory allocation.
 :::
-
 
 ---
 
@@ -298,7 +296,6 @@ monitoring:
 These YAML overlays are passed via `helm upgrade --install -f values-eks.yaml` (or `-f values-gke.yaml`, etc.) alongside the base `values.yaml`. They override only the keys specified — all other defaults remain unchanged.
 :::
 
-
 ---
 
 ## Quick Deployment
@@ -384,12 +381,12 @@ make litmus
 
 # Access Litmus UI
 make chaos-ui
-# → http://localhost:9091 (admin/litmus)
+# Opens http://localhost:9091 (admin/litmus)
 
 # Run the chaos chart's Helm tests
 make litmus-test
 
-# Trigger the GameDay validation via the chaos chart
+# Trigger the Game Day validation via the chaos chart
 make litmus-gameday
 
 # Check chaos status
@@ -455,7 +452,6 @@ The `-Xms512m -Xmx2560m` settings give ZGC a 512 MB starting heap that can grow 
 If you observe `Allocation Stall` warnings in the Kates logs during stress tests, increase `-Xmx` to 3072m or 4096m. This gives ZGC more headroom to collect without stalling application threads.
 :::
 
-
 ### Kates CLI
 
 ```bash
@@ -472,7 +468,6 @@ make cli-clean
 ::: {.callout-note}
 **macOS:** `make cli-install` automatically strips provenance/quarantine extended attributes and ad-hoc codesigns the binary. See [CLI Reference](10-cli-reference.md#installation) for manual install instructions.
 :::
-
 
 ## Access Points
 
@@ -607,7 +602,7 @@ make kates-native
 
 # Verify
 kubectl logs deployment/kates -n kates | head -1
-# → started in 0.047s
+# Expect a startup line like: started in 0.047s
 ```
 
 | Target | Description |
@@ -620,10 +615,10 @@ kubectl logs deployment/kates -n kates | head -1
 | `make test-volume` | Run volume test |
 | `make test-capacity` | Run capacity test |
 | `make litmus-test` | Run the chaos chart's Helm tests |
-| `make litmus-gameday` | Trigger GameDay validation via the chaos chart |
+| `make litmus-gameday` | Trigger Game Day validation via the chaos chart |
 | `make chaos-status` | Check chaos status |
 | `make chaos-ui` | Port-forward the Litmus UI (localhost:9091) |
-| `make gameday` | Run automated GameDay validation pipeline |
+| `make gameday` | Run automated Game Day validation pipeline |
 | `make velero` | Deploy Velero backup |
 | `make chart-lint` | Lint Kates Helm chart |
 | `make ports` | Start port forwarding |
@@ -666,11 +661,11 @@ ACLs are declared via `KafkaUser` CRs (GitOps):
 Kates uses PostgreSQL as its persistent data store for everything that outlives a single test run. Specifically, it stores:
 
 - **Test run metadata** — timestamps, configuration snapshots, which topics and partitions were tested
-- **Performance results** — throughput measurements, latency percentiles (p50/p95/p99), error counts per run
+- **Performance results** — throughput measurements, latency percentiles (P50/P95/P99), error counts per run
 - **Historical baselines** — aggregated metrics used by the `kates report compare` and `kates test compare` commands to detect regressions
 - **Audit records** — who ran what test, when, and with which parameters
 
-Why PostgreSQL and not Kafka itself? Kafka is optimized for sequential append and time-windowed retention — it's not designed for the random-access queries that trend analysis and historical comparison require. PostgreSQL gives you indexed queries like "show me p99 latency for topic X across the last 30 runs" that would be impractical with Kafka's log-based storage.
+Why PostgreSQL and not Kafka itself? Kafka is optimized for sequential append and time-windowed retention — it's not designed for the random-access queries that trend analysis and historical comparison require. PostgreSQL gives you indexed queries like "show me P99 latency for topic X across the last 30 runs" that would be impractical with Kafka's log-based storage.
 
 #### Read-Only Filesystem Compliance
 
@@ -703,8 +698,7 @@ volumes:
 These `emptyDir` volumes are ephemeral — they do not survive pod restarts. This is safe because `/var/run/postgresql` and `/tmp` contain only runtime artifacts (sockets, lock files, temp data). Persistent data is stored on the PVC-backed `/var/lib/postgresql/data` volume.
 :::
 
-
-## GameDay Validation
+## Game Day Validation
 
 Run an automated 7-phase validation pipeline:
 

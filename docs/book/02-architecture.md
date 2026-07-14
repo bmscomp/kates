@@ -145,7 +145,7 @@ Key methods:
 | Method | Lock | Purpose |
 |--------|------|---------|
 | `recordLatency(latencyMs)` | Write | Record a single latency observation |
-| `getPercentile(p)` | Read | Compute p50/p95/p99 from cumulative distribution |
+| `getPercentile(p)` | Read | Compute P50/P95/P99 from cumulative distribution |
 | `exportBuckets()` | Read | Compress to 25 heatmap ranges (non-destructive) |
 | `snapshotAndReset()` | Write | Atomic capture + reset for windowed collection |
 
@@ -454,5 +454,4 @@ Distributed systems fail in partial ways. Kates is designed to degrade gracefull
 ::: {.callout-note}
 The backend's resilience depends on Kafka's durability guarantees. Because test results are written to `kates-results` (RF=3, `acks=all`) before being persisted to PostgreSQL, the Kafka topic serves as a durable write-ahead log. This is a deliberate architectural choice — Kafka is the source of truth, PostgreSQL is the queryable projection.
 :::
-
 

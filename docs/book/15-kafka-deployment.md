@@ -303,7 +303,7 @@ Users are declared as `KafkaUser` CRDs — Strimzi creates a Kubernetes Secret w
 
 **Secret flow:**
 
-```
+```text
 KafkaUser CR → Strimzi User Operator → Kubernetes Secret (name = user name)
                                        → SCRAM credentials in Kafka
                                        → ACLs applied to authorization
@@ -406,11 +406,9 @@ graph LR
 The operator ingress on port `8080` is intentionally open to **all sources** (not scoped to a specific namespace). This is required because Kubelet health probes originate from the node's host network — not from a pod with namespace labels. Restricting ingress to a namespace selector would silently block liveness and readiness checks, causing the operator pod to be restarted by the Kubelet.
 :::
 
-
 ::: {.callout-caution}
 **Do not set `generateNetworkPolicy: true` in the Strimzi Helm values** unless you also provide explicit egress rules in `operatorNetworkPolicy.egress`. When enabled with no egress rules, Strimzi creates an operator NetworkPolicy with empty egress — Kubernetes interprets this as "deny all outgoing traffic." The operator cannot reach the Kafka controllers' admin API (port 9090), causing the Kafka CR to remain `NotReady` indefinitely. Set `generateNetworkPolicy: false` and manage operator network policies manually.
 :::
-
 
 ## Operational Components
 
@@ -460,7 +458,7 @@ These metrics power the consumer lag alerts in `kafka-alerts.yaml`.
 
 The Drain Cleaner intercepts Kubernetes node drain events and gracefully rolls Kafka pods instead of abruptly killing them:
 
-```
+```text
 kubectl drain node → Drain Cleaner webhook intercepts →
   Annotates pod with strimzi.io/delete-pod-and-pvc →
   Strimzi operator performs controlled rolling restart →
@@ -510,8 +508,8 @@ The alerting rules in `kafka-alerts.yaml` cover six categories:
 
 | Alert | Condition | Severity |
 |-------|-----------|----------|
-| `KafkaRequestLatencyHigh` | p99 > 1s for 10min | warning |
-| `KafkaLogFlushLatencyHigh` | p99 > 500ms for 10min | warning |
+| `KafkaRequestLatencyHigh` | P99 > 1s for 10min | warning |
+| `KafkaLogFlushLatencyHigh` | P99 > 500ms for 10min | warning |
 | `KafkaRequestHandlerSaturated` | Handler idle < 30% for 10min | warning |
 | `KafkaISRShrinkRate` | ISR shrinking for 5min | warning |
 
@@ -610,7 +608,7 @@ helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka
 
 **Cause:** The `kafka-ui` Secret is created by the Strimzi Entity Operator (User Operator sub-component) when it reconciles the `KafkaUser` CR. The dependency chain is:
 
-```
+```text
 Kafka CR Ready → Entity Operator deploys → User Operator reconciles KafkaUser → Secret created
 ```
 

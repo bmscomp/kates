@@ -53,7 +53,6 @@ You need a running Kubernetes cluster with:
 If you are using a **managed Kubernetes service** (EKS, GKE, AKS), the StorageClasses are usually pre-configured (e.g., `gp3` on AWS, `standard-rw` on GKE). For local Kind clusters, you must create them manually — see section 3.1.
 :::
 
-
 ### 1.3 Namespaces
 
 The chart deploys everything into a single namespace (default: `kafka`). Create it before installing:
@@ -111,7 +110,6 @@ The Kates backend chart (`charts/kates`) ships additional `ClusterPolicy` resour
 ::: {.callout-tip}
 Start with `podSecurityPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Security & Compliance](17-security.md) for details on each policy.
 :::
-
 
 ---
 
@@ -312,7 +310,6 @@ The CLI automatically:
 Use `kates deploy` for interactive development. Use direct Helm commands (below) in CI pipelines where you need fine-grained control.
 :::
 
-
 **Alternative — Direct Helm installation:**
 
 With the Strimzi operator already installed (section 3.2), install the chart:
@@ -364,7 +361,6 @@ You should see pods appear in this order:
 The initial deployment takes **3–8 minutes**. The operator generates TLS certificates, configures the KRaft quorum, and waits for each broker to join the cluster sequentially. This is normal.
 :::
 
-
 ---
 
 ## 4. Verification
@@ -395,7 +391,7 @@ kubectl get kafkanodepools -n kafka \
 
 Expected:
 
-```
+```text
 NAME              REPLICAS   ROLES        READY
 brokers-alpha     1          broker       True
 brokers-gamma     1          broker       True
@@ -447,7 +443,7 @@ The test suite includes:
 
 Any pod in an allowed namespace can connect using the internal bootstrap address:
 
-```
+```text
 krafter-kafka-bootstrap.kafka.svc:9092  (plain + SCRAM)
 krafter-kafka-bootstrap.kafka.svc:9093  (TLS + mTLS)
 ```
@@ -713,7 +709,6 @@ Every template file in the chart and what it produces:
 Many resources are opt-in via boolean flags in `values.yaml`. A minimal installation with only core CRDs creates ~15 resources. A full production deployment with all features enabled creates 50+ resources.
 :::
 
-
 ---
 
 ## 9. Kafka Listeners & Authentication
@@ -803,7 +798,6 @@ kafka:
 When adding or removing listeners, the Strimzi operator performs a **rolling restart** of all brokers. Plan listener changes during a maintenance window.
 :::
 
-
 ### 9.4 Bootstrap Addresses
 
 Each listener gets its own bootstrap service. Use these addresses in your client configurations:
@@ -888,7 +882,6 @@ kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base6
 ::: {.callout-important}
 Secrets are only created after the Kafka cluster reaches `Ready` state. If secrets are missing, check that the Entity Operator pod is running (see [Section 16: Troubleshooting](#16-troubleshooting)).
 :::
-
 
 ---
 
@@ -984,7 +977,6 @@ After `helm upgrade`, the broker NetworkPolicy is regenerated with the new ingre
 The `allowedClientNamespaces` setting uses `namespaceSelector` with broad pod selectors. Only add namespaces you trust, as **all pods** in the namespace will be able to reach Kafka brokers.
 :::
 
-
 ### 11.5 Disabling Network Policies
 
 For development or Kind clusters where NetworkPolicy enforcement isn't needed:
@@ -997,7 +989,6 @@ networkPolicies:
 ::: {.callout-warning}
 Never disable network policies in production. They are a critical layer of defense-in-depth.
 :::
-
 
 ---
 
@@ -1058,10 +1049,10 @@ The chart creates a single `PrometheusRule` resource with 17 alerts organized in
 | | `KafkaConsumerGroupLagCritical` | critical | > 10M messages lag | 5m | Consumer severely behind — likely stuck or dead |
 | **kafka.kraft** | `KafkaRaftLeaderElectionRate` | warning | > 0.5 elections/s | 5m | Frequent leader elections indicate controller instability |
 | | `KafkaRaftUncommittedRecords` | warning | > 1000 uncommitted | 5m | Metadata backlog — controllers may be overloaded |
-| **kafka.network** | `KafkaRequestLatencyHigh` | warning | p99 > 1000ms | 10m | Slow requests — disk I/O, network, or overloaded brokers |
+| **kafka.network** | `KafkaRequestLatencyHigh` | warning | P99 > 1000ms | 10m | Slow requests — disk I/O, network, or overloaded brokers |
 | **strimzi.operator** | `StrimziOperatorDown` | critical | operator unreachable | 5m | Operator down — no reconciliation of Kafka CRs |
 | **kafka.replication** | `KafkaISRShrinkRate` | warning | ISR shrink > 0/s | 5m | Replicas falling out of sync — network or disk problems |
-| **kafka.performance** | `KafkaLogFlushLatencyHigh` | warning | p99 > 500ms | 10m | Slow disk writes — check I/O scheduler and disk health |
+| **kafka.performance** | `KafkaLogFlushLatencyHigh` | warning | P99 > 500ms | 10m | Slow disk writes — check I/O scheduler and disk health |
 | | `KafkaRequestHandlerSaturated` | warning | idle < 30% | 10m | Request handlers over 70% busy — add threads or brokers |
 | **kafka.cruisecontrol** | `CruiseControlAnomalyDetected` | warning | > 0 anomalies/10m | 5m | Cruise Control detected cluster imbalance or failures |
 | **kafka.certificates** | `KafkaCertificateExpiringSoon` | warning | < 30 days to expiry | 1h | Certificate renewal needed — auto-renewal should handle this |
@@ -1073,7 +1064,7 @@ The chart creates 4 Grafana dashboards as ConfigMaps with the `grafana_dashboard
 
 | Dashboard | ConfigMap | Key Panels | Controlled By |
 |-----------|-----------|------------|---------------|
-| **Broker Overview** | `kafka-broker-dashboard` | Messages in/out rate, bytes in/out, request latency p99, ISR metrics, disk usage | `dashboards.brokerDashboard` |
+| **Broker Overview** | `kafka-broker-dashboard` | Messages in/out rate, bytes in/out, request latency P99, ISR metrics, disk usage | `dashboards.brokerDashboard` |
 | **KRaft Controller** | `kafka-kraft-dashboard` | Leader election rate, uncommitted records, metadata log size, quorum health | `dashboards.kraftDashboard` |
 | **Cruise Control** | `kafka-cruise-control-dashboard` | Anomaly count, rebalance status, optimization goals, broker capacity | `dashboards.cruiseControlDashboard` |
 | **Kafka Connect** | `kafka-connect-dashboard` | Connector status, task failures, source/sink throughput, offset commit rate | `dashboards.connectDashboard` |
@@ -1124,7 +1115,6 @@ crdUpgrade:
 The Job runs with a dedicated `ServiceAccount` and `ClusterRole` scoped only to CRD read/write. It cleans itself up after success (`hook-delete-policy: before-hook-creation,hook-succeeded`).
 :::
 
-
 ### 13.2 Drain Cleaner
 
 **Why it exists:** When a Kubernetes node is drained (e.g., during upgrades), the kubelet evicts pods immediately. For Kafka, this can cause data loss if a broker is killed without transferring partition leadership first.
@@ -1151,7 +1141,6 @@ drainCleaner:
 ::: {.callout-tip}
 Enable Drain Cleaner in any environment where nodes are regularly drained — EKS managed node groups, GKE node auto-upgrades, or spot/preemptible instances.
 :::
-
 
 ### 13.3 Tiered Storage
 
@@ -1186,7 +1175,6 @@ tieredStorage:
 ::: {.callout-warning}
 Tiered storage requires Kafka 3.6+. Enabling it on older versions will cause broker startup failures.
 :::
-
 
 ### 13.4 SeaweedFS
 
@@ -1238,7 +1226,6 @@ backup:
 ::: {.callout-caution}
 Do **not** set `snapshotVolumes: true`. Broker PVC snapshots are crash-consistent and can corrupt data on restore. See the section "Why NetBackup is Incompatible with Kafka" in the chart's README (`charts/kafka-cluster/README.md`) for the full rationale.
 :::
-
 
 ### 13.6 External Secrets Operator
 
@@ -1297,7 +1284,6 @@ podSecurityPolicy:
 ::: {.callout-tip}
 Always start with `action: Audit`. Run `kubectl get policyreport -A` to see which pods would be blocked, then fix them before switching to `Enforce`.
 :::
-
 
 ### 13.8 Cruise Control & Rebalance
 
@@ -1363,7 +1349,6 @@ kafka:
 The `KafkaCertificateExpiringSoon` alert (see [Section 12.2](#122-prometheusrule-alerts-17-alerts)) fires 30 days before expiry. With a 180-day renewal window, you should never see this alert under normal operations — if you do, Strimzi's automatic renewal may be stuck.
 :::
 
-
 ### 13.10 Helm Test Suite (9 Tiers)
 
 The chart includes a comprehensive test suite executed via `kates test helm` (or `helm test kafka-cluster -n kafka`). Tests are organized in 9 tiers, running in order from basic connectivity to full observability validation:
@@ -1402,7 +1387,6 @@ helm test kafka-cluster -n kafka --filter name=krafter-test-produce-consume
 ::: {.callout-tip}
 If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authentication — check that the user secret exists and the SCRAM password is populated. Run `kubectl get kafkausers -n kafka` to verify user status.
 :::
-
 
 ---
 
@@ -1443,7 +1427,6 @@ The operator upgrades brokers one at a time, waiting for ISR to heal before proc
 Always test Kafka version upgrades in a staging environment first. Some versions change log format or protocol versions, which can affect client compatibility.
 :::
 
-
 ---
 
 ## 15. Uninstalling
@@ -1457,7 +1440,6 @@ helm uninstall kafka-cluster -n kafka
 ::: {.callout-caution}
 By default, the chart sets `helm.sh/resource-policy: keep` on the `Kafka` CR, `KafkaNodePool` CRs, `KafkaTopic` CRs, and `KafkaUser` CRs. This means `helm uninstall` **will not delete your data** or Kafka resources. This is intentional — it prevents accidental data loss.
 :::
-
 
 ### 15.2 Full Removal (Including Data)
 
