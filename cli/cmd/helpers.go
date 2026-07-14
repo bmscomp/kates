@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"golang.org/x/term"
 )
 

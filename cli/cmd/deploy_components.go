@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"golang.org/x/sync/errgroup"
 )
 

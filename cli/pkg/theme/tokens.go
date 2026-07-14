@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	import "github.com/klster/kates-cli/pkg/theme"
+//	import "github.com/bmscomp/kates/cli/pkg/theme"
 //
 //	style := lipgloss.NewStyle().Foreground(theme.Accent)
 package theme

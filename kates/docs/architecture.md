@@ -19,7 +19,7 @@ Three core principles shaped the architecture:
 The codebase is organized into packages that correspond directly to the major subsystems of the application. Each package has a clear boundary and a well-defined set of responsibilities. This is not an accident — the package structure is the architecture, made visible in the file system.
 
 ```
-com.klster.kates
+com.bmscomp.kates
 ├── api/                  REST endpoints (JAX-RS resources)
 │   ├── TestResource      POST/GET/DELETE /api/tests, GET /api/tests/backends
 │   ├── ClusterResource   GET /api/cluster/* (brokers, topics, consumer groups)

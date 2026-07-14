@@ -186,7 +186,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=Kates Backend
             org.opencontainers.image.description=Kafka Advanced Testing & Engineering Suite
-            org.opencontainers.image.vendor=klster
+            org.opencontainers.image.vendor=bmscomp
             org.opencontainers.image.version=${{ needs.meta.outputs.version }}
 
       - name: Collect per-platform image refs

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/go-pdf/fpdf"
-	"github.com/klster/kates-cli/internal/helm"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/internal/helm"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
