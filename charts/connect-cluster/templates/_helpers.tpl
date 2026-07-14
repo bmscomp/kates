@@ -113,6 +113,39 @@ Defaults to the Connect cluster namespace if not set.
 {{- end -}}
 
 {{/*
+Schema Registry namespace — defaults to the Kafka namespace (consistent
+with the NetworkPolicy egress rule).
+*/}}
+{{- define "connect-cluster.schemaRegistryNamespace" -}}
+{{- .Values.schemaRegistry.namespace | default (include "connect-cluster.kafkaNamespace" .) -}}
+{{- end -}}
+
+{{/*
+Metrics ConfigMap name. When the chart creates the ConfigMap
+(metricsConfig.create=true) it defaults to <fullname>-metrics; otherwise
+an existing ConfigMap name must be provided via metricsConfig.configMapName.
+*/}}
+{{- define "connect-cluster.metricsConfigMapName" -}}
+{{- if .Values.metricsConfig.configMapName -}}
+{{- .Values.metricsConfig.configMapName -}}
+{{- else if .Values.metricsConfig.create -}}
+{{- printf "%s-metrics" (include "connect-cluster.fullname" .) -}}
+{{- else -}}
+kafka-metrics
+{{- end -}}
+{{- end -}}
+
+{{/*
+Tracing OTLP egress port, parsed from tracing.endpoint (default 4317).
+*/}}
+{{- define "connect-cluster.tracingEgressPort" -}}
+{{- $hostport := .Values.tracing.endpoint | default "" | replace "https://" "" | replace "http://" "" | replace "grpc://" "" -}}
+{{- $hostport = splitList "/" $hostport | first -}}
+{{- $parts := splitList ":" $hostport -}}
+{{- if gt (len $parts) 1 -}}{{ last $parts }}{{- else -}}4317{{- end -}}
+{{- end -}}
+
+{{/*
 Kafka bootstrap servers FQDN (SASL_PLAINTEXT port 9092).
 Usage: {{ include "connect-cluster.bootstrapServers" . }}
 */}}

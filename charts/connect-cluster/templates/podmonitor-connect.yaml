@@ -13,7 +13,9 @@ metadata:
 spec:
   selector:
     matchLabels:
-      strimzi.io/name: {{ $clusterName }}
+      # Strimzi labels Connect pods <cluster>-connect
+      strimzi.io/name: {{ $clusterName }}-connect
+      strimzi.io/kind: KafkaConnect
   podMetricsEndpoints:
     - port: tcp-prometheus
       path: /metrics
