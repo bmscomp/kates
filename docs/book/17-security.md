@@ -81,7 +81,7 @@ Each listener enforces a specific authentication mechanism. The choice of listen
 | Listener | Port | Auth | Protocol | Clients | When to Use |
 |----------|------|------|----------|---------|-------------|
 | `plain` | 9092 | SCRAM-SHA-512 | SASL_PLAINTEXT | Kates, Kafka UI, Apicurio | Performance testing baselines (no TLS overhead) |
-| `tls` | 9093 | mTLS (certificate) | SASL_SSL | Encrypted internal | When you need wire encryption between services |
+| `tls` | 9093 | mTLS (certificate) | SSL | Encrypted internal | When you need wire encryption between services |
 | `external` | 9094 | SCRAM-SHA-512 | SASL_SSL | External tools, CI | Access from outside the Kubernetes cluster |
 
 ### SCRAM-SHA-512
@@ -172,10 +172,12 @@ Kafka uses **simple ACL authorization** with principal-based access control:
 
 ```mermaid
 graph LR
-    User[KafkaUser] -->|"maps to"| Principal["Principal<br/>CN=user-name"]
+    User[KafkaUser] -->|"maps to"| Principal["Principal<br/>User:user-name"]
     Principal -->|"checked against"| ACL["ACL Rules<br/>(resource, operation, host)"]
     ACL -->|"allows/denies"| Resource["Topic / Group / Cluster"]
 ```
+
+A `KafkaUser` authenticating with SCRAM-SHA-512 maps to the principal `User:<username>`. Only users with `authentication.type: tls` get certificate-based principals, whose name is the certificate's Distinguished Name (e.g., `User:CN=my-service`).
 
 Every Kafka operation (produce, consume, describe, create, delete) is checked against the ACL list. If no matching rule is found, the operation is denied by default. This is a **deny-by-default** model — you must explicitly grant every permission.
 
@@ -183,10 +185,11 @@ Every Kafka operation (produce, consume, describe, create, delete) is checked ag
 
 | User | Principal | Access Level | Resources | Quotas |
 |------|-----------|-------------|-----------|--------|
-| `kates-backend` | CN=kates-backend | **superUser** | All (bypasses ACLs) | None |
-| `kafka-ui` | CN=kafka-ui | Read-only | All topics, all groups, cluster describe | 1MB/s produce, 50MB/s consume |
-| `apicurio-registry` | CN=apicurio-registry | Scoped R/W | `__apicurio*` topics, `apicurio*` groups | 10MB/s produce, 20MB/s consume |
-| `litmus-chaos` | CN=litmus-chaos | Full CRUD | All topics, `litmus*` groups, cluster describe | None |
+| `kates-backend` | User:kates-backend | **superUser** | All (bypasses ACLs) | None |
+| `kafka-ui` | User:kafka-ui | Read-only | All topics, all groups, cluster describe | 1MB/s produce, 50MB/s consume |
+| `apicurio-registry` | User:apicurio-registry | Scoped R/W | `__apicurio*`, `kafkasql-*`, `registry-*` topics, `apicurio*` groups | 10MB/s produce, 20MB/s consume |
+| `litmus-chaos` | User:litmus-chaos | Full CRUD | All topics, `litmus*` groups, cluster describe | None |
+| `kates-connect` | User:kates-connect | Scoped R/W | `kates-*`, `cdc*` topics, `kates-connect*`, `connect-*` groups | 50MB/s produce, 50MB/s consume |
 
 ::: {.callout-note}
 The `kates-backend` user has superUser status because it needs to create test topics, manage consumer groups, and read cluster metadata during benchmark runs. In a production deployment, you would scope this down to only the specific topics and operations Kates requires.
@@ -286,10 +289,10 @@ graph TD
     ClusterCA --> ControllerCert["Controller Certs"]
     ClusterCA --> CCCert["Cruise Control Cert"]
 
-    ClientsCA["Clients CA<br/>5yr validity<br/>Renew 180d before expiry"] --> UserCert1["kates-backend cert"]
-    ClientsCA --> UserCert2["kafka-ui cert"]
-    ClientsCA --> UserCert3["apicurio-registry cert"]
+    ClientsCA["Clients CA<br/>5yr validity<br/>Renew 180d before expiry"] --> UserCert["Client certs for KafkaUsers<br/>with authentication.type: tls"]
 ```
+
+The Clients CA issues certificates only for `KafkaUser` resources with `authentication.type: tls`. The default managed users all authenticate with SCRAM-SHA-512, so they receive password Secrets rather than client certificates.
 
 | Property | Value | Purpose |
 |----------|-------|---------|
@@ -323,42 +326,52 @@ Set up a Prometheus alert for certificates expiring within 30 days:
     description: "Secret {{ $labels.secret }} in namespace {{ $labels.namespace }} will expire soon. Trigger a certificate renewal."
 ```
 
+::: {.callout-caution}
+This alert is an approximation, not a measurement of the certificate itself. `kube_secret_created` reports when the Secret was **first created** — not the certificate's `NotAfter` date — and the hardcoded `157680000` seconds mirrors the chart's 1825-day CA validity (`clusterCa.validityDays`). Strimzi renews certificates by updating the Secret in place, so the metric never resets: after the first in-place renewal the alert fires permanently, and it drifts silently if you change the validity period. Treat the `openssl x509 -noout -dates` check above as the source of truth.
+:::
+
+
 ## Audit Logging
 
-Kafka provides configurable audit logging for tracking who accessed what, and when. To enable audit logging on the krafter cluster, add the following to your Kafka CR's `config` section:
+Kafka's authorizer can log every authorization decision — who accessed what, and when. The authorizer itself is already configured on the krafter cluster: Strimzi derives it from `spec.kafka.authorization` (`type: simple`), and it does not allow `authorizer.class.name` to be set directly in the `config` section — unsupported keys placed there are filtered out. What you control is the log level of `kafka.authorizer.logger`, which lives under `spec.kafka.logging` in the Kafka CR:
 
 ```yaml
-config:
-  # Log all authorization decisions (allow and deny)
-  authorizer.class.name: org.apache.kafka.metadata.authorizer.StandardAuthorizer
-  # Log authorization decisions at DEBUG level
-  log4j.logger.kafka.authorizer.logger: "DEBUG, authorizerAppender"
+spec:
+  kafka:
+    logging:
+      type: inline
+      loggers:
+        rootLogger.level: INFO
+        # Kafka 4.x brokers use Log4j2: declare the logger by name, then set its level
+        logger.authorizer.name: kafka.authorizer.logger
+        logger.authorizer.level: DEBUG
 ```
 
-Once enabled, every produce, consume, and admin operation generates an audit entry that includes the principal, the resource, the operation, and the decision (ALLOWED or DENIED). These logs are invaluable during security incident investigations.
+At the default `INFO` level the authorizer logs denied operations only. At `DEBUG`, every produce, consume, and admin operation generates an audit entry that includes the principal, the resource, the operation, and the decision (ALLOWED or DENIED). These logs are invaluable during security incident investigations.
 
 ::: {.callout-tip}
-For lighter-weight auditing, Kates automatically logs all CLI operations to the `kates-audit` topic. You can inspect the audit trail with `kates kafka consume kates-audit --from-beginning`.
+For lighter-weight auditing, Kates records every mutating operation issued through the backend — test creates and deletes, topic changes, disruption runs — in its audit log. Inspect the trail with `kates audit`, filtering with `--type` and `--since`.
 :::
 
 
 ## Network Policies
 
-Network policies are your last line of defense. Even if an attacker compromises a pod in your cluster, network policies prevent that pod from reaching the Kafka brokers unless it's explicitly allowed. The `kafka` namespace enforces **default-deny** for both ingress and egress:
+Network policies are your last line of defense. Even if an attacker compromises a pod in your cluster, network policies prevent that pod from reaching the Kafka brokers unless it's explicitly allowed. The `kafka` namespace enforces **default-deny** ingress and egress on all Strimzi cluster pods (the policy selects the `app.kubernetes.io/part-of: strimzi-krafter` label rather than using an empty pod selector):
 
 ```mermaid
 graph TD
-    subgraph Default["default-deny (all pods)"]
+    subgraph Default["default-deny (Strimzi pods)"]
         DNS["allow-dns<br/>UDP/TCP 53"]
     end
 
     subgraph Broker Rules
         B1["kates namespace → 9092, 9093"]
-        B2["litmus namespace → 9092"]
-        B3["kafka-ui pod → 9092"]
-        B4["apicurio pod → 9092"]
-        B5["monitoring namespace → 9404"]
-        B6["any → 9094 (NodePort external)"]
+        B2["litmus namespace → 9092, 9093"]
+        B3["kafka-ui pod → 9092, 9093"]
+        B4["apicurio pod → 9092, 9093"]
+        B5["connect namespace → 9092, 9093"]
+        B6["monitoring namespace → 9404"]
+        B7["any → 9094 (NodePort external)"]
     end
 
     subgraph Controller Rules
@@ -366,7 +379,7 @@ graph TD
     end
 
     subgraph Operator Rules
-        O1["monitoring → 8080 (metrics)"]
+        O1["any → 8080 (kubelet probes, metrics)"]
         O2["operator → krafter pods"]
         O3["operator → K8s API (443, 6443)"]
     end
@@ -376,14 +389,18 @@ graph TD
 
 | Policy | Target | Ingress From | Ports |
 |--------|--------|-------------|-------|
-| `default-deny` | All pods | None | None |
-| `allow-dns` | All pods | — (egress only) | 53 UDP/TCP |
-| `kafka-brokers` | Broker pods | kates, litmus, kafka-ui, apicurio, monitoring | 9091–9094, 9404 |
-| `kafka-controllers` | Controller pods | krafter cluster pods | 9090, 9091 |
-| `strimzi-operator` | Operator pod | monitoring | 8080 |
+| `default-deny` | Strimzi cluster pods | None | None |
+| `allow-dns` | Strimzi cluster pods | — (egress only) | 53 UDP/TCP |
+| `kafka-brokers` | Broker pods | kates, litmus, kafka-ui, apicurio, connect, monitoring, operator | 9091–9094, 9404 |
+| `kafka-controllers` | Controller pods | krafter cluster pods, operator | 9090, 9091 |
+| `strimzi-operator` | Operator pod | Any (kubelet probes, metrics) | 8080 |
 | `kafka-ui` | Kafka UI pod | Any | 8080 |
 | `cruise-control` | CC pod | Operator, monitoring | 9090, 9404 |
 | `strimzi-drain-cleaner` | Drain Cleaner | Any (webhook) | 8443 |
+| `kafka-connect` | Connect pods | monitoring, kates | 8083, 9404 |
+| `kafka-mirror-maker` | MirrorMaker 2 pods | monitoring | 9404 |
+| `entity-operator` | Entity Operator pod | monitoring | 8080, 8081 |
+| `kafka-exporter` | Kafka Exporter pod | monitoring | 9404 |
 
 ### Testing Network Policies
 
@@ -436,6 +453,7 @@ Per-user quotas prevent denial-of-service from misbehaving clients. Without quot
 |------|:------------:|:------------:|:---------:|
 | `kafka-ui` | 1 MB/s | 50 MB/s | 10% |
 | `apicurio-registry` | 10 MB/s | 20 MB/s | 15% |
+| `kates-connect` | 50 MB/s | 50 MB/s | 25% |
 | `litmus-chaos` | Unlimited | Unlimited | Unlimited |
 
 ::: {.callout-note}
@@ -461,7 +479,7 @@ graph LR
 
 ### Cluster Policies
 
-Kates ships four `ClusterPolicy` resources, deployed conditionally when `kyvernoPolicy.enabled=true` in the Helm values:
+The kates chart ships four `ClusterPolicy` resources, deployed conditionally when `kyvernoPolicy.enabled=true` in the Helm values (the kafka-cluster and kates-chaos charts ship additional policies of their own):
 
 | Policy | Category | Severity | Description |
 |--------|----------|----------|-------------|
@@ -513,8 +531,7 @@ kyvernoPolicy:
       MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
       -----END PUBLIC KEY-----
     imagePatterns:
-      - "ghcr.io/bmscomp/kates-*"
-      - "ghcr.io/bmscomp/kates-tester*"
+      - "ghcr.io/bmscomp/*"
 ```
 
 When enabled, unsigned or tampered images from the specified registries are rejected at admission time. The policy also mutates image references to use digests (`mutateDigest: true`) for immutable deployments.
@@ -525,7 +542,7 @@ The `kates-generate-network-policies` policy implements **zero-trust networking*
 
 1. **`default-deny-ingress`** — blocks all inbound traffic
 2. **`default-deny-egress`** — blocks all outbound traffic
-3. **`allow-dns-egress`** — allows DNS resolution to `kube-system` on port 53
+3. **`allow-dns-egress`** — allows DNS egress on port 53 (UDP and TCP) to any namespace
 
 These policies are synchronized (`synchronize: true`) — Kyverno continuously reconciles them if they are manually deleted. This means even if someone accidentally (or maliciously) deletes the default-deny policies, they're automatically recreated.
 
@@ -537,6 +554,7 @@ Certain system and infrastructure namespaces are excluded from automatic Network
 |--------------------|--------|
 | `kube-system` | Core Kubernetes components |
 | `kube-public` | Public cluster metadata |
+| `kube-node-lease` | Node heartbeat Lease objects |
 | `kyverno` | Kyverno's own namespace |
 | `strimzi-operator` | Strimzi Operator requires API server and Kafka namespace egress |
 | `monitoring` | Prometheus must scrape metrics across all namespaces |

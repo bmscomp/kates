@@ -95,7 +95,9 @@ You should see the Kyverno admission controller, background controller, cleanup 
 
 **How Kyverno integrates with Kates:**
 
-When `kyvernoPolicy.enabled=true` is set in the kafka-cluster Helm chart values, the chart deploys four `ClusterPolicy` resources that leverage Kyverno's admission webhooks:
+When `podSecurityPolicy.enabled=true` is set in the kafka-cluster Helm chart values, the chart deploys the `kafka-pod-security-standards` `ClusterPolicy`, which mutates and validates workloads to enforce restricted Pod Security Standards — non-root, drop ALL capabilities, seccomp `RuntimeDefault`, no privilege escalation, no host namespaces.
+
+The Kates backend chart (`charts/kates`) ships additional `ClusterPolicy` resources, enabled via its own `kyvernoPolicy.*` values:
 
 | Policy | What It Does |
 |--------|-------------|
@@ -105,7 +107,7 @@ When `kyvernoPolicy.enabled=true` is set in the kafka-cluster Helm chart values,
 | `kates-generate-network-policies` | Automatically generates default-deny NetworkPolicies in new namespaces |
 
 ::: {.callout-tip}
-Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Chapter 17: Security & Compliance](17-security.md) for details on each policy.
+Start with `podSecurityPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Chapter 17: Security & Compliance](17-security.md) for details on each policy.
 :::
 
 
@@ -213,23 +215,24 @@ done
 
 **What this does:** Creates three StorageClasses, one per availability zone. The `WaitForFirstConsumer` binding mode ensures PVCs are bound only after a pod is scheduled, respecting node affinity.
 
-### 3.2 Step 2 — Add the Strimzi Helm Repository
+### 3.2 Step 2 — Install the Strimzi Operator
 
-The kafka-cluster chart has a **dependency** on the Strimzi operator chart. Helm needs to know where to find it:
+The kafka-cluster chart creates Strimzi custom resources, but it does **not** bundle the Strimzi operator — the operator must already be running in the cluster. If you deploy with `kates deploy` (section 3.4), the CLI installs the operator for you. To install it manually:
 
 ```bash
-helm repo add strimzi https://strimzi.io/charts/
-helm repo update
+helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  --version 1.0.0 \
+  --namespace strimzi-operator --create-namespace \
+  --set watchAnyNamespace=true \
+  --wait
 ```
 
-Then download the dependency:
+The chart's only Helm dependency is the optional SeaweedFS subchart, whose packaged archive (`charts/seaweedfs-3.68.0.tgz`) ships with the repository. To re-download it:
 
 ```bash
 cd charts/kafka-cluster
 helm dependency update
 ```
-
-This creates a `charts/strimzi-kafka-operator-1.0.0.tgz` file inside the chart directory. Helm will install the operator automatically when you install the chart.
 
 ### 3.3 Step 3 — Review and Customize Values
 
@@ -239,11 +242,13 @@ The chart ships with sensible defaults in `values.yaml`, but you should review k
 
 ```yaml
 clusterName: krafter       # Name of the Kafka cluster
-kafkaVersion: "4.1.1"      # Apache Kafka version
+kafkaVersion: "4.2.0"      # Apache Kafka version
 strimziVersion: "1.0.0"   # Strimzi operator version
 ```
 
 **Broker pools — define one pool per availability zone:**
+
+In the shipped `values.yaml`, `brokerPools` and `controllerPools` default to empty lists — run `kates detect --generate-values` to generate zone-matched pools for your cluster, or define them manually:
 
 ```yaml
 brokerPools:
@@ -287,8 +292,8 @@ The `kates deploy` command handles Strimzi operator installation, values file de
 # Detect your cluster topology and deploy
 kates deploy --topology isolated
 
-# With high availability (3 broker replicas per pool)
-kates deploy --topology isolated --ha
+# High availability (multi-AZ) is enabled by default; disable it for small clusters
+kates deploy --topology isolated --ha=false
 
 # Deploy Kafka + Kafka Connect in one shot
 kates deploy --topology isolated --with-kafka-connect
@@ -308,9 +313,7 @@ Use `kates deploy` for interactive development. Use direct Helm commands (below)
 
 **Alternative — Direct Helm installation:**
 
-There are two installation modes, depending on whether the Strimzi operator is already installed.
-
-**Mode A — Install everything (operator + cluster) in one shot:**
+With the Strimzi operator already installed (section 3.2), install the chart:
 
 ```bash
 helm upgrade --install kafka-cluster charts/kafka-cluster \
@@ -320,22 +323,17 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
   --wait
 ```
 
-This installs the Strimzi operator as a subchart and then creates all Kafka resources. The `--wait` flag tells Helm to block until all deployments are ready.
+The `--wait` flag tells Helm to block until all deployments are ready.
 
-**Mode B — Operator already installed (e.g., shared cluster):**
+If the Strimzi CRDs are managed externally (e.g., by a cluster admin), skip the chart's CRD upgrade hook:
 
 ```bash
 helm upgrade --install kafka-cluster charts/kafka-cluster \
   --namespace kafka \
-  --set strimziOperator.enabled=false \
   --set crdUpgrade.enabled=false \
   --timeout 600s \
   --wait
 ```
-
-Setting `strimziOperator.enabled=false` skips the operator subchart. This is the correct mode when:
-- A cluster admin already installed Strimzi at the cluster level
-- You're upgrading only the Kafka cluster resources
 
 ### 3.5 Step 5 — Watch the Deployment
 
@@ -345,11 +343,7 @@ After `helm install` or `helm upgrade` starts, open a second terminal and watch 
 kubectl get pods -n kafka -w
 ```
 
-Or use the kates CLI which shows deployment progress automatically:
-
-```bash
-kates kafka status
-```
+If you deployed with `kates deploy`, the CLI already shows per-component deployment progress in its own UI.
 
 You should see pods appear in this order:
 
@@ -459,27 +453,44 @@ krafter-kafka-bootstrap.kafka.svc:9093  (TLS + mTLS)
 Example — connect from a debug pod:
 
 ```bash
-kubectl run kafka-debug -it --rm --image=quay.io/strimzi/kafka:latest-kafka-4.1.1 \
+# Get the SCRAM password first (you'll paste it into the client config below):
+kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d
+
+kubectl run kafka-debug -it --rm --image=quay.io/strimzi/kafka:latest-kafka-4.2.0 \
   -n kafka -- /bin/bash
 
-# Inside the pod:
+# Inside the pod — create the client config with the SCRAM credentials:
+cat > /tmp/client.properties <<'EOF'
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="kates-backend" password="<password>";
+EOF
+
 bin/kafka-topics.sh --bootstrap-server krafter-kafka-bootstrap:9092 --list \
   --command-config /tmp/client.properties
 ```
 
 ### 5.2 From Outside the Cluster (NodePort)
 
-The `external` listener exposes Kafka on NodePort `32100`:
+The `external` listener is exposed as a NodePort service — Kubernetes assigns the port:
 
 ```bash
 # Get the node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
+# Get the assigned NodePort of the external bootstrap service
+NODE_PORT=$(kubectl get service krafter-kafka-external-bootstrap -n kafka \
+  -o jsonpath='{.spec.ports[0].nodePort}')
+
+# Extract the cluster CA certificate
+kubectl get secret krafter-cluster-ca-cert -n kafka \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/ca.crt
+
 # Get the SCRAM password
 PASSWORD=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)
 
 # Connect with kafkacat/kcat
-kcat -b ${NODE_IP}:32100 -X security.protocol=SASL_SSL \
+kcat -b ${NODE_IP}:${NODE_PORT} -X security.protocol=SASL_SSL \
   -X sasl.mechanism=SCRAM-SHA-512 \
   -X sasl.username=kates-backend \
   -X sasl.password=${PASSWORD} \
@@ -636,7 +647,7 @@ graph TD
             BNP["KafkaNodePool: brokers ×3"]
         end
         subgraph "Data Management"
-            T["KafkaTopic ×7"]
+            T["KafkaTopic ×8"]
             U["KafkaUser ×5"]
             RB["KafkaRebalance ×2"]
         end
@@ -649,7 +660,7 @@ graph TD
         subgraph "Security"
             NP["NetworkPolicy ×12"]
             SA["ServiceAccount + RBAC"]
-            KP["Kyverno ClusterPolicy ×4"]
+            KP["Kyverno ClusterPolicy"]
         end
         subgraph "Operations"
             DC["Drain Cleaner"]
@@ -672,7 +683,7 @@ Every template file in the chart and what it produces:
 | `kafka.yaml` | `Kafka` CR (cluster spec, listeners, CA, entity operator, Cruise Control, exporter) | Always |
 | `nodepool-controllers.yaml` | `KafkaNodePool` for controller pods (one per zone) | `controllerPools[]` |
 | `nodepool-brokers.yaml` | `KafkaNodePool` for broker pods (one per zone) | `brokerPools[]` |
-| `topics.yaml` | `KafkaTopic` × 7 (managed topic declarations) | `topics.enabled` |
+| `topics.yaml` | `KafkaTopic` × 8 (managed topic declarations) | `topics.enabled` |
 | `users.yaml` | `KafkaUser` × 5 (SCRAM users with ACLs and quotas) | `users.enabled` |
 | `rebalance.yaml` | `KafkaRebalance` × 2 (`full-rebalance` + `add-broker-rebalance`) | `rebalance.enabled` |
 | `networkpolicies.yaml` | `NetworkPolicy` × 12 (default-deny, DNS, broker, controller, operator, etc.) | `networkPolicies.enabled` |
@@ -689,7 +700,7 @@ Every template file in the chart and what it produces:
 | `seaweedfs.yaml` | SeaweedFS subchart resources (master, volume, filer) | `seaweedfs.enabled` |
 | `backup.yaml` | Velero `Schedule`, `Backup`, optional `PVC` | `backup.enabled` |
 | `external-secrets.yaml` | `SecretStore`, `PushSecret`, `ExternalSecret` | `externalSecrets.enabled` |
-| `pod-security-policy.yaml` | Kyverno `ClusterPolicy` × 4 (PSS, workload, image, network) | `podSecurityPolicy.enabled` |
+| `pod-security-policy.yaml` | Kyverno `ClusterPolicy` (`kafka-pod-security-standards` — restricted PSS) | `podSecurityPolicy.enabled` |
 | `tests/test-connection.yaml` | 9 test `Pod` specs (Helm test hooks, tiers 1–9) | Always (test hooks) |
 | `tests/test-performance.yaml` | Performance benchmark test pod | Always (test hooks) |
 | `tests/test-profiler.yaml` | JFR profiler test pod | Always (test hooks) |
@@ -809,7 +820,7 @@ This section documents every default topic and user the chart creates. You rarel
 
 ### 10.1 Default Topics
 
-The chart creates 7 topics, each designed for a specific data pipeline:
+The chart creates 8 topics, each designed for a specific data pipeline:
 
 | Topic | Partitions | Replicas | Retention | Compression | Cleanup | Purpose |
 |-------|:----------:|:--------:|:---------:|:-----------:|:-------:|---------|
@@ -820,6 +831,7 @@ The chart creates 7 topics, each designed for a specific data pipeline:
 | `kates-dlq` | 3 | 3 | forever | — | compact | Dead letter queue for failed messages (compacted to keep latest per key) |
 | `cdc-schema-history` | 1 | 3 | forever | — | compact | Debezium schema history for CDC connectors |
 | `cdc-heartbeat` | 1 | 3 | 1 day | — | delete | CDC liveness heartbeats (detects stalled connectors) |
+| `test-sink-topic` | 3 | 3 | 1 day | — | delete | Sink target for Kafka Connect sink connector validation |
 
 **Why these specific configurations?**
 
@@ -850,10 +862,10 @@ The chart creates 5 users with different permission levels:
 
 Quotas prevent a single user from monopolizing cluster resources. For example, `kafka-ui` is limited to 1 MB/s produce because a monitoring dashboard should never produce significant data. The `requestPercentage` quota limits the percentage of broker request handler threads the user can consume.
 
-To list all users using the kates CLI:
+To list all users:
 
 ```bash
-kates kafka users
+kubectl get kafkausers -n kafka -l strimzi.io/cluster=krafter
 ```
 
 ### 10.3 User Secrets
@@ -1222,7 +1234,7 @@ backup:
 ```
 
 ::: {.callout-caution}
-Do **not** set `snapshotVolumes: true`. Broker PVC snapshots are crash-consistent and can corrupt data on restore. See the README section "Why NetBackup is Incompatible with Kafka" for the full rationale.
+Do **not** set `snapshotVolumes: true`. Broker PVC snapshots are crash-consistent and can corrupt data on restore. See the section "Why NetBackup is Incompatible with Kafka" in the chart's README (`charts/kafka-cluster/README.md`) for the full rationale.
 :::
 
 
@@ -1264,14 +1276,13 @@ externalSecrets:
 
 **Why they exist:** Kubernetes deprecated PodSecurityPolicies (PSP) in v1.25. The chart uses [Kyverno](https://kyverno.io/) ClusterPolicies as a modern replacement, enforcing Pod Security Standards (PSS) at the `restricted` level.
 
-**4 ClusterPolicies:**
+**The ClusterPolicy:**
 
 | Policy | Validates / Mutates | Key Rules |
 |--------|:-------------------:|-----------|
 | `kafka-pod-security-standards` | Both | Non-root, drop ALL capabilities, seccomp RuntimeDefault, no privilege escalation, no host namespaces |
-| `kates-workload-standards` | Validate | Required labels, health probes, pinned image tags |
-| `kates-image-verification` | Validate | Cosign signature verification from trusted registries |
-| `kates-generate-network-policies` | Generate | Auto-creates default-deny NetworkPolicies in new namespaces |
+
+The `kates-workload-standards`, `kates-image-verification`, and `kates-generate-network-policies` policies listed in section 1.5 ship with the Kates backend chart (`charts/kates`), not with kafka-cluster.
 
 ```yaml
 podSecurityPolicy:
@@ -1387,7 +1398,7 @@ helm test kafka-cluster -n kafka --filter name=krafter-test-produce-consume
 ```
 
 ::: {.callout-tip}
-If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authentication — check that the user secret exists and the SCRAM password is populated. Run `kates kafka users` to verify user status.
+If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authentication — check that the user secret exists and the SCRAM password is populated. Run `kubectl get kafkausers -n kafka` to verify user status.
 :::
 
 
@@ -1406,7 +1417,6 @@ kates deploy --topology isolated
 # Alternative — direct Helm command
 helm upgrade kafka-cluster charts/kafka-cluster \
   --namespace kafka \
-  --set strimziOperator.enabled=false \
   --set crdUpgrade.enabled=false \
   --timeout 600s
 ```
@@ -1415,14 +1425,14 @@ The operator performs a **rolling restart** — one broker at a time, maintainin
 
 ### 14.2 Upgrading Kafka Version
 
-1. Update `values.yaml`:
+1. Update `values.yaml` with the new version (it must be supported by the installed Strimzi operator):
    ```yaml
-   kafkaVersion: "4.2.0"
+   kafkaVersion: "<new-version>"
    ```
 2. Run `helm upgrade` or `kates deploy --topology isolated`
 3. Monitor the rolling update:
    ```bash
-   kates kafka status
+   kubectl get pods -n kafka -w
    ```
 
 The operator upgrades brokers one at a time, waiting for ISR to heal before proceeding to the next broker.
@@ -1524,21 +1534,11 @@ kubectl logs -n kafka -l strimzi.io/name=krafter-entity-operator -c user-operato
 
 ```bash
 # ── Kates CLI (preferred) ────────────────────────────────────────
-# Cluster status (shows CR readiness, pod health, listeners)
-kates kafka status
-
-# List all managed topics with partition/replica info
+# List all topics with partition, replication, and ISR health
 kates kafka topics
 
-# List all managed users with ACL summary
-kates kafka users
-
-# Show broker details (node pools, zones, replicas)
+# List brokers with ID, host, port, rack, and controller status
 kates kafka brokers
-
-# Tail broker logs (add -f for follow mode)
-kates kafka logs
-kates kafka logs -f
 
 # Run the 9-tier Helm test suite
 kates test helm
@@ -1575,13 +1575,12 @@ helm test kafka-cluster -n kafka
 | Value | Default | Description |
 |-------|---------|-------------|
 | `clusterName` | `krafter` | Name of the Kafka cluster |
-| `kafkaVersion` | `4.1.1` | Apache Kafka version |
-| `strimziOperator.enabled` | `true` | Install Strimzi operator as subchart |
-| `controllers.replicas` | `3` | Number of KRaft controllers |
-| `brokerPools` | 3 zone pools | List of broker pool definitions |
+| `kafkaVersion` | `4.2.0` | Apache Kafka version |
+| `controllerPools` | `[]` | Controller pool definitions (generate with `kates detect --generate-values`) |
+| `brokerPools` | `[]` | Broker pool definitions (generate with `kates detect --generate-values`) |
 | `brokerDefaults.resources.requests.memory` | `4Gi` | Broker memory request |
 | `kafka.config` | *see values.yaml* | Kafka broker configuration |
-| `topics` | 7 topics | List of managed topics |
+| `topics` | 8 topics | List of managed topics |
 | `users` | 5 users | List of managed users |
 | `networkPolicies.enabled` | `true` | Create default-deny + allow rules |
 | `alerts.enabled` | `true` | Create PrometheusRule alerts |

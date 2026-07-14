@@ -345,7 +345,7 @@ Creates a Kind cluster named `panda` with:
 ./scripts/registry-status.sh
 ```
 
-All images are defined in `images.env`. The load script defaults to `linux/arm64`; override with `--platform linux/amd64` (or the `CTR_PLATFORM` environment variable) on Intel/AMD hosts.
+All images are defined in `images.env`. The load script defaults to `linux/arm64`; override with the `CTR_PLATFORM` environment variable (`CTR_PLATFORM=linux/amd64 ./scripts/load-images-to-kind.sh`) on Intel/AMD hosts.
 
 ### Monitoring Stack
 
