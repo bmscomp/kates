@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="docs/assets/kates-wordmark.svg" width="500" alt="Kates — Kafka advanced testing and engineering suite" />
+  <img src="docs/assets/kates-logo.png" width="140" alt="Kates Logo" />
+
+  <h1>Kates</h1>
+
+  <p><strong>Kafka Advanced Testing & Engineering Suite</strong></p>
 
   <p>
     A Kubernetes-native platform for performance testing, chaos engineering,<br/>
