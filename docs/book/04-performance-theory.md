@@ -64,7 +64,7 @@ sequenceDiagram
     Note over Producer,Follower: Total latency = sum of all steps
 ```
 
-Each step adds latency:
+Each step adds latency. The durations below were measured on a local Kind cluster and are illustrative — absolute numbers vary with host hardware:
 
 | Step | Typical Duration | Variable? |
 |------|-----------------|-----------|
@@ -75,7 +75,7 @@ Each step adds latency:
 | Network: follower → leader (ACK) | \< 1ms (Kind) | Low |
 | Network: leader → producer (ACK) | \< 1ms (Kind) | Low |
 
-Under normal conditions, end-to-end latency on the Kind cluster is **2–10ms**. Under load, it can spike to **100ms+** as internal queues fill.
+Under normal conditions, end-to-end latency on a local Kind cluster typically lands around **2–10ms**, depending on the host. Under load, it can spike to **100ms+** as internal queues fill.
 
 ## Why Averages Lie
 
@@ -99,7 +99,7 @@ Percentiles tell you about the **distribution** of latency, not just the center:
 | **P99.9** | 99.9% of requests are faster than this | Your "everything except rare outliers" |
 | **Max** | Worst single observation | Your "worst case" |
 
-Kates reports P50, P95, P99, and Max for every test run.
+Kates reports the mean plus P50, P95, P99, P99.9, and Max for every test run.
 
 ### The Long Tail Problem
 
@@ -123,7 +123,7 @@ In Kafka, tail latency is caused by:
 - **Controller elections** — KRaft metadata operations can cause brief pauses
 
 ::: {.callout-tip}
-GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** (`-XX:+UseZGC -XX:+ZGenerational`) reduces GC pauses to under 1ms regardless of heap size. Kates deploys with ZGC by default — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning) for details.
+GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates deploys with generational ZGC by default (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default) — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning) for details.
 :::
 
 
@@ -160,7 +160,9 @@ During the stall, the tool should have sent 19 more requests (at t=30, 40, 50...
 
 ### How Kates Handles It
 
-Kates uses a throughput-stable measurement loop. The producer maintains a fixed target rate regardless of response times. If the system stalls, the producer detects the gap and records corrected latencies for the missed window. This is implemented in the `LatencyHistogram` — all observations are recorded, including the time spent waiting.
+Kates mitigates the classic closed-loop form of coordinated omission by sending asynchronously: the producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is configured it keeps pacing sends at that rate regardless of response times. A slow response therefore does not hold back subsequent sends.
+
+Know the limits, though: Kates does not apply coordinated-omission correction. The `LatencyHistogram` records only the observations that actually occurred — there is no gap detection and no back-filling of latencies for send slots missed during a stall. If the producer itself blocks (for example, its internal buffer fills while a broker pauses), the percentiles for that window understate what a steady stream of clients would have experienced. For stall-heavy workloads, cross-check the percentiles against the latency heatmap, which makes those windows visible.
 
 ## Heatmaps: Seeing the Full Picture
 
@@ -190,7 +192,7 @@ Kates exports heatmap data in two formats:
 - **JSON** — structured data for Grafana visualization
 - **CSV** — tabular data for spreadsheet analysis
 
-Each heatmap row contains counts across 25 logarithmic latency buckets, sampled every second during the test. For full details on heatmap export commands, bucket boundaries, and reading patterns, see [Chapter 9: Observability — Latency Heatmaps](09-observability.md#latency-heatmaps).
+Each heatmap row contains counts across logarithmic latency buckets, snapshotted each time the running test's status is polled. For full details on heatmap export commands, bucket boundaries, and reading patterns, see [Chapter 9: Observability — Latency Heatmaps](09-observability.md#latency-heatmaps).
 
 ## Statistical Significance
 
@@ -204,7 +206,7 @@ Running a test once and drawing conclusions is dangerous. Performance measuremen
 
 ### Warm-Up Phase
 
-Always discard the first few seconds of data. Kates test types like LOAD and STRESS include configurable warm-up phases where the engine runs at reduced throughput before measuring at full speed.
+Always discard the first few seconds of data. Multi-phase Kates scenarios support a dedicated WARMUP phase that runs at a reduced target throughput ahead of the steady-state phase; results are recorded per phase, so warm-up numbers stay out of your steady-state measurements.
 
 ### Multiple Runs
 
@@ -234,4 +236,4 @@ There is no universal "good" latency or throughput. It depends entirely on your 
 | Batch data pipeline | \< 1s | 1M+ rec/s |
 | Financial transactions | \< 5ms | 1K–10K rec/s |
 
-Kates lets you define SLA thresholds per test type, so "good" is whatever you define it to be.
+Kates lets you define SLA thresholds per test scenario, so "good" is whatever you define it to be.

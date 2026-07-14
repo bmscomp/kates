@@ -12,13 +12,16 @@ If you need strongly typed clients, streaming results, or high-throughput progra
 
 ## Authentication
 
-Kates does **not** enforce authentication by default when running inside a Kubernetes cluster with port-forwarding. However, when exposed externally (e.g., via an Ingress or LoadBalancer), you should secure access.
+Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values (see [Chapter 17: Security & Compliance](17-security.md)).
 
-If token-based authentication is enabled (via the `kates.auth.enabled=true` configuration), include the token in every request:
+Include the key in every request, using either header form:
 
 ```bash
-curl -H "Authorization: Bearer <your-token>" http://localhost:30083/api/health
+curl -H "Authorization: Bearer $KATES_API_KEY" http://localhost:30083/api/tests
+curl -H "X-API-Key: $KATES_API_KEY" http://localhost:30083/api/tests
 ```
+
+Requests without a key receive `401 Unauthorized`; requests with a wrong key receive `403 Forbidden`. The paths `/api/health`, `/openapi`, and everything under `/q/` (metrics, OpenAPI spec) are public and never require a key.
 
 ### Common Request Headers
 
@@ -26,10 +29,10 @@ curl -H "Authorization: Bearer <your-token>" http://localhost:30083/api/health
 |--------|-------|:---:|-------------|
 | `Content-Type` | `application/json` | ✅ (POST/PUT) | Request body format |
 | `Accept` | `application/json` | | Response format (default) |
-| `Authorization` | `Bearer <token>` | When auth enabled | Authentication token |
-| `X-Request-Id` | UUID string | | Correlation ID for tracing |
+| `Authorization` | `Bearer <api-key>` | When security enabled | API key (alternative: `X-API-Key`) |
+| `X-API-Key` | `<api-key>` | When security enabled | API key (alternative to `Authorization`) |
 
-> **Tip:** When running locally via `kubectl port-forward`, no authentication headers are needed. Kubernetes RBAC controlling access to the port-forward command is sufficient.
+> **Tip:** In Quarkus dev mode and in tests, security is switched off (`%dev.kates.api.security-enabled=false`), so no authentication headers are needed there.
 
 ---
 
@@ -39,34 +42,35 @@ curl -H "Authorization: Bearer <your-token>" http://localhost:30083/api/health
 http://localhost:30083
 ```
 
-When running in-cluster, use the Kubernetes service DNS name: `http://kates.kates.svc.cluster.local:8080`
+Port `30083` is the NodePort defined by the kind overlay (`charts/kates/values-kind.yaml`) — it is not a universal default. On other clusters, port-forward the service (`kubectl port-forward svc/kates 8080:8080`) and target `http://localhost:8080`. When running in-cluster, use the Kubernetes service DNS name: `http://kates.kates.svc.cluster.local:8080`
 
 ---
 
 ## Endpoints
 
+This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The backend exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates/schedules/playbooks, resilience scenarios, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
+
 ### Health & System
 
 #### GET /api/health
 
-System health check including Kafka connectivity and engine status.
+System health check including Kafka connectivity and engine status. This endpoint is public — no API key required.
 
 **Response:** `200 OK`
 
 ```json
 {
   "status": "UP",
+  "engine": { "activeBackend": "native", "availableBackends": ["native", "trogdor"] },
   "kafka": {
-    "connected": true,
+    "status": "UP",
     "bootstrapServers": "krafter-kafka-bootstrap.kafka.svc:9092",
-    "clusterId": "abc123",
-    "brokerCount": 3
-  },
-  "engine": { "activeTests": 2, "totalCompleted": 45 }
+    "message": "Kafka cluster is reachable"
+  }
 }
 ```
 
-When Kafka is unreachable, the response status code is `503 Service Unavailable` with `"status": "DOWN"` and `"kafka.connected": false`.
+The response also contains a `tests` object with the resolved default configuration for every test type. When Kafka is unreachable, the endpoint still returns `200 OK`, but with `"status": "DEGRADED"` and `"kafka.status": "DOWN"`.
 
 ---
 
@@ -74,25 +78,25 @@ When Kafka is unreachable, the response status code is `503 Service Unavailable`
 
 #### POST /api/tests
 
-Create and start a new test run.
+Create and start a new test run. Execution is asynchronous — poll `GET /api/tests/{id}` for progress.
 
 **Request Body:**
 
 ```json
 {
-  "testType": "LOAD",
+  "type": "LOAD",
   "backend": "native",
   "spec": {
-    "records": 100000,
-    "recordSizeBytes": 1024,
-    "producers": 4,
-    "consumers": 2,
+    "numRecords": 100000,
+    "recordSize": 1024,
+    "numProducers": 4,
+    "numConsumers": 2,
     "acks": "all",
     "topic": "perf-test",
     "partitions": 3,
     "replicationFactor": 3,
     "minInsyncReplicas": 2,
-    "durationSeconds": 120,
+    "durationMs": 120000,
     "throughput": -1,
     "consumerGroup": "perf-cg",
     "fetchMinBytes": 1,
@@ -103,27 +107,28 @@ Create and start a new test run.
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `testType` | String | ✅ | One of: LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY |
+| `type` | String | ✅ | Test type — any value returned by `GET /api/tests/types` (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, the TUNE_* family, INTEGRATION_CDC) |
 | `backend` | String | | Backend engine (default: "native") |
 | `spec` | Object | | Test specification overrides |
 
-**Response:** `201 Created`
+**Response:** `202 Accepted`
 
 ```json
 {
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "id": "a1b2c3d4",
   "testType": "LOAD",
   "status": "PENDING",
   "backend": "native",
   "spec": {
-    "records": 100000, "recordSizeBytes": 1024, "producers": 4, "consumers": 2,
+    "numRecords": 100000, "recordSize": 1024, "numProducers": 4, "numConsumers": 2,
     "acks": "all", "topic": "perf-test", "partitions": 3, "replicationFactor": 3,
-    "minInsyncReplicas": 2, "durationSeconds": 120, "throughput": -1
+    "minInsyncReplicas": 2, "durationMs": 120000, "throughput": -1
   },
-  "createdAt": "2026-02-15T20:00:00Z",
-  "updatedAt": "2026-02-15T20:00:00Z"
+  "createdAt": "2026-02-15T20:00:00Z"
 }
 ```
+
+Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`.
 
 #### GET /api/tests
 
@@ -134,9 +139,9 @@ List test runs with pagination and filtering.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `page` | int | 0 | Page number (0-indexed) |
-| `size` | int | 20 | Page size |
+| `size` | int | 50 | Page size (max 200) |
 | `type` | String | | Filter by test type |
-| `status` | String | | Filter by status |
+| `status` | String | | Filter by status (PENDING, RUNNING, STOPPING, DONE, FAILED) |
 
 **Response:** `200 OK`
 
@@ -144,64 +149,52 @@ List test runs with pagination and filtering.
 {
   "items": [
     {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "id": "a1b2c3d4",
       "testType": "LOAD",
-      "status": "COMPLETED",
-      "createdAt": "2026-02-15T20:00:00Z",
-      "completedAt": "2026-02-15T20:02:05Z",
-      "summary": {
-        "recordsSent": 100000,
-        "throughputRecordsPerSec": 8412.7,
-        "avgLatencyMs": 2.4,
-        "p99LatencyMs": 12.3
-      }
+      "status": "DONE",
+      "backend": "native",
+      "createdAt": "2026-02-15T20:00:00Z"
     },
     {
-      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "id": "b2c3d4e5",
       "testType": "STRESS",
       "status": "RUNNING",
-      "createdAt": "2026-02-15T20:05:00Z",
-      "completedAt": null,
-      "summary": null
+      "backend": "native",
+      "createdAt": "2026-02-15T20:05:00Z"
     }
   ],
-  "page": 0, "size": 20, "totalItems": 45, "totalPages": 3
+  "page": 0, "size": 50, "total": 2, "count": 2
 }
 ```
 
 #### GET /api/tests/{id}
 
-Get full details of a test run including results, integrity data, and timeline events.
+Get full details of a test run, refreshing its status. The run carries one result entry per task/phase; for INTEGRITY tests each result also includes an `integrity` object (lost/duplicate records, RTO/RPO).
 
 **Response:** `200 OK`
 
 ```json
 {
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "id": "a1b2c3d4",
   "testType": "LOAD",
-  "status": "COMPLETED",
+  "status": "DONE",
   "backend": "native",
-  "spec": { "records": 100000, "recordSizeBytes": 1024, "producers": 4, "consumers": 2, "acks": "all", "topic": "perf-test" },
+  "spec": { "numRecords": 100000, "recordSize": 1024, "numProducers": 4, "numConsumers": 2, "acks": "all", "topic": "perf-test" },
   "results": [
     {
-      "phaseName": "ramp-up", "recordsSent": 10000,
-      "throughputRecordsPerSec": 5234.1, "throughputMbPerSec": 5.1,
-      "avgLatencyMs": 4.8, "p50LatencyMs": 3.2, "p95LatencyMs": 9.6, "p99LatencyMs": 18.4, "maxLatencyMs": 45.2
+      "taskId": "producer-1", "phaseName": "ramp-up", "status": "DONE", "recordsSent": 10000,
+      "throughputRecordsPerSec": 5234.1, "throughputMBPerSec": 5.1,
+      "avgLatencyMs": 4.8, "p50LatencyMs": 3.2, "p95LatencyMs": 9.6, "p99LatencyMs": 18.4, "maxLatencyMs": 45.2,
+      "startTime": "2026-02-15T20:00:01Z", "endTime": "2026-02-15T20:00:16Z"
     },
     {
-      "phaseName": "steady-state", "recordsSent": 90000,
-      "throughputRecordsPerSec": 8412.7, "throughputMbPerSec": 8.2,
-      "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3, "maxLatencyMs": 34.1
+      "taskId": "producer-2", "phaseName": "steady-state", "status": "DONE", "recordsSent": 90000,
+      "throughputRecordsPerSec": 8412.7, "throughputMBPerSec": 8.2,
+      "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3, "maxLatencyMs": 34.1,
+      "startTime": "2026-02-15T20:00:16Z", "endTime": "2026-02-15T20:02:05Z"
     }
   ],
-  "integrity": { "totalProduced": 100000, "totalConsumed": 100000, "duplicates": 0, "lost": 0, "outOfOrder": 0, "verified": true },
-  "timeline": [
-    { "timestamp": "2026-02-15T20:00:00Z", "event": "TEST_STARTED", "detail": "Initializing producers" },
-    { "timestamp": "2026-02-15T20:00:01Z", "event": "PHASE_STARTED", "detail": "ramp-up" },
-    { "timestamp": "2026-02-15T20:02:05Z", "event": "TEST_COMPLETED", "detail": "All phases finished" }
-  ],
-  "createdAt": "2026-02-15T20:00:00Z",
-  "completedAt": "2026-02-15T20:02:05Z"
+  "createdAt": "2026-02-15T20:00:00Z"
 }
 ```
 
@@ -221,59 +214,64 @@ Get the full test report with cluster snapshot, broker metrics, and SLA verdict.
 
 ```json
 {
-  "testRun": { "id": "a1b2c3d4-...", "testType": "LOAD", "status": "COMPLETED" },
-  "clusterId": "abc123",
-  "clusterSnapshot": { "brokerCount": 3, "topicCount": 12, "totalPartitions": 36 },
+  "run": { "id": "a1b2c3d4", "testType": "LOAD", "status": "DONE" },
+  "summary": {
+    "totalRecords": 100000,
+    "avgThroughputRecPerSec": 8412.7, "peakThroughputRecPerSec": 9120.4, "avgThroughputMBPerSec": 8.2,
+    "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3,
+    "p999LatencyMs": 21.7, "maxLatencyMs": 34.1,
+    "totalErrors": 0, "errorRate": 0.0, "durationMs": 125000
+  },
+  "phases": [
+    { "phaseName": "steady-state", "metrics": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3 } }
+  ],
+  "clusterSnapshot": {
+    "clusterId": "abc123",
+    "brokerCount": 3,
+    "controllerId": 0,
+    "brokers": [ { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092, "rack": "zone-a" } ]
+  },
   "brokerMetrics": [
     {
-      "brokerId": 0, "host": "krafter-kafka-0.kafka.svc",
-      "bytesInPerSec": 8523412.5, "messagesInPerSec": 8412.7,
-      "activeControllerCount": 1, "underReplicatedPartitions": 0
+      "brokerId": 0, "host": "krafter-kafka-0.kafka.svc", "isController": true,
+      "leaderPartitions": 12, "replicaPartitions": 36, "underReplicatedPartitions": 0,
+      "leaderSharePercent": 33.3, "skewed": false
     }
   ],
-  "slaVerdict": {
-    "passed": true,
-    "checks": [
-      { "metric": "p99LatencyMs", "threshold": 500, "actual": 12.3, "result": "PASS" },
-      { "metric": "throughputRecordsPerSec", "threshold": 5000, "actual": 8412.7, "result": "PASS" },
-      { "metric": "errorRate", "threshold": 0.01, "actual": 0.0, "result": "PASS" }
-    ]
-  },
-  "summary": {
-    "totalRecordsSent": 100000, "totalRecordsConsumed": 100000,
-    "avgThroughputRecordsPerSec": 8412.7, "avgLatencyMs": 2.4, "p99LatencyMs": 12.3,
-    "totalDurationMs": 125000, "dataIntegrityVerified": true
-  },
+  "overallSlaVerdict": { "passed": true, "violations": [] },
   "generatedAt": "2026-02-15T20:05:00Z"
 }
 ```
+
+When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`.
 
 #### GET /api/tests/{id}/report/csv
 
 Export report as CSV. **Response:** `200 OK` with `Content-Type: text/csv`
 
 ```
-phase,records_sent,throughput_rps,throughput_mbps,avg_latency_ms,p50_ms,p95_ms,p99_ms,max_ms
-ramp-up,10000,5234.1,5.1,4.8,3.2,9.6,18.4,45.2
-steady-state,90000,8412.7,8.2,2.4,1.8,5.6,12.3,34.1
+runId,testType,backend,phase,recordsSent,throughputRecPerSec,throughputMBPerSec,avgLatencyMs,p50LatencyMs,p95LatencyMs,p99LatencyMs,maxLatencyMs,error
+a1b2c3d4,LOAD,native,ramp-up,10000,5234.1,5.1,4.8,3.2,9.6,18.4,45.2,
+a1b2c3d4,LOAD,native,steady-state,90000,8412.7,8.2,2.4,1.8,5.6,12.3,34.1,
 ```
+
+A `# Summary` block with aggregate metrics is appended after the per-result rows.
 
 #### GET /api/tests/{id}/report/junit
 
-Export report as JUnit XML for CI/CD integration. **Response:** `200 OK` with `Content-Type: application/xml`
+Export report as JUnit XML for CI/CD integration. Each test result maps to a `<testcase>`; SLA violations are appended as extra `<testcase>` entries with `<failure>` elements. **Response:** `200 OK` with `Content-Type: application/xml`
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="kates-load-test" tests="3" failures="0" time="125.0">
-  <testcase name="p99LatencyMs <= 500ms" time="0.001"/>
-  <testcase name="throughputRecordsPerSec >= 5000" time="0.001"/>
-  <testcase name="errorRate <= 0.01" time="0.001"/>
+<testsuite name="LOAD" tests="2" failures="0" errors="0">
+  <testcase name="ramp-up" classname="kates.LOAD" time="15.000"/>
+  <testcase name="steady-state" classname="kates.LOAD" time="110.000"/>
 </testsuite>
 ```
 
 #### GET /api/tests/{id}/report/heatmap
 
-Export latency heatmap data.
+Export latency heatmap data. Returns `404` with a plain-text message when no heatmap data was recorded for the run.
 
 **Query Parameters:**
 
@@ -285,102 +283,109 @@ Export latency heatmap data.
 
 ```json
 {
-  "runId": "a1b2c3d4-...",
+  "runId": "a1b2c3d4",
   "testType": "LOAD",
-  "bucketLabels": ["0–0.1ms", "0.1–0.5ms", "0.5–1ms", "1–2ms", "2–5ms", "5–10ms", "10–50ms", "50–100ms", "100–500ms", "500–1000ms"],
+  "bucketLabels": ["0ms-0.5ms", "0.5ms-1ms", "1ms-2ms", "2ms-3ms", "3ms-5ms"],
+  "bucketBoundaries": [[0.0, 0.5], [0.5, 1.0], [1.0, 2.0], [2.0, 3.0], [3.0, 5.0]],
   "rows": [
-    { "timestampMs": 1708012345000, "phaseName": "ramp-up", "buckets": [0, 12, 145, 832, 1456, 389, 23, 5, 1, 0] },
-    { "timestampMs": 1708012350000, "phaseName": "steady-state", "buckets": [0, 0, 12, 145, 832, 456, 89, 23, 5, 1] }
+    { "timestampMs": 1771185645000, "phase": "ramp-up", "counts": [0, 12, 145, 832, 1456] },
+    { "timestampMs": 1771185650000, "phase": "steady-state", "counts": [0, 0, 12, 145, 832] }
   ]
 }
 ```
+
+*(Arrays truncated for readability — the real heatmap uses 25 latency buckets spanning 0 ms to 10 s. Each row is a 1-second sampling window.)*
 
 ---
 
 ### Cluster Inspection
 
-#### GET /api/cluster
+#### GET /api/cluster/info
 
-Kafka cluster metadata: brokers, topics, partitions.
+Kafka cluster metadata: cluster ID, controller, and brokers.
 
 ```json
 {
   "clusterId": "abc123",
   "controller": { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092 },
+  "brokerCount": 3,
   "brokers": [
     { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092, "rack": "zone-a" },
     { "id": 1, "host": "krafter-kafka-1.kafka.svc", "port": 9092, "rack": "zone-b" },
     { "id": 2, "host": "krafter-kafka-2.kafka.svc", "port": 9092, "rack": "zone-c" }
-  ],
-  "topicCount": 12, "totalPartitions": 36
+  ]
 }
 ```
 
 #### GET /api/cluster/topics
 
-List all topics with partition counts.
+List topic names, paginated (`page`, `size` query parameters; `size` defaults to 50, max 200).
 
 ```json
-{
-  "topics": [
-    { "name": "kates-results", "partitions": 6, "replicationFactor": 3, "internal": false },
-    { "name": "perf-test", "partitions": 3, "replicationFactor": 3, "internal": false }
-  ]
-}
+{ "page": 0, "size": 50, "total": 2, "count": 2, "items": ["kates-results", "perf-test"] }
 ```
 
 #### GET /api/cluster/topics/{name}
 
-Topic detail with partition assignments and ISR.
+Topic detail with partition assignments, ISR, and key configuration entries.
 
 ```json
 {
   "name": "perf-test",
-  "partitions": [
-    { "id": 0, "leader": 0, "replicas": [0, 1, 2], "isr": [0, 1, 2] },
-    { "id": 1, "leader": 1, "replicas": [1, 2, 0], "isr": [1, 2, 0] }
+  "internal": false,
+  "partitions": 3,
+  "replicationFactor": 3,
+  "partitionInfo": [
+    { "partition": 0, "leader": 0, "replicas": [0, 1, 2], "isr": [0, 1, 2], "underReplicated": false },
+    { "partition": 1, "leader": 1, "replicas": [1, 2, 0], "isr": [1, 2, 0], "underReplicated": false }
   ],
-  "config": { "retention.ms": "604800000", "min.insync.replicas": "2", "cleanup.policy": "delete" }
+  "configs": { "retention.ms": "604800000", "min.insync.replicas": "2", "cleanup.policy": "delete" }
 }
 ```
 
 #### GET /api/cluster/groups
 
-List consumer groups with status.
+List consumer groups with state, paginated (`page`, `size` query parameters).
 
 ```json
-{ "groups": [{ "name": "perf-cg", "state": "STABLE", "members": 2, "assignedPartitions": 3 }] }
+{ "page": 0, "size": 50, "total": 1, "count": 1, "items": [{ "groupId": "perf-cg", "state": "Stable" }] }
 ```
 
-#### GET /api/cluster/groups/{name}
+#### GET /api/cluster/groups/{id}
 
-Consumer group detail with per-partition lag.
+Consumer group detail with per-partition offsets and lag.
 
 ```json
 {
-  "name": "perf-cg", "state": "STABLE",
-  "coordinator": { "id": 1, "host": "krafter-kafka-1.kafka.svc" },
-  "members": [{
-    "memberId": "consumer-perf-cg-1-abc123", "clientId": "consumer-perf-cg-1", "host": "/10.244.0.15",
-    "assignments": [
-      { "topic": "perf-test", "partition": 0, "currentOffset": 50000, "logEndOffset": 50000, "lag": 0 }
-    ]
-  }],
+  "groupId": "perf-cg",
+  "state": "Stable",
+  "members": 2,
+  "offsets": [
+    { "topic": "perf-test", "partition": 0, "currentOffset": 50000, "endOffset": 50000, "lag": 0 },
+    { "topic": "perf-test", "partition": 1, "currentOffset": 49998, "endOffset": 50000, "lag": 2 }
+  ],
   "totalLag": 2
 }
 ```
 
-#### GET /api/cluster/brokers
+#### GET /api/cluster/brokers/{id}/configs
 
-Broker configuration listing. Returns broker IDs, hosts, rack assignments, and server-level configuration key/value pairs.
+Non-default configuration entries for a specific broker.
+
+```json
+[
+  { "name": "min.insync.replicas", "value": "2", "source": "STATIC_BROKER_CONFIG", "readOnly": false },
+  { "name": "log.retention.hours", "value": "168", "source": "STATIC_BROKER_CONFIG", "readOnly": false }
+]
+```
 
 ---
 
 ### Disruption Testing
 
-#### POST /api/disruptions/run
+#### POST /api/disruptions
 
-Execute a disruption plan.
+Execute a disruption plan. Execution is **synchronous** — the call blocks until every step has run (including observation windows) and returns the finished report. Add the `dryRun=true` query parameter to validate the plan without injecting any faults.
 
 **Request Body:**
 
@@ -401,94 +406,132 @@ Execute a disruption plan.
 }
 ```
 
-**Response:** `201 Created`
+**Response:** `200 OK`
 
 ```json
 {
-  "id": "disrupt-7f8e9d0c-1a2b-3c4d-5e6f-789012345678",
-  "name": "broker-kill-test",
-  "status": "RUNNING",
-  "steps": [{ "name": "kill-broker-0", "status": "PENDING" }],
-  "createdAt": "2026-02-15T21:00:00Z"
+  "id": "7f8e9d0c",
+  "report": {
+    "planName": "broker-kill-test",
+    "status": "COMPLETED",
+    "stepReports": [{
+      "stepName": "kill-broker-0",
+      "disruptionType": "POD_KILL",
+      "timeToFirstReady": "PT27S",
+      "timeToAllReady": "PT41S",
+      "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
+      "rolledBack": false
+    }],
+    "summary": {
+      "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
+      "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
+    }
+  }
 }
 ```
 
-#### POST /api/disruptions/dry-run
+Disruption IDs are 8-character UUID prefixes. `report.status` is one of `COMPLETED`, `PARTIAL` (some steps failed), or `FAILED`. Plans that violate the safety guard are not executed and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)).
 
-Validate a disruption plan without executing. Accepts the same request body as `POST /api/disruptions/run`.
+**Dry run** — `POST /api/disruptions?dryRun=true` with the same request body returns `200 OK`:
 
 ```json
 {
-  "valid": true,
-  "steps": [{ "name": "kill-broker-0", "targetPods": ["krafter-kafka-0"], "safetyCheck": "PASSED", "warnings": [] }],
-  "estimatedDurationSec": 105
+  "wouldSucceed": true,
+  "totalBrokers": 3,
+  "steps": [{
+    "name": "kill-broker-0",
+    "disruptionType": "POD_KILL",
+    "targetPod": "krafter-kafka-0",
+    "resolvedLeaderId": null,
+    "affectedPods": ["krafter-kafka-0"],
+    "warnings": []
+  }],
+  "warnings": [],
+  "errors": []
 }
 ```
 
 #### GET /api/disruptions
 
-List recent disruption reports.
+List recent disruption reports. Supports `planName`, `page`, and `size` (default 50) query parameters.
 
 ```json
 {
+  "page": 0,
+  "size": 50,
+  "count": 1,
   "items": [{
-    "id": "disrupt-7f8e9d0c-...", "name": "broker-kill-test",
-    "status": "COMPLETED", "verdict": "PASS",
-    "createdAt": "2026-02-15T21:00:00Z", "completedAt": "2026-02-15T21:02:45Z"
-  }],
-  "page": 0, "size": 20, "totalItems": 8, "totalPages": 1
+    "id": "7f8e9d0c",
+    "planName": "broker-kill-test",
+    "status": "COMPLETED",
+    "slaGrade": "A",
+    "createdAt": "2026-02-15T21:02:45Z"
+  }]
 }
 ```
 
 #### GET /api/disruptions/{id}
 
-Get detailed disruption report with step-level verdicts, fault timing, recovery metrics, and observations (under-replicated partitions, leader elections).
+Get the full disruption report: per-step recovery timings, pod event timeline, pre/post metrics with impact deltas, ISR and consumer-lag tracking, and the SLA verdict (letter grade A/B/C/F).
 
 ```json
 {
-  "id": "disrupt-7f8e9d0c-...", "name": "broker-kill-test", "status": "COMPLETED", "verdict": "PASS",
-  "steps": [{
-    "name": "kill-broker-0", "status": "COMPLETED", "verdict": "PASS",
-    "faultAppliedAt": "2026-02-15T21:00:15Z", "recoveryDetectedAt": "2026-02-15T21:01:12Z",
-    "recoveryTimeSec": 27, "affectedPods": ["krafter-kafka-0"],
-    "observations": { "underReplicatedPartitions": 3, "leaderElections": 3, "partitionsFullyReplicated": true }
+  "planName": "broker-kill-test",
+  "status": "COMPLETED",
+  "stepReports": [{
+    "stepName": "kill-broker-0",
+    "disruptionType": "POD_KILL",
+    "podTimeline": [
+      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-kafka-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
+    ],
+    "timeToFirstReady": "PT27S",
+    "timeToAllReady": "PT41S",
+    "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
+    "rolledBack": false
   }],
-  "createdAt": "2026-02-15T21:00:00Z", "completedAt": "2026-02-15T21:02:45Z"
+  "summary": {
+    "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
+    "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
+  },
+  "slaVerdict": { "grade": "A", "violated": false, "violations": [], "totalChecks": 3, "passedChecks": 3 }
 }
 ```
 
 #### GET /api/disruptions/{id}/timeline
 
-Get pod event timeline — fault injection, leader elections, recovery events.
+Get pod-level events and recovery times per step.
 
 ```json
-{
-  "disruptionId": "disrupt-7f8e9d0c-...",
-  "events": [
-    { "timestamp": "2026-02-15T21:00:15Z", "type": "FAULT_INJECTED", "detail": "Pod krafter-kafka-0 killed" },
-    { "timestamp": "2026-02-15T21:00:18Z", "type": "LEADER_ELECTION", "detail": "Partition perf-test-0: new leader broker-1" },
-    { "timestamp": "2026-02-15T21:01:12Z", "type": "RECOVERY_DETECTED", "detail": "ISR fully restored" }
-  ]
-}
+[
+  {
+    "step": "kill-broker-0",
+    "type": "POD_KILL",
+    "events": [
+      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-kafka-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
+    ],
+    "timeToFirstReady": "27000ms",
+    "timeToAllReady": "41000ms"
+  }
+]
 ```
 
 #### GET /api/disruptions/types
 
-List available disruption types: `POD_KILL`, `POD_FAILURE`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `DISK_FILL`, `CPU_STRESS`.
+List available disruption types with descriptions. Returns an array of `{ "name": ..., "description": ... }` objects covering: `POD_KILL`, `POD_DELETE`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL`, `ROLLING_RESTART`, `LEADER_ELECTION`, `SCALE_DOWN`, `NODE_DRAIN`.
 
 #### GET /api/disruptions/{id}/kafka-metrics
 
-Get Kafka intelligence data — pre-fault, during-fault, and post-recovery metrics with impact deltas.
+Get Kafka intelligence data captured during the disruption — ISR recovery and consumer-lag metrics per step.
 
 ```json
-{
-  "metrics": {
-    "preFault": { "throughputRecordsPerSec": 8412.7, "p99LatencyMs": 12.3, "underReplicatedPartitions": 0 },
-    "duringFault": { "throughputRecordsPerSec": 6201.3, "p99LatencyMs": 156.8, "underReplicatedPartitions": 3 },
-    "postRecovery": { "throughputRecordsPerSec": 8389.1, "p99LatencyMs": 13.1, "underReplicatedPartitions": 0 }
-  },
-  "impact": { "throughputDropPercent": 26.3, "latencyIncreasePercent": 1174.8, "recoveryTimeSec": 27 }
-}
+[
+  {
+    "step": "kill-broker-0",
+    "disruptionType": "POD_KILL",
+    "isr": { "timeToFullIsr": "41000ms", "minIsrDepth": 2, "underReplicatedPeakCount": 3, "totalPartitions": 36 },
+    "lag": { "baselineLag": 0, "peakLag": 12500, "lagSpike": 12500, "timeToLagRecovery": "35000ms" }
+  }
+]
 ```
 
 ---
@@ -497,29 +540,34 @@ Get Kafka intelligence data — pre-fault, during-fault, and post-recovery metri
 
 #### POST /api/resilience
 
-Run a combined performance + chaos test.
+Run a combined performance + chaos test. The call is long-running: whitespace is streamed as a keep-alive while the test executes, and the JSON report is written when it completes.
 
 **Request Body:**
 
 ```json
 {
-  "testRequest": { "testType": "LOAD", "spec": { "records": 100000, "producers": 4 } },
+  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "numProducers": 4 } },
   "chaosSpec": { "experimentName": "kafka-pod-kill", "targetNamespace": "kafka" },
   "steadyStateSec": 30
 }
 ```
+
+Optional fields: `probes` (steady-state probe definitions) and `maxRecoveryWaitSec` (default 120).
 
 **Response:**
 
 ```json
 {
   "status": "COMPLETED",
-  "chaosOutcome": { "experimentName": "kafka-pod-kill", "verdict": "PASS", "chaosDuration": "30s" },
-  "impactDeltas": { "throughputRecordsPerSec": -15.6, "p99LatencyMs": 596.7, "errorRate": 0.3 },
-  "preChaosSummary": { "throughputRecordsPerSec": 8412.7, "p99LatencyMs": 12.3, "errorRate": 0.0 },
-  "postChaosSummary": { "throughputRecordsPerSec": 7097.1, "p99LatencyMs": 609.0, "errorRate": 0.3 }
+  "chaosOutcome": { "experimentName": "kafka-pod-kill", "verdict": "Pass", "chaosDuration": "PT30S" },
+  "impactDeltas": { "throughputRecPerSec": -15.6, "avgLatencyMs": 42.1, "p99LatencyMs": 596.7, "maxLatencyMs": 310.4, "errorRate": 0.3 },
+  "preChaosSummary": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3, "errorRate": 0.0 },
+  "postChaosSummary": { "avgThroughputRecPerSec": 7097.1, "p99LatencyMs": 609.0, "errorRate": 0.3 },
+  "recoveryTime": "PT41S"
 }
 ```
+
+`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`. Impact deltas are percentage changes between the pre- and post-chaos summaries.
 
 ---
 
@@ -527,23 +575,26 @@ Run a combined performance + chaos test.
 
 #### GET /api/trends
 
-Historical test trends.
+Historical test trends with baseline comparison and regression detection.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `type` | String | Test type |
-| `metric` | String | Metric name |
-| `days` | int | Lookback period |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `type` | String | (required) | Test type |
+| `metric` | String | `avgThroughputRecPerSec` | Summary metric name (e.g. `p99LatencyMs`) |
+| `days` | int | 30 | Lookback period |
+| `baselineWindow` | int | 5 | Number of runs used for the baseline average |
+| `phase` | String | | Restrict analysis to a named test phase |
 
 ```json
 {
-  "testType": "LOAD", "metric": "p99LatencyMs", "days": 7,
+  "testType": "LOAD", "metric": "p99LatencyMs",
   "dataPoints": [
-    { "date": "2026-02-09", "value": 14.2, "runId": "run-001" },
-    { "date": "2026-02-12", "value": 15.1, "runId": "run-004" },
-    { "date": "2026-02-15", "value": 12.3, "runId": "run-007" }
+    { "timestamp": "2026-02-09T02:00:14Z", "runId": "aa11bb22", "value": 14.2 },
+    { "timestamp": "2026-02-12T02:00:09Z", "runId": "cc33dd44", "value": 15.1 },
+    { "timestamp": "2026-02-15T02:00:11Z", "runId": "ee55ff66", "value": 12.3 }
   ],
-  "trendDirection": "STABLE", "avgValue": 13.2
+  "baseline": 13.9,
+  "regressions": []
 }
 ```
 
@@ -553,7 +604,7 @@ Historical test trends.
 
 #### POST /api/schedules
 
-Create a recurring test schedule.
+Create a recurring test schedule. Cron expressions use the 5-field Unix format (`minute hour day-of-month month day-of-week`, evaluated in UTC).
 
 **Request Body:**
 
@@ -562,7 +613,7 @@ Create a recurring test schedule.
   "name": "Nightly Load Regression",
   "cronExpression": "0 2 * * *",
   "enabled": true,
-  "testRequest": { "testType": "LOAD", "spec": { "records": 100000, "parallelProducers": 4, "acks": "all" } }
+  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "numProducers": 4, "acks": "all" } }
 }
 ```
 
@@ -570,13 +621,16 @@ Create a recurring test schedule.
 
 ```json
 {
-  "id": "sched-a1b2c3d4-...",
+  "id": "e5f6a7b8",
   "name": "Nightly Load Regression",
   "cronExpression": "0 2 * * *",
   "enabled": true,
-  "createdAt": "2026-02-15T20:00:00Z"
+  "lastRunId": null,
+  "lastRunAt": null
 }
 ```
+
+Schedule IDs, like run IDs, are 8-character UUID prefixes.
 
 #### GET /api/schedules
 
@@ -584,19 +638,22 @@ List all schedules.
 
 ```json
 [{
-  "id": "sched-a1b2c3d4-...",
+  "id": "e5f6a7b8",
   "name": "Nightly Load Regression",
   "cronExpression": "0 2 * * *",
   "enabled": true,
-  "lastRunId": "run-d4e5f6...",
-  "lastRunAt": "2026-02-15T02:00:00Z",
-  "createdAt": "2026-02-14T10:00:00Z"
+  "lastRunId": "d4e5f6a7",
+  "lastRunAt": "2026-02-15T02:00:00Z"
 }]
 ```
 
 #### GET /api/schedules/{id}
 
-Get detailed schedule info including last run data, next run time, and total run count.
+Get a single schedule, including the ID and time of its last triggered run.
+
+#### PUT /api/schedules/{id}
+
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule.
 
 #### DELETE /api/schedules/{id}
 
@@ -606,45 +663,53 @@ Delete a schedule. Returns `204 No Content`.
 
 ## Error Responses
 
-All errors follow a consistent JSON format:
+Errors follow a consistent JSON format:
 
 ```json
-{ "error": "Not Found", "message": "Test run not found: abc123", "status": 404 }
+{ "status": 404, "error": "Not Found", "message": "Test run not found: abc123" }
 ```
+
+The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below.
 
 ### HTTP Error Codes
 
 | Status | Error | Description | Common Causes |
 |:---:|-------|-------------|---------------|
-| 400 | Bad Request | Malformed or invalid request | Invalid `testType`, missing required fields, malformed JSON |
+| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON |
+| 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
+| 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
-| 409 | Conflict | Conflicts with current state | Test already running on same topic, schedule name collision |
-| 422 | Unprocessable Entity | Rejected by safety guards | `maxAffectedBrokers` exceeded, unsafe partition count |
-| 500 | Internal Server Error | Unexpected server failure | Thread pool exhaustion, out-of-memory |
-| 503 | Service Unavailable | Backend unreachable | Kafka connection lost, broker cluster restarting |
+| 409 | Conflict | Conflicts with current state | Cancelling a test that is not running |
+| 422 | Unprocessable Entity | Rejected by safety guards | `maxAffectedBrokers` exceeded, plan would affect all brokers |
+| 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable |
+| 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
 
 ### Error Examples
 
 **400 — Invalid test type:**
 ```json
-{ "error": "Bad Request", "message": "Invalid test type: 'BENCHMARK'. Valid types: LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY", "status": 400 }
+{ "status": 400, "error": "Bad Request", "message": "Invalid test type: BENCHMARK" }
 ```
 
-**409 — Test already running:**
+**409 — Cancelling a test that is not running:**
 ```json
-{ "error": "Conflict", "message": "A test is already running on topic 'perf-test'. Cancel or wait for completion.", "status": 409 }
+{ "status": 409, "error": "Conflict", "message": "Test is not running (status: DONE)" }
 ```
 
-**503 — Kafka unreachable:**
+**422 — Disruption plan rejected by the safety guard:**
 ```json
-{ "error": "Service Unavailable", "message": "Cannot reach Kafka cluster at krafter-kafka-bootstrap.kafka.svc:9092. Connection timed out.", "status": 503 }
+{
+  "id": "7f8e9d0c",
+  "status": "REJECTED",
+  "validationWarnings": ["ERROR: Plan would affect ALL 3 brokers — cluster would lose availability"]
+}
 ```
 
 ---
 
 ## API Workflows
 
-The following `curl`-based workflows demonstrate common multi-step operations. All examples assume the API is available at `localhost:30083`.
+The following `curl`-based workflows demonstrate common multi-step operations. All examples assume the API is available at `localhost:30083` (the kind NodePort). When API security is enabled — the production default — add `-H "X-API-Key: $KATES_API_KEY"` to every `curl` call.
 
 ### Workflow 1: Create a Test, Poll for Completion, Get the Report
 
@@ -656,7 +721,7 @@ BASE="http://localhost:30083"
 # Create a load test
 TEST_ID=$(curl -s -X POST "$BASE/api/tests" \
   -H "Content-Type: application/json" \
-  -d '{"testType":"LOAD","spec":{"records":100000,"producers":4,"consumers":2,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
+  -d '{"type":"LOAD","spec":{"numRecords":100000,"numProducers":4,"numConsumers":2,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
   | jq -r '.id')
 echo "Created test: $TEST_ID"
 
@@ -664,7 +729,7 @@ echo "Created test: $TEST_ID"
 while true; do
   STATUS=$(curl -s "$BASE/api/tests/$TEST_ID" | jq -r '.status')
   echo "Status: $STATUS"
-  [[ "$STATUS" == "COMPLETED" || "$STATUS" == "FAILED" ]] && break
+  [[ "$STATUS" == "DONE" || "$STATUS" == "FAILED" ]] && break
   sleep 5
 done
 
@@ -673,7 +738,9 @@ curl -s "$BASE/api/tests/$TEST_ID/report" | jq .
 curl -s "$BASE/api/tests/$TEST_ID/report/junit" -o report.xml
 ```
 
-### Workflow 2: Create a Disruption and Monitor Status
+### Workflow 2: Validate and Execute a Disruption
+
+Disruption execution is synchronous — there is nothing to poll. The `POST` returns only when every step (including observation windows) has finished, so set generous client timeouts for long plans.
 
 ```bash
 #!/usr/bin/env bash
@@ -681,24 +748,17 @@ set -euo pipefail
 BASE="http://localhost:30083"
 PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"steps":[{"name":"kill-broker-0","faultSpec":{"experimentName":"broker-kill","disruptionType":"POD_KILL","targetNamespace":"kafka","targetLabel":"strimzi.io/cluster=krafter","chaosDurationSec":30},"steadyStateSec":15,"observationWindowSec":60,"requireRecovery":true}]}'
 
-# Dry-run to validate
-curl -s -X POST "$BASE/api/disruptions/dry-run" -H "Content-Type: application/json" -d "$PLAN" | jq .
+# Dry-run to validate (no faults injected)
+curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "Content-Type: application/json" -d "$PLAN" | jq .
 
-# Execute
-DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions/run" -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
-echo "Disruption started: $DISRUPT_ID"
+# Execute — blocks until the plan completes, then returns the report
+RESULT=$(curl -s --max-time 600 -X POST "$BASE/api/disruptions" -H "Content-Type: application/json" -d "$PLAN")
+DISRUPT_ID=$(jq -r '.id' <<<"$RESULT")
+echo "Disruption finished: $DISRUPT_ID (status: $(jq -r '.report.status' <<<"$RESULT"))"
 
-# Poll status
-while true; do
-  STATUS=$(curl -s "$BASE/api/disruptions/$DISRUPT_ID" | jq -r '.status')
-  echo "Status: $STATUS"
-  [[ "$STATUS" == "COMPLETED" || "$STATUS" == "FAILED" ]] && break
-  sleep 10
-done
-
-# Inspect timeline and impact
-curl -s "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.events[]'
-curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.impact'
+# Inspect recovery timings and Kafka impact
+curl -s "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.[] | {step, timeToFirstReady, timeToAllReady}'
+curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr, lag}'
 ```
 
 ### Workflow 3: Export Results in Different Formats
@@ -707,7 +767,7 @@ curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.impact'
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
-TEST_ID="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+TEST_ID="a1b2c3d4"
 
 curl -s "$BASE/api/tests/$TEST_ID/report"                   -o report.json
 curl -s "$BASE/api/tests/$TEST_ID/report/csv"                -o report.csv
@@ -716,7 +776,7 @@ curl -s "$BASE/api/tests/$TEST_ID/report/heatmap?format=json" -o heatmap.json
 curl -s "$BASE/api/tests/$TEST_ID/report/heatmap?format=csv"  -o heatmap.csv
 
 echo "Exported: report.json, report.csv, report.xml, heatmap.json, heatmap.csv"
-jq '{type:.testRun.testType, throughput:.summary.avgThroughputRecordsPerSec, p99:.summary.p99LatencyMs, sla:.slaVerdict.passed}' report.json
+jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summary.p99LatencyMs, sla:.overallSlaVerdict.passed}' report.json
 ```
 
 ---

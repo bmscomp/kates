@@ -16,34 +16,41 @@ graph LR
 
 ### Version Compatibility Matrix
 
-| Strimzi | Kafka (min) | Kafka (max) | KRaft |
-|:-------:|:-----------:|:-----------:|:-----:|
-| 0.49.0 | 3.7.0 | 3.9.0 | ✅ |
-| 0.50.0 | 3.8.0 | 4.0.0 | ✅ |
-| 1.0.0 | 3.9.0 | 4.1.1 | ✅ |
+Each Strimzi release supports only a narrow window of Kafka versions, and that window moves with every release — always check the [Strimzi supported versions](https://strimzi.io/downloads/) page before planning an upgrade. This repository pins its versions centrally:
+
+| Component | Pinned version | Source |
+|-----------|----------------|--------|
+| Strimzi operator | 1.0.0 | `STRIMZI_VERSION` in `versions.env` |
+| Kafka image | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
+| Chart default (`kafkaVersion`) | 4.2.0 | `charts/kafka-cluster/values.yaml` |
 
 ### Procedure
 
 **Step 1 — Backup:**
 
 ```bash
-# Create pre-upgrade backup
+# Ensure the Velero backup schedule exists
+# (config/kafka/kafka-backup.yaml defines the kafka-daily-backup Schedule)
 kubectl apply -f config/kafka/kafka-backup.yaml
 
-# Wait for backup completion
+# Take an ad-hoc pre-upgrade backup
+velero backup create kafka-pre-upgrade --include-namespaces kafka --wait
+
+# Confirm completion
 kubectl get backup kafka-pre-upgrade -n velero -o jsonpath='{.status.phase}'
 ```
 
 **Step 2 — Pre-flight validation:**
 
 ```bash
+# Record the current Kafka version for the post-upgrade comparison
+kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.version}'
+
 # Run baseline performance test
-kates test create --type LOAD --records 100000 --acks all --wait \
-  --label upgrade=pre --label version=$(kubectl get kafka krafter -n kafka \
-  -o jsonpath='{.spec.kafka.version}')
+kates test create --type LOAD --records 100000 --acks all --wait
 
 # Run integrity test
-kates test create --type INTEGRITY --records 50000 --wait --label upgrade=pre
+kates test create --type INTEGRITY --records 50000 --wait
 
 # Record the test IDs for post-upgrade comparison
 ```
@@ -72,19 +79,18 @@ kubectl get pods -n kafka -w
 # Watch Kafka status
 watch kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[0].type}={.status.conditions[0].status}'
 
-# Check Strimzi operator logs
-kubectl logs deployment/strimzi-cluster-operator -n kafka -f
+# Check Strimzi operator logs (the operator runs in its own namespace)
+kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator -f
 ```
 
 **Step 5 — Post-upgrade validation:**
 
 ```bash
 # Re-run baseline tests
-kates test create --type LOAD --records 100000 --acks all --wait \
-  --label upgrade=post --label version=4.1.1
+kates test create --type LOAD --records 100000 --acks all --wait
 
 # Compare pre vs post
-kates report diff <pre-id> <post-id>
+kates report compare <pre-id>,<post-id>
 
 # Run full GameDay
 make gameday
@@ -92,16 +98,7 @@ make gameday
 
 ### Rollback
 
-```bash
-# Revert the version in kafka.yaml
-spec:
-  kafka:
-    version: <previous-version>
-
-kubectl apply -f config/kafka/kafka.yaml
-```
-
-Strimzi will roll back one broker at a time.
+Revert `spec.kafka.version` in `config/kafka/kafka.yaml` and re-apply — Strimzi rolls the brokers back one at a time. See [Kafka Version Rollback](#kafka-version-rollback) under Rollback Procedures for the full procedure and the KRaft metadata caveat.
 
 ## Strimzi Operator Upgrade
 
@@ -109,31 +106,29 @@ Strimzi will roll back one broker at a time.
 
 **Step 1 — Check release notes** for breaking changes at [Strimzi releases](https://github.com/strimzi/strimzi-kafka-operator/releases).
 
-**Step 2 — Upgrade via Helm:**
+**Step 2 — Upgrade via Helm.** The operator is installed from the OCI chart as the `strimzi-operator` release in its own `strimzi-operator` namespace (see `scripts/deploy-kafka.sh`):
 
 ```bash
-helm repo update strimzi
-
-helm upgrade strimzi-kafka-operator strimzi/strimzi-kafka-operator \
+helm upgrade strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
   --version <new-version> \
-  --namespace kafka \
+  --namespace strimzi-operator \
   --reuse-values
 ```
 
 **Step 3 — Verify:**
 
 ```bash
-kubectl get pods -n kafka | grep strimzi-cluster-operator
-kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
+kubectl get pods -n strimzi-operator
+kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 ```
 
 ### Post-Upgrade — API Migration
 
-Strimzi periodically deprecates API versions. When upgrading to a version that drops `v1beta2`:
+Strimzi periodically deprecates API versions. The manifests in this repository already use `kafka.strimzi.io/v1` (see `config/kafka/kafka.yaml`). When a future Strimzi release drops an API version your manifests still use, migrate them in bulk — this is the pattern used for the `v1beta2` → `v1` migration:
 
 ```bash
-# Update all CRDs to v1
-sed -i '' 's|kafka.strimzi.io/v1beta2|kafka.strimzi.io/v1|g' \
+# GNU sed; on macOS use `sed -i ''` instead of `sed -i`
+sed -i 's|kafka.strimzi.io/v1beta2|kafka.strimzi.io/v1|g' \
   config/kafka/kafka.yaml \
   config/kafka/kafka-users.yaml \
   config/kafka/kafka-topics.yaml \
@@ -144,12 +139,14 @@ kubectl apply -f config/kafka/
 
 ## Drain Cleaner Upgrade
 
+Drain Cleaner is not a standalone Helm release in this repository — it is deployed by the `kafka-cluster` chart (`charts/kafka-cluster/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (the prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.0.0`). To upgrade it, bump the image tag and re-deploy the chart:
+
 ```bash
-helm upgrade strimzi-drain-cleaner strimzi/strimzi-drain-cleaner \
-  --version <new-version> \
-  --namespace kafka \
-  --set certManager.create=false \
-  --set image.imagePullPolicy=IfNotPresent
+# Update drainCleaner.image in charts/kafka-cluster/values.yaml, then:
+make kafka-upgrade
+
+# Verify
+kubectl get pods -n kafka -l app=strimzi-drain-cleaner
 ```
 
 ## Kates Application Upgrade
@@ -161,7 +158,8 @@ helm upgrade strimzi-drain-cleaner strimzi/strimzi-drain-cleaner \
 make kates-build
 
 # Rolling restart
-make kates-redeploy
+kubectl rollout restart deployment/kates -n kates
+kubectl rollout status deployment/kates -n kates --timeout=300s
 ```
 
 ### Native Image Mode
@@ -177,11 +175,13 @@ kubectl logs deployment/kates -n kates | head -1
 
 ## Monitoring Stack Upgrade
 
+The `monitoring` release is installed into the `kafka` namespace (see the `monitoring` target in the Makefile):
+
 ```bash
-helm dependency update charts/monitoring
+helm dependency build charts/monitoring
 
 helm upgrade monitoring charts/monitoring \
-  --namespace monitoring \
+  --namespace kafka \
   --reuse-values
 ```
 
@@ -196,11 +196,13 @@ Kyverno upgrades require special attention because admission webhooks are in the
 **Step 2 — Upgrade the Kyverno CRDs first:**
 
 ```bash
-# Download and apply the latest CRDs before upgrading the controller
-kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/kyverno/kyverno.io_clusterpolicies.yaml
-kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/kyverno/kyverno.io_policyexceptions.yaml
-kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/policyreport/wgpolicyk8s.io_clusterpolicyreports.yaml
-kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/crds/policyreport/wgpolicyk8s.io_policyreports.yaml
+# Pin to the release tag you are upgrading to — never `main`
+KYVERNO_TAG=<release-tag>   # e.g. from https://github.com/kyverno/kyverno/releases
+
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/${KYVERNO_TAG}/config/crds/kyverno/kyverno.io_clusterpolicies.yaml
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/${KYVERNO_TAG}/config/crds/kyverno/kyverno.io_policyexceptions.yaml
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/${KYVERNO_TAG}/config/crds/policyreport/wgpolicyk8s.io_clusterpolicyreports.yaml
+kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/${KYVERNO_TAG}/config/crds/policyreport/wgpolicyk8s.io_policyreports.yaml
 ```
 
 ::: {.callout-warning}
@@ -254,12 +256,12 @@ After upgrading Kyverno, verify that existing `PolicyException` resources are st
 # List all PolicyExceptions
 kubectl get policyexceptions -A
 
-# Verify no exceptions are in an error state
-kubectl get policyexceptions -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+# Check which API version each exception is stored as
+kubectl get policyexceptions -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.apiVersion}{"\n"}{end}'
 ```
 
 ::: {.callout-important}
-Kyverno v2 introduced the `PolicyException` CRD with a different API shape than v1 exceptions. When upgrading from Kyverno 1.x to 2.x, migrate any existing exception configurations to the new `kyverno.io/v2` API. Refer to the [Kyverno migration guide](https://kyverno.io/docs/upgrading/) for details.
+The `PolicyException` API was introduced in Kyverno 1.9 and has moved through several API versions since (`kyverno.io/v2alpha1` → `v2beta1` → `v2`). After upgrading Kyverno, make sure your exceptions use an API version the new release still serves — alpha and beta versions are dropped over time. Check the [Kyverno release notes](https://github.com/kyverno/kyverno/releases) for API deprecations before upgrading.
 :::
 
 
@@ -268,7 +270,7 @@ Kyverno v2 introduced the `PolicyException` CRD with a different API shape than 
 Run through this before any upgrade:
 
 - [ ] Velero backup completed successfully
-- [ ] Baseline performance test recorded (with `--label upgrade=pre`)
+- [ ] Baseline performance test recorded (note the test ID for the post-upgrade comparison)
 - [ ] Integrity test passed (zero data loss)
 - [ ] All brokers in Running state
 - [ ] Kafka CR status is `Ready: True`
@@ -326,18 +328,18 @@ watch kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[0].typ
 
 ```bash
 # Verify broker version
-kubectl exec krafter-kafka-0 -n kafka -- /opt/kafka/bin/kafka-broker-api-versions.sh \
+kubectl exec krafter-brokers-alpha-0 -n kafka -- /opt/kafka/bin/kafka-broker-api-versions.sh \
   --bootstrap-server localhost:9092 | head -1
 
 # Run integrity test
-kates test create --type INTEGRITY --records 50000 --wait --label rollback=kafka
+kates test create --type INTEGRITY --records 50000 --wait
 
 # Verify no data loss
 kates test get <id>
 ```
 
 ::: {.callout-warning}
-Kafka version rollback is **NOT possible** after upgrading the KRaft metadata format (`kafka-storage.sh format` with a newer metadata version). KRaft metadata format changes are irreversible — the brokers cannot read older metadata formats. Always test the new version thoroughly in staging before upgrading the metadata format in production.
+Kafka version rollback is **NOT possible** once the KRaft metadata version has been raised. Strimzi controls this through `spec.kafka.metadataVersion` in the Kafka CR (exposed as `kafka.metadataVersion` in the `kafka-cluster` chart values): upgrade the broker `version` first while leaving `metadataVersion` at the previous level — in that state a rollback is still possible. Once you raise `metadataVersion`, the brokers can no longer read the older metadata format and downgrade is irreversible. Only bump `metadataVersion` after the new version has passed validation.
 :::
 
 
@@ -347,17 +349,17 @@ Kafka version rollback is **NOT possible** after upgrading the KRaft metadata fo
 
 ```bash
 # List Helm history
-helm history strimzi-kafka-operator -n kafka
+helm history strimzi-operator -n strimzi-operator
 
 # Rollback to previous revision
-helm rollback strimzi-kafka-operator <previous-revision> -n kafka
+helm rollback strimzi-operator <previous-revision> -n strimzi-operator
 ```
 
 **Step 2 — Verify the operator is running:**
 
 ```bash
-kubectl get pods -n kafka | grep strimzi-cluster-operator
-kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
+kubectl get pods -n strimzi-operator
+kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 ```
 
 **Step 3 — Post-rollback validation:**
@@ -367,7 +369,7 @@ kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
 kubectl get kafka,kafkatopic,kafkauser -n kafka
 
 # Run a quick smoke test
-kates test create --type LOAD --records 10000 --wait --label rollback=strimzi
+kates test create --type LOAD --records 10000 --wait
 ```
 
 ::: {.callout-warning}
@@ -407,7 +409,7 @@ kates cluster check
 kates schedule list
 
 # Run a baseline test
-kates test create --type LOAD --records 50000 --wait --label rollback=kates
+kates test create --type LOAD --records 50000 --wait
 ```
 
 ### Rollback Decision Matrix

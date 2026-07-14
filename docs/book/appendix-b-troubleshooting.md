@@ -7,7 +7,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Strimzi operator `CrashLoopBackOff` with `UnsupportedVersionException` | Local chart has mismatched Kafka image map | [Ch 15](15-kafka-deployment.md#strimzi-operator-crashloopbackoff) |
-| Brokers crash with `ConfigException: Invalid value -1 for local.retention.bytes` | Kafka 4.1.1 tightened validation — `-1` rejected when `retention.bytes` is set | [Ch 15](15-kafka-deployment.md#brokers-crash-with-configexception) |
+| Brokers crash with `ConfigException: Invalid value -1 for local.retention.bytes` | Kafka 4.1+ tightened validation — `-1` rejected when `retention.bytes` is set | [Ch 15](15-kafka-deployment.md#brokers-crash-with-configexception) |
 | Brokers crash immediately with `remote.log.storage.system.enable=true` | Tiered storage enabled without remote storage manager plugin JAR | [Ch 15](15-kafka-deployment.md#brokers-crash-with-remotelogmanager) |
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Ch 15](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [Ch 3](03-cluster.md#failure-tolerance-matrix) |
@@ -70,7 +70,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Connectivity Debugging Flowchart
 
-When you can't connect to Kafka, work through this decision tree:
+When you can't connect to Kafka, work through this decision tree. The commands here and in [Quick Diagnostic Commands](#quick-diagnostic-commands) assume the chart defaults — cluster name `krafter` in namespace `kafka` (set in `charts/kafka-cluster/values.yaml`); adjust them if your deployment overrides these values.
 
 ```mermaid
 flowchart TD
@@ -109,7 +109,7 @@ Not every problem is a Kates problem. Use this guide to determine where to focus
 | Everything works locally but fails in CI | **CI environment** | Check resource limits, network access, Docker-in-Docker configuration |
 
 ::: {.callout-tip}
-When filing an issue, include the output of `kates doctor` — it runs 13 diagnostic checks and gives you a single summary of system health.
+When filing an issue, include the output of `kates doctor` — it runs a battery of diagnostic checks and gives you a single summary of system health.
 :::
 
 
@@ -117,7 +117,7 @@ When filing an issue, include the output of `kates doctor` — it runs 13 diagno
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes" | Missing `ClusterRoleBinding` for the Kates service account — the backend can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
+| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the backend can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
 | Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check Kates backend logs for consumer errors |
 | `kates trend` shows no data even after running tests | Tests completed but trend queries require at least 2 data points of the same test type | Run the same test type at least twice. Trend analysis needs historical data to draw a line |
 
@@ -140,7 +140,7 @@ kubectl logs <broker-pod> -n kafka --previous --tail=30
 kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
 
 # Under-replicated partitions
-kubectl exec <broker-pod> -n kafka -- bin/kafka-metadata.sh --snapshot /var/lib/kafka/data-0/__cluster_metadata-0/00000000000000000000.log --cluster-id $(kubectl get kafka krafter -n kafka -o jsonpath='{.status.clusterId}')
+kubectl exec <broker-pod> -n kafka -- bin/kafka-topics.sh --describe --under-replicated-partitions --bootstrap-server localhost:9092
 
 # Consumer lag
 kubectl exec <broker-pod> -n kafka -- bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --all-groups --describe

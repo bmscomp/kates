@@ -20,7 +20,7 @@ graph TB
     end
     
     subgraph Collection["Collection"]
-        JMX[JMX Exporter<br/>Sidecar]
+        JMX[JMX Exporter<br/>Agent]
         API[Kates REST API]
         OTLP[OTLP Collector]
     end
@@ -46,7 +46,7 @@ graph TB
     OTEL --> OTLP --> JAEGER --> JUI
 ```
 
-Each Kafka broker runs a **JMX Exporter sidecar** that scrapes JMX MBeans and exposes them as Prometheus metrics on `/metrics`. Prometheus scrapes these endpoints (plus the Kates engine's own `/q/metrics`) every 15 seconds. Grafana queries Prometheus to render dashboards. Meanwhile, the Kates engine writes test results to PostgreSQL and exposes them through its REST API — which the CLI consumes for terminal dashboards, trend charts, and heatmap exports.
+Each Kafka broker exposes its JMX MBeans as Prometheus metrics through the **JMX Prometheus Exporter agent**, configured by the kafka-cluster chart's metrics ConfigMap (`charts/kafka-cluster/templates/metrics-configmap.yaml`). Prometheus scrapes these endpoints (plus the Kates engine's own `/q/metrics`) on its scrape interval — 30 seconds by default. Grafana queries Prometheus to render dashboards. Meanwhile, the Kates engine writes test results to PostgreSQL and exposes them through its REST API — which the CLI consumes for terminal dashboards, trend charts, and heatmap exports.
 
 ---
 
@@ -68,13 +68,13 @@ Check **Bytes In/Out (rate)** to understand the data volume. If bytes out signif
 
 ### Step 3: Investigate Latency Sources
 
-If your P99 was higher than expected, open **Kafka Broker Internals**. Look at **Request Queue Size** — if it was growing during the test, requests were arriving faster than the broker could process them. A healthy cluster keeps this near zero.
+If your P99 was higher than expected, open the **Broker Internals** row of the **Kafka Performance Testing** dashboard. Look at **Request / Response Queue Size** — if it was growing during the test, requests were arriving faster than the broker could process them. A healthy cluster keeps this near zero.
 
-Check **Purgatory Size** — this tells you how many produce requests were waiting for follower acknowledgments. With `acks=all`, every produce request sits in purgatory until all ISR members replicate it. A growing purgatory means replication is the bottleneck.
+With `acks=all`, every produce request is parked in the broker's produce purgatory until all ISR members replicate it. There is no dedicated purgatory panel, but a clean request queue combined with high produce latency usually means replication — not request processing — is the bottleneck; verify that in the next step.
 
 ### Step 4: Verify Replication
 
-Finally, open the **Kafka Replication** dashboard. During a normal test, **ISR Count per Partition** should equal your replication factor (3) for every partition, for the entire duration. **Replica Lag (bytes)** should stay near zero. If it spiked, followers were struggling to keep up — likely because of disk I/O pressure or network saturation.
+Finally, open the **Replication** row of the **Kafka Performance Testing** dashboard. During a normal test, **ISR Shrinks / Expands** should stay flat at zero and **Under-Replicated Partitions** should be zero for the entire duration. If ISRs shrank during the test, followers were struggling to keep up — likely because of disk I/O pressure or network saturation.
 
 ::: {.callout-tip}
 Get in the habit of following this sequence — cluster health → performance → internals → replication — after every test. It takes 60 seconds and catches problems that aggregate metrics hide. If a test result surprises you, the dashboards will almost always explain why.
@@ -85,11 +85,13 @@ Get in the habit of following this sequence — cluster health → performance �
 
 ## Kafka Grafana Dashboards
 
-Kates deploys six Kafka-focused Grafana dashboards, each targeting a specific monitoring dimension. For the full dashboard and metrics reference, see [docs/monitoring.md](https://github.com/bmscomp/kates/blob/main/docs/monitoring.md).
+The monitoring chart ships a set of Kafka- and Strimzi-focused Grafana dashboards alongside the Kates-specific ones covered in the next section — every JSON file in [`charts/monitoring/dashboards/`](https://github.com/bmscomp/kates/tree/main/charts/monitoring/dashboards) is deployed. This section is organized by monitoring dimension rather than by file; each subsection notes which dashboard file its panels live on.
 
 ### Kafka Cluster Health
 
 This is the primary ops dashboard — your first stop after any test or chaos experiment. It answers the most fundamental question: "Is my cluster healthy right now?" If anything here is red, stop investigating performance and fix the cluster first.
+
+**Files:** `kafka-dashboard.json` (UID `kafka-cluster-health`); the under-replicated, controller, and node-affinity stats are on the broader `kafka-all-metrics-dashboard.json` (UID `kafka-all-metrics`).
 
 | Panel | What It Shows | Alert Threshold |
 |-------|---------------|-----------------|
@@ -105,11 +107,12 @@ This is the primary ops dashboard — your first stop after any test or chaos ex
 
 This dashboard shows the workload patterns hitting your cluster. Use it to verify that your test is generating the load you expect, and to spot asymmetries across brokers or topics.
 
+**Files:** `kafka-performance-dashboard.json` (UID `kafka-performance`) for the test-topic view; the per-broker throughput timeseries are in the **Throughput** row of `kafka-perf-global-dashboard.json` (UID `kafka-perf-global`).
+
 | Panel | Metric |
 |-------|--------|
 | Messages In (rate) | `kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec` |
 | Bytes In/Out (rate) | `kafka.server:type=BrokerTopicMetrics,name=Bytes{In,Out}PerSec` |
-| Request Rate | `kafka.network:type=RequestMetrics,name=RequestsPerSec` |
 | Topic Size Growth | `kafka.log:type=Log,name=Size` |
 
 **Messages In (rate)** should match your configured producer throughput. If it plateaus below your target, the cluster has hit a bottleneck — check broker internals. **Topic Size Growth** matters for long-running tests: if your topic is growing faster than log retention can clean, you'll run out of disk.
@@ -118,45 +121,49 @@ This dashboard shows the workload patterns hitting your cluster. Use it to verif
 
 When performance numbers look off, this is where you diagnose the root cause. These metrics reveal what's happening *inside* each broker — the queues, threads, and internal buffers that determine whether the broker is keeping up or falling behind.
 
+**File:** `kafka-perf-global-dashboard.json` (UID `kafka-perf-global`), **Broker Internals** row; request/response queue sizes also appear on `kafka-all-metrics-dashboard.json`.
+
 | Panel | What It Reveals |
 |-------|----------------|
-| Request Queue Size | How many requests are waiting to be processed |
-| Response Queue Size | How many responses are waiting to be sent |
-| Network Handler Idle | Percentage of time network threads are idle |
-| Purgatory Size | Requests waiting for ACKs (producer purgatory) |
-| ISR Shrink/Expand Rate | How often ISRs change — instability indicator |
+| Request / Response Queue Size | How many requests are waiting to be processed, and responses waiting to be sent |
+| Request Handler Idle % | Percentage of time request handler threads are idle |
+| Network Processor Idle % | Percentage of time network threads are idle |
+| ISR Shrinks / Expands (Replication row) | How often ISRs change — instability indicator |
 
-**Request Queue Size** tells you whether the broker is keeping up. A growing queue means requests are arriving faster than the broker can process them. On a healthy cluster, this stays near zero. **Network Handler Idle** below 50% is a warning — the broker's network threads are saturated, and adding more load will cause requests to queue. **ISR Shrink/Expand Rate** should be zero during normal operations. Any non-zero value means followers are falling behind and catching up — a sign of instability that directly impacts write latency with `acks=all`.
+**Request Queue Size** tells you whether the broker is keeping up. A growing queue means requests are arriving faster than the broker can process them. On a healthy cluster, this stays near zero. **Network Processor Idle %** below 50% is a warning — the broker's network threads are saturated, and adding more load will cause requests to queue. **ISR Shrinks / Expands** should be zero during normal operations. Any non-zero value means followers are falling behind and catching up — a sign of instability that directly impacts write latency with `acks=all`.
 
 ### Kafka JVM Metrics
 
 The JVM is the runtime underneath every broker. GC pauses are the single most common source of tail latency in Kafka benchmarks, making this dashboard essential for capacity planning and GC tuning. If your P99 latency has unexplained spikes, check here first.
 
+**File:** `kafka-jvm-dashboard.json` | **UID:** `kafka-jvm`
+
 | Panel | Significance |
 |-------|-------------|
-| Heap Used vs. Max | Memory pressure indicator |
-| GC Pause Time | Directly impacts tail latency |
-| GC Count | High frequency = memory pressure |
+| JVM Heap Memory | Memory pressure indicator |
+| GC Collection Rate | High frequency = memory pressure; GC pauses impact tail latency |
 | Thread Count | Leak detection over time |
-| Non-Heap Memory | Metaspace growth indicator |
+| JVM Non-Heap Memory | Metaspace growth indicator |
 
-**GC Pause Time** correlates directly with latency spikes. If you see GC pauses of 50ms+ coinciding with your P99 spikes, switching to ZGC will likely eliminate them — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning). **Heap Used vs. Max** trending upward over time without leveling off suggests a memory leak or insufficient heap size.
+GC pauses correlate directly with latency spikes. The dashboard plots the **GC Collection Rate** — if collection spikes coincide with your P99 spikes, switching to ZGC will likely eliminate them — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning). **JVM Heap Memory** trending upward over time without leveling off suggests a memory leak or insufficient heap size.
 
 ### Kafka Replication
 
 This dashboard becomes critical during chaos tests, where you intentionally take brokers offline and need to verify that replication recovers correctly. During normal tests, everything here should be flat and boring — which is exactly what you want.
 
+**File:** `kafka-perf-global-dashboard.json` (UID `kafka-perf-global`), **Replication** row.
+
 | Panel | During Normal | During Chaos |
 |-------|:---:|:---:|
-| ISR Count per Partition | = RF (3) | Drops to 2 or 1 |
-| Under-replicated Partitions | 0 | Spikes |
-| Replica Lag (bytes) | Near 0 | Spikes then recovers |
+| ISR Shrinks / Expands | 0 | Shrinks spike, then expands on recovery |
+| Under-Replicated Partitions | 0 | Spikes |
+| Leader Count (per Broker) | Balanced | Redistributes to surviving brokers |
 
-The story this dashboard tells during a chaos test is: the ISR shrinks when a broker goes down, under-replicated partitions spike, replica lag grows while the remaining brokers absorb the load, and then everything recovers when the broker returns. The *shape* of the recovery curve matters — a sharp V means fast recovery, a gradual slope means the cluster is struggling to catch up.
+The story this dashboard tells during a chaos test is: the ISR shrinks when a broker goes down, under-replicated partitions spike, leadership redistributes while the remaining brokers absorb the load, and then everything recovers when the broker returns. The *shape* of the recovery curve matters — a sharp V means fast recovery, a gradual slope means the cluster is struggling to catch up.
 
 ### Strimzi Operator & Kafka Connect
 
-The **Strimzi Operator & Kafka Connect** dashboard (`charts/monitoring/dashboards/strimzi-operator-dashboard.json`) provides visibility into the operator that manages your Kafka cluster and any Connect workloads. You'll check this dashboard when deployments seem stuck, when topic or user changes aren't applying, or when Connect tasks are failing silently.
+The **Strimzi Operator & Kafka Connect** dashboard (`strimzi-operator-dashboard.json`, UID `strimzi-operator-connect`) provides visibility into the operator that manages your Kafka cluster and any Connect workloads. You'll check this dashboard when deployments seem stuck, when topic or user changes aren't applying, or when Connect tasks are failing silently.
 
 | Panel | Metric | Alert Level |
 |-------|--------|:---:|
@@ -351,7 +358,7 @@ For the theory behind why heatmaps matter and why percentiles alone are insuffic
 graph TD
     subgraph Collection["During Test Execution"]
         direction LR
-        H1["Every 1 second:<br/>LatencyHistogram.snapshotAndReset()"]
+        H1["On each status poll:<br/>LatencyHistogram.exportBuckets()"]
         H2["25 logarithmic buckets<br/>0ms → 10,000ms"]
         H3["Counts per bucket<br/>stored as HeatmapRow"]
     end
@@ -367,30 +374,31 @@ graph TD
 
 ### Bucket Boundaries
 
-The 25 heatmap buckets use logarithmic spacing, concentrating resolution where it matters most — in the low-latency range where small differences are significant:
+The 25 heatmap buckets (defined by `HEATMAP_BOUNDARIES` in `LatencyHistogram.java`) use roughly logarithmic spacing, concentrating resolution where it matters most — in the low-latency range where small differences are significant:
 
 | Bucket | Range | Focus |
 |:-:|---|---|
-| 1 | 0 – 0.1ms | Sub-millisecond operations |
-| 2–5 | 0.1 – 1ms | Fast local writes |
-| 6–10 | 1 – 10ms | Typical Kafka latency |
-| 11–15 | 10 – 100ms | Moderate latency |
-| 16–20 | 100 – 1,000ms | High latency / timeouts |
-| 21–25 | 1,000 – 10,000ms | Extreme tail / failures |
+| 1 | 0 – 0.5ms | Sub-millisecond operations |
+| 2 | 0.5 – 1ms | Fast local writes |
+| 3–7 | 1 – 10ms | Typical Kafka latency |
+| 8–13 | 10 – 100ms | Moderate latency |
+| 14–19 | 100 – 1,000ms | High latency / timeouts |
+| 20–25 | 1,000 – 10,000ms | Extreme tail / failures |
 
 ### Exporting Heatmaps
 
 ```bash
-# JSON (for Grafana)
+# JSON (for Grafana) — run in a terminal, this writes kates-heatmap-<id>.json
 kates report export <id> --format heatmap
 
-# CSV (for spreadsheets)
+# CSV (for spreadsheets) — writes kates-heatmap-<id>.csv
 kates report export <id> --format heatmap-csv
 
-# Save to file
-kates report export <id> --format heatmap -o heatmap.json
-kates report export <id> --format heatmap-csv -o heatmap.csv
+# Pipe or redirect to send the export to stdout instead
+kates report export <id> --format heatmap > heatmap.json
 ```
+
+There is no output-file flag: when stdout is a terminal, the export is written to an auto-named file; when piped or redirected, it goes to stdout.
 
 ### REST API
 
@@ -401,17 +409,17 @@ GET /api/tests/{id}/report/heatmap?format=csv
 
 ### Reading Heatmap Data
 
-Each row in the heatmap data represents one second of the test:
+The JSON payload carries the run ID, test type, bucket labels and boundaries, and a list of rows. Each row is a snapshot of the latency distribution, captured while the engine polls the running test:
 
 ```json
 {
   "timestampMs": 1708012345000,
-  "phaseName": "steady-state",
-  "buckets": [0, 0, 12, 145, 832, 456, 89, 23, 5, 1, ...]
+  "phase": "steady-state",
+  "counts": [0, 0, 12, 145, 832, 456, 89, 23, 5, 1, ...]
 }
 ```
 
-Interpretation: during this second, 832 messages had latency between 1–5ms, 456 had 5–10ms, etc. The `phaseName` field tells you which test phase was active — compare the latency distribution during `ramp-up` vs. `steady-state` to see the effect of JVM warm-up.
+Interpretation: at this snapshot, 832 messages fell in the 3–5ms bucket, 456 in the 5–7ms bucket, etc. The `phase` field tells you which test phase was active — compare the latency distribution during `ramp-up` vs. `steady-state` to see the effect of JVM warm-up.
 
 ### What Heatmaps Reveal
 
@@ -498,15 +506,18 @@ This is particularly valuable after chaos tests — you can see exactly how the 
 
 ## Export Formats Summary
 
-Kates supports five export formats, each designed for a different downstream consumer:
+The `kates report export` command supports six export formats, each designed for a different downstream consumer:
 
 | Format | Command | Use Case |
 |--------|---------|----------|
-| JSON | `kates report export <id> --format json` | Programmatic consumption |
 | CSV | `kates report export <id> --format csv` | Spreadsheet analysis |
 | JUnit XML | `kates report export <id> --format junit` | CI/CD pipelines |
+| Markdown | `kates report export <id> --format md` | Docs, PRs, and chat |
+| HTML | `kates report export <id> --format html` | Shareable standalone report |
 | Heatmap JSON | `kates report export <id> --format heatmap` | Grafana visualization |
 | Heatmap CSV | `kates report export <id> --format heatmap-csv` | Spreadsheet analysis |
+
+When stdout is a terminal, each export is written to an auto-named file (`kates-report-<id>.csv`, `kates-heatmap-<id>.json`, …); when piped or redirected, it goes to stdout — except HTML, which always writes a file. There is no `--format json`: for programmatic JSON, use `kates report show <id> -o json` or the REST API directly.
 
 ---
 
@@ -520,11 +531,11 @@ Tracing is configured in `application.properties`:
 
 | Property | Value | Purpose |
 |----------|-------|---------| 
-| `quarkus.otel.traces.exporter` | `otlp` | Export spans via OTLP (gRPC) |
-| `quarkus.otel.exporter.otlp.endpoint` | `jaeger-collector:4317` | Jaeger collector address |
+| `quarkus.otel.enabled` | `true` | Master switch for OpenTelemetry |
+| `quarkus.otel.exporter.otlp.endpoint` | `http://jaeger-collector.monitoring.svc:4317` | Jaeger collector address (`http://localhost:4317` in dev) |
+| `quarkus.otel.exporter.otlp.protocol` | `grpc` | Export spans via OTLP over gRPC |
 | `quarkus.otel.traces.sampler` | `parentbased_traceidratio` | Sample based on parent trace |
 | `quarkus.otel.traces.sampler.arg` | `0.1` (prod) / `1.0` (dev) | 10% sampling in prod, 100% in dev |
-| `quarkus.otel.instrument.kafka` | `true` | Auto-instrument Kafka client operations |
 
 ::: {.callout-note}
 The `0.1` sampling rate in production means only 10% of requests generate traces. This is a deliberate trade-off — tracing adds overhead, and at high throughput you don't need every request traced to spot patterns. In development, 100% sampling is used so you can trace any request.
@@ -542,7 +553,7 @@ The `0.1` sampling rate in production means only 10% of requests generate traces
 
 ### Viewing Traces
 
-Access the Jaeger UI at http://localhost:30086:
+Deploy Jaeger with `make jaeger`, then access the UI at http://localhost:30086 (NodePort set in `config/monitoring/jaeger-values.yaml`):
 
 1. Select service **kates** in the dropdown
 2. Click **Find Traces** to see recent requests
@@ -554,63 +565,47 @@ Each trace shows the complete request lifecycle as a waterfall diagram. Look for
 
 ## Alerting
 
-Kates deploys 20+ PrometheusRule alerts across 6 alert groups. These alerts fire automatically when cluster health degrades, giving you early warning before problems become outages.
+Kates ships PrometheusRule alerts alongside its charts. These alerts fire automatically when cluster health degrades, giving you early warning before problems become outages.
 
-| Group | File | Alerts |
-|-------|------|--------|
-| `kafka.cluster` | `kafka-alerts.yaml` | Offline partitions, under-replicated, no active controller, disk usage |
-| `kafka.consumer` | `kafka-alerts.yaml` | Consumer group lag warning + critical |
-| `kafka.kraft` | `kafka-alerts.yaml` | Leader election rate, uncommitted records |
-| `kafka.network` | `kafka-alerts.yaml` | Request latency p99 > 1s |
-| `strimzi.operator.health` | `kafka-connect-alerts.yaml` | Reconciliation failing/slow/stalled, resource count drift |
-| `kafka.connect.health` | `kafka-connect-alerts.yaml` | Worker down, task failed, error rate, sink lag, stuck rebalancing |
+| File | Groups | What They Cover |
+|------|--------|-----------------|
+| `charts/kafka-cluster/templates/prometheusrule.yaml` | `kafka.cluster`, `kafka.consumer`, `kafka.kraft`, `kafka.network`, `strimzi.operator`, `kafka.replication`, `kafka.performance`, `kafka.cruisecontrol`, `kafka.certificates` | Offline/under-replicated partitions, controller health, disk usage, consumer lag, KRaft election rate, request latency, operator liveness, ISR shrink, log-flush latency, handler saturation, Cruise Control anomalies, certificate expiry |
+| `charts/connect-cluster/templates/alerts-connect.yaml` | `kafka-connect` | Worker down, failed tasks, task-count mismatch, rebalance storms, error rate, source lag, worker heap |
+| `charts/monitoring/templates/prometheus-chaos-rules.yaml` | `kafka-chaos-expected`, `kafka-chaos-unexpected`, `kafka-chaos-results`, `kafka-gameday`, `kafka-chaos-rto-rpo` | Chaos experiment status, unexpected broker restarts during chaos, gameday workflows, RTO/RPO SLA breaches and data loss |
 
 ### Alert Configuration
 
-Alert thresholds are defined in `charts/monitoring/values.yaml` and can be customized per environment. The alert rules are deployed as Kubernetes `PrometheusRule` resources, which the Prometheus operator discovers automatically.
+The alert rules are deployed as Kubernetes `PrometheusRule` resources, which the Prometheus operator discovers automatically. Each chart has its own toggle: `alerts.enabled` in `charts/kafka-cluster/values.yaml` and `charts/connect-cluster/values.yaml` (with extra labels via `alerts.labels`), and `chaosAlerts.enabled` in `charts/monitoring/values.yaml` (off by default).
 
-To customize thresholds, override the relevant values in your environment-specific values file (`values-kind.yaml` or `values-generic.yaml`). Here are three common alert configurations:
+Thresholds and `for:` durations live in the rule templates themselves — to change one, edit the template or deploy your own `PrometheusRule` alongside. Here are three of the kafka-cluster rules as the chart renders them:
 
 #### Consumer Group Lag
 
 This alert fires when a consumer group falls behind, meaning messages are being produced faster than they're being consumed. A small lag during load tests is expected — sustained lag in production means your consumers are undersized.
 
 ```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: kafka-consumer-lag
-  labels:
-    release: monitoring
-spec:
-  groups:
-    - name: kafka.consumer
-      rules:
-        - alert: KafkaConsumerGroupLagWarning
-          expr: |
-            sum by (consumergroup, topic) (
-              kafka_consumergroup_lag
-            ) > 1000
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Consumer group {{ $labels.consumergroup }} lag > 1000 on {{ $labels.topic }}"
-            description: "Consumer lag has exceeded 1000 for 5 minutes. Check consumer health and scaling."
-        - alert: KafkaConsumerGroupLagCritical
-          expr: |
-            sum by (consumergroup, topic) (
-              kafka_consumergroup_lag
-            ) > 10000
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: "Consumer group {{ $labels.consumergroup }} lag > 10000 on {{ $labels.topic }}"
-            description: "Consumer lag is critically high. Consumers may be down or severely undersized."
+- name: kafka.consumer
+  rules:
+    - alert: KafkaConsumerGroupLag
+      expr: kafka_consumergroup_lag_sum > 1000000
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Consumer group lag exceeds threshold"
+        description: "Consumer group {{ $labels.consumergroup }} has {{ $value }} messages lag."
+
+    - alert: KafkaConsumerGroupLagCritical
+      expr: kafka_consumergroup_lag_sum > 10000000
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Consumer group lag critical"
+        description: "Consumer group {{ $labels.consumergroup }} has {{ $value }} messages lag."
 ```
 
-**When it fires:** Consumer lag exceeds 1,000 messages (warning) or 10,000 messages (critical) for 5 continuous minutes.  
+**When it fires:** Consumer lag exceeds 1 million messages for 15 continuous minutes (warning) or 10 million for 5 minutes (critical).  
 **What to do:** Check that consumer pods are running (`kubectl get pods`). If they're healthy, consider scaling the consumer group or investigating whether the consumer is blocked on downstream dependencies.
 
 #### Offline Partitions
@@ -618,54 +613,36 @@ spec:
 This is the most critical Kafka alert. Offline partitions mean messages can't be produced or consumed for those partitions — this is data unavailability.
 
 ```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: kafka-offline-partitions
-  labels:
-    release: monitoring
-spec:
-  groups:
-    - name: kafka.cluster
-      rules:
-        - alert: KafkaOfflinePartitions
-          expr: |
-            sum(kafka_controller_kafkacontroller_offlinepartitionscount) > 0
-          for: 1m
-          labels:
-            severity: critical
-          annotations:
-            summary: "Kafka has {{ $value }} offline partitions"
-            description: "One or more partitions have no active leader. Producers and consumers for these partitions are blocked."
+- name: kafka.cluster
+  rules:
+    - alert: KafkaOfflinePartitions
+      expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Kafka has offline partitions"
+        description: "{{ $value }} partitions are offline on cluster krafter."
 ```
 
-**When it fires:** Any partition has no leader for more than 1 minute.  
-**What to do:** Check which brokers are down (`kates cluster watch`). If a broker crashed, Kafka should elect new leaders automatically — if it doesn't within a minute, check the KRaft controller logs for election failures.
+**When it fires:** Any partition has no leader for more than 2 minutes.  
+**What to do:** Check which brokers are down (`kates cluster watch`). If a broker crashed, Kafka should elect new leaders automatically — if it doesn't within a couple of minutes, check the KRaft controller logs for election failures.
 
 #### Under-Replicated Partitions (Sustained)
 
 Transient under-replication is normal during broker restarts. Sustained under-replication means data durability is at risk — if the remaining replica also fails, you lose data.
 
 ```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: kafka-under-replicated
-  labels:
-    release: monitoring
-spec:
-  groups:
-    - name: kafka.cluster
-      rules:
-        - alert: KafkaUnderReplicatedPartitions
-          expr: |
-            sum(kafka_server_replicamanager_underreplicatedpartitions) > 0
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "{{ $value }} under-replicated partitions for > 5 minutes"
-            description: "Partitions have fewer in-sync replicas than the replication factor. Check broker health and disk I/O."
+- name: kafka.cluster
+  rules:
+    - alert: KafkaUnderReplicatedPartitions
+      expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Under-replicated partitions detected"
+        description: "{{ $value }} partitions are under-replicated on {{ $labels.kubernetes_pod_name }}."
 ```
 
 **When it fires:** Any partition has ISR < replication factor for more than 5 minutes.  
@@ -680,8 +657,8 @@ The monitoring stack is installed via a **local wrapper chart** in `charts/monit
 | Component | Version | Source |
 |---|---|---|
 | Monitoring Chart | 1.0.0 | Local wrapper (`charts/monitoring`) |
-| Prometheus | Managed by kube-prometheus-stack | `prometheus-community/kube-prometheus-stack` |
-| Grafana | 12.3.1 | Bundled with kube-prometheus-stack |
+| Prometheus | v3.9.1 | Pinned in `charts/monitoring/values.yaml` |
+| Grafana | 12.3.1 | Pinned in `charts/monitoring/values.yaml` |
 | kube-prometheus-stack | `82.4.3` | Upstream dependency in `Chart.yaml` |
 
 ### Deploying
@@ -698,7 +675,7 @@ These commands will:
 
 1. Build chart dependencies (`helm dependency build charts/monitoring`)
 2. Install the local wrapper chart
-3. Automatically deploy all 13 Kates and Kafka Grafana dashboards (templated as ConfigMaps)
+3. Automatically deploy every dashboard in `charts/monitoring/dashboards/` (templated as ConfigMaps)
 
 ### Access
 

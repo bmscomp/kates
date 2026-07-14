@@ -67,7 +67,7 @@ You can verify the zone distribution at any time with `kates cluster topology`. 
 
 | Component | Memory (req=limit) | CPU (req / limit) | Storage | JVM Heap |
 |-----------|:------------------:|:-----------------:|:-------:|:--------:|
-| Controller | 1Gi | 500m / 1000m | 5Gi | Default |
+| Controller | 1Gi | 500m / 1000m | 5Gi | 512m fixed |
 | Broker | 4Gi | 1000m / 2000m | 50Gi | 2Gi fixed |
 | **Total cluster** | **15Gi** | **4.5 / 9 cores** | **165Gi** | — |
 
@@ -151,7 +151,7 @@ helm upgrade krafter charts/kafka-cluster -n kafka \
   --reuse-values
 ```
 
-After the new broker joins, existing partitions won't automatically rebalance. Use Cruise Control or `kates rebalance` to redistribute partitions.
+After the new broker joins, existing partitions won't automatically rebalance. Use Cruise Control to redistribute partitions — the chart provisions `KafkaRebalance` resources (`full-rebalance` and `add-broker-rebalance`) for exactly this.
 
 ### Testing Single-Zone Failures
 
@@ -189,11 +189,11 @@ Remember to re-apply zone labels after testing. Without rack awareness, a single
 | `tls` | 9093 | internal | mTLS | Yes | Encrypted internal communication |
 | `external` | 9094 | nodeport | SCRAM-SHA-512 | Yes | Access from outside the cluster |
 
-Performance tests use port 9092 (plain) for baseline measurements. TLS adds measurable CPU overhead — test both to quantify the encryption cost on a memory-constrained cluster. On this cluster, expect 10–15% throughput reduction and 20–30% latency increase with TLS enabled, due to the limited CPU budget per broker.
+Performance tests use port 9092 (plain) for baseline measurements. TLS adds measurable CPU overhead — test both to quantify the encryption cost on a memory-constrained cluster. Because the CPU budget per broker is limited here, that overhead is more pronounced than on production hardware, so measure it directly rather than assuming a fixed figure.
 
 ## Topics
 
-Kates provisions five declarative topics via `KafkaTopic` CRDs:
+Kates provisions its core application topics via `KafkaTopic` CRDs:
 
 | Topic | Partitions | Retention | Compression | Purpose |
 |-------|:----------:|-----------|:-----------:|---------|
@@ -214,7 +214,7 @@ Beyond the brokers and controllers, the cluster includes several components that
 | **Cruise Control** | Automated partition rebalancing based on resource utilization | Can trigger unexpected partition movements during long tests — be aware of this if latency shifts mid-run |
 | **Kafka Exporter** | Consumer lag and topic offset metrics | Provides the lag data that `kates cluster watch` displays in sparklines |
 | **Drain Cleaner** | Graceful pod rolling during node drains | Ensures broker restarts during chaos tests are clean (finalizes log segments, flushes buffers) |
-| **Entity Operator** | Topic and User lifecycle management via CRDs | Creates and reconciles the `KafkaTopic` and `KafkaUser` resources listed above |
+| **Entity Operator** | Topic and User lifecycle management via CRDs | Creates and reconciles the `KafkaTopic` and `KafkaUser` resources declared in the chart |
 
 For deep operational details on each component, see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
 
@@ -232,22 +232,22 @@ For deep operational details on each component, see [Chapter 15: Kafka Deploymen
 You don't need to memorize the topology — Kates provides built-in cluster inspection commands that give you a live view:
 
 ```bash
-# Cluster overview — brokers, controllers, health
-kates cluster
+# Cluster overview — brokers, controllers, metadata
+kates cluster info
 
 # Full topology — node pools, PVCs, services, network policies
 kates cluster topology
 
 # Topic details with partition layout
 kates cluster topics
-kates cluster topic <topic-name>
+kates cluster topics describe <topic-name>
 
 # Consumer group status with lag
 kates cluster groups
-kates cluster group <group-name>
+kates cluster groups describe <group-id>
 
 # Broker configuration
-kates cluster brokers
+kates cluster broker configs <broker-id>
 
 # Full health check
 kates health

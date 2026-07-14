@@ -50,7 +50,7 @@ Expected output:
 ```
 
 ::: {.callout-tip}
-If you see `No test found for ID` errors, make sure you noted the test IDs from Step 1 output before starting the upgrade. Test IDs are printed after each `kates test apply` or `kates test create` command.
+If you see `Test run not found` errors, make sure you noted the test IDs from Step 1 output before starting the upgrade. Test IDs are printed after each `kates test apply` or `kates test create` command.
 :::
 
 
@@ -100,11 +100,11 @@ scenarios:
 ```bash
 cat > nightly-load.json << 'EOF'
 {
-  "testType": "LOAD",
+  "type": "LOAD",
   "spec": {
-    "records": 100000,
-    "parallelProducers": 4,
-    "recordSizeBytes": 1024,
+    "numRecords": 100000,
+    "numProducers": 4,
+    "recordSize": 1024,
     "acks": "all"
   }
 }
@@ -124,7 +124,7 @@ kates schedule create \
 
 ```bash
 kates trend --type LOAD --metric p99LatencyMs --days 30
-kates trend --type LOAD --metric throughputRecordsPerSec --days 30
+kates trend --type LOAD --metric avgThroughputRecPerSec --days 30
 ```
 
 Expected output:
@@ -135,14 +135,14 @@ Expected output:
     ▁▁▂▁▁▁▂▁▃▁▁▁▂▁▁▁▁▂▁▁▁▁▁▁▁▇▁▁▁▁
                                  ↑ anomaly (run #26)
 
-  ▸ Trend: LOAD / throughputRecordsPerSec (30 days, 30 runs)
+  ▸ Trend: LOAD / avgThroughputRecPerSec (30 days, 30 runs)
     Min: 15,201  Max: 19,843  Avg: 18,102
     ▇▇▆▇▇▇▆▇▅▇▇▇▆▇▇▇▇▆▇▇▇▇▇▇▇▂▇▇▇▇
                                  ↑ anomaly (run #26)
 ```
 
 ::: {.callout-tip}
-If the schedule doesn't trigger, verify the Kates scheduler pod is running with `kubectl get pods -n kates -l app=kates-scheduler`. The cron expression uses UTC — adjust for your timezone.
+If the schedule doesn't trigger, verify the Kates backend pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates` — the scheduler runs inside the backend, not as a separate pod. The cron expression uses UTC — adjust for your timezone.
 :::
 
 
@@ -174,18 +174,19 @@ graph TD
 kates test create --type LOAD --records 200000 --producers 4 --acks all --wait
 ```
 
-**Step 2 — Data integrity under chaos:**
+**Step 2 — Data integrity:**
 
 ```bash
-kates test scaffold --type INTEGRITY_CHAOS -o integrity-chaos.yaml
-kates test apply -f integrity-chaos.yaml --wait
+kates test scaffold export integrity-tx
+kates test apply -f integrity-tx.yaml --wait
 ```
 
 **Step 3 — Disruption playbooks:**
 
 ```bash
-kates disruption run --config <(kates disruption playbook leader-cascade) --fail-on-sla-breach
-kates disruption run --config <(kates disruption playbook split-brain) --fail-on-sla-breach
+kates disruption playbook run leader-cascade
+kates disruption playbook run split-brain
+kates disruption playbook run az-failure
 ```
 
 **Step 4 — Resilience test (performance + chaos combined):**
@@ -194,33 +195,46 @@ kates disruption run --config <(kates disruption playbook split-brain) --fail-on
 cat > resilience.json << 'EOF'
 {
   "testRequest": {
-    "testType": "LOAD",
-    "spec": { "records": 100000, "producers": 4 }
+    "type": "LOAD",
+    "spec": { "numRecords": 100000, "numProducers": 4 }
   },
   "chaosSpec": {
-    "experimentName": "kafka-pod-kill",
-    "targetNamespace": "kafka"
+    "experimentName": "kafka-broker-pod-kill",
+    "targetNamespace": "kafka",
+    "targetLabel": "strimzi.io/component-type=kafka",
+    "chaosDurationSec": 30,
+    "disruptionType": "POD_KILL"
   },
   "steadyStateSec": 30
 }
 EOF
-kates resilience run --config resilience.json
+kates resilience run -f resilience.json
 ```
 
 Expected output:
 
 ```
-  ▸ Resilience Test: kafka-pod-kill
-    Steady-state baseline:    P99=11.2ms  Throughput=18,500 rec/s
-    During chaos:             P99=342.1ms Throughput=12,100 rec/s
-    Recovery time:            8.4s
-    Post-recovery:            P99=12.8ms  Throughput=18,200 rec/s
-    Data loss:                0 messages
-    Verdict:                  PASS ✅
+  Resilience Test Results
+  Status: COMPLETED
+
+  Chaos Outcome
+  Experiment: kafka-broker-pod-kill
+  Verdict:    Pass
+  Duration:   30s
+
+  Pre-Chaos Baseline
+  Throughput (rec/s): 18500.0
+  P99 Latency (ms):   11.20
+  Error Rate:         0.0000%
+
+  Post-Chaos Impact
+  Throughput (rec/s): 18200.0
+  P99 Latency (ms):   12.80
+  Error Rate:         0.0000%
 ```
 
 ::: {.callout-tip}
-If `--fail-on-sla-breach` causes immediate failure, your SLA thresholds may be too tight for disruption tests. Use `kates disruption playbook <name> --show-defaults` to see the recommended thresholds for each playbook.
+Each playbook run prints an SLA grade at the end. If you need a hard pass/fail gate for CI — exit code 1 on SLA violation — run a custom disruption plan instead: `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
 :::
 
 
@@ -251,9 +265,11 @@ If one broker shows disproportionately high load (bytes in/s, request rate), it 
 **Step 3 — Export and compare heatmaps:**
 
 ```bash
-kates report export <good-id> --format heatmap -o good-heatmap.json
-kates report export <bad-id> --format heatmap -o bad-heatmap.json
+kates report export <good-id> --format heatmap > good-heatmap.json
+kates report export <bad-id> --format heatmap > bad-heatmap.json
 ```
+
+(When run interactively without a redirect, the heatmap is written to `kates-heatmap-<id>.json` in the current directory.)
 
 Heatmap patterns to look for:
 
@@ -273,15 +289,20 @@ Expected output:
 
 ```json
 {
-  "clusterHealthy": false,
-  "underReplicatedPartitions": 3,
-  "isrChanges": 12,
-  "offlinePartitions": 0,
-  "brokers": [
-    {"id": 0, "bytesInPerSec": 52428800, "requestRate": 1240},
-    {"id": 1, "bytesInPerSec": 15728640, "requestRate": 310},
-    {"id": 2, "bytesInPerSec": 16777216, "requestRate": 340}
-  ]
+  "clusterId": "lZ0T3AqiTtqzXWkGkDXG3g",
+  "brokers": 3,
+  "controllerId": 0,
+  "topics": 24,
+  "partitions": 96,
+  "consumerGroups": 5,
+  "partitionHealth": {
+    "underReplicated": 3,
+    "offline": 0,
+    "problems": [
+      {"topic": "kates-load-test", "partition": 4, "issue": "UNDER_REPLICATED", "isr": 2, "replicas": 3}
+    ]
+  },
+  "status": "WARNING"
 }
 ```
 
@@ -290,7 +311,7 @@ If the diff shows degraded throughput but the heatmap has no obvious pattern, ch
 :::
 
 
-If under-replicated partitions or ISR changes occurred during the test, the cluster was under stress.
+If under-replicated or offline partitions show up during the test, the cluster was under stress.
 
 ---
 
@@ -323,7 +344,7 @@ The results show per-phase metrics. The last phase before P99 latency exceeded y
 Combine with trend analysis to track capacity changes over time as your cluster configuration evolves:
 
 ```bash
-kates trend --type CAPACITY --metric throughputRecordsPerSec --days 90
+kates trend --type CAPACITY --metric avgThroughputRecPerSec --days 90
 ```
 
 Expected output:

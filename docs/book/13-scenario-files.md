@@ -60,26 +60,26 @@ scenarios:
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
 | `name` | String | | Human-readable scenario name (displayed in output) |
-| `type` | String | ✅ | Test type: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY` |
+| `type` | String | ✅ | Test type: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`, `TUNE_REPLICATION`, `TUNE_ACKS`, `TUNE_BATCHING`, `TUNE_COMPRESSION`, `TUNE_PARTITIONS`, or `INTEGRATION_CDC`. Case-insensitive — the CLI upper-cases the value before submitting |
 | `backend` | String | | Backend engine (default: `native`) |
 | `spec` | Object | | Test specification — see Spec Reference below |
 | `validate` | Object | | SLA validation gates — see Validation Reference below |
 
 ## Spec Reference
 
-The `spec` object controls all test parameters. Every field is optional; Kates applies sensible defaults per test type when a field is omitted.
+The `spec` object controls all test parameters. Every field is optional; the backend fills in defaults per test type (configurable via its `kates.tests.<type>.*` properties), so a STRESS test defaults to larger batches and more producers than a ROUND_TRIP test. The defaults shown below are the stock values for a LOAD test — other types differ.
 
 ### Producer Configuration
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `records` | Integer | varies by type | Number of records to produce |
+| `records` | Integer | 1,000,000 | Number of records to produce |
 | `parallelProducers` | Integer | 1 | Number of concurrent producer threads |
 | `recordSizeBytes` | Integer | 1024 | Payload size per record in bytes |
 | `acks` | String | `all` | Producer acknowledgment mode: `0`, `1`, or `all` |
-| `batchSize` | Integer | 16384 | Producer batch size in bytes |
-| `lingerMs` | Integer | 0 | Milliseconds to wait before sending a batch |
-| `compressionType` | String | `none` | Compression: `none`, `gzip`, `snappy`, `lz4`, `zstd` |
+| `batchSize` | Integer | 65536 | Producer batch size in bytes |
+| `lingerMs` | Integer | 5 | Milliseconds to wait before sending a batch |
+| `compressionType` | String | `lz4` | Compression: `none`, `gzip`, `snappy`, `lz4`, `zstd` |
 | `targetThroughput` | Integer | -1 | Target records/sec (-1 = unlimited) |
 | `enableIdempotence` | Boolean | false | Enable Kafka producer idempotency |
 | `enableTransactions` | Boolean | false | Enable Kafka transactions |
@@ -88,7 +88,7 @@ The `spec` object controls all test parameters. Every field is optional; Kates a
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `numConsumers` | Integer | 0 | Number of consumer threads (0 = no consumption) |
+| `numConsumers` | Integer | 1 | Number of consumer threads |
 | `consumerGroup` | String | auto | Consumer group name |
 | `fetchMinBytes` | Integer | 1 | Minimum bytes per fetch request |
 | `fetchMaxWaitMs` | Integer | 500 | Maximum wait time for fetch in milliseconds |
@@ -97,7 +97,7 @@ The `spec` object controls all test parameters. Every field is optional; Kates a
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `topic` | String | auto-generated | Target topic name |
+| `topic` | String | auto (`<type>-test`) | Target topic name |
 | `partitions` | Integer | 3 | Number of topic partitions |
 | `replicationFactor` | Integer | 3 | Topic replication factor |
 | `minInsyncReplicas` | Integer | 2 | Minimum in-sync replicas |
@@ -106,17 +106,21 @@ The `spec` object controls all test parameters. Every field is optional; Kates a
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `durationSeconds` | Integer | 0 | Time-based test duration (0 = use record count) |
+| `durationSeconds` | Integer | per type | Time-based duration cap — the run stops at `records` or the deadline, whichever comes first |
 
 ### Integrity Options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enableCrc` | Boolean | false | Enable CRC32 checksum verification on messages |
+| `enableCrc` | Boolean | true | Enable CRC32 checksum verification on messages |
 
 ## Validation Reference (SLA Gates)
 
-The `validate` section defines pass/fail criteria that Kates checks after the test completes. If any threshold is breached, the scenario is marked as failed, and the CLI exits with a non-zero status code — making it ideal for CI/CD gate enforcement.
+The `validate` section defines pass/fail criteria that the CLI checks after each test completes. If any threshold is breached, the violation is listed in the summary table and the CLI exits with a non-zero status code — making it ideal for CI/CD gate enforcement.
+
+::: {.callout-warning}
+SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and the CLI exits 0 regardless of how the tests turn out.
+:::
 
 ```mermaid
 graph TD
@@ -128,7 +132,6 @@ graph TD
         R --> G1{"P99 ≤ threshold?"}
         R --> G2{"Avg ≤ threshold?"}
         R --> G3{"Throughput ≥ min?"}
-        R --> G4{"Error rate ≤ max?"}
         R --> G5{"Data loss ≤ max?"}
         R --> G6{"RTO ≤ max?"}
         R --> G7{"RPO ≤ max?"}
@@ -149,7 +152,7 @@ graph TD
 | `maxP99LatencyMs` | Float | Maximum acceptable P99 latency in milliseconds |
 | `maxAvgLatencyMs` | Float | Maximum acceptable average latency in milliseconds |
 | `minThroughputRecPerSec` | Float | Minimum acceptable throughput in records per second |
-| `maxErrorRate` | Float | Maximum acceptable error rate (0.0 = zero errors) |
+| `maxErrorRate` | Float | Maximum acceptable error rate. Accepted in the file, but not currently evaluated by the CLI's gate check |
 
 ### Resilience Gates
 
@@ -206,7 +209,7 @@ scenarios:
       parallelProducers: 8
     validate:
       maxP99LatencyMs: 200
-      maxErrorRate: 0.01
+      minThroughputRecPerSec: 5000
 
   - name: "Data Integrity Check"
     type: INTEGRITY
@@ -256,9 +259,9 @@ scenarios:
     spec:
       records: 100000
       parallelProducers: 4
-      batchSize: 65536
+      batchSize: 262144
       lingerMs: 50
-      compressionType: lz4
+      compressionType: zstd
     validate:
       maxP99LatencyMs: 100
       minThroughputRecPerSec: 20000
@@ -269,43 +272,44 @@ scenarios:
 ### Basic Execution
 
 ```bash
-# Run all scenarios in the file
+# Submit all scenarios in the file (fire-and-forget — no SLA evaluation)
 kates test apply -f scenarios.yaml
 
-# Run and wait for all to complete (blocking)
+# Run and wait for each to complete; SLA gates are evaluated at the end
 kates test apply -f scenarios.yaml --wait
 ```
 
 ### How Execution Works
 
-1. Kates parses the file and validates the schema
+1. Kates parses the file (YAML or JSON) — a malformed file aborts the run with the raw parse error; there is no further schema validation on the client side
 2. Each scenario is submitted to the backend sequentially
 3. If `--wait` is specified, Kates polls until each test completes before submitting the next
-4. After all scenarios complete, SLA gates are evaluated
+4. SLA gates are evaluated for each completed scenario — this only happens with `--wait`; without it, every scenario is left as `SUBMITTED` and never validated
 5. A summary table is printed showing each scenario's result
 
 ### Output
 
+Running with `--wait`:
+
 ```
   ▸ Baseline Load Test (LOAD)...
-    → ID: a1b2c3d4  Status: DONE
-
+  ✓   Created: 3f8a2c1e-9b4…
+  ✓ Baseline Load Test → DONE
   ▸ Stress Ramp-Up (STRESS)...
-    → ID: e5f6a7b8  Status: DONE
-
+  ✓   Created: 7c5e0d2a-1f6…
+  ✓ Stress Ramp-Up → DONE
   ▸ Data Integrity Check (INTEGRITY)...
-    → ID: c9d0e1f2  Status: DONE
+  ✓   Created: b2d94e7f-8a3…
+  ✓ Data Integrity Check → DONE
 
-  Summary
-  ┌──────────────────────┬──────────┬────────┬──────────────────────────┐
-  │ Scenario             │ ID       │ Status │ Note                     │
-  ├──────────────────────┼──────────┼────────┼──────────────────────────┤
-  │ Baseline Load Test   │ a1b2c3d4 │ DONE   │                          │
-  │ Stress Ramp-Up       │ e5f6a7b8 │ DONE   │ p99=210ms > 200ms        │
-  │ Data Integrity Check │ c9d0e1f2 │ DONE   │                          │
-  └──────────────────────┴──────────┴────────┴──────────────────────────┘
+▸ Summary
+  Scenario              ID             Status  Note
+  ────────────────────  ─────────────  ──────  ─────────────────
+  Baseline Load Test    3f8a2c1e-9b4…  DONE    ✓ SLA Pass
+  Stress Ramp-Up        7c5e0d2a-1f6…  DONE    p99=210ms > 200ms
+  Data Integrity Check  b2d94e7f-8a3…  DONE    ✓ SLA Pass
 
-  ✗ One or more SLA gates violated
+  ✖ One or more SLA gates violated
 ```
 
 In this example, the stress test's P99 latency (210ms) exceeded the 200ms threshold. The CLI exits with code 1, which would fail a CI/CD pipeline.
@@ -319,9 +323,11 @@ Scenario files are designed for CI/CD pipelines. Combine with `--wait` to block 
 kates test apply -f regression-suite.yaml --wait
 
 # The exit code tells you the result:
-# 0 = all SLA gates passed
+# 0 = no SLA gate violations detected
 # 1 = one or more SLA gates violated
 ```
+
+Note that only SLA violations set the exit code: a scenario that fails to submit or errors out shows as `FAILED`/`ERROR` in the summary but does not change the exit code. Give every scenario you gate on a `validate` block so a regression actually fails the pipeline.
 
 For JUnit-compatible output, export each test report individually after the suite completes — see [Chapter 9: Observability](09-observability.md) for export formats.
 
@@ -350,33 +356,35 @@ Scenario files also work in JSON:
 
 ## Scaffolding Scenario Files
 
-Use `kates test scaffold` to generate a starter YAML for any test type:
+Rather than writing scenario YAML from scratch, start from the curated template library built into the CLI:
 
 ```bash
-# Generate a load test scenario
-kates test scaffold --type LOAD -o load-scenario.yaml
+# List the built-in templates (bare `kates test scaffold` does the same)
+kates test scaffold list
 
-# Generate an integrity + chaos scenario
-kates test scaffold --type INTEGRITY_CHAOS -o chaos-integrity.yaml
+# Filter the list by test type
+kates test scaffold list --type LOAD
+
+# Preview a template
+kates test scaffold show quick-load
+
+# Export a template as an editable file in the current directory
+kates test scaffold export quick-load
+
+# Export with a custom filename or directory, or export everything
+kates test scaffold export production-load -o load-scenario.yaml
+kates test scaffold export --all --dir ./scenarios/
 ```
 
-The scaffold output includes all available fields with comments explaining each one. Edit the generated file and run it with `kates test apply -f`.
+The library covers the common cases: `quick-load` (fast smoke test), `production-load` (1M records, strict SLA), `stress-test`, `endurance-soak`, `exactly-once`, `integrity-tx`, `spike-test`, and `ci-gate` (a fast 10k-record CI pipeline gate). Edit the exported file and run it with `kates test apply -f`.
 
 ## Common Mistakes
 
-These are the most frequently encountered errors when writing scenario files. Each entry shows the error message you'll see and how to fix it.
+The CLI does not validate scenario files against a schema — a file either parses or it doesn't, and everything else is checked by the backend when the scenario is submitted. These are the most frequent mistakes and what actually happens when you make them.
 
-### 1. Missing Required Field (`testType`)
+### 1. Missing Required Field (`type`)
 
-**Error:**
-
-```
-  ✗ Validation error in scenario #1:
-    Missing required field: 'type'
-    at: scenarios[0].type
-```
-
-**Cause:** The `type` field is the only required field in a scenario definition, but it's easy to forget when copying from examples.
+`type` is the only required field, but the CLI does not check for it. The scenario is submitted as-is and the backend rejects it with a 400 (its request validation requires a test type), so the scenario shows a `✖ Failed: ...` line and is marked `FAILED` in the summary table.
 
 **Fix:** Add the `type` field to every scenario:
 
@@ -390,39 +398,26 @@ scenarios:
 
 ### 2. Invalid Test Type Name
 
-**Error:**
+Case is not the problem — the CLI upper-cases the type before submitting, so `load` and `Load` work fine. What fails is a name that isn't a real test type: the backend rejects it at submission and the scenario is marked `FAILED`.
 
-```
-  ✗ Validation error in scenario "My Test":
-    Invalid test type: 'load'
-    Valid types: LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY
-    at: scenarios[0].type
-```
-
-**Cause:** Test type names are case-sensitive and must be uppercase. Common mistakes include `load` (lowercase), `Load` (mixed case), or `LATENCY` (not a valid type — use `ROUND_TRIP`).
-
-**Fix:** Use the exact uppercase type name:
+**Fix:** Use one of the valid type names:
 
 ```yaml
 scenarios:
   - name: "My Test"
-    type: LOAD           # ✅ correct
-    # type: load         # ❌ wrong — lowercase
-    # type: LATENCY      # ❌ wrong — not a valid type
+    type: LOAD           # ✅ canonical
+    # type: load         # ✅ also works — the CLI upper-cases it
+    # type: LATENCY      # ❌ not a valid type — use ROUND_TRIP
 ```
 
 ### 3. SLA Threshold Format Error
 
-**Error:**
+SLA threshold values must be plain numbers, not strings with units — the field name already indicates the unit (e.g., `maxP99LatencyMs` implies milliseconds). A string value fails YAML decoding, so the whole run aborts with the raw parse error:
 
 ```
-  ✗ Validation error in scenario "Baseline Load Test":
-    Invalid value for 'maxP99LatencyMs': '50ms'
-    Expected: numeric value (integer or float), got: string
-    at: scenarios[0].validate.maxP99LatencyMs
+  ✖ Invalid scenario file: yaml: unmarshal errors:
+  line 8: cannot unmarshal !!str `50ms` into float64
 ```
-
-**Cause:** SLA threshold values must be plain numbers, not strings with units. The field name already indicates the unit (e.g., `maxP99LatencyMs` implies milliseconds).
 
 **Fix:** Remove the unit suffix and any quotes around the number:
 
@@ -436,16 +431,7 @@ validate:
 
 ### 4. Records Count Too Low for Meaningful Results
 
-**Error (warning):**
-
-```
-  ⚠ Warning in scenario "Quick Check":
-    Record count (100) is very low for test type LOAD.
-    Recommended minimum: 10,000 for LOAD, 50,000 for INTEGRITY.
-    Results may not be statistically meaningful.
-```
-
-**Cause:** Low record counts produce unreliable metrics. P99 latency with only 100 records means you're measuring the single slowest message — not a meaningful percentile.
+Kates will not warn you about this — a LOAD test with `records: 100` runs happily and reports a "P99" that is really just your single slowest message. Low record counts produce unreliable metrics.
 
 **Fix:** Use appropriate record counts per test type:
 
@@ -470,22 +456,12 @@ scenarios:
 | STRESS | 50,000 | Need sustained load to detect saturation |
 | INTEGRITY | 50,000 | Higher counts catch intermittent data loss |
 | ROUND_TRIP | 5,000 | Latency measurement is per-message, so fewer needed |
-| CAPACITY | N/A (auto) | Capacity tests auto-scale — don't override |
 
-### 5. Conflicting Spec Fields
+### 5. Setting Both `records` and `durationSeconds`
 
-**Error:**
+Kates does not treat this as a conflict — no error is raised, both values are forwarded to the backend, and the run stops at whichever bound is hit first. That silent "whichever comes first" behavior is easy to misread when you look at results later, so keep the intent explicit.
 
-```
-  ✗ Validation error in scenario "Endurance Run":
-    Conflicting fields: 'records' and 'durationSeconds' are both set.
-    Use 'records' for count-based tests or 'durationSeconds' for time-based tests, not both.
-    at: scenarios[0].spec
-```
-
-**Cause:** You set both `records: 100000` and `durationSeconds: 300` in the same scenario. Kates doesn't know whether to stop after 100K records or after 5 minutes.
-
-**Fix:** Choose one termination condition:
+**Fix:** Set only the termination condition you mean:
 
 ```yaml
 scenarios:
