@@ -4,6 +4,13 @@ Building a Connect pipeline is half the job; keeping it healthy in production is
 
 > **Scope**: day-2 operations for the `connect-cluster` chart. For concepts, the `KafkaConnect` resource, Debezium, and pipeline design, see [Kafka Connect & CDC Pipelines](21-kafka-connect.md).
 
+After this chapter, you can:
+
+- Place and size Connect workers so an Availability Zone failure costs a short rebalance, not an outage
+- Tune producer, consumer, and connector batching when throughput stalls
+- Rotate database credentials and roll out image upgrades with zero downtime
+- Trace a FAILED connector from alert to root cause with the CLI, the REST API, and worker logs
+
 ## Multi-AZ Deployment Strategy
 
 The connect-cluster chart uses the **Stretched Cluster** strategy — a single `KafkaConnect` resource spanning all Availability Zones.
@@ -587,4 +594,38 @@ kubectl logs -n kafka connect-cluster-validate-connectors --tail=50
 
 Fix the connector configs in `values.yaml` and re-run `helm upgrade`.
 
+For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
+
 Component versions for the Connect stack are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md).
+
+::: {.callout-tip}
+**Try it**
+
+Port-forward the Connect REST API and compare its view of connector state with the CLI's:
+
+```bash
+kubectl port-forward -n kafka svc/connect-cluster-rest-api 8083:8083 &
+
+# Worker version and the Kafka cluster it belongs to
+curl -s http://localhost:8083/ | jq .
+
+# Connector- and task-level state in one call
+curl -s "http://localhost:8083/connectors?expand=status" | jq .
+
+# The same connectors as the CLI sees them
+kates kafka connect connectors
+```
+
+Every connector and task reports `RUNNING` in both views — the CLI reads the `KafkaConnector` CRs, whose status Strimzi reconciles from the same REST API you just curled.
+:::
+
+## Summary
+
+- One stretched `KafkaConnect` cluster spans all Availability Zones; topology spread constraints and pod anti-affinity keep workers apart, and the group protocol reassigns tasks off a dead zone in seconds with offsets intact
+- Give containers roughly 2× the JVM heap — off-heap memory is what gets workers OOMKilled — and target 2–5 tasks per worker
+- The internal topics (`*-offsets`, `*-configs`, `*-status`) hold the only persistent state; as long as they survive in Kafka, the cluster is rebuildable from the Helm chart alone
+- Rotate the database password in PostgreSQL first, then the Kubernetes Secret, then restart the connector — in the reverse order the connector restarts straight into failed authentication
+- Upgrades roll one worker at a time with zero downtime, but a Debezium release that changes the offset format makes rollback unsafe — validate in staging with `kates kafka connect test`
+- Most FAILED connectors trace back to credentials, an occupied replication slot, or `wal_level` — start with `kates kafka connect connectors` and the worker logs
+
+Next, [Recipes & Patterns](14-recipes.md) combines individual commands like these into end-to-end procedures — upgrade validation, scheduled regression suites, and resilience certification.
