@@ -1,6 +1,6 @@
 # Chapter 5: Test Types Deep Dive
 
-Kates supports eight distinct test types, each designed to answer a specific question about your Kafka cluster's behavior. This chapter explains the methodology, use case, and configuration for every type.
+This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` parameter-sweep types, covered in [Chapter 10](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
 
 ## Test Type Overview
 
@@ -33,7 +33,7 @@ A LOAD test sends a fixed number of records at a controlled, sustainable rate. I
 graph LR
     subgraph Load["Load Profile"]
         direction LR
-        T1["Warm-up<br/>25% rate<br/>10s"] --> T2["Steady State<br/>100% rate<br/>Duration"] --> T3["Cool-down<br/>Drain<br/>5s"]
+        T1["Start<br/>producers + consumers"] --> T2["Steady State<br/>fixed rate until records sent<br/>or duration reached"] --> T3["Collect<br/>results"]
     end
 ```
 
@@ -48,12 +48,12 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `records` | 100,000 | Total messages to produce |
+| `records` | 1,000,000 | Total messages to produce |
 | `recordSizeBytes` | 1024 | Message payload size |
-| `producers` | 1 | Number of concurrent producers |
-| `consumers` | 0 | Number of concurrent consumers |
+| `parallelProducers` | 1 | Number of concurrent producers |
+| `numConsumers` | 1 | Number of concurrent consumers |
 | `acks` | `all` | Producer acknowledgment mode |
-| `topic` | Auto-generated | Target topic name |
+| `topic` | `load-test` | Target topic name (unless overridden) |
 | `partitions` | 3 | Topic partition count |
 | `replicationFactor` | 3 | Topic replication factor |
 
@@ -94,6 +94,8 @@ scenarios:
 
 ### Interpreting Results
 
+Healthy ranges are environment-dependent — treat these as starting points and calibrate against your own baseline:
+
 | Metric | Healthy Range | Warning |
 |--------|:---:|---------|
 | P99 Latency | \< 50ms | > 200ms suggests resource contention |
@@ -113,13 +115,13 @@ For iterative parameter tuning, use `kates lab` instead of individual `test crea
 
 ### Methodology
 
-A STRESS test **ramps throughput progressively** until the cluster can no longer keep up. It finds the saturation point and characterizes the degradation curve.
+A STRESS test pushes the cluster well past its comfortable operating point to find the saturation point and characterize the degradation curve. How the load is applied depends on the backend: the default native backend runs several **concurrent unthrottled producers** (`parallelProducers`, default 3), while the Trogdor backend (`--backend trogdor`) **ramps throughput progressively** through five steps, each getting a fifth of the test duration:
 
 ```mermaid
 graph LR
-    subgraph Stress["Load Profile"]
+    subgraph Stress["Load Profile (Trogdor backend)"]
         direction LR
-        P1["Phase 1<br/>25% capacity<br/>30s"] --> P2["Phase 2<br/>50% capacity<br/>30s"] --> P3["Phase 3<br/>75% capacity<br/>30s"] --> P4["Phase 4<br/>100% capacity<br/>30s"] --> P5["Phase 5<br/>125%+ capacity<br/>Until failure"]
+        P1["Phase 1<br/>10K msg/s"] --> P2["Phase 2<br/>25K msg/s"] --> P3["Phase 3<br/>50K msg/s"] --> P4["Phase 4<br/>100K msg/s"] --> P5["Phase 5<br/>Unlimited<br/>until duration ends"]
     end
 ```
 
@@ -133,9 +135,9 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `producers` | 1–8 (ramping) | Progressive increase per phase |
-| `durationSeconds` | 300 | Total test duration across phases |
-| `records` | 1,000,000+ | Enough to sustain all phases |
+| `parallelProducers` | 3 | Concurrent producers (native backend) |
+| `durationSeconds` | 900 | Total test duration (Trogdor splits it evenly across the ramp steps) |
+| `records` | 5,000,000 | Enough to sustain the full run |
 | `recordSizeBytes` | 1024 | Message size |
 
 ### Interpreting Results
@@ -171,13 +173,13 @@ graph TD
 
 ### Methodology
 
-A SPIKE test simulates a flash-sale or viral event — a sudden, dramatic increase in traffic followed by a return to normal.
+A SPIKE test simulates a flash-sale or viral event — a sudden, dramatic increase in traffic followed by a return to normal. On the Trogdor backend, the baseline → spike → recovery sequence is automated; the default native backend instead runs a single unthrottled burst producer, so you measure the burst itself and observe recovery in your monitoring.
 
 ```mermaid
 graph LR
-    subgraph Spike["Load Profile"]
+    subgraph Spike["Load Profile (Trogdor backend)"]
         direction LR
-        S1["Baseline<br/>Normal rate<br/>30s"] --> S2["SPIKE!<br/>10x rate<br/>15s"] --> S3["Recovery<br/>Normal rate<br/>60s"]
+        S1["Baseline<br/>1K msg/s<br/>60s"] --> S2["SPIKE!<br/>3 unthrottled producers<br/>120s"] --> S3["Recovery<br/>1K msg/s<br/>60s"]
     end
 ```
 
@@ -191,9 +193,10 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `producers` | 1 → 10 → 1 | Sudden increase then decrease |
-| `records` | Per-phase targets | Different record counts per phase |
-| `durationSeconds` | 120 | Enough for baseline + spike + recovery |
+| `records` | 2,000,000 | Total records for the burst |
+| `recordSizeBytes` | 1024 | Message size |
+| `durationSeconds` | 300 | Enough for baseline + spike + recovery |
+| `acks` | `1` | Latency-oriented default for burst traffic |
 
 ### Key Metrics
 
@@ -217,7 +220,7 @@ An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended pe
 graph LR
     subgraph Endurance["Load Profile"]
         direction LR
-        E1["Warm-up<br/>10min"] --> E2["Sustained Load<br/>60% capacity<br/>4-24 hours"] --> E3["Cool-down<br/>5min"]
+        E1["Sustained rate-limited load<br/>5,000 msg/s default<br/>1h default — extend to 4-24h for leak hunting"]
     end
 ```
 
@@ -235,9 +238,10 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `durationSeconds` | 14400 (4h) | Long enough to expose leaks |
-| `producers` | 2 | Moderate, sustainable load |
-| `records` | 10,000,000+ | Enough for the full duration |
+| `durationSeconds` | 3600 (1h) | Override with longer values to expose slow leaks |
+| `parallelProducers` | 1 | Moderate, sustainable load |
+| `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable |
+| `records` | 10,000,000 | Enough for the full duration |
 
 ---
 
@@ -247,13 +251,13 @@ graph LR
 
 ### Methodology
 
-A VOLUME test focuses on **data size** rather than request rate. It sends large messages or large total volumes to stress the storage and replication subsystems.
+A VOLUME test focuses on **data size** rather than request rate. It sends large messages or large total volumes to stress the storage and replication subsystems. The default native backend runs a single producer with large records (10 KB by default); the Trogdor backend runs two workloads in parallel:
 
 ```mermaid
-graph LR
-    subgraph Volume["Load Profile"]
-        direction LR
-        V1["Small records<br/>1KB × 100K"] --> V2["Medium records<br/>10KB × 50K"] --> V3["Large records<br/>100KB × 10K"] --> V4["Jumbo records<br/>500KB × 1K"]
+graph TB
+    subgraph Volume["Volume workloads (Trogdor backend, run in parallel)"]
+        V1["Large messages<br/>50K × 100KB"]
+        V2["High count<br/>5M × 1KB"]
     end
 ```
 
@@ -267,8 +271,8 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `recordSizeBytes` | 10241.0.000 | Large message sizes |
-| `records` | Variable | Enough to stress storage |
+| `recordSizeBytes` | 10,240 | Large messages (10 KB) |
+| `records` | 2,000,000 | Enough to stress storage |
 | `acks` | `all` | Full replication to measure real cost |
 
 **Scenario file equivalent:**
@@ -294,13 +298,13 @@ scenarios:
 
 ### Methodology
 
-A CAPACITY test removes all artificial throttling and pushes the cluster to its maximum throughput. It finds the ceiling and measures what metric (CPU, disk, memory, network) is the bottleneck.
+A CAPACITY test removes all artificial throttling and pushes the cluster to its maximum throughput. It finds the ceiling and measures what metric (CPU, disk, memory, network) is the bottleneck. The default native backend runs `parallelProducers` (default 5) unthrottled producers concurrently; the Trogdor backend probes stepped throughput targets:
 
 ```mermaid
 graph LR
-    subgraph Capacity["Load Profile"]
+    subgraph Capacity["Probe steps (Trogdor backend)"]
         direction LR
-        C1["Phase 1<br/>1 producer<br/>no throttle"] --> C2["Phase 2<br/>2 producers<br/>no throttle"] --> C3["Phase 3<br/>4 producers<br/>no throttle"] --> C4["Phase 4<br/>8 producers<br/>no throttle"] --> C5["Phase 5<br/>16 producers<br/>no throttle"]
+        C1["5K msg/s"] --> C2["10K msg/s"] --> C3["20K msg/s"] --> C4["40K msg/s"] --> C5["80K msg/s"] --> C6["Unlimited"]
     end
 ```
 
@@ -308,14 +312,14 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `producers` | 1–16 (stepped) | Each phase adds producers |
-| `throughput` | -1 (unlimited) | No rate limiting |
+| `parallelProducers` | 5 | Concurrent unthrottled producers (native backend) |
 | `recordSizeBytes` | 1024 | Standard message size |
-| `records` | 2,000,000+ | Enough for all phases |
+| `records` | 10,000,000 | Enough for the full run |
+| `durationSeconds` | 1200 | Test duration |
 
 ### Interpreting Results
 
-The output is a throughput curve. Max throughput is where adding more producers stops increasing total rec/s:
+The output is a throughput curve, built by running a series of CAPACITY tests with increasing `--producers` counts. Max throughput is where adding more producers stops increasing total rec/s (illustrative numbers):
 
 | Producers | Throughput | Interpretation |
 |:-:|:-:|---|
@@ -356,9 +360,10 @@ sequenceDiagram
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `producers` | 1 | Single producer for clean measurement |
-| `consumers` | 1 | Single consumer to capture delivery |
-| `records` | 10,000 | Fewer records, focus on latency quality |
+| `parallelProducers` | 1 | Single producer for clean measurement |
+| `numConsumers` | 1 | Single consumer to capture delivery |
+| `records` | 500,000 | Records to measure |
+| `targetThroughput` | 10,000 msg/s | Rate-limited to keep latency measurements clean |
 
 **Scenario file equivalent:**
 
@@ -427,12 +432,13 @@ graph TB
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `records` | 100,000 | Messages to verify |
-| `acks` | `all` | Required for integrity guarantees |
-| `idempotenceEnabled` | `true` | Kafka producer idempotency |
-| `transactionsEnabled` | `false` | Optional exactly-once |
-| `consumers` | 1 | Consumer for verification |
-| `consumerGroup` | Auto-generated | Consumer group name |
+| `records` | 1,000,000 | Messages to verify |
+| `acks` | `all` | Forced to `all` for integrity guarantees |
+| `enableIdempotence` | `false` | Kafka producer idempotency — enable it for duplicate detection |
+| `enableTransactions` | `false` | Optional exactly-once |
+| `enableCrc` | `true` | Per-record CRC payload verification |
+| `numConsumers` | 1 | Consumer for verification |
+| `consumerGroup` | `integrity-cg` | Consumer group name (unless overridden) |
 
 **Scenario file equivalent:**
 
@@ -454,29 +460,61 @@ scenarios:
 
 ### Integrity + Chaos
 
-The real power of INTEGRITY tests emerges when combined with chaos engineering:
+The real power of INTEGRITY tests emerges when combined with chaos engineering. `INTEGRITY` is not a chaos test by itself — the combination is orchestrated by `kates resilience run`, which pairs a test request with a chaos experiment (see [Chapter 7](07-chaos-practice.md)):
 
-```bash
-# Generate a chaos-aware integrity test scaffold
-kates test scaffold --type INTEGRITY_CHAOS -o integrity-chaos.yaml
+```yaml
+# resilience-integrity.yaml
+testRequest:
+  type: INTEGRITY
+  spec:
+    numRecords: 100000
+    enableIdempotence: true
 
-# Run it — produces messages while killing a broker
-kates test apply -f integrity-chaos.yaml --wait
+chaosSpec:
+  experimentName: kafka-broker-pod-kill
+  targetNamespace: kafka
+  disruptionType: POD_KILL
+  chaosDurationSec: 30
+
+steadyStateSec: 30
 ```
 
-This test produces messages, kills a broker mid-test, waits for recovery, and then verifies that **every single message** was persisted correctly. It is the ultimate validation of Kafka's durability guarantees.
+```bash
+# Run it — produces messages while killing a broker
+kates resilience run -f resilience-integrity.yaml
+```
+
+This produces messages, kills a broker mid-test, waits for recovery, and then verifies that **every single message** was persisted correctly. It is the ultimate validation of Kafka's durability guarantees. For a standalone transactional integrity scenario, export the built-in template instead: `kates test scaffold export integrity-tx`.
 
 ## Scenario Files
 
-All test types support YAML scenario files for reproducible, version-controlled test definitions. See [Chapter 13: Scenario Files & SLA Gates](13-scenario-files.md) for the complete YAML schema reference, including all 22 spec fields and 9 SLA validation gates.
+All test types support YAML scenario files for reproducible, version-controlled test definitions. See [Chapter 13: Scenario Files & SLA Gates](13-scenario-files.md) for the complete YAML schema reference, including the full spec field list and the SLA validation gates.
+
+The CLI ships a curated library of built-in templates. Browse it with `list` (optionally filtered by `--type`), preview with `show`, and write a ready-to-edit file with `export`:
 
 ```bash
-# Generate a scaffold for any test type
+# Browse the built-in template library
+kates test scaffold list
 kates test scaffold --type LOAD
-kates test scaffold --type STRESS
-kates test scaffold --type SPIKE
-kates test scaffold --type INTEGRITY_CHAOS
+
+# Preview and export a template
+kates test scaffold show quick-load
+kates test scaffold export quick-load
 
 # Apply a scenario
-kates test apply -f scenario.yaml --wait
+kates test apply -f quick-load.yaml --wait
 ```
+
+CLI flags and scenario-file spec keys use different names for the same setting. The canonical mapping:
+
+| CLI flag (`kates test create`) | Scenario YAML key (`spec:`) | Meaning |
+|---|---|---|
+| `--records` | `records` | Total records |
+| `--producers` | `parallelProducers` | Concurrent producers |
+| `--consumers` | `numConsumers` | Concurrent consumers |
+| `--record-size` | `recordSizeBytes` | Record size in bytes |
+| `--duration` | `durationSeconds` | Test duration in seconds |
+| `--acks` | `acks` | Producer acknowledgment mode |
+| `--topic` | `topic` | Topic name |
+| `--throughput` | `targetThroughput` | Rate limit in msg/s (-1 = unlimited) |
+| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options (scenario files only) |

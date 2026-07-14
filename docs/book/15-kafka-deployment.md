@@ -4,15 +4,15 @@ This chapter is the operations manual for the **krafter** Kafka cluster — the 
 
 ## Strimzi Operator
 
-Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.0.0`), installed from the remote Helm chart:
+Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.0.0`), installed from the OCI Helm chart on quay.io into a dedicated `strimzi-operator` namespace (this is exactly what `scripts/deploy-kafka.sh` runs when the Strimzi CRDs are not yet present):
 
 ```bash
-helm repo add strimzi https://strimzi.io/charts/
-helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
+helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
   --version 1.0.0 \
-  --namespace kafka \
+  --namespace strimzi-operator \
   --set watchAnyNamespace=true \
-  --set image.imagePullPolicy=IfNotPresent
+  --set replicas=1 \
+  --timeout 5m --wait
 ```
 
 Strimzi watches for `Kafka`, `KafkaNodePool`, `KafkaTopic`, and `KafkaUser` custom resources and reconciles the desired state into StatefulSets, ConfigMaps, Secrets, and Services.
@@ -284,7 +284,7 @@ Simple ACL authorization with `kates-backend` as a superUser:
 authorization:
   type: simple
   superUsers:
-    - CN=kates-backend
+    - kates-backend
 ```
 
 ## KafkaUser Management
@@ -297,6 +297,7 @@ Users are declared as `KafkaUser` CRDs — Strimzi creates a Kubernetes Secret w
 | `kafka-ui` | Read-only monitor | 1MB/s produce, 50MB/s consume, 10% CPU | Describe+Read on all topics/groups |
 | `apicurio-registry` | Schema registry | 10MB/s produce, 20MB/s consume, 15% CPU | CRUD on `__apicurio*` topics only |
 | `litmus-chaos` | Chaos testing | None | Full CRUD on all topics |
+| `kates-connect` | Kafka Connect workers | 50MB/s produce, 50MB/s consume, 25% CPU | Read/Write/Create on `kates-*` and `cdc*` topics, `connect-*` groups, transactional IDs |
 
 **Secret flow:**
 
@@ -319,6 +320,9 @@ Topics are declared as `KafkaTopic` CRDs, managed by the Topic Operator:
 | `kates-metrics` | 6 | 3 | 24h | lz4 | Real-time broker metrics |
 | `kates-audit` | 3 | 3 | 30d | — | Audit trail |
 | `kates-dlq` | 3 | 3 | ∞ | — | Dead letter queue (compacted) |
+| `cdc-schema-history` | 1 | 3 | ∞ | — | Debezium schema history (compacted) |
+| `cdc-heartbeat` | 1 | 3 | 24h | — | Debezium heartbeat |
+| `test-sink-topic` | 3 | 3 | 24h | — | Connect sink-connector validation |
 
 **Partition rationale:** `kates-results` has 12 partitions (4× the broker count) for maximum consumer parallelism during high-throughput test runs. `kates-audit` has 3 (one per broker) since writes are infrequent.
 
@@ -362,7 +366,7 @@ graph LR
 
 ### Hardened Strimzi Operator NetworkPolicy (Isolated Topology)
 
-When deploying with `--topology isolated`, the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. This requires a precisely scoped NetworkPolicy to allow the operator to function while maintaining strict network isolation:
+When deploying with `kates deploy --topology isolated` (the kates CLI's default topology), the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. This requires a precisely scoped NetworkPolicy to allow the operator to function while maintaining strict network isolation:
 
 ```mermaid
 graph LR
@@ -474,7 +478,7 @@ The Entity Operator runs two sub-operators in a single pod:
 
 ## Prometheus Alerts
 
-The alerting rules in `kafka-alerts.yaml` cover five categories:
+The alerting rules in `kafka-alerts.yaml` cover six categories:
 
 ### Cluster Health
 
@@ -516,6 +520,13 @@ The alerting rules in `kafka-alerts.yaml` cover five categories:
 | `StrimziOperatorDown` | Operator unreachable for 5min | critical |
 | `CruiseControlAnomalyDetected` | Any anomaly in 10min window | warning |
 
+### Certificates
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| `KafkaCertificateExpiringSoon` | Certificate expires in < 30 days (for 1h) | warning |
+| `KafkaCertificateExpiryCritical` | Certificate expires in < 7 days (for 30min) | critical |
+
 ## Backup & Recovery
 
 Daily backups are managed by Velero:
@@ -539,24 +550,26 @@ kubectl apply -f config/kafka/kafka-backup.yaml
 
 ## Deploy Script Flow
 
-The `deploy-kafka.sh` script executes the following sequence:
+The `deploy-kafka.sh` script is Helm-chart-driven: it installs the `charts/kafka-cluster` chart (which templates the Kafka CR, node pools, users, topics, alerts, and network policies, and pulls in SeaweedFS as a subchart) with per-environment values files, installing the Strimzi operator first if its CRDs are missing:
 
 ```mermaid
 graph TD
-    A["Add Strimzi Helm repo"] --> B["Install Strimzi Operator"]
-    B --> C["Install Drain Cleaner"]
-    C --> D["Apply metrics config"]
-    D --> E["Create zone-specific StorageClasses"]
-    E --> F["Apply Kafka CR (brokers + controllers)"]
-    F --> G["Apply dashboards (7 Grafana panels)"]
-    G --> H["Wait for Kafka Ready"]
-    H --> I["Apply KafkaUsers (SCRAM secrets)"]
-    I --> J["Apply KafkaTopics"]
-    J --> K["Wait for user secrets"]
+    A["Ensure kafka namespace"] --> B{"Strimzi CRDs present?"}
+    B -->|"no"| C["Install Strimzi Operator<br/>(OCI chart → strimzi-operator namespace)"]
+    B -->|"yes"| D["helm dependency build<br/>(SeaweedFS subchart)"]
+    C --> D
+    D --> E{"ENV = kind?"}
+    E -->|"yes"| F["Apply zone-specific StorageClasses"]
+    E -->|"no"| G["Select values files<br/>(values-dev / values-kind /<br/>values-staging / values-prod)"]
+    F --> G
+    G --> H["Adopt pre-existing KafkaTopics + KafkaUsers<br/>into the Helm release"]
+    H --> I["helm upgrade --install kafka-cluster<br/>charts/kafka-cluster -n kafka"]
+    I --> J["Wait for kafka/krafter Ready<br/>(up to 10 min)"]
+    J --> K["Wait for KafkaUser secrets"]
     K --> L["Done ✅"]
 ```
 
-**Order matters:** Users must be applied after the cluster is Ready (the User Operator needs a running cluster), and before the Kafka UI deployment (which needs the `kafka-ui` secret).
+**Order matters:** The operator must exist before the cluster chart is installed — its CRDs are a hard dependency, which is why it lives in a separate Helm release. User secrets only appear after the cluster is Ready (the User Operator needs a running cluster), so downstream scripts like `deploy-kafka-ui.sh` wait for the `kafka-ui` secret before deploying.
 
 ## Troubleshooting
 
@@ -566,11 +579,11 @@ graph TD
 
 **Cause:** The Helm chart's Kafka image map includes versions not supported by the operator binary
 
-**Fix:** Use the remote Helm chart (always in sync with the operator):
+**Fix:** Use the OCI-distributed chart from quay.io (always in sync with the operator):
 
 ```bash
-helm upgrade --install strimzi-kafka-operator strimzi/strimzi-kafka-operator \
-  --version 1.0.0
+helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  --version 1.0.0 --namespace strimzi-operator
 ```
 
 ### Brokers Crash with ConfigException
@@ -624,11 +637,11 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 
 ```bash
 # Check for blocking NetworkPolicy
-kubectl describe networkpolicy strimzi-cluster-operator-network-policy -n kafka
+kubectl describe networkpolicy strimzi-cluster-operator-network-policy -n strimzi-operator
 # Look for: "Allowing egress traffic: <none>"
 
 # Check operator logs
-kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
+kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 # Look for: "Error getting controller config: TimeoutException"
 ```
 
@@ -636,14 +649,14 @@ kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=20
 
 ```bash
 # Set generateNetworkPolicy to false in Helm chart values
-helm upgrade strimzi-kafka-operator <chart-path> -n kafka \
-  --reuse-values --set generateNetworkPolicy=false
+helm upgrade strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  -n strimzi-operator --reuse-values --set generateNetworkPolicy=false
 
 # Delete the blocking NetworkPolicy
-kubectl delete networkpolicy strimzi-cluster-operator-network-policy -n kafka
+kubectl delete networkpolicy strimzi-cluster-operator-network-policy -n strimzi-operator
 
 # Restart the operator to clear stale backoff state
-kubectl rollout restart deployment/strimzi-cluster-operator -n kafka
+kubectl rollout restart deployment/strimzi-cluster-operator -n strimzi-operator
 ```
 
 ### Cruise Control Goal Mismatch
@@ -676,9 +689,9 @@ goals: >-
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Apache Kafka | 4.1.1 | Highest supported by Strimzi 1.0.0 |
-| Strimzi Operator | 1.0.0 | Remote Helm chart |
-| Strimzi Drain Cleaner | 1.5.0 | Installed without cert-manager |
-| Cruise Control | 2.5.146 | Bundled with Strimzi |
-| Kafka UI | 0.7.2 | Provectus |
+| Apache Kafka | 4.2.0 | Pinned in `versions.env` (`quay.io/strimzi/kafka:1.0.0-kafka-4.2.0`) |
+| Strimzi Operator | 1.0.0 | OCI Helm chart (`quay.io/strimzi-helm`) |
+| Strimzi Drain Cleaner | 1.0.0 | Installed without cert-manager |
+| Cruise Control | — | Bundled with the Strimzi Kafka image |
+| Kafka UI | v1.5.0 | kafbat/kafka-ui (successor to the Provectus UI) |
 | CRD API | `v1` | Migrated from deprecated `v1beta2` |

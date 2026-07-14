@@ -15,7 +15,7 @@ This chapter walks you through those decisions. You'll start with the architectu
 | kubectl | 1.28+ | Kubernetes CLI |
 | Helm | 3.12+ | Kubernetes package manager |
 | jq | 1.6+ | JSON processing (optional) |
-| Go | 1.22+ | CLI compilation (if building from source) |
+| Go | 1.25+ | CLI compilation (if building from source) |
 | Java | 21+ | Backend compilation (if building from source) |
 | Maven | 3.9+ | Backend build (bundled as `mvnw`) |
 
@@ -44,7 +44,7 @@ The Kates stack uses four namespaces by default:
 | `litmus` | LitmusChaos operator, experiment runners | Chaos tools need elevated privileges; isolation limits the blast radius of those permissions |
 
 ::: {.callout-tip}
-For local Kind deployments, the multi-namespace layout still works and is what `make all` creates by default. The only time single-namespace makes sense is throwaway CI environments where fast teardown (`kubectl delete namespace`) matters more than isolation.
+For local Kind deployments, the multi-namespace layout still works — `make all` prompts you to choose between a single-namespace topology (everything in `kates-stack`) and the isolated multi-namespace topology, and the underlying `kates deploy` command defaults to `--topology isolated`. The only time single-namespace makes sense is throwaway CI environments where fast teardown (`kubectl delete namespace`) matters more than isolation.
 :::
 
 
@@ -136,7 +136,7 @@ The following table shows resource requirements per component. Use this to right
 | Kafka Exporter | 1 | 100m / 200m | 128Mi / 256Mi | — | Consumer lag metrics |
 | Kates Backend | 1 | 500m / 1000m | 512Mi / 2560Mi | — | JVM: `-Xms512m -Xmx2560m` with ZGC |
 | PostgreSQL | 1 | 250m / 500m | 256Mi / 512Mi | 10Gi | Test results and metadata |
-| Prometheus | 1 | 500m / 1000m | 1Gi / 2Gi | 50Gi | 15s scrape interval, 15d retention |
+| Prometheus | 1 | 500m / 1000m | 1Gi / 2Gi | 50Gi | 30d retention in the generic overlay |
 | Grafana | 1 | 100m / 200m | 128Mi / 256Mi | — | 13 pre-provisioned dashboards |
 | LitmusChaos | 1 | 200m / 500m | 256Mi / 512Mi | — | Operator + experiment runners |
 
@@ -306,19 +306,16 @@ These YAML overlays are passed via `helm upgrade --install -f values-eks.yaml` (
 make all
 ```
 
-This executes a 10-step pipeline:
+`make all` drives the deployment through the Kates CLI itself — the Makefile checks prerequisites, ensures a cluster exists, then hands the heavy lifting to `kates deploy`:
 
 ```mermaid
 graph TD
-    S1["Step 1<br/>Create Kind cluster 'panda'<br/>+ local Docker registry"] --> S2["Step 2<br/>Pull all images<br/>to local registry"]
-    S2 --> S3["Step 3<br/>Load images<br/>into Kind nodes"]
-    S3 --> S4["Step 4<br/>Deploy Prometheus<br/>& Grafana"]
-    S4 --> S5["Step 5<br/>Wait for monitoring<br/>readiness"]
-    S5 --> S6["Step 6<br/>Deploy Strimzi Kafka<br/>(KRaft mode)"]
-    S6 --> S7["Step 7<br/>Wait for Kafka<br/>readiness"]
-    S7 --> S8["Step 8<br/>Deploy Kafka UI"]
-    S8 --> S9["Step 9<br/>Deploy Apicurio<br/>Registry"]
-    S9 --> S10["Step 10<br/>Deploy LitmusChaos"]
+    S1["Check prerequisites<br/>(kubectl, helm)"] --> S2["Ensure cluster connectivity<br/>(creates Kind cluster 'panda'<br/>if none is reachable)"]
+    S2 --> S3["Build the kates CLI<br/>if the binary is missing"]
+    S3 --> S4["Prompt: deployment topology<br/>1) single namespace (kates-stack)<br/>2) isolated namespaces"]
+    S4 --> S5["kates deploy --topology &lt;choice&gt;<br/>--with-schema-registry apicurio"]
+    S5 --> S6["Expose service ports<br/>(scripts/port-forward.sh)"]
+    S6 --> S7["Print access points<br/>(Apicurio 30082, Kates 30083,<br/>Litmus UI 9091)"]
 ```
 
 ## Component-by-Component Deployment
@@ -341,14 +338,14 @@ Creates a Kind cluster named `panda` with:
 ### Image Management
 
 ```bash
-# Pull all images to local registry
-make images
+# Pull all images directly into Kind nodes (via ctr pull inside containerd)
+./scripts/load-images-to-kind.sh
 
-# Check registry status
-make registry-status
+# Check local registry status
+./scripts/registry-status.sh
 ```
 
-All images are defined in `images.env`. The pull script detects your platform (arm64/amd64) and pulls the correct architecture.
+All images are defined in `images.env`. The load script defaults to `linux/arm64`; override with `--platform linux/amd64` (or the `CTR_PLATFORM` environment variable) on Intel/AMD hosts.
 
 ### Monitoring Stack
 
@@ -387,8 +384,14 @@ make litmus
 make chaos-ui
 # → http://localhost:9091 (admin/litmus)
 
-# Deploy chaos experiments
-make chaos-experiments
+# Run the chaos chart's Helm tests
+make litmus-test
+
+# Trigger the GameDay validation via the chaos chart
+make litmus-gameday
+
+# Check chaos status
+make chaos-status
 ```
 
 ### Kates Application
@@ -418,13 +421,13 @@ Pattern: `<fully.qualified.class>/<method>/Timeout/value=<millis>`
 com.bmscomp.kates.service.TopicService/describeTopicDetail/Timeout/value=60000
 ```
 
-In `k8s/configmap.yaml` the equivalent env var is:
+In `kates/k8s/configmap.yaml` (relative to the repo root) the equivalent env var is:
 
 ```yaml
 COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_DESCRIBETOPICDETAIL_TIMEOUT_VALUE: "60000"
 ```
 
-All 13 annotated methods across `TopicService`, `ClusterHealthService`, and `ConsumerGroupService` have corresponding entries in both files.
+The 13 annotated methods across `TopicService`, `ClusterHealthService`, and `ConsumerGroupService` have corresponding entries in both files. The codebase carries 26 `@Timeout` annotations across seven classes in total — the remaining ones (in `SecurityService`, `KafkaAdminService`, `DisruptionSafetyGuard`, and `KubernetesChaosProvider`) rely on their annotation defaults but can be overridden with the same property pattern.
 
 #### JVM Tuning
 
@@ -433,7 +436,7 @@ Kates is a latency-sensitive application — it's measuring Kafka's performance,
 ZGC achieves sub-millisecond pause times by performing garbage collection concurrently with the application. The trade-off is roughly 10–15% lower peak throughput compared to G1GC — but for a benchmarking tool, consistent latency matters far more than raw throughput.
 
 ```yaml
-# k8s/deployment.yaml
+# kates/k8s/deployment.yaml
 - name: JAVA_TOOL_OPTIONS
   value: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 ```
@@ -497,12 +500,13 @@ graph TB
     subgraph Infrastructure
         ALL[make all<br/>Complete setup]
         CLUSTER[make cluster]
-        IMAGES[make images]
         MONITOR[make monitoring]
         KAFKA[make kafka]
         UI[make ui]
         APICURIO[make apicurio]
         LITMUS[make litmus]
+        JAEGER[make jaeger]
+        KYVERNO[make kyverno]
     end
     
     subgraph Kates
@@ -513,6 +517,7 @@ graph TB
         KR[make kates-redeploy]
         KL[make kates-logs]
         KU[make kates-undeploy]
+        KH[make kates-helm]
     end
     
     subgraph CLI
@@ -532,12 +537,11 @@ graph TB
     end
     
     subgraph Chaos
-        CK[make chaos-kafka]
-        CKP[make chaos-kafka-pod-delete]
-        CKN[make chaos-kafka-network-partition]
-        CKC[make chaos-kafka-cpu-stress]
-        CKA[make chaos-kafka-all]
-        CKS[make chaos-kafka-status]
+        LT[make litmus-test]
+        LG[make litmus-gameday]
+        CS[make chaos-status]
+        CU[make chaos-ui]
+        GD[make gameday]
     end
     
     subgraph Operations
@@ -551,20 +555,24 @@ graph TB
 
 | Target | Description |
 |--------|-------------|
-| `make all` | Complete setup (cluster → images → all services) |
+| `make all` | Complete setup (cluster check → topology prompt → `kates deploy`) |
 | `make cluster` | Start Kind cluster only |
-| `make images` | Pull and load all images |
-| `make monitoring` | Deploy Prometheus & Grafana (Kind overlay) |
+| `make monitoring` | Deploy Prometheus & Grafana (auto-detects provider) |
 | `make monitoring-generic` | Deploy Prometheus & Grafana (Generic cloud overlay) |
 | `make monitoring-undeploy` | Remove Prometheus & Grafana |
 | `make kafka` | Deploy Strimzi Kafka |
 | `make ui` | Deploy Kafka UI |
 | `make apicurio` | Deploy Apicurio Registry |
 | `make litmus` | Deploy LitmusChaos |
+| `make jaeger` | Deploy Jaeger (distributed tracing) |
+| `make kyverno` | Deploy Kyverno policy engine |
+| `make cert-manager` | Deploy cert-manager |
+| `make connect-deploy` | Deploy Kafka Connect cluster |
 | `make kates` | Build + deploy Kates application |
 | `make kates-build` | Build Kates JVM image |
 | `make kates-native` | Build Kates native image (see below) |
 | `make kates-deploy` | Apply Kates K8s manifests |
+| `make kates-helm` | Deploy Kates via its Helm chart |
 | `make kates-redeploy` | Restart Kates deployment |
 | `make kates-logs` | Stream Kates logs |
 | `make kates-undeploy` | Remove Kates |
@@ -609,12 +617,10 @@ kubectl logs deployment/kates -n kates | head -1
 | `make test-endurance` | Run endurance test |
 | `make test-volume` | Run volume test |
 | `make test-capacity` | Run capacity test |
-| `make chaos-kafka` | Set up Kafka chaos |
-| `make chaos-kafka-pod-delete` | Run pod-delete chaos |
-| `make chaos-kafka-network-partition` | Run network partition |
-| `make chaos-kafka-cpu-stress` | Run CPU stress |
-| `make chaos-kafka-all` | Run all chaos experiments |
-| `make chaos-kafka-status` | Check chaos status |
+| `make litmus-test` | Run the chaos chart's Helm tests |
+| `make litmus-gameday` | Trigger GameDay validation via the chaos chart |
+| `make chaos-status` | Check chaos status |
+| `make chaos-ui` | Port-forward the Litmus UI (localhost:9091) |
 | `make gameday` | Run automated GameDay validation pipeline |
 | `make velero` | Deploy Velero backup |
 | `make chart-lint` | Lint Kates Helm chart |
@@ -659,7 +665,7 @@ Kates uses PostgreSQL as its persistent data store for everything that outlives 
 
 - **Test run metadata** — timestamps, configuration snapshots, which topics and partitions were tested
 - **Performance results** — throughput measurements, latency percentiles (p50/p95/p99), error counts per run
-- **Historical baselines** — aggregated metrics used by the `kates compare` command to detect regressions
+- **Historical baselines** — aggregated metrics used by the `kates report compare` and `kates test compare` commands to detect regressions
 - **Audit records** — who ran what test, when, and with which parameters
 
 Why PostgreSQL and not Kafka itself? Kafka is optimized for sequential append and time-windowed retention — it's not designed for the random-access queries that trend analysis and historical comparison require. PostgreSQL gives you indexed queries like "show me p99 latency for topic X across the last 30 runs" that would be impractical with Kafka's log-based storage.
@@ -704,7 +710,7 @@ Run an automated 7-phase validation pipeline:
 make gameday
 ```
 
-Phases: pre-flight → baseline → chaos-inject → observe → recover → post-flight → report
+Phases: pre-flight → baseline → chaos-inject → chaos-observe → chaos-recover → post-flight → report
 
 ## Troubleshooting
 
@@ -712,10 +718,9 @@ Phases: pre-flight → baseline → chaos-inject → observe → recover → pos
 
 ```bash
 # Check registry health
-make registry-status
+./scripts/registry-status.sh
 
-# Manually pull and load
-./scripts/pull-images.sh
+# Manually pull images into Kind nodes
 ./scripts/load-images-to-kind.sh
 ```
 
@@ -743,7 +748,7 @@ Direct proxy flags are supported too:
 kubectl logs -f deployment/strimzi-cluster-operator -n kafka
 
 # Check Kafka pod events
-kubectl describe pod pool-alpha-0 -n kafka
+kubectl describe pods -l strimzi.io/cluster=krafter -n kafka
 ```
 
 ### CLI Binary Killed on macOS
@@ -780,7 +785,7 @@ kubectl get configmap kates-config -n kates -o yaml
 kubectl get pods -n litmus
 
 # Check experiment status
-make chaos-kafka-status
+make chaos-status
 
 # View experiment logs
 kubectl logs -f -l app=chaos-operator -n litmus

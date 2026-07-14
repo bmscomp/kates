@@ -64,13 +64,13 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 
 | Category | Features |
 |----------|----------|
-| **Performance Testing** | 8 test types: Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, Integrity |
-| **Chaos Engineering** | 10 disruption types, 6 built-in playbooks, safety guardrails, automatic rollback |
+| **Performance Testing** | Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, and Integrity test types |
+| **Chaos Engineering** | Kubernetes-native disruption types, 6 built-in playbooks, safety guardrails, automatic rollback |
 | **Data Integrity** | Sequence tracking, idempotency validation, exactly-once verification, gap detection |
 | **Observability** | Latency heatmaps, broker metrics correlation, historical trends, sparkline charts |
 | **Export Formats** | JSON, CSV, JUnit XML, Grafana-compatible heatmap JSON |
 | **SLA Enforcement** | Per-test thresholds for throughput, latency, error rate with pass/fail verdicts |
-| **CLI** | 30+ commands covering test management, reports, cluster inspection, and disruption control |
+| **CLI** | Commands covering test management, reports, cluster inspection, and disruption control |
 | **Scheduling** | Cron-based recurring tests for regression detection |
 | **Resilience Testing** | Combined performance + chaos tests with before/after impact analysis |
 
@@ -129,6 +129,6 @@ To set expectations clearly:
 
 - **Not a Confluent Platform replacement** — Kates is a testing and validation tool, not a managed Kafka distribution. It works alongside Confluent, Strimzi, or any Kafka deployment.
 - **Not a general-purpose load tester** — Kates understands Kafka semantics (ISR tracking, consumer rebalancing, partition leadership). Use k6, Gatling, or Locust for HTTP/gRPC load testing.
-- **Not a Kafka management UI** — for browsing topics, consumer groups, and cluster state in a web interface, use [Kafka UI](https://github.com/provectus/kafka-ui) (which Kates deploys alongside).
+- **Not a Kafka management UI** — for browsing topics, consumer groups, and cluster state in a web interface, use [Kafka UI](https://github.com/kafbat/kafka-ui) (which Kates deploys alongside).
 - **Not a production monitoring system** — Kates is designed for testing and validation environments. For production monitoring, use Prometheus + Grafana directly (which Kates also deploys for its own observability).
 

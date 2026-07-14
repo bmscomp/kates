@@ -96,8 +96,9 @@ Chaos experiments in a toy environment prove nothing. The Kind cluster in this p
 One-off chaos tests are useful; scheduled, repeating chaos tests are powerful. Kates supports cron-based scheduling:
 
 ```bash
-# Run an integrity chaos test every night at 2 AM
-kates schedule create --type INTEGRITY --records 100000 --cron "0 2 * * *"
+# Run an integrity test every night at 2 AM
+# (integrity.json holds the test request, e.g. {"type": "INTEGRITY", "spec": {"numRecords": 100000}})
+kates schedule create --name "Nightly Integrity" --cron "0 2 * * *" --request integrity.json
 ```
 
 ### 5. Minimize Blast Radius
@@ -181,7 +182,7 @@ sequenceDiagram
     Note over P,F2: Gap = detection time + election time
 ```
 
-Key timing:
+Key timing (with default broker and client configs):
 
 | Phase | Typical Duration | Depends On |
 |-------|:---:|---|
@@ -220,7 +221,7 @@ sequenceDiagram
     C3->>Coord: JoinGroup
     Coord->>C1: Rebalance triggered
     Coord->>C2: Rebalance triggered
-    Note over C1,C2: All consumers stop processing
+    Note over C1,C2: All consumers stop processing<br/>(classic eager protocol)
     C1->>Coord: JoinGroup (re-negotiate)
     C2->>Coord: JoinGroup (re-negotiate)
     C3->>Coord: JoinGroup
@@ -230,7 +231,7 @@ sequenceDiagram
     Note over C1,C3: Processing resumes
 ```
 
-During rebalancing, **all consumers in the group stop processing**. This "stop-the-world" pause can last seconds to minutes depending on group size and partition count.
+The diagram shows the classic **eager** protocol, where all consumers in the group stop processing during a rebalance — a "stop-the-world" pause that can last seconds to minutes depending on group size and partition count. Cooperative incremental rebalancing (KIP-429) shrinks the pause to only the partitions that actually move, and the next-generation consumer group protocol (KIP-848, `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates test workloads can exercise either protocol via the per-test-type `group-protocol` setting (default: `classic`).
 
 ## Key Metrics During Chaos
 
@@ -265,12 +266,6 @@ The `make gameday` command automates this entire pipeline. Each phase is logged 
 ```bash
 # Run the full 7-phase pipeline
 make gameday
-
-# Run with a specific disruption playbook
-make gameday PLAYBOOK=leader-cascade
-
-# Dry run (pre-flight only, no chaos injected)
-make gameday DRY_RUN=true
 ```
 
 ## Fault Injection Approaches
@@ -280,7 +275,7 @@ Kates supports multiple fault injection backends. Choose based on your environme
 | Feature | LitmusChaos | Trogdor | Manual kubectl |
 |---------|:-----------:|:-------:|:--------------:|
 | **Scope** | General-purpose Kubernetes chaos | Kafka-specific fault injection | Ad-hoc pod/network operations |
-| **Installation** | Helm chart + CRDs | Bundled with Kafka (Confluent) | None (built into Kubernetes) |
+| **Installation** | Helm chart + CRDs | Bundled with Apache Kafka | None (built into Kubernetes) |
 | **Kafka awareness** | Low — operates at pod/network level | High — understands partitions, brokers, topics | None |
 | **Experiment types** | Pod kill, network chaos, CPU/memory stress, disk fill | Broker bounce, network degrade, produce/consume workloads | Pod delete, node drain, network policy changes |
 | **Scheduling** | CronWorkflows via Argo or native ChaosSchedule | Trogdor coordinator API | Cron jobs or CI/CD triggers |
@@ -288,7 +283,7 @@ Kates supports multiple fault injection backends. Choose based on your environme
 | **Blast radius control** | Annotations, labels, namespace selectors | Agent-level targeting | Manual — requires discipline |
 | **Reproducibility** | Declarative YAML ChaosExperiments | Declarative JSON task specs | Script-dependent |
 | **Best for** | Production chaos with safety guardrails | Kafka-internal workload simulation | Quick smoke tests, debugging |
-| **Kates integration** | Native — `kates disruption run` uses LitmusChaos | Partial — can be triggered via `chaosSpec` | Manual — run alongside Kates tests |
+| **Kates integration** | Native — `kates disruption run` uses LitmusChaos | Optional — selectable test workload backend (`backend: trogdor` in the test request) | Manual — run alongside Kates tests |
 
 ::: {.callout-tip}
 For most Kates users, **LitmusChaos** is the recommended default. It provides the best balance of safety, observability, and Kubernetes-native integration. Use Trogdor when you need Kafka-internal fault injection (e.g., simulating slow brokers at the protocol level), and manual kubectl for quick one-off debugging sessions.
