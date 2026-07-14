@@ -23,6 +23,7 @@ jobs:
   build:
     name: Render Book
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -41,13 +42,19 @@ jobs:
       - name: Prepare sources for Quarto
         run: ./scripts/prepare-book-render.sh
 
-      - name: Render (HTML only, PR gate)
-        if: github.event_name == 'pull_request'
-        run: quarto render docs/book --to html
-
-      - name: Render (HTML + PDF)
+      # The PDF (102 chromium-rendered diagrams + xelatex) is best-effort:
+      # a slow or wedged PDF build must never block publishing the site.
+      # On failure the site's PDF download link 404s until the next
+      # successful run — acceptable degradation. Rendered before HTML so
+      # the site output is always the final, complete state in _book.
+      - name: Render PDF (best-effort)
         if: github.event_name == 'push'
-        run: quarto render docs/book
+        continue-on-error: true
+        timeout-minutes: 25
+        run: quarto render docs/book --to pdf
+
+      - name: Render HTML
+        run: quarto render docs/book --to html
 
       - name: Upload site artifact
         if: github.event_name == 'push'
