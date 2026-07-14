@@ -787,11 +787,28 @@ Cross-database sync introduces eventual consistency. The sink always lags behind
 ::: {.callout-tip}
 **Try it**
 
-The chart ships a complete CDC pipeline as `testConnectors`, deployed only by `helm test`. With the stack running and the demo tables created in the `orders` database (one-time prep: `docs/tutorials/09-kafka-connect-working-examples.md`), replicate a row end to end:
+The chart ships a complete CDC pipeline as `testConnectors` — `helm test` creates those connectors, exercises them, and deletes them again once the suite succeeds, so keeping the pipeline running means applying the same manifests persistently. With the stack running and the demo tables created in the `orders` database (one-time prep: `docs/tutorials/09-kafka-connect-working-examples.md`), replicate a row end to end:
 
 ```bash
-# Deploy the working-example connectors (packaged as Helm test hooks)
+# Validate the release — the suite probes the REST API and creates the
+# working-example connectors transiently, removing them when it succeeds
 helm test connect-cluster -n connect
+
+# Create the CDC topic on the krafter cluster
+kubectl apply -n kafka -f - <<'EOF'
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata: {name: cdc-public-demo-orders, labels: {strimzi.io/cluster: krafter}}
+spec:
+  topicName: cdc.public.demo_orders
+  partitions: 3
+  replicas: 3
+  config: {min.insync.replicas: "2"}
+EOF
+
+# Deploy the working-example connectors persistently
+helm template connect-cluster charts/connect-cluster -n connect \
+  -s templates/tests/test-connectors.yaml | kubectl apply -f -
 
 # Wait for the Debezium source and the JDBC sink to come up
 kubectl wait -n connect --for=condition=Ready kafkaconnector/debezium-postgres-source-working-example --timeout=300s
@@ -808,7 +825,7 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
   \"SELECT id, customer_name, amount FROM public.demo_orders_replica WHERE id = 1001;\""
 ```
 
-The SELECT returns the row within a few seconds — Debezium captures the insert from the WAL, produces it to `cdc.public.demo_orders`, and the JDBC sink upserts it into `demo_orders_replica`.
+The SELECT returns the row within a few seconds — Debezium captures the insert from the WAL, produces it to `cdc.public.demo_orders`, and the JDBC sink upserts it into `demo_orders_replica`. When you're done, the tutorial's cleanup section removes the connectors and the CDC topic.
 :::
 
 ## Summary

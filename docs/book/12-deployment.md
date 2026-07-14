@@ -6,6 +6,13 @@ Deploying Kates is more than running `make all`. The choices you make *before* r
 
 This chapter walks you through those decisions. You'll start with the architectural trade-offs that shape your deployment, then move through resource sizing and cloud-specific guidance, and finally reach the step-by-step deployment itself. By the end, you'll have a running stack that matches your environment — whether that's a single Kind cluster on your MacBook or a multi-node EKS deployment running continuous benchmarks.
 
+After this chapter, you can:
+
+- Choose a topology — namespace layout, service exposure, storage durability — that fits your environment
+- Size CPU, memory, and disk per component so your tests measure Kafka, not resource contention
+- Adapt the stack to EKS, GKE, or AKS with provider-specific values overlays
+- Deploy everything with `make all` and verify it with `make status` and `kates health`
+
 ---
 
 ## Prerequisites
@@ -740,12 +747,11 @@ Direct proxy flags are supported too:
 ### Kafka Pods Not Starting
 
 ```bash
-# Check Strimzi operator logs
-kubectl logs -f deployment/strimzi-cluster-operator -n kafka
-
-# Check Kafka pod events
+# Check Kafka pod events for the failing constraint
 kubectl describe pods -l strimzi.io/cluster=krafter -n kafka
 ```
+
+Pods stuck in `Pending` mean the scheduler can't satisfy zone affinity or provision storage — [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#pods-stuck-in-pending) walks the `FailedScheduling` events constraint by constraint. Crashing brokers and a Kafka CR stuck on `NotReady` are diagnosed symptom by symptom in [Kafka Deployment Engineering](15-kafka-deployment.md#troubleshooting).
 
 ### CLI Binary Killed on macOS
 
@@ -787,6 +793,8 @@ make chaos-status
 kubectl logs -f -l app=chaos-operator -n litmus
 ```
 
+For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
+
 ## Destroying the Environment
 
 ```bash
@@ -795,3 +803,34 @@ make destroy
 ```
 
 This deletes the Kind cluster and all associated resources.
+
+::: {.callout-tip}
+**Try it**
+
+From a clean slate, run the deploy-verify loop end to end:
+
+```bash
+# Deploy everything (prompts for topology; option 2 gives isolated namespaces)
+make all
+
+# Verify every pod came up
+make status
+
+# Point the CLI at the stack and check end-to-end health
+kates ctx set local --url http://localhost:30083
+kates ctx use local
+kates health
+```
+
+`make status` prints pod counts per namespace and reports "All pods are running!" once the stack is healthy; `kates health` answers with the Kates Health Dashboard showing the system status, the Kafka cluster state, and its bootstrap address.
+:::
+
+## Summary
+
+- Three decisions shape your topology before you deploy anything: namespace isolation (`kafka`, `kates`, `monitoring`, `litmus` by default), service exposure (NodePort locally, LoadBalancer or Ingress in the cloud), and storage durability — Kafka broker volumes are always persistent.
+- Size for what you measure: under-provisioned brokers benchmark resource contention, not Kafka, and the Minimal profile's 16 GB leaves almost no headroom.
+- Cloud moves are values overlays, not rewrites: `gp3` on EKS, `premium-rwo` on GKE, `managed-premium` on AKS, plus workload-identity annotations instead of embedded credentials.
+- `make all` drives the whole deployment through `kates deploy`; per-component targets (`make cluster`, `make monitoring`, `make kafka`, `make litmus`, `make kates`) build the same stack piece by piece.
+- Kates itself runs on ZGC because a benchmarking tool's own GC pauses must not pollute its measurements; the native image cuts startup to ~0.05s for production and CI/CD.
+
+Your stack is running — now lock it down: [Security & Compliance](17-security.md) covers authentication, authorization, network policies, and certificate management in depth.

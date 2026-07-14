@@ -2,7 +2,14 @@
 
 > **Scope**: this chapter owns the *why* — the production engineering behind the cluster: node pools, listeners design, certificates, Cruise Control, alerting, and backup. For the step-by-step install walkthrough, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md); for deploying the Kates stack, see [Deployment Guide](12-deployment.md).
 
-This chapter is the operations manual for the **krafter** Kafka cluster — the Strimzi-managed, KRaft-mode deployment that underpins the entire Kates platform. It covers every layer from the operator to the broker JVM, with the reasoning behind each decision.
+This chapter is the operations manual for the **krafter** Kafka cluster — the Strimzi-managed, KRaft-mode deployment that underpins the entire Kates platform. It covers every layer from the operator to the broker JVM, with the reasoning behind each decision. It's written for the platform engineers who run `krafter` and for anyone who has to defend its design in review.
+
+After this chapter, you can:
+
+- Explain why the cluster separates KRaft controllers from brokers, and why three of each is the fault-tolerance floor
+- Read a `KafkaNodePool` spec and justify its storage, JVM, and zone-affinity choices
+- Trace how listeners, `KafkaUser` credentials, and default-deny NetworkPolicies compose the cluster's security posture
+- Diagnose the common Strimzi failure modes, from empty-egress NetworkPolicies to missing user Secrets
 
 ## Strimzi Operator
 
@@ -571,6 +578,21 @@ graph TD
 
 **Order matters:** The operator must exist before the cluster chart is installed — its CRDs are a hard dependency, which is why it lives in a separate Helm release. User secrets only appear after the cluster is Ready (the User Operator needs a running cluster), so downstream scripts like `deploy-kafka-ui.sh` wait for the `kafka-ui` secret before deploying.
 
+::: {.callout-tip}
+**Try it**
+
+With the deploy script finished, confirm the quorum is healthy and the brokers actually spread across zones:
+
+```bash
+kubectl get kafka krafter -n kafka
+kubectl get kafkanodepools -n kafka
+kubectl get pods -n kafka -l strimzi.io/controller-role=true -o wide
+kubectl get pods -n kafka -l strimzi.io/cluster=krafter -o wide -L zone
+```
+
+Expect the Kafka CR to report Ready, every node pool at its desired replica count, three controller pods on distinct nodes, and each broker pod carrying a different `zone` label (alpha, sigma, gamma) — the rack awareness from the architecture diagrams made visible. If anything is off, the symptoms below are the place to start.
+:::
+
 ## Troubleshooting
 
 ### Strimzi Operator CrashLoopBackOff
@@ -685,6 +707,18 @@ goals: >-
   ...PreferredLeaderElectionGoal
 ```
 
+For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
+
 ## Versions
 
 Component versions for the whole platform are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md), generated from `versions.env`. Two notes specific to this chapter: Cruise Control is bundled with the Strimzi Kafka image (no separate pin), and the Strimzi CRD API is `v1` (migrated from the deprecated `v1beta2`).
+
+## Summary
+
+- `krafter` runs dedicated KRaft roles: a three-controller Raft quorum survives one failure, while zone-pinned brokers satisfy `default.replication.factor: 3` with `min.insync.replicas: 2` — writes keep flowing through a single broker loss.
+- Every `KafkaNodePool` setting is a deliberate trade-off: fixed 2048m heaps prevent resize stalls, memory requests equal to limits buy Guaranteed QoS, and `deleteClaim: false` keeps PVCs alive for recovery.
+- Listeners split traffic by trust level — SCRAM-SHA-512 on 9092 for in-cluster services, mTLS on 9093, a NodePort on 9094 for the outside — all gated by simple ACLs with `kates-backend` as the sole superUser.
+- The `kafka` namespace is default-deny in both directions; the one setting to avoid is `generateNetworkPolicy: true` without egress rules, whose empty-egress policy leaves the Kafka CR `NotReady` indefinitely.
+- Cruise Control rebalances against declared broker capacities, the Kafka Exporter feeds consumer-lag alerts, and the Drain Cleaner turns node drains into controlled rolling restarts — with `kafka-alerts.yaml` watching all of it.
+
+With the engineering rationale behind the cluster settled, [Deployment Guide](12-deployment.md) turns to the stack that uses it — choosing a topology, sizing resources, and deploying the Kates backend, monitoring, and chaos tooling.
