@@ -12,7 +12,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [The Cluster Under Test](03-cluster.md#failure-tolerance-matrix) |
 | Cruise Control `unsupported goals` error | Goals list doesn't match Strimzi's default goals | [Kafka Deployment Engineering](15-kafka-deployment.md#cruise-control-goal-mismatch) |
-| Kafka CR stuck on `NotReady` with `UnforceableProblem` | Strimzi operator egress blocked by `generateNetworkPolicy` or isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
+| Kafka CR stuck on `NotReady` (often with `UnforceableProblem`) | Strimzi CRDs missing, insufficient resources, or operator egress blocked by `generateNetworkPolicy` / isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#kafka-cr-stuck-on-notready), [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 
 ## Kafka Connectivity
 
@@ -22,6 +22,17 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Kates can't connect to Kafka | Wrong bootstrap address or NetworkPolicy blocking | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
 | SCRAM authentication failure | Password rotated or KafkaUser not reconciled | [Security & Compliance](17-security.md#scram-sha-512) |
 | Connection timeout from new namespace | Missing NetworkPolicy entry for the new namespace | [Security & Compliance](17-security.md#testing-network-policies) |
+| `KafkaUser` secrets never created | Entity Operator (User Operator) only starts after the Kafka CR reaches `Ready` | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#user-secrets-not-appearing) |
+
+## Kafka Connect
+
+| Symptom | Likely Cause | Chapter |
+|---------|-------------|---------|
+| `KafkaConnector` status `FAILED` with `DebeziumException` | Wrong database credentials, replication slot still held, `wal_level` not `logical`, or `schema.include.list` matching no tables | [Operating Kafka Connect](operating-kafka-connect.md#connector-stuck-in-failed-state) |
+| Connect cluster stuck in `REBALANCING` — `KafkaConnectRebalanceTooLong` alert fires | Workers crashing mid-rebalance, NetworkPolicy blocking inter-worker traffic on port 8083, or OOM kills during task assignment | [Operating Kafka Connect](operating-kafka-connect.md#rebalancing-takes-too-long) |
+| Connect worker pods restart with `OOMKilled` | Container memory limit under 2× the JVM heap — off-heap memory pushes usage over the limit | [Operating Kafka Connect](operating-kafka-connect.md#connect-workers-oomkilled) |
+| PostgreSQL disk usage grows while a connector is down or paused | Replication slot retains WAL segments until the connector drains them | [Operating Kafka Connect](operating-kafka-connect.md#replication-slot-wal-retention-growing) |
+| `helm upgrade` of the Connect chart hangs or fails with `validation FAILED` | Pre-install hook found missing required fields in a connector config | [Operating Kafka Connect](operating-kafka-connect.md#validation-hook-blocks-deployment) |
 
 ## Performance Issues
 
@@ -39,7 +50,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Images won't load into Kind | Registry unreachable or platform mismatch (arm64/amd64) | [Deployment Guide](12-deployment.md#images-wont-load) |
-| Kafka pods stuck in `Pending` | StorageClass not created or no available nodes in the zone | [Deployment Guide](12-deployment.md#kafka-pods-not-starting) |
+| Kafka pods stuck in `Pending` | StorageClass can't provision PVCs, or no node matches the zone `nodeAffinity` rules | [Deployment Guide](12-deployment.md#kafka-pods-not-starting), [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#pods-stuck-in-pending) |
+| `helm upgrade` fails with `another operation in progress` | A previous install or upgrade was interrupted — roll back the release, then retry | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#helm-upgrade-fails-with-another-operation-in-progress) |
 | PDB blocks rolling restart | Only 1 pod can be unavailable — intentional safety behavior | [Upgrade Playbook](18-upgrade-playbook.md#common-upgrade-issues) |
 | Entity Operator never starts | Kafka CR hasn't reached `Ready` — check operator logs for `UnforceableProblem` | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 | PostgreSQL pod `CrashLoopBackOff` with `could not create lock file` | `readOnlyRootFilesystem: true` mutated by Kyverno — mount `emptyDir` at `/var/run/postgresql` and `/tmp` | [Deployment Guide](12-deployment.md#read-only-filesystem-compliance) |

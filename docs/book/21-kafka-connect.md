@@ -4,6 +4,13 @@ This chapter covers the **connect-cluster** Helm chart — a standalone deployme
 
 > **Scope**: this chapter covers Kafka Connect concepts and building CDC pipelines — architecture, the `KafkaConnect` resource, connectors, Debezium, transforms, schema management, and delivery semantics. Day-2 concerns (scaling, tuning, security rotation, upgrades, disaster recovery, troubleshooting) live in [Operating Kafka Connect](operating-kafka-connect.md).
 
+Whether you're wiring a database into Kafka for the first time or reviewing an existing pipeline, after this chapter you can:
+
+- Deploy Connect as its own Helm release with `kates deploy --topology isolated --with-kafka-connect` and explain why it lives apart from the broker chart
+- Build a PostgreSQL CDC pipeline with Debezium — replication slot, snapshot mode, and the internal topics that hold Connect's state
+- Chain Single Message Transforms to unwrap the Debezium envelope, route topics, and mask fields without a separate stream processing layer
+- Choose delivery semantics deliberately — exactly-once for source connectors, a Dead Letter Queue for tolerant sinks
+
 ## Architecture Overview
 
 Kafka Connect runs as a distributed cluster of worker processes that execute connectors. Each connector is a plugin that moves data between Kafka and an external system (database, object store, search index). The Kates platform deploys Connect as a **separate Helm chart** decoupled from the Kafka broker chart, enabling independent scaling, upgrades, and lifecycle management.
@@ -776,3 +783,57 @@ Cross-database sync introduces eventual consistency. The sink always lags behind
 :::
 
 ---
+
+::: {.callout-tip}
+**Try it**
+
+The chart ships a complete CDC pipeline as `testConnectors` — `helm test` creates those connectors, exercises them, and deletes them again once the suite succeeds, so keeping the pipeline running means applying the same manifests persistently. With the stack running and the demo tables created in the `orders` database (one-time prep: `docs/tutorials/09-kafka-connect-working-examples.md`), replicate a row end to end:
+
+```bash
+# Validate the release — the suite probes the REST API and creates the
+# working-example connectors transiently, removing them when it succeeds
+helm test connect-cluster -n connect
+
+# Create the CDC topic on the krafter cluster
+kubectl apply -n kafka -f - <<'EOF'
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata: {name: cdc-public-demo-orders, labels: {strimzi.io/cluster: krafter}}
+spec:
+  topicName: cdc.public.demo_orders
+  partitions: 3
+  replicas: 3
+  config: {min.insync.replicas: "2"}
+EOF
+
+# Deploy the working-example connectors persistently
+helm template connect-cluster charts/connect-cluster -n connect \
+  -s templates/tests/test-connectors.yaml | kubectl apply -f -
+
+# Wait for the Debezium source and the JDBC sink to come up
+kubectl wait -n connect --for=condition=Ready kafkaconnector/debezium-postgres-source-working-example --timeout=300s
+kubectl wait -n connect --for=condition=Ready kafkaconnector/jdbc-sink-from-cdc-working-example --timeout=300s
+
+# Insert a row into the watched table ...
+kubectl exec -n database postgresql-0 -- /bin/bash -lc \
+  "PGPASSWORD=debezium /opt/bitnami/postgresql/bin/psql -h 127.0.0.1 -U debezium -d orders -c \
+  \"INSERT INTO public.demo_orders (id, customer_name, amount) VALUES (1001, 'alice', 42.50) ON CONFLICT (id) DO UPDATE SET customer_name = EXCLUDED.customer_name, amount = EXCLUDED.amount;\""
+
+# ... and read it back from the replica table
+kubectl exec -n database postgresql-0 -- /bin/bash -lc \
+  "PGPASSWORD=debezium /opt/bitnami/postgresql/bin/psql -h 127.0.0.1 -U debezium -d orders -c \
+  \"SELECT id, customer_name, amount FROM public.demo_orders_replica WHERE id = 1001;\""
+```
+
+The SELECT returns the row within a few seconds — Debezium captures the insert from the WAL, produces it to `cdc.public.demo_orders`, and the JDBC sink upserts it into `demo_orders_replica`. When you're done, the tutorial's cleanup section removes the connectors and the CDC topic.
+:::
+
+## Summary
+
+- Connect runs as its own Helm chart (`charts/connect-cluster/`), decoupled from the brokers — the Strimzi operator reconciles the `KafkaConnect` CR into worker pods you can scale, upgrade, and break without touching Kafka.
+- All connector state lives in compacted internal topics (offsets, configs, status) — never delete the offsets topic, or every source connector re-snapshots its entire database.
+- A Debezium PostgreSQL connector owns exactly one replication slot, so `tasksMax` stays at 1; heartbeats keep WAL retention bounded on idle tables.
+- SMTs transform records in-line — `ExtractNewRecordState` unwraps the Debezium envelope so consumers see plain records instead of `{before, after, source, op}`.
+- Exactly-once source support commits records and offsets in a single Kafka transaction; sinks get resilience through a DLQ — `errors.tolerance: all` without one silently drops bad records.
+
+That pipeline now has to survive production — [Operating Kafka Connect](operating-kafka-connect.md) covers the day-2 half: scaling, tuning, credential rotation, upgrades, disaster recovery, and troubleshooting.

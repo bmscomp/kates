@@ -2,6 +2,13 @@
 
 Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production. This chapter covers the theory — [Chaos Engineering in Practice](07-chaos-practice.md) covers how Kates implements it.
 
+You don't need prior chaos tooling experience — just a working knowledge of Kafka's replication model. After this chapter, you can:
+
+- State a steady-state hypothesis with measurable pass/fail criteria
+- Predict how Kafka behaves during leader election, ISR shrink, and consumer group rebalance
+- Structure a Game Day from hypothesis through follow-up
+- Choose between LitmusChaos, Trogdor, and manual kubectl for a fault injection experiment
+
 ## Why Chaos Engineering?
 
 Distributed systems fail in ways that are impossible to predict from reading code alone. A Kafka cluster might handle a single broker failure gracefully in theory, but in practice:
@@ -288,3 +295,33 @@ Kates supports multiple fault injection backends. Choose based on your environme
 ::: {.callout-tip}
 For most Kates users, **LitmusChaos** is the recommended default. It provides the best balance of safety, observability, and Kubernetes-native integration. Use Trogdor when you need Kafka-internal fault injection (e.g., simulating slow brokers at the protocol level), and manual kubectl for quick one-off debugging sessions.
 :::
+
+::: {.callout-tip}
+**Try it**
+
+Write a steady-state hypothesis for the `krafter` Kafka cluster — bounded latency, zero offline partitions, ISR equal to the replication factor — then check each claim against live data:
+
+```bash
+# Baseline probe: under-replicated and offline partition counts
+kates cluster check
+
+# Confirm the topology your hypothesis assumes (brokers per zone)
+kates cluster topology
+
+# List the faults you could inject against it
+kates disruption types
+```
+
+Expect `kates cluster check` to report zero under-replicated and zero offline partitions — that is your steady state; anything else is a finding before you've injected a single fault.
+:::
+
+## Summary
+
+- Chaos engineering replaces hope with evidence: hypothesize steady state, inject real-world faults, and measure the gap between prediction and behavior.
+- A useful hypothesis is testable and measurable — bounded latency spike, bounded recovery time, zero message loss — with explicit pass/fail criteria.
+- Kafka fails in specific ways: leader election costs seconds of partition unavailability, ISR shrink erodes durability before availability, and eager rebalances stop the entire consumer group.
+- Minimize blast radius — start with a single pod kill and a known recovery path, and escalate only after each level passes.
+- The Game Day pipeline — pre-flight, baseline, chaos, observe, recover, post-flight, report — automates the full methodology via `make gameday`.
+- LitmusChaos is the default fault injection backend; reach for Trogdor when the fault must live inside Kafka's protocol, and manual kubectl for quick smoke tests.
+
+[Chaos Engineering in Practice](07-chaos-practice.md) turns these principles into runnable disruption tests — playbooks, safety guardrails, and SLA grading included.

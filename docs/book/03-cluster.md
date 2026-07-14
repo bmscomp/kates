@@ -4,6 +4,13 @@ Before you can measure performance or inject chaos, you need to understand the s
 
 This chapter documents the **krafter** Kafka cluster — a dedicated-role KRaft deployment on Kubernetes with zone-aware storage. Whether you're running a quick LOAD test or a multi-hour ENDURANCE run, this is the machine under the hood.
 
+After this chapter, you can:
+
+- Sketch the `krafter` topology — dedicated KRaft controllers and zone-pinned brokers — and explain why the roles are separated
+- Predict from the failure tolerance matrix whether a given broker or controller loss stops writes, loses data, or neither
+- Explain how the ~2Gi page cache budget and `min.insync.replicas=2` shape every latency number you measure here
+- Inspect the live cluster with the `kates cluster` commands instead of memorizing its state
+
 ## Physical Topology
 
 ```mermaid
@@ -255,3 +262,29 @@ These commands use the Kafka AdminClient API through the Kates backend — no di
 ::: {.callout-tip}
 The `kates cluster watch` command provides a live-refreshing view with sparkline trends, auto-refreshing every 5 seconds. It's the best way to monitor cluster health during a test or chaos experiment. See [Observability & Monitoring](09-observability.md#cluster-watch) for details.
 :::
+
+::: {.callout-tip}
+**Try it**
+
+Confirm the topology described in this chapter matches your live `krafter` cluster:
+
+```bash
+kates cluster info
+kates cluster topics
+kates cluster topics describe kates-results
+kates cluster check
+```
+
+Expect `info` to list the brokers each in a different rack/AZ, `describe` to show `kates-results` with 12 partitions at RF=3, and `check` to report zero under-replicated and zero offline partitions.
+:::
+
+## Summary
+
+- The `krafter` cluster runs dedicated KRaft roles: controllers hold the metadata quorum, brokers handle the data plane, and each pod is pinned to its own simulated zone — so the control plane stays responsive even when the data plane is saturated.
+- With RF=3 and `min.insync.replicas=2`, one broker can fail without impact; two failures reject writes but never lose acknowledged data. That availability-for-durability trade drives every chaos experiment you'll design.
+- Each broker's 4Gi memory minus a 2Gi fixed heap leaves ~2Gi of page cache — small enough that a lagging consumer hits disk quickly, making this cluster deliberately more sensitive to workload patterns than production hardware.
+- A broker failure plays out in five phases — detection, leader election, ISR shrink, client retry, recovery — and all of them are visible in a Kates chaos test heatmap.
+- Cruise Control, Kafka Exporter, Drain Cleaner, and the Entity Operator run alongside the brokers and can influence long test runs, so know they're there before you interpret a mid-run latency shift.
+- You never need to memorize any of this: `kates cluster info`, `topology`, `topics`, `groups`, and `check` give you a live view on demand.
+
+With the machine under the hood mapped, [Performance Theory](04-performance-theory.md) explains how to turn the numbers it produces into conclusions you can trust.

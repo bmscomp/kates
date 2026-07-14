@@ -2,6 +2,13 @@
 
 This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` parameter-sweep types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
 
+Whether you're baselining a new cluster or gating a CI pipeline, after this chapter you can:
+
+- Pick the test type that answers the question you're actually asking — steady-state capacity, breaking point, burst recovery, or data safety
+- Configure each type's key parameters and know how the native and Trogdor backends shape the load differently
+- Read the results — recognize saturation, slow leaks, and data loss in the metrics each type reports
+- Run any type from a built-in scenario template instead of hand-rolled flags
+
 ## Test Type Overview
 
 ```mermaid
@@ -517,3 +524,33 @@ CLI flags and scenario-file spec keys use different names for the same setting. 
 | `--topic` | `topic` | Topic name |
 | `--throughput` | `targetThroughput` | Rate limit in msg/s (-1 = unlimited) |
 | — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options (scenario files only) |
+
+::: {.callout-tip}
+**Try it**
+
+Run a correctness test end to end from a built-in template:
+
+```bash
+# List every test type the API supports
+kates test types
+
+# Export the transactional INTEGRITY template and inspect it
+kates test scaffold export integrity-tx
+cat integrity-tx.yaml
+
+# Run it and wait for the verdict
+kates test apply -f integrity-tx.yaml --wait
+```
+
+The apply blocks until the verification pass completes — on a healthy cluster, expect a PASS with zero data loss, zero duplicates, and zero CRC failures.
+:::
+
+## Summary
+
+- Every test type answers one specific question — choose by the question you need answered, not by the knobs you want to turn.
+- LOAD establishes the baseline every other result is judged against; STRESS and CAPACITY find the ceiling — STRESS characterizes how the cluster degrades, CAPACITY measures the absolute maximum.
+- The backend changes the load profile: the native backend applies concurrent unthrottled producers, while the Trogdor backend ramps, spikes, or probes in phases — same test type, different shape.
+- ENDURANCE and VOLUME stress the dimensions short tests miss: time (slow leaks, gradual degradation) and data size (storage and replication overhead).
+- INTEGRITY verifies zero loss, zero duplication, and correct ordering with sequence numbers and CRC checks — pair it with chaos through `kates resilience run` for the ultimate durability validation.
+
+Every type here maps onto a version-controlled YAML definition — [Scenario Files & SLA Gates](13-scenario-files.md) covers the full schema and the SLA gates that turn test results into pass/fail verdicts.

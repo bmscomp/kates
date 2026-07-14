@@ -2,6 +2,13 @@
 
 This chapter covers how Kates implements chaos engineering: disruption types, playbooks, safety guardrails, SLA grading, and the full execution lifecycle.
 
+It picks up where [Chaos Engineering Theory](06-chaos-theory.md) leaves off — you have a hypothesis; now you run the experiment. After this chapter, you can:
+
+- Choose the right disruption type and know which backend — the direct Kubernetes API or LitmusChaos — implements it
+- Run a built-in playbook and read the resulting report, timeline, and Kafka intelligence metrics
+- Bound the blast radius of any plan with `maxAffectedBrokers`, `autoRollback`, and recovery gates
+- Gate a CI/CD pipeline on an SLA grade with `--fail-on-sla-breach` and JUnit output
+
 ## Disruption Architecture
 
 ```mermaid
@@ -548,3 +555,34 @@ The CLI prints the chaos outcome, a pre-chaos baseline and post-chaos summary (t
 | `throughputRecPerSec` | -15.6% | ▼ |
 | `p99LatencyMs` | +596.7% | ▲ |
 | `errorRate` | +0.3% | |
+
+::: {.callout-tip}
+**Try it**
+
+Run the most common chaos test — sequential leader kills — and watch the cluster recover:
+
+```bash
+# See what ships out of the box
+kates disruption playbook list
+
+# Kill the leaders of __consumer_offsets partitions 0 and 1, back to back
+kates disruption playbook run leader-cascade
+
+# Inspect the results using the printed disruption ID
+kates disruption kafka-metrics <id>
+kates disruption timeline <id>
+```
+
+The safety guard checks that enough brokers survive before anything is killed; the run prints a disruption ID, final status, and SLA grade, and the metrics show each step's time to full ISR recovery.
+:::
+
+## Summary
+
+- The hybrid provider picks its chaos backend once, at startup: LitmusChaos when the Litmus CRDs exist in the cluster, the direct Kubernetes API provider otherwise — there is no per-type routing.
+- Built-in playbooks (`leader-cascade`, `split-brain`, `az-failure`, `rolling-restart`, `consumer-isolation`, `storage-pressure`) package the common Kafka failure scenarios as ready-to-run YAML.
+- Every plan passes through the `DisruptionSafetyGuard` first: target pods must exist, affected brokers stay within `maxAffectedBrokers`, and at least one broker always survives.
+- Kafka intelligence makes chaos Kafka-aware — leader-targeted kills, ISR recovery snapshots, and consumer lag tracking, surfaced by `kates disruption kafka-metrics`.
+- SLA grading turns post-disruption metrics into a letter grade against your plan's `sla` block; `--fail-on-sla-breach` and `--output-junit` turn that grade into a CI/CD gate.
+- `kates resilience run` layers chaos on top of a LOAD test to quantify the before/after impact on throughput, latency, and error rate.
+
+Surviving the fault is only half the proof — the next question is whether every message survived with it, which is where [Data Integrity Verification](08-data-integrity.md) picks up.

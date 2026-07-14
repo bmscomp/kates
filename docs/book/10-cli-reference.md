@@ -2,6 +2,13 @@
 
 Reference for the Kates CLI — the commands, flags, and output formats you'll use day to day.
 
+This chapter serves two readers: the operator scanning for a flag mid-incident, and the newcomer building a mental map of what the CLI can do. After this chapter, you can:
+
+- Chain individual commands into complete workflows — regression checks, lag investigations, chaos validation, and CI gates
+- Manage contexts with `kates ctx` so one binary drives local, staging, and production
+- Locate the right command family for any task, from test lifecycle to security auditing
+- Switch any command to JSON output and wire it into scripts and pipelines
+
 ## Installation
 
 ```bash
@@ -1896,3 +1903,28 @@ kates completion zsh > "${fpath[1]}/_kates"
 # Fish
 kates completion fish > ~/.config/fish/completions/kates.fish
 ```
+
+::: {.callout-tip}
+**Try it**
+
+None of these commands need a running cluster — they read from the binary itself, so they work the moment `make cli-install` finishes:
+
+```bash
+kates version
+kates tldr
+kates tldr kafka
+kates docs test create
+```
+
+Expect a version banner (with "API: not reachable" when no server is up), a cheatsheet of the most-used commands, its Kafka-specific subset, and man-style documentation for `kates test create`.
+:::
+
+## Summary
+
+- The Common Workflows section is the map: regression checking, lag investigation, chaos validation, pre-production checkout, and CI gating each chain a handful of commands into a repeatable task.
+- Contexts (`kates ctx set`, `kates ctx use`) let one binary target every environment; `--url` and `--context` override the active context for a single call.
+- `kates health`, `kates status`, and `kates doctor` form an escalating diagnostic ladder — start cheap, go deep only when something looks wrong.
+- Every command supports `-o table` for humans and `-o json` for scripts — JSON mode is what makes the CI/CD workflows possible.
+- When you can't remember a command, the CLI documents itself: `kates tldr` for a cheatsheet, `kates docs` for man-style detail, and shell completion for everything in between.
+
+Every one of these commands talks to the same HTTP API, and [REST API Reference](11-api-reference.md) documents those endpoints for when a script or integration needs to skip the CLI.

@@ -2,6 +2,13 @@
 
 This chapter covers the fundamentals of measuring distributed system performance. Understanding these concepts is essential before running any Kates test — without them, you'll collect numbers but not learn anything.
 
+After this chapter, you can:
+
+- Explain the throughput/latency trade-off and locate the saturation point where latency inflects
+- Read P50/P95/P99 percentiles and say why the mean understates tail latency
+- Spot coordinated omission in a measurement and know where the Kates mitigation stops
+- Judge whether two runs differ by more than run-to-run noise before calling a regression
+
 ## The Two Pillars: Throughput and Latency
 
 Every performance measurement reduces to two fundamental questions:
@@ -236,3 +243,29 @@ There is no universal "good" latency or throughput. It depends entirely on your 
 | Financial transactions | \< 5ms | 1K–10K rec/s |
 
 Kates lets you define SLA thresholds per test scenario, so "good" is whatever you define it to be.
+
+::: {.callout-tip}
+**Try it**
+
+Run the identical LOAD test twice and see how far the percentiles move with nothing changed:
+
+```bash
+kates test create --type LOAD --records 100000 --wait
+kates test create --type LOAD --records 100000 --wait
+kates test list --type LOAD
+kates report diff id1 id2
+```
+
+Each run prints its ID (`kates test list --type LOAD` recovers them if you lose track). Expect P50 to agree closely while P99 and Max drift — that gap is your run-to-run noise floor, and any "regression" smaller than it is indistinguishable from chance.
+:::
+
+## Summary
+
+- Throughput and latency are coupled: past the saturation point, throughput plateaus while latency climbs — finding that knee is what a performance test is for.
+- Averages hide the tail. Kates reports the mean plus P50, P95, P99, P99.9, and Max, and the tail is where GC pauses, ISR churn, and log rolls live.
+- Kates avoids closed-loop coordinated omission by sending asynchronously at a paced rate, but it does not back-fill missed send slots — cross-check stall-heavy runs against the latency heatmap.
+- Heatmaps preserve the full latency distribution over time, exposing bimodal populations and regime changes that percentiles compress away.
+- One run proves nothing: keep warm-up out of steady-state numbers, repeat the test 3–5 times, and compare runs before trusting a difference.
+- "Good" is workload-relative — define SLA thresholds per scenario instead of chasing universal numbers.
+
+With the measurement theory in place, [Test Types Deep Dive](05-test-types.md) walks through each Kates test type and when to reach for it.

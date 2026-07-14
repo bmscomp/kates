@@ -1,6 +1,11 @@
 # Architecture & Design
 
-Kates is composed of four major subsystems: the **backend engine**, the **CLI**, the **infrastructure layer**, and the **observability stack**. This chapter explains how they fit together.
+Kates is composed of four major subsystems: the **backend engine**, the **CLI**, the **infrastructure layer**, and the **observability stack**. This chapter explains how they fit together. It serves anyone who operates, extends, or debugs Kates — the mental model built here underpins every later chapter. After this chapter, you can:
+
+- Name the four subsystems and describe what each contributes to a test run
+- Trace a LOAD test from `kates test create` through the `TestOrchestrator` and `NativeKafkaBackend` to its final `TestReport`
+- Explain how the `DisruptionSafetyGuard` and automated rollback keep chaos experiments inside a safe blast radius
+- State why Kafka, not PostgreSQL, is the source of truth for test results
 
 ## High-Level Architecture
 
@@ -454,4 +459,29 @@ Distributed systems fail in partial ways. Kates is designed to degrade gracefull
 ::: {.callout-note}
 The backend's resilience depends on Kafka's durability guarantees. Because test results are written to `kates-results` (RF=3, `acks=all`) before being persisted to PostgreSQL, the Kafka topic serves as a durable write-ahead log. This is a deliberate architectural choice — Kafka is the source of truth, PostgreSQL is the queryable projection.
 :::
+
+::: {.callout-tip}
+**Try it**
+
+Trace one test through every layer of the Data Flow diagram:
+
+```bash
+kates health
+kates test create --type LOAD --records 100000 --wait
+kates test list
+kates report show <id>
+```
+
+`health` confirms the CLI reaches the REST API and Kafka; `create --wait` drives the `TestOrchestrator` and `NativeKafkaBackend` until the run completes; `test list` shows the persisted `TestRun`; and `report show` (with the ID printed by `create`) returns the `ReportGenerator`'s summary, SLA verdicts, and broker snapshot.
+:::
+
+## Summary
+
+- Kates splits into four subsystems: a Quarkus backend exposing REST and gRPC over one shared service layer, a Cobra-based Go CLI, the Kubernetes infrastructure layer, and the observability stack.
+- The `TestOrchestrator` owns the test lifecycle: resolve defaults, create the topic, launch workers, poll status, collect heatmap data, generate the report.
+- Latency measurement rests on HdrHistogram (1µs–60s, microsecond precision), compressed into 25 heatmap buckets for export.
+- Every chaos experiment passes through the `DisruptionSafetyGuard` — blast radius limits, ISR health, quorum protection — with automated rollback when SLA verification fails.
+- Test results flow through the `kates-results` Kafka topic (RF=3, `acks=all`) before landing in PostgreSQL, so Kafka is the durable source of truth and PostgreSQL the queryable projection.
+
+With the architecture mapped, [The Cluster Under Test](03-cluster.md) builds the Kubernetes and Kafka environment these subsystems run against.
 

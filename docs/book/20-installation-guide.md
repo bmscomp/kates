@@ -11,6 +11,13 @@ By the end of this chapter you will have:
 - Prometheus metrics, Grafana dashboards, and alerting rules
 - Managed topics and users, all declared as code
 
+After this chapter, you can:
+
+- Deploy the cluster with `kates deploy` or direct Helm commands, layering the right environment overlay
+- Verify health from the `Kafka` CR, node pools, topics, and user Secrets
+- Connect clients from inside the cluster and through the external NodePort listener
+- Customize topics, users, listeners, and broker pools in `values.yaml`
+
 ---
 
 ## 1. Prerequisites
@@ -1485,7 +1492,7 @@ kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions}' | python3 
 ```
 
 Common causes:
-- Operator cannot reach controller admin API (port 9090) — check NetworkPolicies
+- Operator cannot reach controller admin API (port 9090) — check NetworkPolicies; [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) diagnoses this case step by step
 - Strimzi CRDs not installed — run `kubectl get crd kafkas.kafka.strimzi.io`
 - Insufficient resources — check pod events with `kubectl describe pod`
 
@@ -1509,6 +1516,10 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 # Check entity operator logs
 kubectl logs -n kafka -l strimzi.io/name=krafter-entity-operator -c user-operator --tail=20
 ```
+
+The same dependency chain — and the race it creates for consumers of those secrets — is diagnosed in [Kafka Deployment Engineering](15-kafka-deployment.md#kafka-ui-createcontainerconfigerror).
+
+For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
 
 ---
 
@@ -1579,3 +1590,31 @@ helm test kafka-cluster -n kafka
 | `externalSecrets.enabled` | `false` | Enable External Secrets Operator integration |
 | `podSecurityPolicy.enabled` | `false` | Enable Kyverno pod security policies |
 | `rebalance.enabled` | `true` | Create KafkaRebalance CRs |
+
+---
+
+::: {.callout-tip}
+**Try it**
+
+With the chart installed, confirm the cluster is healthy end to end:
+
+```bash
+kubectl get kafka krafter -n kafka
+kubectl get kafkanodepools -n kafka -l strimzi.io/cluster=krafter
+kubectl get kafkatopics -n kafka -l strimzi.io/cluster=krafter
+kubectl get kafkausers -n kafka -l strimzi.io/cluster=krafter
+kates test helm kafka
+```
+
+Each resource shows `Ready` as `True`, and the Helm test suite passes tier by tier — from connectivity through produce/consume to metrics.
+:::
+
+## Summary
+
+- The chart creates declarative Strimzi CRs — the operator, not Helm, creates the pods. You edit `values.yaml`, run `helm upgrade` (or `kates deploy`), and the operator reconciles with rolling restarts.
+- `kates deploy --topology isolated` handles Strimzi operator install, zone detection, overlay selection, and readiness waiting; direct `helm upgrade --install` gives CI pipelines fine-grained control.
+- One broker pool per zone with `min.insync.replicas: 2` keeps the cluster serving reads and writes through the loss of a full zone.
+- Verification is layered: the `Kafka` CR `Ready` condition, node pool and topic status, user Secrets, then `kates test helm` for produce/consume and authorization round-trips.
+- `helm uninstall` keeps the `Kafka`, `KafkaNodePool`, `KafkaTopic`, and `KafkaUser` CRs by design — deleting data requires the explicit teardown in section 15.2.
+
+With the cluster installed and verified, [Kafka Deployment Engineering](15-kafka-deployment.md) explains the engineering rationale behind this topology — node pools, certificates, Cruise Control, alerting, and backup.
