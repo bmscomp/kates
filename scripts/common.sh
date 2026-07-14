@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared constants, colors, and utility functions for all klster scripts.
+# Shared constants, colors, and utility functions for all Kates scripts.
 # Source this file at the top of every script:
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   source "${SCRIPT_DIR}/common.sh"

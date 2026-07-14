@@ -6,7 +6,7 @@ metadata:
   labels:
     app: postgres
     app.kubernetes.io/name: postgres
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
     app.kubernetes.io/component: database
 spec:
   serviceName: postgres
@@ -73,7 +73,7 @@ metadata:
   labels:
     app: postgres
     app.kubernetes.io/name: postgres
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
     app.kubernetes.io/component: database
 spec:
   type: ClusterIP
