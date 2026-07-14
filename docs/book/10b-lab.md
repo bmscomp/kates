@@ -42,7 +42,7 @@ Lab splits the terminal into two panes:
 │                          │  10-50 █                4%   │
 │                          │  50+ms ▏                1%   │
 ├──────────────────────────┴──────────────────────────────┤
-│  ✓ #3 — 48.7K rec/s, p99=11.00ms  (23s)                 │
+│  ✓ #3 — 48.7K rec/s, p99=11.00ms                        │
 │  ↑↓ navigate  ←→ change  Enter run  p preset  d diff    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -59,7 +59,7 @@ The left pane shows configurable parameters. The right pane shows iteration hist
 | `p` | Config | Cycle through presets (Low Latency → Max Throughput → Durability) |
 | `s` | Config | Start auto-sweep on the currently selected parameter |
 | `m` | Config | Run 3 identical tests and record the median (stabilized result) |
-| `W` | Config | Cycle warmup count (0→1→2→3→4→5→off) — warmup runs are discarded |
+| `W` | Config | Cycle warmup count (1→2→3→4→5→off) — warmup runs are discarded |
 | `d` | Config | Show diff between last two iterations (or pinned pair) |
 | `c` | Config | Open pin-select view to pick arbitrary iterations to compare |
 | `e` | Config | Export all iterations to CSV (`~/kates-lab-{timestamp}.csv`) |
@@ -76,11 +76,11 @@ Presets apply a curated set of parameters for common test scenarios. Press `p` t
 
 | Preset | Goal | Key Settings |
 |--------|------|-------------|
-| **Low Latency** | Minimize P99 | `acks=1`, `compression=none`, `batchSize=16384`, `lingerMs=0`, `producers=1` |
-| **Max Throughput** | Maximize rec/s | `acks=all`, `compression=lz4`, `batchSize=262144`, `lingerMs=50`, `producers=8` |
-| **Durability** | Zero data loss | `acks=all`, `replication=3`, `compression=lz4`, `batchSize=65536`, `lingerMs=5` |
+| **Low Latency** | Minimize P99 | `type=SPIKE`, `acks=1`, `compression=none`, `batchSize=16384`, `lingerMs=0`, `producers=1` |
+| **Max Throughput** | Maximize rec/s | `type=STRESS`, `acks=all`, `compression=lz4`, `batchSize=262144`, `lingerMs=50`, `producers=8` |
+| **Durability** | Zero data loss | `type=LOAD`, `acks=all`, `replication=3`, `compression=lz4`, `batchSize=65536`, `lingerMs=5` |
 
-Presets are starting points — after applying one, fine-tune individual parameters before running.
+Note that each preset also switches the **Test Type** (`SPIKE`, `STRESS`, or `LOAD`), so the top field changes when you cycle `p`. Presets are starting points — after applying one, fine-tune individual parameters before running.
 
 ## Iteration Workflow
 
@@ -102,13 +102,13 @@ Each completed test creates an **iteration** — a snapshot of parameters and re
 
 ### Live Progress
 
-While a test runs, the status bar displays live metrics:
+While a test runs, the status bar shows the iteration number and elapsed time, updating every second:
 
 ```
-⏳ Running iteration #4…  (12s)  23.4K rec  45.2K rec/s  p99=8.50ms
+⏳ Running iteration #4…  (12s)
 ```
 
-The elapsed time, records sent, throughput, and latency update every second.
+Throughput and latency metrics appear once the test completes.
 
 ## Comparing Iterations
 
@@ -167,7 +167,7 @@ After the sweep completes, the iteration history shows results for all values si
 
 The JVM needs time to JIT-compile hot code paths. The first 1–3 runs in a fresh session are typically slower and noisier than subsequent runs. Warmup mode discards a configurable number of iterations before recording the measured one.
 
-Press `W` to cycle the warmup count (0 → 1 → 2 → 3 → 4 → 5 → off):
+Press `W` to cycle the warmup count (1 → 2 → 3 → 4 → 5 → off):
 
 ```
 🔥 Warmup: 2 iteration(s) before measuring
@@ -193,7 +193,7 @@ Press `m` to start:
 After all 3 runs complete, a single iteration is added to the history with the middle throughput/P99 value. This gives you a **stable, reproducible** metric for parameter comparisons.
 
 ::: {.callout-note}
-Median mode and warmup combine: if warmup is set to 2 and you press `m`, Lab runs 2+3+2+3+2+3 = 15 iterations internally but records only 1 aggregated result. For faster sessions, set warmup to 0 when using median mode — the first of 3 runs provides the warmup naturally.
+Median mode ignores the warmup setting: pressing `m` always runs exactly 3 back-to-back tests, with no warmup iterations inserted. Warmup applies only to tests started with `Enter`. In practice the first of the 3 median runs absorbs most of the warmup effect anyway.
 :::
 
 
@@ -235,18 +235,21 @@ Press `r` to retry with the exact same parameters — the previous `CreateTestRe
 
 ## Duration Calculation
 
-Lab calculates `durationMs` proportionally to the record count:
+Lab budgets roughly one millisecond per record when computing `durationMs`:
 
-```
-durationMs = (records / 1000) × 1000
+```go
+durationMs := records / 1000 * 1000 // integer division: ~1 ms per record
+if durationMs < 60000 {
+    durationMs = 60000 // 60-second floor
+}
 ```
 
-With a floor of 60 seconds. This prevents the backend from using its default (15 minutes for STRESS tests) when the workload would finish much faster.
+This prevents the backend from falling back to its configured default duration (for STRESS tests, `kates.tests.stress.duration-ms` — 15 minutes out of the box) when the workload would finish much faster.
 
 | Records | Duration |
 |:-------:|:--------:|
 | 10,000 | 60s (floor) |
-| 50,000 | 60s |
+| 50,000 | 60s (floor) |
 | 100,000 | 100s |
 | 500,000 | 500s |
 | 1,000,000 | 1000s |

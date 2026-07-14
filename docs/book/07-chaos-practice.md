@@ -13,8 +13,8 @@ graph TB
     subgraph Validation["Pre-Flight Validation"]
         SG[Safety Guard]
         SG --> CHK1[Max affected<br/>brokers check]
-        SG --> CHK2[ISR health<br/>check]
-        SG --> CHK3[Quorum<br/>protection]
+        SG --> CHK2[Target broker<br/>pods exist]
+        SG --> CHK3[At least one broker<br/>survives the plan]
     end
     
     subgraph Execution["Step-by-Step Execution"]
@@ -47,51 +47,53 @@ graph TB
 
 ## Disruption Types
 
-Kates supports 10 disruption types across two implementation backends:
+Kates supports 13 disruption types (the `DisruptionType` enum), implemented by two backends:
 
 ### Direct Kubernetes API
 
-These disruptions use the Kubernetes API directly — no additional tooling required:
+The `KubernetesChaosProvider` implements these disruptions against the Kubernetes API directly — no additional tooling required:
 
 | Type | Implementation | Effect |
 |------|---------------|--------|
-| `POD_KILL` | `kubectl delete pod --grace-period=0` | Immediate broker termination, simulates SIGKILL |
-| `POD_DELETE` | `kubectl delete pod` | Graceful shutdown, broker flushes and shuts down |
-| `ROLLING_RESTART` | Sequential pod deletions with readiness checks | Simulates operator-managed rolling updates |
-| `LEADER_ELECTION` | Kill the pod hosting the leader for a specific partition | Forces leader election for targeted partition |
-| `SCALE_DOWN` | Modify Strimzi Kafka CR `replicas` field | Reduces broker count through the operator |
-| `NODE_DRAIN` | `kubectl drain --delete-emptydir-data` | Evicts all pods from a node, simulates AZ failure |
+| `POD_KILL` | Delete pod with grace period 0 | Immediate broker termination, simulates SIGKILL |
+| `POD_DELETE` | Delete pod with configurable grace period | Graceful shutdown, broker flushes and shuts down |
+| `ROLLING_RESTART` | Rolling restart of the matching StatefulSets | Simulates operator-managed rolling updates |
+| `LEADER_ELECTION` | Resolve the partition leader, then force-delete its pod | Forces leader election for targeted partition |
+| `SCALE_DOWN` | Scale the matching StatefulSets down by one replica | Reduces broker count |
+| `NETWORK_PARTITION` | Deny-all NetworkPolicy applied to the target pod | Isolates a broker from the cluster network |
+| `CPU_STRESS` | Stress ephemeral container injected into the pod | Saturates CPU on the broker pod |
+| `IO_STRESS` | Stress ephemeral container injected into the pod | Injects disk I/O pressure on broker storage |
 
 ### LitmusChaos Integration
 
-These disruptions leverage LitmusChaos CRDs for more sophisticated fault injection:
+When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). Five types are only available through Litmus:
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
-| `NETWORK_PARTITION` | `pod-network-partition` | Isolates a broker from the cluster network |
 | `NETWORK_LATENCY` | `pod-network-latency` | Adds configurable latency to broker traffic |
-| `CPU_STRESS` | `pod-cpu-hog` | Saturates CPU on the broker pod |
+| `MEMORY_STRESS` | `pod-memory-hog` | Consumes memory on the broker pod |
+| `DNS_ERROR` | `pod-dns-error` | Injects DNS resolution failures on broker pods |
 | `DISK_FILL` | `disk-fill` | Fills the broker's PVC, triggering out-of-space errors |
+| `NODE_DRAIN` | `node-drain` | Drains the node hosting a broker, simulates node/AZ failure |
 
 ### The Hybrid Provider
 
 ```mermaid
 graph TD
-    DO[DisruptionOrchestrator] --> HCP[HybridChaosProvider]
+    DO[DisruptionOrchestrator] --> HCP[HybridChaosProvider<br/>startup: are Litmus CRDs installed?]
     
-    HCP --> KCP[KubernetesChaosProvider<br/>POD_KILL, POD_DELETE,<br/>ROLLING_RESTART, LEADER_ELECTION,<br/>SCALE_DOWN, NODE_DRAIN]
+    HCP -->|Litmus detected| LCP[LitmusChaosProvider<br/>all types via Litmus experiments]
+    HCP -->|Litmus not found| KCP[KubernetesChaosProvider<br/>direct API subset]
     
-    HCP --> LCP[LitmusChaosProvider<br/>NETWORK_PARTITION,<br/>NETWORK_LATENCY,<br/>CPU_STRESS, DISK_FILL]
-    
-    KCP --> K8S[Kubernetes API]
     LCP --> LIT[LitmusChaos CRDs]
+    KCP --> K8S[Kubernetes API]
 ```
 
-The `HybridChaosProvider` routes each disruption to the appropriate backend based on its type. This allows you to use simple Kubernetes-native operations where possible, and Litmus only where advanced network or resource injection is needed.
+The `HybridChaosProvider` (selected with `kates.chaos.provider=hybrid`) picks its backend once, at startup: it checks whether the Litmus CRDs (`chaosengines.litmuschaos.io`) exist in the cluster. If they do, it delegates **all** fault injection to the `LitmusChaosProvider`; otherwise it falls back to the direct `KubernetesChaosProvider`. There is no per-type routing — a single delegate handles every disruption for the lifetime of the process.
 
 ## Built-In Playbooks
 
-Kates ships with 6 production-tested playbooks located in `kates/src/main/resources/playbooks/`. Each playbook is a YAML file that defines a complete disruption scenario with safety parameters, fault steps, and observation windows.
+Kates ships with a set of built-in playbooks located in `kates/src/main/resources/playbooks/` — that directory is the source of truth for the YAML shown below. Each playbook is a YAML file that defines a complete disruption scenario with safety parameters, fault steps, and observation windows.
 
 ### leader-cascade
 
@@ -198,7 +200,7 @@ graph TB
     end
     
     subgraph During["During AZ Failure"]
-        N1b[Node: alpha ❌<br/>DRAINED]
+        N1b[Node: alpha ❌<br/>Broker 0 killed]
         N2b[Node: sigma ✅<br/>Broker 1]
         N3b[Node: gamma ✅<br/>Broker 2]
     end
@@ -325,25 +327,26 @@ The `DisruptionSafetyGuard` validates every plan before execution:
 
 ```mermaid
 graph TD
-    PLAN[Disruption Plan] --> V1{Max affected<br/>brokers ≤ N?}
-    V1 -->|Yes| V2{Current ISR<br/>healthy?}
-    V1 -->|No| REJECT1["❌ Rejected:<br/>Too many brokers affected"]
-    V2 -->|Yes| V3{KRaft quorum<br/>maintained?}
-    V2 -->|No| REJECT2["❌ Rejected:<br/>Cluster already degraded"]
-    V3 -->|Yes| V4{Auto-rollback<br/>configured?}
-    V3 -->|No| REJECT3["❌ Rejected:<br/>Would break quorum"]
-    V4 -->|Yes| EXECUTE["✅ Execute with<br/>rollback enabled"]
-    V4 -->|No| WARN["⚠ Execute with<br/>warning"]
+    PLAN[Disruption Plan] --> V1{Broker pods found<br/>for target label?}
+    V1 -->|No| REJECT1["❌ Rejected:<br/>No broker pods found"]
+    V1 -->|Yes| V2{Affected brokers ≤<br/>maxAffectedBrokers?}
+    V2 -->|No| REJECT2["❌ Rejected:<br/>Too many brokers affected"]
+    V2 -->|Yes| V3{At least one broker<br/>left untouched?}
+    V3 -->|No| REJECT3["❌ Rejected:<br/>Would affect ALL brokers"]
+    V3 -->|"Yes, but only one"| WARN["⚠ Execute with warning:<br/>only 1 broker remains"]
+    V3 -->|Yes| EXECUTE["✅ Execute"]
 ```
+
+The guard also emits per-step warnings — for example, `SCALE_DOWN` without `autoRollback`, or a `NETWORK_PARTITION` with no duration (the NetworkPolicy would persist until cleanup).
 
 ### Guardrail Parameters
 
 | Parameter | Purpose | Default |
 |-----------|---------|---------|
-| `maxAffectedBrokers` | Maximum brokers to disrupt simultaneously | 1 |
-| `autoRollback` | Automatically restore if health deteriorates | true |
-| `isrTrackingTopic` | Topic to monitor for ISR health | `__consumer_offsets` |
-| `requireRecovery` | Wait for cluster recovery between steps | true |
+| `maxAffectedBrokers` | Maximum brokers to disrupt simultaneously (checked only when > 0) | `-1` (no limit) |
+| `autoRollback` | Automatically restore if health deteriorates | `true` |
+| `isrTrackingTopic` | Topic to monitor for ISR health | unset |
+| `requireRecovery` | Wait for cluster recovery between steps | `false` |
 
 ## Kafka Intelligence
 
@@ -374,52 +377,54 @@ During execution, Kates captures ISR snapshots:
 kates disruption kafka-metrics <id>
 ```
 
-Output includes:
+Output includes, per step:
 
-- ISR state before disruption
-- ISR state during disruption (which replicas fell out)
-- ISR state after recovery (when all replicas caught up)
-- Time to full ISR recovery
+- Time to full ISR recovery (or `NOT RECOVERED`)
+- Minimum ISR depth reached during the disruption
+- Peak number of under-replicated partitions
+- Total partitions tracked
 
 ### Consumer Lag Monitoring
 
 For consumer-facing tests, Kates tracks consumer group lag:
 
-- Peak lag during disruption
-- Lag recovery rate (messages/second of drain)
-- Time to zero lag
+- Baseline lag before the fault
+- Peak lag during disruption, and the spike over baseline
+- Time to lag recovery
 
 ## SLA Grading
 
-Every disruption report includes an **SLA grade** — a structured verdict on whether the cluster met its resilience targets.
+Every disruption report includes an **SLA grade** — a structured verdict on whether the cluster met its resilience targets. The thresholds are not built in: you define them in the plan's `sla` block (an `SlaDefinition`), and the `SlaGrader` checks each step's post-disruption metrics against them. A plan with no SLA constraints grades `A` with zero checks.
 
 ```mermaid
 graph TD
-    subgraph Metrics["Collected Metrics"]
-        M1[Recovery Time]
-        M2[Max Latency Spike]
-        M3[Messages Lost]
-        M4[ISR Recovery Time]
-        M5[Consumer Lag Peak]
+    subgraph Metrics["Post-Disruption Metrics (per step)"]
+        M1[Avg / P99 / P999 Latency]
+        M2[Throughput]
+        M3[Error Rate]
+        M4["Recovery Time (RTO)"]
+        M5[Data Loss %]
     end
     
-    subgraph Thresholds["SLA Thresholds"]
-        T1["Recovery ≤ 30s"]
-        T2["Latency ≤ 500ms"]
-        T3["Loss = 0"]
-        T4["ISR ≤ 60s"]
-        T5["Lag ≤ 10,000"]
+    subgraph Thresholds["SLA Thresholds (plan's sla block)"]
+        T1[maxAvgLatencyMs<br/>maxP99LatencyMs<br/>maxP999LatencyMs]
+        T2[minThroughputRecPerSec]
+        T3[maxErrorRate]
+        T4[maxRtoMs]
+        T5[maxDataLossPercent]
     end
     
-    subgraph Verdict
-        PASS["PASS ✅<br/>All thresholds met"]
-        WARN["WARN ⚠<br/>Some marginal"]
-        FAIL["FAIL ❌<br/>Thresholds breached"]
+    subgraph Verdict["Letter Grade"]
+        A["A ✅<br/>All checks passed"]
+        BCD["B / C / D ⚠<br/>By fraction of failed checks"]
+        F["F ❌<br/>Any CRITICAL violation"]
     end
     
     Metrics --> Thresholds
     Thresholds --> Verdict
 ```
+
+Each violation is classified `WARNING` or `CRITICAL` — a breach far past its threshold (for example, P99 latency or recovery time at more than twice the limit, throughput below half the minimum, or any data loss over the cap) is `CRITICAL`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
 
 ### CI/CD Integration
 
@@ -472,13 +477,13 @@ During execution, Kates provides real-time progress via Server-Sent Events (SSE)
 kates disruption watch <id>
 ```
 
-The CLI displays:
+The CLI displays each event as it arrives:
 
-- Current step name and status
-- ISR state changes
-- Consumer lag updates
-- Recovery progress
-- Final SLA verdict
+- Step start and completion
+- Baseline and post-fault metrics capture
+- Fault injection and recovery waiting
+- Rollback events
+- Final SLA grade and completion status
 
 ## Resilience Testing: Performance + Chaos Combined
 
@@ -512,34 +517,34 @@ graph LR
 ```
 
 ```bash
-# Create a resilience test config
-cat > resilience-test.json << 'EOF'
-{
-  "testRequest": {
-    "testType": "LOAD",
-    "spec": {
-      "records": 100000,
-      "producers": 4,
-      "recordSizeBytes": 1024,
-      "acks": "all"
-    }
-  },
-  "chaosSpec": {
-    "experimentName": "kafka-pod-kill",
-    "targetNamespace": "kafka"
-  },
-  "steadyStateSec": 30
-}
+# Create a resilience test config (YAML or JSON)
+cat > resilience-test.yaml << 'EOF'
+testRequest:
+  type: LOAD
+  spec:
+    numRecords: 100000
+    numProducers: 4
+    recordSize: 1024
+    acks: all
+
+chaosSpec:
+  experimentName: kafka-pod-kill
+  disruptionType: POD_KILL
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka"
+  chaosDurationSec: 30
+
+steadyStateSec: 30
 EOF
 
 # Run it
-kates resilience run --config resilience-test.json
+kates resilience run -f resilience-test.yaml
 ```
 
-The output shows:
+The CLI prints the chaos outcome, a pre-chaos baseline and post-chaos summary (throughput, P99 latency, error rate), and an **Impact Analysis** table with the percentage change of each metric — `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs`, and `errorRate`. With illustrative numbers:
 
-| Metric | Pre-Chaos | Post-Chaos | Change |
-|--------|:-:|:-:|:-:|
-| Throughput (rec/s) | 45,000 | 38,000 | -15.6% ▼ |
-| P99 Latency (ms) | 12.3 | 85.7 | +596.7% ▲ |
-| Error Rate | 0.0% | 0.3% | +0.3% |
+| Metric | Change | |
+|--------|-------:|:-:|
+| `throughputRecPerSec` | -15.6% | ▼ |
+| `p99LatencyMs` | +596.7% | ▲ |
+| `errorRate` | +0.3% | |

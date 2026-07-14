@@ -114,16 +114,16 @@ The in-process Kafka benchmark engine. Each test launches `WorkerState` threads 
 
 - **Produce** messages with configurable record size, acknowledgment mode, and throughput throttling
 - **Consume** messages with configurable consumer group, fetch settings, and poll timeout
-- **Record latency** in a lock-free `LatencyHistogram` (1024 logarithmic buckets, microsecond precision)
+- **Record latency** in a `LatencyHistogram` backed by HdrHistogram (1µs–60s range, microsecond precision)
 - **Track integrity** — sequence numbers, acknowledgment gaps, and consumer-side deduplication
 
 ### LatencyHistogram
 
-The histogram is the heart of latency measurement. It uses **logarithmic bucketing** to provide high resolution at low latencies (sub-millisecond) while covering tails up to 10+ seconds.
+The histogram is the heart of latency measurement. It is backed by **HdrHistogram** (configured for 1µs–60s with 3 significant value digits), which provides high resolution at low latencies (sub-millisecond) while covering tails up to 60 seconds.
 
 ```mermaid
 graph LR
-    subgraph Internal["1024 Logarithmic Buckets"]
+    subgraph Internal["HdrHistogram (1µs–60s)"]
         B1["0.001ms"] --> B2["0.01ms"] --> B3["0.1ms"] --> B4["1ms"] --> B5["10ms"] --> B6["100ms"] --> B7["1000ms"]
     end
     
@@ -144,7 +144,7 @@ Key methods:
 
 | Method | Lock | Purpose |
 |--------|------|---------|
-| `record(latencyUs)` | Read | Record a single latency observation |
+| `recordLatency(latencyMs)` | Write | Record a single latency observation |
 | `getPercentile(p)` | Read | Compute p50/p95/p99 from cumulative distribution |
 | `exportBuckets()` | Read | Compress to 25 heatmap ranges (non-destructive) |
 | `snapshotAndReset()` | Write | Atomic capture + reset for windowed collection |
@@ -198,16 +198,16 @@ graph TB
 
 | Type | Description | Implementation |
 |------|-------------|----------------|
-| `POD_KILL` | Immediately terminate a broker pod | `kubectl delete pod --grace-period=0` |
-| `POD_DELETE` | Gracefully delete a broker pod | `kubectl delete pod` |
+| `POD_KILL` | Immediately terminate a broker pod | Kubernetes API — force-delete pod (grace period 0) |
+| `POD_DELETE` | Gracefully delete a broker pod | Kubernetes API — delete pod (configurable grace period) |
 | `NETWORK_PARTITION` | Isolate a broker from the cluster | Litmus `pod-network-partition` |
 | `NETWORK_LATENCY` | Inject latency into broker network | Litmus `pod-network-latency` |
 | `CPU_STRESS` | Saturate CPU on a broker node | Litmus `pod-cpu-hog` |
 | `DISK_FILL` | Fill the broker's persistent volume | Litmus `disk-fill` |
 | `ROLLING_RESTART` | Restart all brokers sequentially | Kubernetes rolling update |
 | `LEADER_ELECTION` | Force leader re-election for a partition | Kill the current leader broker |
-| `SCALE_DOWN` | Reduce the number of broker replicas | Strimzi scale operation |
-| `NODE_DRAIN` | Drain a Kubernetes node | `kubectl drain` |
+| `SCALE_DOWN` | Reduce the number of broker replicas | Kubernetes API — scale StatefulSet down by one replica |
+| `NODE_DRAIN` | Drain a Kubernetes node | Litmus `node-drain` |
 
 ### Safety Guardrails
 
@@ -220,7 +220,7 @@ The `DisruptionSafetyGuard` validates every disruption plan before execution:
 
 ## CLI Architecture
 
-The CLI is a **standalone Go binary** built with Cobra. It communicates with the backend exclusively through the REST API.
+The CLI is a **standalone Go binary** built with Cobra. It splits its work between two channels: it calls the backend's REST API for test, report, and disruption operations, and it shells out to `kubectl`, `helm`, and `kind` (via `os/exec`) for cluster provisioning and lifecycle tasks such as `kates deploy`, `kates cluster`, and `kates portforward`.
 
 ```mermaid
 graph TD
@@ -257,7 +257,7 @@ Key design decisions:
 
 - **Multi-context support** — like `kubectl`, the CLI supports named contexts for targeting different Kates instances
 - **Rich terminal output** — tables, colored badges, metric bars, sparkline charts, and ASCII banners
-- **Scaffold templates** — `kates test scaffold --type LOAD` generates ready-to-use YAML scenario files
+- **Scaffold templates** — `kates test scaffold export <name>` writes a ready-to-use YAML scenario file to the current directory (browse the library with `kates test scaffold list`, optionally filtered by `--type LOAD`)
 - **Streaming watch** — `kates test watch` and `kates disruption watch` provide real-time progress updates
 
 ## Data Flow
@@ -348,7 +348,7 @@ sequenceDiagram
 | Operator | Strimzi | 1.0.0 | Kafka lifecycle management |
 | Chaos | LitmusChaos | Latest | Advanced chaos experiments |
 | Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |
-| Tracing | Jaeger (OTLP) | 1.64 | Distributed trace collection |
+| Tracing | Jaeger (OTLP) | 2.15.0 | Distributed trace collection |
 | Registry | Apicurio | Latest | Schema registry for Kafka |
 | Database | PostgreSQL | Latest | Test results and schedule persistence |
 | Backup | Velero + MinIO | Latest | Cluster backup and restore |
@@ -428,9 +428,17 @@ erDiagram
 | V2 | `V2__create_schedules_table.sql` | `scheduled_test_runs` for recurring test automation |
 | V3 | `V3__create_disruption_reports.sql` | `disruption_reports` with SLA grade tracking |
 | V4 | `V4__create_disruption_schedules.sql` | `disruption_schedules` for recurring chaos tests |
-| V5–V9 | Various | Connection pooling, batch optimizations, additional indexes |
+| V5 | `V5__create_audit_events.sql` | `audit_events` table for action/event auditing |
+| V6 | `V6__create_webhook_deliveries.sql` | `webhook_deliveries` tracking for outbound webhooks |
+| V7 | `V7__create_profiles.sql` | `profiles` table storing baseline performance profiles |
+| V8 | `V8__create_snapshots.sql` | `snapshots` table for cluster topology captures |
+| V9 | `V9__add_test_tags.sql` | `tags` JSONB column + GIN index on `test_runs` |
 | V10 | `V10__add_composite_indexes.sql` | Composite indexes for test_type + status queries |
 | V11 | `V11__labels_jsonb.sql` | JSONB labels column for flexible test categorization |
+| V12 | `V12__cdc_phases_jsonb.sql` | `cdc_phases_json` column on `test_runs` |
+| V13 | `V13__create_outbox_events.sql` | `outbox_events` table for the transactional outbox pattern |
+| V14 | `V14__create_processed_events.sql` | `processed_events` idempotency-key table for consumer dedup |
+| V15 | `V15__create_webhook_dlq.sql` | `webhook_dlq` dead-letter table for failed webhook deliveries |
 
 ## Graceful Degradation
 
@@ -439,7 +447,7 @@ Distributed systems fail in partial ways. Kates is designed to degrade gracefull
 | Failure Scenario | What Happens | Recovery |
 |------------------|-------------|----------|
 | **Kafka unreachable** | Running tests fail with a connection error. The CLI reports `Kafka: ❌ Disconnected` in health checks. No new tests can be created until Kafka is reachable. Existing test results in PostgreSQL remain accessible. | The backend reconnects automatically when Kafka becomes available. No manual intervention required. |
-| **PostgreSQL down** | Test results from running tests are buffered in the `kates-results` Kafka topic. The backend cannot persist results or serve historical data via the API. The CLI's `test list`, `report show`, and `trend` commands return errors. | On reconnect, the backend replays unconsumed results from the Kafka topic, so no test data is lost. The replay window is limited by the topic's retention period (default: 7 days). |
+| **PostgreSQL down** | Test results from running tests are buffered in the `kates-results` Kafka topic. The backend cannot persist results or serve historical data via the API. The CLI's `test list`, `report show`, and `trend` commands return errors. | On reconnect, the backend replays unconsumed results from the Kafka topic, so no test data is lost. The replay window is limited by the topic's retention period. |
 | **Test interrupted mid-run** | The backend marks the test as `INTERRUPTED` and saves whatever results were collected before the interruption. Partial reports are available via `kates report show`. The test's Kafka consumer group offsets are committed, so no duplicate processing occurs on restart. | You can re-run the test. The interrupted run remains in history for comparison. |
 | **Kates backend crashes during a test** | The Kafka producer/consumer threads stop. In-flight messages may not be acknowledged. When the backend restarts (Kubernetes will restart the pod), it reads test state from PostgreSQL and the `kates-results` topic to reconstruct the last known state. | Kubernetes restarts the pod automatically. Tests that were running are marked as `INTERRUPTED` on recovery. |
 
