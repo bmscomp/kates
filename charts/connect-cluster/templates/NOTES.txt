@@ -17,6 +17,28 @@ Components:
   REST API Service:   {{ if .Values.restApi.service.enabled }}enabled (port {{ .Values.restApi.service.port | default 8083 }}){{ else }}disabled{{ end }}
   Alerts:             {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
   Dashboards:         {{ if .Values.dashboards.enabled }}enabled{{ else }}disabled{{ end }}
+  Managed KafkaUser:  {{ if (.Values.kafkaUser).create }}enabled ({{ .Values.kafkaUser.name | default .Values.kafka.authentication.username }}, secretSync: {{ ((.Values.kafkaUser).secretSync).method | default "job" }}){{ else }}disabled — secret "{{ .Values.kafka.authentication.secretName | default .Values.kafka.authentication.username }}" must exist{{ end }}
+  NetworkPolicy:      {{ if .Values.networkPolicy.enabled }}{{ if ((.Values.networkPolicy.defaultDeny).enabled | default true) }}default-deny + explicit allows{{ else }}allow rules only (no default-deny){{ end }}{{ else }}disabled{{ end }}
+{{- if or .Values.networkPolicy.kafkaPorts .Values.networkPolicy.monitoringNamespace .Values.networkPolicy.restApiClients }}
+
+  ⚠ DEPRECATED networkPolicy keys in use — migrate:
+{{- if .Values.networkPolicy.kafkaPorts }}
+    kafkaPorts          → networkPolicy.kafka.ports
+{{- end }}
+{{- if .Values.networkPolicy.monitoringNamespace }}
+    monitoringNamespace → networkPolicy.monitoring.namespace
+{{- end }}
+{{- if .Values.networkPolicy.restApiClients }}
+    restApiClients      → networkPolicy.restApi.clients
+{{- end }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled ((.Values.networkPolicy.defaultDeny).enabled | default true) }}
+
+  ⚠ Default-deny is ACTIVE: traffic not covered by the configured allow rules
+    (DNS, API server, Kafka, workers, monitoring, REST clients, registry,
+    tracing, databaseEgress, extra*) is blocked. Declare connector endpoints
+    via databaseEgress or networkPolicy.extraEgress.
+{{- end }}
 
 ────────────────────────────────────────────
   Getting Started
@@ -30,7 +52,7 @@ Components:
 2. Check worker pods:
 
   kubectl get pods -n {{ include "connect-cluster.namespace" . }} \
-    -l strimzi.io/name={{ include "connect-cluster.fullname" . }} \
+    -l strimzi.io/name={{ include "connect-cluster.fullname" . }}-connect \
     -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,NODE:.spec.nodeName
 
 3. Run Helm tests:
@@ -57,4 +79,4 @@ Components:
 
   kubectl get kafkaconnect,kafkaconnector -n {{ include "connect-cluster.namespace" . }}
   kubectl logs -n {{ include "connect-cluster.namespace" . }} \
-    -l strimzi.io/name={{ include "connect-cluster.fullname" . }} --tail=50
+    -l strimzi.io/name={{ include "connect-cluster.fullname" . }}-connect --tail=50

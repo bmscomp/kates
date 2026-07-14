@@ -1,0 +1,45 @@
+{{- /*
+  Optional HPA. KafkaConnect exposes the scale subresource, so the HPA can
+  target it directly. When enabled, spec.replicas is omitted from the
+  KafkaConnect resource so Helm upgrades don't fight the autoscaler.
+*/ -}}
+{{- if (.Values.autoscaling).enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: kafka.strimzi.io/v1
+    kind: KafkaConnect
+    name: {{ include "connect-cluster.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas | default 3 }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas | default 10 }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- with .Values.autoscaling.extraMetrics }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

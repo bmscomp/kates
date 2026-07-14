@@ -1,7 +1,24 @@
+{{- /*
+  Explicit allow rules for the Connect pods. Together with the default-deny
+  policy (networkpolicy-default-deny.yaml) this is the complete traffic
+  contract: every flow is individually configurable, anything not listed is
+  blocked. Deprecated flat keys (kafkaPorts, monitoringNamespace,
+  restApiClients) still win over the structured ones when set.
+*/ -}}
 {{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
 {{- $clusterName := include "connect-cluster.fullname" . -}}
 {{- $namespace := include "connect-cluster.namespace" . -}}
 {{- $connectPodName := printf "%s-connect" $clusterName -}}
+{{- $dns := $np.dns | default dict }}
+{{- $api := $np.apiServer | default dict }}
+{{- $kafkaCfg := $np.kafka | default dict }}
+{{- $mon := $np.monitoring | default dict }}
+{{- $rest := $np.restApi | default dict }}
+{{- /* deprecated aliases take precedence when explicitly set */}}
+{{- $kafkaPorts := $np.kafkaPorts | default ($kafkaCfg.ports | default (list 9092 9093)) }}
+{{- $monNs := $np.monitoringNamespace | default ($mon.namespace | default "monitoring") }}
+{{- $clients := $np.restApiClients | default ($rest.clients | default (list)) }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -17,40 +34,77 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- if $mon.enabled | default true }}
+    # Metrics scraping (JMX exporter)
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: monitoring
+              kubernetes.io/metadata.name: {{ $monNs }}
       ports:
-        - port: 9404
+        - port: {{ $mon.port | default 9404 }}
           protocol: TCP
+    {{- end }}
+    {{- if $rest.allowAll }}
+    # REST API open to all sources (explicit opt-in)
+    - ports:
+        - port: 8083
+          protocol: TCP
+    {{- else if or $clients ($rest.operator | default true) }}
+    # REST API: declared clients + Strimzi operator only.
+    # NOTE: no catch-all — kubelet probes bypass NetworkPolicy anyway.
     - from:
+        {{- range $clients }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kates
+              kubernetes.io/metadata.name: {{ .namespace }}
+          {{- with .podSelector }}
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: kates
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+        {{- if $rest.operator | default true }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.strimziOperatorNamespace | default (include "connect-cluster.kafkaNamespace" .) }}
+              kubernetes.io/metadata.name: {{ $np.strimziOperatorNamespace | default (include "connect-cluster.kafkaNamespace" .) }}
           podSelector:
             matchLabels:
               strimzi.io/kind: cluster-operator
-        # Allow ingress from all sources for health probes (kubelet)
-        - namespaceSelector: {}
+        {{- end }}
       ports:
         - port: 8083
           protocol: TCP
+    {{- end }}
+    {{- with $np.extraIngress }}
+    # Extra ingress rules (verbatim)
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
-    # Allow DNS resolution
-    - to: []
+    {{- if $dns.enabled | default true }}
+    # DNS resolution
+    - to:
+        {{- if or $dns.namespaceSelector $dns.podSelector }}
+        - {{- with $dns.namespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+          {{- with $dns.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
       ports:
-        - port: 53
+        {{- range $dns.ports | default (list 53) }}
+        - port: {{ . }}
           protocol: UDP
-        - port: 53
+        - port: {{ . }}
           protocol: TCP
-    # Allow worker-to-worker REST traffic (leader forwarding and task assignment)
+        {{- end }}
+    {{- end }}
+    {{- if ($np.workerToWorker).enabled | default true }}
+    # Worker-to-worker REST traffic (leader forwarding and task assignment)
     - to:
         - podSelector:
             matchLabels:
@@ -60,6 +114,9 @@ spec:
       ports:
         - port: 8083
           protocol: TCP
+    {{- end }}
+    {{- if $kafkaCfg.enabled | default true }}
+    # Kafka brokers
     - to:
         - namespaceSelector:
             matchLabels:
@@ -68,23 +125,45 @@ spec:
             matchLabels:
               strimzi.io/cluster: {{ .Values.kafka.clusterName }}
       ports:
-        {{- range .Values.networkPolicy.kafkaPorts | default (list 9092 9093) }}
+        {{- range $kafkaPorts }}
         - protocol: TCP
           port: {{ . }}
         {{- end }}
-    {{- if .Values.schemaRegistry.enabled }}
+    {{- end }}
+    {{- if and .Values.schemaRegistry.enabled (($np.schemaRegistry).enabled | default true) }}
+    # Schema Registry
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.schemaRegistry.namespace | default (include "connect-cluster.kafkaNamespace" .) }}
+              kubernetes.io/metadata.name: {{ include "connect-cluster.schemaRegistryNamespace" . }}
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: apicurio-registry
+              {{- .Values.schemaRegistry.podSelector | default (dict "app.kubernetes.io/name" "apicurio-registry") | toYaml | nindent 14 }}
       ports:
         - port: {{ .Values.schemaRegistry.port | default 80 }}
           protocol: TCP
     {{- end }}
+    {{- if and .Values.tracing.enabled .Values.tracing.endpoint (($np.tracing).enabled | default true) }}
+    # OTLP tracing collector
+    - to:
+        {{- if or (($np.tracing).namespaceSelector) (($np.tracing).podSelector) }}
+        - {{- with ($np.tracing).namespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+          {{- with ($np.tracing).podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        - port: {{ ($np.tracing).port | default (include "connect-cluster.tracingEgressPort" . | int) }}
+          protocol: TCP
+    {{- end }}
     {{- range (default (list) .Values.databaseEgress) }}
+    # Database egress ({{ .namespace }}:{{ .port | default 5432 }})
     - to:
         - namespaceSelector:
             matchLabels:
@@ -98,16 +177,28 @@ spec:
         - port: {{ .port | default 5432 }}
           protocol: TCP
     {{- end }}
-    # Allow API Server egress
-    - to: []
+    {{- if $api.enabled | default true }}
+    # Kubernetes API server (KubernetesSecretConfigProvider)
+    - to:
+        {{- with $api.ipBlock }}
+        - ipBlock:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
       ports:
-        - port: 443
+        {{- range $api.ports | default (list 443 6443) }}
+        - port: {{ . }}
           protocol: TCP
-        - port: 6443
-          protocol: TCP
-{{- if .Values.databaseEgress }}
-{{- range .Values.databaseEgress }}
+        {{- end }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    # Extra egress rules (verbatim)
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- range (default (list) .Values.databaseEgress) }}
+{{- if ne (toString (.createIngressPolicy | default true)) "false" }}
 ---
+# Reciprocal ingress in the database namespace (disable with createIngressPolicy: false
+# when the platform team manages policies in that namespace)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -129,7 +220,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ include "connect-cluster.namespace" $ }}
+              kubernetes.io/metadata.name: {{ $namespace }}
           podSelector:
             matchLabels:
               strimzi.io/name: {{ $connectPodName }}

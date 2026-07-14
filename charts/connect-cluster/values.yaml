@@ -53,6 +53,39 @@ kafka:
     # -- Key in the Secret containing the authentication password
     secretKey: "password"
 
+# ── Managed KafkaUser ───────────────────────────────────────────────────────
+# One flag provisions everything: KafkaUser (in the Kafka namespace), ACLs,
+# and the credentials Secret in the Connect namespace. Requires the Strimzi
+# User Operator; ACLs apply when the Kafka cluster has authorization enabled.
+kafkaUser:
+  create: false
+  # -- User name (defaults to kafka.authentication.username)
+  name: ""
+  authorization:
+    enabled: true
+    type: simple
+    # -- auto: derive least-privilege ACLs from chart values (groupId,
+    # internal topics, exactly-once, topicGrants). custom: use acls verbatim.
+    mode: auto
+  # -- Data topics connectors read/write (auto mode). Prefix patterns recommended.
+  topicGrants:
+    - name: cdc
+      patternType: prefix
+  # -- Extra consumer groups beyond <groupId> and connect-*
+  groupGrants: []
+  # -- Used only when authorization.mode=custom
+  acls: []
+  quotas: {}
+  # -- KafkaUser template passthrough (labels/annotations on the generated Secret)
+  template: {}
+  # -- Make the credentials Secret available in the Connect namespace when
+  # Kafka lives elsewhere. job: hook Job copies it (re-runs on upgrade for
+  # rotation). reflector: annotate for kubernetes-reflector instead.
+  secretSync:
+    enabled: true
+    method: job
+    timeoutSeconds: 300
+
 # ── Scheduling ──────────────────────────────────────────────────────────────
 topologySpreadConstraints:
   enabled: true
@@ -120,10 +153,13 @@ resources:
 schemaRegistry:
   enabled: false
   serviceName: apicurio-apicurio-registry
-  # -- Namespace where the Schema Registry is deployed (leave empty if same as Kafka)
+  # -- Namespace where the Schema Registry is deployed (defaults to the Kafka namespace)
   namespace: ""
   port: 80
   path: /apis/ccompat/v7
+  # -- Pod labels used by the NetworkPolicy egress rule
+  podSelector:
+    app.kubernetes.io/name: apicurio-registry
 
 # ── Secret Access (Strimzi 1.0.0+) ──────────────────────────────────────────
 # The KubernetesSecretConfigProvider is always enabled. Use the syntax
@@ -134,14 +170,84 @@ schemaRegistry:
 
 
 # ── Network Policy ──────────────────────────────────────────────────────────
+# Default-deny posture: the chart ships a deny-all policy for the Connect pods
+# and every allowed flow below is an explicit, individually configurable rule.
+# Anything not listed is blocked.
+# Deprecated flat keys (kafkaPorts, monitoringNamespace, restApiClients) are
+# still honored and win over the structured equivalents when set.
 networkPolicy:
   enabled: true
+
+  # -- Deny-all Ingress+Egress for the Connect pods. Disable only when a
+  # platform-level default-deny already exists and duplicates are forbidden.
+  defaultDeny:
+    enabled: true
+    # -- Pod selector for the deny policy (empty = Connect pods only)
+    selector: {}
+
+  # -- DNS egress. Empty selectors = any destination; on locked-down clusters
+  # pin to kube-dns, e.g.:
+  #   namespaceSelector: {kubernetes.io/metadata.name: kube-system}
+  #   podSelector: {k8s-app: kube-dns}
+  dns:
+    enabled: true
+    namespaceSelector: {}
+    podSelector: {}
+    ports: [53]
+
+  # -- Kubernetes API server egress (needed by KubernetesSecretConfigProvider).
+  # Empty ipBlock = any destination; pin the control-plane CIDR on strict
+  # clusters, e.g. ipBlock: {cidr: 10.0.0.1/32}
+  apiServer:
+    enabled: true
+    ports: [443, 6443]
+    ipBlock: {}
+
+  # -- Worker-to-worker REST traffic on 8083 (leader forwarding)
+  workerToWorker:
+    enabled: true
+
+  # -- Kafka broker egress
+  kafka:
+    enabled: true
+    ports: [9092, 9093]
+
+  # -- Metrics scrape ingress (JMX exporter, port 9404)
+  monitoring:
+    enabled: true
+    namespace: monitoring
+    port: 9404
+
+  # -- Connect REST API (8083) ingress. No catch-all: kubelet probes bypass
+  # NetworkPolicy, so only the clients listed here (plus the Strimzi operator)
+  # get access. allowAll: true restores the old open behavior.
+  restApi:
+    allowAll: false
+    operator: true
+    clients:
+      - namespace: kates
+        podSelector:
+          app.kubernetes.io/name: kates
+
+  # -- Schema Registry egress (rendered only when schemaRegistry.enabled)
+  schemaRegistry:
+    enabled: true
+
+  # -- OTLP tracing egress (rendered only when tracing.endpoint is set).
+  # Port is parsed from tracing.endpoint; pin selectors to the collector
+  # namespace/pods if desired.
+  tracing:
+    enabled: true
+    namespaceSelector: {}
+    podSelector: {}
+    # port: 4317
+
   # -- Namespace where the Strimzi Operator is deployed (leave empty if same as Kafka)
   strimziOperatorNamespace: ""
-  kafkaPorts:
-    - 9092
-    - 9093
-  monitoringNamespace: monitoring
+
+  # -- Extra raw NetworkPolicy rule fragments, appended verbatim
+  extraIngress: []
+  extraEgress: []
 
 # ── Database Egress (NetworkPolicy) ─────────────────────────────────────────
 databaseEgress: []
@@ -174,6 +280,11 @@ logging:
 tracing:
   enabled: true
   type: opentelemetry
+  # -- OTLP collector endpoint, e.g. http://otel-collector.observability.svc:4317
+  # Tracing is inert until this is set (injects OTEL_* env vars into workers).
+  endpoint: ""
+  # -- Service name reported in traces (defaults to the release fullname)
+  serviceName: ""
 
 # ── Environment Variables ───────────────────────────────────────────────────
 env: []
@@ -249,7 +360,11 @@ build: {}
 
 # ── Metrics ─────────────────────────────────────────────────────────────────
 metricsConfig:
-  configMapName: kafka-metrics
+  # -- Create the JMX exporter ConfigMap in-chart (recommended; makes the chart
+  # self-contained). Set false to reference an existing ConfigMap.
+  create: true
+  # -- ConfigMap name (empty = <fullname>-metrics when create=true)
+  configMapName: ""
   configMapKey: kafka-metrics-config.yml
 
 # ── Pod Template Overrides ──────────────────────────────────────────────────
@@ -342,7 +457,30 @@ testTopics:
     replicas: 3
     config:
       min.insync.replicas: "2"
+# ── Autoscaling (HPA) ───────────────────────────────────────────────────────
+# KafkaConnect exposes the scale subresource, so a standard HPA works.
+# When enabled, the chart stops managing spec.replicas.
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # -- Set to enable memory-based scaling (e.g. 80)
+  targetMemoryUtilizationPercentage: ""
+  # -- Additional autoscaling/v2 metrics entries
+  extraMetrics: []
+  # -- HPA scaling behavior (autoscaling/v2 behavior block)
+  behavior: {}
+
 # ── RBAC ────────────────────────────────────────────────────────────────────
+# -- Restrict the secret-reader Role to specific secrets. Empty = all secrets
+# in the namespace (get/list/watch). When set, verbs narrow to get/watch and
+# access is limited to the named secrets.
+rbac:
+  secretNames: []
+  # - kates-connect
+  # - connect-pg-credentials
+
 serviceAccount:
   # -- Create a dedicated ServiceAccount for Connect pods
   create: true

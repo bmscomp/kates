@@ -78,6 +78,26 @@ helm install backend-connect charts/connect-cluster \
 | `kafka.authentication.username` | SCRAM username | `kates-connect` |
 | `kafka.authentication.secretName` | Secret containing the password | `kates-connect` |
 
+### Managed KafkaUser
+
+Set `kafkaUser.create=true` and the chart provisions everything the Connect cluster needs to authenticate — the Strimzi `KafkaUser` (in the Kafka namespace), least-privilege ACLs derived from chart values, and the credentials Secret in the Connect namespace:
+
+```yaml
+kafkaUser:
+  create: true
+  authorization:
+    mode: auto          # ACLs from groupId, internal topics, exactly-once, topicGrants
+  topicGrants:          # connector data topics
+    - name: cdc
+      patternType: prefix
+  secretSync:
+    method: job         # or "reflector" if kubernetes-reflector is installed
+```
+
+Auto mode grants: internal topics (`<groupId>-offsets/configs/status`), worker group `<groupId>` + `connect-*` sink groups, declared `topicGrants`, `transactionalId <groupId>*` when `exactly.once.source.support` is enabled, and cluster `Describe`. Use `mode: custom` + `acls:` for verbatim ACLs. Requires the Strimzi User Operator; supported auth types: `scram-sha-512`, `scram-sha-256`, `tls`.
+
+When Kafka and Connect are in different namespaces, a post-install/upgrade hook Job copies the generated Secret into the Connect namespace (re-runs on upgrades to pick up rotation). With `method: reflector` the Secret is annotated for [kubernetes-reflector](https://github.com/emberstack/kubernetes-reflector) instead.
+
 ### Converters & Worker Config
 
 ```yaml
@@ -101,9 +121,11 @@ extraConfig:
 | `schemaRegistry.serviceName` | Registry service name | `apicurio-apicurio-registry` |
 | `schemaRegistry.port` | Registry port | `80` |
 | `schemaRegistry.path` | Compatibility API path | `/apis/ccompat/v7` |
+| `schemaRegistry.namespace` | Registry namespace | Kafka namespace |
+| `schemaRegistry.podSelector` | Pod labels for NetworkPolicy egress | `{app.kubernetes.io/name: apicurio-registry}` |
 
 The `schema.registry.url` is automatically computed as:
-`http://<serviceName>.<namespace>.svc.<clusterDomain>:<port><path>`
+`http://<serviceName>.<registryNamespace>.svc.<clusterDomain>:<port><path>`
 
 ### JVM & Resources
 
@@ -135,7 +157,14 @@ database.password: "${secrets:<namespace>/<secret-name>:<key>}"
 ```
 
 The Connect ServiceAccount is automatically granted RBAC permissions to read secrets
-in its namespace.
+in its namespace. To restrict access to specific secrets (recommended for production):
+
+```yaml
+rbac:
+  secretNames:
+    - kates-connect
+    - connect-pg-credentials
+```
 
 ### Connectors
 
@@ -204,6 +233,18 @@ build:
 | `rack.enabled` | Rack awareness | `true` |
 | `tolerations` | Pod tolerations | `[]` |
 
+### Autoscaling (HPA)
+
+`KafkaConnect` exposes the scale subresource, so a standard `autoscaling/v2` HPA can drive worker count. When enabled, the chart stops rendering `spec.replicas` so upgrades don't fight the autoscaler.
+
+```yaml
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+```
+
 ### RBAC & ServiceAccount
 
 | Parameter | Description | Default |
@@ -253,7 +294,7 @@ Included alerts:
 - **KafkaConnectTaskCountMismatch** (critical) — Expected vs running task mismatch
 - **KafkaConnectRebalanceStorm** (warning) — Excessive rebalance rate
 - **KafkaConnectHighErrorRate** (warning) — Task error rate above 1/s
-- **KafkaConnectRebalanceTooLong** (warning) — Rebalance exceeding 2 minutes
+- **KafkaConnectRebalanceTooLong** (warning) — Worker stuck rebalancing for 5+ minutes
 - **KafkaConnectWorkerHeapHigh** (warning) — JVM heap above 85%
 - **KafkaConnectSourceLag** (warning) — Source connector polling 0 records for 15+ min
 
@@ -263,6 +304,16 @@ Included alerts:
 |-----------|-------------|---------|
 | `podMonitors.enabled` | Create PodMonitor | `true` |
 | `podMonitors.labels` | Labels for discovery | `{release: kafka}` |
+
+#### Metrics ConfigMap
+
+The chart ships its own JMX Prometheus Exporter rules (Connect worker, rebalance, connector, and task metrics), so it works standalone in any namespace:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `metricsConfig.create` | Create the metrics ConfigMap in-chart | `true` |
+| `metricsConfig.configMapName` | Name (or existing ConfigMap when `create: false`) | `<fullname>-metrics` |
+| `metricsConfig.configMapKey` | Key within the ConfigMap | `kafka-metrics-config.yml` |
 
 #### Grafana Dashboards
 
@@ -275,9 +326,25 @@ Included alerts:
 
 ### Network Policies
 
+**Default-deny by default.** The chart ships a deny-all Ingress+Egress policy for the Connect pods; every allowed flow is an explicit, individually configurable rule. Anything not listed is blocked — declare connector endpoints via `databaseEgress` or `networkPolicy.extraEgress`.
+
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `databaseEgress` | Cross-namespace egress rules for databases | `[]` |
+| `networkPolicy.enabled` | Create NetworkPolicies | `true` |
+| `networkPolicy.defaultDeny.enabled` | Deny-all policy for Connect pods | `true` |
+| `networkPolicy.dns.*` | DNS egress; pin `namespaceSelector`/`podSelector` to kube-dns on strict clusters | any dest, port 53 |
+| `networkPolicy.apiServer.*` | API server egress; pin `ipBlock` to the control-plane CIDR | any dest, 443/6443 |
+| `networkPolicy.workerToWorker.enabled` | 8083 leader forwarding | `true` |
+| `networkPolicy.kafka.ports` | Broker egress ports | `[9092, 9093]` |
+| `networkPolicy.monitoring.*` | Metrics scrape ingress | `monitoring` ns, 9404 |
+| `networkPolicy.restApi.clients` | Clients allowed on 8083 (no catch-all; `allowAll: true` restores open behavior) | kates UI |
+| `networkPolicy.tracing.*` | OTLP egress (port parsed from `tracing.endpoint`) | auto |
+| `networkPolicy.extraIngress` / `extraEgress` | Raw rule fragments, appended verbatim | `[]` |
+| `databaseEgress` | Cross-namespace egress rules for databases (`createIngressPolicy: false` skips the reciprocal policy in the DB namespace) | `[]` |
+
+Deprecated (still honored, win when set): `kafkaPorts` → `kafka.ports`, `monitoringNamespace` → `monitoring.namespace`, `restApiClients` → `restApi.clients`.
+
+> **Upgrade note (1.2.0):** default-deny ships enabled and the former `namespaceSelector: {}` catch-all on 8083 was removed (kubelet probes bypass NetworkPolicy — it only opened the REST API cluster-wide). In-cluster REST clients must be listed in `networkPolicy.restApi.clients`; undeclared connector egress will be blocked.
 
 ```yaml
 databaseEgress:
@@ -294,6 +361,14 @@ databaseEgress:
 | `logging.type` | `external` or `inline` | `external` |
 | `tracing.enabled` | Enable distributed tracing | `true` |
 | `tracing.type` | Tracing type | `opentelemetry` |
+| `tracing.endpoint` | OTLP collector endpoint (required for traces to be exported) | `""` |
+| `tracing.serviceName` | `OTEL_SERVICE_NAME` | release fullname |
+
+```yaml
+tracing:
+  enabled: true
+  endpoint: http://otel-collector.observability.svc:4317
+```
 
 ### Probes
 

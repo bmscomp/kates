@@ -43,14 +43,14 @@ data:
           "title": "Rebalance Rate",
           "type": "stat",
           "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-          "targets": [{ "expr": "rate(kafka_connect_worker_rebalance_metrics_rebalance_total[5m])", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }],
+          "targets": [{ "expr": "rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total[5m])", "legendFormat": "{{ "{{" }}pod{{ "}}" }}" }],
           "fieldConfig": { "defaults": { "unit": "ops", "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.1 }] } } }
         },
         {
           "title": "Task Error Rate",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-          "targets": [{ "expr": "rate(kafka_connect_task_metrics_total_errors_logged_total[5m])", "legendFormat": "{{ "{{" }}connector{{ "}}" }}/{{ "{{" }}task{{ "}}" }}" }],
+          "targets": [{ "expr": "rate(kafka_connect_task_error_metrics_total_errors_logged[5m])", "legendFormat": "{{ "{{" }}connector{{ "}}" }}/{{ "{{" }}task{{ "}}" }}" }],
           "fieldConfig": { "defaults": { "unit": "errors/s" } }
         },
         {
@@ -72,8 +72,8 @@ data:
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
           "targets": [
-            { "expr": "jvm_memory_bytes_used{area=\"heap\", kubernetes_name=~\".*connect.*\"}", "legendFormat": "{{ "{{" }}pod{{ "}}" }} used" },
-            { "expr": "jvm_memory_bytes_max{area=\"heap\", kubernetes_name=~\".*connect.*\"}", "legendFormat": "{{ "{{" }}pod{{ "}}" }} max" }
+            { "expr": "jvm_memory_bytes_used{area=\"heap\", pod=~\"{{ include "connect-cluster.fullname" . }}-connect-.*\"}", "legendFormat": "{{ "{{" }}pod{{ "}}" }} used" },
+            { "expr": "jvm_memory_bytes_max{area=\"heap\", pod=~\"{{ include "connect-cluster.fullname" . }}-connect-.*\"}", "legendFormat": "{{ "{{" }}pod{{ "}}" }} max" }
           ],
           "fieldConfig": { "defaults": { "unit": "bytes" } }
         }

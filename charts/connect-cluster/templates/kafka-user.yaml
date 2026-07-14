@@ -1,0 +1,119 @@
+{{- /*
+  Managed KafkaUser for this Connect cluster (kafkaUser.create=true).
+  Created in the Kafka namespace, where the Strimzi User Operator watches and
+  writes the credentials Secret. ACLs are derived from chart values (mode: auto)
+  so group/topic names never drift, or taken verbatim (mode: custom).
+*/ -}}
+{{- if (.Values.kafkaUser).create }}
+{{- $auth := .Values.kafka.authentication }}
+{{- $authType := $auth.type | default "scram-sha-512" }}
+{{- if not (has $authType (list "scram-sha-512" "scram-sha-256" "tls")) }}
+{{- fail (printf "kafkaUser.create=true supports authentication types scram-sha-512, scram-sha-256, tls — got %q. Provision OAuth identities externally." $authType) }}
+{{- end }}
+{{- $username := .Values.kafkaUser.name | default $auth.username | default "kates-connect" }}
+{{- $groupId := .Values.groupId | default "kates-connect-cluster" }}
+{{- $authz := .Values.kafkaUser.authorization | default dict }}
+{{- $sync := (.Values.kafkaUser.secretSync) | default dict }}
+{{- $connectNs := include "connect-cluster.namespace" . }}
+{{- $tpl := deepCopy (.Values.kafkaUser.template | default dict) }}
+{{- /* method: reflector — annotate the generated Secret for kubernetes-reflector */}}
+{{- if and ($sync.enabled | default true) (eq ($sync.method | default "job") "reflector") (ne (include "connect-cluster.kafkaNamespace" .) $connectNs) }}
+{{- $ann := dict
+      "reflector.v1.k8s.emberstack.com/reflection-allowed" "true"
+      "reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces" $connectNs
+      "reflector.v1.k8s.emberstack.com/reflection-auto-enabled" "true"
+      "reflector.v1.k8s.emberstack.com/reflection-auto-namespaces" $connectNs }}
+{{- $tpl = merge $tpl (dict "secret" (dict "metadata" (dict "annotations" $ann))) }}
+{{- end }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ $username }}
+  namespace: {{ include "connect-cluster.kafkaNamespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ .Values.kafka.clusterName | default "krafter" }}
+  annotations:
+    {{- if not (eq (toString .Values.keepOnDelete) "false") }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+spec:
+  authentication:
+    type: {{ $authType }}
+  {{- with .Values.kafkaUser.quotas }}
+  quotas:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $tpl }}
+  template:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if $authz.enabled | default true }}
+  authorization:
+    type: {{ $authz.type | default "simple" }}
+    acls:
+      {{- if eq ($authz.mode | default "auto") "custom" }}
+      {{- if not .Values.kafkaUser.acls }}
+      {{- fail "kafkaUser.authorization.mode=custom requires kafkaUser.acls" }}
+      {{- end }}
+      {{- toYaml .Values.kafkaUser.acls | nindent 6 }}
+      {{- else }}
+      # ── Connect internal topics ────────────────────────────────────────
+      {{- range $topic := list
+            ((.Values.internalTopics).offsetsName | default (printf "%s-offsets" $groupId))
+            ((.Values.internalTopics).configsName | default (printf "%s-configs" $groupId))
+            ((.Values.internalTopics).statusName  | default (printf "%s-status"  $groupId)) }}
+      - resource:
+          type: topic
+          name: {{ $topic | quote }}
+          patternType: literal
+        operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs"]
+        host: "*"
+      {{- end }}
+      # ── Worker group + per-connector sink groups ───────────────────────
+      - resource:
+          type: group
+          name: {{ $groupId | quote }}
+          patternType: literal
+        operations: ["Read", "Describe"]
+        host: "*"
+      - resource:
+          type: group
+          name: "connect-"
+          patternType: prefix
+        operations: ["Read", "Describe"]
+        host: "*"
+      {{- range .Values.kafkaUser.groupGrants }}
+      - resource:
+          type: group
+          name: {{ .name | quote }}
+          patternType: {{ .patternType | default "prefix" }}
+        operations: ["Read", "Describe"]
+        host: "*"
+      {{- end }}
+      # ── Connector data topics ──────────────────────────────────────────
+      {{- range .Values.kafkaUser.topicGrants }}
+      - resource:
+          type: topic
+          name: {{ .name | quote }}
+          patternType: {{ .patternType | default "prefix" }}
+        operations: {{ .operations | default (list "Read" "Write" "Create" "Describe") | toJson }}
+        host: "*"
+      {{- end }}
+      {{- if eq (get (.Values.extraConfig | default dict) "exactly.once.source.support" | toString) "enabled" }}
+      # ── Exactly-once source support ────────────────────────────────────
+      - resource:
+          type: transactionalId
+          name: {{ $groupId | quote }}
+          patternType: prefix
+        operations: ["Write", "Describe"]
+        host: "*"
+      {{- end }}
+      # ── Cluster metadata (admin client) ────────────────────────────────
+      - resource:
+          type: cluster
+        operations: ["Describe", "DescribeConfigs"]
+        host: "*"
+      {{- end }}
+  {{- end }}
+{{- end }}
