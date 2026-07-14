@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 840" width="600" height="840" role="img" aria-label="Kates — The Definitive Guide">
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="5" refY="4" markerWidth="3.4" markerHeight="3.4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#5FA9EE"/>
+    </marker>
+  </defs>
+  <rect width="600" height="840" fill="#1D2B62"/>
+  <g transform="translate(300 250)" fill="none" stroke-linecap="round">
+    <circle r="80" stroke="#2E4080" stroke-width="10"/>
+    <circle cx="0" cy="-80" r="14" fill="#2E4080"/>
+    <circle cx="69.3" cy="40" r="14" fill="#2E4080"/>
+    <circle cx="-69.3" cy="40" r="14" fill="#2E4080"/>
+    <g transform="rotate(-28)">
+      <circle cx="-124.4" cy="29.5" r="11" fill="#5FA9EE"/>
+      <path d="M -124.4 29.5 A 132 86 0 0 1 124.4 -29.5" stroke="#5FA9EE" stroke-width="9" marker-end="url(#ah)"/>
+    </g>
+  </g>
+  <text x="300" y="520" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"><tspan font-size="88" font-weight="800" fill="#5FA9EE">K</tspan><tspan font-size="88" font-weight="500" fill="#E8EDF5">ates</tspan></text>
+  <rect x="240" y="560" width="120" height="3" fill="#5FA9EE"/>
+  <text x="300" y="620" text-anchor="middle" font-family="Charter, 'Bitstream Charter', Cambria, Georgia, serif" font-size="30" fill="#E8EDF5">The Definitive Guide</text>
+  <text x="300" y="662" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#93A0B4">Performance testing, chaos engineering, and resilience for Apache Kafka</text>
+</svg>

@@ -40,5 +40,5 @@ jobs:
         with:
           # Offline mode validates only local file links (the drift we care
           # about) and never fails on external outages or localhost URLs.
-          args: --offline --no-progress --include-fragments README.md docs/*.md
+          args: --offline --no-progress --include-fragments README.md "docs/**/*.md"
           fail: true
