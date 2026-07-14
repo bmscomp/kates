@@ -2,7 +2,7 @@
 
 This tutorial walks through deploying production-ready Kafka Connect connectors on your cluster — a CDC pipeline with Debezium and JDBC sink/source connectors. By the end, you'll see a row inserted in PostgreSQL automatically replicate to a Kafka topic and then to a replica table.
 
-> For Kafka Connect architecture and deployment theory, see [Chapter 21: Kafka Connect & CDC Pipelines](../book/21-kafka-connect.md).
+> For Kafka Connect architecture and deployment theory, see [Kafka Connect & CDC Pipelines](../book/21-kafka-connect.md).
 
 ## What You Will Deploy
 

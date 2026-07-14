@@ -1,4 +1,4 @@
-# Chapter 17: Security & Compliance
+# Security & Compliance
 
 A Kafka cluster is a high-value target. It carries your business data, your audit trails, and your event streams. A misconfigured listener, an overly-permissive ACL, or a missing network policy can expose all of it. This chapter covers every security layer in the Kates platform — not just *what* is configured, but *why* each layer exists and what would happen without it.
 
@@ -632,9 +632,9 @@ kates kyverno audit kates-pod-security-standards
 
 ::: {.callout-tip}
 **Cross-references:**
-- For Kyverno installation instructions, see [Chapter 20: Installation Guide](20-installation-guide.md#15-kyverno-optional).
-- For Kyverno upgrade procedures, see [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md).
-- For a full index of Kyverno-related troubleshooting, see [Appendix B: Troubleshooting](appendix-b-troubleshooting.md#deployment-issues).
+- For Kyverno installation instructions, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#15-kyverno-optional).
+- For Kyverno upgrade procedures, see [Upgrade Playbook](18-upgrade-playbook.md).
+- For a full index of Kyverno-related troubleshooting, see [Troubleshooting Index](appendix-b-troubleshooting.md#deployment-issues).
 :::
 
 
@@ -649,7 +649,7 @@ Use this checklist when auditing your deployment. Each item links to the section
 - [ ] Containers run as non-root with read-only root filesystem — see [Container Security](#container-security)
 - [ ] Certificate renewal alerts are configured — see [Rotation Monitoring](#rotation-monitoring)
 - [ ] Per-user quotas limit blast radius from runaway clients — see [Quotas as Security](#quotas-as-security)
-- [ ] `deleteClaim: false` on all PVCs (data survives pod deletion) — see [Chapter 15](15-kafka-deployment.md)
+- [ ] `deleteClaim: false` on all PVCs (data survives pod deletion) — see [Kafka Deployment Engineering](15-kafka-deployment.md)
 - [ ] Secrets are not committed to source control (Strimzi auto-generates) — see [SCRAM-SHA-512](#scram-sha-512)
 - [ ] Audit logging is enabled for authorization decisions — see [Audit Logging](#audit-logging)
 
@@ -667,4 +667,4 @@ This script will:
 3. Check the Kafka cluster CR status to ensure it successfully reached the `Ready` state.
 4. Spawn temporary pods in both the `default` and `kates` namespaces to verify NetworkPolicies (default-deny enforcement and explicitly allowed traffic).
 
-For deployment-level security details (Drain Cleaner, backup encryption), see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
+For deployment-level security details (Drain Cleaner, backup encryption), see [Kafka Deployment Engineering](15-kafka-deployment.md).

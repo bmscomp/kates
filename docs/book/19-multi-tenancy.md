@@ -1,4 +1,4 @@
-# Chapter 19: Multi-Tenancy
+# Multi-Tenancy
 
 This chapter covers strategies for running multiple services, teams, or environments on the shared krafter Kafka cluster without interference — from topic naming to quota enforcement.
 
@@ -366,4 +366,4 @@ kubectl delete kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
 kubectl get kafkauser,kafkatopic -n kafka | grep my-service
 ```
 
-For security configuration details, see [Chapter 17: Security & Compliance](17-security.md). For Kafka deployment internals, see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
+For security configuration details, see [Security & Compliance](17-security.md). For Kafka deployment internals, see [Kafka Deployment Engineering](15-kafka-deployment.md).

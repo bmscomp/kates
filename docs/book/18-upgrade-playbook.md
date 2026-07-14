@@ -1,4 +1,4 @@
-# Chapter 18: Upgrade Playbook
+# Upgrade Playbook
 
 This chapter provides step-by-step procedures for upgrading every component in the Kates stack. Each procedure includes pre-flight checks, rollback plans, and validation steps.
 

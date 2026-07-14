@@ -1,4 +1,4 @@
-# Chapter 13: Scenario Files & SLA Gates
+# Scenario Files & SLA Gates
 
 Scenario files are the declarative way to define, execute, and validate Kates test runs. Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against SLA thresholds.
 
@@ -329,7 +329,7 @@ kates test apply -f regression-suite.yaml --wait
 
 Note that only SLA violations set the exit code: a scenario that fails to submit or errors out shows as `FAILED`/`ERROR` in the summary but does not change the exit code. Give every scenario you gate on a `validate` block so a regression actually fails the pipeline.
 
-For JUnit-compatible output, export each test report individually after the suite completes — see [Chapter 9: Observability](09-observability.md) for export formats.
+For JUnit-compatible output, export each test report individually after the suite completes — see [Observability & Monitoring](09-observability.md) for export formats.
 
 ## JSON Format
 

@@ -30,6 +30,9 @@ jobs:
       - name: Verify chart table matches charts/*/Chart.yaml
         run: ./scripts/gen-chart-table.sh --check
 
+      - name: Verify book version matrix matches repo pins
+        run: ./scripts/gen-version-matrix.sh --check
+
   link-check:
     name: Markdown Link Check
     runs-on: ubuntu-latest

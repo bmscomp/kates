@@ -5,7 +5,7 @@ title-block-banner: false
 # Preface {.unnumbered}
 
 ::: {.callout-note appearance="simple"}
-**You are reading the Kates Definitive Guide** — 21 chapters covering everything from performance theory and chaos engineering to security, deployment, and operations.
+**You are reading the Kates Definitive Guide** — from performance theory and chaos engineering to security, deployment, and operations, with three reference chapters and four appendices.
 :::
 
 ## What This Book Covers
@@ -14,27 +14,33 @@ title-block-banner: false
 
 This guide takes you from first principles to production operations:
 
-- **Part I — Foundations**: Architecture, cluster topology, and the theory behind performance measurement
-- **Part II — Testing**: All 8 test types, chaos engineering (theory and practice), and data integrity verification
-- **Part III — Observability & CLI**: Monitoring, dashboards, the CLI, REST API, and gRPC API
-- **Part IV — Deployment & Operations**: Installation, deployment, security, upgrades, multi-tenancy, and Kafka Connect
+- **Part I — Foundations**: What Kates is, its architecture, and the cluster under test
+- **Part II — Performance Testing**: Measurement theory, the test types, scenario files with SLA gates, and the interactive Lab
+- **Part III — Chaos & Integrity**: Chaos engineering theory and practice, and zero-loss verification
+- **Part IV — Observability**: Dashboards, metrics, heatmaps, tracing, and alerting
+- **Part V — Deployment & Operations**: Installing and engineering Kafka, deploying Kates, security, multi-tenancy, upgrades, Kafka Connect, and operational recipes
+- **Part VI — Reference**: The complete CLI, REST API, and gRPC API references
 
 ## Who This Book Is For
 
 | Reader | Start Here | Focus On |
 |--------|-----------|----------|
-| **Platform Engineer** deploying Kafka | Ch. 15 → Ch. 20 → Ch. 12 | Deployment, installation, and infrastructure |
-| **SRE / Reliability Engineer** | Ch. 6 → Ch. 7 → Ch. 9 | Chaos engineering, observability, and resilience |
-| **Performance Engineer** | Ch. 4 → Ch. 5 → Ch. 10 | Performance theory, test types, and CLI workflows |
-| **Security Engineer** | Ch. 17 → Appendix B | Security, compliance, and troubleshooting |
-| **Developer** using the API | Ch. 11 → Ch. 16 → Ch. 13 | REST API, gRPC API, and scenario files |
+| **Platform Engineer** deploying Kafka | Installing Kafka → Kafka Deployment Engineering → Deployment Guide | Deployment, installation, and infrastructure |
+| **SRE / Reliability Engineer** | Chaos Engineering Theory → Chaos Engineering in Practice → Observability & Monitoring | Chaos engineering, observability, and resilience |
+| **Performance Engineer** | Performance Theory → Test Types Deep Dive → CLI Reference | Performance theory, test types, and CLI workflows |
+| **Security Engineer** | Security & Compliance → Troubleshooting Index | Security, compliance, and troubleshooting |
+| **Developer** using the API | REST API Reference → gRPC API Reference → Scenario Files & SLA Gates | REST API, gRPC API, and scenario files |
+
+## Versions This Book Targets
+
+The book tracks the versions pinned in the repository — Kafka, Strimzi, and the Kates charts themselves. The consolidated matrix lives in the [Version & Compatibility Matrix](appendix-d-versions.md) appendix, generated from `versions.env`; when a claim in a chapter and the matrix disagree, the matrix wins.
 
 ## Conventions
 
 Throughout this book:
 
-- Commands prefixed with `$` are run in your terminal
-- Commands prefixed with `kubectl` assume you have a kubeconfig pointing at your cluster
+- Shell commands are shown without a prompt character — copy them as-is
+- Commands using `kubectl` assume a kubeconfig pointing at your cluster
 - `kates` commands assume the CLI is installed and configured with a context
 - Code blocks with a filename header are files you create or edit
 - Mermaid diagrams illustrate architecture and workflows inline
