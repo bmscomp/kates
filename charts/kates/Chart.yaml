@@ -2,7 +2,7 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-version: 0.4.3
+version: 0.4.4
 appVersion: "1.20.0"
 keywords:
   - kafka
@@ -11,12 +11,12 @@ keywords:
   - chaos-engineering
   - performance
   - sla
-home: https://github.com/klster/kates
+home: https://github.com/bmscomp/kates
 sources:
-  - https://github.com/klster/kates
+  - https://github.com/bmscomp/kates
 maintainers:
-  - name: klster
-icon: https://raw.githubusercontent.com/klster/kates/main/docs/icon.png
+  - name: bmscomp
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
 annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0

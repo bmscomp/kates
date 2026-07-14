@@ -42,7 +42,7 @@ Now the real test — produce 100K messages while killing a broker in the middle
 ### Step 1: Generate the Chaos Integrity Scaffold
 
 ```bash
-kates test scaffold --type INTEGRITY_CHAOS -o integrity-chaos.yaml
+kates test scaffold --type INTEGRITY -o integrity-chaos.yaml
 ```
 
 ### Step 2: Review the Scaffold
@@ -156,7 +156,7 @@ Create a comprehensive integrity validation plan:
 
 ```mermaid
 graph TB
-    T1["Test 1: Baseline<br/>INTEGRITY, no chaos<br/>Expected: PASS"] --> T2["Test 2: Pod Kill<br/>INTEGRITY_CHAOS<br/>Expected: PASS"]
+    T1["Test 1: Baseline<br/>INTEGRITY, no chaos<br/>Expected: PASS"] --> T2["Test 2: Pod Kill<br/>INTEGRITY + pod-kill chaos<br/>Expected: PASS"]
     T2 --> T3["Test 3: Network Partition<br/>INTEGRITY + resilience<br/>Expected: PASS"]
     T3 --> T4["Test 4: CPU Stress<br/>INTEGRITY + resilience<br/>Expected: PASS"]
     T4 --> VERDICT["All 4 passed?<br/>→ Cluster is reliable ✅"]

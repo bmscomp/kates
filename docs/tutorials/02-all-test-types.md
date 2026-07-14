@@ -228,7 +228,7 @@ For the ultimate validation — verify integrity while killing a broker:
 
 ```bash
 # Generate a chaos-aware integrity test
-kates test scaffold --type INTEGRITY_CHAOS -o integrity-chaos.yaml
+kates test scaffold --type INTEGRITY -o integrity-chaos.yaml
 
 # Review the YAML — it includes chaos injection mid-test
 cat integrity-chaos.yaml
@@ -251,7 +251,7 @@ graph TD
     Q1 -->|"Maximum throughput"| CAPACITY[Run CAPACITY test]
     Q1 -->|"Consumer delivery time"| RT[Run ROUND_TRIP test]
     Q1 -->|"Data safety"| INT[Run INTEGRITY test]
-    Q1 -->|"Data safety under failure"| INTC[Run INTEGRITY_CHAOS scaffold]
+    Q1 -->|"Data safety under failure"| INTC[Run INTEGRITY scaffold with chaos]
 ```
 
 ## Comparing All Results
