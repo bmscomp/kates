@@ -298,6 +298,42 @@ sequenceDiagram
     Report-->>CLI: TestReport (summary, SLA, brokers)
 ```
 
+## Disruption Pipeline
+
+The disruption path mirrors the test path but adds safety validation, baseline capture, and automated rollback. This diagram traces a chaos experiment from CLI command to final verdict:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cli as Kates CLI
+    participant Orch as DisruptionOrchestrator
+    participant Guard as SafetyGuard
+    participant Intel as KafkaIntelligenceService
+    participant Chaos as ChaosProvider
+    participant Prom as Prometheus Metrics
+
+    Cli->>Orch: POST /api/resilience
+    Orch->>Guard: Validate Blast Radius and RBAC
+    Guard-->>Orch: Approved (Dry-Run Match)
+    Orch->>Intel: Query Partition Leader & Replica ISR
+    Intel-->>Orch: Leader Broker ID & Partition Metadata
+    Orch->>Prom: Query Baseline "Before" Telemetry Snapshot
+    Orch->>Orch: Wait steadyStateSec (Establish Benchmark Baseline)
+    Orch->>Chaos: triggerFault Asynchronously
+    Note over Orch,Chaos: Fault Injected (e.g. Leader Broker Kill)
+    loop Observation Window
+        Intel->>Intel: Periodically track ISR shrinks/expansions
+        Intel->>Intel: Periodically track consumer offset lag spikes
+    end
+    Orch->>Prom: Query Post-Disruption "After" Telemetry Snapshot
+    Orch->>Orch: Compute Impact Delta & SLA Recovery Times
+    alt SLA Verification Fails or Timeout
+        Orch->>Guard: Trigger Automated Rollback
+        Guard->>Chaos: cleanup(engineName)
+    end
+    Orch->>Cli: Return DisruptionReport with Verdicts
+```
+
 ## Technology Stack
 
 | Component | Technology | Version | Purpose |

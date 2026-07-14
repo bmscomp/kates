@@ -448,6 +448,10 @@ chart-lint:
 	fi
 	@echo "✅ Chart lint passed"
 
+readme-check:
+	@echo "🔍 Checking README chart table against charts/*/Chart.yaml..."
+	@./scripts/gen-chart-table.sh --check
+
 chart-package:
 	@echo "📦 Packaging Kates chart v$(CHART_VERSION)..."
 	helm package $(CHART_DIR) --destination .build/
@@ -982,6 +986,7 @@ help:
 	@echo "  kates-helm-upgrade                 - Upgrade existing release (ENV=...)"
 	@echo "  kates-helm-undeploy                - Remove Kates Helm release"
 	@echo "  chart-lint                         - Lint the Helm chart"
+	@echo "  readme-check                       - Verify README chart table matches Chart.yaml sources"
 	@echo "  chart-package                      - Package the Helm chart"
 	@echo "  chart-push                         - Push the chart to OCI registry"
 	@echo ""
