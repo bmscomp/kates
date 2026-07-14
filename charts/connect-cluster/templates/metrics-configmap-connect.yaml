@@ -1,0 +1,82 @@
+{{- /*
+  JMX Prometheus Exporter rules for Kafka Connect.
+  Created in-chart so Connect works in its own namespace without depending
+  on the kafka-cluster chart's ConfigMap. Set metricsConfig.create=false to
+  use an existing ConfigMap instead (metricsConfig.configMapName).
+*/ -}}
+{{- if .Values.metricsConfig.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "connect-cluster.metricsConfigMapName" . }}
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+data:
+  {{ .Values.metricsConfig.configMapKey | default "kafka-metrics-config.yml" }}: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+    # Client app-info (producer/consumer/connect clients embedded in workers)
+    - pattern: "kafka.(.+)<type=app-info, client-id=(.+)><>start-time-ms"
+      name: kafka_$1_start_time_seconds
+      type: GAUGE
+      valueFactor: 0.001
+      labels:
+        clientId: "$2"
+    - pattern: "kafka.(.+)<type=app-info, client-id=(.+)><>(commit-id|version): (.+)"
+      name: kafka_$1_$3_info
+      value: 1
+      type: UNTYPED
+      labels:
+        clientId: "$2"
+        $3: "$4"
+
+    # Connect worker metrics (per connector)
+    - pattern: "kafka.connect<type=connect-worker-metrics, connector=(.+)>([^:]+):"
+      name: kafka_connect_worker_metrics_$2
+      type: GAUGE
+      labels:
+        connector: "$1"
+
+    # Connect worker metrics (global)
+    - pattern: "kafka.connect<type=connect-worker-metrics>([^:]+):"
+      name: kafka_connect_worker_metrics_$1
+      type: GAUGE
+
+    # Connect worker rebalance metrics
+    - pattern: "kafka.connect<type=connect-worker-rebalance-metrics>([^:]+):"
+      name: kafka_connect_worker_rebalance_metrics_$1
+      type: GAUGE
+
+    # Connector status / metadata
+    - pattern: "kafka.connect<type=connector-metrics, connector=(.+)><>(connector-class|connector-type|connector-version|status): (.+)"
+      name: kafka_connect_connector_metrics
+      value: 1
+      type: UNTYPED
+      labels:
+        connector: "$1"
+        $2: "$3"
+
+    # Task-level metrics: task-metrics, source-task-metrics, sink-task-metrics, task-error-metrics
+    - pattern: "kafka.connect<type=(.+)-metrics, connector=(.+), task=(.+)><>(.+-total|.+-count|.+-ms|.+-ratio|.+-seq-no|.+-rate|.+-max|.+-avg|.+-failures|.+-requests|.+-timestamp|.+-logged|.+-errors|.+-retries|.+-skipped)"
+      name: kafka_connect_$1_metrics_$4
+      type: GAUGE
+      labels:
+        connector: "$2"
+        task: "$3"
+
+    # Connect coordinator / client metrics
+    - pattern: "kafka.connect<type=connect-metrics, client-id=(.+)><>(.+-total|.+-rate|.+-avg|.+-max|.+-count|.+-ms|.+-age|.+-ratio)"
+      name: kafka_connect_connect_metrics_$2
+      type: GAUGE
+      labels:
+        clientId: "$1"
+
+    # Embedded producer/consumer/admin client metrics
+    - pattern: "kafka.(producer|consumer|admin.client)<type=(.+)-metrics, client-id=(.+)><>(.+-total|.+-rate|.+-avg|.+-max)"
+      name: kafka_$1_$2_$4
+      type: GAUGE
+      labels:
+        clientId: "$3"
+{{- end }}

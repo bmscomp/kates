@@ -74,6 +74,16 @@ spec:
           CONNECT="{{ include "connect-cluster.fullname" . }}"
           NAMESPACE="{{ include "connect-cluster.namespace" . }}"
 
+          # ─── Tier 0: Auth Secret Availability ──────────────────────────────
+          echo ""
+          echo "=== Tier 0: Auth Secret Availability ==="
+          AUTH_SECRET="{{ .Values.kafka.authentication.secretName | default .Values.kafka.authentication.username | default "kates-connect" }}"
+          if kubectl get secret "$AUTH_SECRET" -n $NAMESPACE >/dev/null 2>&1; then
+            ok "Auth secret $AUTH_SECRET present in $NAMESPACE"
+          else
+            fail "Auth secret $AUTH_SECRET missing in $NAMESPACE{{ if (.Values.kafkaUser).create }} (kafkaUser.create=true — check the secret-sync Job / User Operator){{ else }} (create it or set kafkaUser.create=true){{ end }}"
+          fi
+
           # ─── Tier 1: KafkaConnect CR Readiness ─────────────────────────────
           echo ""
           echo "=== Tier 1: KafkaConnect CR Readiness ==="

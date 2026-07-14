@@ -49,7 +49,7 @@ spec:
 
         # ── Warning ──────────────────────────────────────────────────────
         - alert: KafkaConnectRebalanceStorm
-          expr: rate(kafka_connect_worker_rebalance_metrics_rebalance_total[5m]) > {{ .Values.alerts.thresholds.rebalanceRatePerSecond }}
+          expr: rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total[5m]) > {{ .Values.alerts.thresholds.rebalanceRatePerSecond }}
           for: 5m
           labels:
             severity: warning
@@ -59,7 +59,7 @@ spec:
             description: "Connect workers are rebalancing at {{ "{{" }} $value {{ "}}" }}/s which may indicate instability."
 
         - alert: KafkaConnectHighErrorRate
-          expr: rate(kafka_connect_task_metrics_total_errors_logged_total[5m]) > {{ .Values.alerts.thresholds.errorRatePerSecond }}
+          expr: rate(kafka_connect_task_error_metrics_total_errors_logged[5m]) > {{ .Values.alerts.thresholds.errorRatePerSecond }}
           for: 5m
           labels:
             severity: warning
@@ -69,8 +69,8 @@ spec:
             description: "Connect tasks are logging errors at {{ "{{" }} $value {{ "}}" }}/s."
 
         - alert: KafkaConnectRebalanceTooLong
-          expr: kafka_connect_worker_rebalance_metrics_rebalance_time_ms_total > 120000
-          for: 2m
+          expr: kafka_connect_worker_rebalance_metrics_rebalancing == 1
+          for: 5m
           labels:
             severity: warning
             cluster: {{ $clusterName }}
@@ -80,8 +80,8 @@ spec:
 
         - alert: KafkaConnectWorkerHeapHigh
           expr: |
-            jvm_memory_bytes_used{area="heap", kubernetes_name="{{ include "connect-cluster.fullname" . }}-connect"}
-            / jvm_memory_bytes_max{area="heap", kubernetes_name="{{ include "connect-cluster.fullname" . }}-connect"}
+            sum by (pod) (jvm_memory_bytes_used{area="heap", namespace="{{ include "connect-cluster.namespace" . }}", pod=~"{{ include "connect-cluster.fullname" . }}-connect-.*"})
+            / sum by (pod) (jvm_memory_bytes_max{area="heap", namespace="{{ include "connect-cluster.namespace" . }}", pod=~"{{ include "connect-cluster.fullname" . }}-connect-.*"})
             > {{ divf .Values.alerts.thresholds.heapUsagePercent 100.0 }}
           for: 5m
           labels:

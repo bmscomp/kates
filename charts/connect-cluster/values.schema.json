@@ -142,8 +142,172 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "serviceName": { "type": "string" },
+        "namespace": { "type": "string" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "path": { "type": "string" }
+        "path": { "type": "string" },
+        "podSelector": { "type": "object" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "defaultDeny": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "selector": { "type": "object" }
+          }
+        },
+        "dns": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "namespaceSelector": { "type": "object" },
+            "podSelector": { "type": "object" },
+            "ports": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            }
+          }
+        },
+        "apiServer": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "ports": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            },
+            "ipBlock": { "type": "object" }
+          }
+        },
+        "workerToWorker": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "kafka": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "ports": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            }
+          }
+        },
+        "monitoring": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "namespace": { "type": "string" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "restApi": {
+          "type": "object",
+          "properties": {
+            "allowAll": { "type": "boolean" },
+            "operator": { "type": "boolean" },
+            "clients": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["namespace"],
+                "properties": {
+                  "namespace": { "type": "string" },
+                  "podSelector": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "schemaRegistry": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "tracing": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "namespaceSelector": { "type": "object" },
+            "podSelector": { "type": "object" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "strimziOperatorNamespace": { "type": "string" },
+        "extraIngress": { "type": "array", "items": { "type": "object" } },
+        "extraEgress": { "type": "array", "items": { "type": "object" } },
+        "kafkaPorts": {
+          "type": "array",
+          "description": "DEPRECATED — use networkPolicy.kafka.ports",
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        },
+        "monitoringNamespace": {
+          "type": "string",
+          "description": "DEPRECATED — use networkPolicy.monitoring.namespace"
+        },
+        "restApiClients": {
+          "type": "array",
+          "description": "DEPRECATED — use networkPolicy.restApi.clients",
+          "items": {
+            "type": "object",
+            "required": ["namespace"],
+            "properties": {
+              "namespace": { "type": "string" },
+              "podSelector": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "kafkaUser": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "authorization": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "type": { "type": "string", "enum": ["simple"] },
+            "mode": { "type": "string", "enum": ["auto", "custom"] }
+          }
+        },
+        "topicGrants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "patternType": { "type": "string", "enum": ["literal", "prefix"] },
+              "operations": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "groupGrants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "patternType": { "type": "string", "enum": ["literal", "prefix"] }
+            }
+          }
+        },
+        "acls": { "type": "array", "items": { "type": "object" } },
+        "quotas": { "type": "object" },
+        "template": { "type": "object" },
+        "secretSync": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "method": { "type": "string", "enum": ["job", "reflector"] },
+            "timeoutSeconds": { "type": "integer", "minimum": 30 }
+          }
+        }
       }
     },
 
@@ -181,7 +345,9 @@
         "type": {
           "type": "string",
           "enum": ["opentelemetry", "jaeger"]
-        }
+        },
+        "endpoint": { "type": "string" },
+        "serviceName": { "type": "string" }
       }
     },
     "env": { "type": "array" },
@@ -207,8 +373,40 @@
     "metricsConfig": {
       "type": "object",
       "properties": {
+        "create": { "type": "boolean" },
         "configMapName": { "type": "string" },
         "configMapKey": { "type": "string" }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 1 },
+        "maxReplicas": { "type": "integer", "minimum": 1 },
+        "targetCPUUtilizationPercentage": {
+          "anyOf": [
+            { "type": "integer", "minimum": 1, "maximum": 100 },
+            { "type": "string", "maxLength": 0 }
+          ]
+        },
+        "targetMemoryUtilizationPercentage": {
+          "anyOf": [
+            { "type": "integer", "minimum": 1, "maximum": 100 },
+            { "type": "string", "maxLength": 0 }
+          ]
+        },
+        "extraMetrics": { "type": "array" },
+        "behavior": { "type": "object" }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "secretNames": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "template": { "type": "object" },

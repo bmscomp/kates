@@ -1,0 +1,26 @@
+{{- /*
+  Default-deny for the Connect pods — ON by default. The allow rules in
+  networkpolicies.yaml define the complete traffic contract; anything not
+  listed there is blocked. Disable only when a platform-level default-deny
+  already exists and policy engines forbid duplicates.
+*/ -}}
+{{- if and .Values.networkPolicy.enabled ((.Values.networkPolicy.defaultDeny).enabled | default true) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-connect-default-deny
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- if (.Values.networkPolicy.defaultDeny).selector }}
+      {{- toYaml .Values.networkPolicy.defaultDeny.selector | nindent 6 }}
+      {{- else }}
+      strimzi.io/name: {{ include "connect-cluster.fullname" . }}-connect
+      {{- end }}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}

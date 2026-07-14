@@ -54,9 +54,19 @@ autoRestart:
 
 networkPolicy:
   enabled: true
-  kafkaPorts:
-    - 9093
-  monitoringNamespace: monitoring
+  defaultDeny:
+    enabled: true
+  # Pin DNS egress to kube-dns (strict zero-trust)
+  dns:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+    podSelector:
+      k8s-app: kube-dns
+  kafka:
+    ports:
+      - 9093
+  monitoring:
+    namespace: monitoring
 
 databaseEgress:
   - namespace: database
