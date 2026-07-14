@@ -1,6 +1,11 @@
 # Upgrade Playbook
 
-This chapter provides step-by-step procedures for upgrading every component in the Kates stack. Each procedure includes pre-flight checks, rollback plans, and validation steps.
+This chapter provides step-by-step procedures for upgrading every component in the Kates stack. Each procedure includes pre-flight checks, rollback plans, and validation steps. It's written for the engineer who owns the upgrade window — the one who must answer "can we still roll back?" before anything moves. After this chapter, you can:
+
+- Upgrade Kafka, the Strimzi operator, Kyverno, and the Kates application in the correct order, with a Velero backup and a recorded baseline taken first
+- Validate an upgrade quantitatively by comparing post-upgrade runs against the pre-upgrade baseline with `kates report compare`
+- Pick the right rollback path per component — and recognize the KRaft `metadataVersion` point of no return before crossing it
+- Run the pre- and post-upgrade checklists as a repeatable drill rather than a one-off scramble
 
 ## Upgrade Strategy
 
@@ -276,6 +281,27 @@ Run through this before any upgrade:
 - [ ] Strimzi release notes reviewed for breaking changes
 - [ ] Rollback plan documented and tested
 
+::: {.callout-tip}
+**Try it**
+
+Dry-run the checklist without touching a version number — take the snapshot and record the baselines, then stop:
+
+```bash
+# Record the current Kafka version
+kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.version}'
+
+# Take the snapshot and confirm it completed
+velero backup create upgrade-drill --include-namespaces kafka --wait
+kubectl get backup upgrade-drill -n velero -o jsonpath='{.status.phase}'
+
+# Record the performance and integrity baselines
+kates test create --type LOAD --records 100000 --acks all --wait
+kates test create --type INTEGRITY --records 50000 --wait
+```
+
+The backup phase reads `Completed` and both tests pass; note the LOAD test ID — it's the `<pre-id>` that `kates report compare` needs after a real upgrade.
+:::
+
 ## Post-Upgrade Validation
 
 - [ ] All pods Running and ready
@@ -419,3 +445,14 @@ kates test create --type LOAD --records 50000 --wait
 | Kates application | `kubectl rollout undo` | 1–2 min | Low |
 | Monitoring stack | Helm rollback | 2–5 min | Low |
 | Kyverno | Helm rollback + CRD restore | 5–10 min | Medium |
+
+## Summary
+
+- Always upgrade the Strimzi operator before Kafka, take a Velero backup and record LOAD and INTEGRITY baselines before either, and run `make gameday` after any upgrade.
+- A Kafka version bump is a one-line change to `spec.kafka.version` in `config/kafka/kafka.yaml`; Strimzi rolls the brokers one at a time with PDB constraints honored.
+- Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it makes downgrade irreversible.
+- Kyverno upgrades go CRDs first, controller second; afterwards verify with `kates kyverno status` and confirm `PolicyException` resources still use a served API version.
+- A Helm rollback of the Strimzi operator does not revert migrated CRDs — those need a manual restore from backup.
+- Post-upgrade validation is quantitative: performance within 10% of the recorded baseline, an integrity test with zero data loss, and a green Game Day run.
+
+With every component upgrade rehearsed and reversible, the remaining moving piece is the integration layer itself: [Kafka Connect & CDC Pipelines](21-kafka-connect.md) covers deploying and operating Kafka Connect with Debezium CDC.

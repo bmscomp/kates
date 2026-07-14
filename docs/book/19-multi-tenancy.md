@@ -2,6 +2,13 @@
 
 This chapter covers strategies for running multiple services, teams, or environments on the shared krafter Kafka cluster without interference — from topic naming to quota enforcement.
 
+After this chapter, you can:
+
+- Onboard a tenant declaratively — prefix-scoped topics, a dedicated `KafkaUser` with scoped ACLs, and a NetworkPolicy entry
+- Size per-user quotas and partition counts against a tenant's throughput profile
+- Track per-tenant bandwidth and consumer lag with topic-prefix PromQL queries
+- Decommission a tenant cleanly without touching its neighbors
+
 ## Multi-Tenancy Model
 
 The krafter cluster uses **namespace-level isolation** within a single Kafka cluster:
@@ -367,3 +374,47 @@ kubectl get kafkauser,kafkatopic -n kafka | grep my-service
 ```
 
 For security configuration details, see [Security & Compliance](17-security.md). For Kafka deployment internals, see [Kafka Deployment Engineering](15-kafka-deployment.md).
+
+::: {.callout-tip}
+**Try it**
+
+Onboard a toy tenant end to end — one prefix-scoped topic and one user, then verify and tear down:
+
+```bash
+kubectl apply -n kafka -f - <<'EOF'
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata: {name: toy-events, labels: {strimzi.io/cluster: krafter}}
+spec: {partitions: 3, replicas: 3}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata: {name: toy, labels: {strimzi.io/cluster: krafter}}
+spec:
+  authentication: {type: scram-sha-512}
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: toy, patternType: prefix}
+        operations: [Read, Write, Describe]
+        host: "*"
+EOF
+
+kubectl wait kafkauser/toy --for=condition=Ready -n kafka --timeout=60s
+kubectl get secret toy -n kafka
+kates security acl-map
+kubectl delete kafkatopic/toy-events kafkauser/toy -n kafka
+```
+
+Within the wait window the User Operator flips the user Ready and generates the `toy` Secret; the ACL map shows `toy-events` covered by the `toy` user before the last command removes both resources.
+:::
+
+## Summary
+
+- Tenancy on the krafter cluster is namespace-level within one Kafka cluster: prefix-scoped topics, a dedicated `KafkaUser` per service, per-user quotas, and NetworkPolicy entries.
+- Onboarding is declarative — append the tenant's `KafkaTopic`, `KafkaUser`, and NetworkPolicy entries to the files in `config/kafka/`, apply, and let the User Operator reconcile credentials and ACLs.
+- Quotas throttle at the broker: an over-quota client sees delayed responses, not errors, so watch tenant latency rather than error rates.
+- Per-user quota metrics aren't exported by the JMX rules, so tenant usage is tracked indirectly — by topic prefix and consumer group in PromQL.
+- Decommissioning reverses onboarding: delete the `KafkaUser` first to revoke access, then the topics — the `app.kubernetes.io/part-of` label finds everything a tenant owns.
+
+With tenants isolated from each other, the remaining risk is change itself — [Upgrade Playbook](18-upgrade-playbook.md) gives you step-by-step procedures for upgrading every component of the stack without breaking them.

@@ -2,7 +2,12 @@
 
 A Kafka cluster is a high-value target. It carries your business data, your audit trails, and your event streams. A misconfigured listener, an overly-permissive ACL, or a missing network policy can expose all of it. This chapter covers every security layer in the Kates platform — not just *what* is configured, but *why* each layer exists and what would happen without it.
 
-Use this chapter as a reference when auditing your deployment, onboarding new services, or designing your own security posture for production.
+Use this chapter as a reference when auditing your deployment, onboarding new services, or designing your own security posture for production. After this chapter, you can:
+
+- Explain which listener each client authenticates on, and why the performance listener deliberately skips TLS
+- Onboard a new service with a least-privilege `KafkaUser` — scoped ACLs, prefix patterns, and quotas
+- Verify that default-deny NetworkPolicies and Kyverno admission policies actually block what they claim to block
+- Grade your cluster's posture with `kates security audit` and act on the findings
 
 ## Threat Model
 
@@ -658,3 +663,32 @@ The target performs these checks:
 4. Spawn temporary pods in both the `default` and `kates` namespaces to verify NetworkPolicies (default-deny enforcement and explicitly allowed traffic).
 
 For deployment-level security details (Drain Cleaner, backup encryption), see [Kafka Deployment Engineering](15-kafka-deployment.md).
+
+::: {.callout-tip}
+**Try it**
+
+Instead of walking the checklist by hand, let the platform grade itself:
+
+```bash
+# Grade the cluster's security posture with CIS-mapped checks
+kates security audit
+
+# See which Kyverno policies are active, and whether they Audit or Enforce
+kates kyverno status
+
+# List any workloads currently violating policy
+kates kyverno violations --namespace kafka
+```
+
+Expect a graded report organized by category — authentication, transport security, policy engine — with a remediation section for every check that isn't a PASS; on a fresh deployment the Policy Enforcement check warns until you switch policies from `Audit` to `Enforce`.
+:::
+
+## Summary
+
+- Every listener authenticates, but only some encrypt: `plain` (9092) uses SCRAM-SHA-512 without TLS so performance baselines isolate Kafka throughput from encryption cost — production traffic belongs on `tls` (9093) or `external` (9094).
+- Authorization is deny-by-default: each service gets its own `KafkaUser` with `patternType: prefix` ACLs and quotas, and only the Kates backend holds superUser status.
+- SCRAM passwords live in base64-encoded — not encrypted — Kubernetes Secrets, so namespace RBAC, Kyverno secret synchronization, and default-deny NetworkPolicies form the outer wall around your credentials.
+- Kyverno enforces restricted Pod Security Standards in two phases — mutation silently patches missing settings, validation rejects what mutation can't fix — and starts in `Audit` mode so you can review violations before switching to `Enforce`.
+- `kates security audit` grades the whole posture A–F against CIS-mapped checks, while `make kafka-verify-policies` verifies that Kyverno, the Strimzi operator, and the NetworkPolicies enforce as intended.
+
+With the security layers in place for a single team, [Multi-Tenancy](19-multi-tenancy.md) shows how to share the same cluster across many services and teams without interference.

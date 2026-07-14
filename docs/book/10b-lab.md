@@ -6,6 +6,13 @@ The Lab is an interactive TUI for iterative Kafka performance tuning. Instead of
 kates lab
 ```
 
+After this chapter, you can:
+
+- Drive a full tuning session in the Lab TUI — apply presets, adjust parameters, and run measured iterations without leaving the terminal
+- Sweep one parameter across all its values and pinpoint the winner with the diff and pin-and-compare views
+- Stabilize noisy results with warmup and median modes before trusting a number
+- Export every iteration to CSV and save the session as a baseline for later comparison
+
 ## When to Use Lab vs CLI
 
 | Use Case | Tool |
@@ -251,3 +258,32 @@ This prevents the backend from falling back to its configured default duration (
 | 100,000 | 100s |
 | 500,000 | 500s |
 | 1,000,000 | 1000s |
+
+::: {.callout-tip}
+**Try it**
+
+Run a complete preset-to-CSV tuning session:
+
+```bash
+kates lab
+```
+
+Inside the TUI, press `p` twice to apply the Max Throughput preset, navigate to `Batch Size` and press `s` to sweep all five values, then press `e` to export and `q` to quit. Inspect the results:
+
+```bash
+column -s, -t ~/kates-lab-*.csv
+```
+
+Expect one iteration per batch-size value in the history; the CSV row with the highest `throughput_rec_s` names your sweet spot.
+:::
+
+## Summary
+
+- Lab is the workbench for iterative tuning; keep `kates test create --type LOAD --wait` for one-off checks and `kates test apply -f` for CI regression gates
+- Presets switch the test type along with the parameters — Low Latency (`SPIKE`), Max Throughput (`STRESS`), Durability (`LOAD`) — and are starting points to fine-tune, not final answers
+- Auto-sweep (`s`) tests every value of one parameter while holding the rest constant; diff (`d`) and pin-and-compare (`c`) connect parameter changes to metric changes
+- Warmup (`W`) discards JIT-cold runs before measuring, while median mode (`m`) runs three identical tests and keeps the middle result — and median ignores the warmup setting
+- Export (`e`) writes every iteration with its full parameter set to a timestamped CSV, and sessions (`w`/`L`) persist history as a baseline for later comparison
+- Lab derives test duration from record count (roughly one millisecond per record with a 60-second floor), so quick iterations never fall back to the backend's much longer default durations
+
+Your cluster now has a tuned, evidence-backed configuration — [Chaos Engineering Theory](06-chaos-theory.md) asks the harder question of whether it survives when brokers, networks, and disks start failing.

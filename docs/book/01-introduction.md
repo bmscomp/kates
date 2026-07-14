@@ -1,5 +1,12 @@
 # Introduction
 
+This chapter is for anyone who runs, tests, or is about to inherit an Apache Kafka cluster — platform engineers, SREs, and developers alike. After this chapter, you can:
+
+- Explain what Kates does and how it differs from generic load testing tools
+- Name the five design principles that shape every Kates feature
+- Run your first LOAD test from the CLI and read its report
+- Decide where Kates fits — and doesn't fit — in your toolchain
+
 ## What Is Kates?
 
 **Kates** — Kafka Advanced Testing & Engineering Suite — is a purpose-built platform for performance testing and chaos engineering on Apache Kafka clusters. It combines a Quarkus-based backend engine, a rich CLI, and deep Kubernetes integration to answer the questions that matter most in production:
@@ -123,6 +130,24 @@ kates report show <id>
 
 For a complete setup guide, see [Deployment Guide](12-deployment.md). For hands-on tutorials, see the [Tutorials](https://github.com/bmscomp/kates/tree/main/docs/tutorials) directory.
 
+::: {.callout-tip}
+**Try it**
+
+Once the Quick Start connection works, take the report pipeline for a spin:
+
+```bash
+kates test types
+kates test create --type LOAD --records 100000 --acks 1 --wait
+kates test list --type LOAD
+kates report show <id>
+
+# Compare against your Quick Start run (which used the acks=all default)
+kates report compare <id1,id2>
+```
+
+Expect a throughput summary, a latency distribution from average through P99, an error rate, and — when thresholds are set — an SLA verdict; the comparison shows what relaxing producer acknowledgments buys you in latency.
+:::
+
 ## What Kates Is Not
 
 To set expectations clearly:
@@ -131,4 +156,14 @@ To set expectations clearly:
 - **Not a general-purpose load tester** — Kates understands Kafka semantics (ISR tracking, consumer rebalancing, partition leadership). Use k6, Gatling, or Locust for HTTP/gRPC load testing.
 - **Not a Kafka management UI** — for browsing topics, consumer groups, and cluster state in a web interface, use [Kafka UI](https://github.com/kafbat/kafka-ui) (which Kates deploys alongside).
 - **Not a production monitoring system** — Kates is designed for testing and validation environments. For production monitoring, use Prometheus + Grafana directly (which Kates also deploys for its own observability).
+
+## Summary
+
+- Kates — Kafka Advanced Testing & Engineering Suite — pairs performance testing with chaos engineering, and understands Kafka semantics like producer acknowledgments, ISR state, and partition leadership rather than treating the cluster as a black box.
+- Production readiness spans three dimensions — performance, resilience, and data integrity — and Kates grades all three with repeatable, SLA-driven tests instead of ad-hoc scripts.
+- Five principles shape the design: Kafka-native, Kubernetes-first, SLA-driven, observable, and safe by default.
+- Every test produces structured output — JSON, CSV, JUnit XML, heatmap data — so results feed CI/CD gates and trend analysis, not just terminal scrollback.
+- Kates is a testing and validation platform, not a Kafka distribution, a management UI, or a production monitoring system.
+
+Next, [Architecture & Design](02-architecture.md) opens the hood on the subsystems that make all of this work.
 

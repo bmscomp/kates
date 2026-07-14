@@ -2,6 +2,13 @@
 
 Data integrity is the highest-stakes property of any messaging system. This chapter explains how Kates verifies that Kafka delivers on its durability and ordering guarantees — and how to test these guarantees under failure conditions.
 
+It's written for engineers who run Kafka where losing a message costs more than delivering it slowly. After this chapter, you can:
+
+- Run an INTEGRITY test and choose between standard, idempotent, and transactional modes
+- Read a Data Integrity report and distinguish real data loss from harmless unacked sends
+- Prove durability under failure by pairing an integrity run with live fault injection
+- Trace a DATA_LOSS verdict to its cause using the Lost Ranges table and the Integrity Timeline
+
 ## Why Data Integrity Matters
 
 Kafka is often used as the backbone of critical data pipelines:
@@ -466,3 +473,33 @@ Reading this report:
 3. **Check for unclean leader election** — run `kubectl logs <broker-pod> -n kafka | grep 'unclean'`. Disable `unclean.leader.election.enable` in production.
 4. **Check disk health** — CRC failures suggest disk corruption. Run `kubectl exec <broker-pod> -n kafka -- df -h` and check for I/O errors in `dmesg`.
 5. **Check timeline events** — run `kates test get <id>`; the Integrity Timeline section prints automatically and shows exactly which sequences failed CRC checks, arrived out of order, or were lost.
+
+::: {.callout-tip}
+**Try it**
+
+Prove zero data loss under a broker failure with two terminals (the disruption plan format is covered in [Chaos Engineering in Practice](07-chaos-practice.md)):
+
+```bash
+# Terminal 1 — export and run the transactional integrity template
+kates test scaffold export integrity-tx
+kates test apply -f integrity-tx.yaml --wait
+
+# Terminal 2 — inject a broker failure while the test produces
+kates disruption run --config disruption-plan.json
+
+# Terminal 1, after the run — read the verdict and timeline
+kates test get <id>
+```
+
+Expect `Verdict ● PASS` with `Lost 0`: the producer stalls during leader election (visible as a non-zero Producer RTO), but every ACKed message is consumed.
+:::
+
+## Summary
+
+- Every INTEGRITY message carries a binary header — sequence number, timestamp, run ID hash, CRC32 checksum — so the verifier detects loss, duplication, reordering, and corruption independently of Kafka's own bookkeeping.
+- Only ACKed messages carry a durability promise: unacked sends during a broker crash are excluded from the loss calculation, so a PASS with a non-zero Producer RTO is expected behavior.
+- Standard mode verifies `acks=all` durability; `enableIdempotence` adds exactly-once delivery to the log; the `integrity-tx` template layers transactions and CRC verification on top.
+- Integrity tests earn their keep under chaos: run `kates test apply` in one terminal and `kates disruption run` in another to verify guarantees during real failures.
+- A DATA_LOSS verdict usually traces back to `acks=1`, `min.insync.replicas=1`, or unclean leader election — the Lost Ranges table and Integrity Timeline show exactly which sequences vanished.
+
+With integrity verified, the next question is what the cluster was doing while the test ran — [Observability & Monitoring](09-observability.md) covers the metrics, dashboards, and alerts that answer it.

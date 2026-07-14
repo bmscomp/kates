@@ -7,52 +7,63 @@ Quick reference for terms used throughout this book.
 | **ACK** | Acknowledgment from Kafka confirming a message has been persisted. Modes: `0` (fire-and-forget), `1` (leader only), `all` (all ISR replicas) |
 | **ACL** | Access Control List — rules that grant or deny specific operations on Kafka resources (topics, groups, cluster) to specific principals |
 | **Admission Webhook** | A Kubernetes extension point that intercepts API requests before persistence. Kyverno uses mutating and validating webhooks to enforce policies |
+| **Apicurio Registry** | A schema registry that stores Avro, JSON Schema, and Protobuf schemas for Kafka clients, enabling schema evolution and type safety (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#schema-registry-integration)) |
 | **AZ** | Availability Zone — an isolated failure domain within a data center or cloud region |
 | **Baseline** | A reference measurement taken under normal conditions, used for comparison after changes or chaos injection |
+| **Blast Radius** | The scope of impact a chaos experiment can have. Kates bounds it with guardrails like `maxAffectedBrokers` and automated rollback (see [Chaos Engineering Theory](06-chaos-theory.md)) |
 | **Broker** | A Kafka server that stores partition data and serves produce/consume requests. In the krafter cluster, brokers run as dedicated pods separate from controllers |
-| **CDC** | Change Data Capture — a pattern for tracking database changes as a stream of events |
+| **CDC** | Change Data Capture — a pattern for tracking database changes as a stream of events (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#change-data-capture-with-debezium)) |
 | **ClusterPolicy** | A Kyverno CRD that defines cluster-wide admission rules (mutate, validate, generate, verifyImages) |
+| **Connector** | A Kafka Connect plugin instance that streams data into Kafka from an external system (source) or out of Kafka to one (sink) (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#connector-lifecycle)) |
 | **Consumer Group** | A set of consumers that cooperatively read from topic partitions. Kafka assigns each partition to exactly one consumer within the group |
 | **Consumer Lag** | The difference between the latest offset produced and the latest offset consumed. Indicates how far behind a consumer is |
-| **Cosign** | A tool for signing and verifying container images. Kyverno uses Cosign public keys to enforce supply chain integrity |
-| **Controller** | A KRaft node responsible for metadata management — leader election, partition assignment, and cluster coordination. Three controllers form the Raft quorum |
+| **Controller** | A KRaft node responsible for metadata management — leader election, partition assignment, and cluster coordination. The controllers together form the Raft quorum |
 | **Coordinated Omission** | A measurement bias where slow responses prevent new requests from being issued, causing artificially low latency measurements |
+| **Cosign** | A tool for signing and verifying container images. Kyverno uses Cosign public keys to enforce supply chain integrity |
 | **CRC32** | A checksum algorithm used to verify message integrity. Kates can attach CRC32 checksums to test messages for corruption detection |
 | **Cruise Control** | LinkedIn's open-source tool for automated Kafka partition rebalancing based on broker resource utilization |
-| **Disruption** | A controlled fault injection — killing pods, partitioning networks, or stressing resources |
+| **Debezium** | An open-source CDC platform that runs as Kafka Connect source connectors, streaming row-level database changes from PostgreSQL (WAL), MySQL (binlog), and MongoDB (change streams) into Kafka (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#change-data-capture-with-debezium)) |
+| **Disruption** | A controlled fault injection — killing pods, partitioning networks, or stressing resources (see [Chaos Engineering in Practice](07-chaos-practice.md)) |
+| **DLQ** | Dead Letter Queue — a topic where a sink connector routes records it cannot process (malformed data, schema mismatch) instead of failing the entire task (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#dead-letter-queue-dlq)) |
 | **Drain Cleaner** | Strimzi component that intercepts Kubernetes node drain events and gracefully rolls Kafka pods instead of killing them |
 | **emptyDir** | A Kubernetes volume type that provides an empty directory backed by the node's filesystem. Used for ephemeral writable paths under read-only root filesystems |
 | **Entity Operator** | Strimzi component running both the Topic Operator and User Operator in a single pod |
-| **Game Day** | A structured chaos engineering session with defined hypotheses, controlled experiments, and documented findings; Kates automates it as a 7-phase pipeline (pre-flight → baseline → chaos → observe → recover → post-flight → report) run via `make gameday` |
+| **Exactly-Once Semantics** | A delivery guarantee that each record is processed exactly once despite retries and crashes. Kafka builds it from idempotent producers and transactions; Connect adds exactly-once source delivery (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#exactly-once-semantics)) |
+| **Game Day** | A structured chaos engineering session with defined hypotheses, controlled experiments, and documented findings; Kates automates it as a 7-phase pipeline (pre-flight → baseline → chaos → observe → recover → post-flight → report) run via `make gameday` (see [Chaos Engineering Theory](06-chaos-theory.md#game-day-pipeline)) |
 | **GraalVM Native Image** | An ahead-of-time compilation technology that compiles Java applications into standalone native binaries. Reduces startup time from seconds to milliseconds. The Kates backend supports native image builds for faster cold starts |
 | **gRPC** | Google Remote Procedure Call — a high-performance binary protocol using HTTP/2 and Protocol Buffers for service-to-service communication |
 | **Heatmap** | A visualization showing the full latency distribution over time. Each row is one second; each column is a latency bucket |
 | **Idempotency** | Kafka producer feature that deduplicates retried messages, preventing duplicates in the log |
 | **Isolated Topology** | A Kates deployment mode where the Strimzi Operator runs in a dedicated `strimzi-operator` namespace separate from the Kafka application namespace |
 | **ISR** | In-Sync Replicas — the set of replicas fully caught up with the partition leader. Writes require acknowledgment from all ISR members when `acks=all` |
+| **Jaeger** | A distributed tracing backend and UI. Kates exports trace spans to Jaeger over OTLP so you can follow a single request across services (see [Observability & Monitoring](09-observability.md#distributed-tracing)) |
 | **JFR** | Java Flight Recorder — a low-overhead JVM profiling tool built into the JDK. Captures CPU, memory, GC, and thread events for post-mortem analysis of performance issues. Enable with `-XX:StartFlightRecording` |
 | **JMX** | Java Management Extensions — the standard monitoring interface for JVM applications. Kafka exports metrics via JMX |
+| **Kafka Connect** | Kafka's framework for streaming data between Kafka and external systems through connectors. Deployed by the `connect-cluster` Helm chart and managed by Strimzi (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md) and [Operating Kafka Connect](operating-kafka-connect.md)) |
 | **Kafka Exporter** | Strimzi component that exposes consumer lag and topic offset metrics not available through JMX |
 | **KafkaNodePool** | Strimzi CRD for managing groups of Kafka nodes with the same role and configuration (e.g., broker pools per zone) |
 | **KafkaTopic** | Strimzi CRD for declarative topic management — the Topic Operator reconciles these into actual Kafka topics |
 | **KafkaUser** | Strimzi CRD for declarative user management — the User Operator creates SCRAM credentials and ACL rules |
+| **Kates** | Kafka Advanced Testing & Engineering Suite — the platform this book documents: a performance testing and chaos engineering suite for Apache Kafka built from a backend engine, a CLI, and Kubernetes tooling (see [Introduction](01-introduction.md)) |
 | **Kind** | Kubernetes IN Docker — a tool for running local Kubernetes clusters using Docker containers as nodes |
 | **KRaft** | Kafka Raft — Kafka's built-in consensus protocol that replaces ZooKeeper for metadata management |
-| **Kyverno** | A Kubernetes-native policy engine that operates as an admission webhook for mutating, validating, and generating resources |
+| **Kyverno** | A Kubernetes-native policy engine that operates as an admission webhook for mutating, validating, and generating resources (see [Security & Compliance](17-security.md)) |
 | **LitmusChaos** | A Kubernetes-native chaos engineering framework that uses CRDs to define and manage chaos experiments |
 | **Loom / Virtual Threads** | A Java 21+ feature that provides lightweight threads managed by the JVM rather than the OS. Quarkus uses virtual threads for non-blocking I/O, enabling millions of concurrent connections without thread pool exhaustion |
 | **mTLS** | Mutual TLS — both client and server present certificates for authentication. Used on the TLS listener (port 9093) |
 | **NetworkPolicy** | Kubernetes resource that controls pod-to-pod network traffic. The kafka namespace uses default-deny with explicit allow rules |
+| **Offset** | The position of a record within a partition — a monotonically increasing number. Consumers commit offsets to track progress; the gap between produced and committed offsets is consumer lag |
 | **OTLP** | OpenTelemetry Protocol — the standard wire protocol for exporting traces, metrics, and logs from instrumented applications. Kates uses OTLP to export trace spans to Jaeger (see [Observability & Monitoring](09-observability.md#distributed-tracing)) |
 | **P50 / P95 / P99** | Percentile latency metrics. P99 = 99% of requests completed within this time. P99 is more useful than averages for understanding worst-case behavior |
 | **Partition** | A topic is divided into partitions for parallelism. Each partition is an ordered, immutable sequence of records |
 | **PDB** | Pod Disruption Budget — Kubernetes resource limiting how many pods in a set can be unavailable simultaneously. Set to `maxUnavailable: 1` for Kafka |
-| **Playbook** | A pre-defined YAML file describing a multi-step disruption scenario with safety parameters |
+| **Playbook** | A pre-defined YAML file describing a multi-step disruption scenario with safety parameters (see [Chaos Engineering in Practice](07-chaos-practice.md#built-in-playbooks)) |
 | **PolicyException** | A Kyverno v2 CRD that relaxes specific validation rules for designated namespaces without disabling entire policies |
 | **PolicyReport** | A Kubernetes CRD (from the Policy Report API) that stores the results of policy evaluations, used by `kates kyverno violations` |
+| **Prometheus** | A time-series metrics database. It scrapes broker JMX exporter endpoints and the Kates engine's `/q/metrics`; Grafana queries it to render dashboards (see [Observability & Monitoring](09-observability.md)) |
 | **Protobuf** | Protocol Buffers — Google's language-neutral serialization format used by gRPC for message encoding |
 | **PVC** | Persistent Volume Claim — a Kubernetes storage request that binds to a Persistent Volume |
-| **Quorum** | The minimum number of Raft voters that must agree for a metadata operation to succeed. For 3 controllers, quorum = 2 |
+| **Quorum** | The minimum number of Raft voters that must agree for a metadata operation to succeed — a majority of the controller count (e.g., with 3 controllers, quorum = 2) |
 | **readOnlyRootFilesystem** | A container security context setting that mounts the root filesystem as read-only, preventing writes outside explicitly mounted volumes |
 | **Rebalance** | The process of redistributing partition assignments among consumers in a consumer group. During rebalancing, all consumers stop processing |
 | **RF** | Replication Factor — the number of copies of each partition maintained across brokers |
@@ -61,12 +72,15 @@ Quick reference for terms used throughout this book.
 | **Scenario File** | A YAML/JSON file defining one or more test specifications with optional SLA validation gates (see [Scenario Files & SLA Gates](13-scenario-files.md)) |
 | **SCRAM-SHA-512** | Salted Challenge Response Authentication Mechanism — a password-based auth protocol used on the plain (9092) and external (9094) Kafka listeners |
 | **Share Group** | Kafka 4.x feature (KIP-932) enabling queue-style competing-consumer semantics alongside traditional consumer groups |
-| **SLA** | Service Level Agreement — quantitative targets for system behavior (e.g., "P99 latency ≤ 50ms") |
+| **SLA** | Service Level Agreement — quantitative targets for system behavior (e.g., "P99 latency ≤ 50ms") (see [Scenario Files & SLA Gates](13-scenario-files.md#validation-reference-sla-gates)) |
+| **SMT** | Single Message Transform — a lightweight, in-line transformation applied to each record as it passes through a connector; transforms chain in order (see [Kafka Connect & CDC Pipelines](21-kafka-connect.md#single-message-transforms-smts)) |
 | **Sparkline** | A compact inline chart showing a trend over time, rendered as Unicode block characters in the terminal |
 | **SSE** | Server-Sent Events — a protocol for streaming real-time updates from server to client over HTTP |
+| **Steady-State Hypothesis** | A measurable definition of normal system behavior with pass/fail criteria — the claim a chaos experiment tests (see [Chaos Engineering Theory](06-chaos-theory.md)) |
 | **Strimzi** | A Kubernetes operator for managing Apache Kafka clusters declaratively via CRDs |
 | **StrimziPodSet** | Strimzi's replacement for StatefulSets — provides finer-grained control over pod lifecycle and rolling updates |
 | **Throughput** | The rate of successful message delivery, typically measured in records/second or MB/second |
-| **Trogdor** | Apache Kafka's native fault injection framework, used internally for testing Kafka itself. Unlike LitmusChaos (which operates at the Kubernetes pod level), Trogdor injects faults directly into the Kafka process |
 | **Tiered Storage** | Kafka feature (KIP-405) that offloads cold log segments to object storage (e.g., S3/MinIO), reducing local disk requirements |
+| **Topic** | A named, append-only stream of records in Kafka, divided into partitions for parallelism. Producers write to topics; consumer groups read from them |
+| **Trogdor** | Apache Kafka's native fault injection framework, used internally for testing Kafka itself. Unlike LitmusChaos (which operates at the Kubernetes pod level), Trogdor injects faults directly into the Kafka process |
 | **Velero** | Kubernetes backup tool used for daily PVC snapshots and pre-upgrade backups of the Kafka namespace |

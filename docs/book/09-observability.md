@@ -4,6 +4,13 @@ Running a Kafka performance test without monitoring is like driving at night wit
 
 This chapter covers everything you need to turn raw numbers into understanding: Grafana dashboards, Kates-specific metrics, latency heatmaps, distributed tracing, alerting, and the CLI tools that tie it all together. By the end, you'll know not just *what* to monitor, but *when* to look at each tool and *what the patterns mean*.
 
+After this chapter, you can:
+
+- Walk the four-step diagnostic sequence — cluster health, performance, broker internals, replication — after any test run
+- Pick the right Grafana dashboard or CLI tool for the question you're asking
+- Export a latency heatmap and read the patterns that percentiles hide
+- Track trends across runs and diff two reports to catch a regression before it ships
+
 ---
 
 ## Observability Architecture
@@ -698,3 +705,41 @@ To check available versions:
 ```bash
 helm search repo prometheus-community/kube-prometheus-stack --versions | head -10
 ```
+
+::: {.callout-tip}
+**Try it**
+
+Run a test end-to-end and read the results the way this chapter teaches — cluster first, then the run itself:
+
+```bash
+# Quick pre-check: engine and Kafka both reachable
+kates status
+
+# Run a LOAD test and wait for it to finish (note the test ID it prints)
+kates test create --type LOAD --records 100000 --wait
+
+# Walk the diagnostic sequence in Grafana (http://localhost:30080):
+# cluster health, then performance, then broker internals, then replication
+
+# Export the run's latency heatmap for Grafana
+kates report export <id> --format heatmap
+
+# See where this run lands in the 30-day P99 trend
+kates trend --type LOAD --metric p99LatencyMs --days 30
+```
+
+Expect a healthy run: dashboards flat where they should be flat (zero under-replicated partitions, near-empty request queues), a heatmap file with one dense low-latency band, and a fresh point at the end of the trend sparkline.
+:::
+
+---
+
+## Summary
+
+- Read dashboards in a fixed order after every run — cluster health, then performance, then broker internals, then replication — and let the pattern, not a single number, tell the story.
+- The monitoring chart deploys Kafka-focused dashboards (health, performance, JVM, replication, Strimzi) alongside Kates-specific ones for live benchmarks, trends, engine health, and chaos correlation.
+- The CLI covers the same ground without a browser: `kates dashboard` for an overview, `kates top` for running tests, `kates status` for a one-line check, and `kates cluster watch` for sparkline trends.
+- Latency heatmaps preserve the full distribution over time; export one with `kates report export <id> --format heatmap` whenever a percentile can't explain a spike.
+- `kates trend` and `kates report diff` turn snapshots into regression detection — compare runs instead of trusting absolute numbers.
+- PrometheusRule alerts ship with the charts and fire on offline partitions, sustained under-replication, and runaway consumer lag — each chart carries its own enable toggle.
+
+With the observability stack in place, the next step is standing up the cluster it watches: [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) walks through that deployment from an empty namespace to a running Kafka.

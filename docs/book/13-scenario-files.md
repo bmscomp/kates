@@ -2,6 +2,13 @@
 
 Scenario files are the declarative way to define, execute, and validate Kates test runs. Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against SLA thresholds.
 
+This chapter is for engineers graduating from ad-hoc `kates test create` runs to version-controlled, CI-gated test suites. After this chapter, you can:
+
+- Describe a multi-scenario test suite in YAML, with `spec` parameters and `validate` SLA gates
+- Run a suite with `kates test apply -f` and read its pass/fail summary
+- Wire the exit code into a CI/CD pipeline so performance regressions block the merge
+- Spot the common scenario-file mistakes and predict how the CLI reacts to each
+
 ## Why Scenario Files?
 
 CLI flags are convenient for ad-hoc testing, but production-grade performance validation requires:
@@ -479,3 +486,32 @@ scenarios:
       durationSeconds: 300
       # records: 100000        # ← remove this
 ```
+
+::: {.callout-tip}
+**Try it**
+
+Watch an SLA gate fail on purpose — the fastest way to trust a gate is to see it catch something:
+
+```bash
+# Export the built-in quick-load template into the current directory
+kates test scaffold export quick-load
+
+# Edit quick-load.yaml: change maxP99LatencyMs from 100 to 1
+
+# Run with gates enabled, then check the verdict
+kates test apply -f quick-load.yaml --wait
+echo $?
+```
+
+No real cluster delivers a 1 ms P99, so the summary table marks the scenario `DONE` with a `p99=… > 1ms` violation note and `echo $?` prints 1 — exactly the signal that blocks a CI/CD pipeline.
+:::
+
+## Summary
+
+- A scenario file is a `scenarios:` list in YAML or JSON; `type` is the only field a scenario must carry, and the backend fills in per-type defaults for everything else
+- SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget and exits 0 no matter what
+- Only SLA violations set exit code 1; a scenario that fails at submission shows `FAILED` in the summary but does not change the exit code, so give every gated scenario a `validate` block
+- The CLI never validates a file against a schema: malformed YAML aborts the run with the raw parse error, while an invalid `type` travels to the backend and is rejected there
+- Start from a `kates test scaffold export` template instead of a blank file — edit a known-good scenario, then run it with `kates test apply -f`
+
+Scenario files lock a winning configuration into Git; finding that configuration interactively is the job of [Lab — Interactive Performance Tuning](10b-lab.md).
