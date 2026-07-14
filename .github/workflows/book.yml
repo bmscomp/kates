@@ -45,16 +45,29 @@ jobs:
       # The PDF (102 chromium-rendered diagrams + xelatex) is best-effort:
       # a slow or wedged PDF build must never block publishing the site.
       # On failure the site's PDF download link 404s until the next
-      # successful run — acceptable degradation. Rendered before HTML so
-      # the site output is always the final, complete state in _book.
+      # successful run — acceptable degradation. The PDF is stashed
+      # outside _book because the HTML render cleans the output dir
+      # (observed: run 29367138974 built the PDF, then lost it).
       - name: Render PDF (best-effort)
         if: github.event_name == 'push'
         continue-on-error: true
         timeout-minutes: 25
-        run: quarto render docs/book --to pdf
+        run: |
+          quarto render docs/book --to pdf
+          mv docs/book/_book/kates-definitive-guide.pdf "$RUNNER_TEMP/"
 
       - name: Render HTML
         run: quarto render docs/book --to html
+
+      - name: Attach PDF to site
+        if: github.event_name == 'push'
+        run: |
+          if [ -f "$RUNNER_TEMP/kates-definitive-guide.pdf" ]; then
+            mv "$RUNNER_TEMP/kates-definitive-guide.pdf" docs/book/_book/
+            echo "PDF attached to site output"
+          else
+            echo "No PDF this run (best-effort render failed) — download link will 404"
+          fi
 
       - name: Upload site artifact
         if: github.event_name == 'push'
