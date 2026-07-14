@@ -1,4 +1,4 @@
-# Chapter 10: CLI Reference
+# CLI Reference
 
 Reference for the Kates CLI — the commands, flags, and output formats you'll use day to day.
 
@@ -122,7 +122,7 @@ kates gate --min-grade B --type LOAD --records 100000
 ```
 
 ::: {.callout-tip}
-See [Appendix C: CI/CD Integration](appendix-c-cicd.md) for complete GitHub Actions, GitLab CI, and Jenkins pipeline examples.
+See [CI/CD Pipeline](appendix-c-cicd.md) for complete GitHub Actions, GitLab CI, and Jenkins pipeline examples.
 :::
 
 
@@ -282,7 +282,7 @@ Expected output:
   ✓ 10/10 checks passed — cluster is ready for testing!
 ```
 
-**See also:** [Chapter 12: Deployment](12-deployment.md) for environment setup, [Appendix B: Troubleshooting](appendix-b-troubleshooting.md) for common diagnostic failures.
+**See also:** [Deployment Guide](12-deployment.md) for environment setup, [Troubleshooting Index](appendix-b-troubleshooting.md) for common diagnostic failures.
 
 ---
 
@@ -477,7 +477,7 @@ kates cluster watch --interval 10
 |------|---------|-------------|
 | `--interval` | 5 | Refresh interval in seconds |
 
-**See also:** [Chapter 3: Cluster Setup](03-cluster.md) for cluster architecture, [Chapter 9: Observability](09-observability.md) for Grafana dashboards.
+**See also:** [The Cluster Under Test](03-cluster.md) for cluster architecture, [Observability & Monitoring](09-observability.md) for Grafana dashboards.
 
 ---
 
@@ -590,7 +590,7 @@ kates test scaffold export --all           # export every template
 | `spike-test` | SPIKE | Burst traffic — 32 producers for 60s, test backpressure handling |
 | `ci-gate` | LOAD | CI pipeline gate — fast 10k-record validation with strict zero-error SLA |
 
-**See also:** [Chapter 5: Test Types](05-test-types.md) for the theory behind each test type, [Chapter 13: Scenario Files](13-scenario-files.md) for YAML scenario syntax.
+**See also:** [Test Types Deep Dive](05-test-types.md) for the theory behind each test type, [Scenario Files & SLA Gates](13-scenario-files.md) for YAML scenario syntax.
 
 ---
 
@@ -688,7 +688,7 @@ kates report brokers <id>
 
 Per-broker metrics for a test run.
 
-**See also:** [Chapter 9: Observability](09-observability.md) for heatmap interpretation and Grafana integration, [Chapter 4: Performance Theory](04-performance-theory.md) for understanding percentile metrics.
+**See also:** [Observability & Monitoring](09-observability.md) for heatmap interpretation and Grafana integration, [Performance Theory](04-performance-theory.md) for understanding percentile metrics.
 
 ---
 
@@ -744,7 +744,7 @@ Runs that deviate significantly from the baseline are listed in a separate "Regr
 
 Use `kates trend phases --type <TYPE>` to list the phase names available for a test type.
 
-**See also:** [Chapter 4: Performance Theory](04-performance-theory.md) for statistical significance and why single runs are insufficient.
+**See also:** [Performance Theory](04-performance-theory.md) for statistical significance and why single runs are insufficient.
 
 ---
 
@@ -815,7 +815,7 @@ kates disruption watch <id>
 
 Real-time SSE progress stream for disruption tests.
 
-**See also:** [Chapter 6: Chaos Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chapter 7: Chaos Practice](07-chaos-practice.md) for step-by-step chaos test walkthroughs.
+**See also:** [Chaos Engineering Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chaos Engineering in Practice](07-chaos-practice.md) for step-by-step chaos test walkthroughs.
 
 ---
 
@@ -878,7 +878,7 @@ chaosSpec:
 steadyStateSec: 30
 ```
 
-**See also:** [Chapter 7: Chaos Practice](07-chaos-practice.md) for resilience test configuration.
+**See also:** [Chaos Engineering in Practice](07-chaos-practice.md) for resilience test configuration.
 
 ---
 
@@ -929,7 +929,7 @@ Aliases: `rm`
 kates schedule delete <id>
 ```
 
-**See also:** [Chapter 14: Recipes](14-recipes.md) for schedule-based regression detection patterns.
+**See also:** [Recipes & Patterns](14-recipes.md) for schedule-based regression detection patterns.
 
 ---
 
@@ -954,7 +954,7 @@ Live view of running tests.
 kates top
 ```
 
-**See also:** [Chapter 9: Observability](09-observability.md) for Grafana dashboards and Prometheus alert rules.
+**See also:** [Observability & Monitoring](09-observability.md) for Grafana dashboards and Prometheus alert rules.
 
 ---
 
@@ -968,7 +968,7 @@ kates lab
 
 Key features: parameter presets (`p`), auto-sweep (`s`), iteration diff (`d`), pin-and-compare (`c`), export (`e`), session save/load (`w`/`L`), cancel running test (`x`), retry on failure (`r`).
 
-See [Chapter 10b: Lab](10b-lab.md) for the full guide.
+See [Lab — Interactive Performance Tuning](10b-lab.md) for the full guide.
 
 ---
 
@@ -1075,7 +1075,7 @@ Build from source and install a new version of the Kates CLI.
 kates upgrade
 ```
 
-**See also:** [Chapter 12: Deployment](12-deployment.md) for detailed deployment topologies and configuration, [Chapter 20: Installation Guide](20-installation-guide.md) for step-by-step setup.
+**See also:** [Deployment Guide](12-deployment.md) for detailed deployment topologies and configuration, [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) for step-by-step setup.
 
 ---
 
@@ -1241,7 +1241,7 @@ kates security trend
 kates sec trend
 ```
 
-**See also:** [Chapter 17: Security](17-security.md) for in-depth security auditing and hardening.
+**See also:** [Security & Compliance](17-security.md) for in-depth security auditing and hardening.
 
 ---
 
@@ -1329,7 +1329,7 @@ kates kyverno apply --mode Enforce --yes --with-netpol
 | `--yes`, `-y` | Skip confirmation prompt |
 | `--dry-run` | Show what would be applied without executing |
 
-**See also:** [Chapter 17: Security](17-security.md) for Kyverno policy deep dive and custom policy authoring.
+**See also:** [Security & Compliance](17-security.md) for Kyverno policy deep dive and custom policy authoring.
 
 ---
 
@@ -1493,7 +1493,7 @@ kates kafka connect scale <replicas>        # Scale Connect workers
 | `-n`, `--namespace` | Namespace where Kafka Connect is deployed |
 | `-f`, `--follow` | (`logs` only) Stream logs continuously |
 
-**See also:** [Chapter 21: Kafka Connect](21-kafka-connect.md) for Connect cluster deployment and connector configuration, [Chapter 3: Cluster Setup](03-cluster.md) for Kafka cluster architecture, [Chapter 15: Kafka Deployment](15-kafka-deployment.md) for production Kafka configuration.
+**See also:** [Kafka Connect & CDC Pipelines](21-kafka-connect.md) for Connect cluster deployment and connector configuration, [The Cluster Under Test](03-cluster.md) for Kafka cluster architecture, [Kafka Deployment Engineering](15-kafka-deployment.md) for production Kafka configuration.
 
 ---
 
@@ -1574,7 +1574,7 @@ kates baseline set <id>
 kates baseline regression <id>
 ```
 
-**See also:** [Chapter 4: Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [Appendix C: CI/CD Integration](appendix-c-cicd.md) for quality gate examples.
+**See also:** [Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [CI/CD Pipeline](appendix-c-cicd.md) for quality gate examples.
 
 ---
 
@@ -1628,7 +1628,7 @@ List available tuning tests.
 kates tune types
 ```
 
-**See also:** [Chapter 10b: Lab](10b-lab.md) for the interactive tuning workbench, [Chapter 5: Test Types](05-test-types.md) for understanding how tuning tests differ from standard tests.
+**See also:** [Lab — Interactive Performance Tuning](10b-lab.md) for the interactive tuning workbench, [Test Types Deep Dive](05-test-types.md) for understanding how tuning tests differ from standard tests.
 
 ---
 
@@ -1744,7 +1744,7 @@ kates snapshot diff <name1> <name2>
 kates snapshot diff pre-upgrade post-upgrade
 ```
 
-**See also:** [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md) for using snapshots during Kafka version upgrades.
+**See also:** [Upgrade Playbook](18-upgrade-playbook.md) for using snapshots during Kafka version upgrades.
 
 ---
 

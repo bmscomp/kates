@@ -1,4 +1,4 @@
-# Chapter 9: Observability & Monitoring
+# Observability & Monitoring
 
 Running a Kafka performance test without monitoring is like driving at night with no headlights. You might arrive safely, but you won't know how close you came to the edge. A test that reports "45,000 rec/s, P99 = 12ms" tells you the result — but it doesn't tell you *why*. Was broker 2 doing twice the work? Were ISRs shrinking under load? Was GC pausing every 30 seconds? Without observability, you're guessing.
 
@@ -145,7 +145,7 @@ The JVM is the runtime underneath every broker. GC pauses are the single most co
 | Thread Count | Leak detection over time |
 | JVM Non-Heap Memory | Metaspace growth indicator |
 
-GC pauses correlate directly with latency spikes. The dashboard plots the **GC Collection Rate** — if collection spikes coincide with your P99 spikes, switching to ZGC will likely eliminate them — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning). **JVM Heap Memory** trending upward over time without leveling off suggests a memory leak or insufficient heap size.
+GC pauses correlate directly with latency spikes. The dashboard plots the **GC Collection Rate** — if collection spikes coincide with your P99 spikes, switching to ZGC will likely eliminate them — see [Deployment Guide](12-deployment.md#jvm-tuning). **JVM Heap Memory** trending upward over time without leveling off suggests a memory leak or insufficient heap size.
 
 ### Kafka Replication
 
@@ -350,7 +350,7 @@ Sparklines use Unicode block characters (▁▂▃▄▅▆▇█) to show the t
 
 Heatmaps are Kates's most powerful observability feature. They preserve the **full latency distribution over time**, revealing patterns invisible in aggregate percentiles. Where a P99 metric tells you "99% of requests were under 15ms," a heatmap tells you "*when* the slow requests happened, *how many* there were, and *whether the pattern was sustained or momentary*."
 
-For the theory behind why heatmaps matter and why percentiles alone are insufficient, see [Chapter 4: Performance Theory — Heatmaps](04-performance-theory.md#heatmaps-seeing-the-full-picture).
+For the theory behind why heatmaps matter and why percentiles alone are insufficient, see [Performance Theory](04-performance-theory.md#heatmaps-seeing-the-full-picture).
 
 ### How Heatmaps Work
 
@@ -480,7 +480,7 @@ The diff command highlights meaningful differences with directional indicators:
 | Avg Latency | 4.1ms | 5.8ms | +41.5% ▲ |
 | Error Rate | 0.00% | 0.00% | — |
 
-A 52% increase in P99 latency with only a 7% drop in throughput suggests the cluster is near its saturation point — small increases in load cause disproportionate latency increases. See [Chapter 4: Performance Theory](04-performance-theory.md#the-two-pillars-throughput-and-latency) for why this non-linear relationship exists.
+A 52% increase in P99 latency with only a 7% drop in throughput suggests the cluster is near its saturation point — small increases in load cause disproportionate latency increases. See [Performance Theory](04-performance-theory.md#the-two-pillars-throughput-and-latency) for why this non-linear relationship exists.
 
 ---
 
@@ -646,7 +646,7 @@ Transient under-replication is normal during broker restarts. Sustained under-re
 ```
 
 **When it fires:** Any partition has ISR < replication factor for more than 5 minutes.  
-**What to do:** Check broker disk I/O and network throughput. Slow disks or saturated networks prevent followers from keeping up with the leader. Also verify that `min.insync.replicas` is correctly configured — see [Chapter 3: Cluster Configuration](03-cluster.md).
+**What to do:** Check broker disk I/O and network throughput. Slow disks or saturated networks prevent followers from keeping up with the leader. Also verify that `min.insync.replicas` is correctly configured — see [The Cluster Under Test](03-cluster.md).
 
 ---
 

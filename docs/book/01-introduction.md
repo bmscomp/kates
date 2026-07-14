@@ -1,4 +1,4 @@
-# Chapter 1: Introduction
+# Introduction
 
 ## What Is Kates?
 
@@ -121,7 +121,7 @@ kates test list
 kates report show <id>
 ```
 
-For a complete setup guide, see [Chapter 12: Deployment Guide](12-deployment.md). For hands-on tutorials, see the [Tutorials](https://github.com/bmscomp/kates/tree/main/docs/tutorials) directory.
+For a complete setup guide, see [Deployment Guide](12-deployment.md). For hands-on tutorials, see the [Tutorials](https://github.com/bmscomp/kates/tree/main/docs/tutorials) directory.
 
 ## What Kates Is Not
 

@@ -1,4 +1,4 @@
-# Chapter 14: Recipes & Patterns
+# Recipes & Patterns
 
 Practical, ready-to-use recipes for common Kates workflows. Each recipe is a self-contained procedure you can adapt to your environment.
 

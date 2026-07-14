@@ -1,4 +1,4 @@
-# Chapter 11: REST API Reference
+# REST API Reference
 
 ## Introduction
 
@@ -12,7 +12,7 @@ If you need strongly typed clients, streaming results, or high-throughput progra
 
 ## Authentication
 
-Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values (see [Chapter 17: Security & Compliance](17-security.md)).
+Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values (see [Security & Compliance](17-security.md)).
 
 Include the key in every request, using either header form:
 
@@ -783,6 +783,6 @@ jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summar
 
 ## See Also
 
-- [Chapter 10: CLI Reference](10-cli-reference.md) — Interactive CLI commands that wrap this REST API
-- [Chapter 13: Scenario Files](13-scenario-files.md) — YAML scenario definitions used with test creation endpoints
-- [Chapter 16: gRPC API Reference](16-grpc-api.md) — Strongly typed alternative for CI/CD and service-to-service integration
+- [CLI Reference](10-cli-reference.md) — Interactive CLI commands that wrap this REST API
+- [Scenario Files & SLA Gates](13-scenario-files.md) — YAML scenario definitions used with test creation endpoints
+- [gRPC API Reference](16-grpc-api.md) — Strongly typed alternative for CI/CD and service-to-service integration

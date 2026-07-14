@@ -1,4 +1,4 @@
-# Chapter 2: Architecture & Design
+# Architecture & Design
 
 Kates is composed of four major subsystems: the **backend engine**, the **CLI**, the **infrastructure layer**, and the **observability stack**. This chapter explains how they fit together.
 
@@ -51,7 +51,7 @@ graph TB
 
 ## Backend Engine
 
-The backend is a **Quarkus application** running in JVM mode (with native image support via GraalVM). It exposes both a REST API and a **gRPC API** (see [Chapter 16](16-grpc-api.md)), and manages the full test lifecycle. Both APIs delegate to the same service layer — identical behavior, different wire formats.
+The backend is a **Quarkus application** running in JVM mode (with native image support via GraalVM). It exposes both a REST API and a **gRPC API** (see [gRPC API Reference](16-grpc-api.md)), and manages the full test lifecycle. Both APIs delegate to the same service layer — identical behavior, different wire formats.
 
 ### Component Map
 

@@ -1,6 +1,6 @@
-# Chapter 6: Chaos Engineering Theory
+# Chaos Engineering Theory
 
-Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production. This chapter covers the theory — Chapter 7 covers how Kates implements it.
+Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production. This chapter covers the theory — [Chaos Engineering in Practice](07-chaos-practice.md) covers how Kates implements it.
 
 ## Why Chaos Engineering?
 

@@ -1,4 +1,6 @@
-# Chapter 15: Kafka Deployment Engineering
+# Kafka Deployment Engineering
+
+> **Scope**: this chapter owns the *why* — the production engineering behind the cluster: node pools, listeners design, certificates, Cruise Control, alerting, and backup. For the step-by-step install walkthrough, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md); for deploying the Kates stack, see [Deployment Guide](12-deployment.md).
 
 This chapter is the operations manual for the **krafter** Kafka cluster — the Strimzi-managed, KRaft-mode deployment that underpins the entire Kates platform. It covers every layer from the operator to the broker JVM, with the reasoning behind each decision.
 
@@ -685,13 +687,6 @@ goals: >-
   ...PreferredLeaderElectionGoal
 ```
 
-## Version Matrix
+## Versions
 
-| Component | Version | Notes |
-|-----------|---------|-------|
-| Apache Kafka | 4.2.0 | Pinned in `versions.env` (`quay.io/strimzi/kafka:1.0.0-kafka-4.2.0`) |
-| Strimzi Operator | 1.0.0 | OCI Helm chart (`quay.io/strimzi-helm`) |
-| Strimzi Drain Cleaner | 1.0.0 | Installed without cert-manager |
-| Cruise Control | — | Bundled with the Strimzi Kafka image |
-| Kafka UI | v1.5.0 | kafbat/kafka-ui (successor to the Provectus UI) |
-| CRD API | `v1` | Migrated from deprecated `v1beta2` |
+Component versions for the whole platform are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md), generated from `versions.env`. Two notes specific to this chapter: Cruise Control is bundled with the Strimzi Kafka image (no separate pin), and the Strimzi CRD API is `v1` (migrated from the deprecated `v1beta2`).

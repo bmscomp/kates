@@ -1,6 +1,6 @@
 # Kafka Connect — Enterprise Image
 
-> For complete Kafka Connect architecture, CDC pipelines, connector lifecycle, and operational procedures, see [Chapter 21: Kafka Connect & CDC Pipelines](book/21-kafka-connect.md).
+> For complete Kafka Connect architecture, CDC pipelines, connector lifecycle, and operational procedures, see [Kafka Connect & CDC Pipelines](book/21-kafka-connect.md).
 
 Production-ready Kafka Connect image with pre-installed CDC, Schema Registry, and JDBC connectors for enterprise data integration pipelines.
 
@@ -80,6 +80,6 @@ The image version follows `<major>.<minor>.<patch>`:
 
 ## See Also
 
-- [Chapter 21: Kafka Connect & CDC Pipelines](book/21-kafka-connect.md) — Architecture, deployment, configuration, and operations
+- [Kafka Connect & CDC Pipelines](book/21-kafka-connect.md) — Architecture, deployment, configuration, and operations
 - [Tutorial 9: Kafka Connect Working Examples](tutorials/09-kafka-connect-working-examples.md) — Hands-on CDC + JDBC walkthrough
 - [Tutorial 10: Source/Sink Quick Runbook](tutorials/kafka-connect-simple-source-sink-demo.md) — Minimal source-to-sink demo

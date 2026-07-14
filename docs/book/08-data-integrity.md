@@ -1,4 +1,4 @@
-# Chapter 8: Data Integrity Verification
+# Data Integrity Verification
 
 Data integrity is the highest-stakes property of any messaging system. This chapter explains how Kates verifies that Kafka delivers on its durability and ordering guarantees — and how to test these guarantees under failure conditions.
 
@@ -176,7 +176,7 @@ scenarios:
 
 ## Integrity Under Chaos
 
-The real power of integrity testing emerges when combined with fault injection. There is no dedicated scaffold for this — you run an INTEGRITY test and inject a disruption (Chapter 7) while it is producing:
+The real power of integrity testing emerges when combined with fault injection. There is no dedicated scaffold for this — you run an INTEGRITY test and inject a disruption (see [Chaos Engineering in Practice](07-chaos-practice.md)) while it is producing:
 
 ```bash
 # Terminal 1 — start the integrity test

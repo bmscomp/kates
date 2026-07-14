@@ -189,7 +189,7 @@ policyexception.kyverno.io/dev-pod-security-exception created
 
 Pods in the `dev` namespace will now be exempted from the `validate-readonly-rootfs` and `validate-drop-capabilities` rules while all other validation rules remain enforced.
 
-> **Tip:** Kates manages these exceptions via Helm values under `kyvernoPolicy.policyExceptions`. For production deployments, use the Helm-managed approach instead of applying YAML directly. See [Chapter 17: Security & Compliance](../book/17-security.md) for details.
+> **Tip:** Kates manages these exceptions via Helm values under `kyvernoPolicy.policyExceptions`. For production deployments, use the Helm-managed approach instead of applying YAML directly. See [Security & Compliance](../book/17-security.md) for details.
 
 ## Step 6: Run a Security Audit
 
@@ -372,6 +372,6 @@ kubectl delete policyexception dev-pod-security-exception -n dev --ignore-not-fo
 
 ## What's Next?
 
-- [Chapter 17: Security & Compliance](../book/17-security.md) — full reference for authentication, authorization, certificates, and network policies
+- [Security & Compliance](../book/17-security.md) — full reference for authentication, authorization, certificates, and network policies
 - [Tutorial 6: CI/CD Integration](06-cicd-integration.md) — automate security gates in your pipeline with `kates security gate --min-grade B`
 - [Tutorial 3: Chaos Engineering](03-chaos-engineering.md) — test your cluster's resilience under failure conditions
