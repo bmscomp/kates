@@ -1,5 +1,8 @@
 <div align="center">
-  <img src="docs/assets/kates-wordmark.svg" width="500" alt="Kates — Kafka advanced testing and engineering suite" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kates-wordmark-dark.svg" />
+    <img src="docs/assets/kates-wordmark.svg" width="500" alt="Kates — Kafka advanced testing and engineering suite" />
+  </picture>
 
   <p>
     A Kubernetes-native platform for performance testing, chaos engineering,<br/>
