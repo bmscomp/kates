@@ -1,0 +1,44 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "charts/*/Chart.yaml"
+      - "scripts/gen-chart-table.sh"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "charts/*/Chart.yaml"
+      - "scripts/gen-chart-table.sh"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  readme-chart-table:
+    name: README Chart Table Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify chart table matches charts/*/Chart.yaml
+        run: ./scripts/gen-chart-table.sh --check
+
+  link-check:
+    name: Markdown Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links in README and top-level docs
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Offline mode validates only local file links (the drift we care
+          # about) and never fails on external outages or localhost URLs.
+          args: --offline --no-progress --include-fragments README.md docs/*.md
+          fail: true
