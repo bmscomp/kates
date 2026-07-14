@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 // setupTest creates an httptest.Server that returns the given statusCode and body.

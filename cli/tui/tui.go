@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/client"
+	"github.com/bmscomp/kates/cli/client"
 )
 
 type tab int

@@ -1,4 +1,4 @@
-module github.com/klster/kates-cli
+module github.com/bmscomp/kates/cli
 
 go 1.25.7
 

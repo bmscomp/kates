@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/klster/kates-cli/tui"
+	"github.com/bmscomp/kates/cli/tui"
 	"github.com/spf13/cobra"
 )
 

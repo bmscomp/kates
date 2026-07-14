@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/klster/kates-cli/cmd"
+	"github.com/bmscomp/kates/cli/cmd"
 )
 
 func main() {

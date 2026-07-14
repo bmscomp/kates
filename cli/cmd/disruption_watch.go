@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klster/kates-cli/client"
+	"github.com/bmscomp/kates/cli/client"
 	"github.com/spf13/cobra"
 )
 

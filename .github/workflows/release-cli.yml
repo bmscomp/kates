@@ -10,7 +10,7 @@ permissions:
 
 env:
   GO_VERSION: "1.25"
-  MODULE: "github.com/klster/kates-cli/cmd"
+  MODULE: "github.com/bmscomp/kates/cli/cmd"
 
 jobs:
   build:

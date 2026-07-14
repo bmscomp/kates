@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 func RenderTUI(report *DetectReport) {

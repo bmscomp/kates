@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/klster/kates-cli/internal/kubectl"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/internal/kubectl"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 

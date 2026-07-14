@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/klster/kates-cli/pkg/detect"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 )
 
 // runInteractiveForms runs the interactive huh forms (Form 1: component selection,

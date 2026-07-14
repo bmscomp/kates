@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 func printDryRun(label string, payload interface{}) {

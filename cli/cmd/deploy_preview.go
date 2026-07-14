@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 // renderDeployPreview displays a dry-run preview of what would be deployed.

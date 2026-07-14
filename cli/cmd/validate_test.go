@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klster/kates-cli/client"
+	"github.com/bmscomp/kates/cli/client"
 )
 
 func TestValidateSLAs_AllPass(t *testing.T) {

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/pkg/theme"
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 

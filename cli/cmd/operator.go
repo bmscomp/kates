@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/klster/kates-cli/pkg/operator"
+	"github.com/bmscomp/kates/cli/pkg/operator"
 	"github.com/spf13/cobra"
 )
 
