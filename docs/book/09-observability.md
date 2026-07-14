@@ -85,7 +85,7 @@ Get in the habit of following this sequence — cluster health → performance �
 
 ## Kafka Grafana Dashboards
 
-Kates deploys six Kafka-focused Grafana dashboards, each targeting a specific monitoring dimension. For the full dashboard and metrics reference, see [docs/monitoring.md](../monitoring.md).
+Kates deploys six Kafka-focused Grafana dashboards, each targeting a specific monitoring dimension. For the full dashboard and metrics reference, see [docs/monitoring.md](https://github.com/bmscomp/kates/blob/main/docs/monitoring.md).
 
 ### Kafka Cluster Health
 

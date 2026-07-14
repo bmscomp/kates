@@ -66,7 +66,7 @@ grpcurl -plaintext localhost:9000 list
 
 ## Service Definitions
 
-The protobuf contract is defined in [`kates.proto`](../../kates/src/main/proto/kates.proto).
+The protobuf contract is defined in [`kates.proto`](https://github.com/bmscomp/kates/blob/main/kates/src/main/proto/kates.proto).
 
 ### TestService
 
