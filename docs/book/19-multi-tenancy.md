@@ -64,6 +64,8 @@ Each tenant gets:
 
 ### Step 1 — Define Topics
 
+Tenant topics are declared alongside the platform topics in `config/kafka/kafka-topics.yaml`:
+
 ```yaml
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -100,6 +102,8 @@ spec:
 ```
 
 ### Step 2 — Create User with Scoped ACLs
+
+Add the user to `config/kafka/kafka-users.yaml`:
 
 ```yaml
 apiVersion: kafka.strimzi.io/v1
@@ -138,7 +142,7 @@ spec:
 Add the service's namespace to the broker NetworkPolicy:
 
 ```yaml
-# In kafka-networkpolicies.yaml, under kafka-brokers ingress
+# In config/kafka/kafka-networkpolicies.yaml, under kafka-brokers ingress
 - from:
     - namespaceSelector:
         matchLabels:
@@ -219,7 +223,7 @@ When a client exceeds its quota, the broker delays its response by a calculated 
 | Consumer parallelism | Partitions ≥ max expected consumers |
 | Throughput | More partitions = more parallel I/O |
 | Broker count | At least = broker count for even spread |
-| Overhead | Each partition costs ~10KB of metadata and file handles |
+| Overhead | Each partition adds controller metadata and open file handles on every replica |
 
 **Recommended sizing:**
 
@@ -275,97 +279,75 @@ flowchart TD
 
 ### Quick-Start Script
 
-Automate the onboarding steps with the Kates CLI:
+There is no dedicated CLI command for tenant onboarding — the workflow is declarative. Append the tenant's `KafkaTopic`, `KafkaUser`, and NetworkPolicy entries to the files in `config/kafka/`, then apply and verify:
 
 ```bash
-# Onboard a new service in one command
-kates tenant onboard my-service \
-  --produce-rate 10MB \
-  --consume-rate 20MB \
-  --cpu-percent 15 \
-  --topics events,commands,dlq \
-  --namespace my-service-namespace
+# Apply the tenant's declarative resources
+kubectl apply -f config/kafka/kafka-topics.yaml
+kubectl apply -f config/kafka/kafka-users.yaml
+kubectl apply -f config/kafka/kafka-networkpolicies.yaml
 
-# Verify the onboarding
-kates tenant verify my-service
-```
+# Wait for the User Operator to reconcile the credentials
+kubectl wait kafkauser/my-service --for=condition=Ready -n kafka --timeout=60s
 
-Expected output:
-
-```
-  ▸ Onboarding: my-service
-    ✓ KafkaUser created (scram-sha-512)
-    ✓ ACLs configured (prefix: my-service)
-    ✓ Quotas set (produce=10MB/s, consume=20MB/s, cpu=15%)
-    ✓ Topics created: my-service-events, my-service-commands, my-service-dlq
-    ✓ Secret generated: my-service (namespace: kafka)
-    ✓ NetworkPolicy updated
-    ✓ Connectivity verified (produce + consume OK)
-  Tenant my-service is ready ✅
+# Confirm the generated secret and topics
+kubectl get secret my-service -n kafka
+kubectl get kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
 ```
 
 ## Quota Monitoring
 
-Use these PromQL queries to track per-tenant resource usage and detect quota breaches before they impact application performance.
+Kafka's per-user quota and throttle-time MBeans are not mapped by the JMX exporter rules in `config/kafka/kafka-metrics.yaml`, so there are no per-user Prometheus metrics in this setup. Tenant usage is tracked indirectly — by topic prefix and consumer group.
 
-### Per-User Bandwidth Monitoring
+### Per-Tenant Bandwidth Monitoring
 
 ```promql
-# Produce bandwidth per user (bytes/sec)
-sum by (user) (
-  rate(kafka_server_fetch_session_cache_metrics_produce_throttle_time_total{user=~".+"}[5m])
-) > 0
+# Produce bandwidth per tenant topic (bytes/sec)
+sum by (topic) (
+  rate(kafka_server_brokertopicmetrics_bytesin_total{topic=~"my-service.*"}[5m])
+)
 
-# Actual produce rate vs quota — shows how close each user is to their limit
-rate(kafka_server_brokertopicmetrics_bytesin_total{topic=~"my-service.*"}[5m])
-  / on() group_left() (10 * 1024 * 1024)  # divide by quota (10MB/s)
+# Fraction of the tenant's 10MB/s produce quota in use
+sum(rate(kafka_server_brokertopicmetrics_bytesin_total{topic=~"my-service.*"}[5m]))
+  / (10 * 1024 * 1024)
 ```
 
-### Per-User CPU Usage
+### Request Handler Saturation
+
+The `requestPercentage` quota is enforced per user inside the broker, but only the pool-wide utilization is exported:
 
 ```promql
-# Request handler utilization per user (percentage of broker request handler pool)
-sum by (user) (
-  rate(kafka_server_request_handler_pool_usage{user=~".+"}[5m])
-) * 100
+# Broker request handler idle percentage (shared across all tenants)
+kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent
 ```
 
 ### Throttling Detection
 
-```promql
-# Detect users being actively throttled (produce or fetch)
-sum by (user) (
-  rate(kafka_server_throttle_time_total{user=~".+"}[5m])
-) > 0
-```
+Broker-side throttle-time metrics are not exported by the current JMX rules. Quota throttling surfaces client-side instead: the broker delays responses, so a throttled tenant sees increased produce/fetch latency without errors (see the quota enforcement diagram above).
 
-### Grafana Alert Rules
+### Alert Rules
 
-Set up alerts for quota breaches:
+The cluster's alerts are defined as a `PrometheusRule` in `config/kafka/kafka-alerts.yaml`. Two of them catch tenant-level problems:
 
 ```yaml
-# In your Grafana alert rules
-groups:
-  - name: kafka-tenant-quotas
-    rules:
-      - alert: TenantNearQuotaLimit
-        expr: |
-          sum by (user) (rate(kafka_server_brokertopicmetrics_bytesin_total[5m]))
-          / on(user) group_left() kafka_user_quota_produce_bytes_rate > 0.8
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Tenant {{ $labels.user }} is using >80% of produce quota"
+# From config/kafka/kafka-alerts.yaml
+- alert: KafkaConsumerGroupLag
+  expr: kafka_consumergroup_lag_sum > 1000000
+  for: 15m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Consumer group lag exceeds threshold"
+    description: "Consumer group {{ $labels.consumergroup }} has {{ $value }} messages lag."
 
-      - alert: TenantThrottled
-        expr: |
-          sum by (user) (rate(kafka_server_throttle_time_total[5m])) > 0
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Tenant {{ $labels.user }} is being throttled for >10 minutes"
+- alert: KafkaRequestHandlerSaturated
+  expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent < 0.3
+  for: 10m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Kafka request handlers over 70% busy"
+    description: "Broker {{ $labels.kubernetes_pod_name }} handler idle is {{ $value | humanizePercentage }} — consider adding threads or brokers."
 ```
 
 ## Decommissioning a Tenant
@@ -378,7 +360,7 @@ kubectl delete kafkauser my-service -n kafka
 kubectl delete kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
 
 # 3. Remove NetworkPolicy entry for the namespace
-# Edit kafka-networkpolicies.yaml and re-apply
+# Edit config/kafka/kafka-networkpolicies.yaml and re-apply
 
 # 4. Verify cleanup
 kubectl get kafkauser,kafkatopic -n kafka | grep my-service

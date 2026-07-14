@@ -1,6 +1,6 @@
 # Chapter 10: CLI Reference
 
-Complete reference for the Kates CLI — every command, flag, and output format.
+Reference for the Kates CLI — the commands, flags, and output formats you'll use day to day.
 
 ## Installation
 
@@ -29,7 +29,7 @@ Before diving into individual commands, here are the workflows you'll use most o
 
 ### Workflow 1: Performance Regression Check
 
-Before upgrading Kafka from 3.8 to 3.9, you want to know if the new version regresses performance. The idea is simple: capture a baseline on the current version, perform the upgrade, run the same test again, and diff the results. If P99 latency or throughput moves outside your tolerance, you have a data-backed reason to investigate before the upgrade reaches production.
+Before upgrading Kafka to a new version, you want to know if the new version regresses performance. The idea is simple: capture a baseline on the current version, perform the upgrade, run the same test again, and diff the results. If P99 latency or throughput moves outside your tolerance, you have a data-backed reason to investigate before the upgrade reaches production.
 
 ```bash
 # 1. Verify the cluster is healthy before starting
@@ -82,7 +82,7 @@ kates top
 kates disruption status <id>
 
 # 4. Export the latency heatmap for detailed post-mortem analysis
-kates report export <test-id> --format heatmap -o heatmap.json
+kates report export <test-id> --format heatmap > heatmap.json
 ```
 
 ### Workflow 4: Pre-Production Cluster Validation
@@ -108,17 +108,17 @@ kates trend --type ENDURANCE --metric p99LatencyMs --days 30
 
 ### Workflow 5: CI/CD Quality Gate
 
-You want every pull request to prove it doesn't regress Kafka performance. This workflow integrates into your CI pipeline — it runs a scenario file, exports JUnit results, and exits non-zero if the grade drops below your threshold.
+You want every pull request to prove it doesn't regress Kafka performance. This workflow integrates into your CI pipeline — it runs a scenario file, exports JUnit results, and runs a quality-gate test that exits non-zero if the grade drops below your threshold.
 
 ```bash
 # 1. Run the scenario defined in your repo
 kates test apply -f ci/load-test.yaml --wait
 
 # 2. Export results as JUnit XML for your CI system
-kates report export <id> --format junit -o results.xml
+kates report export <id> --format junit > results.xml
 
-# 3. Gate: fail the build if the grade is below B
-kates gate -f ci/load-test.yaml --min-grade B
+# 3. Gate: run a gate test and fail the build if the grade is below B
+kates gate --min-grade B --type LOAD --records 100000
 ```
 
 ::: {.callout-tip}
@@ -207,18 +207,22 @@ kates health
 Expected output:
 
 ```
- Kates Health Check
+ Kates Health Dashboard — System Status: UP
 
-  Component          Status    Details
-  ─────────────────────────────────────────────────────
-  API Server         ● UP      v1.17.0 (uptime 4d 12h)
-  Kafka Cluster      ● UP      3 brokers, 0 under-replicated
-  Schema Registry    ● UP      Apicurio 2.2.5.Final
-  Test Engine        ● IDLE    No tests running
-  Database           ● UP      PostgreSQL 16.3
-  Monitoring         ● UP      Prometheus + Grafana
+  Engine
+  Active Backend:   native
+  Available:        [native trogdor]
 
-  Overall: ● HEALTHY
+  Kafka Cluster
+  Status:           ● UP
+  Bootstrap:        krafter-kafka-bootstrap.kafka.svc:9092
+
+  Performance Tests
+  Test        Records   Partitions   Producers   Acks   Compress
+  ─────────────────────────────────────────────────────────────
+  load        100000    3            2           all    lz4
+  stress      5000000   6            16          1      lz4
+  ...
 ```
 
 #### status
@@ -232,12 +236,14 @@ kates status
 Expected output:
 
 ```
-● HEALTHY | 3 brokers | 42 topics | 0 running tests | v1.17.0
+  ✓ local │ UP │ Kafka ✓ │ 12 configs │ 0 running │ 8 done │ 0 failed
 ```
+
+If the API is unreachable, the line shows the context name, its URL, and `unreachable` instead.
 
 #### version
 
-Show CLI, API, and runtime version information.
+Show CLI and runtime version information (CLI version, commit, build date, Go runtime), plus API reachability and the active backend when the server is up.
 
 ```bash
 kates version
@@ -247,7 +253,7 @@ kates version
 
 Aliases: `preflight`, `check`
 
-Pre-flight cluster readiness checklist. The doctor command performs a deep diagnostic of your environment: Kubernetes connectivity, Strimzi operator status, Kafka AdminClient reachability, storage provisioner health, and namespace configuration. It's the first command to run when something "feels wrong" but `kates health` reports healthy — doctor checks the infrastructure layers that health doesn't.
+Pre-flight cluster readiness checklist. The doctor command verifies that the Kates API is reachable, Kafka is connected, the broker count meets the 3-broker minimum, ISR health is clean, topics are listable, and benchmark backends are available. It also checks whether Kyverno is installed with active policies and no workload violations (Kyverno checks warn rather than fail — it's optional but recommended). Failing checks come with remediation hints. It's the first command to run when something "feels wrong" but `kates health` reports healthy.
 
 ```bash
 kates doctor
@@ -258,25 +264,22 @@ kates check
 Expected output:
 
 ```
- Kates Doctor — Environment Diagnostics
+ Kates Doctor — Pre-flight cluster readiness
 
-  Check                          Result
-  ──────────────────────────────────────────────────────
-  Kubernetes API                 ✔ Reachable (v1.32.4)
-  kubectl context                ✔ kind-panda
-  Strimzi Operator               ✔ Running (0.45.0)
-  Kafka Cluster CR               ✔ Ready (3 brokers)
-  KRaft Controller               ✔ Active (broker-0)
-  AdminClient connectivity       ✔ Connected
-  Schema Registry                ✔ Healthy
-  Prometheus                     ✔ Scraping 12 targets
-  Grafana                        ✔ 10 dashboards loaded
-  Namespace: kafka               ✔ Exists
-  Namespace: kates               ✔ Exists
-  StorageClass: standard         ✔ Available
-  PVC health                     ✔ 3/3 Bound
+  Check                Status   Detail
+  ─────────────────────────────────────────────────────────────
+  API Reachable        PASS     Connected
+  Kafka Connected      PASS     krafter-kafka-bootstrap.kafka.svc:9092
+  Broker Count ≥ 3     PASS     3 brokers detected
+  ISR Health           PASS     All replicas in sync
+  Topics Available     PASS     42 topics found
+  Benchmark Backends   PASS     [native trogdor]
+  Kyverno Installed    PASS     CRD present
+  Kyverno Ready        PASS     Admission controller running
+  Kyverno Policies     PASS     6 policies active
+  Kyverno Violations   PASS     No workload violations
 
-  Result: 13/13 checks passed ✔
+  ✓ 10/10 checks passed — cluster is ready for testing!
 ```
 
 **See also:** [Chapter 12: Deployment](12-deployment.md) for environment setup, [Appendix B: Troubleshooting](appendix-b-troubleshooting.md) for common diagnostic failures.
@@ -293,24 +296,24 @@ Kafka cluster metadata and inspection.
 
 ```bash
 # Cluster overview
-kates cluster
+kates cluster info
 
 # List topics
 kates cluster topics
 
 # Topic detail with partition layout
-kates cluster topic <topic-name>
+kates cluster topics describe <topic-name>
 
 # Consumer groups
 kates cluster groups
 
 # Consumer group detail with lag
-kates cluster group <group-name>
+kates cluster groups describe <group-id>
 
-# Broker configuration
-kates cluster brokers
+# Non-default configuration for a broker
+kates cluster broker configs <broker-id>
 
-# Full cluster topology (26 sections)
+# Full cluster topology
 kates cluster topology
 
 # Critical Kafka health alerts
@@ -319,7 +322,7 @@ kates cluster alerts
 
 #### cluster info
 
-Display cluster metadata including broker list, controller identity, cluster ID, and Kafka version.
+Display cluster metadata including broker count, controller identity, cluster ID, and the broker list with rack/AZ placement. The controller broker is marked with ★ in the Role column.
 
 ```bash
 kates cluster info
@@ -328,21 +331,23 @@ kates cluster info
 Expected output:
 
 ```
- Kafka Cluster Info
+ Kafka Cluster — Cluster ID: dQw4w9WgXcQ
 
-  Cluster ID:    dQw4w9WgXcQ
-  Kafka Version: 4.2.0
-  Mode:          KRaft (no ZooKeeper)
-  Controller:    broker-0 (id: 0)
+  Overview
+  Broker Count:   3
 
-  Brokers (3):
-  ID   Host                           Port   Rack    Role
-  ──   ────                           ────   ────    ────
-  0    panda-broker-0.kafka.svc       9092   alpha   broker,controller
-  1    panda-broker-1.kafka.svc       9092   sigma   broker
-  2    panda-broker-2.kafka.svc       9092   gamma   broker
+  Controller
+  Node ID:    0
+  Host:       krafter-broker-0.kafka.svc
+  Port:       9092
+  Rack / AZ:  alpha
 
-  Topics: 42 | Partitions: 186 | Consumer Groups: 7
+  Brokers (3)
+  ID   Host                         Port   Rack / AZ   Role
+  ──   ────                         ────   ─────────   ────
+  0    krafter-broker-0.kafka.svc   9092   alpha       ★
+  1    krafter-broker-1.kafka.svc   9092   sigma
+  2    krafter-broker-2.kafka.svc   9092   gamma
 ```
 
 #### cluster check
@@ -358,80 +363,75 @@ Output statuses: `● HEALTHY`, `▲ WARNING`, `✖ CRITICAL`.
 
 #### cluster topology
 
-Display the full Strimzi/Kafka cluster topology with 26 data sections. Requires the Kates backend to be deployed on Kubernetes with access to Strimzi CRDs and Kafka AdminClient APIs. This is the most comprehensive view of your cluster — use it to verify broker/controller layout after deployment or to audit infrastructure before a load test.
+Display the full Strimzi/Kafka cluster topology, section by section — from the Kubernetes platform down to individual PVCs and endpoints. Requires the Kates backend to be deployed on Kubernetes with access to Strimzi CRDs and Kafka AdminClient APIs. This is the most comprehensive view of your cluster — use it to verify broker/controller layout after deployment or to audit infrastructure before a load test.
 
 ```bash
 kates cluster topology
 kates cluster topology -o json
 ```
 
-Expected output (abbreviated — full output includes 26 sections):
+Expected output (abbreviated — full output includes all sections listed below):
 
 ```
- Kates Cluster Topology — 26 Sections
+ Kafka Cluster Topology — Cluster: krafter  │  Kafka 4.2.0  │  KRaft Mode
 
- ── 1. Kubernetes Platform ─────────────────────────
-  Version:     v1.32.4
-  Provider:    kind
-  Nodes:       3 (panda-worker, panda-worker2, panda-worker3)
+  Kubernetes Platform
+  Version:   v1.31.4
+  Platform:  linux/arm64
+  Nodes:     3
 
- ── 2. Strimzi Operator ────────────────────────────
-  Version:     0.45.0
-  Replicas:    1/1 Ready
-  Watching:    All namespaces
+  Strimzi Operator
+  Version:     1.0.0
+  Components:  ✓ Operator  ✓ Entity Operator  ✓ Cruise Control
 
- ── 3. Kafka Cluster ───────────────────────────────
-  Name:        panda
+  Kafka Cluster
+  Cluster ID:  dQw4w9WgXcQ
   Namespace:   kafka
-  Replicas:    3
-  Status:      Ready
-  Listeners:   PLAIN (9092), TLS (9093)
+  Brokers:     3
+  Status:      ✓ Ready
 
- ── 6. Controllers ─────────────────────────────────
-  Active:      broker-0 (id: 0, zone: alpha)
-  Mode:        KRaft
+  Controllers (3)
+  ...
 
- ── 7. Brokers ─────────────────────────────────────
-  ID  Pod                  Zone    CPU    Memory   Disk
-  0   panda-broker-0       alpha   120m   1.2Gi    4.8Gi
-  1   panda-broker-1       sigma   95m    1.1Gi    4.6Gi
-  2   panda-broker-2       gamma   110m   1.2Gi    4.7Gi
+  Brokers (3)
+  ...
 
-  ... (19 more sections)
+  (more sections: node pools, certificates, ACLs, PVCs, services, ...)
 ```
 
-| # | Section | Source |
-|---|---------|--------|
-| 1 | Kubernetes Platform | K8s API |
-| 2 | Strimzi Operator | Deployment |
-| 3 | Kafka Cluster | CR + AdminClient |
-| 4 | Kafka Config | CR |
-| 5 | Node Pools | CRD |
-| 6 | Controllers | AdminClient + Pods |
-| 7 | Brokers | AdminClient + Pods |
-| 8 | Entity Operator | CR |
-| 9 | Cruise Control | CR |
-| 10 | Kafka Exporter | CR |
-| 11 | TLS Certificates | CR |
-| 12 | Metrics & Monitoring | CR + PodMonitors |
-| 13 | Managed Topics | CRD |
-| 14 | Kafka Users | CRD |
-| 15 | Consumer Groups | AdminClient |
-| 16 | ACLs | AdminClient |
-| 17 | Log Directories | AdminClient |
-| 18 | Feature Flags | AdminClient |
-| 19 | Kafka Rebalances | CRD |
-| 20 | Strimzi Drain Cleaner | Deployment |
-| 21 | Strimzi Pod Sets | CRD |
-| 22 | Network Policies | K8s API |
-| 23 | PVCs | K8s API |
-| 24 | Services | K8s API |
-| 25 | Endpoints | K8s API |
-| 26 | Connect / MirrorMaker2 | CRD |
+| Section | Source |
+|---------|--------|
+| Kubernetes Platform | K8s API |
+| Strimzi Operator | Deployment |
+| Kafka Cluster | CR + AdminClient |
+| Kafka Broker Configuration | CR |
+| Node Pools | CRD |
+| Controllers | AdminClient + Pods |
+| Brokers | AdminClient + Pods |
+| Entity Operator | CR |
+| Cruise Control | CR |
+| Kafka Exporter | CR |
+| TLS Certificates | CR |
+| Metrics & Monitoring | CR + PodMonitors |
+| Managed Topics | CRD |
+| Kafka Users | CRD |
+| Consumer Groups | AdminClient |
+| Access Control Lists | AdminClient |
+| Log Directories | AdminClient |
+| Feature Flags | AdminClient |
+| Kafka Rebalances | CRD |
+| Strimzi Drain Cleaner | Deployment |
+| Strimzi Pod Sets | CRD |
+| Network Policies | K8s API |
+| Persistent Volume Claims | K8s API |
+| Services | K8s API |
+| Endpoints | K8s API |
+| Kafka Connect | CRD |
+| MirrorMaker2 | CRD |
 
 #### cluster alerts
 
-Show critical Kafka health alerts from PrometheusRule CRDs. Displays 16 alert rules across 8 groups that can affect cluster health. Alerts are sorted by severity (critical first) with styled indicators.
+Show critical Kafka health alerts from PrometheusRule CRDs — the alert rules the `kafka-cluster` chart installs, organized into the groups listed below. Alerts are sorted by severity (critical first) with styled indicators.
 
 Returns **exit code 2** when critical alerts are configured — useful for CI/CD health gates.
 
@@ -568,25 +568,27 @@ Apply a YAML scenario file. Supports multi-phase tests with SLA definitions.
 
 #### test scaffold
 
+Browse and export the built-in library of ready-to-use YAML scenario templates.
+
 ```bash
-kates test scaffold --type LOAD
-kates test scaffold --type STRESS -o stress-test.yaml
-kates test scaffold --type INTEGRITY_CHAOS -o chaos-integrity.yaml
+kates test scaffold                        # list all templates
+kates test scaffold --type LOAD           # filter by test type
+kates test scaffold show production-load  # preview a template
+kates test scaffold export ci-gate        # write ci-gate.yaml to current dir
+kates test scaffold export ci-gate -o my-gate.yaml
+kates test scaffold export --all           # export every template
 ```
 
-Generate a YAML scaffold template for any test type.
-
-| Type | Description |
-|------|-------------|
-| `LOAD` | Standard load test scenario |
-| `STRESS` | Multi-phase ramp-up stress test |
-| `SPIKE` | Three-phase spike simulation |
-| `ENDURANCE` | Long-running soak test |
-| `VOLUME` | Large message volume test |
-| `CAPACITY` | Progressive capacity discovery |
-| `ROUND_TRIP` | End-to-end latency measurement |
-| `INTEGRITY` | Data integrity verification |
-| `INTEGRITY_CHAOS` | Integrity + chaos injection |
+| Template | Type | Description |
+|----------|------|-------------|
+| `quick-load` | LOAD | Quick smoke test — 50k records, 2 producers, p99 < 100ms gate |
+| `production-load` | LOAD | Production-grade — 1M records, 8 producers, acks=all, lz4, strict SLA |
+| `stress-test` | STRESS | High-throughput stress — 5M records, 16 producers, find breaking points |
+| `endurance-soak` | ENDURANCE | 1-hour soak at 5k msg/s — detect GC pauses and log compaction issues |
+| `exactly-once` | ROUND_TRIP | E2E integrity — idempotent + transactional, zero-loss, CRC verification |
+| `integrity-tx` | INTEGRITY | Transactional integrity — 4 producers, zstd, CRC, zero-loss verification |
+| `spike-test` | SPIKE | Burst traffic — 32 producers for 60s, test backpressure handling |
+| `ci-gate` | LOAD | CI pipeline gate — fast 10k-record validation with strict zero-error SLA |
 
 **See also:** [Chapter 5: Test Types](05-test-types.md) for the theory behind each test type, [Chapter 13: Scenario Files](13-scenario-files.md) for YAML scenario syntax.
 
@@ -607,34 +609,31 @@ Display the full report for a test run.
 Expected output:
 
 ```
- Test Report — t-a1b2c3
+ Performance Report — Test: a1b2c3
 
-  Type:       LOAD
-  Status:     DONE
-  Duration:   32.4s
-  Backend:    native-loom
-  Topic:      kates-perf-test-a1b2c3 (6 partitions, RF=3)
+  Throughput
+  Total Records:     100,000
+  Avg Throughput:    3,086 rec/s
+  Peak Throughput:   3,412 rec/s
+  Avg MB/s:          3.02
 
-  ── Producer Metrics ──────────────────────────────
-  Records Sent:          100,000
-  Throughput:            3,086 rec/s (3.02 MB/s)
-  Avg Latency:           4.12 ms
-  P50 Latency:           3.00 ms
-  P95 Latency:           8.00 ms
-  P99 Latency:           22.00 ms
-  Max Latency:           186.00 ms
+  Latency Distribution
+  Average  ▓▓░░░░░░░░░░░░░░░░░░    4.12 ms
+  P50      ▓▓░░░░░░░░░░░░░░░░░░    3.00 ms
+  P95      ▓▓▓░░░░░░░░░░░░░░░░░    8.00 ms
+  P99      ▓▓▓▓▓░░░░░░░░░░░░░░░   22.00 ms
+  Max      ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  186.00 ms
 
-  ── Consumer Metrics ──────────────────────────────
-  Records Consumed:      100,000
-  Consumer Throughput:   3,102 rec/s (3.04 MB/s)
-  Integrity:             ✔ 100.00% (0 lost, 0 duplicates)
+  Reliability
+  Error Rate:   0.0000%
 
-  ── SLA Verdict ───────────────────────────────────
-  Grade: A
-  P99 ≤ 50ms:           ✔ PASS (22.00ms)
-  Throughput ≥ 1000:     ✔ PASS (3,086 rec/s)
-  Data Loss = 0:         ✔ PASS
+  SLA Verdict
+  ✓ All SLA thresholds met
+
+  Export: kates report export a1b2c3 --format csv
 ```
+
+If SLA thresholds are violated, the verdict section instead lists each violation in a Metric / Threshold / Actual / Status table.
 
 #### report summary
 
@@ -647,20 +646,23 @@ Condensed summary of key metrics.
 #### report export
 
 ```bash
-kates report export <id> --format json
 kates report export <id> --format csv
-kates report export <id> --format junit -o results.xml
-kates report export <id> --format heatmap -o heatmap.json
-kates report export <id> --format heatmap-csv -o heatmap.csv
+kates report export <id> --format junit
+kates report export <id> --format md
+kates report export <id> --format heatmap > heatmap.json
+kates report export <id> --format heatmap-csv > heatmap.csv
 ```
 
 | Format | Description |
 |--------|-------------|
-| `json` | Full report as JSON |
 | `csv` | Metrics as CSV spreadsheet |
 | `junit` | JUnit XML for CI/CD |
+| `md` | Markdown report |
+| `html` | HTML report |
 | `heatmap` | Latency heatmap as JSON |
 | `heatmap-csv` | Latency heatmap as CSV |
+
+When run in a terminal, the export is written to an auto-named file (e.g. `kates-report-<id>.csv`); when piped or redirected, it goes to stdout. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`.
 
 #### report diff
 
@@ -700,31 +702,47 @@ Historical performance trend analysis.
 
 ```bash
 kates trend --type LOAD --metric p99LatencyMs --days 30
-kates trend --type LOAD --metric throughputRecordsPerSec --days 7
+kates trend --type LOAD --metric avgThroughputRecPerSec --days 7
+kates trend --type SPIKE --phase spike --metric avgThroughputRecPerSec
+kates trend --type ENDURANCE --all-phases --metric p99LatencyMs
+kates trend phases --type SPIKE --days 30
 ```
 
 Expected output:
 
 ```
- Performance Trend — LOAD / p99LatencyMs / 30 days
+ Trend Analysis — LOAD · p99LatencyMs · 30d window
 
-  Date         P99 (ms)   Trend
-  ──────────────────────────────────────────
-  2026-06-09   18.0       ▁▁▁▂▂
-  2026-06-16   19.5       ▁▁▂▂▃
-  2026-06-23   21.0       ▁▂▂▃▃
-  2026-06-30   20.0       ▁▂▂▂▃
-  2026-07-07   22.0       ▂▂▃▃▃
+  Baseline:   20.10
 
-  30-day avg: 20.1ms | Min: 17.5ms | Max: 24.0ms
-  Trend: → stable (±8.2% variance)
+  Trend Chart
+  ▁▂▂▃▃  → stable  (5 data points)
+
+  Min:       18.00
+  Max:       22.00
+  Average:   20.10
+
+  Data Points
+  Run ID     Timestamp             Value
+  ─────────────────────────────────────────
+  a1b2c3     2026-06-09T02:00:00Z  18.00
+  d4e5f6     2026-06-16T02:00:00Z  19.50
+  ...
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--type` | Test type to analyze |
-| `--metric` | Metric name: `p99LatencyMs`, `avgLatencyMs`, `throughputRecordsPerSec` |
-| `--days` | Lookback period in days |
+Runs that deviate significantly from the baseline are listed in a separate "Regressions Detected" table with the deviation percentage.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | | Test type to analyze (required) |
+| `--metric` | `avgThroughputRecPerSec` | Metric name: `avgThroughputRecPerSec`, `peakThroughputRecPerSec`, `avgThroughputMBPerSec`, `avgLatencyMs`, `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs`, `p999LatencyMs`, `maxLatencyMs`, `errorRate` |
+| `--days` | 30 | Lookback period in days |
+| `--baseline` | 5 | Number of recent runs used to compute the baseline |
+| `--phase` | | Phase name to analyze (omit for overall) |
+| `--all-phases` | false | Show trends for all phases side-by-side |
+| `--broker` | | Broker ID to scope trend analysis |
+
+Use `kates trend phases --type <TYPE>` to list the phase names available for a test type.
 
 **See also:** [Chapter 4: Performance Theory](04-performance-theory.md) for statistical significance and why single runs are insufficient.
 
@@ -801,12 +819,63 @@ Real-time SSE progress stream for disruption tests.
 
 ---
 
+### Chaos Experiment History
+
+Chaos commands browse the history of past chaos experiment reports and their probe results — the record left behind by disruption and resilience runs.
+
+Aliases: `cx`
+
+#### chaos list
+
+List recent chaos experiment reports with ID, plan name, status, SLA grade, and date.
+
+```bash
+kates chaos list
+kates chaos list --limit 50
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--limit` | 20 | Maximum reports to display |
+
+#### chaos show
+
+Show a detailed chaos experiment report with per-probe breakdown.
+
+```bash
+kates chaos show <id>
+```
+
+---
+
 ### Resilience
 
 Combined performance + chaos testing. Resilience tests run a load workload and inject disruptions simultaneously, then grade the cluster's ability to maintain SLA under fault conditions. This is the highest-level chaos primitive — it combines what you'd otherwise do manually with `test create` + `disruption run`.
 
 ```bash
-kates resilience run --config resilience-test.json
+kates resilience run -f resilience-test.yaml
+kates resilience run -f resilience-test.json    # JSON also supported
+kates resilience run -f resilience-test.yaml --dry-run
+```
+
+The config file has three parts: a `testRequest` (the same shape as a test creation request), a `chaosSpec` (experiment name, target namespace/label, duration, disruption type), and an optional `steadyStateSec` baseline period:
+
+```yaml
+testRequest:
+  type: LOAD
+  spec:
+    numRecords: 100000
+    numProducers: 2
+    recordSize: 512
+
+chaosSpec:
+  experimentName: kafka-broker-pod-kill
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka"
+  chaosDurationSec: 30
+  disruptionType: POD_KILL
+
+steadyStateSec: 30
 ```
 
 **See also:** [Chapter 7: Chaos Practice](07-chaos-practice.md) for resilience test configuration.
@@ -927,20 +996,22 @@ kates deploy status
 Expected output:
 
 ```
- Kates Deployment Status
+  Operators & CRDs
+    Strimzi Operator      [Healthy]
+    Cert-Manager          [Healthy]
+    Kyverno               [Healthy]
 
-  Component             Namespace    Status     Version
-  ─────────────────────────────────────────────────────
-  Strimzi Operator      kafka        ● Running  0.45.0
-  Kafka Cluster         kafka        ● Ready    4.2.0
-  Kates Backend         kates        ● Running  1.17.0
-  PostgreSQL            kates        ● Running  16.3
-  Prometheus            monitoring   ● Running  2.54.0
-  Grafana               monitoring   ● Running  11.6.0
-  Jaeger                monitoring   ● Running  1.62.0
-  LitmusChaos           litmus       ● Running  3.14.0
+  Core Infrastructure
+    Kafka (krafter)       [Healthy]
+    PostgreSQL (CDC)      [Healthy]
+    Kafka Connect         [Healthy]
+    Monitoring Stack      [Healthy]
 
-  Overall: 8/8 components healthy
+  Applications
+    Apicurio Registry     [Healthy]
+    Kates Backend         [Healthy]
+    Kafka UI              [Healthy]
+    Litmus Chaos          [Healthy]
 ```
 
 #### clean
@@ -1293,20 +1364,19 @@ kates kafka topics
 Expected output:
 
 ```
- Kafka Topics (42 total)
+ Kafka Topics (42)
 
-  Topic                          Partitions   RF   ISR    Status
-  ─────────────────────────────────────────────────────────────────
-  orders.events                  6            3    6/6    ● Healthy
-  user.signups                   3            3    3/3    ● Healthy
-  payments.processed             6            3    6/6    ● Healthy
-  inventory.updates              3            3    3/3    ● Healthy
-  kates-perf-test-a1b2c3         6            3    6/6    ● Healthy
-  __consumer_offsets              50           3    50/50  ● Healthy
+  Topic                    Type       Partitions   Rep. Factor   ISR Health
+  ──────────────────────────────────────────────────────────────────────────
+  orders.events                       6            3             ✓ HEALTHY
+  user.signups                        3            3             ✓ HEALTHY
+  payments.processed                  6            3             ✓ HEALTHY
+  kates-events             system     3            3             ✓ HEALTHY
+  __consumer_offsets       internal   50           3             ✓ HEALTHY
   ...
-
-  Summary: 42 topics, 186 partitions, 0 under-replicated
 ```
+
+Topics with under-replicated partitions show `⚠ N under-replicated` in the ISR Health column. Use `--filter <substring>` to narrow the list.
 
 #### kafka topic
 
@@ -1398,7 +1468,32 @@ Launch interactive Kafka explorer (full-screen TUI).
 kates kafka tui
 ```
 
-**See also:** [Chapter 3: Cluster Setup](03-cluster.md) for Kafka cluster architecture, [Chapter 15: Kafka Deployment](15-kafka-deployment.md) for production Kafka configuration.
+#### kafka connect
+
+Manage Kafka Connect (via Strimzi CRDs) — inspect the Connect cluster, list and describe connectors, and perform lifecycle operations. All subcommands accept `-n`/`--namespace` to select the namespace where Connect is deployed (auto-detected by default: `KATES_CONNECT_NS` env var, then live cluster detection, then `KATES_KAFKA_NS`, then `kafka`).
+
+```bash
+kates kafka connect status                  # Connect cluster status
+kates kafka connect connectors              # List all KafkaConnector CRs
+kates kafka connect connector <name>        # Describe a connector
+kates kafka connect tasks <name>            # Task-level status for a connector
+kates kafka connect config <name>           # Show connector configuration
+kates kafka connect plugins                 # List installed connector plugins
+kates kafka connect logs --follow           # Tail Connect worker logs
+kates kafka connect restart <name>          # Restart a connector
+kates kafka connect restart-task <name> <taskId>
+kates kafka connect pause <name>
+kates kafka connect resume <name>
+kates kafka connect delete <name>
+kates kafka connect scale <replicas>        # Scale Connect workers
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n`, `--namespace` | Namespace where Kafka Connect is deployed |
+| `-f`, `--follow` | (`logs` only) Stream logs continuously |
+
+**See also:** [Chapter 21: Kafka Connect](21-kafka-connect.md) for Connect cluster deployment and connector configuration, [Chapter 3: Cluster Setup](03-cluster.md) for Kafka cluster architecture, [Chapter 15: Kafka Deployment](15-kafka-deployment.md) for production Kafka configuration.
 
 ---
 
@@ -1457,8 +1552,18 @@ CI quality gate — run a test and exit non-zero if grade is below threshold.
 kates gate
 kates ci
 kates quality-gate
-kates gate -f scenario.yaml --min-grade B
+kates gate --min-grade B
+kates gate --min-grade C --type STRESS --records 100000
+kates gate --min-grade A --timeout 300
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--min-grade` | `C` | Minimum passing grade (A, B, C, D, F) |
+| `--type` | `LOAD` | Test type to run |
+| `--records` | 50000 | Number of records |
+| `--backend` | | Benchmark backend |
+| `--timeout` | 180 | Timeout in seconds |
 
 #### baseline
 
@@ -1671,20 +1776,25 @@ kates flow run -f pipeline.yaml
 
 ### Badge Generation
 
-The badge command generates shields.io-compatible SVG badges that display your cluster's latest performance grade, security score, or build status. Embed them in your repository's README, wiki pages, or internal dashboards. Badges are generated from the most recent test or audit results — they update automatically when you run new tests. Supported badge types include `build`, `performance`, `security`, and `health`.
+The badge command generates shields.io-compatible badge URLs from your most recent completed test — ready to paste into a repository README, GitHub PR, or dashboard. It prints the raw URL plus ready-made Markdown and HTML snippets. The badge value comes from the latest `DONE` test (optionally filtered by test type), so it reflects your most recent results each time you regenerate it.
 
 ```bash
-kates badge
-kates badge --type build --output badge.svg
-kates badge --type performance --output perf-badge.svg
-kates badge --type security --output sec-badge.svg
+kates badge                                # grade badge from the latest test
+kates badge --type LOAD --metric grade
+kates badge --type STRESS --metric p99
+kates badge --metric throughput
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | | Test type filter (LOAD, STRESS, etc.) |
+| `--metric` | `grade` | Badge metric: `grade`, `p99`, or `throughput` |
 
 ---
 
 ### Webhook Notifications
 
-Webhooks send HTTP POST notifications to external endpoints when specific events occur in Kates. Supported events include `test.completed`, `test.failed`, `disruption.completed`, `schedule.triggered`, and `security.audit.completed`. Use webhooks to integrate Kates with Slack, PagerDuty, Microsoft Teams, or any system that accepts incoming webhooks. Each webhook registration binds a name, a URL, and an optional event filter — if no event filter is specified, the webhook fires for all events.
+Webhooks send HTTP POST notifications to external endpoints when a test finishes. The backend fires a `test.completed` event whenever a test reaches `DONE` or `FAILED` status; the payload carries the event name, test ID, test type, final status, and timestamp (the event name is also sent in the `X-Kates-Event` header). Use webhooks to integrate Kates with Slack, PagerDuty, Microsoft Teams, or any system that accepts incoming webhooks. Each webhook registration binds a name to a URL. Deliveries are retried, and events that still fail are parked in a dead-letter queue.
 
 #### webhook
 

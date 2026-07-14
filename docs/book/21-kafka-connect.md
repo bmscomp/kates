@@ -55,32 +55,42 @@ graph TB
 
 ## Helm Chart Structure
 
-The `connect-cluster` chart lives at `charts/connect-cluster/` and produces two Strimzi CRDs:
+The `connect-cluster` chart lives at `charts/connect-cluster/` and produces the Strimzi `KafkaConnect` and `KafkaConnector` resources (plus an optional chart-managed `KafkaUser`):
 
 ```
 charts/connect-cluster/
-├── Chart.yaml                          # v1.0.0, appVersion 4.2.0
+├── Chart.yaml                          # v1.2.0, appVersion 4.2.0
 ├── values.yaml                         # Production defaults
-├── values-generic.yaml                    # Kind cluster overlay
+├── values-generic.yaml                 # Generic cluster overlay (no Prometheus CRDs)
+├── values-kind.yaml                    # Kind overlay (generic + local DB egress, Schema Registry)
 ├── values-dev.yaml                     # Development overlay
 ├── values-prod.yaml                    # Production overlay
 ├── values.schema.json                  # Input validation
 ├── README.md                           # Chart documentation
-├── templates/
-│   ├── _helpers.tpl                    # Naming, labels, namespace helpers
-│   ├── kafka-connect.yaml              # KafkaConnect CR
-│   ├── kafka-connectors.yaml           # KafkaConnector CRs
-│   ├── validate-connectors.yaml        # Pre-install CI validation hook
-│   ├── network-policy.yaml             # Ingress/egress rules
-│   ├── service-account.yaml            # Dedicated RBAC
-│   ├── service.yaml                    # REST API Service
-│   ├── ingress.yaml                    # Optional REST API Ingress
-│   ├── prometheus-alerts.yaml          # 8 alert rules
-│   ├── pod-monitor.yaml                # Prometheus PodMonitor
-│   ├── grafana-dashboard.yaml          # 8-panel dashboard
-│   └── tests/
-│       └── test-connect-api.yaml       # Helm test pod (REST API health)
-└── NOTES.txt                           # Post-install instructions
+└── templates/
+    ├── NOTES.txt                       # Post-install instructions
+    ├── _helpers.tpl                    # Naming, labels, namespace helpers
+    ├── kafka-connect.yaml              # KafkaConnect CR
+    ├── connectors.yaml                 # KafkaConnector CRs
+    ├── kafka-user.yaml                 # Managed KafkaUser (SCRAM + auto ACLs)
+    ├── kafka-user-secret-sync.yaml     # Cross-namespace credentials Secret sync
+    ├── kafka-connect-logging.yaml      # External log4j configuration
+    ├── metrics-configmap-connect.yaml  # JMX Prometheus exporter rules
+    ├── validate-connectors.yaml        # Pre-install/pre-upgrade validation hook
+    ├── networkpolicies.yaml            # Explicit ingress/egress allow rules
+    ├── networkpolicy-default-deny.yaml # Default-deny policy for Connect pods
+    ├── secret-reader-rbac.yaml         # RBAC for KubernetesSecretConfigProvider
+    ├── serviceaccount.yaml             # Dedicated ServiceAccount
+    ├── service-rest-api.yaml           # REST API Service
+    ├── ingress.yaml                    # Optional REST API Ingress
+    ├── hpa.yaml                        # Optional HorizontalPodAutoscaler
+    ├── alerts-connect.yaml             # Prometheus alert rules
+    ├── podmonitor-connect.yaml         # Prometheus PodMonitor
+    ├── dashboard-connect.yaml          # Grafana dashboard
+    └── tests/
+        ├── test-connect.yaml           # Helm test pod (REST API connectivity)
+        ├── test-connectors.yaml        # helm-test example KafkaConnectors
+        └── test-topics.yaml            # helm-test KafkaTopics
 ```
 
 ### Deployment
@@ -89,13 +99,14 @@ The recommended way to deploy Kafka Connect is through the **Kates CLI**, which 
 
 ```bash
 # Deploy the full stack including Kafka Connect
+# (--ha defaults to true, so this gives you 3 workers)
 kates deploy --topology isolated --with-kafka-connect
 
-# Deploy with HA (3 workers)
-kates deploy --topology isolated --with-kafka-connect --ha
+# Single-worker deployment (resource-constrained clusters)
+kates deploy --topology isolated --with-kafka-connect --ha=false
 ```
 
-The CLI deploys the `connect-cluster` chart as a separate Helm release, automatically applying the Kind overlay on Kind clusters and provisioning the PostgreSQL credentials secret.
+The CLI deploys the `connect-cluster` chart as a separate Helm release (into the `connect` namespace by default under the isolated topology), automatically applying the Kind overlay on Kind clusters and provisioning the PostgreSQL credentials secret.
 
 #### Direct Helm (alternative)
 
@@ -140,9 +151,9 @@ sequenceDiagram
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `groupId` | `kates-connect-cluster` | All workers sharing this ID form a single cluster |
-| `replicas` | 3 (prod) / 1 (kind) | Number of worker pods |
+| `replicas` | 3 (the CLI sets 1 with `--ha=false`; the dev overlay uses 1) | Number of worker pods |
 | `image` | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built image with Debezium + Apicurio plugins |
-| `bootstrapServers` | `krafter-kafka-bootstrap:9093` | TLS-encrypted connection to Kafka |
+| `kafka.bootstrapServers` | `""` — computed as `<clusterName>-kafka-bootstrap.<ns>.svc:9092` (9093 when `kafka.tls.enabled`) | Connection to Kafka |
 | `version` | 4.2.0 | Kafka protocol version |
 
 ### Internal Topics
@@ -164,7 +175,7 @@ Never delete the offsets topic. If deleted, all source connectors lose their pos
 
 ### Authentication
 
-Connect authenticates to Kafka using SCRAM-SHA-512 over TLS:
+Connect authenticates to Kafka using SCRAM-SHA-512 (TLS is off by default and switched on with `kafka.tls.enabled`):
 
 ```yaml
 authentication:
@@ -176,10 +187,10 @@ authentication:
 tls:
   trustedCertificates:
     - secretName: krafter-cluster-ca-cert
-      pattern: "*.crt"
+      certificate: ca.crt
 ```
 
-The `kates-connect` KafkaUser must be created in the Kafka namespace with appropriate ACLs for topic creation, group management, and connector offset storage.
+The `kates-connect` KafkaUser can be managed by the chart itself: setting `kafkaUser.create: true` provisions the `KafkaUser` in the Kafka namespace, and with `authorization.mode: auto` derives least-privilege ACLs from the chart values (`groupId`, the internal topics, exactly-once transactional IDs, and the data-topic prefixes in `kafkaUser.topicGrants`). When Connect runs in a different namespace than Kafka, `kafkaUser.secretSync` makes the generated credentials Secret available in the Connect namespace — either via a hook Job that copies it (re-run on upgrades for rotation) or via kubernetes-reflector annotations. This requires the Strimzi User Operator; the ACLs take effect when the Kafka cluster has authorization enabled.
 
 ## Connector Lifecycle
 
@@ -278,25 +289,16 @@ build:
           version: "4.8.3"
 ```
 
-#### 2. Using the Init Container Script
+#### 2. Using the Plugin Loader Script
 
-For environments where Strimzi image builds aren't possible, use the provided plugin loader script as an init container to download JARs at pod startup:
+For environments where Strimzi image builds aren't possible, the repo ships `scripts/connect-plugin-loader.sh`, which downloads plugin JARs from Maven Central and extracts them into a `/plugins` directory:
 
-```yaml
-template:
-  pod:
-    metadata: {}
-    initContainers:
-      - name: plugin-loader
-        image: ghcr.io/bmscomp/connect:3.6.0
-        command: ["/bin/bash", "-c", "curl -sfL https://raw.githubusercontent.com/bmscomp/kates/main/scripts/connect-plugin-loader.sh | bash"]
-        env:
-          - name: EXTRA_PLUGINS
-            value: "org.apache.camel.kafkaconnector:camel-aws-s3-sink-kafka-connector:4.8.3"
-        volumeMounts:
-          - name: extra-plugins
-            mountPath: /plugins
+```bash
+EXTRA_PLUGINS="org.apache.camel.kafkaconnector:camel-aws-s3-sink-kafka-connector:4.8.3" \
+  ./scripts/connect-plugin-loader.sh
 ```
+
+The script is written to run as an init container that populates a shared volume on the worker's `plugin.path`, but the chart does not wire this up for you — its `template.pod` passthrough only covers pod metadata, so using the script this way means customizing the `KafkaConnect` resource yourself. In most cases, prefer `spec.build` above or bake the plugins into the image (`make connect-build`).
 
 ### PostgreSQL CDC Pipeline
 
@@ -337,7 +339,7 @@ connectors:
       database.hostname: postgresql.database.svc
       database.port: "5432"
       database.user: debezium
-      database.password: "${dir:/mnt/pg-credentials:password}"
+      database.password: "${secrets:connect/connect-pg-credentials:password}"
       database.dbname: orders
       topic.prefix: cdc
       schema.include.list: public
@@ -367,19 +369,19 @@ The `tasksMax` for a Debezium PostgreSQL connector must always be `1`. PostgreSQ
 
 ### External Configuration (Secrets)
 
-Database credentials are mounted as files via Strimzi's `externalConfiguration`:
+The chart enables three Kafka config providers on every worker — `file`, `dir`, and `secrets` (Strimzi's `KubernetesSecretConfigProvider`):
 
 ```yaml
-externalConfiguration:
-  volumes:
-    - name: pg-credentials
-      secretName: connect-pg-credentials
+config.providers: file,dir,secrets
+config.providers.file.class: org.apache.kafka.common.config.provider.FileConfigProvider
+config.providers.dir.class: org.apache.kafka.common.config.provider.DirectoryConfigProvider
+config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
 ```
 
-This mounts the secret at `/mnt/pg-credentials/` inside each worker pod. Connectors reference values using the `${dir:/mnt/pg-credentials:password}` syntax (Kafka's `DirectoryConfigProvider`).
+Connectors reference Kubernetes Secrets directly with the `${secrets:<namespace>/<secret-name>:<key>}` syntax — no volume mounts required. The chart's `secret-reader-rbac.yaml` grants the Connect ServiceAccount read access to Secrets in its namespace.
 
 ::: {.callout-tip}
-ConfigMap volumes are also supported. Use `type: configMap` and `configMapName` for non-sensitive data like SMT scripts or external lookup tables.
+By default the secret-reader Role covers all Secrets in the namespace. Set `rbac.secretNames` to narrow the grant to the specific Secrets your connectors reference.
 :::
 
 
@@ -473,7 +475,7 @@ rack:
   topologyKey: topology.kubernetes.io/zone
 ```
 
-For Kind clusters, all scheduling constraints are disabled since all pods run on a single node.
+The base values use `whenUnsatisfiable: ScheduleAnyway`, so single-node clusters like Kind still schedule all workers; the dev overlay disables topology spread and anti-affinity entirely, while the prod overlay tightens spreading to `DoNotSchedule`.
 
 ## Pre-Deploy Validation
 
@@ -507,37 +509,37 @@ This catches misconfigurations at `helm upgrade` time rather than at runtime, pr
 
 ### Prometheus Alerts
 
-The chart deploys 8 alert rules:
+The chart deploys the following alert rules (thresholds are configurable under `alerts.thresholds`):
 
 | Alert | Condition | Severity |
 |-------|-----------|----------|
-| `KafkaConnectDown` | No running workers for 5min | critical |
-| `KafkaConnectorFailed` | Connector in FAILED state for 2min | critical |
-| `KafkaConnectorTaskFailed` | Task in FAILED state for 2min | warning |
-| `KafkaConnectRebalancing` | Cluster rebalancing for 10min | warning |
-| `KafkaConnectHighLatency` | Connector source lag >60s for 10min | warning |
-| `KafkaConnectHighErrorRate` | Error rate >5% for 5min | warning |
-| `KafkaConnectWorkerDown` | Worker count < expected for 5min | warning |
-| `KafkaConnectRestApiDown` | REST API unreachable for 3min | critical |
+| `KafkaConnectTaskFailed` | Failed task count > 0 for 2min | critical |
+| `KafkaConnectWorkerDown` | Worker reports 0 connectors for 3min | critical |
+| `KafkaConnectTaskCountMismatch` | Expected vs running task count differ for 5min | critical |
+| `KafkaConnectRebalanceStorm` | Completed-rebalance rate above threshold for 5min | warning |
+| `KafkaConnectHighErrorRate` | Task error-log rate above threshold for 5min | warning |
+| `KafkaConnectRebalanceTooLong` | A rebalance has been in progress for 5min | warning |
+| `KafkaConnectWorkerHeapHigh` | JVM heap usage above threshold (default 85%) for 5min | warning |
+| `KafkaConnectSourceLag` | Source task polled 0 records for `sourceLagMinutes` (default 15min) | warning |
 
 ### Grafana Dashboard
 
-The dashboard provides 8 panels:
+The dashboard ships the following panels:
 
 | Panel | Metric | Visualization |
 |-------|--------|---------------|
-| Worker Count | `kafka_connect_worker_info` | Stat |
-| Connector Status | `kafka_connect_connector_status` | Table |
-| Task Count (by state) | `kafka_connect_connector_task_status` | Pie chart |
-| Source Record Rate | `kafka_connect_source_task_source_record_poll_rate` | Time series |
-| Sink Record Rate | `kafka_connect_sink_task_sink_record_send_rate` | Time series |
-| Error Rate | `kafka_connect_task_error_total_record_errors` | Time series |
-| Rebalance Duration | `kafka_connect_worker_rebalance_rebalance_time_ms_total` | Time series |
+| Running Connectors | `kafka_connect_worker_metrics_connector_count` | Stat |
+| Failed Tasks | `kafka_connect_worker_metrics_connector_failed_task_count` | Stat |
+| Running Tasks | `kafka_connect_worker_metrics_task_count` | Stat |
+| Rebalance Rate | `rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total[5m])` | Stat |
+| Task Error Rate | `rate(kafka_connect_task_error_metrics_total_errors_logged[5m])` | Time series |
+| Source Records Poll Rate | `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` | Time series |
+| Sink Records Put Rate | `rate(kafka_connect_sink_task_metrics_sink_record_send_total[5m])` | Time series |
 | JVM Heap Usage | `jvm_memory_bytes_used{area="heap"}` | Time series |
 
 ### Helm Test
 
-The chart includes a test pod that validates the Connect REST API is reachable:
+The chart includes Helm tests: a connectivity pod that probes the Connect REST API, plus example `KafkaTopic` and `KafkaConnector` resources (defined under `testTopics` / `testConnectors` in values) that are created during `helm test` and deleted when the test succeeds:
 
 ```bash
 # Run the CDC integration test via Kates CLI
@@ -547,25 +549,27 @@ kates kafka connect test
 helm test connect-cluster --namespace kafka --timeout 180s --logs
 ```
 
-The `kates kafka connect test` command runs a full end-to-end CDC integration test against the backend, with a Bubble Tea progress UI showing each phase (DB setup → source deploy → sink deploy → verification).
+The `kates kafka connect test` command runs a full end-to-end CDC integration test against the backend, with a Bubble Tea progress UI showing each phase (DB setup → topic creation → source deploy → sink deploy → verification → cleanup).
 
-The Helm test pod runs `curl http://<connect-service>:8083/connectors` and validates a 200 response.
+The connectivity test pod curls the Connect REST API on port 8083 (the root endpoint and `/connector-plugins`) — first by exec-ing into a worker pod, then falling back to the chart's REST API Service.
 
 ## Environment Overlays
 
-| Setting | Kind | Dev | Prod |
+The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters — the two are identical except that the Kind overlay adds database egress to the local `kates` namespace and enables the Schema Registry integration. `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml` rather than set by the overlay:
+
+| Setting | Kind/Generic | Dev | Prod |
 |---------|:----:|:---:|:----:|
-| Replicas | 1 | 1 | 3 |
-| JVM Heap | 256–512m | 512m | 2048m |
-| Memory request/limit | 512Mi/1Gi | 1Gi/2Gi | 4Gi/6Gi |
-| Topology spread | Disabled | Disabled | Zone-aware, `DoNotSchedule` |
-| Pod anti-affinity | Disabled | Disabled | Per-hostname |
-| Rack awareness | Disabled | Disabled | Per-zone |
+| Replicas | 3 *(base)* — CLI sets 1 with `--ha=false` | 1 | 3 |
+| JVM Heap | 1024m *(base)* | 512m | 2048m |
+| Memory request/limit | 2Gi/4Gi *(base)* | 1Gi/2Gi | 4Gi/6Gi |
+| Topology spread | Zone-aware, `ScheduleAnyway` *(base)* | Disabled | Zone-aware, `DoNotSchedule` |
+| Pod anti-affinity | Per-hostname *(base)* | Disabled | Per-hostname |
 | Alerts | Off | Off | On |
 | PodMonitors | Off | On | On |
 | Dashboards | Off | On | On |
 | Tracing | Off | OpenTelemetry | OpenTelemetry |
-| Priority class | — | — | `system-cluster-critical` |
+| Schema Registry | On (Kind only) | Off *(base)* | Off *(base)* |
+| Priority class | `system-cluster-critical` *(base)* | — (cleared) | `system-cluster-critical` |
 
 ## CLI Reference
 
@@ -596,7 +600,7 @@ The `kates kafka connect` command group provides a complete operational interfac
 | `kates kafka connect tasks [name]` | Show task-level status |
 | `kates kafka connect delete [name]` | Delete a connector |
 
-All commands accept `-n <namespace>` (defaults to `kafka` or `$KATES_KAFKA_NS`) and `-o json` for machine-readable output.
+All commands accept `-n <namespace>` (resolved as `$KATES_CONNECT_NS` → auto-detect from the cluster's `KafkaConnect` CRs → `$KATES_KAFKA_NS` → `kafka`) and `-o json` for machine-readable output.
 
 ### Makefile Targets (CI/Chart Development)
 
@@ -612,7 +616,7 @@ For chart development and CI pipelines, Makefile targets are also available:
 
 ## Network Policies
 
-The chart generates egress rules for cross-namespace database connections:
+The chart ships a default-deny posture: a deny-all Ingress+Egress policy for the Connect pods (`networkPolicy.defaultDeny.enabled`, on by default) with every allowed flow — Kafka, DNS, the Kubernetes API, monitoring scrapes, the REST API, and databases — expressed as an explicit, individually configurable allow rule. For cross-namespace database connections it generates egress rules like these:
 
 ```mermaid
 graph LR
@@ -689,7 +693,7 @@ The Connect REST API (port 8083) is also exposed via a `ClusterIP` Service for d
 
 ```bash
 # Port-forward for local access
-kubectl port-forward -n kafka svc/connect-cluster-connect-api 8083:8083
+kubectl port-forward -n kafka svc/connect-cluster-rest-api 8083:8083
 
 # List connectors via REST
 curl -s http://localhost:8083/connectors | jq .
@@ -1010,12 +1014,12 @@ graph TB
     subgraph Connect Worker Pod
         TLS["TLS Truststore"]
         SASL["SASL Config"]
-        VOL["/mnt/pg-credentials/"]
+        PROV["secrets config provider"]
     end
 
     S1 -->|"mounted by Strimzi"| TLS
     S2 -->|"mounted by Strimzi"| SASL
-    S3 -->|"externalConfiguration"| VOL
+    S3 -->|"read via Kubernetes API"| PROV
 ```
 
 ### Rotation Procedures
@@ -1024,7 +1028,7 @@ graph TB
 |-----------|----------------|:--------:|
 | Kafka TLS CA | Strimzi auto-rotates 180 days before expiry | Zero — rolling restart |
 | SCRAM password | Update `KafkaUser` CR → Strimzi updates Secret | Zero — rolling restart |
-| Database password | Update K8s Secret → rolling restart of Connect | ~30s per worker |
+| Database password | Update K8s Secret → restart the connector | Seconds — connector restart only |
 | Connect REST API (if exposed) | Ingress-level auth (OAuth2 proxy, mTLS) | N/A |
 
 **Database credential rotation:**
@@ -1032,13 +1036,14 @@ graph TB
 ```bash
 # 1. Update the secret
 kubectl create secret generic connect-pg-credentials \
-  -n kafka \
+  -n connect \
   --from-literal=username=debezium \
   --from-literal=password=NEW_PASSWORD \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# 2. Restart Connect workers to pick up new secret
-kubectl rollout restart deployment -n kafka -l strimzi.io/kind=KafkaConnect
+# 2. Restart the connector — the secrets config provider re-reads
+#    the Secret when the connector configuration is (re)applied
+kates kafka connect restart debezium-postgres-source
 ```
 
 ::: {.callout-important}
@@ -1081,7 +1086,7 @@ Connect's internal producer sends records to Kafka. These settings control batch
 | `batch.size` | JDBC Sink | 3000 | 5000–10000 | Rows per INSERT batch |
 
 ::: {.callout-tip}
-Monitor `kafka_connect_source_task_source_record_poll_rate` and `kafka_connect_source_task_source_record_write_rate` in Grafana. If poll rate >> write rate, the producer is the bottleneck — increase `producer.batch.size` and enable compression.
+Monitor `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` and `rate(kafka_connect_source_task_metrics_source_record_write_total[5m])` in Grafana. If poll rate >> write rate, the producer is the bottleneck — increase `producer.batch.size` and enable compression.
 :::
 
 
@@ -1178,8 +1183,9 @@ Cross-database sync introduces eventual consistency. The sink always lags behind
 When a new Debezium or Kafka version is released:
 
 ```bash
-# 1. Build and push the new image
-DBZ_VERSION=3.1.0 make connect-build connect-push
+# 1. Bump ARG DEBEZIUM_VERSION in Dockerfile.connect (e.g. 3.7.0.Final),
+#    then build and push — the image tag is derived from that ARG
+make connect-build connect-push
 
 # 2. Deploy with updated image via Kates CLI
 kates deploy --with-kafka-connect
@@ -1187,7 +1193,7 @@ kates deploy --with-kafka-connect
 # Or update directly via Helm
 helm upgrade connect-cluster charts/connect-cluster \
   --namespace kafka --reuse-values \
-  --set image=ghcr.io/bmscomp/connect:3.1.0
+  --set image=ghcr.io/bmscomp/connect:3.7.0
 ```
 
 Strimzi performs a **rolling restart** — one worker at a time. Connectors are rebalanced to surviving workers during each restart, ensuring zero downtime.
@@ -1306,11 +1312,11 @@ kates kafka connect logs
 
 ### Rebalancing Takes Too Long
 
-**Symptom:** Connect cluster stuck in `REBALANCING` state for minutes
+**Symptom:** Connect cluster stuck in `REBALANCING` state for minutes (the `KafkaConnectRebalanceTooLong` alert fires after 5 minutes)
 
-**Cause:** Large number of connectors/tasks + default `group.initial.rebalance.delay.ms` of 3000ms
+**Cause:** A large number of connectors/tasks being reassigned, or workers repeatedly leaving and rejoining the group. (The chart also sets `group.initial.rebalance.delay.ms: 3000`, which adds a fixed 3-second wait before the *first* assignment when the group forms — that delay is intentional and not the problem here.)
 
-**Fix:** The chart sets `group.initial.rebalance.delay.ms: 3000`. If rebalancing takes more than 5 minutes, check for:
+**Fix:** If rebalancing takes more than 5 minutes, check for:
 - Workers crashing during rebalance (check pod events)
 - Network policies blocking inter-worker communication on port 8083
 - Insufficient memory causing OOM kills during task assignment
@@ -1360,7 +1366,7 @@ heartbeat.interval.ms: "10000"
 **Fix:** Read the hook pod logs to see which fields are missing:
 
 ```bash
-kubectl logs -n kafka -l helm.sh/hook=pre-install --tail=50
+kubectl logs -n kafka connect-cluster-validate-connectors --tail=50
 ```
 
 Fix the connector configs in `values.yaml` and re-run `helm upgrade`.
@@ -1375,4 +1381,4 @@ Fix the connector configs in `values.yaml` and re-run `helm upgrade`.
 | Apicurio Converter | 3.3.0 | Schema Registry integration |
 | Debezium JDBC | 3.6.0.Final | Apache 2.0 licensed JDBC sink connector |
 | Connect Image | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built with all plugins |
-| Helm Chart | 1.0.0 | `charts/connect-cluster` |
+| Helm Chart | 1.2.0 | `charts/connect-cluster` |

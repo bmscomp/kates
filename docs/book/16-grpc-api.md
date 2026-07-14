@@ -81,14 +81,13 @@ The protobuf contract is defined in [`kates.proto`](https://github.com/bmscomp/k
 
 #### CreateTest
 
-`CreateTestRequest` exposes only a subset of `TestSpec` — `type`, `num_records`, `record_size`, `partitions`, `replication_factor`, `compression_type`, and `labels`; every other spec field (acks, batching, producer/consumer counts, ...) uses the server-side defaults listed under [TestSpec](#testspec).
+`CreateTestRequest` exposes only a subset of `TestSpec` — `type`, `num_records`, `record_size`, `partitions`, `replication_factor`, and `compression_type`; every other spec field (acks, batching, producer/consumer counts, ...) falls back to the per-test-type defaults described under [TestSpec](#testspec). The request message also declares a `labels` map, but the current server implementation ignores it — set labels through the REST API if you need them.
 
 ```bash
 grpcurl -plaintext -d '{
   "type": "LOAD", "num_records": 100000, "record_size": 1024,
   "partitions": 3, "replication_factor": 3,
-  "compression_type": "lz4",
-  "labels": {"env": "staging"}
+  "compression_type": "lz4"
 }' localhost:8080 kates.TestService/CreateTest
 ```
 
@@ -105,7 +104,6 @@ grpcurl -plaintext -d '{
     "durationMs": "600000", "replicationFactor": 3, "partitions": 3,
     "minInsyncReplicas": 2
   },
-  "labels": { "env": "staging" },
   "createdAt": "2026-02-15T20:00:00Z",
   "backend": "native"
 }
@@ -152,9 +150,11 @@ grpcurl -plaintext -d '{"type": "LOAD", "page": 0, "size": 10}' \
     { "id": "a1b2c3d4-...", "testType": "LOAD", "status": "COMPLETED", "createdAt": "2026-02-15T20:00:00Z" },
     { "id": "b2c3d4e5-...", "testType": "LOAD", "status": "RUNNING", "createdAt": "2026-02-15T20:05:00Z" }
   ],
-  "page": 0, "size": 10, "total": "45"
+  "size": 10, "total": "45"
 }
 ```
+
+(`page` is absent here for the same proto3 reason explained under [GetClusterInfo](#getclusterinfo): zero-valued fields are omitted from grpcurl's JSON output.)
 
 #### CancelTest / DeleteTest
 
@@ -259,9 +259,9 @@ enum TestType {
 
 ### TestSpec
 
-Proto3 fields carry no wire-level defaults — the values below are the server-side fallbacks the backend applies when a field is unset (see `kates/src/main/java/com/bmscomp/kates/domain/TestSpec.java`).
+Proto3 fields carry no wire-level defaults — when a field is unset, the backend applies **per-test-type defaults** (`TestOrchestrator` calls `applyTypeDefaults`, backed by `config/TestTypeDefaults.java` and overridable via `kates.tests.<type>.*` config properties). The values below are the LOAD-type defaults; other test types differ (STRESS uses more producers, ENDURANCE a longer duration, and so on).
 
-| Field | Type | Server default | Description |
+| Field | Type | LOAD default | Description |
 |-------|------|---------|-------------|
 | `num_records` | int64 | 1000000 | Total messages to produce |
 | `record_size` | int32 | 1024 | Message size in bytes |
@@ -302,7 +302,7 @@ All list RPCs use `page` (zero-based) and `size` (default 50, max 200) request f
 |-------------|:---:|------|---------|
 | `INVALID_ARGUMENT` | 400 | Missing/invalid fields | `Test type is required`, `Invalid test type: BENCHMARK` |
 | `NOT_FOUND` | 404 | Resource doesn't exist | `Test not found: abc-123` |
-| `INTERNAL` | 500 | Test execution failure (underlying exception message) | `Backend not found: 'trogdor'. Available: [native]` |
+| `INTERNAL` | 500 | Test execution failure | Surfaces the underlying exception message verbatim |
 
 Transport-level codes such as `UNAVAILABLE` come from the gRPC runtime itself (e.g. when the server cannot be reached), not from Kates.
 
