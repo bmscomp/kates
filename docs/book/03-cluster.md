@@ -1,4 +1,4 @@
-# Chapter 3: The Cluster Under Test
+# The Cluster Under Test
 
 Before you can measure performance or inject chaos, you need to understand the system you're testing. Without this understanding, you'll collect numbers but draw the wrong conclusions — blaming Kafka for a bottleneck that's actually page cache eviction, or celebrating a throughput number that's only possible because replication was silently disabled.
 
@@ -77,7 +77,7 @@ Kafka relies heavily on page cache for read performance. When a consumer reads r
 
 This makes performance testing on this cluster **more sensitive** to workload patterns than a production cluster with 64Gi per broker. That's a feature, not a bug — if your application performs well here, it'll perform even better on real hardware.
 
-GC logging is enabled (`gcLoggingEnabled: true`) on all brokers, making it possible to correlate latency spikes with garbage collection pauses. See [Chapter 4: Performance Theory](04-performance-theory.md) for a deeper explanation of why GC pauses dominate tail latency.
+GC logging is enabled (`gcLoggingEnabled: true`) on all brokers, making it possible to correlate latency spikes with garbage collection pauses. See [Performance Theory](04-performance-theory.md) for a deeper explanation of why GC pauses dominate tail latency.
 
 ## Replication Configuration
 
@@ -216,7 +216,7 @@ Beyond the brokers and controllers, the cluster includes several components that
 | **Drain Cleaner** | Graceful pod rolling during node drains | Ensures broker restarts during chaos tests are clean (finalizes log segments, flushes buffers) |
 | **Entity Operator** | Topic and User lifecycle management via CRDs | Creates and reconciles the `KafkaTopic` and `KafkaUser` resources declared in the chart |
 
-For deep operational details on each component, see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
+For deep operational details on each component, see [Kafka Deployment Engineering](15-kafka-deployment.md).
 
 ## Access Points
 
@@ -253,8 +253,8 @@ kates cluster broker configs <broker-id>
 kates health
 ```
 
-These commands use the Kafka AdminClient API through the Kates backend — no direct broker access needed from the CLI. For the full CLI reference, see [Chapter 10: CLI Reference](10-cli-reference.md).
+These commands use the Kafka AdminClient API through the Kates backend — no direct broker access needed from the CLI. For the full CLI reference, see [CLI Reference](10-cli-reference.md).
 
 ::: {.callout-tip}
-The `kates cluster watch` command provides a live-refreshing view with sparkline trends, auto-refreshing every 5 seconds. It's the best way to monitor cluster health during a test or chaos experiment. See [Chapter 9: Observability](09-observability.md#cluster-watch) for details.
+The `kates cluster watch` command provides a live-refreshing view with sparkline trends, auto-refreshing every 5 seconds. It's the best way to monitor cluster health during a test or chaos experiment. See [Observability & Monitoring](09-observability.md#cluster-watch) for details.
 :::

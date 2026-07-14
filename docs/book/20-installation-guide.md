@@ -1,4 +1,6 @@
-# Chapter 20: Installing Kafka with the kafka-cluster Helm Chart
+# Installing Kafka with the kafka-cluster Helm Chart
+
+> **Scope**: this chapter owns the happy-path install — deploying and verifying a Kafka cluster with the `kafka-cluster` chart, step by step. The engineering rationale behind the topology (node pools, certificates, Cruise Control, alerting, backup) lives in [Kafka Deployment Engineering](15-kafka-deployment.md), and deploying the Kates stack itself is covered in [Deployment Guide](12-deployment.md).
 
 This chapter walks you through deploying a production-grade Apache Kafka cluster on Kubernetes using the **kafka-cluster** Helm chart. It is written for someone who may be new to Kafka, Kubernetes, or Helm — every step is explained with the *why* before the *how*.
 
@@ -107,7 +109,7 @@ The Kates backend chart (`charts/kates`) ships additional `ClusterPolicy` resour
 | `kates-generate-network-policies` | Automatically generates default-deny NetworkPolicies in new namespaces |
 
 ::: {.callout-tip}
-Start with `podSecurityPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Chapter 17: Security & Compliance](17-security.md) for details on each policy.
+Start with `podSecurityPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Security & Compliance](17-security.md) for details on each policy.
 :::
 
 

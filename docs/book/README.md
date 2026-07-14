@@ -6,33 +6,69 @@ A comprehensive guide to performance testing, chaos engineering, and operational
 
 ## Table of Contents
 
-| Chapter | Title | Description |
-|---------|-------|-------------|
-| 1 | [Introduction](01-introduction.md) | What Kates is, why it exists, and the problems it solves |
-| 2 | [Architecture & Design](02-architecture.md) | Platform architecture, component design, data model, and technology choices |
-| 3 | [The Cluster Under Test](03-cluster.md) | Understanding the krafter Kafka cluster topology |
-| 4 | [Performance Theory](04-performance-theory.md) | Measuring performance: latency, throughput, percentiles, and statistics |
-| 5 | [Test Types Deep Dive](05-test-types.md) | All 8 test types explained with methodology and use cases |
-| 6 | [Chaos Engineering Theory](06-chaos-theory.md) | Principles, practices, and the Game Day methodology |
-| 7 | [Chaos Engineering in Practice](07-chaos-practice.md) | Disruption types, playbooks (with full YAML), safety guardrails, and SLA grading |
-| 8 | [Data Integrity Verification](08-data-integrity.md) | Ensuring zero message loss under fault conditions |
-| 9 | [Observability & Monitoring](09-observability.md) | Metrics, dashboards, heatmaps, and trend analysis |
-| 10 | [CLI Reference](10-cli-reference.md) | Complete Kates CLI command reference with all subcommands and aliases |
-| 10b | [Lab — Interactive Performance Tuning](10b-lab.md) | The interactive TUI workbench for iterative tuning and result comparison |
-| 11 | [REST API Reference](11-api-reference.md) | Backend API endpoints and data models |
-| 12 | [Deployment Guide](12-deployment.md) | Installing and operating the full stack |
-| 13 | [Scenario Files & SLA Gates](13-scenario-files.md) | YAML scenario format, spec fields, and automated SLA enforcement |
-| 14 | [Recipes & Patterns](14-recipes.md) | Ready-to-use workflows for upgrades, nightly regressions, chaos certification, and tuning |
-| 15 | [Kafka Deployment Engineering](15-kafka-deployment.md) | Strimzi operator, KRaft architecture, broker tuning, security, and operations |
-| 16 | [gRPC API Reference](16-grpc-api.md) | Protobuf service definitions, message types, and usage examples |
-| 17 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, Kyverno admission control, and audit checklist |
-| 18 | [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |
-| 19 | [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
-| 20 | [Installation Guide](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites, verification, and troubleshooting |
-| 21 | [Kafka Connect & CDC Pipelines](21-kafka-connect.md) | Kafka Connect architecture, Debezium CDC, connector lifecycle, multi-AZ strategy, and operational procedures |
-| A | [Glossary](appendix-a-glossary.md) | Quick reference for all terms and abbreviations |
-| B | [Troubleshooting Index](appendix-b-troubleshooting.md) | Consolidated troubleshooting procedures from across the book |
-| C | [CI/CD Pipeline](appendix-c-cicd.md) | GitHub Actions workflows, build validation, and release automation |
+Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stable identifiers, not ordering. Chapter numbers are assigned automatically by the rendered book.
+
+**Part I — Foundations**
+
+| Title | Description |
+|-------|-------------|
+| [Introduction](01-introduction.md) | What Kates is, why it exists, and the problems it solves |
+| [Architecture & Design](02-architecture.md) | Platform architecture, component design, data model, and technology choices |
+| [The Cluster Under Test](03-cluster.md) | Understanding the krafter Kafka cluster topology |
+
+**Part II — Performance Testing**
+
+| Title | Description |
+|-------|-------------|
+| [Performance Theory](04-performance-theory.md) | Measuring performance: latency, throughput, percentiles, and statistics |
+| [Test Types Deep Dive](05-test-types.md) | Every test type explained with methodology and use cases |
+| [Scenario Files & SLA Gates](13-scenario-files.md) | YAML scenario format, spec fields, and automated SLA enforcement |
+| [Lab — Interactive Performance Tuning](10b-lab.md) | The interactive TUI workbench for iterative tuning and result comparison |
+
+**Part III — Chaos & Integrity**
+
+| Title | Description |
+|-------|-------------|
+| [Chaos Engineering Theory](06-chaos-theory.md) | Principles, practices, and the Game Day methodology |
+| [Chaos Engineering in Practice](07-chaos-practice.md) | Disruption types, playbooks, safety guardrails, and SLA grading |
+| [Data Integrity Verification](08-data-integrity.md) | Ensuring zero message loss under fault conditions |
+
+**Part IV — Observability**
+
+| Title | Description |
+|-------|-------------|
+| [Observability & Monitoring](09-observability.md) | Metrics, dashboards, heatmaps, and trend analysis |
+
+**Part V — Deployment & Operations**
+
+| Title | Description |
+|-------|-------------|
+| [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites and verification |
+| [Kafka Deployment Engineering](15-kafka-deployment.md) | The engineering rationale: Strimzi, KRaft, broker tuning, and operations |
+| [Deployment Guide](12-deployment.md) | Deploying the Kates stack: topology decisions, sizing, and cloud guidance |
+| [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, and Kyverno |
+| [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
+| [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |
+| [Kafka Connect & CDC Pipelines](21-kafka-connect.md) | Connect concepts: architecture, Debezium CDC, transforms, and delivery semantics |
+| [Operating Kafka Connect](operating-kafka-connect.md) | Day-2 operations: scaling, tuning, security rotation, upgrades, and DR |
+| [Recipes & Patterns](14-recipes.md) | Ready-to-use workflows for upgrades, nightly regressions, and tuning |
+
+**Part VI — Reference**
+
+| Title | Description |
+|-------|-------------|
+| [CLI Reference](10-cli-reference.md) | Complete Kates CLI command reference with all subcommands and aliases |
+| [REST API Reference](11-api-reference.md) | Backend API endpoints and data models |
+| [gRPC API Reference](16-grpc-api.md) | Protobuf service definitions, message types, and usage examples |
+
+**Appendices**
+
+| Title | Description |
+|-------|-------------|
+| [Glossary](appendix-a-glossary.md) | Quick reference for all terms and abbreviations |
+| [Troubleshooting Index](appendix-b-troubleshooting.md) | Consolidated troubleshooting procedures from across the book |
+| [CI/CD Pipeline](appendix-c-cicd.md) | GitHub Actions workflows, build validation, and release automation |
+| [Version & Compatibility Matrix](appendix-d-versions.md) | Every pinned version, generated from the repo's own pins |
 
 ## Tutorials
 
@@ -63,29 +99,29 @@ Hands-on step-by-step guides for specific workflows:
 Don't read this book cover-to-cover. Pick a reading path based on what you need:
 
 ### 🎯 "I want to understand Kafka performance"
-1. [Ch. 4: Performance Theory](04-performance-theory.md) — why averages lie, percentiles, coordinated omission (~10 min)
-2. [Ch. 5: Test Types Deep Dive](05-test-types.md) — all 8 test types explained (~15 min)
-3. [Ch. 9: Observability](09-observability.md) — reading dashboards, heatmaps, trend analysis (~15 min)
+1. [Performance Theory](04-performance-theory.md) — why averages lie, percentiles, coordinated omission (~10 min)
+2. [Test Types Deep Dive](05-test-types.md) — all 8 test types explained (~15 min)
+3. [Observability & Monitoring](09-observability.md) — reading dashboards, heatmaps, trend analysis (~15 min)
 
 ### 🚀 "I want to deploy Kates"
-1. [Ch. 20: Installation Guide](20-installation-guide.md) — full step-by-step with prerequisites (~30 min)
-2. [Ch. 12: Deployment Guide](12-deployment.md) — architecture decisions, resource sizing, cloud deployment (~15 min)
-3. [Ch. 3: The Cluster Under Test](03-cluster.md) — understanding what you just deployed (~10 min)
+1. [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) — full step-by-step with prerequisites (~30 min)
+2. [Deployment Guide](12-deployment.md) — architecture decisions, resource sizing, cloud deployment (~15 min)
+3. [The Cluster Under Test](03-cluster.md) — understanding what you just deployed (~10 min)
 
 ### 💥 "I want to run chaos experiments"
-1. [Ch. 6: Chaos Engineering Theory](06-chaos-theory.md) — principles and methodology (~10 min)
-2. [Ch. 7: Chaos Engineering Practice](07-chaos-practice.md) — disruption types and playbooks (~20 min)
-3. [Ch. 8: Data Integrity Verification](08-data-integrity.md) — proving zero message loss (~10 min)
+1. [Chaos Engineering Theory](06-chaos-theory.md) — principles and methodology (~10 min)
+2. [Chaos Engineering in Practice](07-chaos-practice.md) — disruption types and playbooks (~20 min)
+3. [Data Integrity Verification](08-data-integrity.md) — proving zero message loss (~10 min)
 
 ### 🔒 "I want to harden security"
-1. [Ch. 17: Security & Compliance](17-security.md) — threat model, ACLs, network policies, Kyverno (~20 min)
-2. [Ch. 15: Kafka Deployment Engineering](15-kafka-deployment.md) — broker security, certificates (~15 min)
+1. [Security & Compliance](17-security.md) — threat model, ACLs, network policies, Kyverno (~20 min)
+2. [Kafka Deployment Engineering](15-kafka-deployment.md) — broker security, certificates (~15 min)
 3. [Tutorial 7: Kyverno & Security](../tutorials/07-kyverno-security.md) — hands-on policy enforcement (~20 min)
 
 ### 📋 "I just need a reference"
-- [Ch. 10: CLI Reference](10-cli-reference.md) — all commands with examples and workflows
-- [Ch. 11: REST API Reference](11-api-reference.md) — backend endpoints and data models
-- [Ch. 16: gRPC API Reference](16-grpc-api.md) — protobuf service definitions
-- [Appendix A: Glossary](appendix-a-glossary.md) — terms and abbreviations
-- [Appendix B: Troubleshooting](appendix-b-troubleshooting.md) — symptom → cause → fix
+- [CLI Reference](10-cli-reference.md) — all commands with examples and workflows
+- [REST API Reference](11-api-reference.md) — backend endpoints and data models
+- [gRPC API Reference](16-grpc-api.md) — protobuf service definitions
+- [Glossary](appendix-a-glossary.md) — terms and abbreviations
+- [Troubleshooting Index](appendix-b-troubleshooting.md) — symptom → cause → fix
 

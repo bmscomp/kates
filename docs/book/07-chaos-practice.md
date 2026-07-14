@@ -1,4 +1,4 @@
-# Chapter 7: Chaos Engineering in Practice
+# Chaos Engineering in Practice
 
 This chapter covers how Kates implements chaos engineering: disruption types, playbooks, safety guardrails, SLA grading, and the full execution lifecycle.
 

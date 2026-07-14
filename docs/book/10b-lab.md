@@ -1,4 +1,4 @@
-# Chapter 10b: Lab — Interactive Performance Tuning
+# Lab — Interactive Performance Tuning
 
 The Lab is an interactive TUI for iterative Kafka performance tuning. Instead of running individual `kates test create` commands, Lab lets you tweak parameters, run tests, and compare results in a single live session — like a workbench for finding your cluster's optimal configuration.
 

@@ -1,4 +1,4 @@
-# Chapter 16: gRPC API Reference
+# gRPC API Reference
 
 ## Introduction
 
@@ -6,7 +6,7 @@ Kates exposes a gRPC API alongside the REST API for high-throughput programmatic
 
 **When should you use gRPC over REST?** Choose gRPC when you need type-safe, high-performance integration from Go, Java, Python, or Rust services. The protobuf contract gives you compile-time type checking, automatic client code generation, and efficient binary serialization — ideal for CI/CD pipelines where reliability and speed matter more than human readability. gRPC's HTTP/2 foundation also provides connection multiplexing.
 
-Use the REST API instead when you need quick automation with `curl`, are integrating with HTTP/1.1-only tools (webhooks, dashboards), or want human-readable responses during debugging. See [Chapter 11: REST API Reference](11-api-reference.md) for REST details.
+Use the REST API instead when you need quick automation with `curl`, are integrating with HTTP/1.1-only tools (webhooks, dashboards), or want human-readable responses during debugging. See [REST API Reference](11-api-reference.md) for REST details.
 
 ---
 
@@ -355,5 +355,5 @@ The proto file is bundled at `kates/src/main/proto/kates.proto`.
 
 ## See Also
 
-- [Chapter 10: CLI Reference](10-cli-reference.md) — Interactive CLI that wraps the REST API
-- [Chapter 11: REST API Reference](11-api-reference.md) — JSON/HTTP alternative for curl-based scripting and browser access
+- [CLI Reference](10-cli-reference.md) — Interactive CLI that wraps the REST API
+- [REST API Reference](11-api-reference.md) — JSON/HTTP alternative for curl-based scripting and browser access

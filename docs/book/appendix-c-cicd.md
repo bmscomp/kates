@@ -1,4 +1,4 @@
-# Appendix C: CI/CD Pipeline
+# CI/CD Pipeline
 
 This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform. It covers the six core workflows — from pull-request validation to production image publishing and CLI binary releases. The repository carries additional workflows for the Kafka Connect image (`ci-connect.yml`, `publish-connect.yml`) and for documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
 

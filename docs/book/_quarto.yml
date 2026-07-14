@@ -20,6 +20,8 @@ book:
     logo: assets/kates-wordmark.svg
   downloads: [pdf]
 
+  # Filenames are stable identifiers, not ordering — reading order lives
+  # here and only here. Never renumber files; new chapters get slug names.
   chapters:
     - index.qmd
     - part: "Part I — Foundations"
@@ -27,40 +29,47 @@ book:
         - 01-introduction.md
         - 02-architecture.md
         - 03-cluster.md
-        - 04-performance-theory.md
 
-    - part: "Part II — Testing"
+    - part: "Part II — Performance Testing"
       chapters:
+        - 04-performance-theory.md
         - 05-test-types.md
+        - 13-scenario-files.md
+        - 10b-lab.md
+
+    - part: "Part III — Chaos & Integrity"
+      chapters:
         - 06-chaos-theory.md
         - 07-chaos-practice.md
         - 08-data-integrity.md
 
-    - part: "Part III — Observability & CLI"
+    - part: "Part IV — Observability"
       chapters:
         - 09-observability.md
+
+    - part: "Part V — Deployment & Operations"
+      chapters:
+        - 20-installation-guide.md
+        - 15-kafka-deployment.md
+        - 12-deployment.md
+        - 17-security.md
+        - 19-multi-tenancy.md
+        - 18-upgrade-playbook.md
+        - 21-kafka-connect.md
+        - operating-kafka-connect.md
+        - 14-recipes.md
+
+    - part: "Part VI — Reference"
+      chapters:
         - 10-cli-reference.md
-        - 10b-lab.md
         - 11-api-reference.md
         - 16-grpc-api.md
 
-    - part: "Part IV — Deployment & Operations"
-      chapters:
-        - 12-deployment.md
-        - 13-scenario-files.md
-        - 14-recipes.md
-        - 15-kafka-deployment.md
-        - 17-security.md
-        - 18-upgrade-playbook.md
-        - 19-multi-tenancy.md
-        - 20-installation-guide.md
-        - 21-kafka-connect.md
-
-    - part: "Appendices"
-      chapters:
-        - appendix-a-glossary.md
-        - appendix-b-troubleshooting.md
-        - appendix-c-cicd.md
+  appendices:
+    - appendix-a-glossary.md
+    - appendix-b-troubleshooting.md
+    - appendix-c-cicd.md
+    - appendix-d-versions.md
 
 format:
   html:

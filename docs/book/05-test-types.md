@@ -1,6 +1,6 @@
-# Chapter 5: Test Types Deep Dive
+# Test Types Deep Dive
 
-This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` parameter-sweep types, covered in [Chapter 10](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
+This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` parameter-sweep types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
 
 ## Test Type Overview
 
@@ -74,7 +74,7 @@ kates test create --type LOAD \
   --wait
 ```
 
-**Scenario file equivalent** (see [Chapter 13](13-scenario-files.md)):
+**Scenario file equivalent** (see [Scenario Files & SLA Gates](13-scenario-files.md)):
 
 ```yaml
 scenarios:
@@ -103,7 +103,7 @@ Healthy ranges are environment-dependent — treat these as starting points and 
 | Throughput variability | \< 10% stddev | High variance suggests GC or I/O pressure |
 
 ::: {.callout-tip}
-For iterative parameter tuning, use `kates lab` instead of individual `test create` commands. Lab lets you tweak parameters, run tests, and compare results in a single session — see [Chapter 10b: Lab](10b-lab.md).
+For iterative parameter tuning, use `kates lab` instead of individual `test create` commands. Lab lets you tweak parameters, run tests, and compare results in a single session — see [Lab — Interactive Performance Tuning](10b-lab.md).
 :::
 
 
@@ -460,7 +460,7 @@ scenarios:
 
 ### Integrity + Chaos
 
-The real power of INTEGRITY tests emerges when combined with chaos engineering. `INTEGRITY` is not a chaos test by itself — the combination is orchestrated by `kates resilience run`, which pairs a test request with a chaos experiment (see [Chapter 7](07-chaos-practice.md)):
+The real power of INTEGRITY tests emerges when combined with chaos engineering. `INTEGRITY` is not a chaos test by itself — the combination is orchestrated by `kates resilience run`, which pairs a test request with a chaos experiment (see [Chaos Engineering in Practice](07-chaos-practice.md)):
 
 ```yaml
 # resilience-integrity.yaml
@@ -488,7 +488,7 @@ This produces messages, kills a broker mid-test, waits for recovery, and then ve
 
 ## Scenario Files
 
-All test types support YAML scenario files for reproducible, version-controlled test definitions. See [Chapter 13: Scenario Files & SLA Gates](13-scenario-files.md) for the complete YAML schema reference, including the full spec field list and the SLA validation gates.
+All test types support YAML scenario files for reproducible, version-controlled test definitions. See [Scenario Files & SLA Gates](13-scenario-files.md) for the complete YAML schema reference, including the full spec field list and the SLA validation gates.
 
 The CLI ships a curated library of built-in templates. Browse it with `list` (optionally filtered by `--type`), preview with `show`, and write a ready-to-edit file with `export`:
 

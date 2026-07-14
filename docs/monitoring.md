@@ -1,6 +1,6 @@
 # Monitoring
 
-> **This document has been merged into the book.** For complete monitoring documentation, see [Chapter 9: Observability & Monitoring](book/09-observability.md).
+> **This document has been merged into the book.** For complete monitoring documentation, see [Observability & Monitoring](book/09-observability.md).
 
 Chapter 9 now includes:
 - All Grafana dashboard descriptions (Kafka cluster, Kates benchmark, chaos, application health)

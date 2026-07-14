@@ -1,4 +1,4 @@
-# Chapter 4: Performance Theory
+# Performance Theory
 
 This chapter covers the fundamentals of measuring distributed system performance. Understanding these concepts is essential before running any Kates test — without them, you'll collect numbers but not learn anything.
 
@@ -123,7 +123,7 @@ In Kafka, tail latency is caused by:
 - **Controller elections** — KRaft metadata operations can cause brief pauses
 
 ::: {.callout-tip}
-GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates deploys with generational ZGC by default (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default) — see [Chapter 12: Deployment](12-deployment.md#jvm-tuning) for details.
+GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates deploys with generational ZGC by default (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default) — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
 :::
 
 
@@ -192,7 +192,7 @@ Kates exports heatmap data in two formats:
 - **JSON** — structured data for Grafana visualization
 - **CSV** — tabular data for spreadsheet analysis
 
-Each heatmap row contains counts across logarithmic latency buckets, snapshotted each time the running test's status is polled. For full details on heatmap export commands, bucket boundaries, and reading patterns, see [Chapter 9: Observability — Latency Heatmaps](09-observability.md#latency-heatmaps).
+Each heatmap row contains counts across logarithmic latency buckets, snapshotted each time the running test's status is polled. For full details on heatmap export commands, bucket boundaries, and reading patterns, see [Observability & Monitoring](09-observability.md#latency-heatmaps).
 
 ## Statistical Significance
 

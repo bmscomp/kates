@@ -1,4 +1,6 @@
-# Chapter 12: Deployment Guide
+# Deployment Guide
+
+> **Scope**: this chapter owns deploying the **Kates stack** — the backend, CLI, monitoring, and chaos tooling, and the topology choices between them. Provisioning the Kafka cluster itself is delegated to [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) (the walkthrough) and [Kafka Deployment Engineering](15-kafka-deployment.md) (the rationale).
 
 Deploying Kates is more than running `make all`. The choices you make *before* running that first command — how many namespaces, what service exposure strategy, how much memory to allocate — ripple through every test you'll run later. A deployment tuned for local experimentation will buckle under production load; a production topology is needless overhead on a laptop.
 
@@ -372,7 +374,7 @@ make ui
 make apicurio
 ```
 
-For deep Kafka configuration details (broker tuning, security, Cruise Control, troubleshooting), see [Chapter 15: Kafka Deployment Engineering](15-kafka-deployment.md).
+For deep Kafka configuration details (broker tuning, security, Cruise Control, troubleshooting), see [Kafka Deployment Engineering](15-kafka-deployment.md).
 
 ### LitmusChaos
 
@@ -468,7 +470,7 @@ make cli-clean
 ```
 
 ::: {.callout-note}
-**macOS:** `make cli-install` automatically strips provenance/quarantine extended attributes and ad-hoc codesigns the binary. See [Chapter 10: CLI Reference](10-cli-reference.md#installation) for manual install instructions.
+**macOS:** `make cli-install` automatically strips provenance/quarantine extended attributes and ad-hoc codesigns the binary. See [CLI Reference](10-cli-reference.md#installation) for manual install instructions.
 :::
 
 
@@ -480,7 +482,7 @@ After deployment, set up port forwarding:
 make ports
 ```
 
-For the full list of access points and URLs, see [Chapter 3: The Cluster Under Test](03-cluster.md#access-points).
+For the full list of access points and URLs, see [The Cluster Under Test](03-cluster.md#access-points).
 
 ## CLI Configuration
 

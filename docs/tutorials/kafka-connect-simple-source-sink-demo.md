@@ -2,7 +2,7 @@
 
 A minimal end-to-end runbook: insert a row in PostgreSQL, verify Debezium publishes it to Kafka, and confirm the JDBC sink writes it to a replica table.
 
-For the full tutorial with all connector types and detailed explanations, see [Tutorial 9](09-kafka-connect-working-examples.md). For architecture and theory, see [Chapter 21](../book/21-kafka-connect.md).
+For the full tutorial with all connector types and detailed explanations, see [Tutorial 9](09-kafka-connect-working-examples.md). For architecture and theory, see [Kafka Connect & CDC Pipelines](../book/21-kafka-connect.md).
 This runbook demonstrates a full end-to-end flow:
 - Insert one row in PostgreSQL
 - Verify Debezium source connector publishes to Kafka topic

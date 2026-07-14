@@ -1,4 +1,4 @@
-# Appendix A: Glossary
+# Glossary
 
 Quick reference for terms used throughout this book.
 
@@ -44,7 +44,7 @@ Quick reference for terms used throughout this book.
 | **Loom / Virtual Threads** | A Java 21+ feature that provides lightweight threads managed by the JVM rather than the OS. Quarkus uses virtual threads for non-blocking I/O, enabling millions of concurrent connections without thread pool exhaustion |
 | **mTLS** | Mutual TLS — both client and server present certificates for authentication. Used on the TLS listener (port 9093) |
 | **NetworkPolicy** | Kubernetes resource that controls pod-to-pod network traffic. The kafka namespace uses default-deny with explicit allow rules |
-| **OTLP** | OpenTelemetry Protocol — the standard wire protocol for exporting traces, metrics, and logs from instrumented applications. Kates uses OTLP to export trace spans to Jaeger (see [Ch. 9](09-observability.md#distributed-tracing)) |
+| **OTLP** | OpenTelemetry Protocol — the standard wire protocol for exporting traces, metrics, and logs from instrumented applications. Kates uses OTLP to export trace spans to Jaeger (see [Observability & Monitoring](09-observability.md#distributed-tracing)) |
 | **P50 / P95 / P99** | Percentile latency metrics. P99 = 99% of requests completed within this time. P99 is more useful than averages for understanding worst-case behavior |
 | **Partition** | A topic is divided into partitions for parallelism. Each partition is an ordered, immutable sequence of records |
 | **PDB** | Pod Disruption Budget — Kubernetes resource limiting how many pods in a set can be unavailable simultaneously. Set to `maxUnavailable: 1` for Kafka |
@@ -59,7 +59,7 @@ Quick reference for terms used throughout this book.
 | **RF** | Replication Factor — the number of copies of each partition maintained across brokers |
 | **RPO** | Recovery Point Objective — the maximum acceptable amount of data loss measured in time |
 | **RTO** | Recovery Time Objective — the maximum acceptable time from failure to full recovery |
-| **Scenario File** | A YAML/JSON file defining one or more test specifications with optional SLA validation gates (see [Chapter 13](13-scenario-files.md)) |
+| **Scenario File** | A YAML/JSON file defining one or more test specifications with optional SLA validation gates (see [Scenario Files & SLA Gates](13-scenario-files.md)) |
 | **SCRAM-SHA-512** | Salted Challenge Response Authentication Mechanism — a password-based auth protocol used on the plain (9092) and external (9094) Kafka listeners |
 | **Share Group** | Kafka 4.x feature (KIP-932) enabling queue-style competing-consumer semantics alongside traditional consumer groups |
 | **SLA** | Service Level Agreement — quantitative targets for system behavior (e.g., "P99 latency ≤ 50ms") |
