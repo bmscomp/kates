@@ -36,7 +36,7 @@ kates report diff <baseline-id> <new-id>
 
 Expected output:
 
-```
+```text
   ▸ Report Diff: a1b2c3d4 vs e5f6a7b8
   ┌─────────────────────┬───────────┬───────────┬────────┐
   │ Metric              │ Baseline  │ New       │ Delta  │
@@ -52,7 +52,6 @@ Expected output:
 ::: {.callout-tip}
 If you see `Test run not found` errors, make sure you noted the test IDs from Step 1 output before starting the upgrade. Test IDs are printed after each `kates test apply` or `kates test create` command.
 :::
-
 
 ### Suggested Scenario File
 
@@ -129,7 +128,7 @@ kates trend --type LOAD --metric avgThroughputRecPerSec --days 30
 
 Expected output:
 
-```
+```text
   ▸ Trend: LOAD / p99LatencyMs (30 days, 30 runs)
     Min: 8.2ms  Max: 14.1ms  Avg: 10.5ms
     ▁▁▂▁▁▁▂▁▃▁▁▁▂▁▁▁▁▂▁▁▁▁▁▁▁▇▁▁▁▁
@@ -144,7 +143,6 @@ Expected output:
 ::: {.callout-tip}
 If the schedule doesn't trigger, verify the Kates backend pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates` — the scheduler runs inside the backend, not as a separate pod. The cron expression uses UTC — adjust for your timezone.
 :::
-
 
 A sudden spike in the sparkline indicates a regression. Use `kates report diff` to compare the anomalous run against its predecessor.
 
@@ -213,7 +211,7 @@ kates resilience run -f resilience.json
 
 Expected output:
 
-```
+```text
   Resilience Test Results
   Status: COMPLETED
 
@@ -236,7 +234,6 @@ Expected output:
 ::: {.callout-tip}
 Each playbook run prints an SLA grade at the end. If you need a hard pass/fail gate for CI — exit code 1 on SLA violation — run a custom disruption plan instead: `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
 :::
-
 
 ---
 
@@ -310,7 +307,6 @@ Expected output:
 If the diff shows degraded throughput but the heatmap has no obvious pattern, check the GC logs. Run `kubectl logs <broker-pod> -n kafka | grep 'GC pause'` — JVM garbage collection pauses are a common hidden cause of latency spikes.
 :::
 
-
 If under-replicated or offline partitions show up during the test, the cluster was under stress.
 
 ---
@@ -349,7 +345,7 @@ kates trend --type CAPACITY --metric avgThroughputRecPerSec --days 90
 
 Expected output:
 
-```
+```text
   ▸ Capacity Test Results
   ┌───────┬────────────┬───────────────┬──────────────┐
   │ Phase │ Producers  │ Throughput    │ P99 Latency  │
@@ -367,7 +363,6 @@ Expected output:
 ::: {.callout-tip}
 If capacity results seem unexpectedly low, check that no resource quotas or Kafka user throttling limits are active. Run `kubectl get kafkauser -n kafka -o yaml` and verify the `quotas` section isn't constraining your test user.
 :::
-
 
 ---
 
@@ -424,7 +419,7 @@ kates report compare <id1>,<id2>,<id3>,<id4>
 
 Expected output:
 
-```
+```text
   ▸ Comparison: 4 runs
   ┌───────────────────────┬───────────────┬──────────────┬───────────────────┐
   │ Scenario              │ Throughput    │ P99 Latency  │ Error Rate        │

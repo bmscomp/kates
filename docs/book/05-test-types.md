@@ -106,7 +106,6 @@ Healthy ranges are environment-dependent — treat these as starting points and 
 For iterative parameter tuning, use `kates lab` instead of individual `test create` commands. Lab lets you tweak parameters, run tests, and compare results in a single session — see [Lab — Interactive Performance Tuning](10b-lab.md).
 :::
 
-
 ---
 
 ## STRESS Test

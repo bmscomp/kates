@@ -58,7 +58,7 @@ graph TB
 
 Each message in an INTEGRITY test carries a 28-byte binary header (`SequencedPayload`), zero-padded to the configured record size:
 
-```
+```text
 [8 bytes] sequence number   (long)
 [8 bytes] timestamp nanos   (long)
 [8 bytes] run ID hash       (long)
@@ -249,7 +249,7 @@ A clean run contains only the final `SUMMARY` event.
 
 ### PASS — Zero Data Loss
 
-```
+```text
   ▸ Data Integrity
   Sent                     100.0K
   Acked                    100.0K
@@ -267,7 +267,7 @@ This is the expected result for a properly configured cluster with `acks=all` an
 
 ### DATA_LOSS — Messages Missing
 
-```
+```text
   ▸ Data Integrity
   Sent                     100.0K
   Acked                    100.0K
@@ -299,7 +299,7 @@ Data loss indicates a serious issue. Common causes:
 
 ### PASS with Unacked Messages
 
-```
+```text
   ▸ Data Integrity
   Sent                     100.0K
   Acked                    100.0K
@@ -369,7 +369,7 @@ Ad-hoc `create` runs use the backend defaults: CRC verification is on, but idemp
 
 With `--wait`, `kates test apply` shows a spinner per scenario and a summary table once each test finishes, including the SLA gates from the `validate:` block:
 
-```
+```text
   Applying 1 scenario(s) from integrity-tx.yaml
 
   ▸ Transactional Integrity Verification (INTEGRITY)...
@@ -392,7 +392,7 @@ kates test get <id>
 
 The report starts with the test details, configuration, and per-phase results; for INTEGRITY tests it ends with a Data Integrity section. A successful `integrity-tx` run produces:
 
-```
+```text
   ▸ Data Integrity
   Sent                     200.0K
   Acked                    200.0K
@@ -425,7 +425,7 @@ The report starts with the test details, configuration, and per-phase results; f
 
 If the test detects data loss, the Data Integrity section changes to:
 
-```
+```text
   ▸ Data Integrity
   Sent                     200.0K
   Acked                    200.0K

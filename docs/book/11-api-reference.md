@@ -32,13 +32,15 @@ Requests without a key receive `401 Unauthorized`; requests with a wrong key rec
 | `Authorization` | `Bearer <api-key>` | When security enabled | API key (alternative: `X-API-Key`) |
 | `X-API-Key` | `<api-key>` | When security enabled | API key (alternative to `Authorization`) |
 
-> **Tip:** In Quarkus dev mode and in tests, security is switched off (`%dev.kates.api.security-enabled=false`), so no authentication headers are needed there.
+::: {.callout-tip}
+In Quarkus dev mode and in tests, security is switched off (`%dev.kates.api.security-enabled=false`), so no authentication headers are needed there.
+:::
 
 ---
 
 ## Base URL
 
-```
+```text
 http://localhost:30083
 ```
 
@@ -249,7 +251,7 @@ When an SLA is violated, `overallSlaVerdict.violations` contains entries of the 
 
 Export report as CSV. **Response:** `200 OK` with `Content-Type: text/csv`
 
-```
+```text
 runId,testType,backend,phase,recordsSent,throughputRecPerSec,throughputMBPerSec,avgLatencyMs,p50LatencyMs,p95LatencyMs,p99LatencyMs,maxLatencyMs,error
 a1b2c3d4,LOAD,native,ramp-up,10000,5234.1,5.1,4.8,3.2,9.6,18.4,45.2,
 a1b2c3d4,LOAD,native,steady-state,90000,8412.7,8.2,2.4,1.8,5.6,12.3,34.1,

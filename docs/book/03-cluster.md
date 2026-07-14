@@ -62,7 +62,6 @@ Strimzi's `rack` configuration uses these labels to ensure:
 You can verify the zone distribution at any time with `kates cluster topology`. If all brokers end up in the same zone, rack-aware assignment won't protect you from a zone failure — and your chaos tests will give you false confidence.
 :::
 
-
 ## Resource Budget
 
 | Component | Memory (req=limit) | CPU (req / limit) | Storage | JVM Heap |
@@ -121,7 +120,6 @@ This matrix is the most important table in this chapter. It tells you exactly wh
 Notice that **2 brokers down** means writes are rejected, but **no data is lost**. This is the difference between *availability* and *durability*. With `min.insync.replicas=2`, Kafka trades availability for durability — it would rather refuse writes than risk losing data. Understanding this trade-off is fundamental to designing meaningful chaos experiments.
 :::
 
-
 ### What Happens During a Broker Failure
 
 When a broker goes down, the sequence of events matters for understanding your test results:
@@ -179,7 +177,6 @@ kubectl label node gamma topology.kubernetes.io/zone-
 ::: {.callout-warning}
 Remember to re-apply zone labels after testing. Without rack awareness, a single node failure can cause data loss if all replicas of a partition happen to be on the same node.
 :::
-
 
 ## Listeners
 

@@ -112,7 +112,6 @@ Not every problem is a Kates problem. Use this guide to determine where to focus
 When filing an issue, include the output of `kates doctor` — it runs a battery of diagnostic checks and gives you a single summary of system health.
 :::
 
-
 ## Common Issues (Additional)
 
 | Symptom | Likely Cause | Fix |

@@ -42,7 +42,7 @@ Each tenant gets:
 
 ## Topic Naming Convention
 
-```
+```text
 <service-name>-<domain>[-<qualifier>]
 ```
 
