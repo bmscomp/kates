@@ -6,7 +6,7 @@ metadata:
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 spec:
   replicas: 1
   selector:

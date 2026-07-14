@@ -6,7 +6,7 @@ metadata:
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 data:
   # Kafka cluster
   KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
