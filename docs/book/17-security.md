@@ -614,7 +614,7 @@ kates kyverno audit kates-pod-security-standards
 
 ::: {.callout-tip}
 **Cross-references:**
-- For Kyverno installation instructions, see [Chapter 20: Installation Guide](20-installation-guide.md#kyverno-optional).
+- For Kyverno installation instructions, see [Chapter 20: Installation Guide](20-installation-guide.md#15-kyverno-optional).
 - For Kyverno upgrade procedures, see [Chapter 18: Upgrade Playbook](18-upgrade-playbook.md).
 - For a full index of Kyverno-related troubleshooting, see [Appendix B: Troubleshooting](appendix-b-troubleshooting.md#deployment-issues).
 :::

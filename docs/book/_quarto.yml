@@ -11,7 +11,14 @@ book:
   author: "The Kates Team"
   date: today
   date-format: "MMMM YYYY"
-  cover-image: ../assets/kates-logo.png
+  cover-image: assets/cover.svg
+  repo-url: https://github.com/bmscomp/kates
+  repo-subdir: docs/book
+  repo-actions: [edit, issue]
+  search: true
+  sidebar:
+    logo: assets/kates-wordmark.svg
+  downloads: [pdf]
 
   chapters:
     - index.qmd
@@ -56,7 +63,18 @@ book:
         - appendix-c-cicd.md
 
 format:
+  html:
+    theme:
+      - cosmo
+      - custom.scss
+    toc: true
+    toc-depth: 3
+    code-copy: true
+    code-overflow: wrap
+    mermaid:
+      theme: neutral
   pdf:
+    output-file: kates-definitive-guide
     documentclass: scrbook
     papersize: a4
     fontsize: 11pt

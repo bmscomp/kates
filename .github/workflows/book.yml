@@ -1,0 +1,72 @@
+name: Book
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/book/**"
+      - ".github/workflows/book.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/book/**"
+      - ".github/workflows/book.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: book-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Render Book
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          tinytex: ${{ github.event_name == 'push' }}
+
+      - name: Install Chromium for mermaid PDF rendering
+        if: github.event_name == 'push'
+        run: quarto install chromium --no-prompt
+
+      # Sources are GitHub-flavored .md so chapters render in the repo file
+      # view; Quarto executes mermaid only in .qmd. The script converts
+      # fences, links, filenames, and the chapter list — build-time only,
+      # never committed.
+      - name: Prepare sources for Quarto
+        run: ./scripts/prepare-book-render.sh
+
+      - name: Render (HTML only, PR gate)
+        if: github.event_name == 'pull_request'
+        run: quarto render docs/book --to html
+
+      - name: Render (HTML + PDF)
+        if: github.event_name == 'push'
+        run: quarto render docs/book
+
+      - name: Upload site artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book/_book
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
