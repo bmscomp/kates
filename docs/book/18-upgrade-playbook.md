@@ -92,7 +92,7 @@ kates test create --type LOAD --records 100000 --acks all --wait
 # Compare pre vs post
 kates report compare <pre-id>,<post-id>
 
-# Run full GameDay
+# Run the full Game Day pipeline
 make gameday
 ```
 
@@ -209,7 +209,6 @@ kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/${KYVERNO_TAG
 Always upgrade CRDs before the controller. If the new controller version expects CRD fields that don't exist yet, the admission webhook may fail open or reject all requests.
 :::
 
-
 **Step 3 — Upgrade the Kyverno controller via Helm:**
 
 ```bash
@@ -263,7 +262,6 @@ kubectl get policyexceptions -A -o jsonpath='{range .items[*]}{.metadata.namespa
 ::: {.callout-important}
 The `PolicyException` API was introduced in Kyverno 1.9 and has moved through several API versions since (`kyverno.io/v2alpha1` → `v2beta1` → `v2`). After upgrading Kyverno, make sure your exceptions use an API version the new release still serves — alpha and beta versions are dropped over time. Check the [Kyverno release notes](https://github.com/kyverno/kyverno/releases) for API deprecations before upgrading.
 :::
-
 
 ## Pre-Upgrade Checklist
 
@@ -342,7 +340,6 @@ kates test get <id>
 Kafka version rollback is **NOT possible** once the KRaft metadata version has been raised. Strimzi controls this through `spec.kafka.metadataVersion` in the Kafka CR (exposed as `kafka.metadataVersion` in the `kafka-cluster` chart values): upgrade the broker `version` first while leaving `metadataVersion` at the previous level — in that state a rollback is still possible. Once you raise `metadataVersion`, the brokers can no longer read the older metadata format and downgrade is irreversible. Only bump `metadataVersion` after the new version has passed validation.
 :::
 
-
 ### Strimzi Operator Rollback
 
 **Step 1 — Rollback via Helm:**
@@ -375,7 +372,6 @@ kates test create --type LOAD --records 10000 --wait
 ::: {.callout-warning}
 If the new Strimzi version migrated CRDs to a new API version (e.g., `v1beta2` → `v1`), rolling back the operator will **not** revert the CRDs. You must manually restore the CRDs from backup or re-apply the old CRD definitions.
 :::
-
 
 ### Kates Application Rollback
 

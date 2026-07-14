@@ -308,7 +308,7 @@ Transport-level codes such as `UNAVAILABLE` come from the gRPC runtime itself (e
 
 **Error output format:**
 
-```
+```text
 ERROR:
   Code: NotFound
   Message: Test not found: abc-123

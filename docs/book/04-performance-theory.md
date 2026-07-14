@@ -39,7 +39,7 @@ For Kafka, throughput is measured in two dimensions:
 
 Both matter. A system processing 100,000 tiny 100-byte messages/s has very different characteristics than one processing 10,000 large 10KB messages/s — even though the MB/s might be similar.
 
-In Kates, we measure:
+Kates measures:
 
 - **Average throughput** — total records / total duration
 - **Peak throughput** — highest throughput observed in any sampling window
@@ -125,7 +125,6 @@ In Kafka, tail latency is caused by:
 ::: {.callout-tip}
 GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates deploys with generational ZGC by default (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default) — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
 :::
-
 
 ## Coordinated Omission
 

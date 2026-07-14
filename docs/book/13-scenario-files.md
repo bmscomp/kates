@@ -291,7 +291,7 @@ kates test apply -f scenarios.yaml --wait
 
 Running with `--wait`:
 
-```
+```text
   ▸ Baseline Load Test (LOAD)...
   ✓   Created: 3f8a2c1e-9b4…
   ✓ Baseline Load Test → DONE
@@ -414,7 +414,7 @@ scenarios:
 
 SLA threshold values must be plain numbers, not strings with units — the field name already indicates the unit (e.g., `maxP99LatencyMs` implies milliseconds). A string value fails YAML decoding, so the whole run aborts with the raw parse error:
 
-```
+```text
   ✖ Invalid scenario file: yaml: unmarshal errors:
   line 8: cannot unmarshal !!str `50ms` into float64
 ```

@@ -74,7 +74,6 @@ sequenceDiagram
 Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. This is an acceptable tradeoff for seamless failover — CDC downtime during a rebalance is typically under 30 seconds.
 :::
 
-
 ### Scheduling Configuration
 
 ```yaml
@@ -102,7 +101,7 @@ The base values use `whenUnsatisfiable: ScheduleAnyway`, so single-node clusters
 
 Each Connect worker consumes memory proportional to the number of tasks it runs and the batch sizes configured:
 
-```
+```text
 Worker Memory = JVM Heap + Off-Heap
              = (-Xmx) + (Direct Buffers + Thread Stacks + JMX + GC Overhead)
              ≈ -Xmx × 2
@@ -192,7 +191,6 @@ Connect's internal producer sends records to Kafka. These settings control batch
 ::: {.callout-tip}
 Monitor `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` and `rate(kafka_connect_source_task_metrics_source_record_write_total[5m])` in Grafana. If poll rate >> write rate, the producer is the bottleneck — increase `producer.batch.size` and enable compression.
 :::
-
 
 ---
 
@@ -394,7 +392,6 @@ kates kafka connect restart debezium-postgres-source
 Update the database password in PostgreSQL **before** updating the Kubernetes Secret. If you update the Secret first, Connect workers will restart and immediately fail authentication.
 :::
 
-
 ---
 
 ## Upgrade Procedures
@@ -447,7 +444,6 @@ helm upgrade connect-cluster charts/connect-cluster \
 If the new Debezium version changed the internal offset format, rolling back may cause connectors to fail with deserialization errors. Always test in staging first.
 :::
 
-
 ---
 
 ## Disaster Recovery
@@ -490,7 +486,6 @@ kates deploy --with-kafka-connect --ha
 ::: {.callout-tip}
 The internal topics (`*-offsets`, `*-configs`, `*-status`) are the only persistent state for the Connect cluster. As long as these topics survive in Kafka (with RF=3), the Connect cluster is fully rebuildable from the Helm chart alone.
 :::
-
 
 ### Backup Strategy
 
