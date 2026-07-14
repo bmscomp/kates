@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/pkg/theme"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 	"golang.org/x/term"

@@ -15,7 +15,7 @@ echo ""
 
 if ! command -v kates &>/dev/null; then
   echo "ERROR: kates CLI not found in PATH"
-  echo "Install: go install github.com/klster/kates-cli@latest"
+  echo "Install: brew install bmscomp/tap/kates — or download a binary from https://github.com/bmscomp/kates/releases/latest"
   exit 1
 fi
 

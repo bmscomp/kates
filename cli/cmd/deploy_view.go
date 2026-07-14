@@ -10,7 +10,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/pkg/theme"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )

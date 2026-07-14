@@ -5,7 +5,7 @@ metadata:
   namespace: kafka
   labels:
     app.kubernetes.io/managed-by: kates
-    kates.klster.com/component: chaos-probe
+    kates.bmscomp.github.io/component: chaos-probe
 data:
   rto-probe.sh: |
     #!/bin/bash

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -148,7 +148,7 @@ echo ""
 
 if ! command -v kates &>/dev/null; then
   echo "ERROR: kates CLI not found in PATH"
-  echo "Install: go install github.com/klster/kates-cli@latest"
+  echo "Install: go install github.com/bmscomp/kates/cli@latest"
   exit 1
 fi
 

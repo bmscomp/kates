@@ -12,8 +12,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/pkg/detect"
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/spf13/cobra"
 )
 

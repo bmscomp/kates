@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 

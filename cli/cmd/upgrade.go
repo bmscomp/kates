@@ -95,7 +95,7 @@ func runUpgrade() error {
 
 	// ── 6. Build ─────────────────────────────────────────────────────────────
 	buildDate := time.Now().UTC().Format(time.RFC3339)
-	ldflags := fmt.Sprintf("-s -w -X github.com/klster/kates-cli/cmd.Version=%s -X github.com/klster/kates-cli/cmd.Commit=%s -X github.com/klster/kates-cli/cmd.BuildDate=%s",
+	ldflags := fmt.Sprintf("-s -w -X github.com/bmscomp/kates/cli/cmd.Version=%s -X github.com/bmscomp/kates/cli/cmd.Commit=%s -X github.com/bmscomp/kates/cli/cmd.BuildDate=%s",
 		gitBranch+"-"+gitCommit, gitCommit, buildDate)
 
 	tmpBin := filepath.Join(srcDir, "dist", "kates")

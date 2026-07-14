@@ -5,7 +5,7 @@ metadata:
   namespace: kafka
   labels:
     app.kubernetes.io/managed-by: kates
-    kates.klster.com/scenario: network-partition
+    kates.bmscomp.github.io/scenario: network-partition
 spec:
   annotationCheck: 'false'
   engineState: active
