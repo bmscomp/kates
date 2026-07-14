@@ -8,6 +8,13 @@ Kates exposes a gRPC API alongside the REST API for high-throughput programmatic
 
 Use the REST API instead when you need quick automation with `curl`, are integrating with HTTP/1.1-only tools (webhooks, dashboards), or want human-readable responses during debugging. See [REST API Reference](11-api-reference.md) for REST details.
 
+After this chapter, you can:
+
+- Connect `grpcurl` to the unified Quarkus server on port 8080 and discover the `TestService`, `ClusterService`, and `HealthService` RPCs through server reflection
+- Drive a full test lifecycle over gRPC — `CreateTest`, poll `GetTest` until a terminal status, then `CancelTest` or `DeleteTest`
+- Read proto3 JSON output correctly, knowing that zero-valued fields are omitted and unset request fields fall back to per-test-type defaults
+- Generate typed Go, Java, or Python clients from `kates.proto`
+
 ---
 
 ## gRPC vs REST
@@ -357,3 +364,16 @@ The proto file is bundled at `kates/src/main/proto/kates.proto`.
 
 - [CLI Reference](10-cli-reference.md) — Interactive CLI that wraps the REST API
 - [REST API Reference](11-api-reference.md) — JSON/HTTP alternative for curl-based scripting and browser access
+
+---
+
+## Summary
+
+- gRPC and REST share the same backend service layer, so behavior is identical — gRPC is served over the unified Quarkus HTTP port 8080, not the separate port 9000 the Helm chart still declares
+- Server reflection is enabled, so `grpcurl -plaintext localhost:8080 list` discovers every service without a copy of the proto file
+- `CreateTestRequest` exposes only a subset of `TestSpec`; unset fields fall back to per-test-type defaults, and the request's `labels` map is ignored by the current server
+- proto3 JSON output omits zero-valued fields — a missing `id` or `page` in a response means zero, not an error
+- Kates raises three application status codes — `INVALID_ARGUMENT`, `NOT_FOUND`, and `INTERNAL`; transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
+- Typed clients for Go, Java, and Python are generated with `protoc` from the bundled `kates/src/main/proto/kates.proto`
+
+This closes the book's reference part — for ready-made workflows that put these APIs to work, return to [Recipes & Patterns](14-recipes.md), and turn to the appendices for the glossary, troubleshooting guide, CI/CD templates, and version matrix.

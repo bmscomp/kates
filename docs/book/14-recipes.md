@@ -1,6 +1,11 @@
 # Recipes & Patterns
 
-Practical, ready-to-use recipes for common Kates workflows. Each recipe is a self-contained procedure you can adapt to your environment.
+Practical, ready-to-use recipes for common Kates workflows. Each recipe is a self-contained procedure you can adapt to your environment — this chapter is for you once you know the individual commands and want to combine them into end-to-end procedures. After this chapter, you can:
+
+- Validate a Kafka upgrade by diffing before-and-after runs of the same scenario file with `kates report diff`
+- Schedule a nightly regression suite with `kates schedule create` and spot anomalies with `kates trend`
+- Certify a cluster's resilience with disruption playbooks and a combined `kates resilience run`
+- Diagnose a latency regression and size sustainable capacity from per-phase CAPACITY results
 
 ## Recipe 1: Validate a Kafka Upgrade
 
@@ -436,3 +441,14 @@ Expected output:
 ::: {.callout-tip}
 If all four runs show nearly identical throughput, the bottleneck is likely not the producer configuration. Check network bandwidth between producers and brokers with `kubectl exec <broker-pod> -n kafka -- cat /proc/net/dev` and verify the cluster isn't network-bound.
 :::
+
+## Summary
+
+- Upgrade validation is a baseline-upgrade-retest-diff loop: run the same scenario file before and after, then compare with `kates report diff` against your tolerance.
+- Nightly regressions are cheapest to catch with `kates schedule create` plus a weekly `kates trend` review — a spike in the sparkline points you at the run to diff.
+- Chaos certification layers its tests: a LOAD baseline, an INTEGRITY check, disruption playbooks, and finally `kates resilience run`, which measures performance during failure.
+- Latency investigations move from `kates report diff` to `kates report brokers` to heatmap export — vertical stripes suggest GC pauses or leader elections, horizontal bands bimodal paths, upward drift saturation.
+- The CAPACITY test type finds sustainable throughput by escalating load in phases: the last phase before P99 latency breaches your SLA is your ceiling.
+- Producer tuning is a multi-scenario suite compared with `kates report compare` — batching and linger buy throughput at a latency cost, while compression often improves both.
+
+Every command these recipes lean on has more flags and output formats than shown here — the [CLI Reference](10-cli-reference.md) documents the full command surface.

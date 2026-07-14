@@ -8,6 +8,13 @@ The Kates backend exposes a RESTful API that the CLI and other clients use to ma
 
 If you need strongly typed clients, streaming results, or high-throughput programmatic access from Go, Java, or Python services, consider the [gRPC API](16-grpc-api.md) instead. If you prefer an interactive experience with formatted output, the [CLI](10-cli-reference.md) is the best choice. All three interfaces share the same backend service layer, so results are identical regardless of which you choose.
 
+After this chapter, you can:
+
+- Authenticate any request with an API key and name the endpoints that stay public
+- Create a test with `POST /api/tests`, poll it to completion, and export the report as JSON, CSV, or JUnit XML
+- Validate a disruption plan with a dry run, execute it, and read the recovery timings and SLA grade it returns
+- Decode any failure from the shared error envelope and its HTTP status code
+
 ---
 
 ## Authentication
@@ -781,6 +788,30 @@ echo "Exported: report.json, report.csv, report.xml, heatmap.json, heatmap.csv"
 jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summary.p99LatencyMs, sla:.overallSlaVerdict.passed}' report.json
 ```
 
+::: {.callout-tip}
+**Try it**
+
+Walk the core loop against a running backend — no CLI involved:
+
+```bash
+BASE="http://localhost:30083"
+
+# Public endpoint — answers without any key
+curl -s "$BASE/api/health" | jq '{status, kafka: .kafka.status}'
+
+# Ask the API which test types it accepts
+curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/tests/types" | jq .
+
+# Create a small ROUND_TRIP test, then poll it
+TEST_ID=$(curl -s -X POST "$BASE/api/tests" -H "X-API-Key: $KATES_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"ROUND_TRIP","spec":{"numRecords":1000}}' | jq -r '.id')
+curl -s -H "X-API-Key: $KATES_API_KEY" "$BASE/api/tests/$TEST_ID" | jq '.status'
+```
+
+The health check works with no key, the create call returns `202 Accepted` with an 8-character run ID, and re-running the last command shows `status` advancing from `PENDING` through `RUNNING` to `DONE`.
+:::
+
 ---
 
 ## See Also
@@ -788,3 +819,13 @@ jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summar
 - [CLI Reference](10-cli-reference.md) — Interactive CLI commands that wrap this REST API
 - [Scenario Files & SLA Gates](13-scenario-files.md) — YAML scenario definitions used with test creation endpoints
 - [gRPC API Reference](16-grpc-api.md) — Strongly typed alternative for CI/CD and service-to-service integration
+
+## Summary
+
+- Every CLI action maps to a REST endpoint — anything you do interactively can be scripted with `curl` and `jq` against the same backend service layer
+- Authentication is on by default: pass the key as `Authorization: Bearer` or `X-API-Key`, expect `401` without one and `403` with a wrong one; only `/api/health`, `/openapi`, and everything under `/q/` stay public
+- Test execution is asynchronous — `POST /api/tests` returns `202 Accepted` and you poll `GET /api/tests/{id}` — while disruption execution is synchronous and blocks until the report is ready
+- One report feeds many consumers: JSON for dashboards, CSV for spreadsheets, JUnit XML for CI gates, and heatmap data for latency visualization
+- This chapter covers the core endpoint families only; the complete, always-current spec lives at `/q/openapi`
+
+When shell scripts hit their limits — typed clients, streaming results, service-to-service calls — the same operations are available over protocol buffers in [gRPC API Reference](16-grpc-api.md).
