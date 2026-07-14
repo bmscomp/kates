@@ -411,7 +411,7 @@ kates-undeploy:
 CLUSTER_NAME   ?= panda
 KATES_NS       ?= kates
 KATES_IMAGE    ?= kates:latest
-CHART_REGISTRY ?= oci://ghcr.io/klster/charts
+CHART_REGISTRY ?= oci://ghcr.io/bmscomp/charts
 CHART_DIR      := charts/kates
 CHART_VERSION  := $(shell grep '^version:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}')
 kates-helm: kates-helm-deploy

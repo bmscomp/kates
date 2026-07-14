@@ -54,8 +54,8 @@ make connect-build
 # Build multi-arch and push to registry
 make connect-push
 
-# Tag and release
-make connect-release VERSION=3.0.3
+# Releases are published by CI on version tags (publish-connect.yml)
+git tag v3.0.3 && git push origin v3.0.3
 ```
 
 ### Adding Plugins

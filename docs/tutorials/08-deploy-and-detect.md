@@ -15,7 +15,7 @@
 - A running Kubernetes cluster (Kind, minikube, or remote)
 - `kubectl` configured and pointing to the cluster
 - `helm` v3.x installed
-- `kates` CLI installed (see [Installation](../../README.md#installation))
+- `kates` CLI installed (see [Quick Start](../../README.md#quick-start))
 
 ---
 
@@ -179,7 +179,7 @@ kates test create --type LOAD --records 10000
 Watch the test in real-time:
 
 ```bash
-kates watch <test-id>
+kates watch --id <test-id>
 ```
 
 View the results:

@@ -146,7 +146,7 @@ set -e
 echo "Running integrity gate..."
 
 # Generate and run integrity chaos test
-kates test scaffold --type INTEGRITY_CHAOS -o /tmp/integrity.yaml
+kates test scaffold --type INTEGRITY -o /tmp/integrity.yaml
 ID=$(kates test apply -f /tmp/integrity.yaml --wait -o json | jq -r '.id')
 
 # Check verdict
