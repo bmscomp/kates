@@ -12,6 +12,7 @@ FROM eclipse-temurin:21-jre-alpine AS download
 ARG DEBEZIUM_VERSION=3.6.0.Final
 ARG APICURIO_VERSION=3.3.0
 ARG GROOVY_VERSION=5.0.7
+ARG AIVEN_JDBC_VERSION=6.10.0
 
 RUN apk add --no-cache curl tar
 
@@ -58,6 +59,15 @@ RUN mkdir -p debezium-jdbc && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jdbc/${DEBEZIUM_VERSION}/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz" \
     | tar -xz -C debezium-jdbc --strip-components=1
 
+# ── Aiven JDBC Source/Sink Connector ─────────────────────────────────────────
+# Generic JDBC source (io.aiven.connect.jdbc.JdbcSourceConnector) that polls
+# relational tables into Kafka topics, plus a matching sink. Not published to
+# Maven Central — Aiven attaches release archives to GitHub releases only
+# (plain .tar, not gzipped).
+RUN mkdir -p aiven-jdbc && \
+    curl -sfL "https://github.com/Aiven-Open/jdbc-connector-for-apache-kafka/releases/download/v${AIVEN_JDBC_VERSION}/jdbc-connector-for-apache-kafka-${AIVEN_JDBC_VERSION}.tar" \
+    | tar -x -C aiven-jdbc --strip-components=1
+
 # ── Apicurio Schema Registry Integration ─────────────────────────────────────
 # Apicurio converters enable schema governance with Avro, JSON Schema, and
 # Protobuf serialization. Required when connecting to Apicurio Registry.
@@ -86,6 +96,7 @@ RUN mkdir -p debezium-scripting && \
 FROM base
 
 ARG DEBEZIUM_VERSION=3.1.3.Final
+ARG AIVEN_JDBC_VERSION=6.10.0
 
 USER root:root
 COPY --from=download /plugins/ /opt/kafka/plugins/
@@ -93,7 +104,7 @@ USER 1001
 
 # ─── OCI Image Labels (https://github.com/opencontainers/image-spec) ─────────
 LABEL org.opencontainers.image.title="connect"
-LABEL org.opencontainers.image.description="Enterprise Kafka Connect image with Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server, Oracle, Db2), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), and JDBC Sink. Built on Strimzi Kafka 4.2.0."
+LABEL org.opencontainers.image.description="Enterprise Kafka Connect image with Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server, Oracle, Db2), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), Debezium JDBC Sink, and Aiven JDBC source/sink. Built on Strimzi Kafka 4.2.0."
 LABEL org.opencontainers.image.source="https://github.com/bmscomp/kates"
 LABEL org.opencontainers.image.url="https://github.com/bmscomp/kates/pkgs/container/connect"
 LABEL org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/kafka-connect.md"
@@ -101,3 +112,4 @@ LABEL org.opencontainers.image.vendor="bmscomp"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.base.name="quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
 LABEL io.debezium.version="${DEBEZIUM_VERSION}"
+LABEL io.aiven.jdbc.version="${AIVEN_JDBC_VERSION}"

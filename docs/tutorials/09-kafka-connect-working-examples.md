@@ -135,8 +135,8 @@ kubectl describe kafkaconnector -n "${CONNECT_NS}" jdbc-source-working-example
 ```
 
 Important:
-- This requires plugin class `io.aiven.connect.jdbc.JdbcSourceConnector` in your Connect image.
-- If the plugin is missing, connector status will show class-not-found or failed state.
+- This uses plugin class `io.aiven.connect.jdbc.JdbcSourceConnector`, which the bundled `ghcr.io/bmscomp/connect` image ships (Aiven JDBC connector).
+- If you run a custom Connect image without that plugin, connector status will show class-not-found or failed state.
 
 ## Troubleshooting
 

@@ -44,6 +44,7 @@ make connect-build
 | **Debezium Scripting** | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
 | **Apicurio Registry Converter** | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
 | **Debezium JDBC Sink** | 3.6.0.Final | Upsert sink for SQL databases |
+| **Aiven JDBC** | 6.10.0 | Generic JDBC source (table polling) and sink |
 
 ## Building the Image
 

@@ -96,4 +96,4 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
 
 The repository also includes a JDBC source connector template — `jdbc-source-working-example`, defined under `testConnectors` in [`charts/connect-cluster/values.yaml`](../../charts/connect-cluster/values.yaml).
 
-Use it only after adding a compatible JDBC source plugin class (`io.aiven.connect.jdbc.JdbcSourceConnector`) to the Connect image.
+It uses plugin class `io.aiven.connect.jdbc.JdbcSourceConnector`, which the bundled Connect image ships; custom images must include a compatible JDBC source plugin.
