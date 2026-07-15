@@ -58,7 +58,7 @@ all: check-prerequisites
 	@echo "🔗 Access points:"
 	@echo "  - Apicurio Registry: http://localhost:30082"
 	@echo "  - Kates:             http://localhost:30083"
-	@echo "  - Litmus UI:         http://localhost:9091  (admin/litmus)"
+	@echo "  - Chaos:             execution plane only (no UI) — 'make chaos-status'"
 	@echo ""
 
 # Check prerequisites — only kubectl and helm are strictly required for generic clusters
@@ -829,9 +829,11 @@ litmus-undeploy:
 	@echo "✅ Kates Chaos removed"
 
 chaos-ui:
-	@echo "🌐 Port-forwarding Litmus UI..."
-	@echo "Access at: http://localhost:9091 (admin/litmus)"
-	kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n kafka
+	@echo "ℹ️  The kates-chaos chart deploys the LitmusChaos execution plane only —"
+	@echo "   there is no web portal to port-forward. Drive chaos via ChaosEngine"
+	@echo "   resources / the 'engines:' values, and inspect state with:"
+	@echo "     make chaos-status"
+	@echo "   To get the ChaosCenter UI, install upstream ChaosCenter separately."
 
 chaos-status:
 	@echo "📊 Chaos Status:"
@@ -1006,7 +1008,7 @@ help:
 	@echo "  ports                              - Start port forwarding"
 	@echo "  logs                               - Stream logs from all services"
 	@echo "  status                             - Check cluster status"
-	@echo "  chaos-ui                           - Port-forward Litmus UI"
+	@echo "  chaos-ui                           - Explain chaos access (no UI in execution-plane chart)"
 	@echo "  chaos-status                       - Show chaos infrastructure status"
 	@echo "  gameday                            - Run automated GameDay validation"
 	@echo "  kyverno-permissive                 - Make Kyverno completely permissive (ignore all)"

@@ -1,4 +1,5 @@
-{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- $kafkaNamespace := include "kates-chaos.kafkaNamespace" . }}
+{{- $defaultSA := include "kates-chaos.serviceAccountName" . }}
 {{- range $name, $engine := .Values.engines }}
 {{- if $engine.enabled }}
 ---
@@ -8,19 +9,43 @@ metadata:
   name: {{ $name }}
   namespace: {{ $engine.appNamespace | default $kafkaNamespace }}
   labels:
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: kates-chaos
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
+    {{- with $engine.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $engine.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  engineState: active
+  engineState: {{ $engine.engineState | default "active" }}
+  annotationCheck: {{ $engine.annotationCheck | default false | quote }}
+  {{- with $engine.jobCleanUpPolicy }}
+  jobCleanUpPolicy: {{ . }}
+  {{- end }}
   appinfo:
     appns: {{ $engine.appNamespace | default $kafkaNamespace }}
     applabel: {{ $engine.appLabel | quote }}
     appkind: {{ $engine.appKind | default "statefulset" }}
-  chaosServiceAccount: litmus-admin
+  chaosServiceAccount: {{ $engine.serviceAccount | default $defaultSA }}
   experiments:
     - name: {{ $engine.experiment | default $name }}
       spec:
         components:
+          {{- with $engine.components }}
+          {{- if .nodeSelector }}
+          nodeSelector:
+            {{- toYaml .nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if .resources }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          {{- end }}
+          {{- if .tolerations }}
+          tolerations:
+            {{- toYaml .tolerations | nindent 12 }}
+          {{- end }}
+          {{- end }}
           env:
             - name: TOTAL_CHAOS_DURATION
               value: {{ $engine.duration | default 30 | quote }}
@@ -30,9 +55,21 @@ spec:
             - name: FORCE
               value: "true"
             {{- end }}
+            {{- with $engine.targetPods }}
+            - name: TARGET_PODS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $engine.podsAffectedPerc }}
+            - name: PODS_AFFECTED_PERC
+              value: {{ . | quote }}
+            {{- end }}
             {{- range $key, $val := $engine.env }}
             - name: {{ $key }}
               value: {{ $val | quote }}
             {{- end }}
+        {{- with $engine.probes }}
+        probe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
 {{- end }}
 {{- end }}
