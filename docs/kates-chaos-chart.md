@@ -1,63 +1,47 @@
 # Kates Chaos Chart — Deployment Guide
 
-> **This document covers the `kates-chaos` Helm chart deployment and configuration.** For chaos engineering theory and methodology, see [Chaos Engineering Theory](book/06-chaos-theory.md) and [Chaos Engineering in Practice](book/07-chaos-practice.md).
+> **This document covers the `kates-chaos` Helm chart deployment and configuration.** For a condensed values reference, examples, and upgrade notes, see the [chart README](../charts/kates-chaos/README.md). For chaos engineering theory and methodology, see [Chaos Engineering Theory](book/06-chaos-theory.md) and [Chaos Engineering in Practice](book/07-chaos-practice.md).
 
-Comprehensive guide for deploying the **kates-chaos** Helm chart on any Kubernetes cluster. This chart wraps [LitmusChaos 3.28](https://litmuschaos.io/) with Kafka-specific RBAC, experiment definitions, monitoring, and secrets management.
+Guide for deploying the **kates-chaos** Helm chart on any Kubernetes cluster. This chart wraps the [LitmusChaos](https://litmuschaos.io/) **execution plane** with Kafka/Kates-specific RBAC, ChaosExperiment/ChaosEngine templating, monitoring, network isolation, and admission policy.
+
+> **Scope — execution plane only.** This chart deploys the LitmusChaos chaos **operator**, the chaos **exporter**, and the **CRDs** (via the `litmus-core` subchart). It does **not** deploy the ChaosCenter web portal (frontend / GraphQL server / auth-server / MongoDB). Drive chaos declaratively through the `engines:` values or by applying `ChaosEngine` resources. If you want the UI, install ChaosCenter separately.
 
 ## Prerequisites
 
 | Requirement | Minimum Version | Notes |
 |-------------|----------------|-------|
 | Kubernetes | 1.25+ | Any managed (EKS, GKE, AKS) or self-managed cluster |
-| Helm | 3.12+ | Chart uses OCI and subchart dependencies |
+| Helm | 3.12+ | Chart uses a subchart dependency (`litmus-core`) |
 | kubectl | 1.25+ | Must be configured for your target cluster |
-| Storage class | Any | Dynamic provisioning for MongoDB PVCs |
-| Kafka | Deployed | In the `kafka` namespace (configurable) |
+| Kafka | Deployed | In the `kafka` namespace (configurable via `rbac.targetNamespaces`) |
 
 ### Namespace Requirements
 
-The chart expects these namespaces to exist (or creates them):
-
-- **`litmus`** — Created automatically by `--create-namespace`
-- **`kafka`** — Must exist if RBAC is enabled (chaos target)
-- **`kates`** — Must exist if RBAC is enabled (chaos coordinator)
+- **release namespace** (e.g. `litmus`) — where the operator/exporter run; created by `--create-namespace`
+- **target namespaces** — every entry in `rbac.targetNamespaces` must exist. `role: target` namespaces receive the chaos ServiceAccount + Role (fault injection); `role: coordinator` namespaces get a ClusterRole binding to create engines and read results.
 
 ## Architecture Overview
 
 ```mermaid
 graph TB
-    subgraph litmus["litmus namespace"]
-        direction TB
-        frontend["Frontend UI :9091"]
-        auth["Auth Server"]
-        graphql["GraphQL Server API :9002"]
-        mongo["MongoDB 3-node ReplicaSet"]
+    subgraph release["release namespace (e.g. litmus)"]
         operator["Chaos Operator"]
-        workflow["Workflow Controller Argo"]
         exporter["Chaos Exporter :8080"]
-        tracker["Event Tracker"]
-        subscriber["Subscriber"]
-
-        frontend --> graphql
-        frontend --> auth
-        graphql --> mongo
-        auth --> mongo
-        operator --> subscriber
-        subscriber --> graphql
-        tracker --> graphql
+        crds["Litmus CRDs"]
     end
 
-    subgraph kafka["kafka namespace"]
+    subgraph kafka["kafka namespace (role: target)"]
         brokers["Kafka Brokers"]
+        sa["litmus-admin SA + Role"]
+        experiments["ChaosExperiments"]
     end
 
-    subgraph kates["kates namespace"]
+    subgraph kates["kates namespace (role: coordinator)"]
         app["Kates Application"]
     end
 
-    operator -- "chaos injection" --> kafka
-    subscriber -- "experiment status" --> kafka
-    graphql -- "coordination" --> kates
+    operator -- "reconciles ChaosEngine → injects faults" --> kafka
+    app -- "creates ChaosEngine / reads ChaosResult" --> operator
     exporter -- "metrics" --> prometheus["Prometheus"]
 ```
 
@@ -72,7 +56,7 @@ helm repo update
 
 ### Step 2 — Install CRDs
 
-CRDs must be applied before Helm install (the chart's post-install hooks depend on them):
+CRDs must be applied before Helm install (the post-install hooks depend on them):
 
 ```bash
 kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml
@@ -100,369 +84,295 @@ helm upgrade --install chaos charts/kates-chaos \
   --timeout 10m --wait
 ```
 
-Or use the Makefile shorthand:
-
-```bash
-# Note: installs into the kafka namespace (helm ... -n kafka --create-namespace),
-# unlike the manual commands above which use the litmus namespace
-make litmus-generic
-```
+Or use the Makefile shorthand (`make litmus-generic` — note it installs into the `kafka` namespace).
 
 ### Step 5 — Verify Deployment
 
 ```bash
-# Check pod status
-kubectl get pods -n litmus
-
-# Run Helm test suite (portal, frontend, MongoDB, CRDs)
+kubectl rollout status deployment -l app.kubernetes.io/name=litmus -n litmus
 helm test chaos -n litmus
-
-# Or via Makefile — note: the litmus-* targets install and test in the
-# kafka namespace, not litmus
-make litmus-test
 ```
 
-Expected output — all pods `Running`:
+Expected pods — operator + exporter only:
 
 ```
-NAME                                        READY   STATUS
-chaos-litmus-auth-server-xxx                1/1     Running
-chaos-litmus-frontend-xxx                   1/1     Running
-chaos-litmus-server-xxx                     1/1     Running
-chaos-mongodb-0                             1/1     Running
-chaos-mongodb-1                             1/1     Running
-chaos-mongodb-2                             1/1     Running
-chaos-operator-ce-xxx                       1/1     Running
-chaos-exporter-xxx                          1/1     Running
-subscriber-xxx                              1/1     Running
-workflow-controller-xxx                     1/1     Running
-event-tracker-xxx                           1/1     Running
+NAME                          READY   STATUS
+chaos-operator-ce-xxx         1/1     Running
+chaos-exporter-xxx            1/1     Running
 ```
 
 ## Configuration Reference
 
-### Secrets Management
+### Images
 
-The chart auto-generates credentials on first install and persists them in a Kubernetes Secret with `helm.sh/resource-policy: keep` (survives `helm upgrade`).
-
-| Credential | Secret Key | Behavior |
-|-----------|-----------|----------|
-| Portal admin password | `admin-password` | Auto-generated if `auth.adminPassword` is empty |
-| MongoDB root password | `db-root-password` | Auto-generated (16-char random) |
-| JWT signing secret | `jwt-secret` | Auto-generated (32-char random) |
-
-**Option A — Auto-generated (recommended for production)**
+All chart-managed images resolve from a single `images` block, with an optional global registry prefix and digest pinning:
 
 ```yaml
-auth:
-  adminPassword: ""    # auto-generated
-  dbRootPassword: ""   # auto-generated
-  jwtSecret: ""        # auto-generated
+global:
+  imageRegistry: ""          # prefix applied to every chart-managed image
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+images:
+  kubectl:                   # installer Job, GameDay, Helm tests
+    repository: registry.k8s.io/kubectl
+    tag: "v1.33.0"
+    digest: ""               # takes precedence over tag when set
+  goRunner:                  # default runtime for ChaosExperiment definitions
+    repository: litmuschaos/go-runner
+    tag: "3.28.0"
 ```
 
-**Option B — Explicit passwords**
+The `litmus-core` subchart images (operator/runner) are configured under the `litmus-core:` key.
 
-```bash
-helm upgrade --install chaos charts/kates-chaos \
-  -n litmus --create-namespace \
-  -f charts/kates-chaos/values-generic.yaml \
-  --set auth.adminPassword=MySecureP@ss \
-  --set auth.dbRootPassword=MongoR00t! \
-  --timeout 10m --wait
-```
-
-**Option C — External Secrets Operator**
+### Service Account
 
 ```yaml
-auth:
-  existingSecret: my-external-secret
+serviceAccount:
+  name: litmus-admin         # created in each target namespace; used by ChaosEngines
 ```
 
-The existing Secret must have keys: `admin-password`, `db-root-password`, `jwt-secret`.
-
-**Retrieve auto-generated credentials:**
-
-```bash
-kubectl get secret chaos-auth -n litmus -o jsonpath='{.data.admin-password}' | base64 -d
-kubectl get secret chaos-auth -n litmus -o jsonpath='{.data.db-root-password}' | base64 -d
-```
-
-### MongoDB Configuration
-
-The generic overlay deploys a 3-node MongoDB ReplicaSet with arbiter:
-
-```yaml
-litmus:
-  mongodb:
-    architecture: replicaset
-    replicaCount: 3
-    arbiter:
-      enabled: true
-    auth:
-      enabled: true
-    persistence:
-      enabled: true
-      size: 10Gi
-      storageClass: ""   # uses cluster default
-    resources:
-      requests:
-        cpu: 500m
-        memory: 1Gi
-      limits:
-        cpu: 2
-        memory: 2Gi
-```
-
-> **Storage Class**: Set `storageClass` to your cluster's provisioner (e.g., `gp3`, `standard-rwo`, `longhorn`). Leave empty (`""`) to use the cluster default.
-
-### RBAC (Cross-Namespace Chaos)
-
-The chart creates RBAC resources allowing the chaos operator to inject faults into target namespaces:
+### RBAC (cross-namespace chaos)
 
 ```yaml
 rbac:
   enabled: true
-  kafkaNamespace: kafka    # where Kafka brokers run
-  katesNamespace: kates    # where Kates application runs
+  targetNamespaces:
+    - name: kafka
+      role: target           # litmus-admin SA + Role + RoleBinding (fault injection)
+    - name: kates
+      role: coordinator      # ClusterRole binding: create engines, read results
+  nodeChaos:
+    enabled: true            # cluster-scoped RBAC for node-drain and node-level faults
 ```
 
-This creates:
-- `ClusterRole` + `ClusterRoleBinding` for `litmus-admin` → `kafka` namespace
-- `Role` + `RoleBinding` for chaos coordinator → `kates` namespace
+Each `coordinator` entry may set `serviceAccount:` (defaults to `default`) to bind a specific SA.
 
-### Network Policies
+> **Deprecated:** `rbac.kafkaNamespace` / `rbac.katesNamespace` still work and win over `targetNamespaces` when set, but `targetNamespaces` is preferred and supports any number of namespaces.
 
-Enabled by default in the generic overlay. Controls traffic to/from the litmus namespace:
+### ChaosExperiment Definitions
+
+Installed via a post-install/post-upgrade Job. Definitions carry optional default `env` and `permissions` (mapped to `spec.definition`):
 
 ```yaml
-networkPolicies:
+experiments:
   enabled: true
+  installer:                 # the kubectl Job that applies the definitions
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 300
+    resources: {}
+    securityContext: {}
+    nodeSelector: {}
+    tolerations: []
+  targetNamespaces: []       # empty = every role:target namespace
+  definitions:
+    - name: pod-delete
+      scope: Namespaced
+      env:                   # baked into the ChaosExperiment as defaults
+        PODS_AFFECTED_PERC: "50"
+      permissions: []        # extra RBAC the runner needs (spec.definition.permissions)
 ```
 
-**Allowed traffic:**
-- Litmus ↔ Litmus (inter-component communication)
-- Litmus → Kafka namespace (chaos injection)
-- Litmus → Kates namespace (chaos coordination)
-- Litmus → kube-system (DNS resolution, TCP/UDP port 53)
+Default set: `pod-delete`, `pod-cpu-hog`, `pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error` (Namespaced) and `node-drain` (Cluster).
 
-**All other ingress/egress is denied.**
+Verify: `kubectl get chaosexperiments -n kafka`
 
-### PodDisruptionBudgets
+### ChaosEngine Automation
 
-Protects MongoDB from accidental disruptions:
+Each `engines:` entry renders a `ChaosEngine`. Probes and pod `components` are first-class:
 
 ```yaml
-pdb:
-  enabled: true      # default in generic overlay
+engines:
+  kafka-leader-kill:
+    enabled: true
+    appNamespace: kafka                 # defaults to the primary target namespace
+    appLabel: "strimzi.io/kind=Kafka"
+    appKind: statefulset
+    experiment: pod-delete
+    serviceAccount: ""                  # defaults to serviceAccount.name
+    engineState: active                 # active | stop
+    annotationCheck: false
+    jobCleanUpPolicy: retain            # delete | retain
+    duration: 60                        # TOTAL_CHAOS_DURATION
+    interval: 60                        # CHAOS_INTERVAL
+    force: true                         # FORCE=true
+    targetPods: "krafter-pool-alpha-0"  # TARGET_PODS
+    podsAffectedPerc: "100"             # PODS_AFFECTED_PERC
+    env:                                # any additional experiment env
+      APP_NS: kafka
+    components:
+      nodeSelector: {}
+      resources: {}
+      tolerations: []
+    probes:                             # passed through verbatim to spec…probe
+      - name: verify-isr-failover
+        type: cmdProbe
+        mode: PostChaos
+        runProperties: { probeTimeout: "120s", interval: "10s", retry: 6 }
+        cmdProbe/inputs:
+          command: "kubectl exec -n kafka krafter-pool-alpha-1 -- kafka-topics.sh --bootstrap-server localhost:9092 --list"
+          comparator: { type: string, criteria: contains, value: "orders" }
+    labels: {}
+    annotations: {}
 ```
 
-Creates a PDB with `minAvailable: 1` for MongoDB.
+This model expresses the scenarios in `config/litmus/experiments/` (leader-kill, network-latency, ISR-health probe, multi-broker-kill) directly as values.
+
+### Network Policy
+
+Scopes what the chaos-infra pods in the release namespace may talk to. Egress **must** include the Kubernetes API server (the operator needs it) and DNS:
+
+```yaml
+networkPolicy:
+  enabled: true
+  apiServer:
+    enabled: true
+    ports: [443, 6443]
+    ipBlock: {}              # e.g. {cidr: 10.0.0.1/32} to pin the control plane
+  dns:
+    enabled: true
+    ports: [53]
+  monitoring:
+    enabled: true            # ingress for Prometheus to scrape the exporter
+    namespace: monitoring
+    port: 8080
+  targets:
+    enabled: true            # egress to every rbac.targetNamespaces entry
+  extraIngress: []           # raw rules appended verbatim
+  extraEgress: []
+```
+
+> **Deprecated:** `networkPolicies.enabled` is honored as an alias — the policy renders if **either** key is true.
 
 ### Monitoring
-
-#### Prometheus ServiceMonitor
 
 ```yaml
 monitoring:
   serviceMonitor:
-    enabled: true
+    enabled: false           # litmus-core ships its own exporter ServiceMonitor;
+                             # enable this only if you scrape via THIS chart
+    selector: { app: litmus }  # must match the exporter Service
+    port: http
+    path: /metrics
     interval: 15s
-    labels:
-      release: monitoring   # match your Prometheus operator selector
-```
-
-#### Grafana Dashboard
-
-Auto-discovered via the `grafana_dashboard: "1"` label:
-
-```yaml
-monitoring:
+    scrapeTimeout: ""
+    honorLabels: false
+    relabelings: []
+    metricRelabelings: []
+    labels: { release: monitoring }
   grafanaDashboard:
     enabled: true
-    labels:
-      grafana_dashboard: "1"
+    namespace: ""            # namespace used in dashboard PromQL (default: release ns)
+    folder: ""               # grafana_folder annotation
+    labels: { grafana_dashboard: "1" }
 ```
 
-Dashboard panels:
-- Experiment pass/fail counts
-- Engine duration time series
-- Experiment run count over time
-- Chaos infrastructure pod status table
-- MongoDB health indicator
+Dashboard panels: experiment pass/fail counts, engine duration, run-count over time, chaos-infra pod status, chaos operator up.
 
-### ChaosExperiment Definitions
-
-7 experiments are installed via a post-install/post-upgrade Job:
-
-| Experiment | Scope | Description |
-|-----------|-------|-------------|
-| `pod-delete` | Namespaced | Kill a random pod |
-| `pod-cpu-hog` | Namespaced | CPU stress on target pod |
-| `pod-memory-hog` | Namespaced | Memory stress on target pod |
-| `pod-network-partition` | Namespaced | Network isolation |
-| `pod-io-stress` | Namespaced | Disk I/O stress |
-| `pod-dns-error` | Namespaced | DNS resolution failure |
-| `node-drain` | Cluster | Drain a Kubernetes node |
-
-Verify experiments are installed:
-
-```bash
-kubectl get chaosexperiments -n kafka
-```
-
-### ChaosEngine Automation
-
-Create `ChaosEngine` resources declaratively via values:
+### Kyverno Pod Security Policies
 
 ```yaml
-engines:
-  kafkaPodDelete:
-    enabled: true
-    appNamespace: kafka
-    appLabel: "strimzi.io/cluster=krafter"
-    appKind: statefulset
-    experiment: pod-delete
-    duration: 30
-    interval: 10
-    force: false
-    env:
-      PODS_AFFECTED_PERC: "50"
+kyvernoPolicy:
+  enabled: false
+  action: Audit              # Audit | Enforce
+  mutate: true               # auto-inject restricted security contexts on admission
+  namespaces: []             # empty = release namespace only
+  excludeSelector:           # pods skipped from validate/mutate (need privileges)
+    matchExpressions:
+      - key: chaosUID
+        operator: Exists
 ```
 
-This creates a `ChaosEngine` resource that runs the `pod-delete` experiment against the Kafka StatefulSet.
+Only rendered when the cluster has the `kyverno.io/v1` API.
+
+### PodDisruptionBudget
+
+Off by default — the chart ships no stateful workload to protect. To guard a workload you run in the release namespace, enable it and **provide a selector** (required):
+
+```yaml
+pdb:
+  enabled: true
+  minAvailable: 1            # or set maxUnavailable
+  selector:
+    app.kubernetes.io/name: my-workload
+```
 
 ### GameDay Validation
 
-Trigger a 6-point infrastructure validation:
-
-```bash
-# Via Makefile
-make litmus-gameday
-
-# Via Helm
-helm upgrade chaos charts/kates-chaos \
-  -n litmus \
-  -f charts/kates-chaos/values-generic.yaml \
-  --set gameday.enabled=true \
-  --timeout 5m --wait
-```
-
-Checks performed:
-1. CRDs installed
-2. Chaos operator running
-3. MongoDB responsive
-4. Experiments installed in kafka namespace
-5. Subscriber connected
-6. Kafka namespace accessible
-
-## Accessing the Portal
-
-### ClusterIP (generic default)
-
-```bash
-kubectl port-forward svc/chaos-litmus-frontend-service 9091:9091 -n litmus
-```
-
-Then open http://localhost:9091
-
-### Ingress (production)
-
-Create an Ingress via Helm values:
+A Job of read-only checks. Checks are data-driven; leave `checks` empty for the operator-only default set, or override:
 
 ```yaml
-litmus:
-  ingress:
-    enabled: true
-    ingressClassName: nginx
-    host:
-      name: chaos.example.com
+gameday:
+  enabled: true
+  checks:
+    - name: CRDs installed
+      command: "kubectl get crd chaosengines.litmuschaos.io"
+    - name: Custom broker check
+      command: "kubectl get pods -n kafka -l strimzi.io/kind=Kafka | grep Running"
+```
+
+```bash
+# Enable on an existing release
+helm upgrade chaos charts/kates-chaos -n litmus --reuse-values --set gameday.enabled=true
 ```
 
 ## Uninstalling
 
 ```bash
-# Full teardown (Helm release + PVCs + namespace)
-make litmus-undeploy
-
-# Or manually
 helm uninstall chaos -n litmus
-kubectl delete pvc --all -n litmus
-kubectl delete all --all -n litmus
 kubectl delete namespace litmus
 ```
 
 ## Troubleshooting
 
-### MongoDB pods stuck in `Pending`
+### Experiments not appearing in the target namespace
 
-**Cause**: No StorageClass available or PVC cannot bind.
+**Cause**: post-install Job failed or the CRDs weren't established first.
 
 ```bash
-kubectl describe pvc -n litmus
+kubectl get jobs -n litmus | grep experiments
+kubectl logs job/chaos-kates-chaos-experiments -n litmus
 ```
 
-**Fix**: Set `litmus.mongodb.persistence.storageClass` to a valid provisioner name.
+### Operator not reconciling ChaosEngines
 
-### Auth-server/server stuck in `Init:0/1`
+**Cause**: with `networkPolicy.enabled=true` and a strict CNI, the operator may be unable to reach the Kubernetes API server.
 
-**Cause**: Init container `wait-for-mongodb` cannot connect. MongoDB must be a StatefulSet (not Deployment).
+**Fix**: ensure `networkPolicy.apiServer.enabled=true` (default) and, on locked-down clusters, set `networkPolicy.apiServer.ipBlock.cidr` to the control-plane CIDR.
 
-**Fix**: Ensure `litmus.mongodb.architecture: replicaset` (not `standalone`). The init container connects via StatefulSet DNS (`chaos-mongodb-0.chaos-mongodb-headless`).
+### `helm test` fails on the operator check
 
-### ImagePullBackOff on MongoDB
-
-**Cause**: The upstream Litmus chart defaults to a deprecated `bitnamilegacy/mongodb` image.
-
-**Fix**: The stack pins MongoDB to `mongo:6.0` (see `images.env`); on Kind the external MongoDB StatefulSet is used because `bitnamilegacy/mongodb` is amd64-only. If issues persist, verify image availability:
+**Cause**: the operator Deployment is not `Available` yet.
 
 ```bash
-docker pull mongo:6.0
-```
-
-### Subscriber CrashLoopBackOff
-
-**Cause**: Transient — subscriber starts before the Litmus server is fully ready.
-
-**Fix**: Generally self-resolving within 2-3 restart cycles. If persistent, check server logs:
-
-```bash
-kubectl logs -n litmus -l app.kubernetes.io/component=litmus-server
-```
-
-### Experiments not appearing in kafka namespace
-
-**Cause**: Post-install Job failed or RBAC insufficient.
-
-```bash
-# Check the installer job
-kubectl get jobs -n litmus | grep experiment
-kubectl logs job/chaos-experiments -n litmus
+kubectl rollout status deployment -l app.kubernetes.io/name=litmus -n litmus
+kubectl get pods -n litmus -l app.kubernetes.io/name=litmus
 ```
 
 ## Chart Files Reference
 
 ```
 charts/kates-chaos/
-├── Chart.yaml                              # v1.2.0, depends on litmus-core 3.28.1
+├── Chart.yaml                              # v2.0.0, depends on litmus-core 3.28.1
+├── README.md                               # Chart reference (values tables, examples, upgrade notes)
 ├── values.yaml                             # Base defaults
 ├── values-kind.yaml                        # Kind cluster overlay (dev)
 ├── values-generic.yaml                     # Generic Kubernetes overlay (prod)
 ├── values.schema.json                      # Helm install-time validation
 ├── .helmignore
 └── templates/
-    ├── _helpers.tpl                        # Template helpers
+    ├── _helpers.tpl                        # Image/label/namespace helpers
     ├── NOTES.txt                           # Post-install instructions
-    ├── secrets.yaml                        # Auto-generated auth secrets
-    ├── chaos-rbac.yaml                     # Cross-namespace RBAC
-    ├── experiments.yaml                    # Post-install ChaosExperiment Job
-    ├── chaosengines.yaml                   # Templated ChaosEngine resources
+    ├── chaos-rbac.yaml                     # Cross-namespace RBAC (per target namespace)
+    ├── experiments.yaml                    # Post-install ChaosExperiment installer Job
+    ├── chaosengines.yaml                   # Templated ChaosEngine resources (probes/components)
     ├── servicemonitor.yaml                 # Prometheus integration
     ├── grafana-dashboard.yaml              # Grafana dashboard ConfigMap
-    ├── pdb.yaml                            # MongoDB PodDisruptionBudget
-    ├── networkpolicy.yaml                  # Namespace isolation
-    ├── gameday.yaml                        # Infrastructure validation Job
+    ├── kyverno-policies.yaml               # Pod security ClusterPolicy
+    ├── networkpolicy.yaml                  # Chaos-infra network isolation
+    ├── pdb.yaml                            # Optional PodDisruptionBudget
+    ├── gameday.yaml                        # Data-driven validation Job
     └── tests/
-        └── test-connectivity.yaml          # 4-tier Helm test suite
+        └── test-connectivity.yaml          # Helm test suite (operator + CRDs)
 ```
 
 ## Makefile Targets
@@ -471,8 +381,13 @@ charts/kates-chaos/
 |--------|-------------|
 | `make litmus` | Deploy with Kind overlay (development) |
 | `make litmus-generic` | Deploy with generic Kubernetes overlay (production) |
-| `make litmus-undeploy` | Full teardown (release + PVCs + namespace) |
+| `make litmus-undeploy` | Full teardown (release + namespace) |
 | `make litmus-test` | Run Helm test suite |
-| `make litmus-gameday` | Trigger GameDay infrastructure validation |
-| `make chaos-ui` | Port-forward Litmus UI to localhost:9091 |
+| `make litmus-gameday` | Trigger GameDay validation |
 | `make chaos-status` | Show release, pods, experiments, engines, results |
+
+## See Also
+
+- [Chaos Engineering Theory](book/06-chaos-theory.md)
+- [Chaos Engineering in Practice](book/07-chaos-practice.md)
+- [Tutorial 3: Chaos Engineering](tutorials/03-chaos-engineering.md)

@@ -1,5 +1,5 @@
 # Kates Chaos — Generic Kubernetes Cluster Overlay
-# Cloud-native defaults for any standard Kubernetes environment
+# Cloud-native defaults for any standard Kubernetes environment.
 
 litmus-core:
   enabled: true
@@ -10,14 +10,24 @@ litmus-core:
     image:
       pullPolicy: Always
 
+global:
+  imagePullPolicy: Always
+
 rbac:
   enabled: true
-  kafkaNamespace: kafka
-  katesNamespace: kates
+  targetNamespaces:
+    - name: kafka
+      role: target
+    - name: kates
+      role: coordinator
+  nodeChaos:
+    enabled: true
 
 monitoring:
   serviceMonitor:
-    enabled: true
+    # Off by default to avoid duplicating the litmus-core exporter
+    # ServiceMonitor. Enable if you scrape via this chart instead.
+    enabled: false
     interval: 15s
     labels:
       release: monitoring
@@ -26,7 +36,7 @@ monitoring:
     labels:
       grafana_dashboard: "1"
 
-pdb:
+networkPolicy:
   enabled: true
 
 kyvernoPolicy:
@@ -34,9 +44,10 @@ kyvernoPolicy:
   action: Audit
   mutate: true
 
-networkPolicies:
-  enabled: true
+# No stateful workload ships with this chart; leave the PDB off unless you
+# point pdb.selector at a workload you run in the release namespace.
+pdb:
+  enabled: false
 
 experiments:
   enabled: true
-  image: registry.k8s.io/kubectl:v1.33.0

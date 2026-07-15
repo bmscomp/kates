@@ -1,5 +1,5 @@
 # Kates Chaos — Kind Cluster Overlay
-# Optimized for single-node Kind with pre-loaded images
+# Optimized for single-node Kind with pre-loaded images.
 
 litmus-core:
   enabled: true
@@ -10,14 +10,22 @@ litmus-core:
     image:
       pullPolicy: IfNotPresent
 
+global:
+  imagePullPolicy: IfNotPresent
+
 rbac:
   enabled: true
-  kafkaNamespace: kafka
-  katesNamespace: kates
+  targetNamespaces:
+    - name: kafka
+      role: target
+    - name: kates
+      role: coordinator
+  nodeChaos:
+    enabled: true
 
 monitoring:
   serviceMonitor:
-    enabled: true
+    enabled: false
     interval: 30s
     labels:
       release: monitoring
@@ -26,13 +34,11 @@ monitoring:
     labels:
       grafana_dashboard: "1"
 
-pdb:
+networkPolicy:
   enabled: false
 
-networkPolicies:
+pdb:
   enabled: false
 
 experiments:
   enabled: true
-  # FIX #8: pin to the exact same kubectl version used everywhere else in the stack
-  image: registry.k8s.io/kubectl:v1.33.0

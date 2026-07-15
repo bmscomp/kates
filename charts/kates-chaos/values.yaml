@@ -1,18 +1,52 @@
-
 # Kates Chaos Engineering — Default Values
-# Wraps LitmusChaos with Kafka/Kates-specific chaos infrastructure
+#
+# Wraps LitmusChaos with Kafka/Kates-specific chaos infrastructure:
+# cross-namespace RBAC, ChaosExperiment/ChaosEngine templating, monitoring,
+# network isolation, and admission policy.
+#
+# SCOPE: this chart deploys the LitmusChaos EXECUTION PLANE only — the chaos
+# operator, the chaos exporter, and the CRDs (via the litmus-core subchart).
+# It does NOT deploy the ChaosCenter web portal (frontend / GraphQL server /
+# auth-server / MongoDB). If you want the UI, install ChaosCenter separately.
 
 nameOverride: ""
 fullnameOverride: ""
 
-# Global settings
+# -- Extra labels added to every resource this chart renders
+commonLabels: {}
+# -- Extra annotations added to every resource this chart renders
+commonAnnotations: {}
+
+# ── Global settings ──────────────────────────────────────────────────────────
 global:
+  # -- Registry prefix applied to every chart-managed image (e.g. "myregistry.io").
+  # Empty = pull from the upstream registry in each image's repository.
+  imageRegistry: ""
+  # -- Default image pull policy for chart-managed pods
   imagePullPolicy: IfNotPresent
-  # Standardize DNS/Storage variables (even if not explicitly used by Litmus)
+  # -- Image pull secrets applied to chart-managed pods
+  imagePullSecrets: []
+  # -- Cluster DNS domain
   clusterDomain: "cluster.local"
+  # -- Default storage class (reserved for future stateful components)
   storageClass: ""
 
-# Upstream Litmus execution plane (Chaos Operator + CRDs)
+# ── Image sources ────────────────────────────────────────────────────────────
+# Single source of truth for the images this chart manages directly. Set
+# `digest` to pin by content (takes precedence over `tag`).
+images:
+  # kubectl — used by the experiment installer Job, GameDay, and Helm tests
+  kubectl:
+    repository: registry.k8s.io/kubectl
+    tag: "v1.33.0"
+    digest: ""
+  # go-runner — default runtime for ChaosExperiment definitions
+  goRunner:
+    repository: litmuschaos/go-runner
+    tag: "3.28.0"
+    digest: ""
+
+# ── Upstream Litmus execution plane (Chaos Operator + exporter + CRDs) ───────
 litmus-core:
   enabled: true
   operator:
@@ -24,27 +58,84 @@ litmus-core:
       repository: docker.io/litmuschaos/chaos-runner
       tag: "3.28.0"
 
-# RBAC for chaos experiments in target namespaces
+# ── Chaos service account ────────────────────────────────────────────────────
+# The identity ChaosEngines and experiment pods run as. Created by the RBAC
+# block in each "target"-role namespace, and referenced by ChaosEngines.
+serviceAccount:
+  name: litmus-admin
+
+# ── RBAC for chaos experiments in target namespaces ──────────────────────────
+# Each target namespace gets RBAC by role:
+#   target      → litmus-admin ServiceAccount + Role + RoleBinding (fault injection)
+#   coordinator → ClusterRole binding letting its default SA create ChaosEngines
+#                 and read ChaosResults (used by an app that orchestrates chaos)
 rbac:
   enabled: true
-  kafkaNamespace: kafka
-  katesNamespace: kates
+  targetNamespaces:
+    - name: kafka
+      role: target
+    - name: kates
+      role: coordinator
+  # -- Cluster-scoped RBAC for node-level chaos (node-drain, node-restart, …)
+  nodeChaos:
+    enabled: true
 
-# Prometheus monitoring integration
+  # -- DEPRECATED: use `targetNamespaces`. When set, these win over the list
+  # above and are honored for backward compatibility.
+  kafkaNamespace: ""
+  katesNamespace: ""
+
+# ── Prometheus monitoring integration ────────────────────────────────────────
 monitoring:
   serviceMonitor:
+    # -- Create a ServiceMonitor for the chaos exporter. NOTE: the litmus-core
+    # subchart can ship its own exporter ServiceMonitor; leave this disabled to
+    # avoid duplicate scrapes and enable it only if you manage scraping here.
     enabled: false
+    # -- Label selector matching the exporter Service (litmus-core labels its
+    # exporter Service `app: litmus`).
+    selector:
+      app: litmus
+    # -- Exporter Service port name to scrape
+    port: http
+    path: /metrics
     interval: 30s
+    scrapeTimeout: ""
+    honorLabels: false
+    relabelings: []
+    metricRelabelings: []
     labels: {}
   grafanaDashboard:
     enabled: false
+    # -- Namespace used in dashboard PromQL queries (defaults to the release
+    # namespace where the chaos infra runs)
+    namespace: ""
+    # -- Grafana folder annotation (empty = General)
+    folder: ""
     labels:
       grafana_dashboard: "1"
 
-# ChaosExperiment definitions (deployed via post-install Job)
+# ── ChaosExperiment definitions (installed via post-install Job) ─────────────
 experiments:
   enabled: true
-  image: registry.k8s.io/kubectl:v1.33.0
+  # Installer Job (applies the ChaosExperiment CRs once the operator + CRDs
+  # are ready).
+  installer:
+    # -- Override the kubectl image as a plain string; empty = images.kubectl
+    image: ""
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 300
+    resources: {}
+    podSecurityContext: {}
+    securityContext: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  # -- Namespaces to install ChaosExperiment definitions into. Empty = every
+  # "target"-role namespace from rbac.targetNamespaces.
+  targetNamespaces: []
+  # -- ChaosExperiment definitions. `env` becomes the experiment's default env;
+  # `permissions` maps to spec.definition.permissions (RBAC the runner needs).
   definitions:
     - name: pod-delete
       scope: Namespaced
@@ -61,29 +152,86 @@ experiments:
     - name: node-drain
       scope: Cluster
 
-# ChaosEngine automation (Phase 3)
+# ── ChaosEngine automation ───────────────────────────────────────────────────
+# Each entry renders a ChaosEngine. Minimal example:
+#   engines:
+#     kafka-pod-delete:
+#       enabled: true
+#       appLabel: "strimzi.io/kind=Kafka"
+#       experiment: pod-delete
+#       duration: 30
+#       interval: 10
+#       force: true
+#       podsAffectedPerc: "50"
+# See values-generic.yaml and docs for probes/components.
 engines: {}
 
-# PodDisruptionBudgets
-pdb:
+# ── Network policy ───────────────────────────────────────────────────────────
+# Default-deny is NOT imposed; this policy scopes what the chaos infra pods in
+# the release namespace may talk to. Egress must include the Kubernetes API
+# server (the operator needs it) and DNS.
+networkPolicy:
   enabled: false
+  # -- Egress to the Kubernetes API server (required by the chaos operator)
+  apiServer:
+    enabled: true
+    ports: [443, 6443]
+    # -- Restrict to the control-plane CIDR on locked-down clusters, e.g.
+    # ipBlock: {cidr: 10.0.0.1/32}
+    ipBlock: {}
+  # -- DNS egress
+  dns:
+    enabled: true
+    ports: [53]
+  # -- Prometheus scrape ingress to the exporter
+  monitoring:
+    enabled: true
+    namespace: monitoring
+    port: 8080
+  # -- Egress to the chaos target namespaces (fault injection / coordination)
+  targets:
+    enabled: true
+  # -- Extra raw ingress/egress rules appended verbatim
+  extraIngress: []
+  extraEgress: []
 
-# Kyverno pod security policies (requires Kyverno controller in cluster)
-kyvernoPolicy:
-  enabled: false          # opt-in by default
-  action: Audit           # Audit | Enforce
-  mutate: true            # auto-inject security contexts on pod admission
-  excludeContainers:       # container names to skip during mutation
-    - chaos-runner
-    - go-runner
-    - experiment
-
-# Network policies
+# -- DEPRECATED alias for networkPolicy.enabled (honored for compatibility)
 networkPolicies:
   enabled: false
 
-# GameDay validation (trigger: --set gameday.enabled=true)
+# ── PodDisruptionBudget ──────────────────────────────────────────────────────
+# Off by default in the operator-only topology (there is no stateful workload
+# shipped by this chart to protect). Enable and point `selector` at a workload
+# you run in the release namespace if you need one.
+pdb:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+  # -- Pod selector for the PDB (required when enabled)
+  selector: {}
+
+# ── Kyverno pod security policies (requires Kyverno controller in cluster) ───
+kyvernoPolicy:
+  enabled: false          # opt-in
+  action: Audit           # Audit | Enforce
+  mutate: true            # auto-inject security contexts on pod admission
+  # -- Namespaces the policy applies to (empty = release namespace only)
+  namespaces: []
+  # -- Pods excluded from validation/mutation. Chaos experiment pods carry the
+  # `chaosUID` label and must be excluded (they need elevated privileges).
+  excludeSelector:
+    matchExpressions:
+      - key: chaosUID
+        operator: Exists
+
+# ── GameDay validation ───────────────────────────────────────────────────────
+# Runs a Job of read-only checks against the chaos infra. Checks are
+# data-driven: each has a name and a shell command that must exit 0 to pass.
+# Empty `checks` uses the operator-only default set below (rendered by the
+# template). Override to add your own.
 gameday:
   enabled: false
-
-
+  image: ""               # empty = images.kubectl
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  checks: []

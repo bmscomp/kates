@@ -1,16 +1,32 @@
 apiVersion: v2
 name: kates-chaos
-version: 1.2.0
-appVersion: "1.20.0"
-description: Kates Chaos Engineering — wraps LitmusChaos with Kafka-specific RBAC, experiments, and monitoring
+version: 2.0.0
+# Tracks the LitmusChaos execution-plane version this chart deploys.
+appVersion: "3.28.0"
+description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
 home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
 keywords:
   - chaos-engineering
   - kafka
   - kates
   - litmus
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
 dependencies:
   - name: litmus-core
     version: 3.28.1
     repository: https://litmuschaos.github.io/litmus-helm/
     condition: litmus-core.enabled
+annotations:
+  artifacthub.io/category: skip-prediction
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/changes: |
+    - kind: changed
+      description: Scoped the chart to the LitmusChaos execution plane (operator-only); removed portal (frontend/server/MongoDB) references from NOTES, tests, and GameDay
+    - kind: added
+      description: Configurable images block, service account name, structured NetworkPolicy, ServiceMonitor scrape controls, multi-namespace RBAC/Kyverno, probes and components on ChaosEngines
+    - kind: deprecated
+      description: rbac.kafkaNamespace/rbac.katesNamespace (use rbac.targetNamespaces) and networkPolicies.enabled (use networkPolicy.enabled) — still honored

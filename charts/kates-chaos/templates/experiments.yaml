@@ -1,5 +1,16 @@
 {{- if .Values.experiments.enabled }}
-{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- $kubectl := include "kates-chaos.kubectlImage" . }}
+{{- $goRunner := include "kates-chaos.goRunnerImage" . }}
+{{- $pullPolicy := .Values.global.imagePullPolicy | default "IfNotPresent" }}
+{{- $installer := .Values.experiments.installer | default dict }}
+{{- /* Namespaces to install ChaosExperiment definitions into */ -}}
+{{- $installNs := .Values.experiments.targetNamespaces }}
+{{- if not $installNs }}
+{{- $installNs = list }}
+{{- range (include "kates-chaos.targetNamespaces" . | fromYamlArray) }}
+{{- if eq (.role | default "target") "target" }}{{- $installNs = append $installNs .name }}{{- end }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,34 +22,50 @@ metadata:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- with include "kates-chaos.annotations" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
 data:
   experiments.yaml: |
-    {{- range .Values.experiments.definitions }}
+    {{- range $ns := $installNs }}
+    {{- range $def := $.Values.experiments.definitions }}
     ---
     apiVersion: litmuschaos.io/v1alpha1
     kind: ChaosExperiment
     metadata:
-      name: {{ .name }}
-      namespace: {{ $kafkaNamespace }}
+      name: {{ $def.name }}
+      namespace: {{ $ns }}
       labels:
-        name: {{ .name }}
+        name: {{ $def.name }}
         app.kubernetes.io/part-of: litmus
     spec:
       definition:
-        scope: {{ .scope | default "Namespaced" }}
-        image: {{ .image | default "litmuschaos/go-runner:3.28.0" }}
-        imagePullPolicy: IfNotPresent
-        # NOTE(Backend-Upgrade): The Litmus Chaos Engine orchestrator explicitly validates 
-        # the ChaosExperiment definition and fails with "nil command" if the command field is omitted. 
-        # Additionally, since `litmuschaos/go-runner:3.x` uses a distroless container architecture 
+        scope: {{ $def.scope | default "Namespaced" }}
+        {{- with $def.permissions }}
+        permissions:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        image: {{ $def.image | default $goRunner }}
+        imagePullPolicy: {{ $pullPolicy }}
+        # NOTE(Backend-Upgrade): The Litmus Chaos Engine orchestrator explicitly validates
+        # the ChaosExperiment definition and fails with "nil command" if the command field is omitted.
+        # Additionally, since `litmuschaos/go-runner:3.x` uses a distroless container architecture
         # without standard shells like `/bin/bash`, we cannot use standard `/bin/bash -c` wrappers.
         # Instead, we directly invoke the `experiments` binary at its absolute path `/litmus/experiments`
         # and pass the experiment name argument to execute the targeted chaos fault natively.
         command: ["/litmus/experiments"]
-        args: ["-name", "{{ .name }}"]
+        args: ["-name", "{{ $def.name }}"]
+        {{- with $def.env }}
+        env:
+          {{- range $k, $v := . }}
+          - name: {{ $k }}
+            value: {{ $v | quote }}
+          {{- end }}
+        {{- end }}
         labels:
-          name: {{ .name }}
-          experiment: {{ .name }}
+          name: {{ $def.name }}
+          experiment: {{ $def.name }}
+    {{- end }}
     {{- end }}
 ---
 apiVersion: batch/v1
@@ -52,25 +79,53 @@ metadata:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- with include "kates-chaos.annotations" . }}
+    {{- . | nindent 4 }}
+    {{- end }}
 spec:
-  backoffLimit: 3
-  ttlSecondsAfterFinished: 300
+  backoffLimit: {{ $installer.backoffLimit | default 3 }}
+  ttlSecondsAfterFinished: {{ $installer.ttlSecondsAfterFinished | default 300 }}
   template:
     metadata:
       labels:
         app: experiment-installer
+        {{- include "kates-chaos.selectorLabels" . | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
       automountServiceAccountToken: true
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $installer.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $installer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $installer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $installer.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: experiments-data
           configMap:
             name: {{ include "kates-chaos.fullname" . }}-experiments-data
       initContainers:
         - name: wait-for-operator
-          image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
-          imagePullPolicy: IfNotPresent
+          image: {{ $kubectl }}
+          imagePullPolicy: {{ $pullPolicy }}
+          {{- with $installer.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - "kubectl"
             - "wait"
@@ -82,8 +137,12 @@ spec:
             - "{{ .Release.Namespace }}"
             - "--timeout=300s"
         - name: wait-for-crd
-          image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
-          imagePullPolicy: IfNotPresent
+          image: {{ $kubectl }}
+          imagePullPolicy: {{ $pullPolicy }}
+          {{- with $installer.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - "kubectl"
             - "wait"
@@ -92,8 +151,16 @@ spec:
             - "--timeout=300s"
       containers:
         - name: install
-          image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
-          imagePullPolicy: IfNotPresent
+          image: {{ $kubectl }}
+          imagePullPolicy: {{ $pullPolicy }}
+          {{- with $installer.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $installer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - "kubectl"
             - "apply"

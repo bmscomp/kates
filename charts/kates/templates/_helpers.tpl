@@ -43,9 +43,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "kates.postgresql.jdbcUrl" -}}
-{{- if .Values.postgresql.useSubchart -}}
-jdbc:postgresql://{{ .Release.Name }}-postgresqlha-postgresql.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
-{{- else if .Values.postgresql.enabled -}}
+{{- if .Values.postgresql.enabled -}}
 jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
 {{- else -}}
 jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}

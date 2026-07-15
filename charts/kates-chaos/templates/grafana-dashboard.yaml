@@ -1,4 +1,6 @@
 {{- if .Values.monitoring.grafanaDashboard.enabled }}
+{{- $gd := .Values.monitoring.grafanaDashboard }}
+{{- $ns := $gd.namespace | default .Release.Namespace }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,9 +8,13 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
-    {{- range $key, $val := .Values.monitoring.grafanaDashboard.labels }}
+    {{- range $key, $val := $gd.labels }}
     {{ $key }}: {{ $val | quote }}
     {{- end }}
+  {{- if $gd.folder }}
+  annotations:
+    grafana_folder: {{ $gd.folder | quote }}
+  {{- end }}
 data:
   kates-chaos-dashboard.json: |
     {
@@ -91,7 +97,7 @@ data:
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
           "targets": [
             {
-              "expr": "kube_pod_status_phase{namespace=\"litmus\", phase=\"Running\"} == 1",
+              "expr": "kube_pod_status_phase{namespace=\"{{ $ns }}\", phase=\"Running\"} == 1",
               "legendFormat": "{{`{{`}} pod {{`}}`}}",
               "instant": true,
               "format": "table"
@@ -99,20 +105,24 @@ data:
           ]
         },
         {
-          "title": "MongoDB Status",
+          "title": "Chaos Operator Up",
           "type": "stat",
           "gridPos": { "h": 6, "w": 6, "x": 0, "y": 14 },
           "targets": [
             {
-              "expr": "up{job=~\".*mongodb.*\", namespace=\"litmus\"}",
-              "legendFormat": "MongoDB"
+              "expr": "count(kube_pod_status_phase{namespace=\"{{ $ns }}\", pod=~\".*chaos-operator.*\", phase=\"Running\"} == 1) or vector(0)",
+              "legendFormat": "Operator"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "mappings": [
-                { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
-              ]
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              }
             }
           }
         }
