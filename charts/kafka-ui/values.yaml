@@ -14,13 +14,22 @@ image:
 imagePullSecrets: []
 #  - name: ghcr-credentials
 
-# -- Number of replicas
+# -- Number of replicas (ignored when autoscaling.enabled)
 replicas: 1
 
 # -- Override names
 nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
+
+# -- ServiceAccount for the Kafka UI pod. Kafka UI does not call the Kubernetes
+# API, so the token is not mounted by default.
+serviceAccount:
+  create: true
+  # -- Name (defaults to the fullname when create=true)
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
 
 # -- Service configuration
 service:
@@ -60,11 +69,16 @@ schemaRegistry:
   enabled: false
   # -- Schema Registry URL (e.g., Apicurio Registry)
   url: ""
-  # -- Authentication for Schema Registry
+  # -- Authentication for Schema Registry. The password is sourced from a
+  # Secret and injected as an env var — never rendered into the ConfigMap.
   auth:
     enabled: false
     username: ""
+    # -- Password (used to create a Secret when existingSecret is empty)
     password: ""
+    # -- Use an existing Secret instead of creating one
+    existingSecret: ""
+    passwordKey: "password"
 
 # -- Kafka Connect integration (shows connectors in Kafka UI)
 kafkaConnect:
@@ -73,6 +87,13 @@ kafkaConnect:
   name: "connect-cluster"
   # -- Kafka Connect REST API URL
   url: ""
+  # -- Basic auth for the Connect REST API (password injected from a Secret)
+  auth:
+    enabled: false
+    username: ""
+    password: ""
+    existingSecret: ""
+    passwordKey: "password"
 
 # -- Kafka UI application authentication (login to the web UI itself)
 auth:
@@ -82,8 +103,15 @@ auth:
   type: "DISABLED"
   # -- Username for Basic Authentication (when type is LOGIN_FORM)
   username: "admin"
-  # -- The name of the Kubernetes Secret containing the password (in a key named 'password')
+  # -- The name of the Kubernetes Secret containing the password (key 'password').
+  # Created by the chart if it does not already exist.
   passwordSecret: "kafka-ui-web-password"
+  # -- Explicit web password. When empty, a random password is generated on
+  # first install and preserved across upgrades (via lookup). Never defaults
+  # to a well-known value.
+  password: ""
+  # -- Use a pre-existing Secret (key 'password') instead of managing one
+  existingSecret: ""
   
   # -- Role-Based Access Control (RBAC) settings for Kafka UI
   rbac:
@@ -169,6 +197,14 @@ networkPolicy:
   enabled: true
   # -- Namespace of the ingress controller (for browser access restriction)
   ingressNamespace: "ingress-nginx"
+  # -- Namespace allowed to scrape metrics (Prometheus)
+  monitoringNamespace: "monitoring"
+  # -- Allow egress to the Kubernetes API server. Off by default — Kafka UI
+  # does not call the API (Secrets are injected by the kubelet).
+  apiServerEgress: false
+  # -- Extra ingress/egress rules appended verbatim
+  extraIngress: []
+  extraEgress: []
 
 # -- Pod annotations (e.g., Prometheus scraping)
 podAnnotations: {}
@@ -212,10 +248,11 @@ podSecurityContext:
   runAsUser: 1001
   fsGroup: 1001
 
-# -- Container-level security context
+# -- Container-level security context. readOnlyRootFilesystem is on; the chart
+# mounts an emptyDir at /tmp for the app's scratch space.
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
@@ -228,6 +265,47 @@ tolerations: []
 
 # -- Affinity rules
 affinity: {}
+
+# -- Topology spread constraints (spread replicas across nodes/zones)
+topologySpreadConstraints: []
+#  - maxSkew: 1
+#    topologyKey: topology.kubernetes.io/zone
+#    whenUnsatisfiable: ScheduleAnyway
+#    labelSelector:
+#      matchLabels:
+#        app: kafka-ui
+
+# -- PodDisruptionBudget (recommended when replicas > 1)
+pdb:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# -- Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+# -- Prometheus monitoring integration
+metrics:
+  serviceMonitor:
+    # -- Create a ServiceMonitor (requires the Prometheus Operator CRDs)
+    enabled: false
+    # -- Metrics path exposed by Kafka UI (Spring Boot Actuator)
+    path: /actuator/prometheus
+    interval: 30s
+    scrapeTimeout: ""
+    honorLabels: false
+    labels: {}
+    relabelings: []
+    metricRelabelings: []
+
+# -- Extra volumes / mounts (e.g. custom truststores, serde descriptors)
+extraVolumes: []
+extraVolumeMounts: []
 
 # -- Extra environment variables
 extraEnv: []

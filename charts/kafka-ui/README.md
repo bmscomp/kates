@@ -4,6 +4,8 @@ A Helm chart for deploying [Kafbat Kafka UI](https://github.com/kafbat/kafka-ui)
 
 > **Note** — This chart uses the actively maintained **Kafbat** fork (`ghcr.io/kafbat/kafka-ui`), which is the community continuation of the original Provectus Kafka UI. The old `provectuslabs/kafka-ui` image is deprecated and contains known security vulnerabilities.
 
+> **📚 Task-oriented guides** live in [`docs/`](docs/): [Setup & Access](docs/01-setup.md) · [Kafka Connection & ACLs](docs/02-kafka-and-acls.md) · [Schema Registry](docs/03-schema-registry.md) · [Kafka Connect](docs/04-kafka-connect.md). This README is the parameter reference.
+
 ## Architecture
 
 Kafka UI serves as the central observability and management dashboard for the entire Kates streaming platform. Rather than requiring operators to interact with each component individually through CLI tools or raw API calls, Kafka UI provides a single web interface that aggregates information from three core backend services — the Kafka brokers, the Apicurio Schema Registry, and the Kafka Connect cluster — into one unified view.
@@ -216,6 +218,24 @@ kafka:
     enabled: true
 ```
 
+### TLS to Kafka (SASL_SSL)
+
+When `kafka.tls.enabled=true` the chart uses `SASL_SSL` and **mounts the CA
+certificate** so the broker cert can be verified. You must provide the Secret
+holding the PEM CA (the Strimzi cluster CA, named `<clusterName>-cluster-ca-cert`):
+
+```yaml
+kafka:
+  tls:
+    enabled: true
+    trustedCertificateSecret: krafter-cluster-ca-cert   # required when enabled
+    certificateKey: ca.crt                              # key inside the Secret
+```
+
+The Secret is mounted at `/etc/kafka-ui/certs/<certificateKey>` and referenced
+via `ssl.truststore.location`. Enabling TLS without `trustedCertificateSecret`
+fails the render with a clear error.
+
 ### Authentication
 
 Kafka UI authenticates to the Kafka cluster using SCRAM-SHA-512. The chart creates a Strimzi `KafkaUser` resource, and the Strimzi Entity Operator generates a Kubernetes Secret containing the password. The Deployment mounts this Secret as an environment variable.
@@ -257,7 +277,9 @@ schemaRegistry:
 
 If `url` is left empty, the chart auto-computes it as `http://apicurio-apicurio-registry.<namespace>.svc.cluster.local:8080/apis/ccompat/v7`.
 
-For registries that require authentication:
+For registries that require authentication. The password is **stored in a
+Secret and injected as an environment variable** — it is never rendered into
+the ConfigMap:
 
 ```yaml
 schemaRegistry:
@@ -266,7 +288,9 @@ schemaRegistry:
   auth:
     enabled: true
     username: "admin"
-    password: "secret"
+    password: "secret"          # the chart creates a Secret from this
+    # existingSecret: my-sr-secret   # …or bring your own (key: password)
+    # passwordKey: password
 ```
 
 ## Integrating Kafka Connect
@@ -279,9 +303,15 @@ kafkaConnect:
   name: "connect-cluster"     # display name in the UI
   # Explicit URL to the Kafka Connect REST API
   url: "http://connect-cluster-connect-api.kafka.svc:8083"
+  # Optional basic auth (password sourced from a Secret, like Schema Registry)
+  auth:
+    enabled: false
+    username: ""
+    password: ""
+    # existingSecret: my-connect-secret
 ```
 
-If `url` is left empty, the chart auto-computes it as `http://connect-cluster-connect-api.<namespace>.svc.cluster.local:8083`.
+If `url` is left empty, the chart auto-computes it as `http://connect-cluster-connect-api.<namespace>.svc.cluster.local:8083`. The NetworkPolicy egress port is derived automatically from the URL.
 
 ## Securing Kafka UI (Web UI Auth & RBAC)
 
@@ -394,6 +424,59 @@ echo "http://localhost:8080"
 echo "https://kafka-ui.mycompany.com"
 ```
 
+## Observability
+
+Kafka UI exposes Prometheus metrics at `/actuator/prometheus`. Create a
+`ServiceMonitor` (requires the Prometheus Operator CRDs):
+
+```yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: monitoring     # match your Prometheus selector
+```
+
+## High Availability
+
+```yaml
+replicas: 2
+pdb:
+  enabled: true
+  minAvailable: 1
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: kafka-ui
+autoscaling:            # optional — CPU/memory HPA (omit static replicas)
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+```
+
+## Security Hardening
+
+The chart runs hardened by default:
+
+- Dedicated `ServiceAccount` with `automountServiceAccountToken: false` — Kafka UI does not call the Kubernetes API.
+- `readOnlyRootFilesystem: true` with an `emptyDir` mounted at `/tmp`.
+- Non-root, all capabilities dropped, no privilege escalation.
+- A default-scoped `NetworkPolicy` (no Kubernetes API-server egress unless `networkPolicy.apiServerEgress=true`).
+- The web login password is randomly generated on first install and preserved across upgrades (never a well-known default).
+
+```yaml
+serviceAccount:
+  create: true
+  automountServiceAccountToken: false
+extraVolumes: []          # e.g. mount custom truststores / serde descriptors
+extraVolumeMounts: []
+```
+
 ## Parameters Reference
 
 ### Image
@@ -415,6 +498,8 @@ echo "https://kafka-ui.mycompany.com"
 | `kafka.bootstrapServers` | `""` (auto-computed) | Bootstrap servers override |
 | `kafka.clusterDomain` | `cluster.local` | Kubernetes cluster domain |
 | `kafka.tls.enabled` | `false` | Enable TLS (port 9093) |
+| `kafka.tls.trustedCertificateSecret` | `""` | Secret holding the PEM CA (**required** when TLS enabled) |
+| `kafka.tls.certificateKey` | `ca.crt` | Key inside the Secret |
 
 ### Schema Registry
 
@@ -424,7 +509,9 @@ echo "https://kafka-ui.mycompany.com"
 | `schemaRegistry.url` | `""` (auto-computed) | Schema Registry URL |
 | `schemaRegistry.auth.enabled` | `false` | Enable authentication |
 | `schemaRegistry.auth.username` | `""` | Auth username |
-| `schemaRegistry.auth.password` | `""` | Auth password |
+| `schemaRegistry.auth.password` | `""` | Password (creates a Secret; not in the ConfigMap) |
+| `schemaRegistry.auth.existingSecret` | `""` | Use a pre-existing Secret instead |
+| `schemaRegistry.auth.passwordKey` | `password` | Key in the Secret |
 
 ### Web UI Authentication & RBAC
 
@@ -433,7 +520,9 @@ echo "https://kafka-ui.mycompany.com"
 | `auth.enabled` | `false` | Enable Web UI authentication |
 | `auth.type` | `DISABLED` | Authentication type (`DISABLED` or `LOGIN_FORM`) |
 | `auth.username` | `admin` | Username for Basic Auth |
-| `auth.passwordSecret` | `""` | Name of Kubernetes Secret containing the password |
+| `auth.passwordSecret` | `kafka-ui-web-password` | Secret the chart creates/looks up for the password |
+| `auth.password` | `""` | Explicit password (else a random one is generated + preserved) |
+| `auth.existingSecret` | `""` | Use a pre-existing Secret instead of managing one |
 | `auth.rbac.enabled` | `false` | Enable Role-Based Access Control |
 | `auth.rbac.roles` | `[]` | List of RBAC roles and permissions |
 
@@ -444,6 +533,41 @@ echo "https://kafka-ui.mycompany.com"
 | `kafkaConnect.enabled` | `false` | Enable Kafka Connect integration |
 | `kafkaConnect.name` | `connect-cluster` | Display name in the UI |
 | `kafkaConnect.url` | `""` (auto-computed) | Connect REST API URL |
+| `kafkaConnect.auth.enabled` | `false` | Enable basic auth to the Connect REST API |
+| `kafkaConnect.auth.username` / `password` / `existingSecret` | `""` | Connect credentials (password via Secret) |
+
+### ServiceAccount & Security
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
+| `serviceAccount.name` | `""` (fullname) | ServiceAccount name |
+| `serviceAccount.automountServiceAccountToken` | `false` | Mount the API token (not needed) |
+| `securityContext.readOnlyRootFilesystem` | `true` | Read-only root FS (chart mounts `/tmp` emptyDir) |
+| `extraVolumes` / `extraVolumeMounts` | `[]` | Extra volumes/mounts (custom truststores, serdes) |
+
+### NetworkPolicy
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `networkPolicy.enabled` | `true` | Create a NetworkPolicy |
+| `networkPolicy.ingressNamespace` | `ingress-nginx` | Namespace allowed to reach the UI |
+| `networkPolicy.monitoringNamespace` | `monitoring` | Namespace allowed to scrape metrics |
+| `networkPolicy.apiServerEgress` | `false` | Allow egress to the Kubernetes API server |
+| `networkPolicy.extraIngress` / `extraEgress` | `[]` | Extra rules appended verbatim |
+
+### Observability & HA
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `metrics.serviceMonitor.enabled` | `false` | Create a ServiceMonitor (needs Prometheus Operator) |
+| `metrics.serviceMonitor.path` | `/actuator/prometheus` | Metrics path |
+| `metrics.serviceMonitor.interval` | `30s` | Scrape interval |
+| `pdb.enabled` | `false` | Create a PodDisruptionBudget |
+| `pdb.minAvailable` / `maxUnavailable` | `1` / `""` | PDB thresholds |
+| `autoscaling.enabled` | `false` | Enable the HorizontalPodAutoscaler |
+| `autoscaling.minReplicas` / `maxReplicas` | `1` / `5` | HPA bounds |
+| `topologySpreadConstraints` | `[]` | Spread replicas across nodes/zones |
 
 ### Service
 
