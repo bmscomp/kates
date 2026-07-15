@@ -2,7 +2,7 @@ apiVersion: v2
 name: kafka-ui
 description: A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "v1.5.0"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
@@ -19,3 +19,15 @@ keywords:
   - monitoring
   - strimzi
   - dashboard
+annotations:
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: Wire the Kafka TLS truststore (mount trustedCertificateSecret + set ssl.truststore.location) so SASL_SSL actually works
+    - kind: fixed
+      description: Source Schema Registry / Kafka Connect auth passwords from Secrets instead of rendering them into the ConfigMap
+    - kind: fixed
+      description: Derive NetworkPolicy egress ports from the Schema Registry / Connect URLs; generate a random web password instead of admin
+    - kind: added
+      description: ServiceAccount (token not mounted), ServiceMonitor, PodDisruptionBudget, HorizontalPodAutoscaler, Helm test, topologySpreadConstraints, extraVolumes, values.schema.json, read-only root filesystem
