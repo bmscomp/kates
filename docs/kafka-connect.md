@@ -41,9 +41,41 @@ make connect-build
 | **Debezium SQL Server** | 3.6.0.Final | CDC from SQL Server (CT tables) |
 | **Debezium Oracle** | 3.6.0.Final | CDC from Oracle (LogMiner/XStream) |
 | **Debezium Db2** | 3.6.0.Final | CDC from IBM Db2 (ASN capture) |
-| **Debezium Scripting** | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
+| **Debezium Scripting** | 3.6.0.Final | `Filter` and `ContentBasedRouter` SMTs with Groovy 5 JSR-223, embedded in every Debezium connector directory |
 | **Apicurio Registry Converter** | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
 | **Debezium JDBC Sink** | 3.6.0.Final | Upsert sink for SQL databases |
+
+> **Why the scripting jars live inside each connector directory:** Kafka Connect
+> loads every plugin-path entry in an isolated classloader. A standalone
+> `debezium-scripting` directory cannot see `debezium-core`, so
+> `io.debezium.transforms.Filter` and `io.debezium.transforms.ContentBasedRouter`
+> fail plugin scanning and configs referencing them are rejected with
+> "class not found". Per the Debezium docs, the scripting and Groovy jars are
+> copied into each `debezium-*` plugin directory at image build time.
+
+## Confluent Compatibility
+
+Confluent Platform components are commercially licensed and are **not** bundled.
+Use these open-source equivalents, all included in this image or in Kafka itself:
+
+| Confluent component | Bundled alternative |
+|---------------------|---------------------|
+| `io.confluent.connect.transforms.Filter$Value` | `io.debezium.transforms.Filter` (Groovy condition on any field), or Kafka's `org.apache.kafka.connect.transforms.Filter` with `predicates` (topic name, header, tombstone) |
+| Confluent JDBC source/sink (`kafka-connect-jdbc`) | Debezium CDC connectors (log-based source) and `io.debezium.connector.jdbc.JdbcSinkConnector` (sink) |
+| Confluent Schema Registry converters | Apicurio Registry converters (also serve Confluent-compatible clients via the `ccompat` API) |
+
+Example — drop delete events with the Debezium filter SMT:
+
+```properties
+transforms=filter
+transforms.filter.type=io.debezium.transforms.Filter
+transforms.filter.language=jsr223.groovy
+transforms.filter.condition=value.op != 'd'
+```
+
+> **Debezium 3.x note:** `snapshot.mode: never` was removed. Use
+> `snapshot.mode: no_data` (valid modes: `always`, `initial`, `initial_only`,
+> `no_data`, `when_needed`, `configuration_based`, `custom`).
 
 ## Building the Image
 
