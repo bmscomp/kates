@@ -37,11 +37,6 @@ spec:
             group: org.apache.camel.kafkaconnector
             artifact: camel-aws-s3-sink-kafka-connector
             version: 4.8.3
-      - name: aiven-jdbc
-        artifacts:
-          # Not on Maven Central — Aiven publishes release archives on GitHub.
-          - type: zip
-            url: https://github.com/Aiven-Open/jdbc-connector-for-apache-kafka/releases/download/v6.10.0/jdbc-connector-for-apache-kafka-6.10.0.zip
   config:
     group.id: kates-connect
     offset.storage.topic: kates-connect-offsets

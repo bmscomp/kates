@@ -342,13 +342,6 @@ build: {}
   #         artifact: aiven-kafka-connect-http
   #         version: "0.6.0"
   #
-  #   # --- JDBC (Aiven; already bundled in the default connect image) ---
-  #   # Not on Maven Central — Aiven publishes release archives on GitHub.
-  #   - name: aiven-jdbc
-  #     artifacts:
-  #       - type: zip
-  #         url: https://github.com/Aiven-Open/jdbc-connector-for-apache-kafka/releases/download/v6.10.0/jdbc-connector-for-apache-kafka-6.10.0.zip
-  #
   #   # --- Incubating Debezium ---
   #   - name: debezium-vitess
   #     artifacts:
