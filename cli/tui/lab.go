@@ -274,7 +274,7 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if !m.sweepActive {
 				m.startSweep()
-				return m, nil
+				return m, tea.Batch(m.runTest(), m.tickElapsed())
 			}
 		case "W":
 			if !m.running {
@@ -1208,15 +1208,15 @@ func (m LabModel) exportCSV() string {
 	path := filepath.Join(dir, fmt.Sprintf("kates-lab-%s.csv", time.Now().Format("20060102-150405")))
 
 	var sb strings.Builder
-	sb.WriteString("iteration,throughput_rec_s,p99_ms,avg_latency_ms,delta,test_id")
+	sb.WriteString("iteration,throughput_rec_s,p99_ms,avg_latency_ms,error_rate,delta,test_id")
 	for _, p := range m.params {
 		sb.WriteString("," + p.Key)
 	}
 	sb.WriteString("\n")
 
 	for _, iter := range m.iterations {
-		sb.WriteString(fmt.Sprintf("%d,%.2f,%.2f,%.2f,%s,%s",
-			iter.Number, iter.Throughput, iter.P99Ms, iter.ErrorRate,
+		sb.WriteString(fmt.Sprintf("%d,%.2f,%.2f,%.2f,%.2f,%s,%s",
+			iter.Number, iter.Throughput, iter.P99Ms, iter.AvgMs, iter.ErrorRate,
 			stripAnsi(iter.Delta), iter.TestID))
 		for _, p := range m.params {
 			val := ""
