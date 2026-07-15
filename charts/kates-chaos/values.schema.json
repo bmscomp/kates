@@ -1,46 +1,67 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
+  "additionalProperties": true,
+  "definitions": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string" }
+      }
+    }
+  },
   "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "commonLabels": { "type": "object" },
+    "commonAnnotations": { "type": "object" },
     "global": {
       "type": "object",
       "properties": {
-        "imagePullPolicy": {
-          "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"]
-        }
+        "imageRegistry": { "type": "string" },
+        "imagePullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] },
+        "imagePullSecrets": { "type": "array" },
+        "clusterDomain": { "type": "string" },
+        "storageClass": { "type": "string" }
       }
     },
-    "litmus": {
+    "images": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "kubectl": { "$ref": "#/definitions/image" },
+        "goRunner": { "$ref": "#/definitions/image" }
       }
     },
-    "auth": {
+    "serviceAccount": {
       "type": "object",
       "properties": {
-        "adminPassword": { "type": "string", "description": "Litmus admin portal password (auto-generated if empty)" },
-        "dbRootPassword": { "type": "string", "description": "MongoDB root password (auto-generated if empty)" },
-        "jwtSecret": { "type": "string", "description": "JWT signing secret (auto-generated if empty)" },
-        "existingSecret": { "type": "string", "description": "Name of pre-existing K8s Secret to use instead" }
+        "name": { "type": "string", "minLength": 1 }
       }
     },
     "rbac": {
       "type": "object",
-      "required": ["kafkaNamespace", "katesNamespace"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "kafkaNamespace": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Target namespace where Kafka is deployed"
+        "targetNamespaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "role": { "type": "string", "enum": ["target", "coordinator"] },
+              "serviceAccount": { "type": "string" }
+            }
+          }
         },
-        "katesNamespace": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Target namespace where Kates is deployed"
-        }
+        "nodeChaos": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "kafkaNamespace": { "type": "string", "description": "DEPRECATED: use targetNamespaces" },
+        "katesNamespace": { "type": "string", "description": "DEPRECATED: use targetNamespaces" }
       }
     },
     "monitoring": {
@@ -50,7 +71,14 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "selector": { "type": "object" },
+            "port": { "type": "string" },
+            "path": { "type": "string" },
             "interval": { "type": "string", "pattern": "^[0-9]+[smh]$" },
+            "scrapeTimeout": { "type": "string" },
+            "honorLabels": { "type": "boolean" },
+            "relabelings": { "type": "array" },
+            "metricRelabelings": { "type": "array" },
             "labels": { "type": "object" }
           }
         },
@@ -58,6 +86,8 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "namespace": { "type": "string" },
+            "folder": { "type": "string" },
             "labels": { "type": "object" }
           }
         }
@@ -67,35 +97,119 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "image": { "type": "string" },
+        "image": { "type": "string", "description": "DEPRECATED: use experiments.installer.image or images.kubectl" },
+        "installer": {
+          "type": "object",
+          "properties": {
+            "image": { "type": "string" },
+            "backoffLimit": { "type": "integer", "minimum": 0 },
+            "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+            "resources": { "type": "object" },
+            "podSecurityContext": { "type": "object" },
+            "securityContext": { "type": "object" },
+            "nodeSelector": { "type": "object" },
+            "tolerations": { "type": "array" },
+            "affinity": { "type": "object" }
+          }
+        },
+        "targetNamespaces": { "type": "array", "items": { "type": "string" } },
         "definitions": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "scope"],
+            "required": ["name"],
             "properties": {
               "name": { "type": "string" },
-              "scope": {
-                "type": "string",
-                "enum": ["Namespaced", "Cluster"]
-              },
-              "image": { "type": "string" }
+              "scope": { "type": "string", "enum": ["Namespaced", "Cluster"] },
+              "image": { "type": "string" },
+              "env": { "type": "object" },
+              "permissions": { "type": "array" }
             }
           }
         }
       }
     },
-    "engines": { "type": "object" },
-    "pdb": {
+    "engines": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "appNamespace": { "type": "string" },
+          "appLabel": { "type": "string" },
+          "appKind": { "type": "string" },
+          "experiment": { "type": "string" },
+          "serviceAccount": { "type": "string" },
+          "engineState": { "type": "string", "enum": ["active", "stop"] },
+          "annotationCheck": { "type": "boolean" },
+          "jobCleanUpPolicy": { "type": "string", "enum": ["delete", "retain"] },
+          "duration": { "type": ["integer", "string"] },
+          "interval": { "type": ["integer", "string"] },
+          "force": { "type": "boolean" },
+          "targetPods": { "type": "string" },
+          "podsAffectedPerc": { "type": ["integer", "string"] },
+          "env": { "type": "object" },
+          "components": { "type": "object" },
+          "probes": { "type": "array" },
+          "labels": { "type": "object" },
+          "annotations": { "type": "object" }
+        }
+      }
+    },
+    "networkPolicy": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "apiServer": { "type": "object" },
+        "dns": { "type": "object" },
+        "monitoring": { "type": "object" },
+        "targets": { "type": "object" },
+        "extraIngress": { "type": "array" },
+        "extraEgress": { "type": "array" }
       }
     },
     "networkPolicies": {
       "type": "object",
+      "description": "DEPRECATED alias for networkPolicy",
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "pdb": {
+      "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["integer", "string"] },
+        "maxUnavailable": { "type": ["integer", "string"] },
+        "selector": { "type": "object" }
+      }
+    },
+    "kyvernoPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "action": { "type": "string", "enum": ["Audit", "Enforce"] },
+        "mutate": { "type": "boolean" },
+        "namespaces": { "type": "array", "items": { "type": "string" } },
+        "excludeSelector": { "type": "object" }
+      }
+    },
+    "gameday": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": "string" },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+              "name": { "type": "string" },
+              "command": { "type": "string" }
+            }
+          }
+        }
       }
     }
   }

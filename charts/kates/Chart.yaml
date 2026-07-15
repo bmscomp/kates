@@ -20,9 +20,7 @@ icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
 annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
-dependencies:
-  - name: postgresql
-    version: "16.x.x"
-    repository: https://charts.bitnami.com/bitnami
-    condition: postgresql.useSubchart
-    alias: postgresqlHA
+# No subchart dependencies: the bundled database is a self-contained
+# StatefulSet on the official `postgres` image (templates/postgresql.yaml).
+# For production HA, set postgresql.enabled=false and point externalDatabase
+# at a managed cluster — CloudNativePG is the recommended non-Bitnami option.

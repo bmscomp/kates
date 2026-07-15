@@ -1,37 +1,66 @@
+{{- $kubectl := include "kates-chaos.kubectlImage" . }}
+{{- $pullPolicy := .Values.global.imagePullPolicy | default "IfNotPresent" }}
+{{- $kafkaNamespace := include "kates-chaos.kafkaNamespace" . }}
+{{- $testSA := printf "%s-test" (include "kates-chaos.fullname" .) }}
 apiVersion: v1
-kind: Pod
+kind: ServiceAccount
 metadata:
-  name: {{ include "kates-chaos.fullname" . }}-test-portal
+  name: {{ $testSA }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
+    "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-spec:
-  restartPolicy: Never
-  containers:
-    - name: test
-      image: busybox:1.36
-      command: ['sh', '-c']
-      args:
-        - |
-          echo "Testing Litmus portal server..."
-          for i in $(seq 1 10); do
-            if wget -q --spider --timeout=5 "http://{{ .Release.Name }}-litmus-server-service:9002/status" 2>/dev/null; then
-              echo "✅ Portal server reachable"
-              exit 0
-            fi
-            echo "Attempt $i/10..."
-            sleep 3
-          done
-          echo "❌ Portal server unreachable"
-          exit 1
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $testSA }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosexperiments", "chaosengines", "chaosresults"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $testSA }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $testSA }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $testSA }}
+    namespace: {{ .Release.Namespace }}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "kates-chaos.fullname" . }}-test-frontend
+  name: {{ include "kates-chaos.fullname" . }}-test-operator
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
@@ -40,53 +69,22 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  serviceAccountName: {{ $testSA }}
   containers:
     - name: test
-      image: busybox:1.36
+      image: {{ $kubectl }}
+      imagePullPolicy: {{ $pullPolicy }}
       command: ['sh', '-c']
       args:
         - |
-          echo "Testing Litmus frontend..."
-          for i in $(seq 1 10); do
-            if wget -q --spider --timeout=5 "http://{{ .Release.Name }}-litmus-frontend-service:9091" 2>/dev/null; then
-              echo "✅ Frontend reachable"
-              exit 0
-            fi
-            echo "Attempt $i/10..."
-            sleep 3
-          done
-          echo "❌ Frontend unreachable"
-          exit 1
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: {{ include "kates-chaos.fullname" . }}-test-mongodb
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": test
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
-spec:
-  restartPolicy: Never
-  containers:
-    - name: test
-      image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
-      command: ['sh', '-c']
-      args:
-        - |
-          echo "Testing MongoDB connectivity..."
-          for i in $(seq 1 15); do
-            if kubectl exec {{ .Release.Name }}-mongodb-0 -n {{ .Release.Namespace }} -- \
-              mongosh --quiet --eval "db.adminCommand('ping')" 2>/dev/null | grep -q "ok"; then
-              echo "✅ MongoDB responsive"
-              exit 0
-            fi
-            echo "Attempt $i/15..."
-            sleep 5
-          done
-          echo "❌ MongoDB not responsive"
+          echo "Waiting for the chaos operator to become Available..."
+          if kubectl wait --for=condition=Available deployment \
+            -l app.kubernetes.io/name=litmus -n {{ .Release.Namespace }} --timeout=120s; then
+            echo "✅ Chaos operator Available"
+            exit 0
+          fi
+          echo "❌ Chaos operator not Available"
+          kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name=litmus
           exit 1
 ---
 apiVersion: v1
@@ -101,10 +99,11 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
-  serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
+  serviceAccountName: {{ $testSA }}
   containers:
     - name: test
-      image: {{ .Values.experiments.image | default "registry.k8s.io/kubectl:v1.33.0" }}
+      image: {{ $kubectl }}
+      imagePullPolicy: {{ $pullPolicy }}
       command: ['sh', '-c']
       args:
         - |
@@ -122,8 +121,8 @@ spec:
             fi
           done
           echo ""
-          echo "Verifying ChaosExperiments in {{ .Values.rbac.kafkaNamespace }}..."
-          COUNT=$(kubectl get chaosexperiments -n {{ .Values.rbac.kafkaNamespace }} --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "Verifying ChaosExperiments in {{ $kafkaNamespace }}..."
+          COUNT=$(kubectl get chaosexperiments -n {{ $kafkaNamespace }} --no-headers 2>/dev/null | wc -l | tr -d ' ')
           if [ "$COUNT" -gt "0" ]; then
             echo "  ✅ $COUNT experiments found"
             PASS=$((PASS + 1))

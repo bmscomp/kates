@@ -416,13 +416,14 @@ metrics:
     labels:
       grafana_dashboard: "1"
 
-# -- Bundled PostgreSQL configuration
+# -- Bundled PostgreSQL configuration.
+# A self-contained single-instance StatefulSet on the official `postgres`
+# image (no Bitnami). For production HA, set enabled=false and point
+# externalDatabase at a managed cluster (CloudNativePG recommended).
 postgresql:
   # -- Deploy bundled PostgreSQL
   enabled: true
-  # -- Use Bitnami PostgreSQL subchart instead
-  useSubchart: false
-  # -- PostgreSQL image
+  # -- PostgreSQL image (official library image; Alpine variants also work)
   image:
     repository: postgres
     tag: "16"
@@ -470,7 +471,10 @@ postgresql:
     # -- Minimum pool size
     minSize: "5"
 
-# -- External database configuration (when postgresql.enabled=false)
+# -- External database configuration (when postgresql.enabled=false).
+# Recommended for production HA: run a CloudNativePG `Cluster` (official
+# postgres images, streaming replication, backups) and point host/port at its
+# `-rw` service, e.g. host: kates-db-rw.database.svc — no Bitnami involved.
 externalDatabase:
   # -- Enable external database
   enabled: false
@@ -488,21 +492,6 @@ externalDatabase:
   existingSecret: ""
   # -- Key in the existing Secret
   passwordKey: "password"
-
-# -- Bitnami PostgreSQL HA subchart values (when postgresql.useSubchart=true)
-postgresqlHA:
-  auth:
-    database: kates
-    username: kates
-    password: kates
-  architecture: replication
-  primary:
-    persistence:
-      size: 10Gi
-  readReplicas:
-    replicaCount: 2
-    persistence:
-      size: 10Gi
 
 # -- Default benchmark parameters (fallback for all test types)
 defaults:
