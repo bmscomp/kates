@@ -324,7 +324,7 @@ connect-build:
 		kind load docker-image connect:$${TAG} --name $(CLUSTER_NAME); \
 	fi && \
 	echo "✅ connect:$${TAG} built successfully" && \
-	echo "   Plugins: debezium-postgres, debezium-mysql, debezium-mongodb, debezium-sqlserver, debezium-oracle, debezium-db2, apicurio-converter, debezium-jdbc, debezium-scripting"
+	echo "   Plugins: debezium-postgres, debezium-mysql, debezium-mongodb, debezium-sqlserver, debezium-oracle, debezium-db2, apicurio-converter, debezium-jdbc, debezium-scripting, aiven-jdbc"
 
 connect-push:
 	@echo "🚀 Pushing Kafka Connect image to $(REGISTRY)..."
