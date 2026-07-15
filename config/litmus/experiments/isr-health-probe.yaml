@@ -56,7 +56,7 @@ spec:
                 criteria: contains
                 value: "PASS"
               source:
-                image: bitnami/kubectl:latest
+                image: soldevelo/kubectl:latest
                 hostNetwork: false
           
           # Min ISR check - ensure partitions can still accept writes
@@ -88,7 +88,7 @@ spec:
                 criteria: "<="
                 value: "5"  # Allow up to 5 unavailable during chaos
               source:
-                image: bitnami/kubectl:latest
+                image: soldevelo/kubectl:latest
                 hostNetwork: false
 ---
 # ISR health monitoring ConfigMap

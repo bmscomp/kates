@@ -18,7 +18,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: chaos-runner
-          image: bitnami/kubectl:latest
+          image: soldevelo/kubectl:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: KATES_API_URL
