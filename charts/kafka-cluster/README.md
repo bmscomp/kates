@@ -18,7 +18,7 @@ Production-ready Apache Kafka deployment on Kubernetes using the [Strimzi](https
 |-------------|---------|
 | Kubernetes | ≥ 1.25 |
 | Helm | ≥ 3.12 |
-| Strimzi Operator | 1.0.0 (bundled as subchart) |
+| Strimzi Operator | 1.1.0 (bundled as subchart) |
 
 ## Quick Start
 
@@ -218,8 +218,8 @@ graph LR
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `clusterName` | Kafka cluster name (Kubernetes resource name) | `krafter` |
-| `kafkaVersion` | Apache Kafka version | `4.2.0` |
-| `strimziVersion` | Strimzi operator version | `1.0.0` |
+| `kafkaVersion` | Apache Kafka version | `4.3.0` |
+| `strimziVersion` | Strimzi operator version | `1.1.0` |
 
 ### Global Image Configuration
 
@@ -229,7 +229,7 @@ Override these to pull all images from a private or air-gapped registry:
 |-----------|-------------|---------|
 | `global.imageRegistry` | Container image registry for all chart images | `quay.io` |
 | `global.imageRepository` | Container image repository (org/project) | `strimzi` |
-| `images.kafka` | Kafka client image (Helm test tier 2) | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` |
+| `images.kafka` | Kafka client image (Helm test tier 2) | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` |
 | `images.kubectl` | kubectl image (Helm tests + CRD upgrade hook) | `bitnami/kubectl:1.33.0` |
 
 Example: redirect all images to a private registry:
@@ -239,7 +239,7 @@ global:
   imageRegistry: "my-registry.example.com"
   imageRepository: "strimzi"
 images:
-  kafka: "my-registry.example.com/strimzi/kafka:1.0.0-kafka-4.2.0"
+  kafka: "my-registry.example.com/strimzi/kafka:1.1.0-kafka-4.3.0"
   kubectl: "my-registry.example.com/bitnami/kubectl:1.33.0"
 ```
 
@@ -715,7 +715,7 @@ Set `strimziOperator.enabled: false` if the operator is already installed in the
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `drainCleaner.enabled` | Deploy Strimzi Drain Cleaner | `true` |
-| `drainCleaner.image` | Container image | `quay.io/strimzi/drain-cleaner:1.0.0` |
+| `drainCleaner.image` | Container image | `quay.io/strimzi/drain-cleaner:1.6.1` |
 
 ### Pod Security
 

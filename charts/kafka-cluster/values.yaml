@@ -1,6 +1,6 @@
 clusterName: krafter
-kafkaVersion: "4.2.0"
-strimziVersion: "1.0.0"
+kafkaVersion: "4.3.0"
+strimziVersion: "1.1.0"
 
 nameOverride: ""
 fullnameOverride: ""
@@ -25,6 +25,13 @@ testImages:
   kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
 
 kafka:
+  # KRaft metadata version, pinned one step behind the Kafka version per the
+  # Strimzi upgrade procedure: if left unset the operator auto-raises it to the
+  # new version's default as soon as `kafkaVersion` changes, which forecloses
+  # any rollback to the previous Kafka line. Raise to 4.3-IV0 in a follow-up
+  # once 4.3.0 is proven. Must stay >= 4.2-IV0 or share groups will not
+  # bootstrap on new clusters.
+  metadataVersion: 4.2-IV1
   listeners:
     - name: plain
       port: 9092
@@ -586,7 +593,7 @@ rebalance:
 
 drainCleaner:
   enabled: false
-  image: quay.io/strimzi/drain-cleaner:1.0.0
+  image: quay.io/strimzi/drain-cleaner:1.6.1
   resources:
     requests:
       memory: 64Mi
@@ -606,7 +613,7 @@ strimziOperator:
 strimzi-kafka-operator:
   replicas: 1
   watchAnyNamespace: true
-  defaultImageTag: 1.0.0
+  defaultImageTag: 1.1.0
   # Cluster DNS domain — must match global.clusterDomain for correct FQDN resolution
   kubernetesServiceDnsDomain: cluster.local
   # When global.imageRegistry is set, pass it to the Strimzi subchart

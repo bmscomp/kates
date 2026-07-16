@@ -378,7 +378,7 @@ kates cluster topology -o json
 Expected output (abbreviated — full output includes all sections listed below):
 
 ```text
- Kafka Cluster Topology — Cluster: krafter  │  Kafka 4.2.0  │  KRaft Mode
+ Kafka Cluster Topology — Cluster: krafter  │  Kafka 4.3.0  │  KRaft Mode
 
   Kubernetes Platform
   Version:   v1.31.4
@@ -386,7 +386,7 @@ Expected output (abbreviated — full output includes all sections listed below)
   Nodes:     3
 
   Strimzi Operator
-  Version:     1.0.0
+  Version:     1.1.0
   Components:  ✓ Operator  ✓ Entity Operator  ✓ Cruise Control
 
   Kafka Cluster

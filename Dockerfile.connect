@@ -1,4 +1,4 @@
-FROM quay.io/strimzi/kafka:1.0.0-kafka-4.2.0 AS base
+FROM quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 AS base
 # Trigger build
 # ─── Stage 1: Download connector plugins ─────────────────────────────────────
 #
@@ -110,6 +110,6 @@ LABEL org.opencontainers.image.url="https://github.com/bmscomp/kates/pkgs/contai
 LABEL org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/kafka-connect.md"
 LABEL org.opencontainers.image.vendor="bmscomp"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.base.name="quay.io/strimzi/kafka:1.0.0-kafka-4.2.0"
+LABEL org.opencontainers.image.base.name="quay.io/strimzi/kafka:1.1.0-kafka-4.3.0"
 LABEL io.debezium.version="${DEBEZIUM_VERSION}"
 LABEL io.aiven.jdbc.version="${AIVEN_JDBC_VERSION}"

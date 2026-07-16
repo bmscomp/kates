@@ -228,7 +228,7 @@ The kafka-cluster chart creates Strimzi custom resources, but it does **not** bu
 
 ```bash
 helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version 1.0.0 \
+  --version 1.1.0 \
   --namespace strimzi-operator --create-namespace \
   --set watchAnyNamespace=true \
   --wait
@@ -249,8 +249,8 @@ The chart ships with sensible defaults in `values.yaml`, but you should review k
 
 ```yaml
 clusterName: krafter       # Name of the Kafka cluster
-kafkaVersion: "4.2.0"      # Apache Kafka version
-strimziVersion: "1.0.0"   # Strimzi operator version
+kafkaVersion: "4.3.0"      # Apache Kafka version
+strimziVersion: "1.1.0"   # Strimzi operator version
 ```
 
 **Broker pools — define one pool per availability zone:**
@@ -461,7 +461,7 @@ Example — connect from a debug pod:
 # Get the SCRAM password first (you'll paste it into the client config below):
 kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d
 
-kubectl run kafka-debug -it --rm --image=quay.io/strimzi/kafka:latest-kafka-4.2.0 \
+kubectl run kafka-debug -it --rm --image=quay.io/strimzi/kafka:latest-kafka-4.3.0 \
   -n kafka -- /bin/bash
 
 # Inside the pod — create the client config with the SCRAM credentials:
@@ -1135,7 +1135,7 @@ The Job runs with a dedicated `ServiceAccount` and `ClusterRole` scoped only to 
 ```yaml
 drainCleaner:
   enabled: false     # Enable for production clusters with node upgrade cycles
-  image: quay.io/strimzi/drain-cleaner:1.0.0
+  image: quay.io/strimzi/drain-cleaner:1.6.1
   resources:
     requests:
       memory: 64Mi
@@ -1570,7 +1570,7 @@ helm test kafka-cluster -n kafka
 | Value | Default | Description |
 |-------|---------|-------------|
 | `clusterName` | `krafter` | Name of the Kafka cluster |
-| `kafkaVersion` | `4.2.0` | Apache Kafka version |
+| `kafkaVersion` | `4.3.0` | Apache Kafka version |
 | `controllerPools` | `[]` | Controller pool definitions (generate with `kates detect --generate-values`) |
 | `brokerPools` | `[]` | Broker pool definitions (generate with `kates detect --generate-values`) |
 | `brokerDefaults.resources.requests.memory` | `4Gi` | Broker memory request |

@@ -25,9 +25,9 @@ Each Strimzi release supports only a narrow window of Kafka versions, and that w
 
 | Component | Pinned version | Source |
 |-----------|----------------|--------|
-| Strimzi operator | 1.0.0 | `STRIMZI_VERSION` in `versions.env` |
-| Kafka image | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
-| Chart default (`kafkaVersion`) | 4.2.0 | `charts/kafka-cluster/values.yaml` |
+| Strimzi operator | 1.1.0 | `STRIMZI_VERSION` in `versions.env` |
+| Kafka image | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
+| Chart default (`kafkaVersion`) | 4.3.0 | `charts/kafka-cluster/values.yaml` |
 
 ### Procedure
 
@@ -66,7 +66,7 @@ kates test create --type INTEGRITY --records 50000 --wait
 # In config/kafka/kafka.yaml — change the version
 spec:
   kafka:
-    version: 4.1.1  # → new version
+    version: 4.3.0  # → new version
 ```
 
 ```bash
@@ -144,7 +144,7 @@ kubectl apply -f config/kafka/
 
 ## Drain Cleaner Upgrade
 
-Drain Cleaner is not a standalone Helm release in this repository — it is deployed by the `kafka-cluster` chart (`charts/kafka-cluster/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (the prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.0.0`). To upgrade it, bump the image tag and re-deploy the chart:
+Drain Cleaner is not a standalone Helm release in this repository — it is deployed by the `kafka-cluster` chart (`charts/kafka-cluster/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (the prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.6.1`). To upgrade it, bump the image tag and re-deploy the chart:
 
 ```bash
 # Update drainCleaner.image in charts/kafka-cluster/values.yaml, then:
