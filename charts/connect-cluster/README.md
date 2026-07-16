@@ -60,7 +60,7 @@ helm install backend-connect charts/connect-cluster \
 |-----------|-------------|---------|
 | `replicas` | Number of Connect worker replicas | `3` |
 | `image` | Connect container image | `ghcr.io/bmscomp/connect:3.0.2` |
-| `version` | Kafka version | `4.2.0` |
+| `version` | Kafka version | `4.3.0` |
 | `groupId` | Connect cluster group ID | `kates-connect-cluster` |
 | `clusterDomain` | Kubernetes cluster DNS domain | `cluster.local` |
 | `nameOverride` | Override chart name | `""` |

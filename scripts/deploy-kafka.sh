@@ -20,7 +20,7 @@ if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
     info "Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
     ensure_namespace "strimzi-operator"
     helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-        --version 1.0.0 \
+        --version 1.1.0 \
         --namespace "strimzi-operator" \
         --set watchAnyNamespace=true \
         --set replicas=1 \

@@ -53,7 +53,7 @@ kind: Namespace
 metadata:
   name: strimzi-operator`)
 			clusterDomain := dc.resolveClusterDomain()
-			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator",
+			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.1.0", "-n", "strimzi-operator",
 				"--set", "watchAnyNamespace=true",
 				"--set", "kubernetesServiceDnsDomain="+clusterDomain,
 				"--set", "replicas=1",

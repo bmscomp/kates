@@ -68,7 +68,7 @@ The `connect-cluster` chart lives at `charts/connect-cluster/` and produces the 
 
 ```text
 charts/connect-cluster/
-├── Chart.yaml                          # v1.2.0, appVersion 4.2.0
+├── Chart.yaml                          # v1.3.0, appVersion 4.3.0
 ├── values.yaml                         # Production defaults
 ├── values-generic.yaml                 # Generic cluster overlay (no Prometheus CRDs)
 ├── values-kind.yaml                    # Kind overlay (generic + local DB egress, Schema Registry)
@@ -163,7 +163,7 @@ sequenceDiagram
 | `replicas` | 3 (the CLI sets 1 with `--ha=false`; the dev overlay uses 1) | Number of worker pods |
 | `image` | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built image with Debezium + Apicurio plugins |
 | `kafka.bootstrapServers` | `""` — computed as `<clusterName>-kafka-bootstrap.<ns>.svc:9092` (9093 when `kafka.tls.enabled`) | Connection to Kafka |
-| `version` | 4.2.0 | Kafka protocol version |
+| `version` | 4.3.0 | Kafka protocol version |
 
 ### Internal Topics
 

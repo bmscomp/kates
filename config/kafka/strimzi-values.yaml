@@ -3,7 +3,7 @@
 
 replicas: 1
 watchAnyNamespace: true
-defaultImageTag: 1.0.0
+defaultImageTag: 1.1.0
 
 
 fullReconciliationIntervalMs: 60000
