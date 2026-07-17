@@ -22,10 +22,12 @@ func deployGroupA(dc *deployContext) error {
 	// ---------------------------------------------------------
 	// GROUP A: Operators & CRDs (Parallel)
 	// ---------------------------------------------------------
-	deployStrimzi := false
-	if deployWithStrimzi {
-		deployStrimzi = !isHelmReleaseDeployedFn(ctx, "strimzi-operator", "strimzi-operator")
-	}
+	// Strimzi is reconciled unconditionally. `helm upgrade --install` converges,
+	// and charts/strimzi-operator's pre-upgrade hook is what keeps the CRDs
+	// current — skipping when the release already exists means the hook never
+	// fires on an existing cluster and the CRDs silently freeze at whatever
+	// version first installed them.
+	deployStrimzi := deployWithStrimzi
 	deployCertMgr := false
 	if deployWithCertManager {
 		deployCertMgr = !isHelmReleaseDeployedFn(ctx, "cert-manager", "cert-manager")
@@ -53,15 +55,27 @@ kind: Namespace
 metadata:
   name: strimzi-operator`)
 			clusterDomain := dc.resolveClusterDomain()
-			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.1.0", "-n", "strimzi-operator",
-				"--set", "watchAnyNamespace=true",
-				"--set", "kubernetesServiceDnsDomain="+clusterDomain,
-				"--set", "replicas=1",
-				"--set", "resources.limits.memory=768Mi",
-				"--set", "resources.requests.memory=768Mi",
-				"--set", "leaderElection.enabled=false",
-				"--set", "operationTimeoutMs=900000",
-				"--timeout", "5m")
+			// The wrapper chart does not render until its subchart is fetched.
+			// `build` (not `update`) resolves from Chart.lock, so the pinned
+			// Strimzi version cannot drift.
+			if err := runHelmFn(gCtx, "dependency", "build", "charts/strimzi-operator"); err != nil {
+				return err
+			}
+			// Everything this call site used to --set is now pinned in the
+			// chart's values.yaml; only the cluster domain is environment-
+			// specific. The old leaderElection.enabled=false is gone on
+			// purpose: `enabled` was a typo for the upstream key `enable`, so
+			// Helm silently ignored it and leader election has always been on.
+			// Dropping it preserves that behavior; turning it off is a separate
+			// decision, not a side effect of this refactor.
+			//
+			// --reset-values: pre-chart releases stored flat upstream keys that
+			// now live under the subchart key, and the schema rejects them.
+			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "charts/strimzi-operator", "-n", "strimzi-operator",
+				"--reset-values",
+				"-f", dc.chartOverlay("charts/strimzi-operator"),
+				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain="+clusterDomain,
+				"--timeout", "10m")
 			if err != nil {
 				return err
 			}
