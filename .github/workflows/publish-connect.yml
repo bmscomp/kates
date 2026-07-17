@@ -45,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
       debezium_version: ${{ steps.version.outputs.debezium_version }}
       platforms: ${{ steps.set.outputs.platforms }}
       platform_matrix: ${{ steps.set.outputs.platform_matrix }}
@@ -61,9 +62,23 @@ jobs:
           fi
           echo "debezium_version=${DBZ_VERSION}" >> "$GITHUB_OUTPUT"
 
-          # Image version = Debezium version without .Final suffix
-          VERSION="${DBZ_VERSION%.Final}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # Clean Debezium version (drop .Final): appVersion + moving alias tag.
+          DBZ_CLEAN="${DBZ_VERSION%.Final}"
+          echo "version=${DBZ_CLEAN}" >> "$GITHUB_OUTPUT"
+
+          # The image's identity is (Debezium, Kafka base). Tagging by Debezium
+          # ALONE meant a base bump (e.g. #74's Kafka 4.2.0 -> 4.3.0) did not
+          # move the tag, so connect:<debezium> silently changed content under a
+          # fixed name. Fold the Kafka base version into the tag.
+          KAFKA_VERSION=$(grep -m1 '^FROM quay.io/strimzi/kafka:' Dockerfile.connect \
+            | sed -E 's/.*-kafka-([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          if [[ -z "${KAFKA_VERSION}" || "${KAFKA_VERSION}" == *FROM* ]]; then
+            echo "::error::could not parse Kafka version from the base FROM line"
+            exit 1
+          fi
+          IMAGE_TAG="${DBZ_CLEAN}-kafka-${KAFKA_VERSION}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "connect image tag: ${IMAGE_TAG} (Debezium ${DBZ_CLEAN} on Kafka ${KAFKA_VERSION})"
 
       - name: Set build matrix
         id: set
@@ -166,6 +181,7 @@ jobs:
             ${{ env.DOCKERHUB_REPO }}
             ${{ env.GHCR_REPO }}
           tags: |
+            type=raw,value=${{ needs.meta.outputs.image_tag }}
             type=raw,value=${{ needs.meta.outputs.version }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=,format=short
@@ -273,14 +289,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Update Chart versions
         env:
-          VERSION: ${{ needs.meta.outputs.version }}
+          # appVersion tracks the Debezium version (the chart's headline
+          # component); the image pin carries the full build identity.
+          APP_VERSION: ${{ needs.meta.outputs.version }}
+          IMAGE_TAG: ${{ needs.meta.outputs.image_tag }}
         run: |
-          # Remove leading 'v' if present
-          CLEAN_VERSION=${VERSION#v}
-          
-          # Update connect-cluster chart
-          sed -i "s/appVersion: .*/appVersion: \"${CLEAN_VERSION}\"/" charts/connect-cluster/Chart.yaml
-          sed -i "s/image: .*/image: \"ghcr.io\/bmscomp\/connect:${CLEAN_VERSION}\"/" charts/connect-cluster/values.yaml
+          # Anchored to ^ so the commented example image: line is left alone.
+          sed -i "s/^appVersion: .*/appVersion: \"${APP_VERSION}\"/" charts/connect-cluster/Chart.yaml
+          sed -i "s|^image: .*|image: \"ghcr.io/bmscomp/connect:${IMAGE_TAG}\"|" charts/connect-cluster/values.yaml
           
       - name: Commit and Push
         run: |
@@ -290,6 +306,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: bump connect-cluster appVersion to ${VERSION} [skip ci]"
+            git commit -m "chore: pin connect-cluster to connect:${IMAGE_TAG} [skip ci]"
             git push
           fi
