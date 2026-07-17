@@ -1,0 +1,208 @@
+{{- if .Values.crdUpgrade.enabled }}
+{{- /*
+Strimzi CRD applier.
+
+WHY THIS EXISTS: the upstream subchart ships its CRDs in `crds/`, and per
+`helm upgrade --help` Helm installs those "if not already present" — it never
+UPDATES them on upgrade. Without this hook, CRDs freeze at whatever version was
+first installed and the apiserver silently PRUNES fields the frozen schema does
+not know about. No error, no event; the field just vanishes.
+
+WHY NOT TEMPLATE THE CRDs INSTEAD: live CRDs carry no Helm ownership metadata,
+so templating them would break adoption of the existing release with an
+"invalid ownership metadata" error and — worse — would hand `helm uninstall`
+the power to cascade-delete every Kafka CR in the cluster
+(CRD -> Kafka/KafkaNodePool -> StrimziPodSet -> Pods). They stay in crds/.
+
+WHY A PARENT-SIDE FETCH RATHER THAN READING THE SUBCHART'S crds/: `.Files.Glob`
+cannot reach subchart files, so a hermetic ConfigMap is impossible. The bundle
+fetched here is the same pin as the subchart's crds/.
+
+ORDERING: hook-weight 1 creates the identity, weight 5 runs the Job. Helm
+defers hook-succeeded deletion to a second pass after all hooks in the phase
+complete, so the weight-1 ServiceAccount survives for the weight-5 Job.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.crdUpgrade.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.crdUpgrade.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "strimzi-operator.selectorLabels" . | nindent 8 }}
+        app: crd-upgrade
+    spec:
+      serviceAccountName: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+      restartPolicy: OnFailure
+      securityContext:
+        {{- include "strimzi-operator.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: crd-upgrade
+          image: {{ include "strimzi-operator.kubectlImage" . }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              CRD_URL="{{ include "strimzi-operator.crdUrl" . }}"
+              EXPECTED_CRDS=10
+
+              echo "Applying Strimzi CRDs (v{{ .Values.strimziVersion }})..."
+              echo "Source: ${CRD_URL}"
+
+              # -f makes HTTP errors exit non-zero. Without it curl exits 0 on a
+              # 404 and writes the error body, so the failure would only surface
+              # downstream as a confusing kubectl parse error — after burning
+              # every backoffLimit attempt. --retry-all-errors covers the
+              # transient 429/503 case, which would otherwise abort a live
+              # upgrade and strand the release in pending-upgrade.
+              set +e
+              HTTP_CODE=$(curl -fsSL \
+                    --retry 5 --retry-all-errors --retry-connrefused \
+                    --max-time 120 \
+                    -w '%{http_code}' \
+                    "${CRD_URL}" -o /tmp/strimzi-crds.yaml)
+              CURL_RC=$?
+              set -e
+              if [ "${CURL_RC}" -ne 0 ]; then
+                echo "✗ Download FAILED (curl exit ${CURL_RC}, HTTP ${HTTP_CODE:-unknown})"
+                echo "  URL: ${CRD_URL}"
+                echo "  If this cluster has no egress to the URL above, mirror the"
+                echo "  bundle internally and set crdUpgrade.url — the hook needs"
+                echo "  this URL on EVERY install and upgrade."
+                exit 1
+              fi
+              echo "  Downloaded (HTTP ${HTTP_CODE})"
+
+              # Validate BEFORE mutating anything.
+              if [ ! -s /tmp/strimzi-crds.yaml ]; then
+                echo "✗ Downloaded bundle is EMPTY — refusing to apply."
+                echo "  URL: ${CRD_URL}"
+                exit 1
+              fi
+
+              FOUND=$(grep -c '^kind: CustomResourceDefinition' /tmp/strimzi-crds.yaml || true)
+              if [ "${FOUND}" -ne "${EXPECTED_CRDS}" ]; then
+                echo "✗ Expected ${EXPECTED_CRDS} CustomResourceDefinitions, found ${FOUND}."
+                echo "  URL: ${CRD_URL}"
+                echo "  The response is probably not the CRD bundle (proxy interstitial?)."
+                head -5 /tmp/strimzi-crds.yaml
+                exit 1
+              fi
+              echo "  Bundle contains ${FOUND} CRDs"
+
+              echo "Validating against the API server (dry-run)..."
+              if ! kubectl apply --server-side --force-conflicts \
+                    --dry-run=server -f /tmp/strimzi-crds.yaml >/dev/null; then
+                echo "✗ Server-side dry-run FAILED — refusing to apply."
+                exit 1
+              fi
+
+              # --force-conflicts is required: Helm 4 applies server-side by
+              # default, so its field manager co-owns these CRDs and would
+              # otherwise conflict with this Job's manager.
+              echo "Applying CRDs with server-side apply..."
+              kubectl apply --server-side --force-conflicts -f /tmp/strimzi-crds.yaml
+
+              echo "Verifying CRDs..."
+              MISSING=0
+              for crd in kafkas.kafka.strimzi.io \
+                         kafkaconnects.kafka.strimzi.io \
+                         kafkatopics.kafka.strimzi.io \
+                         kafkausers.kafka.strimzi.io \
+                         kafkanodepools.kafka.strimzi.io \
+                         kafkabridges.kafka.strimzi.io \
+                         kafkaconnectors.kafka.strimzi.io \
+                         kafkamirrormaker2s.kafka.strimzi.io \
+                         kafkarebalances.kafka.strimzi.io \
+                         strimzipodsets.core.strimzi.io; do
+                if kubectl get crd "${crd}" > /dev/null 2>&1; then
+                  echo "  ✓ ${crd}"
+                else
+                  echo "  ✗ ${crd} — MISSING"
+                  MISSING=$((MISSING + 1))
+                fi
+              done
+              if [ "${MISSING}" -gt 0 ]; then
+                echo "✗ ${MISSING} CRD(s) missing after apply."
+                exit 1
+              fi
+              echo "All ${EXPECTED_CRDS} Strimzi CRDs applied successfully."
+          securityContext:
+            {{- include "strimzi-operator.containerSecurityContext" . | nindent 12 }}
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 200m
+{{- end }}

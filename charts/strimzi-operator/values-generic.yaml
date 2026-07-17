@@ -1,0 +1,34 @@
+# Strimzi Operator — Generic Cluster Overlay
+# Usage: helm dependency build charts/strimzi-operator && helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator -f charts/strimzi-operator/values-generic.yaml
+#
+# For clusters whose topology is not known ahead of time (EKS/GKE/AKS/on-prem).
+# This overlay is mostly documentation — it carries two facts that are easy to
+# get wrong and silently break the operator.
+#
+# 1. THE DNS DOMAIN MUST BE INJECTED BY THE CALLER.
+#    Upstream only emits KUBERNETES_SERVICE_DNS_DOMAIN when the value differs
+#    from cluster.local. So on a default cluster, omitting it is invisible —
+#    and on a cluster with a custom domain, omitting it silently produces a
+#    broken operator that cannot resolve its operands. scripts/deploy-kafka-generic.sh
+#    detects the domain (get_cluster_domain) and must pass it through:
+#
+#      --set strimzi-kafka-operator.kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}"
+#
+#    It is NOT set here: a hardcoded value in an overlay would defeat detection.
+#
+# 2. REGISTRY REDIRECTION IS defaultImageRegistry, NOT global.imageRegistry.
+#    The upstream chart contains zero `.Values.global` references and ignores
+#    global.imageRegistry entirely — setting it leaves the operator image at
+#    quay.io/strimzi/operator with no warning. This chart therefore does not
+#    declare a `global` block at all, so `--set global.imageRegistry=...` fails
+#    loudly against the schema instead of being silently dropped. Use:
+#
+#      strimzi-kafka-operator:
+#        defaultImageRegistry: registry.example.com
+#        defaultImageRepository: strimzi
+
+strimzi-kafka-operator:
+  # Unknown clusters may or may not run Grafana with a dashboard sidecar, and
+  # these ConfigMaps collide with kafka-cluster's dashboards block.
+  dashboards:
+    enabled: false

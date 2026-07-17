@@ -1,0 +1,33 @@
+apiVersion: v2
+name: strimzi-operator
+version: 0.1.0
+# Tracks the Strimzi operator version this chart deploys.
+appVersion: "1.1.0"
+description: The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+keywords:
+  - kafka
+  - strimzi
+  - operator
+  - kraft
+  - kates
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+dependencies:
+  - name: strimzi-kafka-operator
+    version: 1.1.0
+    repository: oci://quay.io/strimzi-helm
+annotations:
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial chart — extracts the Strimzi operator install from ad-hoc helm calls
+    - kind: added
+      description: Owns Strimzi CRD upgrade via a pre-install/pre-upgrade hook
+    - kind: fixed
+      description: leaderElection.enable is now the honored key (the CLI previously set a misspelled leaderElection.enabled that was silently ignored)
