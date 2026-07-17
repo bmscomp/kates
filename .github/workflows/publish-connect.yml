@@ -18,9 +18,12 @@ on:
   workflow_dispatch:
     inputs:
       debezium_version:
-        description: "Debezium version to build"
+        # Empty = read the version from Dockerfile.connect (the source of
+        # truth). A hardcoded default here silently overrode the Dockerfile on
+        # manual dispatches and produced wrongly-versioned image tags.
+        description: "Debezium version override (blank = use Dockerfile.connect)"
         type: string
-        default: "3.0.2.Final"
+        default: ""
       platforms:
         description: "Target platforms"
         type: choice
