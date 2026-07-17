@@ -44,7 +44,14 @@ var replayCmd = &cobra.Command{
 
 		if replayWait {
 			fmt.Println()
-			pollUntilDone(result.ID)
+			status, err := pollUntilDone(result.ID)
+			if err != nil {
+				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
+			}
+			if isFailedStatus(status) {
+				return cmdErr("test " + truncID(result.ID) + " finished " + status +
+					" — details: kates test get " + result.ID)
+			}
 		} else {
 			output.Hint("Track progress: kates test watch " + result.ID)
 		}

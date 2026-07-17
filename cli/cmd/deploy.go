@@ -117,7 +117,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// terminal they fail with "could not open a new TTY" rather than falling
 	// back to the flag defaults. Piped or scripted runs should just use the
 	// defaults.
-	if (deployInteractive || cmd.Flags().NFlag() == 0) && isInteractive() {
+	if (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive() {
 		if err := runInteractiveForms(); err != nil {
 			return err
 		}
@@ -215,13 +215,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	dashboard := NewDeployDashboard(ctx, totalSteps)
 	registerDashboardComponents(&dashboard, ns)
 
-	var pOptions []tea.ProgramOption
+	// Only build a bubbletea program where one can actually render. With p=nil
+	// the DashboardController falls back to plain fmt printing — that fallback
+	// existed all along; the wiring just never used it. Previously a piped or
+	// headless deploy launched an alt-screen program into the pipe, dumping
+	// escape sequences into logs.
+	var p *tea.Program
 	if isTesting {
-		pOptions = append(pOptions, tea.WithoutRenderer(), tea.WithInput(nil))
-	} else {
-		pOptions = append(pOptions, tea.WithAltScreen())
+		p = tea.NewProgram(dashboard, tea.WithoutRenderer(), tea.WithInput(nil))
+	} else if IsInteractive() {
+		p = tea.NewProgram(dashboard, tea.WithAltScreen())
 	}
-	p := tea.NewProgram(dashboard, pOptions...)
 	dl = &DashboardController{p: p}
 
 	var step int32
@@ -247,7 +251,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	doneCh := make(chan struct{})
 	go func() {
 		defer close(doneCh)
-		defer p.Quit()
+		defer func() {
+			if p != nil {
+				p.Quit()
+			}
+		}()
 
 		deployErr = func() error {
 			if err := deployGroupA(dc); err != nil {
@@ -269,8 +277,18 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}()
 	}()
 
-	if _, err := p.Run(); err != nil {
-		return err
+	if p != nil {
+		if _, err := p.Run(); err != nil {
+			// The dashboard is cosmetic; the deploy goroutine is real work.
+			// Returning here used to orphan it mid-helm — the process exited
+			// while installs were in flight, leaving releases half-applied.
+			// Wait it out, then report the more consequential error.
+			<-doneCh
+			if deployErr != nil {
+				return deployErr
+			}
+			return err
+		}
 	}
 
 	<-doneCh // Wait for deployment goroutine to fully exit

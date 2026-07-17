@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 type ThemeConfig struct {
@@ -46,36 +44,18 @@ var builtinThemes = map[string]ThemeConfig{
 
 var themeCmd = &cobra.Command{
 	Use:   "theme",
-	Short: "Manage CLI color themes",
+	Short: "Preview CLI color palettes (not yet configurable)",
 }
 
 var themeListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List available themes",
+	Short: "List the built-in palettes",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := loadConfig()
-		currentTheme := ""
-		cfgData, err := os.ReadFile(configPath())
-		if err == nil {
-			var raw map[string]interface{}
-			if yaml.Unmarshal(cfgData, &raw) == nil {
-				if t, ok := raw["theme"].(string); ok {
-					currentTheme = t
-				}
-			}
-		}
-		_ = cfg
-
 		fmt.Println()
-		output.Header("Available Themes")
+		output.Header("Built-in Palettes")
 		fmt.Println()
 
 		for name, t := range builtinThemes {
-			active := ""
-			if name == currentTheme {
-				active = " (active)"
-			}
-
 			swatch := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Primary)).Render("■") + " " +
 				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Secondary)).Render("■") + " " +
 				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Render("■") + " " +
@@ -84,11 +64,14 @@ var themeListCmd = &cobra.Command{
 
 			label := output.PadRight(
 				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.Primary)).Render(name), 14)
-			fmt.Printf("  %s %s%s\n", label, swatch,
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(active))
+			fmt.Printf("  %s %s\n", label, swatch)
 		}
 		fmt.Println()
-		output.Hint("Set theme: add 'theme: <name>' to ~/.kates.yaml")
+		// Deliberately no "set theme in ~/.kates.yaml" hint here: nothing reads
+		// that setting, so the previous hint promised configuration that never
+		// took effect (and marked the configured theme "(active)" when it was
+		// not). These are previews; kates always renders the default palette.
+		output.Hint("Themes are previews — kates currently always uses the default palette.")
 		return nil
 	},
 }

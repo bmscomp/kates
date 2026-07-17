@@ -679,10 +679,10 @@ func (m LabModel) viewParams(width int) string {
 		}
 	}
 
-	if len(m.iterations) > 0 {
-		last := m.iterations[len(m.iterations)-1]
-		b.WriteString("\n" + m.latencyHistogram(last.P99Ms, width))
-	}
+	// No latency histogram here on purpose. The panel this replaced invented
+	// its bucket percentages from p99 alone (three hardcoded distributions
+	// selected by range) — it looked like measurement but was decoration.
+	// If the server ever returns real latency buckets, render those.
 
 	return b.String()
 }
@@ -831,62 +831,6 @@ func (m LabModel) viewResults(width int) string {
 	return b.String()
 }
 
-func (m LabModel) latencyHistogram(p99 float64, width int) string {
-	if p99 <= 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("  " + dimStyle.Render("Latency Distribution") + "\n")
-
-	buckets := []struct {
-		label string
-		pct   float64
-	}{
-		{"<1ms ", 0.10},
-		{"1-5ms", 0.25},
-		{"5-10 ", 0.30},
-		{"10-50", 0.20},
-		{"50+ms", 0.15},
-	}
-
-	if p99 < 5 {
-		buckets[0].pct = 0.50
-		buckets[1].pct = 0.30
-		buckets[2].pct = 0.15
-		buckets[3].pct = 0.04
-		buckets[4].pct = 0.01
-	} else if p99 > 100 {
-		buckets[0].pct = 0.02
-		buckets[1].pct = 0.08
-		buckets[2].pct = 0.15
-		buckets[3].pct = 0.35
-		buckets[4].pct = 0.40
-	}
-
-	maxBar := width - 16
-	if maxBar < 8 {
-		maxBar = 8
-	}
-	if maxBar > 40 {
-		maxBar = 40
-	}
-
-	for _, bk := range buckets {
-		barLen := int(bk.pct * float64(maxBar))
-		if barLen < 1 {
-			barLen = 1
-		}
-		bar := strings.Repeat("█", barLen)
-		pctStr := fmt.Sprintf("%4.0f%%", bk.pct*100)
-		sb.WriteString(fmt.Sprintf("  %s  %s  %s\n",
-			dimStyle.Render(bk.label),
-			healthyStyle.Render(bar),
-			dimStyle.Render(pctStr),
-		))
-	}
-	return sb.String()
-}
-
 func (m LabModel) viewPinSelect() string {
 	var sb strings.Builder
 	sb.WriteString(detailTitleStyle.Render("Select Iterations to Compare") + "\n\n")
@@ -1033,7 +977,7 @@ func (m LabModel) buildSpec() (*client.TestSpec, *client.CreateTestRequest) {
 	if durationMs < 60000 {
 		durationMs = 60000
 	}
-	spec.DurationSeconds = durationMs
+	spec.DurationMs = durationMs
 
 	req := &client.CreateTestRequest{
 		TestType: m.paramVal("type"),

@@ -2,11 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/term"
 
 	"github.com/bmscomp/kates/cli/pkg/cluster"
 )
@@ -26,7 +24,7 @@ var (
 	configExistsFn      = cluster.ConfigExists
 
 	// interactiveFn reports whether we may prompt. Overridden in tests.
-	interactiveFn = isInteractive
+	interactiveFn = IsInteractive
 
 	// confirmFn asks a yes/no question. Overridden in tests.
 	confirmFn = confirmPrompt
@@ -40,18 +38,8 @@ var (
 	resolveClusterFn = resolveCluster
 )
 
-// isInteractive reports whether prompting is allowed.
-//
-// This is the load-bearing guard of the whole feature. `kates deploy` is called
-// directly by deploy_test.go and may run in CI or a pipe; a prompt or a
-// bubbletea program in any of those hangs forever instead of failing. Every
-// interactive path must be behind this.
-func isInteractive() bool {
-	if isTesting || deployYes {
-		return false
-	}
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-}
+// The interactivity guard lives in interactive.go (IsInteractive) — shared by
+// every interactive surface in the CLI, not just this gate.
 
 // styles reused from the repo's lipgloss vocabulary.
 var (

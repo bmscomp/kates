@@ -37,8 +37,11 @@ func TestScenarioToRequest_BasicFields(t *testing.T) {
 	if req.Spec.RecordSizeBytes != 2048 {
 		t.Errorf("expected 2048 record size, got %d", req.Spec.RecordSizeBytes)
 	}
-	if req.Spec.DurationSeconds != 300 {
-		t.Errorf("expected 300 duration, got %d", req.Spec.DurationSeconds)
+	// durationSeconds: 300 in the scenario is 300_000 on the wire — the wire
+	// field is milliseconds. The previous assertion (== 300) enshrined a 1000x
+	// bug that made every scenario test finish almost instantly.
+	if req.Spec.DurationMs != 300_000 {
+		t.Errorf("expected 300000 ms duration, got %d", req.Spec.DurationMs)
 	}
 	if req.Spec.Topic != "my-topic" {
 		t.Errorf("expected my-topic, got %s", req.Spec.Topic)

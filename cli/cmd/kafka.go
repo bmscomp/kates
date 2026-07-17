@@ -519,12 +519,18 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 			fmt.Printf("%s Delete topic %s? This cannot be undone. [y/N] ",
 				errorBadge("⚠"), output.WarningStyle.Render(name))
 			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-				if answer != "y" && answer != "yes" {
-					output.Hint("Cancelled.")
-					return nil
-				}
+			// Fail CLOSED. The previous version only checked the answer when
+			// Scan() succeeded — on EOF or closed stdin it fell straight
+			// through to the delete, so `kates kafka delete-topic x </dev/null`
+			// destroyed the topic without consent. No answer is a "no".
+			if !scanner.Scan() {
+				return cmdErr("aborted: no confirmation received (stdin closed) — use --yes to skip the prompt")
+			}
+			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+			if answer != "y" && answer != "yes" {
+				// A declined destructive action exits non-zero so scripts that
+				// forgot --yes fail loudly instead of reporting success.
+				return cmdErr("aborted: topic not deleted")
 			}
 		}
 
@@ -547,6 +553,10 @@ var kafkaTuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Launch interactive Kafka explorer (full-screen TUI)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !IsInteractive() {
+			return cmdErr("kates kafka tui is a full-screen TUI and needs a terminal.\n" +
+				"  For scripted access use: kates kafka topics / brokers / groups")
+		}
 		return tui.Run(apiClient)
 	},
 }
