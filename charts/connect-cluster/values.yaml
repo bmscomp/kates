@@ -15,7 +15,7 @@ extraLabels: {}
 
 # -- Test images used in Helm test pods
 testImages:
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
 
 # -- Number of Kafka Connect worker replicas
 replicas: 3

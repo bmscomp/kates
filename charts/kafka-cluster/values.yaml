@@ -20,9 +20,9 @@ global:
 # Per-component image references for test pods and utilities.
 # -- Test images
 testImages:
-  kafka: "ghcr.io/bmscomp/kates-tester:1.17.0"
+  kafka: "ghcr.io/bmscomp/kates-tester:1.21.0"
   bash: "bash:5.2"
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
 
 kafka:
   # KRaft metadata version, pinned one step behind the Kafka version per the

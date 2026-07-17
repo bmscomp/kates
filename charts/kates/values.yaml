@@ -16,7 +16,7 @@ image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
   # -- Image tag
-  tag: "1.18.3"
+  tag: "1.21.0"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
