@@ -61,6 +61,11 @@ all: check-prerequisites
 	@echo "  - Chaos:             execution plane only (no UI) — 'make chaos-status'"
 	@echo ""
 
+# Assert the Strimzi version pins agree across all five places that declare one.
+# Also run in CI (.github/workflows/ci.yml, Helm Lint job).
+check-versions: ## Verify the Strimzi version pins agree
+	@./scripts/check-versions.sh
+
 # Check prerequisites — only kubectl and helm are strictly required for generic clusters
 check-prerequisites:
 	@echo "🔍 Checking prerequisites..."

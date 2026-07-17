@@ -1,0 +1,12 @@
+# Strimzi Operator — kind Overlay
+# Usage: helm dependency build charts/strimzi-operator && helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator -f charts/strimzi-operator/values-kind.yaml
+
+strimzi-kafka-operator:
+  # Local kind nodes are memory-constrained; 768Mi is sized for a real cluster.
+  resources:
+    limits:
+      memory: 384Mi
+    requests:
+      memory: 384Mi
+  podDisruptionBudget:
+    enabled: false

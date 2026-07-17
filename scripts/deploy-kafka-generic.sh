@@ -142,40 +142,33 @@ info "Step 4/6: Deploying Kafka cluster..."
 # Ensure namespace exists
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
 
-# Install Strimzi Operator if not present (separate release required to avoid CRD chicken-and-egg)
-# Skip if the detect output already confirmed Strimzi is running
+# Reconcile the Strimzi Operator (a separate release from kafka-cluster, to
+# avoid the CRD chicken-and-egg). The only opt-out is an explicit
+# strimziOperator.enabled=false from `kates detect`, meaning the pipeline
+# manages the operator itself.
 if grep -A1 'strimziOperator:' "${DETECTED_VALUES}" 2>/dev/null | grep -q 'enabled: false'; then
     info "  Strimzi Operator already managed by pipeline — skipping"
 else
-    # Check if Strimzi CRD is missing OR if the operator deployment is missing
-    operator_exists=false
-    if kubectl get deployment -A -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
-        operator_exists=true
-    elif kubectl get deployment -n kafka -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
-        operator_exists=true
-    elif kubectl get deployment -n strimzi-operator -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
-        operator_exists=true
-    fi
+    # Unconditional by design. `helm upgrade --install` is idempotent and
+    # converges, and the chart's pre-upgrade hook is what keeps the CRDs current
+    # — so gating this on "is the operator already there?" would mean the hook
+    # never fires on an existing cluster and the CRDs silently freeze at
+    # whatever version first installed them.
+    info "  Reconciling Strimzi Kafka Operator (charts/strimzi-operator)..."
+    ensure_namespace "strimzi-operator"
 
-    if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null || [ "$operator_exists" = false ]; then
-        if [ "$operator_exists" = false ] && kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
-            warn "  Strimzi CRDs are present, but Strimzi Operator deployment is not running!"
-            info "  Installing Strimzi Kafka Operator to manage existing CRDs..."
-        else
-            info "  Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
-        fi
-        kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
-        helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-            --version 1.1.0 \
-            --namespace "strimzi-operator" \
-            --set watchAnyNamespace=true \
-            --set replicas=1 \
-            --set kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}" \
-            --timeout 5m --wait
-        kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
-    else
-        info "  Strimzi CRDs and Operator deployment already present"
-    fi
+    # The wrapper chart does not render until its subchart is fetched.
+    helm dependency build "${ROOT_DIR}/charts/strimzi-operator"
+
+    # --reset-values: the pre-chart releases stored flat upstream keys
+    # (watchAnyNamespace, replicas, ...) which now live under the subchart key.
+    # A bare upgrade reuses them and the values schema rejects them.
+    helm upgrade --install strimzi-operator "${ROOT_DIR}/charts/strimzi-operator" \
+        --namespace "strimzi-operator" \
+        --reset-values \
+        --set "strimzi-kafka-operator.kubernetesServiceDnsDomain=${CLUSTER_DOMAIN}" \
+        --timeout 10m --wait
+    kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
 fi
 
 # Adopt pre-existing Kafka resources into Helm release

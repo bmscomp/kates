@@ -49,6 +49,7 @@ book:
 
     - part: "Part V — Deployment & Operations"
       chapters:
+        - deploying-strimzi-operator.md
         - 20-installation-guide.md
         - 15-kafka-deployment.md
         - 12-deployment.md

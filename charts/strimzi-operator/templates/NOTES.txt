@@ -1,0 +1,58 @@
+{{- $op := index .Values "strimzi-kafka-operator" -}}
+Strimzi Operator v{{ .Chart.Version }} (Strimzi {{ .Chart.AppVersion }})
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Configuration:
+  Watch scope:      {{ if $op.watchAnyNamespace }}all namespaces (STRIMZI_NAMESPACE="*"){{ else }}{{ .Release.Namespace }} only{{ end }}
+  Replicas:         {{ $op.replicas }}
+  Leader election:  {{ if $op.leaderElection.enable }}enabled{{ else }}disabled{{ end }}
+  DNS domain:       {{ $op.kubernetesServiceDnsDomain }}
+  CRD upgrade hook: {{ if .Values.crdUpgrade.enabled }}enabled{{ else }}DISABLED{{ end }}
+
+{{- if .Values.crdUpgrade.enabled }}
+
+  ✓ CRDs applied from {{ include "strimzi-operator.crdUrl" . }}
+{{- end }}
+
+{{- if not .Values.crdUpgrade.enabled }}
+
+  ⚠ helm upgrade does NOT update CRDs. The upstream chart ships them in crds/,
+    which Helm only applies on install. This chart's crdUpgrade hook keeps them
+    current — you have disabled it, so CRDs freeze at the version first
+    installed and the API server will silently prune fields the frozen schema
+    does not know about. Re-enable with crdUpgrade.enabled=true unless another
+    applier owns them.
+{{- end }}
+
+{{- if not $op.watchAnyNamespace }}
+
+  ⚠ The operator will only watch {{ .Release.Namespace }}. Existing Kafka
+    clusters in other namespaces will go UNMANAGED — their CRs stay in the
+    cluster but nothing reconciles them. Set
+    strimzi-kafka-operator.watchAnyNamespace=true to restore cluster-wide scope.
+{{- end }}
+
+  ⚠ Upgrading? Bare `helm upgrade` REUSES this release's stored values. Pass
+    --reset-values (or -f <overlay>) or it will fail schema validation on the
+    stale flat keys left by the retired ad-hoc install:
+
+      helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} --reset-values
+
+────────────────────────────────────────────
+  Verify
+────────────────────────────────────────────
+
+Watch scope actually in effect (expect "*"):
+  kubectl get deploy strimzi-cluster-operator -n {{ .Release.Namespace }} \
+    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}'
+
+CRDs installed:
+  kubectl get crd -l strimzi.io/crd-install=true
+
+Operator rollout:
+  kubectl rollout status deploy/strimzi-cluster-operator -n {{ .Release.Namespace }}
+
+Full check:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
