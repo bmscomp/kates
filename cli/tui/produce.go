@@ -3,11 +3,12 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/charmbracelet/bubbles/textinput"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type produceView int
@@ -22,8 +23,8 @@ type produceModel struct {
 	topics      []client.KafkaTopic
 	cursor      int
 	view        produceView
-	keyBuf      string
-	valueBuf    string
+	keyInput    textinput.Model
+	valueInput  textinput.Model
 	activeField int // 0=key, 1=value
 	history     []producedRecord
 	width       int
@@ -54,7 +55,19 @@ type produceSentMsg struct {
 }
 
 func newProduceModel(c *client.Client) produceModel {
-	return produceModel{client: c, loading: true}
+	// bubbles/textinput instead of hand-rolled byte buffers: the old input
+	// only accepted single-byte keystrokes, which silently dropped paste and
+	// every non-ASCII rune ("é" is two bytes, so it never appeared).
+	key := textinput.New()
+	key.Placeholder = "optional"
+	key.Prompt = "  "
+	key.CharLimit = 0
+	value := textinput.New()
+	value.Placeholder = "record value"
+	value.Prompt = "  "
+	value.CharLimit = 0
+	key.Focus()
+	return produceModel{client: c, loading: true, keyInput: key, valueInput: value}
 }
 
 func (m produceModel) loadTopics() tea.Cmd {
@@ -103,7 +116,7 @@ func (m produceModel) Update(msg tea.Msg) (produceModel, tea.Cmd) {
 			if len(m.history) > 50 {
 				m.history = m.history[len(m.history)-50:]
 			}
-			m.valueBuf = ""
+			m.valueInput.SetValue("")
 		}
 
 	case tea.KeyMsg:
@@ -145,37 +158,40 @@ func (m produceModel) updateInput(msg tea.KeyMsg) (produceModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.view = produceTopicSelect
-		m.keyBuf = ""
-		m.valueBuf = ""
+		m.keyInput.SetValue("")
+		m.valueInput.SetValue("")
 		m.statusMsg = ""
+		return m, nil
 	case "tab":
 		m.activeField = (m.activeField + 1) % 2
+		if m.activeField == 0 {
+			m.keyInput.Focus()
+			m.valueInput.Blur()
+		} else {
+			m.valueInput.Focus()
+			m.keyInput.Blur()
+		}
+		return m, nil
 	case "enter":
-		if m.valueBuf == "" {
+		if m.valueInput.Value() == "" {
 			m.statusMsg = warnStyle.Render("Value cannot be empty")
 			return m, nil
 		}
 		topic := m.topics[m.cursor].Name
 		m.loading = true
 		m.statusMsg = dimStyle.Render("Sending…")
-		return m, m.sendRecord(topic, m.keyBuf, m.valueBuf)
-	case "backspace":
-		if m.activeField == 0 && len(m.keyBuf) > 0 {
-			m.keyBuf = m.keyBuf[:len(m.keyBuf)-1]
-		} else if m.activeField == 1 && len(m.valueBuf) > 0 {
-			m.valueBuf = m.valueBuf[:len(m.valueBuf)-1]
-		}
-	default:
-		ch := msg.String()
-		if len(ch) == 1 {
-			if m.activeField == 0 {
-				m.keyBuf += ch
-			} else {
-				m.valueBuf += ch
-			}
-		}
+		return m, m.sendRecord(topic, m.keyInput.Value(), m.valueInput.Value())
 	}
-	return m, nil
+
+	// Everything else — runes, paste, cursor keys, backspace — belongs to the
+	// focused textinput, which handles multi-rune input correctly.
+	var cmd tea.Cmd
+	if m.activeField == 0 {
+		m.keyInput, cmd = m.keyInput.Update(msg)
+	} else {
+		m.valueInput, cmd = m.valueInput.Update(msg)
+	}
+	return m, cmd
 }
 
 func (m produceModel) View() string {
@@ -265,14 +281,6 @@ func (m produceModel) viewInput() string {
 		topicName = m.topics[m.cursor].Name
 	}
 
-	keyCursor := ""
-	valueCursor := ""
-	if m.activeField == 0 {
-		keyCursor = "▌"
-	} else {
-		valueCursor = "▌"
-	}
-
 	keyLabel := dimStyle.Render("Key")
 	valueLabel := dimStyle.Render("Value")
 	if m.activeField == 0 {
@@ -284,9 +292,9 @@ func (m produceModel) viewInput() string {
 	var b strings.Builder
 	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Produce → %s", topicName)) + "\n\n")
 	b.WriteString(keyLabel + "\n")
-	b.WriteString(fmt.Sprintf("  %s%s\n\n", m.keyBuf, keyCursor))
+	b.WriteString(m.keyInput.View() + "\n\n")
 	b.WriteString(valueLabel + "\n")
-	b.WriteString(fmt.Sprintf("  %s%s\n\n", m.valueBuf, valueCursor))
+	b.WriteString(m.valueInput.View() + "\n\n")
 
 	if m.statusMsg != "" {
 		b.WriteString(m.statusMsg + "\n\n")
