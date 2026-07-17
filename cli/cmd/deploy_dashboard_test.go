@@ -100,3 +100,46 @@ func TestDashboardRowsShareOneWidth(t *testing.T) {
 		}
 	}
 }
+
+// The summary's table and footer must agree. They previously interpreted the
+// (never-recorded) empty status independently: the table rendered "Skipped"
+// while the footer counted "deployed" — eight Skipped rows above
+// "8 components deployed successfully!".
+func TestClassifyStatus_UnrecordedIsUnknownNotBoth(t *testing.T) {
+	if got := classifyStatus(""); got != "unknown" {
+		t.Errorf("classifyStatus(\"\") = %q — the empty status must be visibly unknown, not silently success or skip", got)
+	}
+	for _, s := range []string{"deployed", "skipped", "failed"} {
+		if got := classifyStatus(s); got != s {
+			t.Errorf("classifyStatus(%q) = %q", s, got)
+		}
+	}
+}
+
+func TestMarkEntryStatuses(t *testing.T) {
+	entries := []DeploySummaryEntry{
+		{Release: "strimzi-operator", Namespace: "strimzi-operator"},
+		{Release: "krafter", Namespace: "kafka"},
+		{Release: "kates", Namespace: "kates"},
+	}
+
+	// Everything already present: components are skipped — except Strimzi,
+	// which is reconciled unconditionally and therefore always does work.
+	markEntryStatuses(entries, func(string, string) bool { return true })
+	if entries[0].Status != "deployed" {
+		t.Errorf("strimzi = %q, want deployed (reconciled every run)", entries[0].Status)
+	}
+	for _, e := range entries[1:] {
+		if e.Status != "skipped" {
+			t.Errorf("%s = %q, want skipped when already present", e.Release, e.Status)
+		}
+	}
+
+	// Nothing present: everything deploys.
+	markEntryStatuses(entries, func(string, string) bool { return false })
+	for _, e := range entries {
+		if e.Status != "deployed" {
+			t.Errorf("%s = %q, want deployed on fresh cluster", e.Release, e.Status)
+		}
+	}
+}
