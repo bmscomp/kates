@@ -44,7 +44,7 @@ strimziVersion: "1.1.0"
 # tests). The operator's own image comes from the subchart.
 testImages:
   # -- kubectl image used by the CRD-upgrade hook Job and the Helm tests
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
 
 # ── CRD lifecycle ────────────────────────────────────────────────────────────
 # Closes the gap Helm leaves: crds/ is applied on install and never on upgrade.
