@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type labParam struct {
@@ -471,6 +471,12 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m LabModel) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	// Below the supported floor, render the shared card instead of a layout
+	// that clips into garbage.
+	if TooSmall(m.width, m.height) {
+		return TooSmallCard(m.width, m.height)
 	}
 
 	w := m.width

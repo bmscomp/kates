@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/bmscomp/kates/cli/output"
 	"os"
 	"os/exec"
 	"strings"
@@ -74,7 +75,7 @@ var (
 
 func cleanRunDefault(ctx context.Context, name string, args ...string) error {
 	if cleanVerbose {
-		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		fmt.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	if cleanVerbose {
@@ -86,7 +87,7 @@ func cleanRunDefault(ctx context.Context, name string, args ...string) error {
 
 func cleanRunOutputDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if cleanVerbose {
-		fmt.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		fmt.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()

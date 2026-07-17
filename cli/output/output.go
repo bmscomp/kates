@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 	"golang.org/x/term"
@@ -130,22 +130,22 @@ func StatusBadge(status string) string {
 	upper := strings.ToUpper(status)
 	switch upper {
 	case "UP", "DONE", "PASS", "COMPLETED", "ENABLED":
-		return SuccessStyle.Bold(true).Render("● " + upper)
+		return SuccessStyle.Bold(true).Render(Glyphs().Bullet + " " + upper)
 	case "RUNNING", "PENDING":
-		return AccentStyle.Bold(true).Render("◉ " + upper)
+		return AccentStyle.Bold(true).Render(Glyphs().DotOn + " " + upper)
 	case "DEGRADED", "STOPPING":
-		return WarningStyle.Bold(true).Render("◈ " + upper)
+		return WarningStyle.Bold(true).Render(Glyphs().Diamond + " " + upper)
 	case "DOWN", "FAILED", "ERROR", "FAIL":
-		return ErrorStyle.Render("✖ " + upper)
+		return ErrorStyle.Render(Glyphs().Cross + " " + upper)
 	case "DISABLED":
-		return DimStyle.Render("○ " + upper)
+		return DimStyle.Render(Glyphs().Ring + " " + upper)
 	default:
-		return DimStyle.Render("○ " + status)
+		return DimStyle.Render(Glyphs().Ring + " " + status)
 	}
 }
 
 func Header(text string) {
-	bar := lipgloss.NewStyle().Foreground(Purple).Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	bar := lipgloss.NewStyle().Foreground(Purple).Render(strings.Repeat(Glyphs().HeavyRule, 42))
 	title := lipgloss.NewStyle().Bold(true).Foreground(HeaderColor).Render("  " + text)
 	fmt.Fprintln(Out)
 	fmt.Fprintln(Out, bar)
@@ -155,7 +155,7 @@ func Header(text string) {
 
 func SubHeader(text string) {
 	fmt.Fprintln(Out)
-	fmt.Fprintln(Out, SubHeaderStyle.Render("▸ "+text))
+	fmt.Fprintln(Out, SubHeaderStyle.Render(Glyphs().Arrow+" "+text))
 }
 
 func KeyValue(key, value string) {
@@ -168,15 +168,15 @@ func KeyValueIndent(key, value string, indent int) {
 }
 
 func Success(msg string) {
-	fmt.Fprintln(Out, SuccessStyle.Render("  ✓ "+msg))
+	fmt.Fprintln(Out, SuccessStyle.Render("  "+Glyphs().Check+" "+msg))
 }
 
 func Warn(msg string) {
-	fmt.Fprintln(Out, WarningStyle.Render("  ⚠ "+msg))
+	fmt.Fprintln(Out, WarningStyle.Render("  "+Glyphs().Warn+" "+msg))
 }
 
 func Error(msg string) {
-	fmt.Fprintln(Err, ErrorStyle.Render("  ✖ "+msg))
+	fmt.Fprintln(Err, ErrorStyle.Render("  "+Glyphs().Cross+" "+msg))
 }
 
 func Hint(msg string) {
@@ -231,7 +231,7 @@ func Table(headers []string, rows [][]string) {
 		headerLine += "  " + headerFg.Render(PadRight(h, widths[i]))
 	}
 	for i := range headers {
-		sepLine += "  " + sepFg.Render(strings.Repeat("─", widths[i]))
+		sepLine += "  " + sepFg.Render(strings.Repeat(Glyphs().Rule, widths[i]))
 	}
 
 	fmt.Fprintln(Out, headerLine)
@@ -306,7 +306,7 @@ func MetricBar(label string, value, max float64) {
 		filled = 0
 	}
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	bar := strings.Repeat(Glyphs().BarFull, filled) + strings.Repeat(Glyphs().BarEmpty, barWidth-filled)
 
 	barColor := Green
 	ratio := value / max
@@ -324,7 +324,7 @@ func Sparkline(values []float64) string {
 	if len(values) == 0 {
 		return ""
 	}
-	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	blocks := Glyphs().Spark
 	min, max := values[0], values[0]
 	for _, v := range values {
 		if v < min {
@@ -356,7 +356,7 @@ func SparklineColored(values []float64, higherIsBetter bool) string {
 	if len(values) == 0 {
 		return ""
 	}
-	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	blocks := Glyphs().Spark
 	min, max := values[0], values[0]
 	for _, v := range values {
 		if v < min {
@@ -431,9 +431,9 @@ func ConfigList(title string, entries []ConfigEntry) {
 		}
 	}
 
-	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(Indigo).Render("▸ " + title)
+	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(Indigo).Render(Glyphs().Arrow + " " + title)
 	countStyled := lipgloss.NewStyle().Foreground(Gray).Render(fmt.Sprintf("  (%d)", len(entries)))
-	sep := lipgloss.NewStyle().Foreground(SeparatorColor).Render(strings.Repeat("─", 50))
+	sep := lipgloss.NewStyle().Foreground(SeparatorColor).Render(strings.Repeat(Glyphs().Rule, 50))
 
 	fmt.Fprintln(Out)
 	fmt.Fprintln(Out, titleStyled+countStyled)
