@@ -428,3 +428,18 @@ func TestResolveCluster_KubeconfigErrorPropagates(t *testing.T) {
 		t.Error("must not create a cluster because kubectl is broken")
 	}
 }
+
+// Phase numbers are generated, not literals — a reorder can no longer produce
+// the [1], [1], [2], [3], [4] sequence users saw.
+func TestDeployPhaseCounter(t *testing.T) {
+	resetDeployPhases()
+	for want := 1; want <= 5; want++ {
+		if got := nextDeployPhase(); got != want {
+			t.Fatalf("phase %d, want %d", got, want)
+		}
+	}
+	resetDeployPhases()
+	if got := nextDeployPhase(); got != 1 {
+		t.Fatalf("after reset, phase = %d, want 1", got)
+	}
+}

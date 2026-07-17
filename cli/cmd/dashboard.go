@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ var dashboardCmd = &cobra.Command{
 		latencyHistory := make([]float64, 0, 30)
 
 		for {
-			fmt.Print("\033[2J\033[H")
+			output.ClearFrame(IsInteractive())
 
 			health, healthErr := apiClient.Health(context.Background())
 			paged, _ := apiClient.ListTests(context.Background(), "", "", 0, 50)

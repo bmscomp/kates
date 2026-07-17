@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var (
@@ -162,7 +160,15 @@ var testGetCmd = &cobra.Command{
 			}
 			if maxThroughput > 0 {
 				fmt.Println()
-				output.MetricBar("Throughput", maxThroughput, 100000)
+				// Only draw a bar when the test declared a target: a bar needs
+				// a meaningful ceiling, and the old hardcoded 100k made high
+				// throughput render RED (the consumption palette read "good"
+				// as "dangerous") while any slow test looked healthily green.
+				if result.Spec != nil && result.Spec.TargetThroughput > 0 {
+					output.MetricBarDir("Throughput", maxThroughput, float64(result.Spec.TargetThroughput), true)
+				} else {
+					output.KeyValue("Peak Throughput", fmtNum(maxThroughput)+" rec/s")
+				}
 			}
 
 			for _, r := range result.Results {
@@ -314,7 +320,11 @@ var testCreateCmd = &cobra.Command{
   kates test create --type LOAD --records 100000 --consumers 4 --consumer-group perf-cg
   kates test create --type LOAD --records 100000 --throughput 10000 --fetch-min-bytes 1048576`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !plainOutput && cmd.Flags().NFlag() == 0 && term.IsTerminal(int(os.Stdout.Fd())) {
+		// IsInteractive is the one guard: the previous check looked at stdout
+		// only, so `echo | kates test create` (TTY stdout, piped stdin) sent
+		// huh hunting for input on a pipe. It also ignored isTesting and
+		// TERM=dumb.
+		if cmd.Flags().NFlag() == 0 && IsInteractive() {
 			if err := runInteractiveTestCreate(); err != nil {
 				return err
 			}
@@ -443,10 +453,12 @@ func runInteractiveTestCreate() error {
 			huh.NewInput().
 				Title("Number of Records").
 				Description("Leave blank if specifying duration").
+				Validate(optionalPositiveInt).
 				Value(&recordsStr),
 			huh.NewInput().
 				Title("Duration (seconds)").
 				Description("Leave blank if specifying records").
+				Validate(optionalPositiveInt).
 				Value(&durationStr),
 			huh.NewConfirm().
 				Title("Wait for completion?").
@@ -458,15 +470,28 @@ func runInteractiveTestCreate() error {
 		return err
 	}
 
+	// The form validated these, so Atoi cannot fail here — but the old code
+	// silently discarded errors, meaning a typo like "10k" created a test
+	// with zero records and no explanation.
 	if recordsStr != "" {
-		if val, err := strconv.Atoi(recordsStr); err == nil {
-			createRecords = val
-		}
+		createRecords, _ = strconv.Atoi(recordsStr)
 	}
 	if durationStr != "" {
-		if val, err := strconv.Atoi(durationStr); err == nil {
-			createDuration = val
-		}
+		createDuration, _ = strconv.Atoi(durationStr)
+	}
+	return nil
+}
+
+// optionalPositiveInt validates a wizard field that may be blank or a positive
+// integer — rejecting input at the form, where the user can fix it, instead of
+// silently dropping it after.
+func optionalPositiveInt(s string) error {
+	if s == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("enter a positive whole number (or leave blank)")
 	}
 	return nil
 }

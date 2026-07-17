@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -29,16 +30,16 @@ type ClusterSnapshot struct {
 var (
 	snapTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnDark).
+			Background(theme.Accent).
 			Padding(0, 1)
 
 	snapDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 
 	snapNameStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(theme.Info)
 )
 
 var snapshotCmd = &cobra.Command{
@@ -166,13 +167,13 @@ var snapshotDiffCmd = &cobra.Command{
 
 		added, removed := diffStringLists(s1.TopicList, s2.TopicList)
 		if len(added) > 0 {
-			fmt.Println("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("+ Topics added:"))
+			fmt.Println("  " + lipgloss.NewStyle().Foreground(theme.Success).Bold(true).Render("+ Topics added:"))
 			for _, t := range added {
 				fmt.Printf("    + %s\n", t)
 			}
 		}
 		if len(removed) > 0 {
-			fmt.Println("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("- Topics removed:"))
+			fmt.Println("  " + lipgloss.NewStyle().Foreground(theme.Error).Bold(true).Render("- Topics removed:"))
 			for _, t := range removed {
 				fmt.Printf("    - %s\n", t)
 			}
@@ -180,13 +181,13 @@ var snapshotDiffCmd = &cobra.Command{
 
 		addedG, removedG := diffStringLists(s1.GroupList, s2.GroupList)
 		if len(addedG) > 0 {
-			fmt.Println("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("+ Groups added:"))
+			fmt.Println("  " + lipgloss.NewStyle().Foreground(theme.Success).Bold(true).Render("+ Groups added:"))
 			for _, g := range addedG {
 				fmt.Printf("    + %s\n", g)
 			}
 		}
 		if len(removedG) > 0 {
-			fmt.Println("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("- Groups removed:"))
+			fmt.Println("  " + lipgloss.NewStyle().Foreground(theme.Error).Bold(true).Render("- Groups removed:"))
 			for _, g := range removedG {
 				fmt.Printf("    - %s\n", g)
 			}
@@ -201,9 +202,9 @@ func printSnapDiff(label string, a, b int) {
 	delta := b - a
 	var indicator string
 	if delta > 0 {
-		indicator = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render(fmt.Sprintf(" (+%d)", delta))
+		indicator = lipgloss.NewStyle().Foreground(theme.Success).Render(fmt.Sprintf(" (+%d)", delta))
 	} else if delta < 0 {
-		indicator = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(fmt.Sprintf(" (%d)", delta))
+		indicator = lipgloss.NewStyle().Foreground(theme.Error).Render(fmt.Sprintf(" (%d)", delta))
 	}
 	fmt.Printf("  %-16s %-14d %-14d%s\n", label, a, b, indicator)
 }

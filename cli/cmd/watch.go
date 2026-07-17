@@ -23,83 +23,27 @@ var testWatchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
-		tick := 0
-		var throughputHistory []float64
 
-		for {
-			result, err := apiClient.GetTest(context.Background(), id)
-			if err != nil {
-				return cmdErr("Failed to fetch test: " + err.Error())
-			}
-
-			status := strings.ToUpper(result.Status)
-
-			var currentThroughput float64
-			for _, r := range result.Results {
-				if r.ThroughputRecordsPerSec > currentThroughput {
-					currentThroughput = r.ThroughputRecordsPerSec
-				}
-			}
-			throughputHistory = append(throughputHistory, currentThroughput)
-
-			fmt.Print("\033[2J\033[H")
-
-			output.Banner("Test Watch", fmt.Sprintf("%s · %s", result.TestType, truncID(id)))
-
-			output.SubHeader("Status")
-			output.KeyValue("Test ID", id)
-			output.KeyValue("Type", result.TestType)
-			output.KeyValue("Backend", result.Backend)
-			output.KeyValue("Status", output.StatusBadge(status))
-			output.KeyValue("Created", formatTime(result.CreatedAt))
-
-			if len(result.Results) > 0 {
-				output.SubHeader(fmt.Sprintf("Results (%d phases)", len(result.Results)))
-				rows := make([][]string, 0, len(result.Results))
-				for _, r := range result.Results {
-					phase := r.PhaseName
-					if phase == "" {
-						phase = "main"
-					}
-					rows = append(rows, []string{
-						phase,
-						r.Status,
-						fmtNum(r.RecordsSent),
-						fmtFloat(r.ThroughputRecordsPerSec, 1),
-						fmtFloat(r.AvgLatencyMs, 2),
-						fmtFloat(r.P99LatencyMs, 2),
-					})
-				}
-				output.Table(
-					[]string{"Phase", "Status", "Records", "Throughput", "Avg Lat.", "P99 Lat."},
-					rows,
-				)
-			}
-
-			if len(throughputHistory) > 1 {
-				fmt.Println()
-				sparkline := output.Sparkline(throughputHistory)
-				output.KeyValue("Throughput Trend", sparkline+" "+fmtNum(currentThroughput)+" rec/s")
-			}
-
-			switch status {
-			case "DONE", "COMPLETED":
-				output.Success("Test completed successfully")
-				output.Hint(fmt.Sprintf("View report: kates report show %s", id))
-				return nil
-			case "FAILED", "ERROR":
-				return cmdErr("Test failed")
-			default:
-				fmt.Println()
-				fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-					spinnerFrame(tick),
-					watchInterval,
-				)
-			}
-
-			tick++
-			time.Sleep(time.Duration(watchInterval) * time.Second)
+		// One follower for the whole test family. `watch` used to be its own
+		// clear-screen loop — a second implementation with its own rendering,
+		// its own polling, and (until wave 1) DIFFERENT exit semantics from
+		// `create --wait`. pollUntilDone gives the rich TUI on a terminal and
+		// the append-only line format everywhere else.
+		if watchInterval > 0 {
+			origInterval := pollInterval
+			pollInterval = time.Duration(watchInterval) * time.Second
+			defer func() { pollInterval = origInterval }()
 		}
+
+		status, err := pollUntilDone(id)
+		if err != nil {
+			return cmdErr("Lost track of test " + truncID(id) + ": " + err.Error())
+		}
+		if isFailedStatus(status) {
+			return cmdErr("Test failed — details: kates test get " + id)
+		}
+		output.Hint(fmt.Sprintf("View report: kates report show %s", id))
+		return nil
 	},
 }
 

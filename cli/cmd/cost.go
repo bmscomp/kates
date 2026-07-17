@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -35,20 +36,20 @@ var (
 
 	costTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnDark).
+			Background(theme.Accent).
 			Padding(0, 1)
 
 	costLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).
+			Foreground(theme.Muted).
 			Width(18)
 
 	costValueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(theme.Info)
 
 	costTotalStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#22C55E"))
+			Foreground(theme.Highlight)
 )
 
 var costCmd = &cobra.Command{

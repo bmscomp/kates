@@ -266,6 +266,11 @@ jobs:
       # CI logs" class regressions — unit tests never see the raw bytes.
       - name: CLI terminal-compatibility checks
         run: bash scripts/check-cli-compat.sh
+
+      # Static companion to the compat harness: no hardcoded hex colors
+      # outside the theme, no raw escape literals outside cli/output/.
+      - name: CLI style checks
+        run: bash scripts/check-cli-style.sh
         env:
           GOMEMLIMIT: 2GiB
           GOGC: 50

@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -36,20 +37,20 @@ var (
 
 	profTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnDark).
+			Background(theme.Accent).
 			Padding(0, 1)
 
 	profUpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22C55E")).
+			Foreground(theme.Success).
 			Bold(true)
 
 	profDownStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EF4444")).
+			Foreground(theme.Error).
 			Bold(true)
 
 	profDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 )
 
 var profileCmd = &cobra.Command{
@@ -138,10 +139,10 @@ var profileListCmd = &cobra.Command{
 				savedDate = t.Format("Jan 02")
 			}
 			fmt.Printf("  %-22s %-10s %-12s %-10s %-10s %s\n",
-				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#06B6D4")).Render(p.Name),
+				lipgloss.NewStyle().Bold(true).Foreground(theme.Info).Render(p.Name),
 				p.TestType,
 				profUpStyle.Render(fmtAdvisorNum(p.Throughput)+" rec/s"),
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(fmt.Sprintf("%.0fms", p.P99Ms)),
+				lipgloss.NewStyle().Foreground(theme.Warning).Render(fmt.Sprintf("%.0fms", p.P99Ms)),
 				profDimStyle.Render(savedDate),
 				profDimStyle.Render(p.RunID[:minLen(len(p.RunID), 8)]),
 			)

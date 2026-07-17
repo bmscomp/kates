@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bmscomp/kates/cli/pkg/cluster"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 )
 
 // The cluster gate runs before anything in `kates deploy` that assumes a
@@ -44,11 +45,11 @@ var (
 // styles reused from the repo's lipgloss vocabulary.
 var (
 	gateTitle  = lipgloss.NewStyle().Bold(true)
-	gateDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	gateOK     = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
-	gateWarn   = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-	gateErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
-	gateAccent = lipgloss.NewStyle().Foreground(lipgloss.Color("#6366F1"))
+	gateDim    = lipgloss.NewStyle().Foreground(theme.Muted)
+	gateOK     = lipgloss.NewStyle().Foreground(theme.Success)
+	gateWarn   = lipgloss.NewStyle().Foreground(theme.Warning)
+	gateErr    = lipgloss.NewStyle().Foreground(theme.Error)
+	gateAccent = lipgloss.NewStyle().Foreground(theme.Accent)
 )
 
 // resolveCluster is the gate. It returns the context name to deploy into, or an

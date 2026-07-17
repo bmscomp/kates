@@ -19,7 +19,7 @@ var topCmd = &cobra.Command{
 		tick := 0
 
 		for {
-			fmt.Print("\033[2J\033[H")
+			output.ClearFrame(IsInteractive())
 
 			health, _ := apiClient.Health(context.Background())
 			paged, err := apiClient.ListTests(context.Background(), "", "", 0, 50)
