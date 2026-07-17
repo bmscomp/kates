@@ -237,11 +237,27 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	// Because everything is already deployed, no `helm upgrade` should be called.
+	// Everything already deployed => no `helm upgrade`, with ONE deliberate
+	// exception: the Strimzi operator is always reconciled.
+	//
+	// Skipping is not idempotency — `helm upgrade --install` converges, which is
+	// the real thing. Skipping strimzi-operator when its release exists means
+	// charts/strimzi-operator's pre-upgrade CRD hook never fires on an existing
+	// cluster, so the CRDs freeze at whatever version first installed them while
+	// the API server silently prunes fields the newer operator needs.
+	var strimziUpgraded bool
 	for _, cmd := range executedCommands {
-		if strings.Contains(cmd, "helm upgrade") {
-			t.Errorf("Expected no helm upgrade commands to run due to idempotency, got: %s", cmd)
+		if !strings.Contains(cmd, "helm upgrade") {
+			continue
 		}
+		if strings.Contains(cmd, "strimzi-operator") {
+			strimziUpgraded = true
+			continue
+		}
+		t.Errorf("Expected no helm upgrade commands to run due to idempotency, got: %s", cmd)
+	}
+	if !strimziUpgraded {
+		t.Error("Expected strimzi-operator to be reconciled unconditionally, but no helm upgrade ran for it")
 	}
 }
 

@@ -15,17 +15,29 @@ info "Deploying Kafka cluster (env=${ENV})..."
 
 ensure_namespace "${NAMESPACE}"
 
-# Install Strimzi Operator if not present (separate release required to avoid CRD chicken-and-egg)
-if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
-    info "Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
-    ensure_namespace "strimzi-operator"
-    helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-        --version 1.1.0 \
-        --namespace "strimzi-operator" \
-        --set watchAnyNamespace=true \
-        --set replicas=1 \
-        --timeout 5m --wait
-fi
+# Reconcile the Strimzi Operator (a separate release from kafka-cluster, to
+# avoid the CRD chicken-and-egg).
+#
+# Unconditional by design. `helm upgrade --install` is idempotent and converges,
+# and the chart's pre-upgrade hook is what keeps the CRDs current — gating this
+# on "are the CRDs already there?" would mean the hook never fires on an
+# existing cluster and the CRDs silently freeze at whatever version first
+# installed them.
+info "Reconciling Strimzi Kafka Operator (charts/strimzi-operator)..."
+ensure_namespace "strimzi-operator"
+
+# The wrapper chart does not render until its subchart is fetched. `build`
+# resolves from Chart.lock, so the pinned Strimzi version cannot drift.
+helm dependency build "${ROOT_DIR}/charts/strimzi-operator"
+
+# --reset-values: pre-chart releases stored flat upstream keys (watchAnyNamespace,
+# replicas, ...) which now live under the subchart key. A bare upgrade reuses
+# them and the values schema rejects them.
+helm upgrade --install strimzi-operator "${ROOT_DIR}/charts/strimzi-operator" \
+    --namespace "strimzi-operator" \
+    --reset-values \
+    --timeout 10m --wait
+kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
 
 # Build Helm dependencies (SeaweedFS subchart)
 info "Building Helm chart dependencies..."
