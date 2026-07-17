@@ -15,7 +15,7 @@
     <a href="https://github.com/bmscomp/kates/releases/latest"><img src="https://img.shields.io/github/v/release/bmscomp/kates?label=release&logo=github" alt="Release" /></a>
     <img src="https://img.shields.io/badge/CLI-Go%201.25-00ADD8?logo=go&logoColor=white" alt="Go" />
     <img src="https://img.shields.io/badge/Backend-Quarkus%203.15-4695EB?logo=quarkus&logoColor=white" alt="Quarkus" />
-    <img src="https://img.shields.io/badge/Kafka-4.2.0%20KRaft-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
+    <img src="https://img.shields.io/badge/Kafka-4.3.0%20KRaft-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
     <img src="https://img.shields.io/badge/Charts-Helm-0F1689?logo=helm&logoColor=white" alt="Helm" />
   </p>
 </div>
@@ -161,8 +161,8 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
 | [`kates`](charts/kates/) | 0.4.4 | 1.20.0 | The Kates backend (Quarkus REST/gRPC) and frontend, deployed as a single Kubernetes Deployment with ConfigMap-driven configuration. |
-| [`kafka-cluster`](charts/kafka-cluster/) | 0.1.1 | 4.2.0 | A Strimzi-managed KRaft Kafka cluster with zone-aware broker pools, SCRAM-SHA-512 authentication, and rack-affinity storage classes. |
-| [`connect-cluster`](charts/connect-cluster/) | 1.2.0 | 4.2.0 | A Strimzi-managed Kafka Connect cluster with a managed KafkaUser, least-privilege ACLs, default-deny NetworkPolicies, and in-chart JMX metrics. |
+| [`kafka-cluster`](charts/kafka-cluster/) | 0.2.0 | 4.3.0 | A Strimzi-managed KRaft Kafka cluster with zone-aware broker pools, SCRAM-SHA-512 authentication, and rack-affinity storage classes. |
+| [`connect-cluster`](charts/connect-cluster/) | 1.3.0 | 4.3.0 | A Strimzi-managed Kafka Connect cluster with a managed KafkaUser, least-privilege ACLs, default-deny NetworkPolicies, and in-chart JMX metrics. |
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A web-based Kafka management interface for topic inspection, consumer group monitoring, and message browsing. |
 | [`kates-chaos`](charts/kates-chaos/) | 2.0.0 | 3.28.0 | A LitmusChaos execution-plane wrapper (operator, exporter, CRDs) with Kafka-specific RBAC, ChaosExperiment/ChaosEngine templating, and monitoring for broker and network faults. |
 | [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | The Prometheus and Grafana monitoring stack, pre-configured with scrape jobs, recording rules, and auto-provisioned dashboards for Kafka, JVM, and Strimzi metrics. |

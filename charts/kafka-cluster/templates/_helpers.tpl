@@ -60,7 +60,7 @@ seccompProfile:
 
 {{/*
 Resolve the Kafka client image used in Helm tests.
-Default: quay.io/strimzi/kafka:1.0.0-kafka-4.2.0
+Default: quay.io/strimzi/kafka:1.1.0-kafka-4.3.0
 Override via: images.kafka or global.imageRegistry + global.imageRepository
 */}}
 {{- define "kafka-cluster.kafkaImage" -}}

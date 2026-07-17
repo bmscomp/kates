@@ -13,11 +13,11 @@ After this chapter, you can:
 
 ## Strimzi Operator
 
-Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.0.0`), installed from the OCI Helm chart on quay.io into a dedicated `strimzi-operator` namespace (this is exactly what `scripts/deploy-kafka.sh` runs when the Strimzi CRDs are not yet present):
+Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.1.0`), installed from the OCI Helm chart on quay.io into a dedicated `strimzi-operator` namespace (this is exactly what `scripts/deploy-kafka.sh` runs when the Strimzi CRDs are not yet present):
 
 ```bash
 helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version 1.0.0 \
+  --version 1.1.0 \
   --namespace strimzi-operator \
   --set watchAnyNamespace=true \
   --set replicas=1 \
@@ -605,7 +605,7 @@ Expect the Kafka CR to report Ready, every node pool at its desired replica coun
 
 ```bash
 helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version 1.0.0 --namespace strimzi-operator
+  --version 1.1.0 --namespace strimzi-operator
 ```
 
 ### Brokers Crash with ConfigException

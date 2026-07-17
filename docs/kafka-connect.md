@@ -18,9 +18,9 @@ make connect-build
 
 | Property | Value |
 |----------|-------|
-| **Base Image** | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` |
-| **Kafka Version** | 4.2.0 |
-| **Strimzi Version** | 1.0.0 |
+| **Base Image** | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` |
+| **Kafka Version** | 4.3.0 |
+| **Strimzi Version** | 1.1.0 |
 | **Architecture** | `linux/amd64`, `linux/arm64` |
 | **License** | Apache 2.0 |
 

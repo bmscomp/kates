@@ -166,7 +166,7 @@ else
         fi
         kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
         helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-            --version 1.0.0 \
+            --version 1.1.0 \
             --namespace "strimzi-operator" \
             --set watchAnyNamespace=true \
             --set replicas=1 \

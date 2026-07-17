@@ -41,7 +41,7 @@ The chart bundles the **Strimzi Operator** as a subchart (`strimziOperator.enabl
 ```bash
 helm install strimzi-kafka-operator \
   oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version 1.0.0 \
+  --version 1.1.0 \
   --namespace kafka --create-namespace \
   --wait
 ```
@@ -167,7 +167,7 @@ global:
   imageRegistry: "my-registry.example.com"
   imageRepository: "strimzi"
 images:
-  kafka: "my-registry.example.com/strimzi/kafka:1.0.0-kafka-4.2.0"
+  kafka: "my-registry.example.com/strimzi/kafka:1.1.0-kafka-4.3.0"
   kubectl: "my-registry.example.com/bitnami/kubectl:1.33.0"
 ```
 
