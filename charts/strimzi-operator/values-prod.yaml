@@ -1,0 +1,81 @@
+# Strimzi Operator — Production Overlay (UPLIFT, NOT current behavior)
+# Usage: helm dependency build charts/strimzi-operator && helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator -f charts/strimzi-operator/values-prod.yaml
+#
+# READ BEFORE ENABLING. These settings have NEVER been applied to any cluster.
+# They were stranded in config/kafka/strimzi-values.yaml, whose header claimed
+# deploy-kafka.sh passed it with -f — it never did. Proof: the live operator
+# runs STRIMZI_FULL_RECONCILIATION_INTERVAL_MS=120000 (the upstream default),
+# not the 60000 that file specifies.
+#
+# So this overlay is a REAL BEHAVIOR CHANGE, not a restatement of the status
+# quo. Measured against this chart: it takes the operator from 17 to 19
+# resources (+1 NetworkPolicy, +1 PodDisruptionBudget), tightens the
+# reconciliation loop, and flips the operator to a read-only root filesystem.
+# Enabling dashboards below would add 9 more ConfigMaps. Roll it out
+# deliberately, not as a default.
+
+strimzi-kafka-operator:
+  # ── Hardening ──────────────────────────────────────────────────────────────
+  podSecurityContext:
+    runAsNonRoot: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  # ── Availability ───────────────────────────────────────────────────────────
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    unhealthyPodEvictionPolicy: IfHealthyBudget
+  priorityClassName: system-cluster-critical
+
+  # ── Reconciliation ─────────────────────────────────────────────────────────
+  # Tighter loop than the 120000 default — more responsive, more API traffic.
+  fullReconciliationIntervalMs: 60000
+
+  # ── Network ────────────────────────────────────────────────────────────────
+  # Restricts access to the OPERATOR deployment only. Does NOT control the
+  # NetworkPolicies the operator generates for Kafka operands.
+  operatorNetworkPolicy:
+    enabled: true
+
+  # ── Resources ──────────────────────────────────────────────────────────────
+  # 768Mi is what runs live today. Do NOT lower this to the 512Mi that
+  # config/kafka/strimzi-values.yaml specified — that would REGRESS production
+  # below its current allocation. Memory only; cpu inherits upstream defaults.
+  resources:
+    limits:
+      memory: 768Mi
+    requests:
+      memory: 768Mi
+
+  # ── Dashboards: left OFF deliberately ──────────────────────────────────────
+  # Upstream creates 9 Grafana ConfigMaps whose names are independent of the
+  # release name, and charts/kafka-cluster/values.yaml has its own dashboards
+  # block targeting the `kafka` namespace. Enabling this without resolving
+  # ownership produces colliding ConfigMaps. Decide who owns the dashboards
+  # first, then enable on ONE side.
+  dashboards:
+    enabled: false
+
+# ── Airgapped / restricted-egress clusters ───────────────────────────────────
+# The CRD hook needs egress to the bundle URL on EVERY install AND upgrade —
+# it is a pre-upgrade gate, so if the URL is unreachable the upgrade aborts and
+# the release is left in pending-upgrade. Mirror the bundle internally and
+# point the hook at it:
+#
+# crdUpgrade:
+#   url: "https://mirror.internal/strimzi-crds-1.1.0.yaml"
+#
+# Separately, `helm dependency build` needs egress to quay.io to pull the
+# operator subchart. Registry redirection for the operator IMAGE is
+# strimzi-kafka-operator.defaultImageRegistry (NOT global.imageRegistry, which
+# upstream ignores entirely):
+#
+# strimzi-kafka-operator:
+#   defaultImageRegistry: registry.internal

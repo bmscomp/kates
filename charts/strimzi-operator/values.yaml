@@ -1,0 +1,151 @@
+# Strimzi Operator — Default Values
+#
+# Wraps the upstream strimzi-kafka-operator chart with the kates defaults that
+# were previously duplicated (and drifting) across three ad-hoc `helm` call
+# sites. The defaults below reproduce what is LIVE today — not what any single
+# call site intended.
+#
+# FOUR THINGS TO KNOW BEFORE YOU EDIT THIS FILE:
+#
+# 1. CRD LIFECYCLE. The upstream chart ships its CRDs in `crds/`, so `helm
+#    install` creates them, `helm upgrade` NEVER updates them, and `helm
+#    uninstall` never deletes them. The `crdUpgrade` hook below closes that
+#    gap. Disable it and your CRDs freeze at the version first installed.
+#
+# 2. NESTING IS MANDATORY. Every operator setting MUST live under the
+#    `strimzi-kafka-operator:` key. A top-level `watchAnyNamespace: true` is
+#    silently ignored by Helm — values.schema.json rejects it deliberately so
+#    the mistake is loud instead of silent.
+#
+# 3. THIS CHART HAS A SUBCHART. Run `helm dependency build charts/strimzi-operator`
+#    before install/upgrade/template or it will not render at all.
+#
+# 4. REGISTRY REDIRECTION is `strimzi-kafka-operator.defaultImageRegistry`.
+#    NOT `global.imageRegistry` — upstream contains zero `.Values.global`
+#    references and ignores it entirely, so this chart does not declare it.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Extra labels added to every resource this chart renders
+commonLabels: {}
+# -- Extra annotations added to every resource this chart renders
+commonAnnotations: {}
+
+# ── Strimzi version ──────────────────────────────────────────────────────────
+# -- Strimzi version used to build the CRD bundle URL for the crdUpgrade hook.
+# MUST equal Chart.yaml's appVersion, the dependency version, and versions.env
+# STRIMZI_VERSION — otherwise the hook applies CRDs for a different operator
+# than the one being installed. Enforced by scripts/check-versions.sh.
+strimziVersion: "1.1.0"
+
+# ── Image sources ────────────────────────────────────────────────────────────
+# -- Images used by this chart's OWN resources (the CRD-upgrade hook and Helm
+# tests). The operator's own image comes from the subchart.
+testImages:
+  # -- kubectl image used by the CRD-upgrade hook Job and the Helm tests
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.17.0"
+
+# ── CRD lifecycle ────────────────────────────────────────────────────────────
+# Closes the gap Helm leaves: crds/ is applied on install and never on upgrade.
+# This hook runs pre-install AND pre-upgrade, so CRDs are current before the
+# operator Deployment is patched.
+crdUpgrade:
+  # -- Apply the Strimzi CRD bundle via a pre-install/pre-upgrade hook Job
+  enabled: true
+  # -- Override the CRD bundle URL (empty = derive from strimziVersion).
+  # Set this to an internal mirror for airgapped clusters — see values-prod.yaml.
+  url: ""
+  # -- Job retry budget before the install/upgrade is aborted
+  backoffLimit: 3
+  # -- Seconds to retain a FAILED Job for log inspection. This never applies to
+  # the success path: the hook carries `hook-delete-policy: hook-succeeded`, so
+  # Helm deletes the Job the moment it succeeds and there is nothing left for
+  # the TTL to govern. On failure the Job survives, and this is its retention.
+  ttlSecondsAfterFinished: 300
+
+# ── Upstream Strimzi operator (subchart) ─────────────────────────────────────
+# The ONLY place operator settings take effect. Full key reference:
+#   https://github.com/strimzi/strimzi-kafka-operator/blob/main/helm-charts/helm3/strimzi-kafka-operator/values.yaml
+#
+# Only FOUR keys below deviate from stock upstream; everything else is pinned
+# for safety or is an explicit restatement of an upstream default.
+strimzi-kafka-operator:
+  # -- Operator replicas. All three previous call sites set 1.
+  replicas: 1
+
+  # -- Watch every namespace (STRIMZI_NAMESPACE="*"). All three previous call
+  # sites set this; verified live. This default is what makes the retired
+  # top-level `--set watchAnyNamespace=true` harmless rather than dangerous.
+  watchAnyNamespace: true
+
+  # -- Cluster DNS domain. Upstream only emits KUBERNETES_SERVICE_DNS_DOMAIN
+  # when this differs from cluster.local, so callers on non-default domains
+  # MUST inject the detected value (see values-generic.yaml).
+  kubernetesServiceDnsDomain: cluster.local
+
+  # -- Reconciliation operation timeout. Upstream default is 300000; 900000 is
+  # what the CLI set and what runs live, so it is the behavior-preserving value.
+  operationTimeoutMs: 900000
+
+  # -- Full reconciliation interval. Upstream default; verified live. NOT the
+  # 60000 in config/kafka/strimzi-values.yaml, which was never applied.
+  fullReconciliationIntervalMs: 120000
+
+  # -- Operator resources. MEMORY ONLY: 768Mi is what runs live (upstream
+  # default is 384Mi). cpu is deliberately NOT set — upstream already defaults
+  # it to limits 1000m / requests 200m, and duplicating that here would create
+  # a second source of truth for a value nobody overrode.
+  resources:
+    limits:
+      memory: 768Mi
+    requests:
+      memory: 768Mi
+
+  # -- Leader election. `enable` is the correct upstream key and defaults to
+  # true. The old CLI passed a misspelled `leaderElection.enabled=false` that
+  # Helm silently ignored — leader election has never actually been off, so
+  # true is behavior-preserving. Setting false here would be a NEW change.
+  leaderElection:
+    enable: true
+
+  # ── Pinned for safety (restating upstream defaults on purpose) ─────────────
+  # -- Create the cluster-scoped ClusterRoles/ClusterRoleBindings. Setting this
+  # false leaves exactly four bindings with dangling roleRefs.
+  createGlobalResources: true
+  # -- Aggregate ClusterRoles that extend existing roles with Strimzi CRD access
+  createAggregateRoles: false
+  rbac:
+    # -- Create the operator's RBAC resources
+    create: true
+  # -- Create the operator ServiceAccount
+  serviceAccountCreate: true
+  # -- Operator ServiceAccount name. Upstream templates the RBAC subjects and
+  # the Deployment's serviceAccountName from this value, so it is genuinely
+  # overridable. What is NOT overridable is the Deployment's own name, which
+  # upstream hardcodes to `strimzi-cluster-operator` — the Helm tests key on
+  # that literal, not on this value.
+  serviceAccount: strimzi-cluster-operator
+
+  # ── Off by default — these are uplifts, enable via values-prod.yaml ────────
+  # -- PodDisruptionBudget for the operator Deployment
+  podDisruptionBudget:
+    enabled: false
+  # -- NetworkPolicy for the operator Deployment (does NOT affect operator-
+  # generated policies for Kafka operands)
+  operatorNetworkPolicy:
+    enabled: false
+  # -- Grafana dashboard ConfigMaps. Upstream names these independently of the
+  # release, so they collide with kafka-cluster's dashboards block. Resolve
+  # ownership before enabling.
+  dashboards:
+    enabled: false
+
+  # -- Pod-level security context for the operator. Empty = live behavior;
+  # hardening is an opt-in uplift in values-prod.yaml.
+  podSecurityContext: {}
+  # -- Container-level security context for the operator. Empty = live behavior.
+  securityContext: {}
+
+  # NOTE: defaultImageTag is deliberately NOT pinned — upstream defaults it to
+  # its own appVersion, so pinning would duplicate the version pin.

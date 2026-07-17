@@ -164,6 +164,7 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | [`kafka-cluster`](charts/kafka-cluster/) | 0.2.0 | 4.3.0 | A Strimzi-managed KRaft Kafka cluster with zone-aware broker pools, SCRAM-SHA-512 authentication, and rack-affinity storage classes. |
 | [`connect-cluster`](charts/connect-cluster/) | 1.3.0 | 4.3.0 | A Strimzi-managed Kafka Connect cluster with a managed KafkaUser, least-privilege ACLs, default-deny NetworkPolicies, and in-chart JMX metrics. |
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A web-based Kafka management interface for topic inspection, consumer group monitoring, and message browsing. |
+| [`strimzi-operator`](charts/strimzi-operator/) | 0.1.0 | 1.1.0 | The Strimzi Kafka Operator, wrapping the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema. |
 | [`kates-chaos`](charts/kates-chaos/) | 2.0.0 | 3.28.0 | A LitmusChaos execution-plane wrapper (operator, exporter, CRDs) with Kafka-specific RBAC, ChaosExperiment/ChaosEngine templating, and monitoring for broker and network faults. |
 | [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | The Prometheus and Grafana monitoring stack, pre-configured with scrape jobs, recording rules, and auto-provisioned dashboards for Kafka, JVM, and Strimzi metrics. |
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 3.3.0 | Apicurio Schema Registry deployed with KafkaSQL persistence, providing schema validation and compatibility enforcement for Avro, Protobuf, and JSON Schema. |

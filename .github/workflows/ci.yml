@@ -7,9 +7,11 @@ on:
       - "kates/**"
       - "cli/**"
       - "charts/kates/**"
+      - "charts/strimzi-operator/**"
       - "config/**"
       - "images.env"
       - "versions.env"
+      - "scripts/check-versions.sh"
       - ".github/workflows/ci.yml"
       - "!**/*.md"
   pull_request:
@@ -18,9 +20,11 @@ on:
       - "kates/**"
       - "cli/**"
       - "charts/kates/**"
+      - "charts/strimzi-operator/**"
       - "config/**"
       - "images.env"
       - "versions.env"
+      - "scripts/check-versions.sh"
       - ".github/workflows/ci.yml"
       - "!**/*.md"
 
@@ -53,6 +57,10 @@ jobs:
               - '.github/workflows/ci.yml'
             helm:
               - 'charts/kates/**'
+              - 'charts/strimzi-operator/**'
+              - 'charts/kafka-cluster/values.yaml'
+              - 'versions.env'
+              - 'scripts/check-versions.sh'
             yaml:
               - 'config/**'
 
@@ -101,6 +109,46 @@ jobs:
 
       - name: Template validation
         run: helm template kates charts/kates/ > /dev/null
+
+      # The Strimzi version is declared in five places. If values.yaml's
+      # strimziVersion drifts from the Chart.yaml dependency version, the CRD
+      # hook applies CRDs for a different operator than the one installed —
+      # silently. This is the only thing that catches that.
+      - name: Check Strimzi version pins agree
+        run: bash scripts/check-versions.sh
+
+      # The wrapper chart does not render until its subchart is fetched.
+      # `build` resolves from Chart.lock so the pinned version cannot drift.
+      - name: Fetch strimzi-operator chart dependencies
+        run: helm dependency build charts/strimzi-operator/
+
+      - name: Lint strimzi-operator chart
+        run: helm lint charts/strimzi-operator/
+
+      - name: Template validation (strimzi-operator, all overlays)
+        run: |
+          helm template strimzi-operator charts/strimzi-operator/ \
+            -n strimzi-operator > /dev/null
+          for overlay in kind dev prod generic; do
+            echo "  values-${overlay}.yaml"
+            helm template strimzi-operator charts/strimzi-operator/ \
+              -n strimzi-operator \
+              -f "charts/strimzi-operator/values-${overlay}.yaml" > /dev/null
+          done
+
+      # The chart's reason to exist is that a typo'd key fails loudly instead of
+      # being silently ignored (as leaderElection.enabled was for the lifetime
+      # of the old release). Assert the schema actually rejects one.
+      - name: Assert values schema rejects unknown keys
+        run: |
+          if helm template strimzi-operator charts/strimzi-operator/ \
+               -n strimzi-operator \
+               --set 'strimzi-kafka-operator.leaderElection.enabled=false' \
+               > /dev/null 2>&1; then
+            echo "::error::values.schema.json accepted a misspelled key (leaderElection.enabled)"
+            exit 1
+          fi
+          echo "OK: schema rejected the misspelled key"
 
   kyverno-policy-test:
     name: Kyverno Policy Validation
