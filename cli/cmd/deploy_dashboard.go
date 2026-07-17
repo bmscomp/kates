@@ -328,7 +328,13 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			compWidth = 50
 		}
 		m.compWidth = compWidth - 2
-		logsWidth := msg.Width - compWidth - 4 // 4 for spacing/margins
+
+		// One row width for the whole dashboard: header and panes must end at
+		// the same column. The header renders at msg.Width-2 total (content
+		// width + its border), while the old pane math produced msg.Width-4 —
+		// so the panes row sat 2-4 columns short of the header's right edge.
+		rowWidth := msg.Width - 2
+		logsWidth := rowWidth - compWidth // rendered log pane incl. its border
 		if logsWidth < 20 {
 			logsWidth = 20
 		}
@@ -588,7 +594,9 @@ func (m deployDashboardModel) View() string {
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder(), true).
 		BorderForeground(theme.Accent).
-		Width(m.width - 2)
+		// Content width; +2 border columns renders the header at m.width-2 —
+		// the same rowWidth the panes fill, so the right edges align.
+		Width(m.width - 4)
 
 	headerContent := fmt.Sprintf("📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps) │ Helm: %s", bar, pct*100, m.currentStep, m.totalSteps, m.helmVersion)
 	out.WriteString(headerStyle.Render(headerContent) + "\n")
