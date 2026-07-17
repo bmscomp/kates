@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/bmscomp/kates/cli/pkg/detect"
@@ -36,6 +37,19 @@ func (o *KindOptions) withDefaults() {
 	if o.Progress == nil {
 		o.Progress = func(string) {}
 	}
+}
+
+// ConfigExists reports whether the topology config is readable from here.
+//
+// DefaultKindConfig is repo-relative, so an installed binary run from anywhere
+// but the repo root cannot see it. Checking up front turns a confusing failure
+// deep inside `kind create` into an explanation the caller can act on.
+func ConfigExists(path string) bool {
+	if path == "" {
+		path = DefaultKindConfig
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // KindClusterExists reports whether a Kind cluster of this name is already

@@ -23,6 +23,7 @@ var (
 	probeEnvironmentFn  = cluster.ProbeEnvironment
 	createKindFn        = cluster.CreateKind
 	kindClusterExistsFn = cluster.KindClusterExists
+	configExistsFn      = cluster.ConfigExists
 
 	// interactiveFn reports whether we may prompt. Overridden in tests.
 	interactiveFn = isInteractive
@@ -123,12 +124,34 @@ func resolveCluster() (string, error) {
 func offerKind(d cluster.Decision) (string, error) {
 	printNoCluster(d)
 
+	// A dry run must not build a cluster. --dry-run is checked much later in
+	// runDeploy, so without this the plan preview would create real
+	// infrastructure on the way to telling you it changes nothing.
+	if deployDryRun {
+		fmt.Println("  " + gateDim.Render(fmt.Sprintf(
+			"would offer to create a local %d-zone kind cluster (skipped: --dry-run)",
+			len(cluster.KindZones))))
+		return "", fmt.Errorf("no reachable Kubernetes cluster to plan against.\n" +
+			"  Re-run without --dry-run to create a local kind cluster.")
+	}
+
 	if !interactiveFn() {
 		return "", fmt.Errorf("no reachable Kubernetes cluster.\n"+
 			"  Docker and kind are available — a local %d-zone cluster can be created.\n"+
 			"  Re-run in a terminal to be prompted, or create it directly:\n"+
 			"    kind create cluster --config %s --name %s",
 			len(cluster.KindZones), cluster.DefaultKindConfig, cluster.DefaultKindClusterName)
+	}
+
+	// The topology config is repo-relative. Offering to build a cluster we
+	// cannot describe would fail inside `kind create` with a bare "no such
+	// file"; say so now instead.
+	if !configExistsFn(cluster.DefaultKindConfig) {
+		return "", fmt.Errorf("no reachable Kubernetes cluster, and the kind topology %s is not readable from here.\n"+
+			"  The %d-zone config lives in the kates repo — run from the repo root, or create the cluster yourself:\n"+
+			"    kind create cluster --config <path-to>/%s --name %s",
+			cluster.DefaultKindConfig, len(cluster.KindZones),
+			cluster.DefaultKindConfig, cluster.DefaultKindClusterName)
 	}
 
 	if kindClusterExistsFn(defaultExecutor, cluster.DefaultKindClusterName) {

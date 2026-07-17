@@ -25,6 +25,9 @@ type stubGate struct {
 	// kindExists simulates a pre-existing kind cluster. Left false, tests are
 	// independent of whatever clusters the developer's machine happens to have.
 	kindExists bool
+	// configMissing simulates running outside the repo, where the kind topology
+	// config is not readable.
+	configMissing bool
 
 	createCalled  bool
 	createErr     error
@@ -62,11 +65,14 @@ func (s *stubGate) install(t *testing.T) {
 		return s.picked, s.pickErr
 	}
 	kindClusterExistsFn = func(detect.CommandExecutor, string) bool { return s.kindExists }
+	origConfig := configExistsFn
+	configExistsFn = func(string) bool { return !s.configMissing }
 
 	t.Cleanup(func() {
 		listContextsFn, checkAllReachableFn, probeEnvironmentFn, createKindFn = origList, origReach, origProbe, origCreate
 		interactiveFn, confirmFn, pickContextFn = origInteractive, origConfirm, origPick
 		kindClusterExistsFn = origExists
+		configExistsFn = origConfig
 	})
 }
 
@@ -276,6 +282,50 @@ func TestResolveCluster_ExistingUnreachableKindIsNotClobbered(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "kind delete cluster") {
 		t.Errorf("error should offer the way out, got: %v", err)
+	}
+}
+
+// A plan preview must not build real infrastructure. --dry-run is checked far
+// later in runDeploy, so the gate has to refuse on its own.
+func TestResolveCluster_DryRunNeverCreatesACluster(t *testing.T) {
+	origDry := deployDryRun
+	deployDryRun = true
+	t.Cleanup(func() { deployDryRun = origDry })
+
+	s := &stubGate{contexts: nil, env: dockerReady, tty: true, confirm: true}
+	s.install(t)
+
+	_, err := resolveCluster()
+	if err == nil {
+		t.Fatal("a dry run with no cluster should report, not proceed")
+	}
+	if s.createCalled {
+		t.Error("--dry-run must NEVER create a kind cluster")
+	}
+	if s.confirmCalled {
+		t.Error("--dry-run must not even ask — there is nothing to consent to")
+	}
+}
+
+// The kind topology config is repo-relative, so an installed binary run from
+// elsewhere cannot read it. Offering anyway fails inside `kind create` with a
+// bare "no such file".
+func TestResolveCluster_MissingTopologyConfigIsExplained(t *testing.T) {
+	s := &stubGate{
+		contexts: nil, env: dockerReady, tty: true, confirm: true,
+		configMissing: true,
+	}
+	s.install(t)
+
+	_, err := resolveCluster()
+	if err == nil {
+		t.Fatal("want an error when the topology config is unreadable")
+	}
+	if s.createCalled {
+		t.Error("must not attempt creation without the topology config")
+	}
+	if !strings.Contains(err.Error(), cluster.DefaultKindConfig) {
+		t.Errorf("error should name the missing config, got: %v", err)
 	}
 }
 
