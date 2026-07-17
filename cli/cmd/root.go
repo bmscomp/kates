@@ -327,19 +327,6 @@ func init() {
 		fmt.Println("Usage:")
 		fmt.Printf("  %s [command]\n", cmd.CommandPath())
 		fmt.Println()
-		// The curated template above highlights common workflows, but it is
-		// hand-maintained and had drifted to listing 21 of 48 commands —
-		// hiding deploy, clean, connect, upgrade, and portforward entirely.
-		// This complete list is generated from the registered commands, so it
-		// cannot rot.
-		fmt.Println("All commands:")
-		for _, c := range cmd.Commands() {
-			if c.Hidden || c.Name() == "help" || c.Name() == "completion" {
-				continue
-			}
-			fmt.Printf("  %-16s %s\n", c.Name(), c.Short)
-		}
-		fmt.Println()
 		fmt.Printf("Use \"%s [command] --help\" for more information about a command.\n", cmd.CommandPath())
 	})
 }
