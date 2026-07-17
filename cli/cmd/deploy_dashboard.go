@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/output"
-	"github.com/bmscomp/kates/cli/pkg/theme"
 )
 
 // ── Controller Interface for deploy.go ─────────────────────────────────────
@@ -272,6 +273,31 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 	}
 }
 
+// sanitizeLogLine strips variation selector-16 (U+FE0F). The padding stack
+// (viewport/lipgloss via go-runewidth) counts emoji+VS16 sequences as ONE
+// cell while terminals render TWO — so every "⏭️ …" line pushed the pane's
+// right border out by a column, producing the ragged edge. Without VS16 the
+// base rune renders text-style at the width runewidth already computes.
+func sanitizeLogLine(s string) string {
+	return strings.ReplaceAll(s, "\ufe0f", "")
+}
+
+// buildLogContent joins the log ring with every line truncated to the pane
+// width. Lines were previously passed through untouched, so one over-long
+// helm message stretched the box past the terminal edge and the border
+// wrapped into fragments.
+func (m deployDashboardModel) buildLogContent() string {
+	w := m.logsViewport.Width
+	if w <= 0 {
+		return strings.Join(m.logs, "\n")
+	}
+	out := make([]string, 0, len(m.logs))
+	for _, l := range m.logs {
+		out = append(out, ansi.Truncate(l, w, "…"))
+	}
+	return strings.Join(out, "\n")
+}
+
 func (m deployDashboardModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
@@ -312,6 +338,8 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.logsViewport.Width = logsWidth - 2
 		m.logsViewport.Height = viewHeight - 2
+		// Stored lines were truncated for the old width; rebuild for the new.
+		m.logsViewport.SetContent(m.buildLogContent())
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -335,13 +363,13 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		lines := strings.Split(strings.TrimSpace(msg.text), "\n")
 		for _, l := range lines {
 			if l != "" {
-				m.logs = append(m.logs, l)
+				m.logs = append(m.logs, sanitizeLogLine(l))
 			}
 		}
 		if len(m.logs) > 100 {
 			m.logs = m.logs[len(m.logs)-100:]
 		}
-		m.logsViewport.SetContent(strings.Join(m.logs, "\n"))
+		m.logsViewport.SetContent(m.buildLogContent())
 		if m.logsViewport.AtBottom() || len(m.logs) < m.logsViewport.Height {
 			m.logsViewport.GotoBottom()
 		}
