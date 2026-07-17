@@ -101,6 +101,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	dl = &DashboardController{}
 
+	// ── Target cluster ───────────────────────────────────────────────────
+	// This runs FIRST, before the wizard. There is no point asking eight
+	// questions about a deployment and only then discovering there is nowhere
+	// to deploy it. When nothing is reachable this offers to build the local
+	// 3-zone kind cluster; when several are reachable it asks rather than
+	// guessing.
+	PrintPhaseHeader(1, "Selecting Target Cluster")
+	if _, err := resolveClusterFn(); err != nil {
+		return err
+	}
+
 	// ── Interactive Forms ────────────────────────────────────────────────
 	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
 	// terminal they fail with "could not open a new TTY" rather than falling
@@ -112,23 +123,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 1. Resolve Topology
+	// Resolve Topology
 	printTopologyResolution()
 
-	// 2. Component Selection
+	// Component Selection
 	printComponentSelection()
 
-	// 3. Cluster Detection
-	PrintPhaseHeader(3, "Selecting Target Cluster")
 	executor := defaultExecutor
-
-	// Resolve which cluster we are deploying to before anything assumes one
-	// exists. When nothing is reachable this offers to build the local 3-zone
-	// kind cluster; when several are reachable it asks rather than guessing.
-	if _, err := resolveClusterFn(); err != nil {
-		return err
-	}
-
 	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
 	collector := detect.NewCollector(executor)
 	if err := collector.Preflight(); err != nil {

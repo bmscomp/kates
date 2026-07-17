@@ -988,7 +988,47 @@ Deploy the Kates stack (Kafka, Kates, Chaos, Schema Registry).
 ```bash
 kates deploy
 kates deploy -i
+kates deploy --yes
 ```
+
+| Flag | Description |
+|---|---|
+| `--interactive`, `-i` | Force the configuration wizard. It also opens for a bare `kates deploy` with no flags, when attached to a terminal |
+| `--yes`, `-y` | Never prompt — fail instead of asking. Use in scripts and pipelines |
+| `--dry-run` | Print the deployment plan and stop before the Helm pipeline runs |
+| `--topology` | `isolated` (a namespace per component) or `single` (default: `isolated`) |
+| `--namespace` | Target namespace when `--topology single` (default: `kates-stack`) |
+| `--ha` | Multi-AZ high availability: replicas 3, `min.insync.replicas` 2, zone spread (default: `true`) |
+| `--port-forward`, `-P` | After deploying, hold the terminal forwarding every service until Ctrl+C |
+| `--with-schema-registry` | `none`, `apicurio`, or `confluent` (default: `apicurio`) |
+| `--with-*` | Per-component toggles — `kates deploy --help` lists them, along with the per-component `*-ns` flags |
+
+::: {.callout-warning}
+`--dry-run` is not inert. It stops before the Helm pipeline, but the cluster gate, pre-flight introspection, and Kind StorageClass bootstrap all run first — the last of these writes StorageClasses into the cluster. It will not create a Kind cluster, but it is a plan preview, not a read-only mode.
+:::
+
+`deploy` works out which cluster it is deploying to before it asks you anything else — there is no point configuring a deployment that has nowhere to go. What happens next depends on what it finds:
+
+| What it finds | What it does |
+|---|---|
+| One reachable cluster | Uses it, without asking |
+| Several reachable clusters | Asks you to pick one |
+| No reachable cluster, Docker and kind available | Offers to create a local three-zone kind cluster |
+| No reachable cluster, kind missing | Explains how to install kind |
+| No reachable cluster, Docker stopped | Asks you to start Docker |
+| No Docker at all | Explains both ways forward |
+
+When nothing is reachable, any contexts you do have configured are listed by name rather than treated as absent — a kubeconfig that has gone stale looks nothing like a machine with no cluster, and the difference decides what you do about it.
+
+The kind offer has three further conditions. It is skipped under `--dry-run`, and it stops rather than proceeding when a kind cluster of that name already exists but does not answer (recreating would destroy it) or when the topology config cannot be read from the current directory. Each case prints the command that resolves it.
+
+::: {.callout-note}
+`--yes` never guesses. When several clusters are reachable and nothing can be asked, `deploy` fails and tells you to choose with `kubectl config use-context` rather than picking one for you. Selecting a cluster silently is how a deployment lands somewhere it was never meant to go.
+:::
+
+The same applies without a terminal. Piped or scripted runs take the flag defaults instead of opening the wizard, and any state that needs an answer becomes an error carrying the command that resolves it.
+
+**See also:** [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) for first-time setup, and [Deployment Guide](12-deployment.md) for what the stack looks like once it is up.
 
 #### deploy status
 
