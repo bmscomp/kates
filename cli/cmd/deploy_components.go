@@ -756,6 +756,11 @@ spec:
     plugin.name: pgoutput
     slot.name: debezium_kates
     heartbeat.interval.ms: "10000"
+    # Default heartbeat topic is __debezium-heartbeat.<prefix>, which falls
+    # OUTSIDE the kates-connect user's cdc* topic grant. The denial poisons the
+    # transactional producer and the connector reports the misleading
+    # "Cannot execute transactional method because we are in an error state".
+    topic.heartbeat.prefix: cdc-heartbeat
     snapshot.mode: initial
     decimal.handling.mode: double
     tombstones.on.delete: "true"
@@ -792,7 +797,10 @@ spec:
     enabled: true
     maxRestarts: 10
   config:
-    topics: "test-sink-topic"
+    # The topic debezium actually produces (and the ACLs actually grant).
+    # "test-sink-topic" was a placeholder: unauthorized AND fed by nothing, so
+    # the sink failed on ACLs and would have sat idle even without them.
+    topics: "cdc.public.demo_orders"
     connection.url: "jdbc:postgresql://postgresql.%s.svc:5432/orders"
     connection.username: "${secrets:%s/connect-pg-credentials:username}"
     connection.password: "${secrets:%s/connect-pg-credentials:password}"
@@ -1048,4 +1056,35 @@ func (dc *deployContext) deployComponent(id, namespace, selector string, timeout
 	dl.FinishComponent(id, true)
 	dc.advanceStep()
 	return nil
+}
+
+// printConnectorDiagnostics surfaces WHY connectors are not ready: the
+// NotReady condition message and the first line of each failed task's trace.
+// Without this, a readiness timeout reported nothing and the real cause
+// (an ACL denial, a bad topic) had to be dug out of the CRs by hand.
+func printConnectorDiagnostics(ctx context.Context, namespace string) {
+	out, err := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "-n", namespace,
+		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.conditions[0].type}{"\t"}{.status.conditions[0].message}{"\t"}{.status.connectorStatus.tasks[0].trace}{"\n"}{end}`).Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 3 || parts[1] == "Ready" {
+			continue
+		}
+		dl.Printf("    %s %s: %s — %s\n", output.ErrorStyle.Render("✖"), parts[0], parts[1], parts[2])
+		if len(parts) == 4 && parts[3] != "" {
+			// The root cause is usually the LAST "Caused by" in the trace.
+			trace := parts[3]
+			cause := trace
+			if i := strings.LastIndex(trace, "Caused by: "); i >= 0 {
+				cause = trace[i+len("Caused by: "):]
+			}
+			if nl := strings.IndexByte(cause, '\n'); nl >= 0 {
+				cause = cause[:nl]
+			}
+			dl.Printf("      %s\n", output.DimStyle.Render(cause))
+		}
+	}
 }
