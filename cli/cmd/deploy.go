@@ -98,6 +98,7 @@ func init() {
 func runDeploy(cmd *cobra.Command, args []string) error {
 	deployStartTime := time.Now()
 	PrintDeployBanner()
+	resetDeployPhases()
 
 	dl = &DashboardController{}
 
@@ -107,7 +108,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// to deploy it. When nothing is reachable this offers to build the local
 	// 3-zone kind cluster; when several are reachable it asks rather than
 	// guessing.
-	PrintPhaseHeader(1, "Selecting Target Cluster")
+	PrintPhaseHeader(nextDeployPhase(), "Selecting Target Cluster")
 	if _, err := resolveClusterFn(); err != nil {
 		return err
 	}
@@ -130,7 +131,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	printComponentSelection()
 
 	executor := defaultExecutor
-	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
+	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
 	collector := detect.NewCollector(executor)
 	if err := collector.Preflight(); err != nil {
 		output.Error(fmt.Sprintf("Preflight failed: %v", err))
@@ -142,7 +143,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
 	// them and writes the correct storageClass names into values-detected.yaml,
 	// so no hardcoded pool overrides are needed in values-kind.yaml.
-	if quickDetectKind() {
+	// A dry run must not write StorageClasses into the cluster. Introspection
+	// below stays (it is read-only and the plan needs its data); this is the
+	// one pre-plan step that mutates.
+	if quickDetectKind() && !deployDryRun {
 		PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
 		if err := setupKindStorageClasses(context.Background()); err != nil {
 			output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
@@ -201,7 +205,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Execution Plan (Helm)
-	PrintPhaseHeader(4, "Executing Deployment Pipeline")
+	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
 
 	totalSteps := countDeploySteps()
 

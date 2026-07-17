@@ -7,8 +7,9 @@ import (
 	"math"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -54,12 +55,14 @@ type timeSlice struct {
 
 var heatBlocks = []string{"░", "▒", "▓", "█"}
 
-var heatGradient = []lipgloss.Color{
-	lipgloss.Color("#1a1a2e"),
-	lipgloss.Color("#16213e"),
-	lipgloss.Color("#0f3460"),
-	lipgloss.Color("#533483"),
-	lipgloss.Color("#e94560"),
+// heatGradient is a cold-to-hot intensity ramp built from theme tokens:
+// faint separators up through the error red at peak latency.
+var heatGradient = []lipgloss.AdaptiveColor{
+	theme.Subtle,
+	theme.Muted,
+	theme.Accent,
+	theme.Secondary,
+	theme.Error,
 }
 
 func renderHeatmap(data heatmapData) {
@@ -109,19 +112,19 @@ func renderHeatmap(data heatmapData) {
 			block := heatBlock(intensity)
 			row.WriteString(block)
 		}
-		fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(label), row.String())
+		fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(theme.Muted).Render(label), row.String())
 	}
 
 	fmt.Printf("%s%s\n",
 		strings.Repeat(" ", labelWidth),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("time →"))
+		lipgloss.NewStyle().Foreground(theme.Muted).Render("time →"))
 
 	legend := "  "
 	for i, block := range heatBlocks {
 		pct := float64(i+1) / float64(len(heatBlocks)) * 100
 		legend += fmt.Sprintf("%s %.0f%%  ", colorizeHeat(block, float64(i+1)/float64(len(heatBlocks))), pct)
 	}
-	fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Legend:") + legend)
+	fmt.Println(lipgloss.NewStyle().Foreground(theme.Muted).Render("Legend:") + legend)
 }
 
 func heatBlock(intensity float64) string {

@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -64,24 +65,24 @@ var (
 
 	flowTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnDark).
+			Background(theme.Accent).
 			Padding(0, 1)
 
 	flowStepStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(theme.Info)
 
 	flowPassStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#22C55E"))
+			Foreground(theme.Success)
 
 	flowFailStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#EF4444"))
+			Foreground(theme.Error)
 
 	flowDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 )
 
 var flowCmd = &cobra.Command{

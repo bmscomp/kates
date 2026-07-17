@@ -3,8 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-	"golang.org/x/term"
 )
 
 // ─── Color Palette ──────────────────────────────────────────
@@ -51,7 +48,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	// ── Header ──
 	banner := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Foreground(theme.OnDark).
 		Background(clrAccent).
 		Padding(0, 1).
 		Render(" ⎈ Kates Deployment Summary ")
@@ -74,16 +71,11 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	}
 	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", termW))
 
-	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-	var colHeaders string
-	if isTTY {
-		colHeaders = lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render("  COMPONENT\x1b[31GNAMESPACE\x1b[49GSTATUS")
-	} else {
-		colHdrName := lipgloss.NewStyle().Width(28).Render("COMPONENT")
-		colHdrNs := lipgloss.NewStyle().Width(18).Render("NAMESPACE")
-		colHdrStat := lipgloss.NewStyle().Render("STATUS")
-		colHeaders = lipgloss.NewStyle().Bold(true).Foreground(clrDim).Render(fmt.Sprintf("  %s%s%s", colHdrName, colHdrNs, colHdrStat))
-	}
+	// One layout for every terminal: runewidth-measured padding. The TTY path
+	// used CHA cursor-column jumps — which broke the moment output was
+	// captured, and meant TTY and non-TTY rows could disagree about columns.
+	colHeaders := lipgloss.NewStyle().Bold(true).Foreground(clrDim).
+		Render("  " + padCell("COMPONENT", summaryNameWidth) + padCell("NAMESPACE", summaryNsWidth) + "STATUS")
 
 	for _, g := range []string{"A", "B", "C"} {
 		if len(groups[g]) == 0 {
@@ -94,8 +86,11 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
 		for _, e := range groups[g] {
-			status := getComponentStatus(ctx, e.Release, e.Namespace)
-			printRow(e.Icon, e.Name, e.Namespace, status)
+			// The status RECORDED during the deploy, not a fresh helm query.
+			// Re-querying ran `helm status` per row (up to 5s each) and could
+			// contradict what the deploy just reported — a component that
+			// failed mid-apply can still hold a "deployed" helm release.
+			printRow(e.Icon, e.Name, e.Namespace, e.Status)
 		}
 	}
 
@@ -139,49 +134,40 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	fmt.Println()
 }
 
-func getComponentStatus(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
-	if cmd.Run() == nil {
-		return "ready"
+const (
+	summaryNameWidth = 28
+	summaryNsWidth   = 18
+)
+
+// padCell pads a raw (unstyled) cell to a display width, measured with
+// runewidth so emoji and CJK count their true two cells. Padding happens
+// BEFORE styling: ANSI sequences are zero-width and must not enter the math.
+func padCell(s string, w int) string {
+	gap := w - visualWidth(s)
+	if gap < 1 {
+		gap = 1
 	}
-	return "skip"
+	return s + strings.Repeat(" ", gap)
 }
 
+// printRow renders one summary row from the status recorded during deploy
+// ("deployed", "skipped", "failed").
 func printRow(icon, name, namespace, status string) {
-	const nameWidth = 28
-	const nsWidth = 18
+	g := output.Glyphs()
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(padCell(icon+" "+name, summaryNameWidth))
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(padCell(namespace, summaryNsWidth))
 
-	nameStr := icon + " " + name
-
-	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-
-	var nameCol, nsCol string
-	if isTTY {
-		nameCol = lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(nameStr)
-		nsCol = lipgloss.NewStyle().Foreground(clrDim).Render(namespace)
-	} else {
-		nameCol = lipgloss.NewStyle().Bold(true).Foreground(clrText).Width(nameWidth).Render(nameStr)
-		nsCol = lipgloss.NewStyle().Foreground(clrDim).Width(nsWidth).Render(namespace)
-	}
-
-	// Status column
 	var statusStr string
 	switch status {
-	case "ready":
-		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render("✔ Ready")
-	case "fail":
-		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render("✖ Failed")
+	case "deployed":
+		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render(g.Check + " Deployed")
+	case "failed":
+		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render(g.Cross + " Failed")
 	default:
-		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render("⏭ Skipped")
+		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render(g.Ring + " Skipped")
 	}
 
-	if isTTY {
-		fmt.Printf("  %s\x1b[31G%s\x1b[49G%s\n", nameCol, nsCol, statusStr)
-	} else {
-		fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
-	}
+	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
 }
 
 // visualWidth returns the true terminal display width of a string using
@@ -192,6 +178,17 @@ func visualWidth(s string) int {
 }
 
 // ─── Phase Logging ──────────────────────────────────────────
+
+// deployPhase numbers the phase headers of one runDeploy invocation. A counter
+// instead of literals: the literals drifted to [1], [1], [2], [3], [4] after a
+// reorder, and nothing noticed until a user did.
+var deployPhase int
+
+// resetDeployPhases starts the numbering over; call at the top of runDeploy.
+func resetDeployPhases() { deployPhase = 0 }
+
+// nextDeployPhase returns the next phase number.
+func nextDeployPhase() int { deployPhase++; return deployPhase }
 
 // PrintPhaseHeader prints a styled phase header.
 func PrintPhaseHeader(number int, title string) {

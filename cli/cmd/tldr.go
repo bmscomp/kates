@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -81,17 +82,17 @@ var tldrGroups = []tldrGroup{
 var (
 	tldrTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7C3AED"))
+			Foreground(theme.Primary)
 
 	tldrDescStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 
 	tldrCmdStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(theme.Info)
 
 	tldrCatStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#F59E0B")).
+			Foreground(theme.Secondary).
 			MarginTop(1)
 )
 

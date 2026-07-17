@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
@@ -142,6 +143,20 @@ func StatusBadge(status string) string {
 	default:
 		return DimStyle.Render(Glyphs().Ring + " " + status)
 	}
+}
+
+// ClearFrame starts a new frame of a refreshing display. When clear is true
+// (an interactive terminal) it clears the screen; otherwise it emits a
+// timestamped separator so redirected output stays append-only — a log full
+// of clear-screen sequences is unreadable in an editor and unparseable by
+// tools, and `... | head` used to emit them forever.
+func ClearFrame(clear bool) {
+	if clear {
+		fmt.Fprint(Out, "\033[2J\033[H")
+		return
+	}
+	g := Glyphs()
+	fmt.Fprintln(Out, DimStyle.Render(strings.Repeat(g.Rule, 8)+" "+time.Now().Format("15:04:05")+" "+strings.Repeat(g.Rule, 8)))
 }
 
 func Header(text string) {
@@ -296,7 +311,17 @@ func Banner(title, subtitle string) {
 	fmt.Fprintln(Out, box.Render(content))
 }
 
+// MetricBar renders a consumption-style bar where approaching max is BAD —
+// latency against a budget, disk against capacity. Green when low, red when
+// near the ceiling. For metrics where high is good (throughput against a
+// target), use MetricBarDir with higherIsBetter=true; using this one inverts
+// the color story.
 func MetricBar(label string, value, max float64) {
+	MetricBarDir(label, value, max, false)
+}
+
+// MetricBarDir renders a metric bar with an explicit direction of goodness.
+func MetricBarDir(label string, value, max float64, higherIsBetter bool) {
 	barWidth := 20
 	filled := int((value / max) * float64(barWidth))
 	if filled > barWidth {
@@ -308,11 +333,15 @@ func MetricBar(label string, value, max float64) {
 
 	bar := strings.Repeat(Glyphs().BarFull, filled) + strings.Repeat(Glyphs().BarEmpty, barWidth-filled)
 
-	barColor := Green
 	ratio := value / max
-	if ratio > 0.8 {
+	good := ratio
+	if !higherIsBetter {
+		good = 1 - ratio
+	}
+	barColor := Green
+	if good < 0.2 {
 		barColor = Red
-	} else if ratio > 0.5 {
+	} else if good < 0.5 {
 		barColor = Amber
 	}
 

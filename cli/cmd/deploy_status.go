@@ -16,6 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/bmscomp/kates/cli/pkg/theme"
 )
 
 var (
@@ -660,7 +662,7 @@ func (m interactiveStatusModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Foreground(theme.OnDark).
 		Background(clrAccent).
 		Padding(0, 1).
 		Render(" ⎈ Gathering Kates Deployment Status "))
@@ -766,7 +768,7 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 
 	banner := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Foreground(theme.OnDark).
 		Background(clrAccent).
 		Padding(0, 1).
 		Render(" ⎈ Kates Deployment Status ")

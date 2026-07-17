@@ -35,11 +35,15 @@ var testCleanupCmd = &cobra.Command{
 
 		for _, run := range paged.Content {
 			created, err := time.Parse(time.RFC3339Nano, run.CreatedAt)
-			if err != nil {
+			// Guard the slice: a short or empty CreatedAt panicked here.
+			if err != nil && len(run.CreatedAt) >= 19 {
 				created, err = time.Parse("2006-01-02T15:04:05", run.CreatedAt[:19])
 			}
 			if err != nil {
-				stale = append(stale, run.ID)
+				// Unknown age is not proven staleness. This used to add the
+				// run to the DELETE list — destroying data because we could
+				// not read its timestamp.
+				output.Warn("Skipping " + truncID(run.ID) + ": unparseable createdAt " + fmt.Sprintf("%q", run.CreatedAt))
 				continue
 			}
 			if now.Sub(created) > staleThreshold {

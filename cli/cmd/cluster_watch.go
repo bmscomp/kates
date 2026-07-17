@@ -58,7 +58,7 @@ var clusterWatchCmd = &cobra.Command{
 
 			hist.record(report)
 
-			fmt.Print("\033[2J\033[H")
+			output.ClearFrame(IsInteractive())
 
 			statusLabel := output.SuccessStyle.Render("● HEALTHY")
 			if report.Status == "WARNING" {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/bmscomp/kates/cli/pkg/detect"
+	"github.com/charmbracelet/huh"
 )
 
 // runInteractiveForms runs the interactive huh forms (Form 1: component selection,
@@ -157,7 +157,7 @@ func runInteractiveForms() error {
 
 // printTopologyResolution prints the resolved namespace topology (Phase 1).
 func printTopologyResolution() {
-	PrintPhaseHeader(1, fmt.Sprintf("Resolving Namespace Topology (%s mode)", deployTopology))
+	PrintPhaseHeader(nextDeployPhase(), fmt.Sprintf("Resolving Namespace Topology (%s mode)", deployTopology))
 	if deployTopology == "single" {
 		PrintPhaseItem(fmt.Sprintf("All components → %s", deployNamespace))
 	} else {
@@ -179,7 +179,7 @@ func printTopologyResolution() {
 
 // printComponentSelection prints the selected components (Phase 2).
 func printComponentSelection() {
-	PrintPhaseHeader(2, "Component Selection")
+	PrintPhaseHeader(nextDeployPhase(), "Component Selection")
 	if deployWithStrimzi {
 		PrintPhaseSuccess("Strimzi Operator")
 	}
