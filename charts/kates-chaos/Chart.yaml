@@ -2,7 +2,7 @@ apiVersion: v2
 name: kates-chaos
 version: 2.0.0
 # Tracks the LitmusChaos execution-plane version this chart deploys.
-appVersion: "3.28.0"
+appVersion: "1.21.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
 home: https://github.com/bmscomp/kates
 sources:
