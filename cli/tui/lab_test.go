@@ -187,8 +187,14 @@ func TestLabCancelKey(t *testing.T) {
 		m.warmupRemaining = 2
 
 		m, cmd := updateLab(t, m, keyMsg("x"))
-		if cmd != nil {
-			t.Error("cmd = non-nil, want nil after cancel")
+		// The server-side cancel is dispatched as a COMMAND. The old assertion
+		// (cmd == nil) enshrined the synchronous version, which ran the HTTP
+		// cancel inside Update and froze the whole TUI for up to the client's
+		// 30s timeout.
+		if cmd == nil {
+			t.Error("cmd = nil, want the async server-side cancel command")
+		} else {
+			_ = cmd() // must complete without panicking (10s-bounded cancel)
 		}
 		if m.running {
 			t.Error("running = true, want false")
@@ -660,7 +666,10 @@ func TestExportCSVColumnAlignment(t *testing.T) {
 		Params:     params,
 	}}
 
-	path := m.exportCSV()
+	path, exportErr := m.exportCSV()
+	if exportErr != nil {
+		t.Fatalf("exportCSV: %v", exportErr)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading exported CSV: %v", err)
@@ -724,7 +733,10 @@ func TestSaveLoadSessionRoundTrip(t *testing.T) {
 		{Number: 1, Throughput: 100, P99Ms: 5, AvgMs: 2.5, ErrorRate: 0.1, TestID: "t1", Params: map[string]string{"acks": "all"}},
 		{Number: 2, Throughput: 200, P99Ms: 6, AvgMs: 3.5, ErrorRate: 0.2, TestID: "t2", Params: map[string]string{"acks": "1"}},
 	}
-	savedPath := a.saveSession()
+	savedPath, saveErr := a.saveSession()
+	if saveErr != nil {
+		t.Fatalf("saveSession: %v", saveErr)
+	}
 
 	b := NewLab(nil, "")
 	loadedPath, ok := b.loadSession()

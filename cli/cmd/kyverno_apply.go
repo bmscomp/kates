@@ -120,12 +120,16 @@ It uses Helm to apply the exact configuration needed.`,
 		}
 
 		if !kyvernoApplyYes {
-			fmt.Print("Apply these policies? [y/N]: ")
-			var response string
-			fmt.Scanln(&response)
-			if strings.ToLower(strings.TrimSpace(response)) != "y" {
-				output.Warn("Aborted by user.")
-				return nil
+			// The old prompt had no TTY guard — a piped run hit Scanln, read
+			// EOF, and "aborted" with exit 0, indistinguishable from success.
+			// confirm() refuses without a terminal, and declining is now
+			// non-zero per the exit-code contract.
+			ok, err := confirm("Apply these policies?")
+			if err != nil {
+				return cmdErr("aborted: " + err.Error())
+			}
+			if !ok {
+				return cmdErr("aborted: policies not applied")
 			}
 		}
 
