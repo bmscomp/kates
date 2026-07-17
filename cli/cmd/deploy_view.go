@@ -99,7 +99,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 
 	var deployedCount, skippedCount, failedCount int
 	for _, e := range entries {
-		switch e.Status {
+		switch classifyStatus(e.Status) {
 		case "failed":
 			failedCount++
 		case "skipped":
@@ -111,7 +111,7 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 
 	if failedCount > 0 {
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
-			Render(fmt.Sprintf("  ⚠️  %d deployed, %d failed", deployedCount, failedCount)))
+			Render(fmt.Sprintf("  %s %d deployed, %d failed", output.Glyphs().Warn, deployedCount, failedCount)))
 		for _, e := range entries {
 			if e.Status == "failed" && e.Error != "" {
 				fmt.Printf("     %s %s: %s\n",
@@ -120,9 +120,18 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 					lipgloss.NewStyle().Foreground(clrDim).Render(e.Error))
 			}
 		}
+	} else if deployedCount == 0 && skippedCount > 0 {
+		// The state the old footer lied about: nothing was deployed because
+		// everything already was. "8 deployed successfully!" over a column of
+		// skips contradicted the table two lines above it.
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
+			Render(fmt.Sprintf("  %s All %d components already deployed — nothing to do", output.Glyphs().Check, skippedCount)))
+	} else if skippedCount > 0 {
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
+			Render(fmt.Sprintf("  %s %d deployed, %d already present", output.Glyphs().Check, deployedCount, skippedCount)))
 	} else {
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-			Render(fmt.Sprintf("  ✅ %d components deployed successfully!", deployedCount)))
+			Render(fmt.Sprintf("  %s %d components deployed successfully", output.Glyphs().Check, deployedCount)))
 	}
 
 	fmt.Println()
@@ -139,6 +148,37 @@ const (
 	summaryNsWidth   = 18
 )
 
+// markEntryStatuses records each component's outcome from the same predicate
+// the skip logic uses: already present → "skipped", absent → about to be
+// "deployed". Strimzi is the exception — it is reconciled unconditionally
+// (its pre-upgrade hook keeps the CRDs current), so work happens every run.
+func markEntryStatuses(entries []DeploySummaryEntry, present func(release, namespace string) bool) {
+	for i := range entries {
+		if entries[i].Release == "strimzi-operator" {
+			entries[i].Status = "deployed"
+			continue
+		}
+		if present(entries[i].Release, entries[i].Namespace) {
+			entries[i].Status = "skipped"
+		} else {
+			entries[i].Status = "deployed"
+		}
+	}
+}
+
+// classifyStatus is the ONE interpretation of a recorded component status.
+// The table renderer and the footer counter both use it — they previously
+// each had their own switch, and the empty string meant "Skipped" to one and
+// "deployed" to the other.
+func classifyStatus(s string) string {
+	switch s {
+	case "deployed", "skipped", "failed":
+		return s
+	default:
+		return "unknown"
+	}
+}
+
 // padCell pads a raw (unstyled) cell to a display width, measured with
 // runewidth so emoji and CJK count their true two cells. Padding happens
 // BEFORE styling: ANSI sequences are zero-width and must not enter the math.
@@ -150,21 +190,34 @@ func padCell(s string, w int) string {
 	return s + strings.Repeat(" ", gap)
 }
 
-// printRow renders one summary row from the status recorded during deploy
-// ("deployed", "skipped", "failed").
+// printRow renders one summary row from the status recorded during deploy.
 func printRow(icon, name, namespace, status string) {
 	g := output.Glyphs()
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(padCell(icon+" "+name, summaryNameWidth))
+	// Icons vary between 1 and 2 display cells (☸ vs 🔐), which used to shift
+	// every name's start column by the difference — the left edge of the
+	// component names zig-zagged. Pad the icon to a fixed 2-cell cell first.
+	iconPad := 2 - visualWidth(icon)
+	if iconPad < 0 {
+		iconPad = 0
+	}
+	cell := icon + strings.Repeat(" ", iconPad) + " " + name
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(padCell(cell, summaryNameWidth))
 	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(padCell(namespace, summaryNsWidth))
 
 	var statusStr string
-	switch status {
+	switch classifyStatus(status) {
 	case "deployed":
 		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render(g.Check + " Deployed")
 	case "failed":
 		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render(g.Cross + " Failed")
+	case "skipped":
+		// Dim, not warning-orange: a component that was already running is a
+		// fine state, not a caution.
+		statusStr = lipgloss.NewStyle().Foreground(clrDim).Render(g.Ring + " Already present")
 	default:
-		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render(g.Ring + " Skipped")
+		// A status nothing recorded is a bug worth seeing, not disguising as
+		// either success or a skip.
+		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render(g.Warn + " Unknown")
 	}
 
 	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)

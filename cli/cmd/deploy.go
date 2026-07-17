@@ -204,6 +204,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return runDeployDryRun(sharedEntries)
 	}
 
+	// Record each component's outcome BEFORE the pipeline runs, from the same
+	// predicate the skip logic uses: a release that already exists gets skipped
+	// ("already present"), one that does not gets deployed. Status was never
+	// recorded at all before this — the summary's table read the empty string
+	// as "Skipped" while its footer counted the same empty string as
+	// "deployed", producing eight Skipped rows above "8 components deployed
+	// successfully!".
+	markEntryStatuses(sharedEntries, func(release, namespace string) bool {
+		return isHelmReleaseDeployedFn(context.Background(), release, namespace)
+	})
+
 	// 4. Execution Plan (Helm)
 	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
 
