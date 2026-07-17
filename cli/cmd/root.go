@@ -297,8 +297,12 @@ func resolveFallbackURL(url string, checkPort func(string) bool) string {
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		// silentErr was already printed (styled) by cmdErr. Everything else
+		// goes through the same styled channel, so a plain fmt.Errorf from a
+		// RunE reads like every other kates error instead of a bare line —
+		// one error voice for the whole CLI.
 		if _, ok := err.(*silentErr); !ok {
-			fmt.Fprintln(os.Stderr, err)
+			output.Error(err.Error())
 		}
 		os.Exit(1)
 	}

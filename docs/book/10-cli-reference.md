@@ -1931,6 +1931,23 @@ kates test list -o table
 kates test list -o json
 ```
 
+Output degrades automatically. When stdout is not a terminal — a pipe, a redirect, a CI log — color codes are stripped, refreshing displays become append-only lines, and full-screen TUIs refuse with a plain-text explanation instead of launching. `NO_COLOR` and `TERM=dumb` are honored; `--plain` (or `KATES_PLAIN=1`) forces the fully plain, pure-ASCII form; `KATES_ASCII=1` keeps colors but swaps glyphs for ASCII.
+
+## Exit Codes
+
+The exit code is a contract: `0` means the thing you asked for happened.
+
+| Code | Meaning |
+|------|---------|
+| `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
+| `1` | Anything else: the operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), a confirmation was declined or could not be asked |
+
+Three consequences worth knowing in scripts:
+
+- `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
+- A declined confirmation exits `1`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
+- Confirmations are never answered implicitly. With no terminal attached, a command that needs consent fails and tells you to pass `--yes`, rather than assuming either answer.
+
 ## Shell Completion
 
 ```bash

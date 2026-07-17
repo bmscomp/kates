@@ -200,7 +200,7 @@ var exportFormat string
 
 var reportExportCmd = &cobra.Command{
 	Use:   "export <id>",
-	Short: "Export report as CSV, JUnit XML, Heatmap, Markdown, or HTML",
+	Short: "Export report as csv, junit, heatmap, heatmap-csv, md, or html",
 	Args:  cobra.ExactArgs(1),
 	Example: `  kates report export abc123 --format csv
   kates report export abc123 --format junit
@@ -317,7 +317,7 @@ func isTerminal() bool {
 }
 
 func init() {
-	reportExportCmd.Flags().StringVar(&exportFormat, "format", "csv", "Export format: csv, junit, heatmap, or heatmap-csv")
+	reportExportCmd.Flags().StringVar(&exportFormat, "format", "csv", "Export format: csv, junit, heatmap, heatmap-csv, md, or html")
 
 	reportCmd.AddCommand(reportShowCmd)
 	reportCmd.AddCommand(reportSummaryCmd)

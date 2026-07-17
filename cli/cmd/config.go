@@ -14,7 +14,14 @@ import (
 var ctxCmd = &cobra.Command{
 	Use:     "ctx",
 	Aliases: []string{"context", "config"},
-	Short:   "Manage CLI contexts (server connections)",
+	Short:   "Manage Kates server connection profiles (not Kubernetes contexts)",
+	Long: `Manage named connection profiles for the Kates API server: its URL,
+API key, and preferred output format. The --context global flag selects one of
+THESE profiles.
+
+Not to be confused with Kubernetes contexts. Which CLUSTER kates deploys to
+comes from your kubeconfig — kates deploy detects and lets you choose it, and
+kubectl config use-context changes it.`,
 }
 
 var ctxShowCmd = &cobra.Command{
