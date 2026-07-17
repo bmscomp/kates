@@ -45,11 +45,11 @@ func runInteractiveForms() error {
 				Options(
 					huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
 					huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
-					huh.NewOption("🖥️  Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
+					huh.NewOption("🖥  Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
 					huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
 					huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
 					huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
-					huh.NewOption("🛡️  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
+					huh.NewOption("🛡  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
 				).
 				Value(&components),
 		),
@@ -243,13 +243,13 @@ func resolveNamespaces() resolvedNamespaces {
 func buildSharedEntries(ns resolvedNamespaces) []DeploySummaryEntry {
 	var entries []DeploySummaryEntry
 	if deployWithStrimzi {
-		entries = append(entries, DeploySummaryEntry{Icon: "☸️", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
+		entries = append(entries, DeploySummaryEntry{Icon: "☸", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
 	}
 	if deployWithCertManager {
 		entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
 	}
 	if deployWithKyverno {
-		entries = append(entries, DeploySummaryEntry{Icon: "🛡️", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
+		entries = append(entries, DeploySummaryEntry{Icon: "🛡", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
 	}
 	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: ns.kafka, Group: "B"})
 	if deployWithKafkaConnect {
@@ -264,7 +264,7 @@ func buildSharedEntries(ns resolvedNamespaces) []DeploySummaryEntry {
 	}
 	entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: ns.app, Group: "C"})
 	if deployWithKafkaUI {
-		entries = append(entries, DeploySummaryEntry{Icon: "🖥️", Name: "Kafka UI", Release: "kafka-ui", Namespace: ns.kafkaUI, Group: "C"})
+		entries = append(entries, DeploySummaryEntry{Icon: "🖥", Name: "Kafka UI", Release: "kafka-ui", Namespace: ns.kafkaUI, Group: "C"})
 	}
 	if deployWithChaos {
 		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: ns.chaos, Group: "C"})

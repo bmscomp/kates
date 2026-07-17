@@ -18,6 +18,8 @@ type GlyphSet struct {
 	DotOn   string
 	Diamond string
 	Ring    string
+	// Skip marks a step bypassed because it was already done.
+	Skip string
 	// Bar segments for progress bars.
 	BarFull  string
 	BarEmpty string

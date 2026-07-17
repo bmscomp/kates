@@ -43,7 +43,7 @@ func deployGroupA(dc *deployContext) error {
 	if deployWithStrimzi {
 		g.Go(func() error {
 			if !deployStrimzi {
-				dl.Println("⏭️  Strimzi Operator already deployed. Skipping.")
+				dl.Println(output.Glyphs().Skip + "  Strimzi Operator already deployed. Skipping.")
 				dl.FinishComponent("strimzi", true)
 				dc.advanceStep()
 				return nil
@@ -87,7 +87,7 @@ metadata:
 	if deployWithCertManager {
 		g.Go(func() error {
 			if !deployCertMgr {
-				dl.Println("⏭️  Cert-Manager already deployed. Skipping.")
+				dl.Println(output.Glyphs().Skip + "  Cert-Manager already deployed. Skipping.")
 				dl.FinishComponent("cert-manager", true)
 				dc.advanceStep()
 				return nil
@@ -201,7 +201,7 @@ spec:
 	if deployWithKyverno {
 		g.Go(func() error {
 			if !deployKyvernoFlag {
-				dl.Println("⏭️  Kyverno already deployed. Skipping.")
+				dl.Println(output.Glyphs().Skip + "  Kyverno already deployed. Skipping.")
 				dl.FinishComponent("kyverno", true)
 				dc.advanceStep()
 				return nil
@@ -334,7 +334,7 @@ func deployGroupB(dc *deployContext) error {
 	if deployKafka {
 		dl.Printf("\n📦 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
 	} else {
-		dl.Println("⏭️  Kafka Cluster already deployed. Skipping.")
+		dl.Println(output.Glyphs().Skip + "  Kafka Cluster already deployed. Skipping.")
 		dl.FinishComponent("kafka", true)
 		dc.advanceStep()
 		dl.FinishComponent("kafka-users", true)
@@ -345,7 +345,7 @@ func deployGroupB(dc *deployContext) error {
 		if deployMon {
 			dl.Printf("\n📦 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
 		} else {
-			dl.Println("⏭️  Monitoring stack already deployed. Skipping.")
+			dl.Println(output.Glyphs().Skip + "  Monitoring stack already deployed. Skipping.")
 			dl.FinishComponent("monitoring", true)
 			dc.advanceStep()
 		}
@@ -355,7 +355,7 @@ func deployGroupB(dc *deployContext) error {
 		if deployPG {
 			dl.Printf("\n📦 Deploying PostgreSQL CDC Database (Namespace: %s)...\n", deployDbNS)
 		} else {
-			dl.Println("⏭️  PostgreSQL already deployed. Skipping.")
+			dl.Println(output.Glyphs().Skip + "  PostgreSQL already deployed. Skipping.")
 			dl.FinishComponent("postgres", true)
 			dc.advanceStep()
 		}
@@ -577,7 +577,7 @@ metadata:
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "--server-side", "--force-conflicts", "-f", "-"}, metricsYaml)
 			}
 		} else {
-			dl.Printf("    ⚠️  ConfigMap 'kafka-metrics' not found in namespace %s\n", kafkaNS)
+			dl.Printf("    ⚠  ConfigMap 'kafka-metrics' not found in namespace %s\n", kafkaNS)
 		}
 
 		dl.Println("    - Copying kates-connect credentials to connect namespace...")
@@ -623,7 +623,7 @@ data:
 %s`, connectNS, dataLines.String())
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectSecretYaml)
 		} else {
-			dl.Printf("    ⚠️  Secret 'kates-connect' not found in namespace %s after waiting — KafkaUser may not be ready\n", kafkaNS)
+			dl.Printf("    ⚠  Secret 'kates-connect' not found in namespace %s after waiting — KafkaUser may not be ready\n", kafkaNS)
 		}
 	}
 
@@ -648,7 +648,7 @@ stringData:
 			"-n", connectNS, "-l", "strimzi.io/kind=KafkaConnect",
 			"-o", "jsonpath={.items}").Output()
 		if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
-			dl.Println("    ⚠️  Kafka Connect release exists but no pods found — upgrading...")
+			dl.Println("    ⚠  Kafka Connect release exists but no pods found — upgrading...")
 			connectDeployed = false
 		}
 	}
@@ -703,7 +703,7 @@ stringData:
 			out, err := exec.CommandContext(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found").CombinedOutput()
 			if err != nil || len(bytes.TrimSpace(out)) == 0 {
 				monitoringEnabled = false
-				dl.Printf("    ⚠️  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
+				dl.Printf("    ⚠  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
 			}
 		}
 
@@ -719,7 +719,7 @@ stringData:
 			return err
 		}
 	} else {
-		dl.Println("⏭️  Kafka Connect already deployed. Skipping.")
+		dl.Println(output.Glyphs().Skip + "  Kafka Connect already deployed. Skipping.")
 		dl.FinishComponent("kafka-connect", true)
 		dc.advanceStep()
 	}
@@ -845,7 +845,7 @@ func deployGroupC(dc *deployContext) error {
 			dl.FinishComponent("apicurio", true)
 			dc.advanceStep()
 		} else {
-			dl.Println("⏭️  Apicurio already deployed.")
+			dl.Println(output.Glyphs().Skip + "  Apicurio already deployed.")
 			dl.FinishComponent("apicurio", true)
 			dc.advanceStep()
 		}
@@ -884,7 +884,7 @@ data:
   password: %s`, appNS, string(pwBytes))
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
 			} else {
-				dl.Printf("    ⚠️  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+				dl.Printf("    ⚠  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 			}
 		}
 
@@ -905,7 +905,7 @@ data:
 			return err
 		}
 	} else {
-		dl.Println("⏭️  Kates Backend already deployed.")
+		dl.Println(output.Glyphs().Skip + "  Kates Backend already deployed.")
 		dl.FinishComponent("kates", true)
 		dc.advanceStep()
 	}
@@ -913,7 +913,7 @@ data:
 	// Deploy Kafka UI
 	if deployWithKafkaUI {
 		if !isHelmReleaseDeployedFn(ctx, "kafka-ui", kafkaUINS) {
-			dl.Printf("\n🖥️  Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
+			dl.Printf("\n🖥  Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
 			dl.StartComponent("kafka-ui", 5*time.Minute)
 
 			// Cross-namespace secret copy (KafkaUser secret lives in Kafka NS)
@@ -940,7 +940,7 @@ data:
   password: %s`, kafkaUINS, string(pwBytes))
 					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
 				} else {
-					dl.Printf("    ⚠️  Secret 'kafka-ui' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+					dl.Printf("    ⚠  Secret 'kafka-ui' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 				}
 			}
 
@@ -961,7 +961,7 @@ data:
 			dl.FinishComponent("kafka-ui", true)
 			dc.advanceStep()
 		} else {
-			dl.Println("⏭️  Kafka UI already deployed.")
+			dl.Println(output.Glyphs().Skip + "  Kafka UI already deployed.")
 			dl.FinishComponent("kafka-ui", true)
 			dc.advanceStep()
 		}
@@ -988,7 +988,7 @@ data:
 				return err
 			}
 		} else {
-			dl.Println("⏭️  Litmus Chaos already deployed.")
+			dl.Println(output.Glyphs().Skip + "  Litmus Chaos already deployed.")
 			dl.FinishComponent("chaos", true)
 			dc.advanceStep()
 		}
