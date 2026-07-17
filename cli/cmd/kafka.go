@@ -516,18 +516,12 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 		name := args[0]
 
 		if !deleteTopicYes {
-			fmt.Printf("%s Delete topic %s? This cannot be undone. [y/N] ",
-				errorBadge("⚠"), output.WarningStyle.Render(name))
-			scanner := bufio.NewScanner(os.Stdin)
-			// Fail CLOSED. The previous version only checked the answer when
-			// Scan() succeeded — on EOF or closed stdin it fell straight
-			// through to the delete, so `kates kafka delete-topic x </dev/null`
-			// destroyed the topic without consent. No answer is a "no".
-			if !scanner.Scan() {
-				return cmdErr("aborted: no confirmation received (stdin closed) — use --yes to skip the prompt")
+			ok, err := confirm(fmt.Sprintf("%s Delete topic %s? This cannot be undone.",
+				errorBadge("⚠"), output.WarningStyle.Render(name)))
+			if err != nil {
+				return cmdErr("aborted: " + err.Error())
 			}
-			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-			if answer != "y" && answer != "yes" {
+			if !ok {
 				// A declined destructive action exits non-zero so scripts that
 				// forgot --yes fail loudly instead of reporting success.
 				return cmdErr("aborted: topic not deleted")

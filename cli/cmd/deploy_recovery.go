@@ -3,12 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
-	"golang.org/x/term"
 )
 
 // DeployError wraps a component deployment failure with context for retry/display.
@@ -49,17 +46,11 @@ func retryableHelmDeploy(ctx context.Context, componentID string, maxRetries int
 			}
 
 			// Check if we can prompt the user
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				// Non-TTY: fail immediately
-				break
-			}
-
-			// Interactive retry prompt
-			fmt.Printf("\n  %s Retry %s? [y/N]: ", output.WarningStyle.Render("⚠"), componentID)
-			var response string
-			fmt.Scanln(&response)
-			response = strings.TrimSpace(strings.ToLower(response))
-			if response != "y" && response != "yes" {
+			// One confirm implementation for the whole CLI. confirm refuses
+			// without a terminal, which covers the old explicit TTY check.
+			fmt.Println()
+			ok, err := confirm(fmt.Sprintf("%s Retry %s?", output.WarningStyle.Render("⚠"), componentID))
+			if err != nil || !ok {
 				break
 			}
 			continue
