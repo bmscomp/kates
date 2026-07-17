@@ -66,6 +66,11 @@ all: check-prerequisites
 check-versions: ## Verify the Strimzi version pins agree
 	@./scripts/check-versions.sh
 
+# Terminal-compatibility gate: runs the real binary piped, with NO_COLOR,
+# TERM=dumb, --plain, KATES_ASCII, and no TTY. Also run in CI (CLI Tests job).
+check-cli-compat: ## Verify CLI output degrades correctly across terminals
+	@./scripts/check-cli-compat.sh
+
 # Check prerequisites — only kubectl and helm are strictly required for generic clusters
 check-prerequisites:
 	@echo "🔍 Checking prerequisites..."

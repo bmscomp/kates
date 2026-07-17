@@ -332,7 +332,7 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 
 	if deployVerbose {
 		// Show the command being run
-		dl.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		dl.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -349,7 +349,7 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
-			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
+			dl.Printf("    %s\n", output.ErrorStyle.Render(errMsg))
 			return fmt.Errorf("%w: %s", err, errMsg)
 		}
 		return err
@@ -374,7 +374,7 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 	defer execMutex.Unlock()
 
 	if deployVerbose {
-		dl.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		dl.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -389,7 +389,7 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
-			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
+			dl.Printf("    %s\n", output.ErrorStyle.Render(errMsg))
 			return fmt.Errorf("%w: %s", runErr, errMsg)
 		}
 		return runErr

@@ -2,11 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
-	"golang.org/x/term"
 )
 
 var componentGroupNames = map[string]string{
@@ -118,12 +116,12 @@ func padLeftN(s string, n int) string {
 	return strings.Repeat(" ", n-len(s)) + s
 }
 
+// termWidth delegates to the single shared width helper. Three copies of this
+// existed with three different fallbacks (120, 80, and 72-capped-80), so the
+// same terminal state produced three different layouts depending on which
+// command you ran.
 func termWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || w == 0 {
-		return 80
-	}
-	return w
+	return output.TermWidth()
 }
 
 func describeType(t string) string {

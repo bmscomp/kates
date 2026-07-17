@@ -259,6 +259,13 @@ jobs:
       - name: Run Go tests
         working-directory: cli
         run: go test -p 1 ./... -v -race -count=1
+
+      # Runs the REAL binary under the conditions scripts and CI use it in:
+      # piped stdout, NO_COLOR, TERM=dumb, --plain, KATES_ASCII, unset locale,
+      # and TUI commands with no TTY. This is what catches "escape codes in
+      # CI logs" class regressions — unit tests never see the raw bytes.
+      - name: CLI terminal-compatibility checks
+        run: bash scripts/check-cli-compat.sh
         env:
           GOMEMLIMIT: 2GiB
           GOGC: 50

@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
@@ -65,12 +66,11 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
-	termW := 72
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		termW = w - 4
-		if termW > 80 {
-			termW = 80
-		}
+	// Width comes from the one shared helper; the -4 margin and 80 cap are
+	// this view's layout choices, not a third opinion on terminal size.
+	termW := output.TermWidth() - 4
+	if termW > 80 {
+		termW = 80
 	}
 	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", termW))
 

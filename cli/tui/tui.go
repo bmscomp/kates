@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type tab int
@@ -201,6 +201,10 @@ func (m Model) handleFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	if TooSmall(m.width, m.height) {
+		return TooSmallCard(m.width, m.height)
 	}
 
 	tabBar := m.renderTabs()
