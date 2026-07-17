@@ -9,6 +9,11 @@ import (
 
 func init() {
 	isTesting = true
+	// These tests exercise deploy orchestration and assume a cluster already
+	// exists. The cluster gate is a real precondition of runDeploy, but its own
+	// behavior (picking, the kind offer, the blocked states) is covered directly
+	// in cluster_gate_test.go — stubbing it here keeps that concern in one place.
+	resolveClusterFn = func() (string, error) { return "test-context", nil }
 }
 
 type MockExecutor struct{}

@@ -338,8 +338,13 @@ make cluster
 Creates a Kind cluster named `panda` with:
 - 1 control-plane node (alpha)
 - 2 worker nodes (sigma, gamma)
-- Zone labels for rack awareness
-- Local-path storage provisioner per zone
+- Zone labels for rack awareness, and a `node.kubernetes.io/local-storage` label per node
+
+The per-zone StorageClasses the Kafka chart binds to (`local-storage-alpha` and friends) are not created here — `kates deploy` applies them during pre-flight, from the zone labels above. A cluster built this way has the labels but not the classes until you deploy.
+
+You do not have to run this first. `kates deploy` resolves the target cluster before it configures anything: with one reachable cluster it proceeds, with several it asks which, and with none it offers to build this same three-zone cluster for you. Reach for `make cluster` when you want the cluster on its own, or when you are behind a proxy — it reconciles the container runtime's proxy settings and CA trust, which `kates deploy` does not.
+
+Both paths build from `config/cluster.yaml` and untaint the control-plane afterwards, so the topology is identical either way: three schedulable zones, not two. One difference worth knowing — `make cluster` resolves the config relative to itself and works from anywhere, while `kates deploy` looks for `config/cluster.yaml` relative to the working directory, so its offer only stands from the repo root. It says so rather than failing inside `kind`.
 
 ### Image Management
 
