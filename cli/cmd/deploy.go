@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/detect"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +61,7 @@ var (
 	deployPortForward        bool
 	deployDryRun             bool
 	deployWithKafkaUI        bool
+	deployYes                bool
 )
 
 func init() {
@@ -89,6 +90,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
+	deployCmd.Flags().BoolVarP(&deployYes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -100,7 +102,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	dl = &DashboardController{}
 
 	// ── Interactive Forms ────────────────────────────────────────────────
-	if deployInteractive || cmd.Flags().NFlag() == 0 {
+	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
+	// terminal they fail with "could not open a new TTY" rather than falling
+	// back to the flag defaults. Piped or scripted runs should just use the
+	// defaults.
+	if (deployInteractive || cmd.Flags().NFlag() == 0) && isInteractive() {
 		if err := runInteractiveForms(); err != nil {
 			return err
 		}
@@ -113,39 +119,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	printComponentSelection()
 
 	// 3. Cluster Detection
-	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
+	PrintPhaseHeader(3, "Selecting Target Cluster")
 	executor := defaultExecutor
+
+	// Resolve which cluster we are deploying to before anything assumes one
+	// exists. When nothing is reachable this offers to build the local 3-zone
+	// kind cluster; when several are reachable it asks rather than guessing.
+	if _, err := resolveClusterFn(); err != nil {
+		return err
+	}
+
+	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
 	collector := detect.NewCollector(executor)
-
 	if err := collector.Preflight(); err != nil {
-		fmt.Println("⚠️  Kubernetes cluster is unreachable.")
-
-		// Check if docker is running
-		if dockerCheck := exec.Command("docker", "info"); dockerCheck.Run() == nil {
-			fmt.Print("🐳 Docker is running. Would you like to automatically create a local Kind cluster? [y/N]: ")
-			var response string
-			fmt.Scanln(&response)
-			if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
-				fmt.Println("📦 Creating Kind cluster via 'make cluster'...")
-				cmd := exec.Command("make", "cluster")
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err != nil {
-					return fmt.Errorf("failed to create Kind cluster: %w", err)
-				}
-				fmt.Println("✅ Kind cluster created successfully! Retrying preflight...")
-
-				// Re-run preflight
-				if err := collector.Preflight(); err != nil {
-					return fmt.Errorf("preflight failed even after cluster creation: %w", err)
-				}
-			} else {
-				return fmt.Errorf("cluster is unreachable and user opted out of auto-creation")
-			}
-		} else {
-			output.Error(fmt.Sprintf("Preflight failed: %v", err))
-			return err
-		}
+		output.Error(fmt.Sprintf("Preflight failed: %v", err))
+		return err
 	}
 
 	// ── Kind storage bootstrap ────────────────────────────────────────────────
