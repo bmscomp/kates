@@ -24,12 +24,17 @@ func TermWidth() int {
 
 var plainMode bool
 
+// SetPlain only ever forces the color profile DOWN. With plain=false it leaves
+// lipgloss's automatic termenv detection in charge, which is what honors
+// NO_COLOR, TERM=dumb, non-truecolor terminals (tmux without Tc, Terminal.app
+// get ANSI-256/16 conversions instead of raw 38;2 sequences), and the
+// downgrade to no styling when stdout is a pipe. The previous version forced
+// TrueColor on every run, which defeated all of that at once: escape codes in
+// piped output and CI logs, and NO_COLOR silently ignored.
 func SetPlain(plain bool) {
 	plainMode = plain
 	if plain {
 		lipgloss.SetColorProfile(termenv.Ascii)
-	} else {
-		lipgloss.SetColorProfile(termenv.TrueColor)
 	}
 }
 

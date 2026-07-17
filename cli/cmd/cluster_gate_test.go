@@ -196,19 +196,38 @@ func TestResolveCluster_OfferKindNonTTYFailsWithoutPrompting(t *testing.T) {
 	}
 }
 
-// isInteractive is the single guard everything else relies on.
-func TestIsInteractive_FalseUnderTestAndYes(t *testing.T) {
-	origTesting, origYes := isTesting, deployYes
-	t.Cleanup(func() { isTesting, deployYes = origTesting, origYes })
+// IsInteractive is the single guard everything else relies on.
+func TestIsInteractive_FalseUnderTestYesAndPlain(t *testing.T) {
+	origTesting, origYes, origPlain := isTesting, deployYes, plainOutput
+	t.Cleanup(func() { isTesting, deployYes, plainOutput = origTesting, origYes, origPlain })
 
-	isTesting, deployYes = true, false
-	if isInteractive() {
+	isTesting, deployYes, plainOutput = true, false, false
+	if IsInteractive() {
 		t.Error("isTesting must disable prompting — deploy_test.go calls runDeploy directly")
 	}
 
-	isTesting, deployYes = false, true
-	if isInteractive() {
+	isTesting, deployYes, plainOutput = false, true, false
+	if IsInteractive() {
 		t.Error("--yes must disable prompting")
+	}
+
+	// --plain is a statement that a machine is reading the output; forms and
+	// TUIs have no place in it.
+	isTesting, deployYes, plainOutput = false, false, true
+	if IsInteractive() {
+		t.Error("--plain must disable prompting")
+	}
+}
+
+// TERM=dumb is the terminal declaring it cannot do cursor addressing.
+func TestIsInteractive_FalseOnDumbTerm(t *testing.T) {
+	origTesting, origYes, origPlain := isTesting, deployYes, plainOutput
+	t.Cleanup(func() { isTesting, deployYes, plainOutput = origTesting, origYes, origPlain })
+	isTesting, deployYes, plainOutput = false, false, false
+	t.Setenv("TERM", "dumb")
+
+	if interactiveAllowed() {
+		t.Error("TERM=dumb must disable prompting")
 	}
 }
 

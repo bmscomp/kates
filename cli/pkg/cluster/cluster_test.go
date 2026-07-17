@@ -91,6 +91,37 @@ func TestListContexts_MarksCurrent(t *testing.T) {
 	}
 }
 
+// The jsonpath sent to kubectl must have balanced braces. A doubled closing
+// brace comes back in kubectl's output and renders as "kind-panda} · ns:}".
+func TestListContexts_JsonpathBracesBalanced(t *testing.T) {
+	f := newFake().
+		on("kubectl config get-contexts", "kind-panda\n", nil).
+		on("kubectl config current-context", "kind-panda\n", nil)
+
+	if _, err := ListContexts(f); err != nil {
+		t.Fatalf("ListContexts: %v", err)
+	}
+
+	sawView := false
+	for _, call := range f.calls {
+		if !strings.Contains(call, "config view") {
+			continue
+		}
+		sawView = true
+		opens := strings.Count(call, "{")
+		closes := strings.Count(call, "}")
+		if opens != closes {
+			t.Errorf("unbalanced jsonpath braces (%d open, %d close): %s", opens, closes, call)
+		}
+		if strings.Contains(call, "}}") {
+			t.Errorf("doubled closing brace in jsonpath: %s", call)
+		}
+	}
+	if !sawView {
+		t.Fatal("expected a kubectl config view call for context fields")
+	}
+}
+
 // A machine with no kubeconfig is a normal state the flow handles, not an
 // error to propagate.
 func TestListContexts_NoKubeconfigIsEmptyNotError(t *testing.T) {

@@ -3,13 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/huh"
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -335,7 +336,7 @@ var testCreateCmd = &cobra.Command{
 				Records:           createRecords,
 				ParallelProducers: createProducers,
 				RecordSizeBytes:   createRecordSize,
-				DurationSeconds:   createDuration * 1000,
+				DurationMs:        createDuration * 1000,
 				Topic:             createTopic,
 				Acks:              createAcks,
 				BatchSize:         createBatchSize,
@@ -363,7 +364,25 @@ var testCreateCmd = &cobra.Command{
 		}
 
 		if outputMode == "json" {
-			output.JSON(result)
+			if !createWait {
+				output.JSON(result)
+				return nil
+			}
+			// json + --wait previously returned HERE, before waiting at all —
+			// the flag was silently ignored. Follow silently, then emit the
+			// FINAL state, which is the object a json consumer actually wants.
+			status, err := pollUntilDonePlain(result.ID, io.Discard)
+			if err != nil {
+				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
+			}
+			final, gerr := apiClient.GetTest(context.Background(), result.ID)
+			if gerr != nil {
+				return cmdErr("Failed to fetch final state: " + gerr.Error())
+			}
+			output.JSON(final)
+			if isFailedStatus(status) {
+				return cmdErr("test " + truncID(result.ID) + " finished " + status)
+			}
 			return nil
 		}
 
@@ -376,7 +395,16 @@ var testCreateCmd = &cobra.Command{
 
 		if createWait {
 			fmt.Println()
-			pollUntilDone(result.ID)
+			status, err := pollUntilDone(result.ID)
+			if err != nil {
+				// Unknown outcome is not success. Exiting 0 here is how CI
+				// stayed green while load tests failed.
+				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
+			}
+			if isFailedStatus(status) {
+				return cmdErr("test " + truncID(result.ID) + " finished " + status +
+					" — details: kates test get " + result.ID)
+			}
 		} else {
 			output.Hint("Track progress: kates test watch " + result.ID)
 		}

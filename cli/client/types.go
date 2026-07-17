@@ -425,7 +425,7 @@ type TestSpec struct {
 	Records            int    `json:"numRecords,omitempty"`
 	ParallelProducers  int    `json:"numProducers,omitempty"`
 	RecordSizeBytes    int    `json:"recordSize,omitempty"`
-	DurationSeconds    int    `json:"durationMs,omitempty"`
+	DurationMs    int    `json:"durationMs,omitempty"`
 	Topic              string `json:"topic,omitempty"`
 	Acks               string `json:"acks,omitempty"`
 	BatchSize          int    `json:"batchSize,omitempty"`

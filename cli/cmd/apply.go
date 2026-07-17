@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -133,6 +133,7 @@ var testApplyCmd = &cobra.Command{
 		output.SubHeader("Summary")
 		rows := make([][]string, 0, len(results))
 		hasViolation := false
+		hasFailure := false
 		for _, r := range results {
 			extra := ""
 			if r.err != "" {
@@ -146,6 +147,9 @@ var testApplyCmd = &cobra.Command{
 					extra = "✓ SLA Pass"
 				}
 			}
+			if r.err != "" || isFailedStatus(strings.ToUpper(r.status)) {
+				hasFailure = true
+			}
 			rows = append(rows, []string{r.name, truncID(r.id), r.status, extra})
 		}
 		output.Table([]string{"Scenario", "ID", "Status", "Note"}, rows)
@@ -154,6 +158,12 @@ var testApplyCmd = &cobra.Command{
 			fmt.Println()
 			output.Error("One or more SLA gates violated")
 			os.Exit(1)
+		}
+		// A FAILED scenario is a failed run even without SLA gates. Only SLA
+		// violations used to set the exit code, so a batch whose tests crashed
+		// outright still exited 0.
+		if hasFailure {
+			return cmdErr("one or more scenarios failed")
 		}
 
 		return nil
@@ -186,7 +196,10 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.RecordSizeBytes = toInt(v)
 		}
 		if v, ok := s.Spec["durationSeconds"]; ok {
-			spec.DurationSeconds = toInt(v)
+			// Scenario files declare SECONDS; the wire field is milliseconds.
+			// Without the conversion a 300-second scenario ran for 300ms —
+			// every "passing" scenario test finished 1000x early.
+			spec.DurationMs = toInt(v) * 1000
 		}
 		if v, ok := s.Spec["topic"]; ok {
 			spec.Topic = fmt.Sprintf("%v", v)

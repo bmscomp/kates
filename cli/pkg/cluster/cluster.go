@@ -97,19 +97,25 @@ func ListContexts(exec detect.CommandExecutor) ([]Context, error) {
 		}
 		contexts = append(contexts, Context{
 			Name:      name,
-			Cluster:   contextField(exec, name, "{.context.cluster}"),
-			Namespace: contextField(exec, name, "{.context.namespace}"),
+			Cluster:   contextField(exec, name, ".context.cluster"),
+			Namespace: contextField(exec, name, ".context.namespace"),
 			Current:   name == current,
 		})
 	}
 	return contexts, nil
 }
 
-// contextField reads one jsonpath field for a named context. A failure here is
+// contextField reads one jsonpath field (a bare dotted path like
+// ".context.cluster", no braces) for a named context. A failure here is
 // cosmetic — the context is still selectable — so errors degrade to "".
-func contextField(exec detect.CommandExecutor, name, jsonpath string) string {
+//
+// The braces are owned entirely by this format string. The previous version
+// took brace-wrapped paths and trimmed only the opening one, sending kubectl a
+// doubled closing brace whose surplus "}" came back in the output — rendering
+// as "kind-panda} · ns:}" in the picker.
+func contextField(exec detect.CommandExecutor, name, path string) string {
 	out, err := exec.Exec("kubectl", "config", "view",
-		"-o", fmt.Sprintf("jsonpath={.contexts[?(@.name==%q)]%s}", name, strings.TrimPrefix(jsonpath, "{")))
+		"-o", fmt.Sprintf("jsonpath={.contexts[?(@.name==%q)]%s}", name, path))
 	if err != nil {
 		return ""
 	}
