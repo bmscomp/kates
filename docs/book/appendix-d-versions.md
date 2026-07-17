@@ -21,7 +21,7 @@ Every version the platform pins, in one place. This table is generated from the 
 | `kafka-ui` chart | 0.3.0 (app v1.5.0) | `charts/kafka-ui/Chart.yaml` |
 | `kates-chaos` chart | 2.0.0 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
 | `kates-platform` chart | 0.2.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
-| `kates` chart | 0.4.4 (app 1.20.0) | `charts/kates/Chart.yaml` |
+| `kates` chart | 0.5.0 (app 1.21.0) | `charts/kates/Chart.yaml` |
 | `minio` chart | 17.0.21 (app 2025.7.23) | `charts/minio/Chart.yaml` |
 | `monitoring` chart | 1.0.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
 | `strimzi-operator` chart | 0.1.0 (app 1.1.0) | `charts/strimzi-operator/Chart.yaml` |

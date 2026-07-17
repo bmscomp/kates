@@ -160,18 +160,18 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 <!-- chart-table:start -->
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
-| [`kates`](charts/kates/) | 0.4.4 | 1.20.0 | The Kates backend (Quarkus REST/gRPC) and frontend, deployed as a single Kubernetes Deployment with ConfigMap-driven configuration. |
-| [`kafka-cluster`](charts/kafka-cluster/) | 0.2.0 | 4.3.0 | A Strimzi-managed KRaft Kafka cluster with zone-aware broker pools, SCRAM-SHA-512 authentication, and rack-affinity storage classes. |
-| [`connect-cluster`](charts/connect-cluster/) | 1.3.0 | 4.3.0 | A Strimzi-managed Kafka Connect cluster with a managed KafkaUser, least-privilege ACLs, default-deny NetworkPolicies, and in-chart JMX metrics. |
-| [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A web-based Kafka management interface for topic inspection, consumer group monitoring, and message browsing. |
-| [`strimzi-operator`](charts/strimzi-operator/) | 0.1.0 | 1.1.0 | The Strimzi Kafka Operator, wrapping the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema. |
-| [`kates-chaos`](charts/kates-chaos/) | 2.0.0 | 3.28.0 | A LitmusChaos execution-plane wrapper (operator, exporter, CRDs) with Kafka-specific RBAC, ChaosExperiment/ChaosEngine templating, and monitoring for broker and network faults. |
-| [`kates-monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | The Prometheus and Grafana monitoring stack, pre-configured with scrape jobs, recording rules, and auto-provisioned dashboards for Kafka, JVM, and Strimzi metrics. |
-| [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 3.3.0 | Apicurio Schema Registry deployed with KafkaSQL persistence, providing schema validation and compatibility enforcement for Avro, Protobuf, and JSON Schema. |
-| [`kates-platform`](charts/kates-platform/) | 0.2.0 | 1.0.0 | An umbrella chart that composes all sub-charts into a single `helm install` operation for full-platform provisioning. |
-| [`headlamp`](charts/headlamp/) | 0.1.0 | 0.40.1 | A lightweight Kubernetes dashboard for visual cluster inspection and resource management. |
-| [`velero`](charts/velero/) | 11.3.2 | 1.17.1 | Velero backup and disaster recovery, configured for scheduled snapshots of persistent volumes and Kubernetes resources. |
-| [`minio`](charts/minio/) | 17.0.21 | 2025.7.23 | MinIO object storage, used as the S3-compatible backend for Velero backups and optional Kafka tiered storage. |
+| [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 3.3.0 | A Helm chart for Kubernetes of Apicurio Registry |
+| [`connect-cluster`](charts/connect-cluster/) | 1.3.0 | 4.3.0 | A Helm chart for deploying Strimzi Kafka Connect clusters |
+| [`headlamp`](charts/headlamp/) | 0.1.0 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
+| [`kafka-cluster`](charts/kafka-cluster/) | 0.2.0 | 4.3.0 | Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability |
+| [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
+| [`kates-chaos`](charts/kates-chaos/) | 2.0.0 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
+| [`kates-platform`](charts/kates-platform/) | 0.2.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
+| [`kates`](charts/kates/) | 0.5.0 | 1.21.0 | Kates — Kafka Advanced Testing & Engineering Suite |
+| [`minio`](charts/minio/) | 17.0.21 | 2025.7.23 | MinIO(R) is an object storage server, compatible with Amazon S3 cloud |
+| [`monitoring`](charts/monitoring/) | 1.0.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
+| [`strimzi-operator`](charts/strimzi-operator/) | 0.1.0 | 1.1.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
+| [`velero`](charts/velero/) | 11.3.2 | 1.17.1 | A Helm chart for velero |
 <!-- chart-table:end -->
 
 ## CLI at a Glance
