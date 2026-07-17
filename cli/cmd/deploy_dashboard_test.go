@@ -73,3 +73,30 @@ func TestDashboardLog_RetruncatesOnResize(t *testing.T) {
 		}
 	}
 }
+
+// The header box and the panes row must end at the same column. The header
+// rendered at m.width while the panes row filled m.width-4, so the dashboard's
+// right edge was a staircase: header sticking out past the panes below it.
+func TestDashboardRowsShareOneWidth(t *testing.T) {
+	for _, w := range []int{80, 100, 120, 160} {
+		m := NewDeployDashboard(context.Background(), 13)
+		m = dashUpdate(t, m, tea.WindowSizeMsg{Width: w, Height: 40})
+		m = dashUpdate(t, m, logMsg{text: "a log line"})
+
+		view := m.View()
+		var topBorders []int
+		for _, line := range strings.Split(view, "\n") {
+			if strings.Contains(line, "╭") {
+				topBorders = append(topBorders, ansi.StringWidth(line))
+			}
+		}
+		// Two top-border lines: the header box, and the joined panes row.
+		if len(topBorders) < 2 {
+			t.Fatalf("width %d: found %d top-border lines, want 2", w, len(topBorders))
+		}
+		if topBorders[0] != topBorders[1] {
+			t.Errorf("width %d: header renders %d cols, panes row %d — right edges misaligned",
+				w, topBorders[0], topBorders[1])
+		}
+	}
+}
