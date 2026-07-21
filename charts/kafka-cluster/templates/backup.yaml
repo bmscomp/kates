@@ -22,7 +22,7 @@ apiVersion: velero.io/v1
 kind: Schedule
 metadata:
   name: {{ include "kafka-cluster.clusterName" . }}-daily-backup
-  namespace: velero
+  namespace: {{ .Values.backup.veleroNamespace | default "velero" }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
   annotations:
@@ -82,7 +82,7 @@ apiVersion: velero.io/v1
 kind: Backup
 metadata:
   name: {{ include "kafka-cluster.clusterName" . }}-pre-upgrade
-  namespace: velero
+  namespace: {{ .Values.backup.veleroNamespace | default "velero" }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
   annotations:

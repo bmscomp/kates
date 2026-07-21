@@ -8,6 +8,11 @@ global:
   # -- Kubernetes cluster DNS domain
   clusterDomain: "cluster.local"
 
+# -- Enable production guard rails: template rendering fails if insecure
+# chart defaults (e.g. the default database password) would reach the
+# cluster. Enabled in values-prod.yaml; leave false for dev/kind.
+productionMode: false
+
 # -- Number of KATES replicas
 replicaCount: 1
 
@@ -439,6 +444,12 @@ postgresql:
     existingSecret: ""
     # -- Key in the existing Secret
     passwordKey: "password"
+  # -- Node selector for the embedded PostgreSQL pod (dev/test only)
+  nodeSelector: {}
+  # -- Tolerations for the embedded PostgreSQL pod
+  tolerations: []
+  # -- Affinity rules for the embedded PostgreSQL pod
+  affinity: {}
   # -- PVC storage configuration
   storage:
     # -- Storage size

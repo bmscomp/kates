@@ -9,11 +9,13 @@ info "Downloading Helm charts for offline installation..."
 
 mkdir -p "${CHARTS_DIR}"
 
-step "Downloading Litmus chart (v${LITMUS_CHART_VERSION})..."
+step "Downloading litmus-core chart (v${LITMUS_CHART_VERSION})..."
+# kates-chaos depends on litmus-core (execution plane only), not the full
+# litmus chart (which also carries the ChaosCenter portal + MongoDB).
 helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/ 2>/dev/null || true
 helm repo update litmuschaos
-rm -rf "${CHARTS_DIR}/litmus"
-helm pull litmuschaos/litmus --version "${LITMUS_CHART_VERSION}" --untar --untardir "${CHARTS_DIR}"
+rm -rf "${CHARTS_DIR}/litmus" "${CHARTS_DIR}/litmus-core"
+helm pull litmuschaos/litmus-core --version "${LITMUS_CHART_VERSION}" --untar --untardir "${CHARTS_DIR}"
 
 step "Building kafka-cluster chart dependencies (Strimzi v${STRIMZI_VERSION})..."
 helm dependency build "${CHARTS_DIR}/kafka-cluster"

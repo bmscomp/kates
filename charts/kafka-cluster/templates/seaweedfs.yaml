@@ -11,6 +11,13 @@
     1. tieredStorage.credentials.existingSecret  (tiered-storage.yaml)
     2. Velero BackupStorageLocation (provisioned externally or via velero CLI)
 */}}
+{{- if not .Values.seaweedfs.s3.existingSecret }}
+{{- /* Guard rail: never ship the placeholder secret to an auth-enforcing
+       deployment. Set seaweedfs.s3.existingSecret (recommended) or real
+       credentials. */}}
+{{- if and .Values.seaweedfs.filer.s3.enableAuth (eq .Values.seaweedfs.s3.secretAccessKey "change-me-in-prod") }}
+{{- fail "seaweedfs.filer.s3.enableAuth is true but seaweedfs.s3.secretAccessKey is the insecure placeholder. Set seaweedfs.s3.existingSecret (recommended) or real credentials." }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -25,6 +32,7 @@ type: Opaque
 stringData:
   AWS_ACCESS_KEY_ID:     {{ .Values.seaweedfs.s3.accessKeyId | quote }}
   AWS_SECRET_ACCESS_KEY: {{ .Values.seaweedfs.s3.secretAccessKey | quote }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap

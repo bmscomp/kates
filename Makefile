@@ -1,4 +1,4 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
+.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all chaos-chart-package chaos-chart-push strimzi-chart-package strimzi-chart-push platform-chart-deps platform-chart-lint platform-chart-package platform-chart-push connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
 
 .DEFAULT_GOAL := help
 
@@ -723,6 +723,48 @@ connect-chart-package:
 connect-chart-push: connect-chart-package
 	helm push .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Connect chart pushed: $(CHART_REGISTRY)/connect-cluster:$(CONNECT_CHART_VERSION)"
+
+CHAOS_CHART_DIR     := charts/kates-chaos
+CHAOS_CHART_VERSION := $(shell grep '^version:' $(CHAOS_CHART_DIR)/Chart.yaml | awk '{print $$2}')
+
+chaos-chart-package:
+	@mkdir -p .build
+	helm package $(CHAOS_CHART_DIR) --destination .build/
+	@echo "✅ Chaos chart packaged: .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz"
+
+chaos-chart-push: chaos-chart-package
+	helm push .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz $(CHART_REGISTRY)
+	@echo "✅ Chaos chart pushed: $(CHART_REGISTRY)/kates-chaos:$(CHAOS_CHART_VERSION)"
+
+STRIMZI_CHART_DIR     := charts/strimzi-operator
+STRIMZI_CHART_VERSION := $(shell grep '^version:' $(STRIMZI_CHART_DIR)/Chart.yaml | awk '{print $$2}')
+
+strimzi-chart-package:
+	@mkdir -p .build
+	helm package $(STRIMZI_CHART_DIR) --destination .build/
+	@echo "✅ Strimzi operator chart packaged: .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz"
+
+strimzi-chart-push: strimzi-chart-package
+	helm push .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz $(CHART_REGISTRY)
+	@echo "✅ Strimzi operator chart pushed: $(CHART_REGISTRY)/strimzi-operator:$(STRIMZI_CHART_VERSION)"
+
+PLATFORM_CHART_DIR     := charts/kates-platform
+PLATFORM_CHART_VERSION := $(shell grep '^version:' $(PLATFORM_CHART_DIR)/Chart.yaml | awk '{print $$2}')
+
+platform-chart-deps:
+	helm dependency build $(PLATFORM_CHART_DIR)
+
+platform-chart-lint: platform-chart-deps
+	helm lint $(PLATFORM_CHART_DIR)
+
+platform-chart-package: platform-chart-deps
+	@mkdir -p .build
+	helm package $(PLATFORM_CHART_DIR) --destination .build/
+	@echo "✅ Platform chart packaged: .build/kates-platform-$(PLATFORM_CHART_VERSION).tgz"
+
+platform-chart-push: platform-chart-package
+	helm push .build/kates-platform-$(PLATFORM_CHART_VERSION).tgz $(CHART_REGISTRY)
+	@echo "✅ Platform chart pushed: $(CHART_REGISTRY)/kates-platform:$(PLATFORM_CHART_VERSION)"
 
 connect-chart-test:
 	@echo ""

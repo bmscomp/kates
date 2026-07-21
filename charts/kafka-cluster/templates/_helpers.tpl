@@ -7,9 +7,10 @@ Expand the name of the chart.
 
 {{/*
 Create a default fully qualified cluster name.
+Falls back to the release name when clusterName is not set.
 */}}
 {{- define "kafka-cluster.clusterName" -}}
-{{- .Values.clusterName }}
+{{- .Values.clusterName | default .Release.Name }}
 {{- end }}
 
 {{/*
@@ -17,6 +18,8 @@ Common labels applied to every resource.
 */}}
 {{- define "kafka-cluster.labels" -}}
 helm.sh/chart: {{ include "kafka-cluster.name" . }}-{{ .Chart.Version | replace "+" "_" }}
+app.kubernetes.io/name: {{ include "kafka-cluster.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: {{ include "kafka-cluster.name" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}

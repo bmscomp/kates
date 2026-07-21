@@ -366,6 +366,7 @@
         "enabled": { "type": "boolean" },
         "schedule": { "type": "string", "pattern": "^[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+$" },
         "ttl": { "type": "string", "pattern": "^[0-9]+h[0-9]+m[0-9]+s$" },
+        "veleroNamespace": { "type": "string" },
         "snapshotVolumes": { "type": "boolean" },
         "persistence": {
           "type": "object",
