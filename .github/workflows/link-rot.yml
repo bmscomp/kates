@@ -1,0 +1,42 @@
+name: Link Rot
+
+# External-link validation for README and docs, off the PR path.
+# PRs are gated by the offline lychee job in docs.yml (relative links +
+# fragments only); this weekly job catches dead https:// URLs without
+# letting third-party outages or rate limits block merges. A failure
+# here means rot to triage, not a broken build.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC — off the top-of-hour rush
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  external-links:
+    name: External Link Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check external links in README and docs
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # No --offline: this run exists to hit the network. No
+          # --include-fragments: external anchor checks false-positive on
+          # JS-rendered pages. 429s are accepted — rate limiting is not rot.
+          # Private/localhost/cluster-internal URLs are excluded; the book
+          # legitimately references them as examples.
+          args: >-
+            --no-progress
+            --max-retries 3
+            --retry-wait-time 5
+            --accept 200..=206,429
+            --exclude-all-private
+            --exclude '^mailto:'
+            README.md
+            "docs/**/*.md"
+          fail: true
