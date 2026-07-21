@@ -4,8 +4,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-performance"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test

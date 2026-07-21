@@ -1,0 +1,26 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "kafka-cluster": {
+            "type": "object",
+            "description": "Pass-through values for the kafka-cluster subchart (validated by the subchart itself)",
+            "properties": {
+                "enabled": { "type": "boolean" }
+            }
+        },
+        "kates": {
+            "type": "object",
+            "description": "Pass-through values for the kates subchart (validated by the subchart itself)",
+            "properties": {
+                "enabled": { "type": "boolean" }
+            }
+        },
+        "test": {
+            "type": "object",
+            "properties": {
+                "image": { "type": "string" }
+            }
+        }
+    }
+}

@@ -1,0 +1,46 @@
+{{- /* Kates addition (not upstream): post-install smoke test against the
+       Velero server's metrics endpoint. */}}
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "velero.fullname" . }}-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "velero.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ include "velero.chart" . }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+  containers:
+    - name: velero-metrics-test
+      image: curlimages/curl:8.7.1
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 25m
+        limits:
+          memory: 64Mi
+          cpu: 100m
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Checking Velero server metrics endpoint..."
+          curl -sf http://{{ include "velero.fullname" . }}.{{ .Release.Namespace }}.svc:8085/metrics > /dev/null
+          echo "Velero server responding."
+{{- end }}

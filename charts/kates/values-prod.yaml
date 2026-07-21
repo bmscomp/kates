@@ -47,11 +47,18 @@ metrics:
   grafanaDashboard:
     enabled: true
 
+# Fail rendering if insecure chart defaults would reach production.
+productionMode: true
+
 postgresql:
   enabled: false
 
 externalDatabase:
   enabled: true
+  # productionMode requires real credentials here. Point existingSecret at a
+  # Secret carrying the password (key: password), e.g. one provisioned by
+  # your secrets operator:
+  # existingSecret: "kates-db-credentials"
 
 backup:
   enabled: true
