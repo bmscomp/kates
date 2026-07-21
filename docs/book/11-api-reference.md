@@ -670,6 +670,189 @@ Delete a schedule. Returns `204 No Content`.
 
 ---
 
+### Disruption Schedules, Playbooks & Templates
+
+Beyond one-shot disruptions, the API manages recurring chaos schedules, named multi-step playbooks, and reusable disruption templates.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/disruptions/schedules` | List disruption schedules |
+| POST | `/api/disruptions/schedules` | Create a cron-driven disruption schedule |
+| PUT | `/api/disruptions/schedules/{id}` | Update a schedule |
+| DELETE | `/api/disruptions/schedules/{id}` | Delete a schedule |
+| GET | `/api/disruptions/playbooks` | List available playbooks |
+| POST | `/api/disruptions/playbooks/{name}` | Run a named playbook |
+| GET | `/api/disruptions/templates` | List disruption templates |
+| POST | `/api/disruptions/templates/{id}` | Launch a disruption from a template |
+
+---
+
+### Profiles
+
+Saved parameter profiles — define a test configuration once, reuse it across runs and machines.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/profiles` | List saved profiles (`page`, `size` pagination) |
+| GET | `/api/profiles/{name}` | Get a single profile |
+| POST | `/api/profiles` | Save a profile |
+| DELETE | `/api/profiles/{name}` | Delete a profile |
+
+---
+
+### Security
+
+The REST mirror of the `kates security` CLI family. All endpoints are `GET` unless noted.
+
+| Path | Description |
+|------|-------------|
+| `/api/security/audit` | Full security audit (listeners, ACLs, TLS, secrets) |
+| `/api/security/tls` | TLS certificate inventory and expiry |
+| `/api/security/auth-test` | Probe ACL rules for a user (least-privilege verification) |
+| `/api/security/pentest` | Adversarial penetration tests against the cluster |
+| `/api/security/compliance` | Compliance posture report |
+| `/api/security/baseline` (POST) | Record the current posture as the drift baseline |
+| `/api/security/drift` | Diff current posture against the recorded baseline |
+| `/api/security/gate` | Pass/fail security gate for CI |
+| `/api/security/certs` | Certificate chain details |
+| `/api/security/cve` | Known CVE exposure for the running Kafka version |
+| `/api/security/config-diff` | Non-default broker security configuration |
+| `/api/security/acl-map` | ACL coverage matrix (users × topics) |
+| `/api/security/trend` | Security score history |
+| `/api/security/secrets` | Secret hygiene scan |
+
+---
+
+### Kafka Client
+
+Direct Kafka data-plane operations — the REST mirror of `kates kafka`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/kafka/brokers` | Broker list with rack and controller status |
+| GET | `/api/kafka/topics` | Topic list |
+| POST | `/api/kafka/topics` | Create a topic |
+| GET | `/api/kafka/topics/{name}` | Topic detail with partition layout |
+| PATCH | `/api/kafka/topics/{name}` | Alter topic configuration entries |
+| DELETE | `/api/kafka/topics/{name}` | Delete a topic |
+| GET | `/api/kafka/groups` | Consumer group list |
+| GET | `/api/kafka/groups/{id}` | Consumer group detail with lag |
+| GET | `/api/kafka/consume/{topic}` | Consume a bounded sample of records |
+| POST | `/api/kafka/produce/{topic}` | Produce records |
+
+---
+
+### Audit
+
+#### GET /api/audit
+
+The audit log of cluster mutations — the same events the `kates audit` CLI command renders.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | 0 | Page number (0-based) |
+| `size` | int | 50 | Page size (max 200) |
+| `type` | String | | Filter by event type (`test`, `topic`, `disruption`, `resilience`) |
+| `since` | String | | Filter events after this ISO-8601 timestamp |
+
+---
+
+### Webhooks
+
+Register HTTP callbacks for test lifecycle events instead of polling.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/webhooks` | List registered webhooks |
+| POST | `/api/webhooks` | Register a webhook (`{"name", "url", "events"}`) |
+| DELETE | `/api/webhooks/{name}` | Unregister a webhook |
+
+Delivered payloads carry `event`, `testId`, `testType`, `status`, and `timestamp`.
+
+---
+
+### Cost Estimation
+
+#### POST /api/cost/estimate
+
+Estimate the infrastructure cost of a test run before launching it.
+
+```json
+{
+  "cloud": "aws",
+  "records": 100000,
+  "recordSize": 512,
+  "durationSeconds": 300,
+  "brokers": 3,
+  "replicas": 3
+}
+```
+
+All fields are optional; the values above are the defaults.
+
+---
+
+### Advisor
+
+#### GET /api/tests/{id}/advisor
+
+Post-run analysis for a completed test — the advisor inspects the run's metrics and returns findings with tuning recommendations.
+
+---
+
+### Event Stream
+
+#### GET /api/events/stream
+
+Server-sent events (SSE) for test lifecycle changes — the push alternative to polling `GET /api/tests/{id}`. Optional `type` and `id` query parameters restrict the stream to one event type or one run.
+
+---
+
+### Dead Letter Queue
+
+#### GET /api/dlq/stats
+
+Statistics for the Dead Letter Queue — messages that failed processing and were parked for inspection.
+
+```json
+{
+  "totalMessages": 12,
+  "lastMessageAt": "2026-07-20T14:03:22Z",
+  "messagesBySource": { "kates-results": 9, "webhook-dispatch": 3 }
+}
+```
+
+`lastMessageAt` is `null` when the DLQ has never received a message.
+
+---
+
+### Share Groups
+
+Share Groups (KIP-932) give the results pipeline work-queue semantics: multiple consumers pull from the same topic without static partition assignment. These endpoints control the Share Group consumer for `kates-results` processing.
+
+#### POST /api/share-groups/start
+
+Start the Share Group consumer. Returns `200` with `{"status": "started"}`, or `409 Conflict` with `{"status": "already_running"}` if it is already active.
+
+#### POST /api/share-groups/stop
+
+Stop the Share Group consumer. Returns `200` with `{"status": "stopped"}`, or `409 Conflict` with `{"status": "not_running"}` if it is not active.
+
+#### GET /api/share-groups/status
+
+Current consumer state and processing counters.
+
+```json
+{
+  "running": true,
+  "processedCount": 1842,
+  "failedCount": 3,
+  "recentResults": ["t-a1b2c3: LOAD grade A", "t-d4e5f6: STRESS grade B"]
+}
+```
+
+---
+
 ## Error Responses
 
 Errors follow a consistent JSON format:

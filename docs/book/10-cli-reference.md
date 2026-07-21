@@ -256,7 +256,7 @@ kates version
 
 #### doctor
 
-Aliases: `pre-flight`, `check`
+Aliases: `preflight`, `check`
 
 Pre-flight cluster readiness checklist. The doctor command verifies that the Kates API is reachable, Kafka is connected, the broker count meets the 3-broker minimum, ISR health is clean, topics are listable, and benchmark backends are available. It also checks whether Kyverno is installed with active policies and no workload violations (Kyverno checks warn rather than fail — it's optional but recommended). Failing checks come with remediation hints. It's the first command to run when something "feels wrong" but `kates health` reports healthy.
 
@@ -288,6 +288,22 @@ Expected output:
 ```
 
 **See also:** [Deployment Guide](12-deployment.md) for environment setup, [Troubleshooting Index](appendix-b-troubleshooting.md) for common diagnostic failures.
+
+#### audit
+
+View the audit log of cluster mutations. Every state-changing operation — test creation, topic changes, disruptions, resilience runs — lands in the audit log with a timestamp and event type, so you can reconstruct what changed and when. The `changelog` command (under Developer & Help Commands) renders these same events as a release-notes-style document.
+
+```bash
+kates audit
+kates audit --type test --limit 20
+kates audit --since 2026-07-01T00:00:00Z
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--limit` | 50 | Maximum number of events to show |
+| `--type` | | Filter by event type (`test`, `topic`, `disruption`, `resilience`) |
+| `--since` | | Show events after this ISO-8601 timestamp |
 
 ---
 
@@ -558,9 +574,11 @@ kates test rm <id>
 
 ```bash
 kates test watch <id>
+kates watch <id>                  # root-level shortcut
+kates watch <id> --interval 5
 ```
 
-Live-stream test progress to the terminal.
+Live-stream test progress to the terminal, refreshing every 3 seconds by default (`--interval` adjusts it).
 
 #### test apply
 
@@ -596,6 +614,19 @@ kates test scaffold export --all           # export every template
 | `ci-gate` | LOAD | CI pipeline gate — fast 10k-record validation with strict zero-error SLA |
 
 **See also:** [Test Types Deep Dive](05-test-types.md) for the theory behind each test type, [Scenario Files & SLA Gates](13-scenario-files.md) for YAML scenario syntax.
+
+#### scenario-diff
+
+Alias: `sdiff`
+
+Compare a scenario YAML against a completed test run to detect config drift. The scenario file in your repo says one thing — did the run actually execute with those parameters? `scenario-diff` flags every field where the file and the run diverge, which makes it the fastest way to catch a stale scenario or an out-of-band override.
+
+```bash
+kates scenario-diff scenario.yaml <test-id>
+kates sdiff scenario.yaml <test-id>
+```
+
+**See also:** [Scenario Files & SLA Gates](13-scenario-files.md) for the scenario schema.
 
 ---
 
@@ -673,6 +704,7 @@ When run in a terminal, the export is written to an auto-named file (e.g. `kates
 
 ```bash
 kates report diff <id1> <id2>
+kates diff <id1> <id2>            # root-level shortcut
 ```
 
 Side-by-side comparison of two test runs.
@@ -1610,13 +1642,16 @@ kates gate --min-grade A --timeout 300
 | `--backend` | | Benchmark backend |
 | `--timeout` | 180 | Timeout in seconds |
 
-#### baseline
+#### test baseline
 
-The baseline command sets a specific test run as the performance reference point for future regression detection. Once set, you can run `baseline regression <id>` to compare any new test against the baseline and see exactly where performance has changed. Baselines work hand-in-hand with trend analysis — trends show long-term drift, baselines catch acute regressions. The typical workflow is: run a comprehensive test on a known-good configuration, set it as baseline, then compare every subsequent run against it.
+The baseline commands set a specific test run as the performance reference point for future regression detection. Once a baseline is set, `kates report regression <id>` compares any new test against it and shows exactly where performance has changed. Baselines work hand-in-hand with trend analysis — trends show long-term drift, baselines catch acute regressions. The typical workflow is: run a comprehensive test on a known-good configuration, set it as baseline, then compare every subsequent run against it.
 
 ```bash
-kates baseline set <id>
-kates baseline regression <id>
+kates test baseline set <id>       # mark a run as the baseline for its type
+kates test baseline show <type>    # show the current baseline for a test type
+kates test baseline list           # list all configured baselines
+kates test baseline unset <type>   # remove the baseline for a test type
+kates report regression <id>       # compare a run against its type's baseline
 ```
 
 **See also:** [Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [CI/CD Pipeline](appendix-c-cicd.md) for quality gate examples.
@@ -1916,6 +1951,23 @@ kates changelog --since 2025-01-01 --until 2025-01-31
 |------|-------------|
 | `--since` | Start date for changelog range |
 | `--until` | End date for changelog range |
+
+#### plugin
+
+Manage CLI plugins. Any executable named `kates-<name>` placed in `~/.kates/plugins/` or on your `PATH` is discovered automatically and becomes callable as `kates <name>`; `plugin list` shows everything the CLI has found and where.
+
+```bash
+kates plugin list
+```
+
+#### theme
+
+Preview the CLI's built-in color palettes. The display is informational — palettes are not yet configurable.
+
+```bash
+kates theme list
+kates theme preview <name>
+```
 
 ---
 
