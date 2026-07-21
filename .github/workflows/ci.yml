@@ -6,8 +6,7 @@ on:
     paths:
       - "kates/**"
       - "cli/**"
-      - "charts/kates/**"
-      - "charts/strimzi-operator/**"
+      - "charts/**"
       - "config/**"
       - "images.env"
       - "versions.env"
@@ -19,8 +18,7 @@ on:
     paths:
       - "kates/**"
       - "cli/**"
-      - "charts/kates/**"
-      - "charts/strimzi-operator/**"
+      - "charts/**"
       - "config/**"
       - "images.env"
       - "versions.env"
@@ -56,9 +54,7 @@ jobs:
               - 'versions.env'
               - '.github/workflows/ci.yml'
             helm:
-              - 'charts/kates/**'
-              - 'charts/strimzi-operator/**'
-              - 'charts/kafka-cluster/values.yaml'
+              - 'charts/**'
               - 'versions.env'
               - 'scripts/check-versions.sh'
             yaml:
@@ -100,9 +96,6 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.17.0
-
-      - name: Fetch chart dependencies
-        run: helm dependency build charts/kates/
 
       - name: Lint kates chart
         run: helm lint charts/kates/
@@ -149,6 +142,53 @@ jobs:
             exit 1
           fi
           echo "OK: schema rejected the misspelled key"
+
+      # Every chart must at least lint and render with default values.
+      # Dependency tgzs are vendored in each chart's charts/ dir, so no
+      # network fetch is needed — except kates-platform, whose dependencies
+      # are local file:// references resolved from this repo.
+      - name: Build kates-platform local dependencies
+        run: helm dependency build charts/kates-platform/
+
+      - name: Lint and template all charts
+        run: |
+          rc=0
+          for chart in charts/*/; do
+            name=$(basename "${chart}")
+            echo "==> ${name}"
+            helm lint "${chart}" || rc=1
+            helm template "${name}" "${chart}" > /dev/null || rc=1
+          done
+          exit ${rc}
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o /tmp/kubeconform.tgz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/
+
+      # Rendered manifests must satisfy the Kubernetes OpenAPI schemas and,
+      # for CRs (Strimzi, Litmus, Velero, Kyverno, monitoring), the community
+      # CRD schema catalog. -ignore-missing-schemas keeps CRs without a
+      # published schema from failing the build.
+      - name: Validate rendered manifests (kubeconform)
+        run: |
+          rc=0
+          for chart in charts/*/; do
+            name=$(basename "${chart}")
+            echo "==> ${name}"
+            helm template "${name}" "${chart}" \
+              | kubeconform -strict -summary -ignore-missing-schemas \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              || rc=1
+          done
+          exit ${rc}
+
+      # Root README chart table must stay in sync with charts/*/Chart.yaml.
+      - name: Check README chart table
+        run: ./scripts/gen-chart-table.sh --check
 
   kyverno-policy-test:
     name: Kyverno Policy Validation

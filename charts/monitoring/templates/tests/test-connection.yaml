@@ -1,0 +1,46 @@
+{{- if (index .Values "kube-prometheus-stack").enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-monitoring-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-monitoring.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+  containers:
+    - name: connection-test
+      image: {{ .Values.test.image }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 25m
+        limits:
+          memory: 64Mi
+          cpu: 100m
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Checking Prometheus readiness..."
+          # prometheus-operated is the operator-managed headless service —
+          # its name is stable regardless of release name.
+          curl -sf http://prometheus-operated.{{ .Release.Namespace }}.svc:9090/-/ready
+          echo "Prometheus ready."
+          echo "Checking Grafana health..."
+          curl -sf http://{{ .Release.Name }}-grafana.{{ .Release.Namespace }}.svc/api/health
+          echo "Grafana healthy."
+{{- end }}

@@ -1,3 +1,6 @@
+{{- /* Embedded PostgreSQL — dev/test convenience only: single replica, no
+       replication. productionMode fails rendering if this is enabled (see
+       secret.yaml); production deployments use externalDatabase. */}}
 {{- if .Values.postgresql.enabled }}
 apiVersion: apps/v1
 kind: StatefulSet
@@ -19,6 +22,18 @@ spec:
         app.kubernetes.io/name: {{ include "kates.postgresql.fullname" . }}
         app.kubernetes.io/component: database
     spec:
+      {{- with .Values.postgresql.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresql.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresql.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.postgresql.securityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}

@@ -1,0 +1,39 @@
+{{- /* Kates addition (not upstream Bitnami): post-install smoke test. */}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "common.names.fullname" . }}-test
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+  containers:
+    - name: minio-health-test
+      image: {{ .Values.test.image | default "curlimages/curl:8.7.1" }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 25m
+        limits:
+          memory: 64Mi
+          cpu: 100m
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Checking MinIO liveness endpoint..."
+          curl -sf http://{{ include "common.names.fullname" . }}:{{ .Values.service.ports.api }}/minio/health/live
+          echo "MinIO healthy."

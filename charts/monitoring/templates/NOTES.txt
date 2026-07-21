@@ -24,3 +24,10 @@ Dashboards:
 
 Verify:
   kubectl get pods -n {{ .Release.Namespace }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if eq (toString (index .Values "kube-prometheus-stack" "grafana" "adminPassword")) "admin" }}
+
+WARNING: Grafana is using the default admin password ("admin").
+Override kube-prometheus-stack.grafana.adminPassword before exposing this
+deployment beyond your workstation.
+{{- end }}

@@ -1,0 +1,32 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "description": "Light-touch schema for the vendored Bitnami MinIO chart: types the keys the Kates platform actually sets, allows everything else through. See values.yaml for the full reference.",
+    "properties": {
+        "mode": { "type": "string", "enum": ["standalone", "distributed"] },
+        "auth": {
+            "type": "object",
+            "properties": {
+                "rootUser": { "type": "string" },
+                "rootPassword": { "type": "string" },
+                "existingSecret": { "type": "string" }
+            }
+        },
+        "persistence": {
+            "type": "object",
+            "properties": {
+                "enabled": { "type": "boolean" },
+                "size": { "type": "string" },
+                "storageClass": { "type": "string" }
+            }
+        },
+        "service": { "type": "object" },
+        "resources": {},
+        "test": {
+            "type": "object",
+            "properties": {
+                "image": { "type": "string" }
+            }
+        }
+    }
+}

@@ -6,6 +6,7 @@ on:
     paths:
       - "cli/**"
       - "kates/**"
+      - "charts/**"
       - "images.env"
       - "versions.env"
       - "Makefile"
@@ -16,6 +17,7 @@ on:
     paths:
       - "cli/**"
       - "kates/**"
+      - "charts/**"
       - "images.env"
       - "versions.env"
       - "Makefile"
