@@ -10,6 +10,10 @@ on:
       - "scripts/gen-chart-table.sh"
       - "scripts/gen-version-matrix.sh"
       - "scripts/check-book-style.sh"
+      - "scripts/check-reference-drift.sh"
+      - "cli/cmd/**"
+      - "kates/src/main/proto/**"
+      - "kates/src/main/java/**"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
@@ -20,6 +24,10 @@ on:
       - "scripts/gen-chart-table.sh"
       - "scripts/gen-version-matrix.sh"
       - "scripts/check-book-style.sh"
+      - "scripts/check-reference-drift.sh"
+      - "cli/cmd/**"
+      - "kates/src/main/proto/**"
+      - "kates/src/main/java/**"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -39,6 +47,9 @@ jobs:
 
       - name: Verify book style rules
         run: ./scripts/check-book-style.sh
+
+      - name: Verify reference chapters match sources
+        run: ./scripts/check-reference-drift.sh
 
   link-check:
     name: Markdown Link Check

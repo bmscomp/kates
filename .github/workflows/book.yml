@@ -31,9 +31,30 @@ jobs:
         with:
           tinytex: ${{ github.event_name == 'push' }}
 
-      - name: Install Chromium for mermaid PDF rendering
+      # Chromium is the slowest install of the PDF toolchain — cache it
+      # keyed on the workflow file so a config change refreshes it.
+      - name: Cache Chromium
         if: github.event_name == 'push'
+        id: chromium-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quarto/chromium
+          key: book-chromium-${{ runner.os }}-${{ hashFiles('.github/workflows/book.yml') }}
+
+      - name: Install Chromium for mermaid PDF rendering
+        if: github.event_name == 'push' && steps.chromium-cache.outputs.cache-hit != 'true'
         run: quarto install chromium --no-prompt
+
+      # Fallback PDF: restore the newest last-good PDF so a failed render
+      # degrades to serving yesterday's PDF instead of a 404 download link.
+      - name: Restore last-good PDF
+        if: github.event_name == 'push'
+        uses: actions/cache/restore@v4
+        with:
+          path: .last-good-pdf
+          key: book-last-good-pdf-${{ github.sha }}
+          restore-keys: |
+            book-last-good-pdf-
 
       # Sources are GitHub-flavored .md so chapters render in the repo file
       # view; Quarto executes mermaid only in .qmd. The script converts
@@ -59,15 +80,35 @@ jobs:
       - name: Render HTML
         run: quarto render docs/book --to html
 
-      - name: Attach PDF to site
+      # Fresh PDF wins; otherwise fall back to the cached last-good PDF and
+      # say so loudly. Only a fresh PDF is saved back to the cache.
+      - name: Attach PDF to site (fresh or last-good)
         if: github.event_name == 'push'
+        id: attach-pdf
         run: |
           if [ -f "$RUNNER_TEMP/kates-definitive-guide.pdf" ]; then
             mv "$RUNNER_TEMP/kates-definitive-guide.pdf" docs/book/_book/
-            echo "PDF attached to site output"
+            mkdir -p .last-good-pdf
+            cp docs/book/_book/kates-definitive-guide.pdf .last-good-pdf/
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            echo ":white_check_mark: Book PDF rendered fresh this run" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f .last-good-pdf/kates-definitive-guide.pdf ]; then
+            cp .last-good-pdf/kates-definitive-guide.pdf docs/book/_book/
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Book PDF::PDF render failed — site is serving the last-good PDF from cache"
+            echo ":warning: PDF render **failed** — serving last-good PDF from cache" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "No PDF this run (best-effort render failed) — download link will 404"
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Book PDF::PDF render failed and no cached PDF exists — download link will 404"
+            echo ":warning: PDF render **failed**, no cached fallback — download link will 404" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Save last-good PDF
+        if: github.event_name == 'push' && steps.attach-pdf.outputs.fresh == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .last-good-pdf
+          key: book-last-good-pdf-${{ github.sha }}
 
       - name: Upload site artifact
         if: github.event_name == 'push'
