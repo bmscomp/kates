@@ -47,6 +47,12 @@ Exactly one blank line after the closing `:::`. Genuine quotations may use plain
 | pre-flight | preflight | Pre-Flight in Title Case headings |
 | LOAD, ROUND_TRIP, INTEGRITY | Load, Round-Trip | Enum form whenever naming a Kates test type; lowercase "round-trip" only for the generic latency concept |
 
+## Figures
+
+- Screenshots live in `assets/screenshots/`, named `<chapter-slug>--<subject>.png`, and follow [the capture conventions](assets/screenshots/README.md).
+- Alt text is mandatory and descriptive — the PDF accessibility layer depends on it.
+- Diagrams are mermaid, not images; screenshots are for surfaces mermaid can't show (TUIs, dashboards, web UIs).
+
 ## Punctuation
 
 - Spaced em dash ( — ) for asides; straight quotes only; `--` never as a prose dash (kubectl/CLI flag separators in code excepted).

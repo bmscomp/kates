@@ -614,7 +614,7 @@ helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka
 
 **Symptom:** `Invalid value -1 for configuration local.retention.bytes`
 
-**Cause:** Kafka 4.1.1 tightened validation — `local.retention.bytes` cannot be `-1` when `retention.bytes` is explicitly set
+**Cause:** Kafka `4.1.1` tightened validation — `local.retention.bytes` cannot be `-1` when `retention.bytes` is explicitly set
 
 **Fix:** Remove `log.local.retention.bytes: -1` from `kafka.yaml`
 

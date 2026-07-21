@@ -165,7 +165,7 @@ sequenceDiagram
 | `replicas` | 3 (the CLI sets 1 with `--ha=false`; the dev overlay uses 1) | Number of worker pods |
 | `image` | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built image with Debezium + Apicurio plugins |
 | `kafka.bootstrapServers` | `""` — computed as `<clusterName>-kafka-bootstrap.<ns>.svc:9092` (9093 when `kafka.tls.enabled`) | Connection to Kafka |
-| `version` | 4.3.0 | Kafka protocol version |
+| `version` | `4.3.0` | Kafka protocol version |
 
 ### Internal Topics
 
@@ -273,7 +273,7 @@ The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.0`) bundles the follow
 | Debezium Oracle | 3.6.0.Final | CDC from Oracle LogMiner/XStream |
 | Debezium Db2 | 3.6.0.Final | CDC from IBM Db2 ASN capture |
 | Debezium Scripting | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
-| Apicurio Registry Converter | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
+| Apicurio Registry Converter | `3.3.0` | Schema Registry integration (Avro, JSON Schema, Protobuf) |
 | Debezium JDBC Sink | 3.6.0.Final | Upsert sink for SQL databases |
 
 ### Extending the Image with Additional Plugins

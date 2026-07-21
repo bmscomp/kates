@@ -657,14 +657,14 @@ Transient under-replication is normal during broker restarts. Sustained under-re
 
 ## Monitoring Stack Deployment
 
-The monitoring stack is installed via a **local wrapper chart** in `charts/monitoring/` that depends on `kube-prometheus-stack` v82.4.3:
+The monitoring stack is installed via a **local wrapper chart** in `charts/monitoring/` that depends on `kube-prometheus-stack` at the version recorded in the [Version & Compatibility Matrix](appendix-d-versions.md):
 
-| Component | Version | Source |
-|---|---|---|
-| Monitoring Chart | 1.0.0 | Local wrapper (`charts/monitoring`) |
-| Prometheus | v3.9.1 | Pinned in `charts/monitoring/values.yaml` |
-| Grafana | 12.3.1 | Pinned in `charts/monitoring/values.yaml` |
-| kube-prometheus-stack | `82.4.3` | Upstream dependency in `Chart.yaml` |
+| Component | Where the version is pinned |
+|---|---|
+| Monitoring Chart | `charts/monitoring/Chart.yaml` (and the [Version & Compatibility Matrix](appendix-d-versions.md)) |
+| Prometheus | `charts/monitoring/values.yaml` |
+| Grafana | `charts/monitoring/values.yaml` |
+| kube-prometheus-stack | Dependency in `charts/monitoring/Chart.yaml` |
 
 ### Deploying
 

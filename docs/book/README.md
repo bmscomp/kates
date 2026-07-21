@@ -44,6 +44,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | Title | Description |
 |-------|-------------|
 | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites and verification |
+| [kafka-cluster Chart Reference](kafka-cluster-chart-reference.md) | The chart's resource graph, listeners, topics & users, network policies, observability, and advanced features |
 | [Kafka Deployment Engineering](15-kafka-deployment.md) | The engineering rationale: Strimzi, KRaft, broker tuning, and operations |
 | [Deployment Guide](12-deployment.md) | Deploying the Kates stack: topology decisions, sizing, and cloud guidance |
 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, and Kyverno |
@@ -57,7 +58,9 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 
 | Title | Description |
 |-------|-------------|
-| [CLI Reference](10-cli-reference.md) | Complete Kates CLI command reference with all subcommands and aliases |
+| [CLI Reference](10-cli-reference.md) | Install, configuration, workflows, and the everyday health, cluster, test, report, and trend commands |
+| [Operations CLI Reference](cli-operations.md) | Disruptions, chaos history, resilience, schedules, observability, the Lab, and deployment & lifecycle |
+| [Security & Analysis CLI Reference](cli-security-analysis.md) | Security, Kyverno, Kafka client, analysis, tuning, profiles, and developer tooling |
 | [REST API Reference](11-api-reference.md) | Backend API endpoints and data models |
 | [gRPC API Reference](16-grpc-api.md) | Protobuf service definitions, message types, and usage examples |
 
@@ -119,7 +122,9 @@ Don't read this book cover-to-cover. Pick a reading path based on what you need:
 3. [Tutorial 7: Kyverno & Security](../tutorials/07-kyverno-security.md) — hands-on policy enforcement (~20 min)
 
 ### 📋 "I just need a reference"
-- [CLI Reference](10-cli-reference.md) — all commands with examples and workflows
+- [CLI Reference](10-cli-reference.md) — install, configuration, workflows, and the everyday commands
+- [Operations CLI Reference](cli-operations.md) — disruption, schedule, deploy, and Lab commands
+- [Security & Analysis CLI Reference](cli-security-analysis.md) — security, policy, and analysis commands
 - [REST API Reference](11-api-reference.md) — backend endpoints and data models
 - [gRPC API Reference](16-grpc-api.md) — protobuf service definitions
 - [Glossary](appendix-a-glossary.md) — terms and abbreviations
