@@ -73,8 +73,8 @@ Each filter also carries an explicit `!**/*.md` exclusion, so documentation-only
 |-----|---------|-------------|
 | **Build & Test** | Java 21 (Temurin) | Compiles the Quarkus backend and runs the test suite with `./mvnw verify`; JUnit results are published as a check |
 | **CLI Tests** | Go 1.25 | Runs `go test -race` across all CLI packages with the race detector enabled |
-| **Helm Lint** | Helm v3.17.0 | Runs `helm dependency build` and `helm lint` on the `kates` chart, then `helm template` to verify the chart renders |
-| **Kyverno Policy Validation** | Kyverno CLI v1.13.0 | Renders the Kyverno policy templates from the `kates`, `kafka-cluster`, and `kates-chaos` charts and validates them with `kyverno apply` |
+| **Helm Lint** | Helm `v3.17.0` | Runs `helm dependency build` and `helm lint` on the `kates` chart, then `helm template` to verify the chart renders |
+| **Kyverno Policy Validation** | Kyverno CLI `v1.13.0` | Renders the Kyverno policy templates from the `kates`, `kafka-cluster`, and `kates-chaos` charts and validates them with `kyverno apply` |
 | **YAML Validation** | Python + PyYAML | Parses every YAML file under `config/` to catch syntax errors |
 
 ### Key Details
@@ -174,9 +174,9 @@ The workflow provisions a Kind cluster inside the GitHub Actions runner, created
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| Kind | v0.27.0 | Ephemeral Kubernetes cluster with three zone-labelled nodes |
-| kubectl | v1.33.0 | Applies and dry-runs manifests against the cluster |
-| Helm | v3.17.0 | Lints every chart under `charts/` |
+| Kind | `v0.27.0` | Ephemeral Kubernetes cluster with three zone-labelled nodes |
+| kubectl | `v1.33.0` | Applies and dry-runs manifests against the cluster |
+| Helm | `v3.17.0` | Lints every chart under `charts/` |
 | Go | 1.25 | Builds the `kates` CLI from source for the compatibility gate |
 
 ### Validation Steps

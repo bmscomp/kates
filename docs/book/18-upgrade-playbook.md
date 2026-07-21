@@ -23,11 +23,13 @@ graph LR
 
 Each Strimzi release supports only a narrow window of Kafka versions, and that window moves with every release — always check the [Strimzi supported versions](https://strimzi.io/downloads/) page before planning an upgrade. This repository pins its versions centrally:
 
-| Component | Pinned version | Source |
-|-----------|----------------|--------|
-| Strimzi operator | 1.1.0 | `STRIMZI_VERSION` in `versions.env` |
-| Kafka image | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
-| Chart default (`kafkaVersion`) | 4.3.0 | `charts/kafka-cluster/values.yaml` |
+| Component | Source of the pin |
+|-----------|-------------------|
+| Strimzi operator | `STRIMZI_VERSION` in `versions.env` |
+| Kafka image | `STRIMZI_KAFKA_VERSION` in `versions.env` (an image tag of the form `quay.io/strimzi/kafka:<strimzi>-kafka-<kafka>`) |
+| Chart default (`kafkaVersion`) | `charts/kafka-cluster/values.yaml` |
+
+The current values of all three live in the [Version & Compatibility Matrix](appendix-d-versions.md).
 
 ### Procedure
 

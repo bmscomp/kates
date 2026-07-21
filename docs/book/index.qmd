@@ -5,7 +5,7 @@ title-block-banner: false
 # Preface {.unnumbered}
 
 ::: {.callout-note appearance="simple"}
-**You are reading the Kates Definitive Guide** — from performance theory and chaos engineering to security, deployment, and operations, with three reference chapters and four appendices.
+**You are reading the Kates Definitive Guide** — from performance theory and chaos engineering to security, deployment, and operations, with full CLI, REST, and gRPC references and four appendices.
 :::
 
 ## What This Book Covers
@@ -19,7 +19,7 @@ This guide takes you from first principles to production operations:
 - **Part III — Chaos & Integrity**: Chaos engineering theory and practice, and zero-loss verification
 - **Part IV — Observability**: Dashboards, metrics, heatmaps, tracing, and alerting
 - **Part V — Deployment & Operations**: Installing and engineering Kafka, deploying Kates, security, multi-tenancy, upgrades, Kafka Connect, and operational recipes
-- **Part VI — Reference**: The complete CLI, REST API, and gRPC API references
+- **Part VI — Reference**: The complete CLI references (everyday, operations, and security & analysis), the REST API, and the gRPC API
 
 ## Who This Book Is For
 

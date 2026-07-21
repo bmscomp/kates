@@ -349,15 +349,17 @@ sequenceDiagram
 | CLI | Go | 1.25+ | Cross-platform binary |
 | CLI Framework | Cobra | Latest | Command parsing, help generation |
 | Cluster | Kind | Latest | Local Kubernetes simulation |
-| Kafka | Apache Kafka | 4.3.0 | KRaft mode, Share Groups |
-| Operator | Strimzi | 1.1.0 | Kafka lifecycle management |
-| Chaos | LitmusChaos | Latest | Advanced chaos experiments |
-| Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |
-| Tracing | Jaeger (OTLP) | 2.15.0 | Distributed trace collection |
+| Kafka | Apache Kafka | Pinned | KRaft mode, Share Groups |
+| Operator | Strimzi | Pinned | Kafka lifecycle management |
+| Chaos | LitmusChaos | Pinned | Advanced chaos experiments |
+| Monitoring | Prometheus + Grafana | Pinned | Metrics collection and visualization |
+| Tracing | Jaeger (OTLP) | Pinned | Distributed trace collection |
 | Registry | Apicurio | Latest | Schema registry for Kafka |
 | Database | PostgreSQL | Latest | Test results and schedule persistence |
 | Backup | Velero + MinIO | Latest | Cluster backup and restore |
 | Policy Engine | Kyverno | Latest | Admission control, PSS enforcement, NetworkPolicy generation |
+
+The concrete version behind every "Pinned" entry lives in the [Version & Compatibility Matrix](appendix-d-versions.md), generated from the repository's own pins.
 
 ## Data Model
 

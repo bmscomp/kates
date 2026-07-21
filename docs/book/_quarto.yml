@@ -51,6 +51,7 @@ book:
       chapters:
         - deploying-strimzi-operator.md
         - 20-installation-guide.md
+        - kafka-cluster-chart-reference.md
         - 15-kafka-deployment.md
         - 12-deployment.md
         - 17-security.md
@@ -63,6 +64,8 @@ book:
     - part: "Part VI — Reference"
       chapters:
         - 10-cli-reference.md
+        - cli-operations.md
+        - cli-security-analysis.md
         - 11-api-reference.md
         - 16-grpc-api.md
 

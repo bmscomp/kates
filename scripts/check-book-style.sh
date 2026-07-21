@@ -65,7 +65,35 @@ then
   note "banned terminology in prose (see STYLE.md terminology table)"
 fi
 
-# 5. Double blank line after callout close
+# 5. Version literals in prose (fenced code, inline code, and URLs are
+#    exempt). Versions live in appendix-d-versions.md — chapters point
+#    there instead of pinning their own (STYLE.md "Facts").
+if python3 - >&2 <<'PY'
+import glob, re, sys
+bad = False
+for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
+    if f.endswith(('STYLE.md', 'README.md', 'appendix-d-versions.md')):
+        continue
+    fence = False
+    for i, l in enumerate(open(f, encoding='utf-8'), 1):
+        if l.strip().startswith('```'):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        prose = re.sub(r'`[^`]*`', '', l)          # inline code
+        prose = re.sub(r'\]\([^)]*\)', ']()', prose)  # link targets
+        prose = re.sub(r'https?://\S+', '', prose)    # bare URLs
+        for m in re.finditer(r'(?<![\w.])v?\d+\.\d+\.\d+(?![\d.])', prose):
+            print(f"{f}:{i}: version literal '{m.group(0)}' in prose: {l.strip()[:90]}")
+            bad = True
+sys.exit(0 if bad else 1)
+PY
+then
+  note "version literal in prose -> point to the Version & Compatibility Matrix appendix"
+fi
+
+# 6. Double blank line after callout close
 if python3 - <<'PY'
 import glob, re, sys
 bad = False
