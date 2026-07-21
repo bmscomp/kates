@@ -1747,3 +1747,7 @@ provisioning:
     ##                   - frontend
     ##
     extraEgress: []
+
+## Kates addition (not upstream Bitnami): image for the helm test pod
+test:
+  image: curlimages/curl:8.7.1

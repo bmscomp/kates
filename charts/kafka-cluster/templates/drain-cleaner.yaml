@@ -55,7 +55,7 @@ metadata:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     app: strimzi-drain-cleaner
 spec:
-  replicas: 1
+  replicas: {{ .Values.drainCleaner.replicas | default 1 }}
   selector:
     matchLabels:
       app: strimzi-drain-cleaner
@@ -67,10 +67,25 @@ spec:
         app: strimzi-drain-cleaner
     spec:
       serviceAccountName: strimzi-drain-cleaner
+      {{- with .Values.drainCleaner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.drainCleaner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.drainCleaner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: drain-cleaner
           image: {{ .Values.drainCleaner.image }}
           ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
             - containerPort: 8443
               name: https
               protocol: TCP
@@ -88,16 +103,21 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.drainCleaner.tls.secretName }}
+            - name: webhook-certificates
+              mountPath: /etc/webhook-certificates
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
-              port: 8080
+              port: http
             initialDelaySeconds: 10
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
-              port: 8080
+              port: http
             initialDelaySeconds: 10
             periodSeconds: 10
       securityContext:
@@ -105,6 +125,11 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.drainCleaner.tls.secretName }}
+        - name: webhook-certificates
+          secret:
+            secretName: {{ .Values.drainCleaner.tls.secretName }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -130,6 +155,10 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
     app: strimzi-drain-cleaner
+  {{- with .Values.drainCleaner.webhookAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 webhooks:
   - name: strimzi-drain-cleaner.{{ $namespace }}.svc.{{ include "kafka-cluster.clusterDomain" . }}
     rules:
@@ -138,6 +167,9 @@ webhooks:
         operations: ["CREATE"]
         resources: ["pods/eviction"]
     clientConfig:
+      {{- with .Values.drainCleaner.tls.caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
       service:
         name: strimzi-drain-cleaner
         namespace: {{ $namespace }}
@@ -150,4 +182,20 @@ webhooks:
     namespaceSelector:
       matchLabels:
         kates.io/namespace: {{ $namespace }}
+{{- if .Values.drainCleaner.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: strimzi-drain-cleaner
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    app: strimzi-drain-cleaner
+spec:
+  minAvailable: {{ .Values.drainCleaner.podDisruptionBudget.minAvailable | default 1 }}
+  selector:
+    matchLabels:
+      app: strimzi-drain-cleaner
+{{- end }}
 {{- end }}

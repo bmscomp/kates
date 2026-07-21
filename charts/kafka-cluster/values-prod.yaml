@@ -63,8 +63,10 @@ backup:
 seaweedfs:
   enabled: true
   s3:
-    accessKeyId:     "kates-kafka"        # override via external secret in prod
-    secretAccessKey: "change-me-in-prod"  # override via external secret in prod
+    # Credentials come from a pre-provisioned Secret (e.g. synced by
+    # external-secrets — see externalSecrets below). The chart renders no
+    # credentials Secret of its own when existingSecret is set.
+    existingSecret: "kafka-seaweedfs-credentials"
   buckets:
     tieredStorage: "kafka-tiered-storage"
     velero:        "velero-backups"

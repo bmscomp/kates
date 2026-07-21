@@ -62,13 +62,17 @@ dnsConfig: {}
 postgresql:
   enabled: false
 
+# Fail rendering if insecure chart defaults would reach production.
+# (Requires filling in externalDatabase credentials below.)
+productionMode: true
+
 externalDatabase:
   enabled: true
   host: ""              # e.g. kates-db.corp-rds.internal
   port: 5432
   database: kates
   username: kates
-  existingSecret: ""    # e.g. "kates-db-credentials"
+  existingSecret: ""    # e.g. "kates-db-credentials" — required by productionMode
   passwordKey: password
 
 # ── Kafka ─────────────────────────────────────────────────────────────────────

@@ -3,3 +3,7 @@ kafka-cluster:
 
 kates:
   enabled: true
+
+# Image used by the helm test connectivity pod (needs `nc`)
+test:
+  image: busybox:1.37
