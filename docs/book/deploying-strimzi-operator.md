@@ -2,7 +2,9 @@
 
 Every Kafka cluster in this repository is a custom resource, and a custom resource is inert without two things: the CRD that defines its schema, and an operator that reconciles it into pods. The `strimzi-operator` chart owns both. It is the first thing installed on a new cluster and the last thing to touch casually on a running one — the operator's version decides which Kafka versions exist at all, and its CRDs are the only reason your `Kafka` resources are still in etcd.
 
-> **Scope**: installing, migrating to, upgrading, and rolling back the `charts/strimzi-operator` release. For the engineering rationale behind the cluster it manages — node pools, listeners, certificates — see [Kafka Deployment Engineering](15-kafka-deployment.md). For the Kafka cluster install that follows this one, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md).
+::: {.callout-note appearance="simple"}
+**Scope**: installing, migrating to, upgrading, and rolling back the `charts/strimzi-operator` release. For the engineering rationale behind the cluster it manages — node pools, listeners, certificates — see [Kafka Deployment Engineering](15-kafka-deployment.md). For the Kafka cluster install that follows this one, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md).
+:::
 
 After this chapter, you can:
 

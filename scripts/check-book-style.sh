@@ -26,8 +26,10 @@ for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
 PY
 )
 
-# 2. Bold-blockquote admonitions
-if grep -rn '^> \*\*\(Note\|Tip\|Warning\|Important\|Caution\):\*\*' docs/book/*.md >&2; then
+# 2. Bold-blockquote admonitions — any `> **…**` opener, not just the five
+#    admonition words (a `> **Scope**:` slips the same rule). Genuine
+#    quotations are still fine: plain `> text` without a bold lead.
+if grep -rnE '^\s*> \*\*' docs/book/*.md >&2; then
   note "bold-blockquote admonition -> use ::: callout-*"
 fi
 

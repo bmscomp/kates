@@ -1,6 +1,8 @@
 # Kafka Deployment Engineering
 
-> **Scope**: this chapter owns the *why* — the production engineering behind the cluster: node pools, listeners design, certificates, Cruise Control, alerting, and backup. For the step-by-step install walkthrough, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md); for deploying the Kates stack, see [Deployment Guide](12-deployment.md).
+::: {.callout-note appearance="simple"}
+**Scope**: this chapter owns the *why* — the production engineering behind the cluster: node pools, listeners design, certificates, Cruise Control, alerting, and backup. For the step-by-step install walkthrough, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md); for deploying the Kates stack, see [Deployment Guide](12-deployment.md).
+:::
 
 This chapter is the operations manual for the **krafter** Kafka cluster — the Strimzi-managed, KRaft-mode deployment that underpins the entire Kates platform. It covers every layer from the operator to the broker JVM, with the reasoning behind each decision. It's written for the platform engineers who run `krafter` and for anyone who has to defend its design in review.
 

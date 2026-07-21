@@ -55,3 +55,15 @@ Exactly one blank line after the closing `:::`. Genuine quotations may use plain
 
 - No hardcoded counts unless the enumeration sits beside them. Versions live in the [Version & Compatibility Matrix](appendix-d-versions.md) — chapters point there instead of pinning their own.
 - Documenting a command? It must exist — link or name the implementing source file in the PR description.
+
+## CI Enforcement
+
+Every PR touching `docs/**` must pass the `Docs` workflow before merge (keep both jobs in the required status checks for `main`):
+
+- `check-book-style.sh` — the machine-checkable rules on this page (fence tags, callouts, cross-reference style, terminology, version literals in prose).
+- `gen-version-matrix.sh --check` — the appendix matrix matches the repo's pinned versions.
+- `gen-chart-table.sh --check` — the README chart table matches `charts/*/Chart.yaml`.
+- lychee (offline) — every relative link and `#fragment` in `README.md` and `docs/**` resolves.
+- `check-reference-drift.sh` — the CLI, REST, and gRPC reference chapters match the implementing sources.
+
+The `Book` workflow renders the HTML site on every book PR; HTML+PDF publish happens on push to `main`. A weekly `Link Rot` workflow validates external URLs off the PR path — its failures mean rot to triage, never a blocked merge.

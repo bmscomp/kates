@@ -158,7 +158,9 @@ graph TD
 
 ### Example Hypothesis
 
-> **Hypothesis:** "When we kill the leader broker for our main topic, producer latency will spike to no more than 500ms during leader election (which should complete within 10 seconds), and zero messages will be lost."
+::: {.callout-tip}
+**Hypothesis:** "When we kill the leader broker for our main topic, producer latency will spike to no more than 500ms during leader election (which should complete within 10 seconds), and zero messages will be lost."
+:::
 
 This hypothesis is testable, measurable, and has clear pass/fail criteria.
 
