@@ -13,9 +13,13 @@ class ProfileResourceTest {
     @Test
     void listReturns200() {
         var response = RestAssured.given()
-                .when().get("/api/profiles")
-                .then().statusCode(200)
-                .extract().body().jsonPath();
+                .when()
+                .get("/api/profiles")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .jsonPath();
 
         assertNotNull(response.getList("items"));
         assertEquals(0, response.getInt("page"));
@@ -23,9 +27,7 @@ class ProfileResourceTest {
 
     @Test
     void getReturns404ForMissingProfile() {
-        RestAssured.given()
-                .when().get("/api/profiles/nonexistent")
-                .then().statusCode(404);
+        RestAssured.given().when().get("/api/profiles/nonexistent").then().statusCode(404);
     }
 
     @Test
@@ -33,8 +35,10 @@ class ProfileResourceTest {
         RestAssured.given()
                 .contentType(ContentType.JSON)
                 .body("{}")
-                .when().post("/api/profiles")
-                .then().statusCode(400);
+                .when()
+                .post("/api/profiles")
+                .then()
+                .statusCode(400);
     }
 
     @Test
@@ -42,14 +46,14 @@ class ProfileResourceTest {
         RestAssured.given()
                 .contentType(ContentType.JSON)
                 .body("{\"name\":\"perf-1\",\"runId\":\"missing-run\"}")
-                .when().post("/api/profiles")
-                .then().statusCode(404);
+                .when()
+                .post("/api/profiles")
+                .then()
+                .statusCode(404);
     }
 
     @Test
     void deleteReturns404ForMissingProfile() {
-        RestAssured.given()
-                .when().delete("/api/profiles/nonexistent")
-                .then().statusCode(404);
+        RestAssured.given().when().delete("/api/profiles/nonexistent").then().statusCode(404);
     }
 }

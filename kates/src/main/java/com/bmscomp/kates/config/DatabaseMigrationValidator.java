@@ -1,9 +1,10 @@
 package com.bmscomp.kates.config;
 
-import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
+
+import io.quarkus.runtime.StartupEvent;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
@@ -17,7 +18,9 @@ public class DatabaseMigrationValidator {
     @Inject
     Flyway flyway;
 
-    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.flyway.migrate-at-start", defaultValue = "true")
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "quarkus.flyway.migrate-at-start",
+            defaultValue = "true")
     boolean migrateAtStart;
 
     void onStart(@Observes StartupEvent ev) {

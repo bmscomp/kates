@@ -39,8 +39,16 @@ public class DisruptionScheduler {
     @Inject
     ObjectMapper objectMapper;
 
+    @jakarta.inject.Inject
+    com.bmscomp.kates.service.SchedulerLeaseService leases;
+
     @Scheduled(every = "60s", identity = "kates-disruption-schedule-evaluator")
     void evaluateSchedules() {
+        // Only the lease holder may trigger disruptions — with replicas > 1
+        // each schedule would otherwise inject faults once per replica.
+        if (!leases.tryAcquire("disruption-scheduler", java.time.Duration.ofSeconds(55))) {
+            return;
+        }
         List<DisruptionScheduleEntity> schedules = em.createQuery(
                         "SELECT s FROM DisruptionScheduleEntity s WHERE s.enabled = true",
                         DisruptionScheduleEntity.class)

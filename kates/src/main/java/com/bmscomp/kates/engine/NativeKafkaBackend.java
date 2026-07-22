@@ -112,16 +112,19 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
     private void runIntegrityCdc(BenchmarkTask task, WorkerState state) {
         try {
-            BenchmarkStatus cdcStatus = cdcIntegrationService.runCdcTest(task, (phase, durations) -> {
-                state.currentPhase = phase;
-                state.cdcPhaseDurations = durations;
-            }).join();
+            BenchmarkStatus cdcStatus = cdcIntegrationService
+                    .runCdcTest(task, (phase, durations) -> {
+                        state.currentPhase = phase;
+                        state.cdcPhaseDurations = durations;
+                    })
+                    .join();
             state.status = cdcStatus.getState();
             if (cdcStatus.getError() != null) {
                 state.error = cdcStatus.getError();
             }
             state.recordsProcessed.set(cdcStatus.getRecordsProcessed());
-            if (cdcStatus.getPhaseDurations() != null && !cdcStatus.getPhaseDurations().isEmpty()) {
+            if (cdcStatus.getPhaseDurations() != null
+                    && !cdcStatus.getPhaseDurations().isEmpty()) {
                 state.cdcPhaseDurations = cdcStatus.getPhaseDurations();
             }
         } catch (Exception e) {

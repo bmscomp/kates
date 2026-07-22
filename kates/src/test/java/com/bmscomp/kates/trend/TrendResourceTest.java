@@ -4,8 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
 
-import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -20,17 +20,17 @@ class TrendResourceTest {
 
     @Test
     void getTrendReturns400WhenTypeMissing() {
-        RestAssured.given()
-                .when().get("/api/trends")
-                .then().statusCode(400);
+        RestAssured.given().when().get("/api/trends").then().statusCode(400);
     }
 
     @Test
     void getTrendReturns400ForInvalidType() {
         RestAssured.given()
                 .queryParam("type", "INVALID")
-                .when().get("/api/trends")
-                .then().statusCode(400);
+                .when()
+                .get("/api/trends")
+                .then()
+                .statusCode(400);
     }
 
     @Test
@@ -38,8 +38,10 @@ class TrendResourceTest {
         RestAssured.given()
                 .queryParam("type", "LOAD")
                 .queryParam("days", 0)
-                .when().get("/api/trends")
-                .then().statusCode(400);
+                .when()
+                .get("/api/trends")
+                .then()
+                .statusCode(400);
     }
 
     @Test
@@ -50,8 +52,10 @@ class TrendResourceTest {
 
         RestAssured.given()
                 .queryParam("type", "LOAD")
-                .when().get("/api/trends")
-                .then().statusCode(200);
+                .when()
+                .get("/api/trends")
+                .then()
+                .statusCode(200);
     }
 
     @Test
@@ -60,9 +64,13 @@ class TrendResourceTest {
 
         var body = RestAssured.given()
                 .queryParam("type", "LOAD")
-                .when().get("/api/trends/phases")
-                .then().statusCode(200)
-                .extract().body().jsonPath();
+                .when()
+                .get("/api/trends/phases")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .jsonPath();
 
         assertEquals(2, body.getList("").size());
     }
@@ -75,8 +83,10 @@ class TrendResourceTest {
 
         RestAssured.given()
                 .queryParam("type", "LOAD")
-                .when().get("/api/trends/breakdown")
-                .then().statusCode(200);
+                .when()
+                .get("/api/trends/breakdown")
+                .then()
+                .statusCode(200);
     }
 
     @Test
@@ -87,7 +97,9 @@ class TrendResourceTest {
 
         RestAssured.given()
                 .queryParam("type", "LOAD")
-                .when().get("/api/trends/broker")
-                .then().statusCode(200);
+                .when()
+                .get("/api/trends/broker")
+                .then()
+                .statusCode(200);
     }
 }

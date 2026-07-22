@@ -5,7 +5,6 @@ import static org.mockito.Mockito.*;
 
 import java.util.Map;
 import java.util.Set;
-
 import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
@@ -42,8 +41,7 @@ class TopicServiceTest {
         when(result.all()).thenReturn(KafkaFuture.completedFuture(null));
         when(mockClient.createTopics(any())).thenReturn(result);
 
-        assertDoesNotThrow(() ->
-                topicService.createTopic("test-topic", 3, 1, Map.of("retention.ms", "60000")));
+        assertDoesNotThrow(() -> topicService.createTopic("test-topic", 3, 1, Map.of("retention.ms", "60000")));
     }
 
     @Test
@@ -52,8 +50,7 @@ class TopicServiceTest {
         when(result.all()).thenReturn(KafkaFuture.completedFuture(null));
         when(mockClient.createTopics(any())).thenReturn(result);
 
-        assertDoesNotThrow(() ->
-                topicService.createTopic("test-topic", 1, 1, null));
+        assertDoesNotThrow(() -> topicService.createTopic("test-topic", 1, 1, null));
     }
 
     @Test

@@ -89,6 +89,27 @@ jobs:
           report_paths: kates/target/surefire-reports/TEST-*.xml
           check_name: "JUnit Tests"
 
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: kates/target/jacoco-report/
+          if-no-files-found: ignore
+
+      # Dependency CVE scan — the pom manually pins kafka-clients/netty for
+      # named CVEs; this catches the next ones instead of relying on memory.
+      # CRITICAL fails the build; HIGH and below are reported only.
+      - name: Dependency CVE scan (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: kates
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
   helm-lint:
     name: Helm Lint
     needs: changes

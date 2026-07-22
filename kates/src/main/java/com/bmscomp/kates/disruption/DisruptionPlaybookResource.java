@@ -1,7 +1,6 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;

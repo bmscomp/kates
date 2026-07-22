@@ -73,13 +73,12 @@ class FaultSpecTest {
         var mutable = new java.util.HashMap<String, String>();
         mutable.put("A", "1");
 
-        FaultSpec spec = FaultSpec.builder("test")
-                .envOverrides(mutable)
-                .build();
+        FaultSpec spec = FaultSpec.builder("test").envOverrides(mutable).build();
 
         mutable.put("B", "2");
         assertEquals(1, spec.envOverrides().size());
-        assertThrows(UnsupportedOperationException.class, () -> spec.envOverrides().put("C", "3"));
+        assertThrows(
+                UnsupportedOperationException.class, () -> spec.envOverrides().put("C", "3"));
     }
 
     @Test
@@ -87,12 +86,12 @@ class FaultSpecTest {
         var mutable = new java.util.ArrayList<ProbeSpec>();
         mutable.add(ProbeSpec.builder("p1").build());
 
-        FaultSpec spec = FaultSpec.builder("test")
-                .probes(mutable)
-                .build();
+        FaultSpec spec = FaultSpec.builder("test").probes(mutable).build();
 
         mutable.add(ProbeSpec.builder("p2").build());
         assertEquals(1, spec.probes().size());
-        assertThrows(UnsupportedOperationException.class, () -> spec.probes().add(ProbeSpec.builder("p3").build()));
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> spec.probes().add(ProbeSpec.builder("p3").build()));
     }
 }

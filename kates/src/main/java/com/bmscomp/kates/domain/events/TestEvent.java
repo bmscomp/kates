@@ -1,8 +1,9 @@
 package com.bmscomp.kates.domain.events;
 
-import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
+import com.bmscomp.kates.domain.TestResult.TaskStatus;
 
 public class TestEvent {
     private String testId;
@@ -14,11 +15,12 @@ public class TestEvent {
     public TestEvent() {}
 
     @JsonCreator
-    public TestEvent(@JsonProperty("testId") String testId, 
-                     @JsonProperty("testType") String testType,
-                     @JsonProperty("status") TaskStatus status, 
-                     @JsonProperty("message") String message, 
-                     @JsonProperty("timestamp") long timestamp) {
+    public TestEvent(
+            @JsonProperty("testId") String testId,
+            @JsonProperty("testType") String testType,
+            @JsonProperty("status") TaskStatus status,
+            @JsonProperty("message") String message,
+            @JsonProperty("timestamp") long timestamp) {
         this.testId = testId;
         this.testType = testType;
         this.status = status;
@@ -26,9 +28,23 @@ public class TestEvent {
         this.timestamp = timestamp;
     }
 
-    public String getTestId() { return testId; }
-    public String getTestType() { return testType; }
-    public TaskStatus getStatus() { return status; }
-    public String getMessage() { return message; }
-    public long getTimestamp() { return timestamp; }
+    public String getTestId() {
+        return testId;
+    }
+
+    public String getTestType() {
+        return testType;
+    }
+
+    public TaskStatus getStatus() {
+        return status;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
+    }
 }

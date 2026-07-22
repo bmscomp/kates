@@ -1,7 +1,6 @@
 package com.bmscomp.kates.resource;
 
 import java.util.List;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -10,9 +9,9 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import com.bmscomp.kates.service.ShareGroupConsumerService;
-
 import io.smallrye.common.annotation.Blocking;
+
+import com.bmscomp.kates.service.ShareGroupConsumerService;
 
 /**
  * REST endpoint for managing the Kafka 4.2 Share Groups consumer.
@@ -31,7 +30,8 @@ public class ShareGroupResource {
     public Response start() {
         boolean started = shareGroupService.start();
         if (started) {
-            return Response.ok(new ActionResult("started", "Share Group consumer started")).build();
+            return Response.ok(new ActionResult("started", "Share Group consumer started"))
+                    .build();
         }
         return Response.status(Response.Status.CONFLICT)
                 .entity(new ActionResult("already_running", "Share Group consumer is already running"))
@@ -43,7 +43,8 @@ public class ShareGroupResource {
     public Response stop() {
         boolean stopped = shareGroupService.stop();
         if (stopped) {
-            return Response.ok(new ActionResult("stopped", "Share Group consumer stopped")).build();
+            return Response.ok(new ActionResult("stopped", "Share Group consumer stopped"))
+                    .build();
         }
         return Response.status(Response.Status.CONFLICT)
                 .entity(new ActionResult("not_running", "Share Group consumer is not running"))
@@ -57,16 +58,11 @@ public class ShareGroupResource {
                 shareGroupService.isRunning(),
                 shareGroupService.getProcessedCount(),
                 shareGroupService.getFailedCount(),
-                shareGroupService.getRecentResults()
-        );
+                shareGroupService.getRecentResults());
     }
 
     public record ActionResult(String status, String message) {}
 
     public record ShareGroupStatus(
-            boolean running,
-            long processedCount,
-            long failedCount,
-            List<String> recentResults
-    ) {}
+            boolean running, long processedCount, long failedCount, List<String> recentResults) {}
 }

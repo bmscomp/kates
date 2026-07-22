@@ -13,13 +13,14 @@ final class DisruptionPersistence {
 
     private DisruptionPersistence() {}
 
-    static void persistReport(String id, DisruptionReport report,
-                              DisruptionReportRepository repository, ObjectMapper objectMapper) {
+    static void persistReport(
+            String id, DisruptionReport report, DisruptionReportRepository repository, ObjectMapper objectMapper) {
         try {
-            String grade = report.getSlaVerdict() != null ? report.getSlaVerdict().grade() : null;
+            String grade =
+                    report.getSlaVerdict() != null ? report.getSlaVerdict().grade() : null;
             String reportJson = objectMapper.writeValueAsString(report);
-            String summaryJson = report.getSummary() != null
-                    ? objectMapper.writeValueAsString(report.getSummary()) : null;
+            String summaryJson =
+                    report.getSummary() != null ? objectMapper.writeValueAsString(report.getSummary()) : null;
 
             DisruptionReportEntity entity = new DisruptionReportEntity(
                     id, report.getPlanName(), report.getStatus(), grade, reportJson, summaryJson);
@@ -30,8 +31,7 @@ final class DisruptionPersistence {
         }
     }
 
-    static DisruptionReport loadReport(String id, DisruptionReportRepository repository,
-                                        ObjectMapper objectMapper) {
+    static DisruptionReport loadReport(String id, DisruptionReportRepository repository, ObjectMapper objectMapper) {
         DisruptionReportEntity entity = repository.findById(id);
         if (entity == null) return null;
         try {

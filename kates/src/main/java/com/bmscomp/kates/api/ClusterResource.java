@@ -12,9 +12,10 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import io.smallrye.mutiny.Uni;
 
 import io.smallrye.common.annotation.Blocking;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.mutiny.Uni;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -39,10 +40,12 @@ public class ClusterResource {
     private final ClusterAlertsService clusterAlertsService;
 
     @Inject
-    public ClusterResource(TopicService topicService, ConsumerGroupService consumerGroupService,
-                           ClusterHealthService clusterHealthService,
-                           ClusterTopologyService clusterTopologyService,
-                           ClusterAlertsService clusterAlertsService) {
+    public ClusterResource(
+            TopicService topicService,
+            ConsumerGroupService consumerGroupService,
+            ClusterHealthService clusterHealthService,
+            ClusterTopologyService clusterTopologyService,
+            ClusterAlertsService clusterAlertsService) {
         this.topicService = topicService;
         this.consumerGroupService = consumerGroupService;
         this.clusterHealthService = clusterHealthService;
@@ -194,17 +197,26 @@ public class ClusterResource {
 
     @GET
     @Path("/check")
+    // Override the class-level @Blocking: this method is a genuine reactive
+    // pipeline (clusterHealthCheck wraps AdminClient KafkaFutures as
+    // CompletionStages — no blocking work), so it belongs on the event loop
+    // rather than being dispatched to a worker thread only to return a Uni.
+    @NonBlocking
     public Uni<Response> clusterCheck() {
-        return clusterHealthService.clusterHealthCheck()
+        return clusterHealthService
+                .clusterHealthCheck()
                 .map(report -> Response.ok(report).build())
-                .onFailure().recoverWithItem(e -> Response.serverError()
-                        .entity(ApiError.of(500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))
+                .onFailure()
+                .recoverWithItem(e -> Response.serverError()
+                        .entity(ApiError.of(
+                                500, "Internal Server Error", "Cluster health check failed: " + e.getMessage()))
                         .build());
     }
 
     @GET
     @Path("/topology")
-    @Operation(summary = "Get cluster topology",
+    @Operation(
+            summary = "Get cluster topology",
             description = "Returns full cluster topology including KRaft controllers and broker node pools")
     @APIResponse(responseCode = "200", description = "Cluster topology")
     @APIResponse(responseCode = "503", description = "Kubernetes API not available")
@@ -225,7 +237,8 @@ public class ClusterResource {
 
     @GET
     @Path("/alerts")
-    @Operation(summary = "Get critical cluster alerts",
+    @Operation(
+            summary = "Get critical cluster alerts",
             description = "Returns critical and warning PrometheusRule alerts that affect Kafka cluster health")
     @APIResponse(responseCode = "200", description = "Cluster alerts")
     public Response getClusterAlerts() {

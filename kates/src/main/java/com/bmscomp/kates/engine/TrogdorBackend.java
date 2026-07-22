@@ -98,9 +98,7 @@ public class TrogdorBackend implements BenchmarkBackend {
                         task.getDurationMs(),
                         task.getRecordSize());
             case INTEGRITY, INTEGRITY_CDC ->
-                throw new BenchmarkException(
-                        "INTEGRITY/CDC tests require the native backend",
-                        null);
+                throw new BenchmarkException("INTEGRITY/CDC tests require the native backend", null);
         };
     }
 

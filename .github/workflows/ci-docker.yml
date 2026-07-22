@@ -39,16 +39,9 @@ jobs:
             runner: ubuntu-latest
             qemu: false
 
-          - variant: native
-            arch: amd64
-            platform: linux/amd64
-            dockerfile: kates/Dockerfile.native
-            runner: ubuntu-latest
-            qemu: false
-
           # --- arm64 build (native ARM runner, JVM only) ---
-          # native/arm64 is excluded: GraalVM native-image is too slow
-          # for CI even on native runners (~12 min) — validated at release time.
+          # native builds (amd64 + arm64) are excluded: GraalVM native-image
+          # is too slow for PR CI (~7-12 min) — validated at release time.
           - variant: jvm
             arch: arm64
             platform: linux/arm64
