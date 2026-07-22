@@ -78,6 +78,15 @@ strimzi-kafka-operator:
     requests:
       memory: 768Mi
 
+  # ── JVM heap ───────────────────────────────────────────────────────────────
+  # The memory limit above is Guaranteed QoS, but without an explicit -Xmx the
+  # JVM sizes the heap from cgroup defaults and can creep toward the 768Mi limit
+  # under reconciliation load and OOMKill. Pin the heap with headroom for
+  # metaspace, threads and non-heap. Tune against the operator's real RSS.
+  extraEnvs:
+    - name: JAVA_OPTS
+      value: "-Xms256m -Xmx512m"
+
   # ── Dashboards: left OFF deliberately ──────────────────────────────────────
   # Upstream creates 9 Grafana ConfigMaps whose names are independent of the
   # release name, and charts/kafka-cluster/values.yaml has its own dashboards
@@ -86,6 +95,21 @@ strimzi-kafka-operator:
   # first, then enable on ONE side.
   dashboards:
     enabled: false
+
+# ── Operator self-observability (wrapper-owned, not the subchart) ────────────
+# Scrape the cluster operator's OWN metrics (reconciliation counters, JVM) and
+# alert on operator health — distinct from the Kafka operands it manages. The
+# `release: kafka` label matches this repo's Prometheus podMonitor/rule
+# selector (same as charts/kafka-cluster podMonitors.labels).
+metrics:
+  podMonitor:
+    enabled: true
+    labels:
+      release: kafka
+alerts:
+  enabled: true
+  labels:
+    release: kafka
 
 # ── Airgapped / restricted-egress clusters ───────────────────────────────────
 # The CRD hook needs egress to the bundle URL on EVERY install AND upgrade —

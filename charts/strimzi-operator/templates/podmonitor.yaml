@@ -1,0 +1,38 @@
+{{- if .Values.metrics.podMonitor.enabled }}
+{{- /*
+Scrapes the cluster operator's OWN metrics endpoint (:8080/metrics) — the
+reconciliation counters and JVM stats for the operator process itself. This is
+distinct from the operand monitoring the operator sets up for Kafka clusters.
+PodMonitor (not ServiceMonitor) because upstream exposes the metrics on the pod
+port directly and ships no Service for the operator.
+*/ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (include "strimzi-operator.annotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      # The operator pod label is upstream-fixed, not derived from this release.
+      name: strimzi-cluster-operator
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.podMonitor.interval }}
+      {{- with .Values.metrics.podMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+{{- end }}

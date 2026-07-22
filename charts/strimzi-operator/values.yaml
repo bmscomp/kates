@@ -46,6 +46,27 @@ testImages:
   # -- kubectl image used by the CRD-upgrade hook Job and the Helm tests
   kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
 
+# ── Operator self-observability ──────────────────────────────────────────────
+# Monitoring of the cluster operator ITSELF (its reconciliation counters and
+# JVM), distinct from the Kafka operands it manages. Both off by default —
+# enable via values-prod.yaml. Require the Prometheus Operator CRDs.
+metrics:
+  podMonitor:
+    # -- Create a PodMonitor scraping the operator's :8080/metrics endpoint
+    enabled: false
+    # -- Labels so your Prometheus selects this PodMonitor (this repo's
+    # kube-prometheus-stack selects on `release`)
+    labels: {}
+    # -- Scrape interval
+    interval: 30s
+    # -- Optional scrape timeout
+    scrapeTimeout: ""
+alerts:
+  # -- Create a PrometheusRule with operator-health alerts
+  enabled: false
+  # -- Labels so your Prometheus selects this PrometheusRule
+  labels: {}
+
 # ── CRD lifecycle ────────────────────────────────────────────────────────────
 # Closes the gap Helm leaves: crds/ is applied on install and never on upgrade.
 # This hook runs pre-install AND pre-upgrade, so CRDs are current before the
