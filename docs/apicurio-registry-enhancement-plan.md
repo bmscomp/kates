@@ -11,16 +11,19 @@ The chart was vendored as a third-party tree and still looks like raw `helm crea
 > - **Week 3 (P2) ✓** — removed from the `publish-charts.yml` exclusion (now OCI-pushed + cosign-signed like the rest); added as optional `kates-platform` dependency (`condition: apicurio-registry.enabled`); optional UI Deployment/Service/Ingress (P2-3); ServiceMonitor scraping the management port (P2-4); `SASL_SSL`/mTLS truststore wiring against the cluster `tls` listener (P2-5).
 > - **Post-P2 correctness ✓** — `kafkaSql.consumerGroupPrefix` (default `apicurio`) sets `APICURIO_KAFKASQL_CONSUMER_GROUP_PREFIX` so the registry's per-replica consumer group falls within the `kafka-cluster` KafkaUser's group-prefix ACL. Without it the default random-UUID group is denied by the secured cluster and the registry cannot replay its own journal.
 
-## Still open
+## Post-P2 follow-ups (chart 0.4.0)
 
-None of the runtime behaviour has been exercised against a live registry — everything so far is lint/template/kubeconform. Remaining, in priority order:
+- **Deploy path realigned ✓** — `config/apicurio/apicurio-values.yaml` and its offline variant, plus `scripts/deploy-apicurio.sh`, were still pinned to the legacy 2.x `apicurio-registry-kafkasql` image and set removed keys (`kafka.enabled`, `global.kafka.properties`) that the new `additionalProperties:false` schema rejects — so the actual deploy would have failed at `helm install`. They now use the chart defaults (quay.io 3.x), the `global.kafka.*` interface, and `service.nodePort` (30082); the script relies on the chart's Secret wiring instead of hand-injecting JAAS env. `service.nodePort` support was added to the chart.
+- **Live validation on kind ✓** — new `.github/workflows/ci-apicurio.yml` deploys Strimzi + `kafka-cluster` + this chart via the same scripts `make all` uses, waits for Ready (which by itself proves probes/port 9000/image/SCRAM/journal replay), and round-trips a schema through the ccompat v3 API. Path-filtered to the relevant charts/config plus `workflow_dispatch`. *New heavy job — expect a first-run shake-out on the runner.*
+- **Events topic ✓** — `kafkaTopics.events.enabled` provisions `registry-events` (finite retention) for when eventing is turned on; off by default.
+- **UI hardening ✓** — UI container defaults to `readOnlyRootFilesystem: true` with tmpfs mounts at nginx's writable paths (`/tmp`, `/var/cache/nginx`, `/var/run`).
 
-1. **Live validation on kind.** Deploy Strimzi + `kafka-cluster` + this chart, confirm the pod reaches Ready (probe paths, port 9000, image, SCRAM JAAS), and round-trip a schema through `/apis/registry/v3` to prove the KafkaSQL journal path. The repo's `integration.yml` is currently dry-run only, so this needs a real operator+broker deploy (heavier, ~adds minutes to that job).
-2. **Events topic.** Only journal + snapshots are provisioned. If Kafka-based eventing is ever enabled, gate a `registry-events` `KafkaTopic` behind a value (the `registry-` topic ACL already exists).
-3. **UI hardening.** The UI container runs with `readOnlyRootFilesystem: false` (nginx scratch dirs); tighten with emptyDir mounts.
-4. **kafka-ui integration.** Wire `kafka-ui`'s `schemaRegistry.enabled` at this registry so schemas surface in the UI.
-5. **Registry auth.** No auth env today; add OIDC when needed.
-6. **Publish dry-run.** Trigger `publish-charts` once (tag) to confirm the OCI push + cosign now works for this chart.
+### Still open
+
+1. **kafka-ui integration.** Wire `kafka-ui`'s `schemaRegistry.enabled` at this registry so schemas surface in the UI.
+2. **Registry auth.** No auth env today; add OIDC when needed.
+3. **Publish dry-run.** Trigger `publish-charts` once (tag) to confirm the OCI push + cosign now works for this chart.
+4. **UI probe realism.** UI liveness/readiness hit `/`; confirm the 3.x UI image serves a lighter health path.
 
 ## Current state
 
