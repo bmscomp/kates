@@ -41,6 +41,10 @@ brokerDefaults:
   resources:
     requests: { memory: 1Gi, cpu: 250m }
     limits: { memory: 1Gi, cpu: 500m }
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
   tolerations: []
 
 # A single broker cannot satisfy the production replication factors (3) the base
