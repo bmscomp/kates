@@ -1,0 +1,30 @@
+{{- if .Values.kafkaTopics.create }}
+{{- $t := .Values.kafkaTopics }}
+{{- range $name := list $t.journalName $t.snapshotsName }}
+---
+# KafkaSQL {{ $name }}: cleanup.policy=delete with infinite retention is
+# mandatory — the registry verifies this on startup and refuses to run
+# against a topic that could silently lose journal data.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ $name }}
+  namespace: {{ $t.namespace }}
+  labels:
+    strimzi.io/cluster: {{ $t.clusterName }}
+    {{- include "apicurio-registry.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  partitions: {{ $t.partitions }}
+  replicas: {{ $t.replicas }}
+  config:
+    cleanup.policy: delete
+    retention.ms: -1
+    retention.bytes: -1
+    min.insync.replicas: {{ $t.minInsyncReplicas }}
+    {{- with $t.extraConfig }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

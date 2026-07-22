@@ -62,6 +62,18 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Registry container image reference. Digest pins win over tags.
+*/}}
+{{- define "apicurio-registry.image" -}}
+{{- $repo := printf "%s/%s" .Values.image.registry .Values.image.repository }}
+{{- if .Values.image.digest }}
+{{- printf "%s@%s" $repo .Values.image.digest }}
+{{- else }}
+{{- printf "%s:%s" $repo (.Values.image.tag | default .Chart.AppVersion) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Kafka bootstrap servers. The registry uses the external Strimzi cluster
 deployed by the kafka-cluster chart in this repository (no bundled broker).
 */}}
