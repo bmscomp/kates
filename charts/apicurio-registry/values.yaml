@@ -4,11 +4,17 @@
 
 replicaCount: 1
 
+# -- Image configuration. Registry 3.x publishes to quay.io (the Docker Hub
+# apicurio/apicurio-registry repository carries the legacy 2.x line).
 image:
+  registry: quay.io
   repository: apicurio/apicurio-registry
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
+  # -- Image tag — defaults to Chart.appVersion when empty
   tag: ""
+  # -- Optional image digest for pinned deployments (overrides tag when set)
+  # digest: "sha256:abc123..."
+  digest: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -39,6 +45,9 @@ securityContext: {}
 service:
   type: ClusterIP
   port: 80
+  # -- Quarkus management port: /health/live, /health/ready and /metrics are
+  # served here (Registry 3.x moved them off the main 8080 port).
+  managementPort: 9000
 
 ingress:
   enabled: false
@@ -83,6 +92,37 @@ affinity: {}
 
 networkPolicy:
   enabled: false
+
+# -- Extra environment variables appended to the registry container
+env: []
+
+# -- KafkaSQL storage tuning
+kafkaSql:
+  # -- Escape hatch: skip the registry's startup verification of journal /
+  # snapshots topic configuration. Leave false — the chart provisions
+  # correctly configured topics via kafkaTopics.create instead.
+  topicVerificationOverride: false
+
+# -- Strimzi KafkaTopic provisioning for KafkaSQL storage. The journal and
+# snapshots topics must use cleanup.policy=delete with infinite retention;
+# the registry refuses to start against misconfigured topics. CRs are created
+# in the Kafka cluster's namespace so the topic operator picks them up.
+kafkaTopics:
+  # -- Create kafkasql-journal and kafkasql-snapshots KafkaTopic CRs
+  create: true
+  # -- Strimzi cluster name (strimzi.io/cluster label)
+  clusterName: "krafter"
+  # -- Namespace of the Kafka cluster / topic operator
+  namespace: "kafka"
+  journalName: "kafkasql-journal"
+  snapshotsName: "kafkasql-snapshots"
+  partitions: 3
+  # -- Keep at 1 for single-broker (kind) clusters; raise to 3 with
+  # minInsyncReplicas 2 on production clusters.
+  replicas: 1
+  minInsyncReplicas: 1
+  # -- Extra topic config merged into both topics
+  extraConfig: {}
 
 # Kafka connection for kafkasql storage. The registry has no bundled broker:
 # it targets the Strimzi cluster deployed by this repo's kafka-cluster chart,

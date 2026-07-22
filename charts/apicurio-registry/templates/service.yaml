@@ -11,5 +11,11 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    # Health + metrics (Quarkus management interface); scraped by the
+    # ServiceMonitor and probed by humans, never exposed via Ingress.
+    - port: {{ .Values.service.managementPort }}
+      targetPort: management
+      protocol: TCP
+      name: management
   selector:
     {{- include "apicurio-registry.selectorLabels" . | nindent 4 }}

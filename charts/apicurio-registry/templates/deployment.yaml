@@ -31,25 +31,31 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "apicurio-registry.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
+            # Quarkus management interface: health + metrics (Registry 3.x)
+            - name: management
+              containerPort: 9000
+              protocol: TCP
           livenessProbe:
             httpGet:
-              path: /
-              port: http
+              path: /health/live
+              port: management
           readinessProbe:
             httpGet:
-              path: /
-              port: http
+              path: /health/ready
+              port: management
           env:
             - name: APICURIO_STORAGE_KIND
               value: "kafkasql"
+            {{- if .Values.kafkaSql.topicVerificationOverride }}
             - name: APICURIO_KAFKASQL_TOPIC_CONFIGURATION_VERIFICATION_OVERRIDE_ENABLED
               value: "true"
+            {{- end }}
             - name: APICURIO_KAFKASQL_BOOTSTRAP_SERVERS
               value: {{ include "apicurio-registry.kafkaBootstrapServers" . }}
             {{- if .Values.global.kafka.securityProtocol }}
