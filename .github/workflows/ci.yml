@@ -164,12 +164,22 @@ jobs:
           fi
           echo "OK: schema rejected the misspelled key"
 
-      # Every chart must at least lint and render with default values.
-      # Dependency tgzs are vendored in each chart's charts/ dir, so no
-      # network fetch is needed — except kates-platform, whose dependencies
-      # are local file:// references resolved from this repo.
-      - name: Build kates-platform local dependencies
-        run: helm dependency build charts/kates-platform/
+      # Charts whose dependency tgzs are gitignored (charts/*/charts/) must be
+      # fetched before the render loop. seaweedfs (kafka-cluster), litmus-core
+      # (kates-chaos) and kube-prometheus-stack (monitoring) come from classic
+      # Helm repos; kates-platform resolves local file:// deps. minio and
+      # apicurio-registry vendor their dependencies in-tree, so they are left
+      # untouched (their upstream Bitnami repo is deprecated).
+      - name: Build chart dependencies
+        run: |
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          for chart in kafka-cluster kates-chaos monitoring kates-platform; do
+            echo "==> helm dependency build charts/${chart}/"
+            helm dependency build "charts/${chart}/"
+          done
 
       - name: Lint and template all charts
         run: |
