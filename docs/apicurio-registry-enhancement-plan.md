@@ -9,6 +9,18 @@ The chart was vendored as a third-party tree and still looks like raw `helm crea
 > - **Week 1 (P0) ✓** — P0-1 removed the bitnami kafka 17.2.6 dependency, `Chart.lock`, and the vendored `charts/kafka` tree (~100 files, Kafka 3.2-era, ZooKeeper); `kafkasql` targets the `kafka-cluster` `krafter` cluster (SCRAM user, ACLs, Secret already provisioned there). P0-2 probes hit `/health/live` + `/health/ready` on the 3.x management port 9000. P0-3 image moved to `quay.io` with registry override + digest pinning. P0-4 `kafkasql-journal` / `kafkasql-snapshots` provisioned as `KafkaTopic` CRs (`cleanup.policy=delete`, infinite retention); the verification-override env is now opt-in.
 > - **Week 2 (P1) ✓** — securityContext (runAsNonRoot 185, seccomp, RO rootfs, emptyDir `/tmp`), `values.schema.json` (`additionalProperties:false`), default resources, PDB, HPA capped at 5, topology spread, configurable probes + startup probe, dynamic-namespace NetworkPolicy, README documenting the kafka-cluster contract, NOTES runbook, and a chart test hitting `/apis/registry/v3/system/info`.
 > - **Week 3 (P2) ✓** — removed from the `publish-charts.yml` exclusion (now OCI-pushed + cosign-signed like the rest); added as optional `kates-platform` dependency (`condition: apicurio-registry.enabled`); optional UI Deployment/Service/Ingress (P2-3); ServiceMonitor scraping the management port (P2-4); `SASL_SSL`/mTLS truststore wiring against the cluster `tls` listener (P2-5).
+> - **Post-P2 correctness ✓** — `kafkaSql.consumerGroupPrefix` (default `apicurio`) sets `APICURIO_KAFKASQL_CONSUMER_GROUP_PREFIX` so the registry's per-replica consumer group falls within the `kafka-cluster` KafkaUser's group-prefix ACL. Without it the default random-UUID group is denied by the secured cluster and the registry cannot replay its own journal.
+
+## Still open
+
+None of the runtime behaviour has been exercised against a live registry — everything so far is lint/template/kubeconform. Remaining, in priority order:
+
+1. **Live validation on kind.** Deploy Strimzi + `kafka-cluster` + this chart, confirm the pod reaches Ready (probe paths, port 9000, image, SCRAM JAAS), and round-trip a schema through `/apis/registry/v3` to prove the KafkaSQL journal path. The repo's `integration.yml` is currently dry-run only, so this needs a real operator+broker deploy (heavier, ~adds minutes to that job).
+2. **Events topic.** Only journal + snapshots are provisioned. If Kafka-based eventing is ever enabled, gate a `registry-events` `KafkaTopic` behind a value (the `registry-` topic ACL already exists).
+3. **UI hardening.** The UI container runs with `readOnlyRootFilesystem: false` (nginx scratch dirs); tighten with emptyDir mounts.
+4. **kafka-ui integration.** Wire `kafka-ui`'s `schemaRegistry.enabled` at this registry so schemas surface in the UI.
+5. **Registry auth.** No auth env today; add OIDC when needed.
+6. **Publish dry-run.** Trigger `publish-charts` once (tag) to confirm the OCI push + cosign now works for this chart.
 
 ## Current state
 

@@ -223,6 +223,14 @@ kafkaSql:
   # snapshots topic configuration. Leave false — the chart provisions
   # correctly configured topics via kafkaTopics.create instead.
   topicVerificationOverride: false
+  # -- Consumer group prefix. The registry generates a unique group ID per
+  # replica on every start (never set a FIXED group ID — the H2 store is
+  # rebuilt from the journal each boot). By default that ID is a bare UUID,
+  # which the kafka-cluster chart's KafkaUser ACL (group prefix "apicurio",
+  # Read/Describe) would deny. Setting this prefix makes the generated group
+  # match the ACL so the registry can consume its own journal. Must stay in
+  # sync with the group ACL in charts/kafka-cluster/values.yaml.
+  consumerGroupPrefix: "apicurio"
 
 # -- TLS to the Kafka brokers. Enable to mount the Strimzi cluster CA and set
 # securityProtocol to SASL_SSL (against the kafka-cluster `tls` listener on
