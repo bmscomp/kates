@@ -3,6 +3,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "enabled": { "type": "boolean" },
     "replicaCount": { "type": "integer", "minimum": 0 },
     "image": {
       "type": "object",
@@ -102,11 +103,78 @@
       }
     },
     "env": { "type": "array" },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "digest": { "type": "string" }
+          }
+        },
+        "registryApiUrl": { "type": "string" },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer" }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "className": { "type": "string" },
+            "annotations": { "type": "object" },
+            "hosts": { "type": "array" },
+            "tls": { "type": "array" }
+          }
+        },
+        "env": { "type": "array" },
+        "resources": { "type": "object" },
+        "podSecurityContext": { "type": "object" },
+        "securityContext": { "type": "object" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "path": { "type": "string" },
+            "interval": { "type": "string" },
+            "scrapeTimeout": { "type": "string" },
+            "additionalLabels": { "type": "object" }
+          }
+        }
+      }
+    },
     "kafkaSql": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "topicVerificationOverride": { "type": "boolean" }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "truststoreSecretName": { "type": "string" },
+        "truststoreSecretKey": { "type": "string" }
       }
     },
     "kafkaTopics": {

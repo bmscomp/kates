@@ -161,12 +161,78 @@ networkPolicy:
 # -- Extra environment variables appended to the registry container
 env: []
 
+# -- Web console (separate image in Registry 3.x). Off by default; the chart
+# deploys the backend only unless ui.enabled is set.
+ui:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: apicurio/apicurio-registry-ui
+    tag: ""
+    digest: ""
+  # -- Browser-facing REST API URL baked into the SPA. Leave empty to point at
+  # the backend Service (port-forward); set to the Ingress URL in production.
+  registryApiUrl: ""
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: registry-ui.example.com
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+    tls: []
+  env: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+# -- Prometheus monitoring integration
+metrics:
+  serviceMonitor:
+    # -- Create a ServiceMonitor (requires the Prometheus Operator CRDs).
+    # Scrapes /metrics on the management port.
+    enabled: false
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: ""
+    additionalLabels: {}
+
 # -- KafkaSQL storage tuning
 kafkaSql:
   # -- Escape hatch: skip the registry's startup verification of journal /
   # snapshots topic configuration. Leave false — the chart provisions
   # correctly configured topics via kafkaTopics.create instead.
   topicVerificationOverride: false
+
+# -- TLS to the Kafka brokers. Enable to mount the Strimzi cluster CA and set
+# securityProtocol to SASL_SSL (against the kafka-cluster `tls` listener on
+# 9093). The cluster CA Secret is created by Strimzi as <cluster>-cluster-ca-cert.
+tls:
+  enabled: false
+  # -- Secret holding the cluster CA certificate (PEM)
+  truststoreSecretName: "krafter-cluster-ca-cert"
+  # -- Key within the Secret
+  truststoreSecretKey: "ca.crt"
 
 # -- Strimzi KafkaTopic provisioning for KafkaSQL storage. The journal and
 # snapshots topics must use cleanup.policy=delete with infinite retention;

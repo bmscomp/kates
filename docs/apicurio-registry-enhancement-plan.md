@@ -4,7 +4,11 @@ Audit date: 2026-07-22. Scope: `charts/apicurio-registry/` only. Branch: `feat/a
 
 The chart was vendored as a third-party tree and still looks like raw `helm create` scaffold with a kafkasql env block bolted on. It is excluded from `publish-charts.yml` and from the hygiene bar the five core charts meet (schema, README, real probes, securityContext, PDB, tests). This plan promotes it to a first-party chart wired to the in-repo `kafka-cluster` (Strimzi) chart.
 
-> **Status 2026-07-22:** P0-1 ✓ (this branch) — bitnami kafka 17.2.6 dependency, `Chart.lock`, and the vendored `charts/kafka` tree (~100 files, Kafka 3.2-era, ZooKeeper-based) removed; `kafkasql` now always targets the `kafka-cluster` chart's `krafter` cluster, whose values already provision the `apicurio-registry` SCRAM-SHA-512 KafkaUser, ACLs (`kafkasql-` / `__apicurio` topic prefixes), and credentials Secret. Chart version 0.1.5 → 0.2.0.
+> **Status 2026-07-22:** All three waves landed on `feat/apicurio-registry-chart`. Chart version 0.1.5 → **0.3.0**.
+>
+> - **Week 1 (P0) ✓** — P0-1 removed the bitnami kafka 17.2.6 dependency, `Chart.lock`, and the vendored `charts/kafka` tree (~100 files, Kafka 3.2-era, ZooKeeper); `kafkasql` targets the `kafka-cluster` `krafter` cluster (SCRAM user, ACLs, Secret already provisioned there). P0-2 probes hit `/health/live` + `/health/ready` on the 3.x management port 9000. P0-3 image moved to `quay.io` with registry override + digest pinning. P0-4 `kafkasql-journal` / `kafkasql-snapshots` provisioned as `KafkaTopic` CRs (`cleanup.policy=delete`, infinite retention); the verification-override env is now opt-in.
+> - **Week 2 (P1) ✓** — securityContext (runAsNonRoot 185, seccomp, RO rootfs, emptyDir `/tmp`), `values.schema.json` (`additionalProperties:false`), default resources, PDB, HPA capped at 5, topology spread, configurable probes + startup probe, dynamic-namespace NetworkPolicy, README documenting the kafka-cluster contract, NOTES runbook, and a chart test hitting `/apis/registry/v3/system/info`.
+> - **Week 3 (P2) ✓** — removed from the `publish-charts.yml` exclusion (now OCI-pushed + cosign-signed like the rest); added as optional `kates-platform` dependency (`condition: apicurio-registry.enabled`); optional UI Deployment/Service/Ingress (P2-3); ServiceMonitor scraping the management port (P2-4); `SASL_SSL`/mTLS truststore wiring against the cluster `tls` listener (P2-5).
 
 ## Current state
 

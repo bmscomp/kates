@@ -74,6 +74,32 @@ Registry container image reference. Digest pins win over tags.
 {{- end }}
 
 {{/*
+Web console (UI) image reference. Digest pins win over tags. The UI ships as
+a separate image in Registry 3.x; it tracks the same appVersion by default.
+*/}}
+{{- define "apicurio-registry.uiImage" -}}
+{{- $repo := printf "%s/%s" .Values.image.registry .Values.ui.image.repository }}
+{{- if .Values.ui.image.digest }}
+{{- printf "%s@%s" $repo .Values.ui.image.digest }}
+{{- else }}
+{{- printf "%s:%s" $repo (.Values.ui.image.tag | default .Chart.AppVersion) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Browser-facing REST API URL injected into the UI SPA. Falls back to the
+backend Service (works under port-forward); override ui.registryApiUrl when
+serving the UI through an Ingress.
+*/}}
+{{- define "apicurio-registry.uiApiUrl" -}}
+{{- if .Values.ui.registryApiUrl }}
+{{- .Values.ui.registryApiUrl }}
+{{- else }}
+{{- printf "http://%s:%v/apis/registry/v3" (include "apicurio-registry.fullname" .) .Values.service.port }}
+{{- end }}
+{{- end }}
+
+{{/*
 Kafka bootstrap servers. The registry uses the external Strimzi cluster
 deployed by the kafka-cluster chart in this repository (no bundled broker).
 */}}
