@@ -1,7 +1,7 @@
 # Stage 1: Build the KATES CLI (Go)
 # Base images pinned by digest for reproducibility (tag kept for readability).
 # Digests are the multi-arch manifest-list digests; refresh with Renovate/Dependabot.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine@sha256:8d22e29d960bc50cd025d93d5b7c7d220b1ee9aa7a239b3c8f55a57e987e8d45 AS cli-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS cli-builder
 ENV GOTOOLCHAIN=auto
 WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
