@@ -160,7 +160,7 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 <!-- chart-table:start -->
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
-| [`apicurio-registry`](charts/apicurio-registry/) | 0.1.5 | 3.3.0 | A Helm chart for Kubernetes of Apicurio Registry |
+| [`apicurio-registry`](charts/apicurio-registry/) | 0.2.0 | 3.3.0 | A Helm chart for Kubernetes of Apicurio Registry |
 | [`connect-cluster`](charts/connect-cluster/) | 1.3.1 | 3.6.0 | A Helm chart for deploying Strimzi Kafka Connect clusters |
 | [`headlamp`](charts/headlamp/) | 0.2.0 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
 | [`kafka-cluster`](charts/kafka-cluster/) | 0.3.0 | 4.3.0 | Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability |
