@@ -1,7 +1,10 @@
 # Default values for apicurio-registry.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
+#
+# The registry runs KafkaSQL storage against the Strimzi cluster deployed by
+# this repository's kafka-cluster chart. See README.md for the full contract.
 
+# -- Number of registry replicas (each replica independently replays the
+# journal topic; safe to scale horizontally). Ignored when autoscaling.enabled.
 replicaCount: 1
 
 # -- Image configuration. Registry 3.x publishes to quay.io (the Docker Hub
@@ -16,31 +19,40 @@ image:
   # digest: "sha256:abc123..."
   digest: ""
 
+# -- Image pull secrets for private registries
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# -- ServiceAccount for the registry pod. The registry does not call the
+# Kubernetes API, so the token is not mounted by default.
 serviceAccount:
-  # Specifies whether a service account should be created
   create: true
-  # Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
+  # -- Name (defaults to the fullname when create=true)
   name: ""
+  automountServiceAccountToken: false
 
+# -- Pod annotations
 podAnnotations: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+# -- Pod-level security context. The quay.io image runs as UID 185 (Quarkus).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 185
+  fsGroup: 185
+  seccompProfile:
+    type: RuntimeDefault
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+# -- Container-level security context. readOnlyRootFilesystem is on; the chart
+# mounts an emptyDir at /tmp for Quarkus/Vert.x scratch space and the embedded
+# H2 database the KafkaSQL journal is replayed into.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 service:
   type: ClusterIP
@@ -65,33 +77,86 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# -- Pod resource requests and limits (upstream HA guidance: 512Mi–1Gi for a
+# JVM registry instance; the journal replay lives in an in-memory H2 store)
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
 
+# -- Liveness probe (/health/live on the management port)
+livenessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+# -- Readiness probe (/health/ready on the management port). Generous failure
+# threshold: a replica is not Ready until the journal replay completes.
+readinessProbe:
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 12
+
+# -- Startup probe for long journal replays on restart against a large topic
+startupProbe:
+  enabled: false
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+
+# -- Horizontal Pod Autoscaler
 autoscaling:
   enabled: false
   minReplicas: 1
-  maxReplicas: 100
+  maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
 
+# -- PodDisruptionBudget (recommended when replicaCount > 1)
+pdb:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# -- Node selector
 nodeSelector: {}
 
+# -- Tolerations
 tolerations: []
 
+# -- Affinity rules
 affinity: {}
 
+# -- Topology spread constraints (spread replicas across nodes/zones)
+topologySpreadConstraints: []
+
+# -- NetworkPolicy configuration. Namespace names are values, not hardcoded.
 networkPolicy:
   enabled: false
+  # -- Namespaces whose pods may call the registry REST API (8080)
+  clientNamespaces:
+    - connect
+    - kates
+  # -- Namespace of the ingress controller; allowed to reach 8080 when
+  # ingress.enabled is set
+  ingressNamespace: "ingress-nginx"
+  # -- Namespace allowed to scrape /metrics on the management port
+  monitoringNamespace: "monitoring"
+  # -- Namespace of the Kafka cluster (egress target)
+  kafkaNamespace: "kafka"
+  # -- Kafka broker ports the registry may reach (9092 plain, 9093 TLS)
+  kafkaEgressPorts:
+    - 9092
+    - 9093
+  # -- Extra ingress/egress rules appended verbatim
+  extraIngress: []
+  extraEgress: []
 
 # -- Extra environment variables appended to the registry container
 env: []
@@ -135,4 +200,3 @@ global:
     securityProtocol: "SASL_PLAINTEXT"
     saslMechanism: "SCRAM-SHA-512"
     saslJaasConfigSecretName: "apicurio-registry"
-
