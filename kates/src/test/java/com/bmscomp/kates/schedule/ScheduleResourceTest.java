@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Optional;
 
-import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.Test;
@@ -28,9 +28,13 @@ class ScheduleResourceTest {
         Mockito.when(repository.findAll()).thenReturn(List.of(s));
 
         var response = RestAssured.given()
-                .when().get("/api/schedules")
-                .then().statusCode(200)
-                .extract().body().jsonPath();
+                .when()
+                .get("/api/schedules")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .jsonPath();
 
         assertEquals(1, response.getList("").size());
     }
@@ -39,9 +43,7 @@ class ScheduleResourceTest {
     void getScheduleReturns404ForMissing() {
         Mockito.when(repository.findById("missing")).thenReturn(Optional.empty());
 
-        RestAssured.given()
-                .when().get("/api/schedules/missing")
-                .then().statusCode(404);
+        RestAssured.given().when().get("/api/schedules/missing").then().statusCode(404);
     }
 
     @Test
@@ -51,9 +53,7 @@ class ScheduleResourceTest {
         s.setName("nightly");
         Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
 
-        RestAssured.given()
-                .when().get("/api/schedules/s1")
-                .then().statusCode(200);
+        RestAssured.given().when().get("/api/schedules/s1").then().statusCode(200);
     }
 
     @Test
@@ -61,8 +61,10 @@ class ScheduleResourceTest {
         RestAssured.given()
                 .contentType(ContentType.JSON)
                 .body("{\"cronExpression\":\"0 0 * * *\",\"testRequest\":{\"type\":\"LOAD\"}}")
-                .when().post("/api/schedules")
-                .then().statusCode(400);
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400);
     }
 
     @Test
@@ -70,8 +72,10 @@ class ScheduleResourceTest {
         RestAssured.given()
                 .contentType(ContentType.JSON)
                 .body("{\"name\":\"test\",\"testRequest\":{\"type\":\"LOAD\"}}")
-                .when().post("/api/schedules")
-                .then().statusCode(400);
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400);
     }
 
     @Test
@@ -79,8 +83,10 @@ class ScheduleResourceTest {
         RestAssured.given()
                 .contentType(ContentType.JSON)
                 .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":{\"type\":\"LOAD\"}}")
-                .when().post("/api/schedules")
-                .then().statusCode(201);
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(201);
 
         Mockito.verify(repository).save(Mockito.any(ScheduledTestRun.class));
     }
@@ -91,9 +97,7 @@ class ScheduleResourceTest {
         s.setId("s1");
         Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
 
-        RestAssured.given()
-                .when().delete("/api/schedules/s1")
-                .then().statusCode(204);
+        RestAssured.given().when().delete("/api/schedules/s1").then().statusCode(204);
 
         Mockito.verify(repository).delete("s1");
     }
@@ -102,8 +106,6 @@ class ScheduleResourceTest {
     void deleteScheduleReturns404ForMissing() {
         Mockito.when(repository.findById("missing")).thenReturn(Optional.empty());
 
-        RestAssured.given()
-                .when().delete("/api/schedules/missing")
-                .then().statusCode(404);
+        RestAssured.given().when().delete("/api/schedules/missing").then().statusCode(404);
     }
 }

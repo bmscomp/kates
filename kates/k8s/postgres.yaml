@@ -31,9 +31,15 @@ spec:
         - name: POSTGRES_DB
           value: "kates"
         - name: POSTGRES_USER
-          value: "kates"
+          valueFrom:
+            secretKeyRef:
+              name: kates-secrets
+              key: QUARKUS_DATASOURCE_USERNAME
         - name: POSTGRES_PASSWORD
-          value: "kates"
+          valueFrom:
+            secretKeyRef:
+              name: kates-secrets
+              key: QUARKUS_DATASOURCE_PASSWORD
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         volumeMounts:

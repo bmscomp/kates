@@ -3,9 +3,10 @@ package com.bmscomp.kates.engine;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import java.util.List;
-
 import java.lang.reflect.Field;
+import java.util.List;
+import jakarta.enterprise.event.Event;
+import jakarta.enterprise.inject.Instance;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -13,14 +14,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import jakarta.enterprise.event.Event;
-import jakarta.enterprise.inject.Instance;
-
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
-import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.service.TestRunRepository;
+import com.bmscomp.kates.service.TopicService;
 
 class TestOrchestratorTest {
 
@@ -59,11 +57,23 @@ class TestOrchestratorTest {
         setDefaults(td, "roundTrip", 3, 3, 2, "all", 16384, 0, "none", 1024, 500000L, 10000, 600000L, 1, 1);
     }
 
-    private void setDefaults(TestTypeDefaults td, String prefix,
-            int rf, int partitions, int isr, String acks,
-            int batchSize, int lingerMs, String compression,
-            int recordSize, long numRecords, int throughput,
-            long durationMs, int numProducers, int numConsumers) throws Exception {
+    private void setDefaults(
+            TestTypeDefaults td,
+            String prefix,
+            int rf,
+            int partitions,
+            int isr,
+            String acks,
+            int batchSize,
+            int lingerMs,
+            String compression,
+            int recordSize,
+            long numRecords,
+            int throughput,
+            long durationMs,
+            int numProducers,
+            int numConsumers)
+            throws Exception {
         setField(td, prefix + "ReplicationFactor", rf);
         setField(td, prefix + "Partitions", partitions);
         setField(td, prefix + "MinInsyncReplicas", isr);
@@ -213,7 +223,8 @@ class TestOrchestratorTest {
             TestSpec spec = specWith(1000, 3);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
-            long uniqueIds = tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
+            long uniqueIds =
+                    tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
             assertEquals(3, uniqueIds, "Each stress producer must have a unique task ID");
         }
 
@@ -223,15 +234,14 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
             for (BenchmarkTask task : tasks) {
-                assertEquals(500000, task.getMaxMessages(),
-                        "Each STRESS producer gets the full record count from spec");
+                assertEquals(
+                        500000, task.getMaxMessages(), "Each STRESS producer gets the full record count from spec");
             }
         }
 
         @Test
         void topicNameIsStressTest() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.STRESS, specWith(1000, 2), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, specWith(1000, 2), "run-1");
 
             for (BenchmarkTask task : tasks) {
                 assertEquals("stress-test", task.getTopic());
@@ -244,8 +254,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsSingleBurstProducer() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.SPIKE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.SPIKE, specWith(1000, 1), "run-1");
 
             assertEquals(1, tasks.size());
             assertEquals(BenchmarkTask.WorkloadType.PRODUCE, tasks.get(0).getWorkloadType());
@@ -253,17 +262,17 @@ class TestOrchestratorTest {
 
         @Test
         void unlimitedThroughput() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.SPIKE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.SPIKE, specWith(1000, 1), "run-1");
 
-            assertEquals(-1, tasks.get(0).getTargetMessagesPerSec(),
+            assertEquals(
+                    -1,
+                    tasks.get(0).getTargetMessagesPerSec(),
                     "SPIKE burst producer should have unlimited throughput");
         }
 
         @Test
         void topicNameIsSpikeTest() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.SPIKE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.SPIKE, specWith(1000, 1), "run-1");
 
             assertEquals("spike-test", tasks.get(0).getTopic());
         }
@@ -274,8 +283,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsProducerAndConsumer() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.ENDURANCE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ENDURANCE, specWith(1000, 1), "run-1");
 
             assertEquals(2, tasks.size(), "ENDURANCE should create produce + consume");
             assertEquals(BenchmarkTask.WorkloadType.PRODUCE, tasks.get(0).getWorkloadType());
@@ -284,8 +292,7 @@ class TestOrchestratorTest {
 
         @Test
         void topicNameIsEnduranceTest() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.ENDURANCE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ENDURANCE, specWith(1000, 1), "run-1");
 
             assertEquals("endurance-test", tasks.get(0).getTopic());
         }
@@ -296,8 +303,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsSingleProducer() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.VOLUME, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.VOLUME, specWith(1000, 1), "run-1");
 
             assertEquals(1, tasks.size());
             assertEquals(BenchmarkTask.WorkloadType.PRODUCE, tasks.get(0).getWorkloadType());
@@ -324,8 +330,7 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.CAPACITY, spec, "run-1");
 
             for (BenchmarkTask task : tasks) {
-                assertEquals(-1, task.getTargetMessagesPerSec(),
-                        "CAPACITY producers should have unlimited throughput");
+                assertEquals(-1, task.getTargetMessagesPerSec(), "CAPACITY producers should have unlimited throughput");
             }
         }
     }
@@ -335,8 +340,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsSingleRoundTripTask() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.ROUND_TRIP, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ROUND_TRIP, specWith(1000, 1), "run-1");
 
             assertEquals(1, tasks.size());
             assertEquals(BenchmarkTask.WorkloadType.ROUND_TRIP, tasks.get(0).getWorkloadType());
@@ -401,9 +405,9 @@ class TestOrchestratorTest {
     class BuildTasksTune {
 
         @ParameterizedTest
-        @EnumSource(value = TestType.class, names = {
-                "TUNE_REPLICATION", "TUNE_ACKS", "TUNE_BATCHING", "TUNE_COMPRESSION", "TUNE_PARTITIONS"
-        })
+        @EnumSource(
+                value = TestType.class,
+                names = {"TUNE_REPLICATION", "TUNE_ACKS", "TUNE_BATCHING", "TUNE_COMPRESSION", "TUNE_PARTITIONS"})
         void tuneTypesCreateSingleProducer(TestType tuneType) {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(tuneType, specWith(1000, 1), "run-1");
 
@@ -430,7 +434,8 @@ class TestOrchestratorTest {
                 assertNotNull(task.getTaskId(), type + ": task ID must not be null");
                 assertNotNull(task.getWorkloadType(), type + ": workload type must not be null");
                 assertNotNull(task.getTopic(), type + ": topic must not be null");
-                assertTrue(task.getMaxMessages() > 0 || task.getDurationMs() > 0,
+                assertTrue(
+                        task.getMaxMessages() > 0 || task.getDurationMs() > 0,
                         type + ": task must have records or duration");
             }
         }
@@ -578,10 +583,8 @@ class TestOrchestratorTest {
 
             assertEquals(4, tasks.size());
             for (BenchmarkTask task : tasks) {
-                assertEquals(300000, task.getDurationMs(),
-                        "All STRESS producers must have the same duration");
-                assertEquals(500000, task.getMaxMessages(),
-                        "STRESS gives each producer the full record count");
+                assertEquals(300000, task.getDurationMs(), "All STRESS producers must have the same duration");
+                assertEquals(500000, task.getMaxMessages(), "STRESS gives each producer the full record count");
             }
         }
 
@@ -600,8 +603,7 @@ class TestOrchestratorTest {
             TestSpec merged = orchestrator.applyTypeDefaults(TestType.ENDURANCE, null);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ENDURANCE, merged, "run-1");
 
-            assertEquals(3600000, tasks.get(0).getDurationMs(),
-                    "ENDURANCE default duration should be 1 hour");
+            assertEquals(3600000, tasks.get(0).getDurationMs(), "ENDURANCE default duration should be 1 hour");
         }
     }
 
@@ -631,8 +633,7 @@ class TestOrchestratorTest {
             TestSpec spec = specWith(1000, 0);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
-            assertTrue(tasks.isEmpty(),
-                    "STRESS with 0 producers should create an empty task list");
+            assertTrue(tasks.isEmpty(), "STRESS with 0 producers should create an empty task list");
         }
 
         @Test
@@ -640,8 +641,7 @@ class TestOrchestratorTest {
             TestSpec spec = specWith(1000, 0);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.CAPACITY, spec, "run-1");
 
-            assertTrue(tasks.isEmpty(),
-                    "CAPACITY with 0 producers should create an empty task list");
+            assertTrue(tasks.isEmpty(), "CAPACITY with 0 producers should create an empty task list");
         }
 
         @Test
@@ -659,10 +659,8 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.INTEGRITY, spec, "run-1");
             BenchmarkTask task = tasks.get(0);
 
-            assertFalse(task.isEnableIdempotence(),
-                    "Idempotence should default to false when not explicitly set");
-            assertFalse(task.isEnableTransactions(),
-                    "Transactions should default to false when not explicitly set");
+            assertFalse(task.isEnableIdempotence(), "Idempotence should default to false when not explicitly set");
+            assertFalse(task.isEnableTransactions(), "Transactions should default to false when not explicitly set");
         }
 
         @Test
@@ -671,7 +669,8 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
             assertEquals(16, tasks.size(), "Should handle large producer counts");
-            long uniqueIds = tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
+            long uniqueIds =
+                    tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
             assertEquals(16, uniqueIds, "All 16 task IDs must be unique");
         }
     }

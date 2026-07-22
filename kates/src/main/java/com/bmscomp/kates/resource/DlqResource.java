@@ -3,16 +3,15 @@ package com.bmscomp.kates.resource;
 import java.time.Instant;
 import java.util.Map;
 import java.util.stream.Collectors;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
-import com.bmscomp.kates.service.DeadLetterQueueService;
-
 import io.smallrye.common.annotation.Blocking;
+
+import com.bmscomp.kates.service.DeadLetterQueueService;
 
 /**
  * REST endpoint for Dead Letter Queue monitoring and inspection.
@@ -32,16 +31,8 @@ public class DlqResource {
         Map<String, Long> bySource = dlqService.getDlqBySource().entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().get()));
 
-        return new DlqStats(
-                dlqService.getTotalDlqMessages(),
-                last != null ? last.toString() : null,
-                bySource
-        );
+        return new DlqStats(dlqService.getTotalDlqMessages(), last != null ? last.toString() : null, bySource);
     }
 
-    public record DlqStats(
-            long totalMessages,
-            String lastMessageAt,
-            Map<String, Long> messagesBySource
-    ) {}
+    public record DlqStats(long totalMessages, String lastMessageAt, Map<String, Long> messagesBySource) {}
 }

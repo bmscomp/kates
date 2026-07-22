@@ -28,6 +28,9 @@ public class WebhookResource {
     @Inject
     WebhookService webhookService;
 
+    @Inject
+    WebhookUrlValidator urlValidator;
+
     @GET
     @Operation(summary = "List registered webhooks")
     public List<WebhookService.WebhookRegistration> list() {
@@ -47,6 +50,8 @@ public class WebhookResource {
                     .entity("{\"error\":\"url is required\"}")
                     .build();
         }
+        // SSRF guard — throws IllegalArgumentException (→ 400) on violation.
+        urlValidator.validate(registration.url());
         webhookService.register(registration);
         return Response.status(201).entity(registration).build();
     }

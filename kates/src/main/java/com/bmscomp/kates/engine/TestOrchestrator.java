@@ -26,9 +26,8 @@ import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.export.LatencyHeatmapData;
-import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.service.TestRunRepository;
-import com.bmscomp.kates.webhook.WebhookService;
+import com.bmscomp.kates.service.TopicService;
 
 /**
  * Orchestrator that routes benchmark execution to pluggable backends.
@@ -51,7 +50,16 @@ public class TestOrchestrator {
     private final int maxConcurrentTests;
     private final Semaphore concurrencyGuard;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
+    /**
+     * Heatmap rows are read by ReportResource after a run completes, so they
+     * cannot be dropped on completion — instead retain the most recent
+     * {@link #MAX_HEATMAP_RUNS} runs (previously unbounded: grew forever).
+     */
+    private static final int MAX_HEATMAP_RUNS = 50;
+
     private final Map<String, List<LatencyHeatmapData.HeatmapRow>> heatmapRows = new ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentLinkedDeque<String> heatmapOrder =
+            new java.util.concurrent.ConcurrentLinkedDeque<>();
     private final Map<String, Long> runStartNanos = new ConcurrentHashMap<>();
 
     @Inject
@@ -92,7 +100,7 @@ public class TestOrchestrator {
             for (TestResult result : run.getResults()) {
                 if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
                     result = result.withStatus(TestResult.TaskStatus.FAILED)
-                                   .withError("Recovered: test was orphaned after server restart");
+                            .withError("Recovered: test was orphaned after server restart");
                 }
                 newResults.add(result);
             }
@@ -108,9 +116,9 @@ public class TestOrchestrator {
         }
 
         if (!concurrencyGuard.tryAcquire()) {
-            return com.bmscomp.kates.util.Result.failure(new BenchmarkException(
-                    "Concurrency limit reached: " + maxConcurrentTests
-                    + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
+            return com.bmscomp.kates.util.Result.failure(
+                    new BenchmarkException("Concurrency limit reached: " + maxConcurrentTests
+                            + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
         }
 
         TestType type = request.getType();
@@ -120,7 +128,8 @@ public class TestOrchestrator {
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
             concurrencyGuard.release();
-            return com.bmscomp.kates.util.Result.failure(backendResult.asFailure().orElseThrow());
+            return com.bmscomp.kates.util.Result.failure(
+                    backendResult.asFailure().orElseThrow());
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
@@ -218,17 +227,18 @@ public class TestOrchestrator {
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
-            return com.bmscomp.kates.util.Result.failure(backendResult.asFailure().orElseThrow());
+            return com.bmscomp.kates.util.Result.failure(
+                    backendResult.asFailure().orElseThrow());
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
         TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
         TestRun run = new TestRun(type, baseSpec)
-            .withBackend(backendName)
-            .withScenarioName(scenario.getName())
-            .withLabels(scenario.getLabels())
-            .withSla(scenario.getSla())
-            .withStatus(TestResult.TaskStatus.RUNNING);
+                .withBackend(backendName)
+                .withScenarioName(scenario.getName())
+                .withLabels(scenario.getLabels())
+                .withSla(scenario.getSla())
+                .withStatus(TestResult.TaskStatus.RUNNING);
         repository.save(run);
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
         fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
@@ -330,7 +340,8 @@ public class TestOrchestrator {
                         result = applyStatus(result, status);
 
                         // Propagate CDC phase data to the TestRun
-                        if (status.getPhaseDurations() != null && !status.getPhaseDurations().isEmpty()) {
+                        if (status.getPhaseDurations() != null
+                                && !status.getPhaseDurations().isEmpty()) {
                             run = run.withCdcPhases(status.getPhaseDurations());
                         }
                         if (status.getCurrentPhase() != null) {
@@ -339,11 +350,25 @@ public class TestOrchestrator {
 
                         if (status.getHeatmapBuckets() != null) {
                             heatmapRows
-                                    .computeIfAbsent(runId, k -> new java.util.ArrayList<>())
+                                    .computeIfAbsent(runId, k -> {
+                                        heatmapOrder.addLast(k);
+                                        return java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+                                    })
                                     .add(new LatencyHeatmapData.HeatmapRow(
                                             System.currentTimeMillis(),
                                             result.getPhaseName(),
                                             status.getHeatmapBuckets()));
+                            while (heatmapRows.size() > MAX_HEATMAP_RUNS) {
+                                String eldest = heatmapOrder.pollFirst();
+                                if (eldest == null) {
+                                    break;
+                                }
+                                if (eldest.equals(runId)) {
+                                    heatmapOrder.addLast(eldest);
+                                    break;
+                                }
+                                heatmapRows.remove(eldest);
+                            }
                         }
                     } catch (Exception e) {
                         LOG.warn("Failed to poll task: " + result.getTaskId(), e);
@@ -441,8 +466,8 @@ public class TestOrchestrator {
                     for (TestResult result : updated.getResults()) {
                         if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
                             result = result.withStatus(TestResult.TaskStatus.FAILED)
-                                           .withError("Server shutdown")
-                                           .withEndTime(Instant.now().toString());
+                                    .withError("Server shutdown")
+                                    .withEndTime(Instant.now().toString());
                         }
                         newResults.add(result);
                     }
@@ -456,6 +481,8 @@ public class TestOrchestrator {
             runStartNanos.remove(runId);
         }
         activeHandles.clear();
+        heatmapRows.clear();
+        heatmapOrder.clear();
     }
 
     public void stopTest(String runId) {
@@ -489,7 +516,13 @@ public class TestOrchestrator {
     }
 
     public List<LatencyHeatmapData.HeatmapRow> getHeatmapRows(String runId) {
-        return heatmapRows.getOrDefault(runId, List.of());
+        List<LatencyHeatmapData.HeatmapRow> rows = heatmapRows.get(runId);
+        if (rows == null) {
+            return List.of();
+        }
+        synchronized (rows) {
+            return List.copyOf(rows);
+        }
     }
 
     /**
@@ -539,8 +572,8 @@ public class TestOrchestrator {
                 .filter(b -> b.name().equals(name))
                 .findFirst()
                 .<com.bmscomp.kates.util.Result<BenchmarkBackend, Exception>>map(com.bmscomp.kates.util.Result::success)
-                .orElseGet(() -> com.bmscomp.kates.util.Result.failure(
-                        new BenchmarkException("Backend not found: '" + name + "'. Available: " + availableBackends())));
+                .orElseGet(() -> com.bmscomp.kates.util.Result.failure(new BenchmarkException(
+                        "Backend not found: '" + name + "'. Available: " + availableBackends())));
     }
 
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.buildTasks")
@@ -632,7 +665,6 @@ public class TestOrchestrator {
                         .topic(topic)
                         .producerConfig(producerConfig)
                         .build());
-
         };
     }
 
@@ -648,7 +680,8 @@ public class TestOrchestrator {
         String taskId = runId + "-" + phaseName;
 
         return switch (phase.getPhaseType()) {
-            case WARMUP, STEADY, COOLDOWN -> List.of(produceTask(taskId + "-produce", runId, topic, spec, producerConfig));
+            case WARMUP, STEADY, COOLDOWN ->
+                List.of(produceTask(taskId + "-produce", runId, topic, spec, producerConfig));
             case RAMP -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 int steps = Math.max(1, phase.getRampSteps());
@@ -680,7 +713,8 @@ public class TestOrchestrator {
         };
     }
 
-    private BenchmarkTask produceTask(String taskId, String runId, String topic, TestSpec spec, Map<String, String> producerConfig) {
+    private BenchmarkTask produceTask(
+            String taskId, String runId, String topic, TestSpec spec, Map<String, String> producerConfig) {
         return BenchmarkTask.builder(taskId, BenchmarkTask.WorkloadType.PRODUCE)
                 .runId(runId)
                 .topic(topic)

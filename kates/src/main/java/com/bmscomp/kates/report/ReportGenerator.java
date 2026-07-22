@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,7 +33,20 @@ public class ReportGenerator {
     @Inject
     KatesMetrics katesMetrics;
 
-    private final ConcurrentHashMap<String, TestReport> reportCache = new ConcurrentHashMap<>();
+    /**
+     * Reports embed histograms and timelines; an uncapped cache grows without
+     * bound in a long-running service. LRU-evict beyond MAX_CACHED_REPORTS —
+     * evicted reports are simply regenerated on next access.
+     */
+    private static final int MAX_CACHED_REPORTS = 200;
+
+    private final Map<String, TestReport> reportCache =
+            java.util.Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, TestReport> eldest) {
+                    return size() > MAX_CACHED_REPORTS;
+                }
+            });
 
     /**
      * Evict a cached report, forcing regeneration on the next call.

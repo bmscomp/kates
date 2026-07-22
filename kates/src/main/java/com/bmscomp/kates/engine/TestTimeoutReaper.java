@@ -50,8 +50,8 @@ public class TestTimeoutReaper {
                         if (result.getStatus() == TestResult.TaskStatus.RUNNING
                                 || result.getStatus() == TestResult.TaskStatus.PENDING) {
                             result = result.withStatus(TestResult.TaskStatus.FAILED)
-                                           .withError("Timeout: exceeded max duration of " + maxDurationMs + "ms")
-                                           .withEndTime(Instant.now().toString());
+                                    .withError("Timeout: exceeded max duration of " + maxDurationMs + "ms")
+                                    .withEndTime(Instant.now().toString());
                         }
                         newResults.add(result);
                     }

@@ -62,8 +62,7 @@ class EntityMapperTest {
 
     @Test
     void nullSpecHandled() {
-        TestRun run = new TestRun(TestType.LOAD, null)
-            .withStatus(TestResult.TaskStatus.PENDING);
+        TestRun run = new TestRun(TestType.LOAD, null).withStatus(TestResult.TaskStatus.PENDING);
 
         TestRunEntity entity = EntityMapper.toEntity(run);
         assertNull(entity.getSpecJson());
@@ -78,12 +77,8 @@ class EntityMapperTest {
         TestRunEntity entity = EntityMapper.toEntity(run);
         assertEquals(1, entity.getResults().size());
 
-        TestResult r2 = new TestResult()
-            .withTaskId("task-2")
-            .withRecordsSent(2000);
-        TestResult r3 = new TestResult()
-            .withTaskId("task-3")
-            .withRecordsSent(3000);
+        TestResult r2 = new TestResult().withTaskId("task-2").withRecordsSent(2000);
+        TestResult r3 = new TestResult().withTaskId("task-3").withRecordsSent(3000);
         run = run.withResults(java.util.List.of(r2, r3));
 
         EntityMapper.updateEntity(entity, run);
@@ -103,23 +98,23 @@ class EntityMapperTest {
         sla.setMaxP99LatencyMs(50.0);
 
         TestResult result = new TestResult()
-            .withTaskId("task-1")
-            .withRecordsSent(1000)
-            .withThroughputRecordsPerSec(500.0)
-            .withAvgLatencyMs(5.0)
-            .withP50LatencyMs(3.0)
-            .withP95LatencyMs(10.0)
-            .withP99LatencyMs(20.0)
-            .withMaxLatencyMs(50.0)
-            .withStatus(TestResult.TaskStatus.DONE);
+                .withTaskId("task-1")
+                .withRecordsSent(1000)
+                .withThroughputRecordsPerSec(500.0)
+                .withAvgLatencyMs(5.0)
+                .withP50LatencyMs(3.0)
+                .withP95LatencyMs(10.0)
+                .withP99LatencyMs(20.0)
+                .withMaxLatencyMs(50.0)
+                .withStatus(TestResult.TaskStatus.DONE);
 
         TestRun run = new TestRun(TestType.LOAD, spec)
-            .withStatus(TestResult.TaskStatus.RUNNING)
-            .withBackend("native")
-            .withScenarioName("basic-load")
-            .withSla(sla)
-            .withLabels(new LinkedHashMap<>(Map.of("env", "test")))
-            .withAddedResult(result);
+                .withStatus(TestResult.TaskStatus.RUNNING)
+                .withBackend("native")
+                .withScenarioName("basic-load")
+                .withSla(sla)
+                .withLabels(new LinkedHashMap<>(Map.of("env", "test")))
+                .withAddedResult(result);
 
         return run;
     }

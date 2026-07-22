@@ -42,12 +42,10 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
         }
 
         LOG.error("Unhandled exception in REST endpoint", exception);
-        return error(
-                500,
-                "Internal Server Error",
-                root.getMessage() != null
-                        ? root.getMessage()
-                        : exception.getClass().getSimpleName());
+        // Do NOT echo root.getMessage() here: internal exception messages can
+        // leak connection strings, hostnames, or stack details to API clients.
+        // The full exception is in the server log above.
+        return error(500, "Internal Server Error", "Unexpected server error — see server logs for details");
     }
 
     private static Response error(int status, String label, String message) {

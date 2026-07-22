@@ -22,26 +22,22 @@ public class TestRunRepository {
     @Transactional
     public void save(TestRun run) {
         em.merge(EntityMapper.toEntity(run));
-        
+
         // Also persist an outbox event for state changes
         try {
             com.bmscomp.kates.domain.TestResult.TaskStatus status = run.getStatus();
             com.bmscomp.kates.domain.events.TestEvent testEvent = new com.bmscomp.kates.domain.events.TestEvent(
-                run.getId(),
-                run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
-                status,
-                "",
-                System.currentTimeMillis()
-            );
+                    run.getId(),
+                    run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
+                    status,
+                    "",
+                    System.currentTimeMillis());
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             String payload = mapper.writeValueAsString(testEvent);
-            
-            com.bmscomp.kates.persistence.OutboxEventEntity outboxEvent = new com.bmscomp.kates.persistence.OutboxEventEntity(
-                run.getId(),
-                "TestRun",
-                "test.lifecycle",
-                payload
-            );
+
+            com.bmscomp.kates.persistence.OutboxEventEntity outboxEvent =
+                    new com.bmscomp.kates.persistence.OutboxEventEntity(
+                            run.getId(), "TestRun", "test.lifecycle", payload);
             em.persist(outboxEvent);
         } catch (Exception e) {
             throw new RuntimeException("Failed to persist outbox event", e);
@@ -103,15 +99,12 @@ public class TestRunRepository {
     public List<TestRun> findByLabelJsonb(String key, String value) {
         try {
             String jsonPattern = "{\"" + key + "\":\"" + value + "\"}";
-            return ((List<TestRunEntity>) em
-                    .createNativeQuery(
-                            "SELECT * FROM test_runs WHERE labels_json @> CAST(:pattern AS jsonb) ORDER BY created_at DESC",
-                            TestRunEntity.class)
-                    .setParameter("pattern", jsonPattern)
-                    .getResultList())
-                    .stream()
-                    .map(EntityMapper::toDomainSummary)
-                    .collect(Collectors.toList());
+            return ((List<TestRunEntity>) em.createNativeQuery(
+                                    "SELECT * FROM test_runs WHERE labels_json @> CAST(:pattern AS jsonb) ORDER BY created_at DESC",
+                                    TestRunEntity.class)
+                            .setParameter("pattern", jsonPattern)
+                            .getResultList())
+                    .stream().map(EntityMapper::toDomainSummary).collect(Collectors.toList());
         } catch (Exception e) {
             return findByLabel(key, value);
         }
@@ -163,6 +156,26 @@ public class TestRunRepository {
     public long countByType(TestType type) {
         return em.createQuery("SELECT COUNT(r) FROM TestRunEntity r WHERE r.testType = :type", Long.class)
                 .setParameter("type", type)
+                .getSingleResult();
+    }
+
+    public List<TestRun> findByStatusPaged(com.bmscomp.kates.domain.TestResult.TaskStatus status, int page, int size) {
+        return em
+                .createQuery(
+                        "SELECT r FROM TestRunEntity r WHERE r.status = :status ORDER BY r.createdAt DESC",
+                        TestRunEntity.class)
+                .setParameter("status", status)
+                .setFirstResult(page * size)
+                .setMaxResults(size)
+                .getResultList()
+                .stream()
+                .map(EntityMapper::toDomainSummary)
+                .collect(Collectors.toList());
+    }
+
+    public long countByStatus(com.bmscomp.kates.domain.TestResult.TaskStatus status) {
+        return em.createQuery("SELECT COUNT(r) FROM TestRunEntity r WHERE r.status = :status", Long.class)
+                .setParameter("status", status)
                 .getSingleResult();
     }
 

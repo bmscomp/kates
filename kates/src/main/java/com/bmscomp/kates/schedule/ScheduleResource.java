@@ -42,15 +42,18 @@ public class ScheduleResource {
     @APIResponse(responseCode = "200", description = "Schedule details")
     @APIResponse(responseCode = "404", description = "Schedule not found")
     public Response getSchedule(@Parameter(description = "Schedule ID") @PathParam("id") String id) {
-        return repository.findById(id).map(s -> Response.ok(s).build()).orElseGet(() -> Response.status(404)
-                .entity(ApiError.of(404, "Not Found", "Schedule not found: " + id))
-                .build());
+        return repository
+                .findById(id)
+                .map(s -> Response.ok(s).build())
+                .orElseGet(() -> Response.status(404)
+                        .entity(ApiError.of(404, "Not Found", "Schedule not found: " + id))
+                        .build());
     }
 
     @POST
     @Operation(summary = "Create a schedule", description = "Creates a new recurring test schedule")
     @APIResponse(responseCode = "201", description = "Schedule created")
-    public Response createSchedule(CreateScheduleRequest request) {
+    public Response createSchedule(@jakarta.validation.Valid CreateScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Field 'name' is required"))
@@ -130,9 +133,17 @@ public class ScheduleResource {
     }
 
     public static class CreateScheduleRequest {
+        @jakarta.validation.constraints.NotBlank(message = "name is required")
+        @jakarta.validation.constraints.Size(max = 255)
         public String name;
+
+        @jakarta.validation.constraints.NotBlank(message = "cronExpression is required")
+        @jakarta.validation.constraints.Size(max = 120)
         public String cronExpression;
+
         public boolean enabled = true;
+
+        @jakarta.validation.Valid
         public CreateTestRequest testRequest;
     }
 }

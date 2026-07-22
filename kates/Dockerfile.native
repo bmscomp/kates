@@ -1,5 +1,9 @@
 # Stage 1: Build the KATES CLI (Go)
-FROM golang:1.25-alpine AS cli-builder
+# golang base pinned by digest (multi-arch manifest list). The mandrel builder
+# (quay.io) and ubi-minimal runtime (registry.access.redhat.com) below are left
+# tag-pinned: their digests need a quay/RedHat registry lookup, best handled by
+# Renovate/Dependabot which resolves all three registries automatically.
+FROM golang:1.25-alpine@sha256:8d22e29d960bc50cd025d93d5b7c7d220b1ee9aa7a239b3c8f55a57e987e8d45 AS cli-builder
 ENV GOTOOLCHAIN=auto
 WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
@@ -43,7 +47,15 @@ RUN --mount=type=cache,target=/root/.m2 \
   if [ -n "$ZSTD_JAR" ]; then cd /tmp && jar xf "$ZSTD_JAR" "linux/$JNI_ARCH/" && cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null && cd /build/native-libs/ && for f in libzstd-jni-*.so; do [ -e "$f" ] && cp "$f" libzstd-jni.so; done || true; fi && \
   if [ -n "$LZ4_JAR" ]; then cd /tmp && jar xf "$LZ4_JAR" "linux/$JNI_ARCH/" 2>/dev/null || jar xf "$LZ4_JAR" "net/jpountz/util/linux/$JNI_ARCH/" 2>/dev/null && cp -v net/jpountz/util/linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
   if [ -n "$SNAPPY_JAR" ]; then cd /tmp && jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/Linux/$JNI_ARCH/" 2>/dev/null || jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/$SNAPPY_ARCH/" 2>/dev/null && cp -v org/xerial/snappy/native/Linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v org/xerial/snappy/native/$SNAPPY_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  ls -la /build/native-libs/
+  ls -la /build/native-libs/ && \
+  for lib in zstd lz4 snappy; do \
+    ls /build/native-libs/ | grep -qi "$lib" || { echo "FATAL: no $lib native library extracted into /build/native-libs"; exit 1; }; \
+  done
+
+# NOTE: the guard above fails the build if any compression JNI lib is missing.
+# The per-command `|| true` in the extraction tolerates arch/path variation,
+# so without this final check a broken extraction would silently ship an image
+# that crashes the first time lz4/snappy/zstd compression is used at runtime.
 
 
 # Stage 3: Minimal runtime

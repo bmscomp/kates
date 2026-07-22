@@ -3,9 +3,10 @@ package com.bmscomp.kates.engine;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import org.HdrHistogram.Histogram;
+
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Tags;
+import org.HdrHistogram.Histogram;
 
 public class LatencyHistogram {
 
@@ -93,7 +94,8 @@ public class LatencyHistogram {
     }
 
     public static final double[] HEATMAP_BOUNDARIES = {
-        0, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000
+        0, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500,
+        10000
     };
 
     public long[] exportBuckets() {

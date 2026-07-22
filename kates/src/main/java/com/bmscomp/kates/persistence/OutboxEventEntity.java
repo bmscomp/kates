@@ -1,8 +1,8 @@
 package com.bmscomp.kates.persistence;
 
-import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
+import jakarta.persistence.*;
 
 @Entity
 @Table(name = "outbox_events")
@@ -38,10 +38,27 @@ public class OutboxEventEntity {
         this.createdAt = Instant.now();
     }
 
-    public UUID getId() { return id; }
-    public String getAggregateId() { return aggregateId; }
-    public String getAggregateType() { return aggregateType; }
-    public String getEventType() { return eventType; }
-    public String getPayload() { return payload; }
-    public Instant getCreatedAt() { return createdAt; }
+    public UUID getId() {
+        return id;
+    }
+
+    public String getAggregateId() {
+        return aggregateId;
+    }
+
+    public String getAggregateType() {
+        return aggregateType;
+    }
+
+    public String getEventType() {
+        return eventType;
+    }
+
+    public String getPayload() {
+        return payload;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
 }

@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -47,10 +46,10 @@ public class TopicService {
         cachedTopics = null;
     }
 
-    @Retry(maxRetries = 3, delay = 1000, abortOn = {
-            org.apache.kafka.common.errors.TopicExistsException.class,
-            IllegalArgumentException.class
-    })
+    @Retry(
+            maxRetries = 3,
+            delay = 1000,
+            abortOn = {org.apache.kafka.common.errors.TopicExistsException.class, IllegalArgumentException.class})
     @Timeout(35_000)
     public void createTopic(String name, int partitions, int replicationFactor, Map<String, String> configs) {
         AdminClient client = adminService.getClient();
@@ -89,9 +88,7 @@ public class TopicService {
         try {
             ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, name);
             List<AlterConfigOp> ops = configs.entrySet().stream()
-                    .map(e -> new AlterConfigOp(
-                            new ConfigEntry(e.getKey(), e.getValue()),
-                            AlterConfigOp.OpType.SET))
+                    .map(e -> new AlterConfigOp(new ConfigEntry(e.getKey(), e.getValue()), AlterConfigOp.OpType.SET))
                     .toList();
             client.incrementalAlterConfigs(Map.of(resource, ops)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Altered config for topic: " + name);

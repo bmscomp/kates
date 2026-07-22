@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Keeps the digest-pinned base images (Dockerfile, Dockerfile.native) current
+  # across Docker Hub, quay.io, and registry.access.redhat.com — resolves the
+  # digests the manual web lookup could not fetch for quay/RedHat.
+  - package-ecosystem: docker
+    directory: /kates
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Maven dependencies (Quarkus BOM, kafka-clients/netty CVE pins, etc.).
+  - package-ecosystem: maven
+    directory: /kates
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # GitHub Actions used across the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

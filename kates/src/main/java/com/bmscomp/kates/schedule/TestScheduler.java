@@ -29,8 +29,16 @@ public class TestScheduler {
     @Inject
     TestOrchestrator orchestrator;
 
+    @Inject
+    com.bmscomp.kates.service.SchedulerLeaseService leases;
+
     @Scheduled(every = "60s", identity = "kates-schedule-evaluator")
     void evaluateSchedules() {
+        // With replicas > 1 every instance fires this — only the lease holder
+        // may trigger runs, or each schedule would execute once per replica.
+        if (!leases.tryAcquire("test-scheduler", java.time.Duration.ofSeconds(55))) {
+            return;
+        }
         List<ScheduledTestRun> schedules = repository.findAllEnabled();
         if (schedules.isEmpty()) {
             return;
@@ -60,7 +68,8 @@ public class TestScheduler {
                 repository.updateLastRun(schedule.getId(), run.getId());
                 LOG.info("Schedule '" + schedule.getName() + "' started run " + run.getId());
             } else {
-                LOG.error("Failed to execute schedule '" + schedule.getName() + "': " + result.asFailure().orElseThrow().getMessage());
+                LOG.error("Failed to execute schedule '" + schedule.getName() + "': "
+                        + result.asFailure().orElseThrow().getMessage());
             }
         } catch (Exception e) {
             LOG.error("Failed to execute schedule '" + schedule.getName() + "'", e);

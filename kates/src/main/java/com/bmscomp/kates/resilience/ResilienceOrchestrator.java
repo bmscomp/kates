@@ -63,7 +63,8 @@ public class ResilienceOrchestrator {
             var result = testOrchestrator.executeTest(request.getTestRequest());
             if (result.isFailure()) {
                 report.setStatus("ERROR");
-                LOG.error("Failed to start resilience benchmark: " + result.asFailure().orElseThrow().getMessage());
+                LOG.error("Failed to start resilience benchmark: "
+                        + result.asFailure().orElseThrow().getMessage());
                 return report;
             }
             TestRun run = result.asSuccess().orElseThrow();
@@ -96,8 +97,8 @@ public class ResilienceOrchestrator {
             AtomicBoolean chaosActive = new AtomicBoolean(true);
 
             if (!probes.isEmpty()) {
-                startContinuousProbes(probes, request.getChaosSpec().targetNamespace(),
-                        chaosActive, duringChaosResults);
+                startContinuousProbes(
+                        probes, request.getChaosSpec().targetNamespace(), chaosActive, duringChaosResults);
             }
 
             CompletableFuture<ChaosOutcome> chaosFuture = chaosCoordinator.triggerFault(request.getChaosSpec());
@@ -108,7 +109,8 @@ public class ResilienceOrchestrator {
             report.setChaosOutcome(outcome);
             report.setDuringChaosProbes(List.copyOf(duringChaosResults));
 
-            long duringPass = duringChaosResults.stream().filter(ProbeResult::passed).count();
+            long duringPass =
+                    duringChaosResults.stream().filter(ProbeResult::passed).count();
             LOG.infof("During-chaos probes: %d/%d passed", duringPass, duringChaosResults.size());
 
             // 6. Measure recovery time (RTO)
@@ -120,7 +122,8 @@ public class ResilienceOrchestrator {
 
                 List<ProbeResult> postRecovery = probeExecutor.evaluateAll(probes, namespace);
                 report.setPostRecoveryProbes(postRecovery);
-                long postPass = postRecovery.stream().filter(ProbeResult::passed).count();
+                long postPass =
+                        postRecovery.stream().filter(ProbeResult::passed).count();
                 LOG.infof("Post-recovery probes: %d/%d passed", postPass, postRecovery.size());
             } else {
                 CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS))
@@ -180,14 +183,10 @@ public class ResilienceOrchestrator {
     }
 
     private void startContinuousProbes(
-            List<ProbeSpec> probes,
-            String namespace,
-            AtomicBoolean active,
-            List<ProbeResult> results) {
+            List<ProbeSpec> probes, String namespace, AtomicBoolean active, List<ProbeResult> results) {
 
-        List<ProbeSpec> continuousProbes = probes.stream()
-                .filter(p -> "Continuous".equals(p.mode()))
-                .toList();
+        List<ProbeSpec> continuousProbes =
+                probes.stream().filter(p -> "Continuous".equals(p.mode())).toList();
 
         if (continuousProbes.isEmpty()) return;
 

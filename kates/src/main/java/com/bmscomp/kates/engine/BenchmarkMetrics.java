@@ -103,7 +103,8 @@ public class BenchmarkMetrics {
 
         DistributionSummary latencySummary(String phase) {
             return latencySummaries.computeIfAbsent(
-                    phase, p -> DistributionSummary.builder("kates.benchmark.latency.ms")
+                    phase,
+                    p -> DistributionSummary.builder("kates.benchmark.latency.ms")
                             .tags("run_id", runId, "test_type", testType, "phase", p)
                             .description("Request latency distribution")
                             .publishPercentiles(0.5, 0.95, 0.99, 0.999)
@@ -111,17 +112,21 @@ public class BenchmarkMetrics {
         }
 
         Counter recordCount(String phase) {
-            return recordCounters.computeIfAbsent(phase, p -> Counter.builder("kates.benchmark.records.total")
-                    .tags("run_id", runId, "test_type", testType, "phase", p)
-                    .description("Total records processed")
-                    .register(registry));
+            return recordCounters.computeIfAbsent(
+                    phase,
+                    p -> Counter.builder("kates.benchmark.records.total")
+                            .tags("run_id", runId, "test_type", testType, "phase", p)
+                            .description("Total records processed")
+                            .register(registry));
         }
 
         Counter errorCount(String phase) {
-            return errorCounters.computeIfAbsent(phase, p -> Counter.builder("kates.benchmark.errors.total")
-                    .tags("run_id", runId, "test_type", testType, "phase", p)
-                    .description("Total errors")
-                    .register(registry));
+            return errorCounters.computeIfAbsent(
+                    phase,
+                    p -> Counter.builder("kates.benchmark.errors.total")
+                            .tags("run_id", runId, "test_type", testType, "phase", p)
+                            .description("Total errors")
+                            .register(registry));
         }
     }
 }

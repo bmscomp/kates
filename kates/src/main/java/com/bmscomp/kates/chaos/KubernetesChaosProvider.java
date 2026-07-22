@@ -7,9 +7,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
-import io.fabric8.kubernetes.api.model.networking.v1.*;
 import io.fabric8.kubernetes.api.model.EphemeralContainer;
 import io.fabric8.kubernetes.api.model.EphemeralContainerBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.eclipse.microprofile.faulttolerance.Retry;
 import org.eclipse.microprofile.faulttolerance.Timeout;
@@ -32,13 +32,19 @@ public class KubernetesChaosProvider implements ChaosProvider {
     @Inject
     KubernetesChaosProvider self;
 
+    @Inject
+    com.bmscomp.kates.engine.KatesExecutor executor;
+
     @Override
     public String name() {
         return "kubernetes";
     }
 
     @Retry(maxRetries = 3, delay = 1000)
-    @org.eclipse.microprofile.faulttolerance.CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10000)
+    @org.eclipse.microprofile.faulttolerance.CircuitBreaker(
+            requestVolumeThreshold = 4,
+            failureRatio = 0.5,
+            delay = 10000)
     public void applyDisruption(FaultSpec spec, String engineName) throws Exception {
         if (spec.disruptionType() == null) {
             throw new IllegalArgumentException("No disruptionType set — use the builder");
@@ -57,8 +63,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
             case LEADER_ELECTION -> executePodKill(spec);
             case CPU_STRESS -> executeCpuStress(spec);
             case IO_STRESS -> executeIoStress(spec);
-            default -> throw new UnsupportedOperationException(
-                    "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
+            default ->
+                throw new UnsupportedOperationException(
+                        "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
         }
 
         if (spec.chaosDurationSec() > 0 && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
@@ -69,28 +76,44 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
-        return CompletableFuture.supplyAsync(() -> {
-            Instant start = Instant.now();
-            long startNanos = System.nanoTime();
-            String engineName = spec.experimentName() + "-" + System.currentTimeMillis();
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    Instant start = Instant.now();
+                    long startNanos = System.nanoTime();
+                    String engineName = spec.experimentName() + "-" + System.currentTimeMillis();
 
-            try {
-                self.applyDisruption(spec, engineName);
-                return ChaosOutcome.success(
-                        engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
+                    try {
+                        self.applyDisruption(spec, engineName);
+                        return ChaosOutcome.success(
+                                engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
 
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return ChaosOutcome.failure(
-                        engineName, spec.experimentName(), start, Instant.now(), startNanos,
-                        "Interrupted", null, null, null);
-            } catch (Exception e) {
-                LOG.error("Fault injection failed after retries", e);
-                return ChaosOutcome.failure(
-                        engineName, spec.experimentName(), start, Instant.now(), startNanos,
-                        e.getMessage(), null, null, null);
-            }
-        });
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return ChaosOutcome.failure(
+                                engineName,
+                                spec.experimentName(),
+                                start,
+                                Instant.now(),
+                                startNanos,
+                                "Interrupted",
+                                null,
+                                null,
+                                null);
+                    } catch (Exception e) {
+                        LOG.error("Fault injection failed after retries", e);
+                        return ChaosOutcome.failure(
+                                engineName,
+                                spec.experimentName(),
+                                start,
+                                Instant.now(),
+                                startNanos,
+                                e.getMessage(),
+                                null,
+                                null,
+                                null);
+                    }
+                },
+                executor.get());
     }
 
     private void executePodKill(FaultSpec spec) {
@@ -200,18 +223,35 @@ public class KubernetesChaosProvider implements ChaosProvider {
     private void executeCpuStress(FaultSpec spec) {
         String podName = resolvePodName(spec);
         LOG.info("CPU_STRESS: injecting stress-ng ephemeral container into " + podName);
-        injectEphemeralContainer(spec.targetNamespace(), podName, "chaos-cpu-stress", "polinux/stress",
-                "stress", "--cpu", String.valueOf(spec.cpuCores()), "--timeout", spec.chaosDurationSec() + "s");
+        injectEphemeralContainer(
+                spec.targetNamespace(),
+                podName,
+                "chaos-cpu-stress",
+                "polinux/stress",
+                "stress",
+                "--cpu",
+                String.valueOf(spec.cpuCores()),
+                "--timeout",
+                spec.chaosDurationSec() + "s");
     }
 
     private void executeIoStress(FaultSpec spec) {
         String podName = resolvePodName(spec);
         LOG.info("IO_STRESS: injecting stress-ng ephemeral container into " + podName);
-        injectEphemeralContainer(spec.targetNamespace(), podName, "chaos-io-stress", "polinux/stress",
-                "stress", "--io", String.valueOf(spec.ioWorkers()), "--timeout", spec.chaosDurationSec() + "s");
+        injectEphemeralContainer(
+                spec.targetNamespace(),
+                podName,
+                "chaos-io-stress",
+                "polinux/stress",
+                "stress",
+                "--io",
+                String.valueOf(spec.ioWorkers()),
+                "--timeout",
+                spec.chaosDurationSec() + "s");
     }
 
-    private void injectEphemeralContainer(String namespace, String podName, String containerName, String image, String... command) {
+    private void injectEphemeralContainer(
+            String namespace, String podName, String containerName, String image, String... command) {
         var podResource = client.pods().inNamespace(namespace).withName(podName);
         var pod = podResource.get();
         if (pod == null) {
@@ -225,7 +265,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .build();
 
         pod.getSpec().getEphemeralContainers().add(ec);
-        
+
         // Use replace to update ephemeral containers (requires k8s 1.25+)
         podResource.replace(pod);
     }

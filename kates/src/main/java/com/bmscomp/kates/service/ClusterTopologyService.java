@@ -7,10 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.VersionInfo;
+import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConsumerGroupListing;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
@@ -21,12 +25,6 @@ import org.apache.kafka.common.acl.AclBinding;
 import org.apache.kafka.common.acl.AclBindingFilter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.VersionInfo;
-import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 
 @ApplicationScoped
 public class ClusterTopologyService {
@@ -62,19 +60,21 @@ public class ClusterTopologyService {
             .withScope("Namespaced")
             .build();
 
-    private static final CustomResourceDefinitionContext KAFKA_CONNECT_CRD = new CustomResourceDefinitionContext.Builder()
-            .withGroup("kafka.strimzi.io")
-            .withVersion("v1")
-            .withPlural("kafkaconnects")
-            .withScope("Namespaced")
-            .build();
+    private static final CustomResourceDefinitionContext KAFKA_CONNECT_CRD =
+            new CustomResourceDefinitionContext.Builder()
+                    .withGroup("kafka.strimzi.io")
+                    .withVersion("v1")
+                    .withPlural("kafkaconnects")
+                    .withScope("Namespaced")
+                    .build();
 
-    private static final CustomResourceDefinitionContext KAFKA_CONNECTOR_CRD = new CustomResourceDefinitionContext.Builder()
-            .withGroup("kafka.strimzi.io")
-            .withVersion("v1")
-            .withPlural("kafkaconnectors")
-            .withScope("Namespaced")
-            .build();
+    private static final CustomResourceDefinitionContext KAFKA_CONNECTOR_CRD =
+            new CustomResourceDefinitionContext.Builder()
+                    .withGroup("kafka.strimzi.io")
+                    .withVersion("v1")
+                    .withPlural("kafkaconnectors")
+                    .withScope("Namespaced")
+                    .build();
 
     private static final CustomResourceDefinitionContext KAFKA_MM2_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("kafka.strimzi.io")
@@ -83,19 +83,21 @@ public class ClusterTopologyService {
             .withScope("Namespaced")
             .build();
 
-    private static final CustomResourceDefinitionContext KAFKA_REBALANCE_CRD = new CustomResourceDefinitionContext.Builder()
-            .withGroup("kafka.strimzi.io")
-            .withVersion("v1")
-            .withPlural("kafkarebalances")
-            .withScope("Namespaced")
-            .build();
+    private static final CustomResourceDefinitionContext KAFKA_REBALANCE_CRD =
+            new CustomResourceDefinitionContext.Builder()
+                    .withGroup("kafka.strimzi.io")
+                    .withVersion("v1")
+                    .withPlural("kafkarebalances")
+                    .withScope("Namespaced")
+                    .build();
 
-    private static final CustomResourceDefinitionContext STRIMZI_POD_SET_CRD = new CustomResourceDefinitionContext.Builder()
-            .withGroup("core.strimzi.io")
-            .withVersion("v1")
-            .withPlural("strimzipodsets")
-            .withScope("Namespaced")
-            .build();
+    private static final CustomResourceDefinitionContext STRIMZI_POD_SET_CRD =
+            new CustomResourceDefinitionContext.Builder()
+                    .withGroup("core.strimzi.io")
+                    .withVersion("v1")
+                    .withPlural("strimzipodsets")
+                    .withScope("Namespaced")
+                    .build();
 
     @Inject
     KubernetesClient kubernetesClient;
@@ -181,8 +183,11 @@ public class ClusterTopologyService {
                 }
                 var labels = node.getMetadata().getLabels();
                 if (labels != null) {
-                    n.put("role", labels.getOrDefault("node-role.kubernetes.io/control-plane", null) != null
-                            ? "control-plane" : "worker");
+                    n.put(
+                            "role",
+                            labels.getOrDefault("node-role.kubernetes.io/control-plane", null) != null
+                                    ? "control-plane"
+                                    : "worker");
                 }
                 boolean ready = false;
                 if (status != null && status.getConditions() != null) {
@@ -205,10 +210,12 @@ public class ClusterTopologyService {
     private Map<String, Object> describeStrimzi() {
         Map<String, Object> strimzi = new LinkedHashMap<>();
         try {
-            var pods = kubernetesClient.pods()
+            var pods = kubernetesClient
+                    .pods()
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/kind", "cluster-operator")
-                    .list().getItems();
+                    .list()
+                    .getItems();
             if (!pods.isEmpty()) {
                 Pod operatorPod = pods.get(0);
                 String image = operatorPod.getSpec().getContainers().get(0).getImage();
@@ -225,10 +232,12 @@ public class ClusterTopologyService {
 
         // Entity Operator
         try {
-            var entityPods = kubernetesClient.pods()
+            var entityPods = kubernetesClient
+                    .pods()
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/name", kafkaCluster + "-entity-operator")
-                    .list().getItems();
+                    .list()
+                    .getItems();
             if (!entityPods.isEmpty()) {
                 strimzi.put("entityOperatorReady", isPodReady(entityPods.get(0)));
             }
@@ -238,10 +247,12 @@ public class ClusterTopologyService {
 
         // Cruise Control
         try {
-            var ccPods = kubernetesClient.pods()
+            var ccPods = kubernetesClient
+                    .pods()
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/name", kafkaCluster + "-cruise-control")
-                    .list().getItems();
+                    .list()
+                    .getItems();
             if (!ccPods.isEmpty()) {
                 strimzi.put("cruiseControlReady", isPodReady(ccPods.get(0)));
             }
@@ -251,10 +262,12 @@ public class ClusterTopologyService {
 
         // Kafka Exporter
         try {
-            var expPods = kubernetesClient.pods()
+            var expPods = kubernetesClient
+                    .pods()
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/name", kafkaCluster + "-kafka-exporter")
-                    .list().getItems();
+                    .list()
+                    .getItems();
             if (!expPods.isEmpty()) {
                 strimzi.put("kafkaExporterReady", isPodReady(expPods.get(0)));
             }
@@ -264,16 +277,19 @@ public class ClusterTopologyService {
 
         // Kafka Connect
         try {
-            var connectPods = kubernetesClient.pods()
+            var connectPods = kubernetesClient
+                    .pods()
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/name", kafkaCluster + "-connect")
-                    .list().getItems();
+                    .list()
+                    .getItems();
             if (!connectPods.isEmpty()) {
                 long readyCount = connectPods.stream().filter(this::isPodReady).count();
                 strimzi.put("kafkaConnectReady", readyCount == connectPods.size());
                 strimzi.put("kafkaConnectPods", connectPods.size());
                 strimzi.put("kafkaConnectReadyPods", readyCount);
-                String connectImage = connectPods.get(0).getSpec().getContainers().get(0).getImage();
+                String connectImage =
+                        connectPods.get(0).getSpec().getContainers().get(0).getImage();
                 strimzi.put("kafkaConnectImage", connectImage);
             }
         } catch (Exception e) {
@@ -286,7 +302,8 @@ public class ClusterTopologyService {
     @SuppressWarnings("unchecked")
     private Map<String, Object> readKafkaCrSpec() {
         try {
-            GenericKubernetesResource kafka = kubernetesClient.genericKubernetesResources(KAFKA_CRD)
+            GenericKubernetesResource kafka = kubernetesClient
+                    .genericKubernetesResources(KAFKA_CRD)
                     .inNamespace(kafkaNamespace)
                     .withName(kafkaCluster)
                     .get();
@@ -479,14 +496,16 @@ public class ClusterTopologyService {
         }
         // PodMonitors
         try {
-            var monitors = kubernetesClient.genericKubernetesResources(
-                    new CustomResourceDefinitionContext.Builder()
+            var monitors = kubernetesClient
+                    .genericKubernetesResources(new CustomResourceDefinitionContext.Builder()
                             .withGroup("monitoring.coreos.com")
                             .withVersion("v1")
                             .withPlural("podmonitors")
                             .withScope("Namespaced")
-                            .build()
-            ).inNamespace(kafkaNamespace).list().getItems();
+                            .build())
+                    .inNamespace(kafkaNamespace)
+                    .list()
+                    .getItems();
             List<String> monitorNames = new ArrayList<>();
             for (var m : monitors) {
                 monitorNames.add(m.getMetadata().getName());
@@ -504,7 +523,8 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeNodePools() {
         List<Map<String, Object>> nodePools = new ArrayList<>();
         try {
-            var pools = kubernetesClient.genericKubernetesResources(NODE_POOL_CRD)
+            var pools = kubernetesClient
+                    .genericKubernetesResources(NODE_POOL_CRD)
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/cluster", kafkaCluster)
                     .list()
@@ -526,7 +546,8 @@ public class ClusterTopologyService {
                 if (storage.get("volumes") instanceof List<?> volumes && !volumes.isEmpty()) {
                     Map<String, Object> vol = (Map<String, Object>) volumes.get(0);
                     storageSize = (String) vol.getOrDefault("size", "");
-                    if (vol.get("class") != null) storageClass = vol.get("class").toString();
+                    if (vol.get("class") != null)
+                        storageClass = vol.get("class").toString();
                 }
 
                 Map<String, Object> resources = (Map<String, Object>) spec.getOrDefault("resources", Map.of());
@@ -596,28 +617,30 @@ public class ClusterTopologyService {
 
         int controllerQuorumLeader = -1;
         try {
-            Node controller = adminService.getClient().describeCluster()
-                    .controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Node controller =
+                    adminService.getClient().describeCluster().controller().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             controllerQuorumLeader = controller.id();
         } catch (Exception e) {
             LOG.debug("Unable to determine controller leader", e);
         }
 
         try {
-            var pools = kubernetesClient.genericKubernetesResources(NODE_POOL_CRD)
+            var pools = kubernetesClient
+                    .genericKubernetesResources(NODE_POOL_CRD)
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/cluster", kafkaCluster)
                     .list()
                     .getItems();
 
             for (GenericKubernetesResource pool : pools) {
-                Map<String, Object> spec = (Map<String, Object>) pool.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) pool.getAdditionalProperties().getOrDefault("spec", Map.of());
                 String poolName = pool.getMetadata().getName();
                 List<String> roles = (List<String>) spec.getOrDefault("roles", List.of());
                 String role = roles.isEmpty() ? "unknown" : roles.get(0);
 
-                List<Pod> pods = kubernetesClient.pods()
+                List<Pod> pods = kubernetesClient
+                        .pods()
                         .inNamespace(kafkaNamespace)
                         .withLabel("strimzi.io/pool-name", poolName)
                         .withLabel("strimzi.io/cluster", kafkaCluster)
@@ -637,8 +660,8 @@ public class ClusterTopologyService {
                         nodeInfo.put("rack", bn.get("rack"));
                     } else {
                         nodeInfo.put("id", nodeId);
-                        nodeInfo.put("host",
-                                podName + "." + kafkaCluster + "-kafka-brokers." + kafkaNamespace + ".svc");
+                        nodeInfo.put(
+                                "host", podName + "." + kafkaCluster + "-kafka-brokers." + kafkaNamespace + ".svc");
                         nodeInfo.put("port", 9092);
                         nodeInfo.put("rack", pod.getMetadata().getLabels().getOrDefault("zone", ""));
                     }
@@ -668,7 +691,8 @@ public class ClusterTopologyService {
     private Map<String, Object> describeTopics() {
         Map<String, Object> topics = new LinkedHashMap<>();
         try {
-            var topicList = kubernetesClient.genericKubernetesResources(KAFKA_TOPIC_CRD)
+            var topicList = kubernetesClient
+                    .genericKubernetesResources(KAFKA_TOPIC_CRD)
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/cluster", kafkaCluster)
                     .list()
@@ -679,8 +703,8 @@ public class ClusterTopologyService {
             for (GenericKubernetesResource topic : topicList) {
                 Map<String, Object> t = new LinkedHashMap<>();
                 t.put("name", topic.getMetadata().getName());
-                Map<String, Object> spec = (Map<String, Object>) topic.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) topic.getAdditionalProperties().getOrDefault("spec", Map.of());
                 if (spec.get("partitions") instanceof Number n) t.put("partitions", n.intValue());
                 if (spec.get("replicas") instanceof Number n) t.put("replicas", n.intValue());
                 topicDetails.add(t);
@@ -698,7 +722,8 @@ public class ClusterTopologyService {
     private Map<String, Object> describeUsers() {
         Map<String, Object> users = new LinkedHashMap<>();
         try {
-            var userList = kubernetesClient.genericKubernetesResources(KAFKA_USER_CRD)
+            var userList = kubernetesClient
+                    .genericKubernetesResources(KAFKA_USER_CRD)
                     .inNamespace(kafkaNamespace)
                     .withLabel("strimzi.io/cluster", kafkaCluster)
                     .list()
@@ -709,8 +734,8 @@ public class ClusterTopologyService {
             for (GenericKubernetesResource user : userList) {
                 Map<String, Object> u = new LinkedHashMap<>();
                 u.put("name", user.getMetadata().getName());
-                Map<String, Object> spec = (Map<String, Object>) user.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) user.getAdditionalProperties().getOrDefault("spec", Map.of());
                 if (spec.get("authentication") instanceof Map<?, ?> auth) {
                     u.put("authType", auth.get("type"));
                 }
@@ -719,8 +744,8 @@ public class ClusterTopologyService {
                 }
 
                 // Ready status
-                Map<String, Object> status = (Map<String, Object>) user.getAdditionalProperties()
-                        .getOrDefault("status", Map.of());
+                Map<String, Object> status =
+                        (Map<String, Object>) user.getAdditionalProperties().getOrDefault("status", Map.of());
                 if (status.get("conditions") instanceof List<?> conditions) {
                     for (Object c : conditions) {
                         if (c instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
@@ -746,8 +771,8 @@ public class ClusterTopologyService {
             Collection<Node> nodes = client.describeCluster().nodes().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             List<Integer> brokerIds = nodes.stream().map(Node::id).toList();
             DescribeLogDirsResult logDirs = client.describeLogDirs(brokerIds);
-            Map<Integer, Map<String, LogDirDescription>> allLogDirs = logDirs.allDescriptions()
-                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Map<Integer, Map<String, LogDirDescription>> allLogDirs =
+                    logDirs.allDescriptions().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             for (var entry : allLogDirs.entrySet()) {
                 int brokerId = entry.getKey();
                 for (var dirEntry : entry.getValue().entrySet()) {
@@ -775,13 +800,15 @@ public class ClusterTopologyService {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             AdminClient client = adminService.getClient();
-            Collection<ConsumerGroupListing> groups = client.listConsumerGroups()
-                    .all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Collection<ConsumerGroupListing> groups =
+                    client.listConsumerGroups().all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             List<Map<String, Object>> items = new ArrayList<>();
             if (!groups.isEmpty()) {
-                var descriptions = client.describeConsumerGroups(
-                        groups.stream().map(ConsumerGroupListing::groupId).toList()
-                ).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                var descriptions = client.describeConsumerGroups(groups.stream()
+                                .map(ConsumerGroupListing::groupId)
+                                .toList())
+                        .all()
+                        .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 for (var entry : descriptions.entrySet()) {
                     Map<String, Object> g = new LinkedHashMap<>();
                     g.put("groupId", entry.getKey());
@@ -808,8 +835,8 @@ public class ClusterTopologyService {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             AdminClient client = adminService.getClient();
-            Collection<AclBinding> acls = client.describeAcls(AclBindingFilter.ANY)
-                    .values().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Collection<AclBinding> acls =
+                    client.describeAcls(AclBindingFilter.ANY).values().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             List<Map<String, Object>> items = new ArrayList<>();
             for (AclBinding acl : acls) {
                 Map<String, Object> a = new LinkedHashMap<>();
@@ -838,8 +865,7 @@ public class ClusterTopologyService {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             AdminClient client = adminService.getClient();
-            var features = client.describeFeatures().featureMetadata()
-                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            var features = client.describeFeatures().featureMetadata().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             var finalized = features.finalizedFeatures();
             List<Map<String, Object>> items = new ArrayList<>();
             for (var entry : finalized.entrySet()) {
@@ -864,20 +890,21 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeRebalances() {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            var list = kubernetesClient.genericKubernetesResources(KAFKA_REBALANCE_CRD)
+            var list = kubernetesClient
+                    .genericKubernetesResources(KAFKA_REBALANCE_CRD)
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
             for (GenericKubernetesResource res : list) {
                 Map<String, Object> r = new LinkedHashMap<>();
                 r.put("name", res.getMetadata().getName());
-                Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("spec", Map.of());
                 if (spec.get("mode") != null) r.put("mode", spec.get("mode"));
                 if (spec.get("goals") instanceof List<?> goals) r.put("goalCount", goals.size());
                 if (spec.get("rebalanceDisk") instanceof Boolean rd) r.put("rebalanceDisk", rd);
-                Map<String, Object> status = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("status", Map.of());
+                Map<String, Object> status =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("status", Map.of());
                 if (status.get("conditions") instanceof List<?> conditions && !conditions.isEmpty()) {
                     Map<String, Object> last = (Map<String, Object>) conditions.get(conditions.size() - 1);
                     r.put("status", last.getOrDefault("type", "Unknown"));
@@ -896,14 +923,18 @@ public class ClusterTopologyService {
     private Map<String, Object> describeDrainCleaner() {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
-            var deploy = kubernetesClient.apps().deployments()
+            var deploy = kubernetesClient
+                    .apps()
+                    .deployments()
                     .inNamespace(kafkaNamespace)
                     .withName("strimzi-drain-cleaner")
                     .get();
             if (deploy != null) {
-                result.put("ready", deploy.getStatus() != null
-                        && deploy.getStatus().getReadyReplicas() != null
-                        && deploy.getStatus().getReadyReplicas() > 0);
+                result.put(
+                        "ready",
+                        deploy.getStatus() != null
+                                && deploy.getStatus().getReadyReplicas() != null
+                                && deploy.getStatus().getReadyReplicas() > 0);
                 result.put("replicas", deploy.getSpec().getReplicas());
                 if (deploy.getStatus() != null && deploy.getStatus().getReadyReplicas() != null) {
                     result.put("readyReplicas", deploy.getStatus().getReadyReplicas());
@@ -931,20 +962,21 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeStrimziPodSets() {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            var list = kubernetesClient.genericKubernetesResources(STRIMZI_POD_SET_CRD)
+            var list = kubernetesClient
+                    .genericKubernetesResources(STRIMZI_POD_SET_CRD)
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
             for (GenericKubernetesResource res : list) {
                 Map<String, Object> ps = new LinkedHashMap<>();
                 ps.put("name", res.getMetadata().getName());
-                Map<String, Object> status = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("status", Map.of());
+                Map<String, Object> status =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("status", Map.of());
                 if (status.get("pods") instanceof Number n) ps.put("pods", n.intValue());
                 if (status.get("readyPods") instanceof Number n) ps.put("readyPods", n.intValue());
                 if (status.get("currentPods") instanceof Number n) ps.put("currentPods", n.intValue());
-                Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("spec", Map.of());
                 if (spec.get("pods") instanceof List<?> pods) ps.put("desiredPods", pods.size());
                 result.add(ps);
             }
@@ -957,7 +989,9 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeNetworkPolicies() {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            var policies = kubernetesClient.network().networkPolicies()
+            var policies = kubernetesClient
+                    .network()
+                    .networkPolicies()
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
@@ -965,7 +999,9 @@ public class ClusterTopologyService {
                 Map<String, Object> p = new LinkedHashMap<>();
                 p.put("name", np.getMetadata().getName());
                 var podSel = np.getSpec().getPodSelector();
-                if (podSel != null && podSel.getMatchLabels() != null && !podSel.getMatchLabels().isEmpty()) {
+                if (podSel != null
+                        && podSel.getMatchLabels() != null
+                        && !podSel.getMatchLabels().isEmpty()) {
                     p.put("targetPods", podSel.getMatchLabels());
                 } else {
                     p.put("targetPods", "all");
@@ -988,7 +1024,8 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describePvcs() {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            var pvcs = kubernetesClient.persistentVolumeClaims()
+            var pvcs = kubernetesClient
+                    .persistentVolumeClaims()
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
@@ -1005,7 +1042,13 @@ public class ClusterTopologyService {
                 } else if (pvc.getSpec().getResources() != null
                         && pvc.getSpec().getResources().getRequests() != null
                         && pvc.getSpec().getResources().getRequests().get("storage") != null) {
-                    p.put("capacity", pvc.getSpec().getResources().getRequests().get("storage").toString());
+                    p.put(
+                            "capacity",
+                            pvc.getSpec()
+                                    .getResources()
+                                    .getRequests()
+                                    .get("storage")
+                                    .toString());
                 }
                 if (pvc.getSpec().getAccessModes() != null) {
                     p.put("accessModes", pvc.getSpec().getAccessModes());
@@ -1025,7 +1068,8 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeServices() {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            var svcs = kubernetesClient.services()
+            var svcs = kubernetesClient
+                    .services()
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
@@ -1062,7 +1106,8 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeEndpoints() {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            var endpoints = kubernetesClient.endpoints()
+            var endpoints = kubernetesClient
+                    .endpoints()
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
@@ -1074,8 +1119,10 @@ public class ClusterTopologyService {
                 List<Map<String, Object>> ports = new ArrayList<>();
                 if (ep.getSubsets() != null) {
                     for (var subset : ep.getSubsets()) {
-                        if (subset.getAddresses() != null) readyAddrs += subset.getAddresses().size();
-                        if (subset.getNotReadyAddresses() != null) notReadyAddrs += subset.getNotReadyAddresses().size();
+                        if (subset.getAddresses() != null)
+                            readyAddrs += subset.getAddresses().size();
+                        if (subset.getNotReadyAddresses() != null)
+                            notReadyAddrs += subset.getNotReadyAddresses().size();
                         if (subset.getPorts() != null) {
                             for (var port : subset.getPorts()) {
                                 Map<String, Object> p = new LinkedHashMap<>();
@@ -1102,7 +1149,8 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeConnect() {
         List<Map<String, Object>> connects = new ArrayList<>();
         try {
-            var list = kubernetesClient.genericKubernetesResources(KAFKA_CONNECT_CRD)
+            var list = kubernetesClient
+                    .genericKubernetesResources(KAFKA_CONNECT_CRD)
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
@@ -1110,15 +1158,15 @@ public class ClusterTopologyService {
                 Map<String, Object> c = new LinkedHashMap<>();
                 String connectName = res.getMetadata().getName();
                 c.put("name", connectName);
-                Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("spec", Map.of());
                 if (spec.get("replicas") instanceof Number n) c.put("replicas", n.intValue());
                 if (spec.get("bootstrapServers") != null) c.put("bootstrapServers", spec.get("bootstrapServers"));
                 if (spec.get("version") != null) c.put("version", spec.get("version"));
 
                 // CR status
-                Map<String, Object> status = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("status", Map.of());
+                Map<String, Object> status =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("status", Map.of());
                 if (status.get("conditions") instanceof List<?> conditions) {
                     for (Object cond : conditions) {
                         if (cond instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
@@ -1180,18 +1228,23 @@ public class ClusterTopologyService {
                 // Config details (schema registry, converters)
                 if (spec.get("config") instanceof Map<?, ?> config) {
                     Map<String, Object> configSummary = new LinkedHashMap<>();
-                    if (config.get("key.converter") != null) configSummary.put("keyConverter", config.get("key.converter"));
-                    if (config.get("value.converter") != null) configSummary.put("valueConverter", config.get("value.converter"));
-                    if (config.get("schema.registry.url") != null) configSummary.put("schemaRegistryUrl", config.get("schema.registry.url"));
+                    if (config.get("key.converter") != null)
+                        configSummary.put("keyConverter", config.get("key.converter"));
+                    if (config.get("value.converter") != null)
+                        configSummary.put("valueConverter", config.get("value.converter"));
+                    if (config.get("schema.registry.url") != null)
+                        configSummary.put("schemaRegistryUrl", config.get("schema.registry.url"));
                     if (!configSummary.isEmpty()) c.put("configSummary", configSummary);
                 }
 
                 // Pods for this KafkaConnect resource
                 try {
-                    var connectPods = kubernetesClient.pods()
+                    var connectPods = kubernetesClient
+                            .pods()
                             .inNamespace(kafkaNamespace)
                             .withLabel("strimzi.io/name", connectName)
-                            .list().getItems();
+                            .list()
+                            .getItems();
                     List<Map<String, Object>> podDetails = new ArrayList<>();
                     int readyCount = 0;
                     for (Pod pod : connectPods) {
@@ -1225,7 +1278,8 @@ public class ClusterTopologyService {
 
                 // KafkaConnector resources
                 try {
-                    var connectors = kubernetesClient.genericKubernetesResources(KAFKA_CONNECTOR_CRD)
+                    var connectors = kubernetesClient
+                            .genericKubernetesResources(KAFKA_CONNECTOR_CRD)
                             .inNamespace(kafkaNamespace)
                             .withLabel("strimzi.io/cluster", connectName)
                             .list()
@@ -1234,14 +1288,14 @@ public class ClusterTopologyService {
                     for (GenericKubernetesResource connector : connectors) {
                         Map<String, Object> ci = new LinkedHashMap<>();
                         ci.put("name", connector.getMetadata().getName());
-                        Map<String, Object> connSpec = (Map<String, Object>) connector.getAdditionalProperties()
-                                .getOrDefault("spec", Map.of());
+                        Map<String, Object> connSpec = (Map<String, Object>)
+                                connector.getAdditionalProperties().getOrDefault("spec", Map.of());
                         if (connSpec.get("class") != null) ci.put("class", connSpec.get("class"));
                         if (connSpec.get("tasksMax") instanceof Number n) ci.put("tasksMax", n.intValue());
                         if (connSpec.get("pause") instanceof Boolean paused) ci.put("paused", paused);
 
-                        Map<String, Object> connStatus = (Map<String, Object>) connector.getAdditionalProperties()
-                                .getOrDefault("status", Map.of());
+                        Map<String, Object> connStatus = (Map<String, Object>)
+                                connector.getAdditionalProperties().getOrDefault("status", Map.of());
                         if (connStatus.get("conditions") instanceof List<?> connConds) {
                             for (Object cond : connConds) {
                                 if (cond instanceof Map<?, ?> cm && "Ready".equals(cm.get("type"))) {
@@ -1288,15 +1342,16 @@ public class ClusterTopologyService {
     private List<Map<String, Object>> describeMirrorMaker2() {
         List<Map<String, Object>> mm2s = new ArrayList<>();
         try {
-            var list = kubernetesClient.genericKubernetesResources(KAFKA_MM2_CRD)
+            var list = kubernetesClient
+                    .genericKubernetesResources(KAFKA_MM2_CRD)
                     .inNamespace(kafkaNamespace)
                     .list()
                     .getItems();
             for (GenericKubernetesResource res : list) {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("name", res.getMetadata().getName());
-                Map<String, Object> spec = (Map<String, Object>) res.getAdditionalProperties()
-                        .getOrDefault("spec", Map.of());
+                Map<String, Object> spec =
+                        (Map<String, Object>) res.getAdditionalProperties().getOrDefault("spec", Map.of());
                 if (spec.get("replicas") instanceof Number n) m.put("replicas", n.intValue());
                 mm2s.add(m);
             }

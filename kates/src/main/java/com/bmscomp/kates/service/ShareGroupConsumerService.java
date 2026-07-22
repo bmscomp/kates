@@ -7,7 +7,6 @@ import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -78,8 +77,7 @@ public class ShareGroupConsumerService {
         try {
             consumer = buildShareGroupConsumer();
             consumer.subscribe(List.of(RESULTS_TOPIC));
-            LOG.infof("Share Group consumer started [group=%s, topic=%s]",
-                    SHARE_GROUP_ID, RESULTS_TOPIC);
+            LOG.infof("Share Group consumer started [group=%s, topic=%s]", SHARE_GROUP_ID, RESULTS_TOPIC);
 
             pollingThread = new Thread(this::pollLoop, "share-group-poller");
             pollingThread.setDaemon(true);
@@ -131,8 +129,7 @@ public class ShareGroupConsumerService {
                         processedCount.incrementAndGet();
                     } catch (Exception e) {
                         failedCount.incrementAndGet();
-                        LOG.warnf("Share Group record processing failed [key=%s]: %s",
-                                record.key(), e.getMessage());
+                        LOG.warnf("Share Group record processing failed [key=%s]: %s", record.key(), e.getMessage());
                     }
                 });
             } catch (org.apache.kafka.common.errors.InterruptException e) {
@@ -141,7 +138,11 @@ public class ShareGroupConsumerService {
             } catch (Exception e) {
                 if (running.get()) {
                     LOG.error("Share Group poll error, retrying in 5s", e);
-                    try { Thread.sleep(5000); } catch (InterruptedException ie) { break; }
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException ie) {
+                        break;
+                    }
                 }
             }
         }
@@ -154,8 +155,7 @@ public class ShareGroupConsumerService {
         }
         recentResults.add(String.format("[%s] %s", key, truncate(value, 150)));
 
-        LOG.debugf("Share Group processed result [key=%s, len=%d]",
-                key, value != null ? value.length() : 0);
+        LOG.debugf("Share Group processed result [key=%s, len=%d]", key, value != null ? value.length() : 0);
     }
 
     private KafkaConsumer<String, String> buildShareGroupConsumer() {

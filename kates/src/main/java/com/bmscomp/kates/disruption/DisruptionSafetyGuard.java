@@ -4,12 +4,11 @@ import java.util.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import org.eclipse.microprofile.faulttolerance.Retry;
-import org.eclipse.microprofile.faulttolerance.Timeout;
-
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.DisruptionType;
@@ -195,13 +194,15 @@ public class DisruptionSafetyGuard {
 
         for (Pod pod : brokers) {
             if (pod.getStatus() == null || !"Running".equals(pod.getStatus().getPhase())) {
-                LOG.warn("Cluster state verification failed: broker " + pod.getMetadata().getName() + " is not Running");
+                LOG.warn("Cluster state verification failed: broker "
+                        + pod.getMetadata().getName() + " is not Running");
                 return false;
             }
             boolean ready = pod.getStatus().getConditions().stream()
                     .anyMatch(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()));
             if (!ready) {
-                LOG.warn("Cluster state verification failed: broker " + pod.getMetadata().getName() + " is not Ready");
+                LOG.warn("Cluster state verification failed: broker "
+                        + pod.getMetadata().getName() + " is not Ready");
                 return false;
             }
         }

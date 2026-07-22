@@ -49,16 +49,18 @@ public final class EntityMapper {
 
     public static TestRun toDomain(TestRunEntity entity) {
         TestRun run = new TestRun()
-            .withId(entity.getId())
-            .withTestType(entity.getTestType())
-            .withStatus(entity.getStatus())
-            .withCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
-            .withBackend(entity.getBackend())
-            .withScenarioName(entity.getScenarioName())
-            .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
-            .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
-            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
-            .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
+                .withId(entity.getId())
+                .withTestType(entity.getTestType())
+                .withStatus(entity.getStatus())
+                .withCreatedAt(
+                        entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
+                .withBackend(entity.getBackend())
+                .withScenarioName(entity.getScenarioName())
+                .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
+                .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
+                .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
+                .withCdcPhases(
+                        fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -75,16 +77,18 @@ public final class EntityMapper {
      */
     public static TestRun toDomainSummary(TestRunEntity entity) {
         return new TestRun()
-            .withId(entity.getId())
-            .withTestType(entity.getTestType())
-            .withStatus(entity.getStatus())
-            .withCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
-            .withBackend(entity.getBackend())
-            .withScenarioName(entity.getScenarioName())
-            .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
-            .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
-            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
-            .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
+                .withId(entity.getId())
+                .withTestType(entity.getTestType())
+                .withStatus(entity.getStatus())
+                .withCreatedAt(
+                        entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
+                .withBackend(entity.getBackend())
+                .withScenarioName(entity.getScenarioName())
+                .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
+                .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
+                .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
+                .withCdcPhases(
+                        fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
     }
 
     public static void updateEntity(TestRunEntity entity, TestRun run) {
@@ -127,21 +131,21 @@ public final class EntityMapper {
 
     private static TestResult toResultDomain(TestResultEntity entity) {
         return new TestResult()
-            .withTaskId(entity.getTaskId())
-            .withTestType(entity.getTestType())
-            .withStatus(entity.getStatus())
-            .withRecordsSent(entity.getRecordsSent())
-            .withThroughputRecordsPerSec(entity.getThroughputRecordsPerSec())
-            .withThroughputMBPerSec(entity.getThroughputMBPerSec())
-            .withAvgLatencyMs(entity.getAvgLatencyMs())
-            .withP50LatencyMs(entity.getP50LatencyMs())
-            .withP95LatencyMs(entity.getP95LatencyMs())
-            .withP99LatencyMs(entity.getP99LatencyMs())
-            .withMaxLatencyMs(entity.getMaxLatencyMs())
-            .withStartTime(entity.getStartTime())
-            .withEndTime(entity.getEndTime())
-            .withError(entity.getError())
-            .withPhaseName(entity.getPhaseName());
+                .withTaskId(entity.getTaskId())
+                .withTestType(entity.getTestType())
+                .withStatus(entity.getStatus())
+                .withRecordsSent(entity.getRecordsSent())
+                .withThroughputRecordsPerSec(entity.getThroughputRecordsPerSec())
+                .withThroughputMBPerSec(entity.getThroughputMBPerSec())
+                .withAvgLatencyMs(entity.getAvgLatencyMs())
+                .withP50LatencyMs(entity.getP50LatencyMs())
+                .withP95LatencyMs(entity.getP95LatencyMs())
+                .withP99LatencyMs(entity.getP99LatencyMs())
+                .withMaxLatencyMs(entity.getMaxLatencyMs())
+                .withStartTime(entity.getStartTime())
+                .withEndTime(entity.getEndTime())
+                .withError(entity.getError())
+                .withPhaseName(entity.getPhaseName());
     }
 
     private static String toJson(Object obj) {

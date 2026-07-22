@@ -2,13 +2,12 @@ package com.bmscomp.kates.api;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
+import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Liveness;
-
-import jakarta.inject.Inject;
 
 /**
  * Liveness probe: verifies JVM health beyond just "running".

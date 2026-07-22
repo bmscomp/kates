@@ -5,7 +5,6 @@ import static org.mockito.Mockito.*;
 
 import java.util.Collection;
 import java.util.Map;
-
 import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
@@ -39,9 +38,7 @@ class ClusterHealthServiceTest {
         DescribeClusterResult result = mock(DescribeClusterResult.class);
         Node controller = new Node(0, "broker-0", 9092);
         Collection<Node> nodes = java.util.List.of(
-                new Node(0, "broker-0", 9092),
-                new Node(1, "broker-1", 9092),
-                new Node(2, "broker-2", 9092));
+                new Node(0, "broker-0", 9092), new Node(1, "broker-1", 9092), new Node(2, "broker-2", 9092));
         when(result.clusterId()).thenReturn(KafkaFuture.completedFuture("test-cluster-id"));
         when(result.controller()).thenReturn(KafkaFuture.completedFuture(controller));
         when(result.nodes()).thenReturn(KafkaFuture.completedFuture(nodes));
@@ -82,8 +79,10 @@ class ClusterHealthServiceTest {
         @SuppressWarnings("unchecked")
         KafkaFuture<String> failFuture = mock(KafkaFuture.class);
         try {
-            when(failFuture.get(anyLong(), any())).thenThrow(new java.util.concurrent.ExecutionException(new RuntimeException("refused")));
-        } catch (Exception ignored) {}
+            when(failFuture.get(anyLong(), any()))
+                    .thenThrow(new java.util.concurrent.ExecutionException(new RuntimeException("refused")));
+        } catch (Exception ignored) {
+        }
         when(result.clusterId()).thenReturn(failFuture);
         when(mockClient.describeCluster()).thenReturn(result);
 
@@ -103,8 +102,10 @@ class ClusterHealthServiceTest {
         @SuppressWarnings("unchecked")
         KafkaFuture<String> failFuture = mock(KafkaFuture.class);
         try {
-            when(failFuture.get(anyLong(), any())).thenThrow(new java.util.concurrent.ExecutionException(new RuntimeException("fail")));
-        } catch (Exception ignored) {}
+            when(failFuture.get(anyLong(), any()))
+                    .thenThrow(new java.util.concurrent.ExecutionException(new RuntimeException("fail")));
+        } catch (Exception ignored) {
+        }
         when(result.clusterId()).thenReturn(failFuture);
         when(mockClient.describeCluster()).thenReturn(result);
 

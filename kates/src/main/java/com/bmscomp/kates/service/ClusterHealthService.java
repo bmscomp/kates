@@ -8,21 +8,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CompletionStage;
-
-import io.smallrye.mutiny.Uni;
-import io.smallrye.mutiny.tuples.Tuple5;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import io.smallrye.mutiny.Uni;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
-import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.apache.kafka.clients.admin.ConsumerGroupListing;
+import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.apache.kafka.clients.admin.ListConsumerGroupsOptions;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.Node;
@@ -201,26 +196,46 @@ public class ClusterHealthService {
         try {
             DescribeClusterResult cluster = client.describeCluster();
 
-            Uni<String> clusterIdUni = Uni.createFrom().completionStage(cluster.clusterId().toCompletionStage());
-            Uni<Node> controllerUni = Uni.createFrom().completionStage(cluster.controller().toCompletionStage());
-            Uni<Collection<Node>> nodesUni = Uni.createFrom().completionStage(cluster.nodes().toCompletionStage());
-            Uni<Set<String>> topicsUni = Uni.createFrom().completionStage(client.listTopics().names().toCompletionStage());
-            Uni<Collection<ConsumerGroupListing>> groupsUni = Uni.createFrom().completionStage(
-                    client.listConsumerGroups(new ListConsumerGroupsOptions()).all().toCompletionStage());
-            
+            Uni<String> clusterIdUni =
+                    Uni.createFrom().completionStage(cluster.clusterId().toCompletionStage());
+            Uni<Node> controllerUni =
+                    Uni.createFrom().completionStage(cluster.controller().toCompletionStage());
+            Uni<Collection<Node>> nodesUni =
+                    Uni.createFrom().completionStage(cluster.nodes().toCompletionStage());
+            Uni<Set<String>> topicsUni =
+                    Uni.createFrom().completionStage(client.listTopics().names().toCompletionStage());
+            Uni<Collection<ConsumerGroupListing>> groupsUni = Uni.createFrom()
+                    .completionStage(client.listConsumerGroups(new ListConsumerGroupsOptions())
+                            .all()
+                            .toCompletionStage());
+
             // Note: describeMetadataQuorum might not be supported on all versions, so we fall back gracefully.
             Uni<org.apache.kafka.clients.admin.QuorumInfo> quorumUni = Uni.createFrom()
-                    .completionStage(client.describeMetadataQuorum().quorumInfo().toCompletionStage())
-                    .onFailure().recoverWithNull();
+                    .completionStage(
+                            client.describeMetadataQuorum().quorumInfo().toCompletionStage())
+                    .onFailure()
+                    .recoverWithNull();
 
-            return Uni.combine().all().unis(clusterIdUni, controllerUni, nodesUni, topicsUni, groupsUni, quorumUni).asTuple()
+            return Uni.combine()
+                    .all()
+                    .unis(clusterIdUni, controllerUni, nodesUni, topicsUni, groupsUni, quorumUni)
+                    .asTuple()
                     .chain(tuple -> processHealthTuple(client, tuple));
         } catch (Exception e) {
             return Uni.createFrom().failure(new RuntimeException("Failed to perform cluster health check", e));
         }
     }
 
-    private Uni<Map<String, Object>> processHealthTuple(AdminClient client, io.smallrye.mutiny.tuples.Tuple6<String, Node, Collection<Node>, Set<String>, Collection<ConsumerGroupListing>, org.apache.kafka.clients.admin.QuorumInfo> tuple) {
+    private Uni<Map<String, Object>> processHealthTuple(
+            AdminClient client,
+            io.smallrye.mutiny.tuples.Tuple6<
+                            String,
+                            Node,
+                            Collection<Node>,
+                            Set<String>,
+                            Collection<ConsumerGroupListing>,
+                            org.apache.kafka.clients.admin.QuorumInfo>
+                    tuple) {
         String clusterId = tuple.getItem1();
         Node controller = tuple.getItem2();
         Collection<Node> nodes = tuple.getItem3();
@@ -235,7 +250,9 @@ public class ClusterHealthService {
 
         Uni<Map<String, TopicDescription>> topicDescsUni = topics.isEmpty()
                 ? Uni.createFrom().item(Map.of())
-                : Uni.createFrom().completionStage(client.describeTopics(topics).allTopicNames().toCompletionStage());
+                : Uni.createFrom()
+                        .completionStage(
+                                client.describeTopics(topics).allTopicNames().toCompletionStage());
 
         return topicDescsUni.map(topicDescs -> {
             int totalPartitions = 0;
@@ -283,23 +300,23 @@ public class ClusterHealthService {
             } else if (underReplicated > 0) {
                 status = "WARNING";
             }
-            
+
             if (quorum != null) {
                 Map<String, Object> quorumHealth = new LinkedHashMap<>();
                 quorumHealth.put("leaderId", quorum.leaderId());
                 quorumHealth.put("voters", quorum.voters().size());
                 quorumHealth.put("observers", quorum.observers().size());
-                
+
                 boolean hasLeader = quorum.leaderId() >= 0;
                 quorumHealth.put("hasLeader", hasLeader);
-                
+
                 if (!hasLeader) {
                     status = "CRITICAL";
                     quorumHealth.put("issue", "NO_LEADER");
                 }
                 report.put("kraftQuorum", quorumHealth);
             }
-            
+
             report.put("status", status);
 
             cachedHealthCheck = report;
@@ -309,4 +326,3 @@ public class ClusterHealthService {
         });
     }
 }
-

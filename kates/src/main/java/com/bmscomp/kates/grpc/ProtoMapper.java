@@ -4,7 +4,6 @@ import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
-
 import com.bmscomp.kates.grpc.proto.*;
 
 /**

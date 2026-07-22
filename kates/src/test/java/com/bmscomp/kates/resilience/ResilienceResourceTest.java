@@ -33,11 +33,7 @@ class ResilienceResourceTest {
 
     @Test
     void listScenariosReturnsSevenEntries() {
-        given().when()
-                .get("/api/resilience/scenarios")
-                .then()
-                .statusCode(200)
-                .body("$.size()", is(7));
+        given().when().get("/api/resilience/scenarios").then().statusCode(200).body("$.size()", is(7));
     }
 
     @Test

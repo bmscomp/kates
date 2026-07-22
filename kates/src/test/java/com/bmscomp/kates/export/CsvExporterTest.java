@@ -27,14 +27,14 @@ class CsvExporterTest {
     void resultRowContainsAllFields() {
         TestRun run = new TestRun();
         TestResult result = new TestResult()
-            .withTaskId("task-1")
-            .withRecordsSent(1000)
-            .withThroughputRecordsPerSec(500.0)
-            .withAvgLatencyMs(5.0)
-            .withP50LatencyMs(3.0)
-            .withP95LatencyMs(10.0)
-            .withP99LatencyMs(20.0)
-            .withMaxLatencyMs(50.0);
+                .withTaskId("task-1")
+                .withRecordsSent(1000)
+                .withThroughputRecordsPerSec(500.0)
+                .withAvgLatencyMs(5.0)
+                .withP50LatencyMs(3.0)
+                .withP95LatencyMs(10.0)
+                .withP99LatencyMs(20.0)
+                .withMaxLatencyMs(50.0);
         run = run.withAddedResult(result);
 
         TestReport report = new TestReport();
@@ -71,9 +71,7 @@ class CsvExporterTest {
     @Test
     void csvEscapingHandlesCommasAndQuotes() {
         TestRun run = new TestRun();
-        TestResult result = new TestResult()
-            .withTaskId("task-1")
-            .withError("Connection failed, retrying \"now\"");
+        TestResult result = new TestResult().withTaskId("task-1").withError("Connection failed, retrying \"now\"");
         run = run.withAddedResult(result);
 
         TestReport report = new TestReport();

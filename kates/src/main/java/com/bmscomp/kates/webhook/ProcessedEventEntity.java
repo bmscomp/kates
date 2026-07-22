@@ -1,10 +1,10 @@
 package com.bmscomp.kates.webhook;
 
+import java.time.Instant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import java.time.Instant;
 
 @Entity
 @Table(name = "processed_events")
@@ -17,8 +17,7 @@ public class ProcessedEventEntity {
     @Column(name = "processed_at", nullable = false)
     private Instant processedAt;
 
-    public ProcessedEventEntity() {
-    }
+    public ProcessedEventEntity() {}
 
     public ProcessedEventEntity(String idempotencyKey) {
         this.idempotencyKey = idempotencyKey;

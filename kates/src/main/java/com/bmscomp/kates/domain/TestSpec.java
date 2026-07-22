@@ -1,29 +1,85 @@
 package com.bmscomp.kates.domain;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class TestSpec {
 
+    // Nullable on purpose: null means "use the configured default for the test
+    // type" (TestTypeDefaults). Constraints only fire on explicitly set values.
+    @Pattern(regexp = "[a-zA-Z0-9._-]{1,249}", message = "topic must be a legal Kafka topic name")
     private String topic;
+
+    @Min(1)
+    @Max(1_000_000_000)
     private Integer numRecords;
+
+    @Min(1)
+    @Max(104_857_600) // 100 MiB
     private Integer recordSize;
+
+    @Min(value = -1, message = "throughput must be -1 (unlimited) or positive")
     private Integer throughput;
+
+    @Pattern(regexp = "all|-1|0|1", message = "acks must be one of: all, -1, 0, 1")
     private String acks;
+
+    @Min(0)
+    @Max(134_217_728) // 128 MiB
     private Integer batchSize;
+
+    @Min(0)
+    @Max(300_000)
     private Integer lingerMs;
+
+    @Pattern(
+            regexp = "none|gzip|snappy|lz4|zstd",
+            message = "compressionType must be one of: none, gzip, snappy, lz4, zstd")
     private String compressionType;
+
+    @Min(1)
+    @Max(100)
     private Integer numProducers;
+
+    @Min(0)
+    @Max(100)
     private Integer numConsumers;
+
+    @Min(1_000)
+    @Max(86_400_000) // 24h
     private Long durationMs;
+
+    @Min(1)
+    @Max(10)
     private Integer replicationFactor;
+
+    @Min(1)
+    @Max(10_000)
     private Integer partitions;
+
+    @Min(1)
+    @Max(10)
     private Integer minInsyncReplicas;
+
+    @Size(max = 255)
     private String consumerGroup;
+
+    @Min(value = -1, message = "targetThroughput must be -1 (unlimited) or positive")
     private Integer targetThroughput;
+
+    @Min(1)
     private Integer fetchMinBytes;
+
+    @Min(0)
+    @Max(300_000)
     private Integer fetchMaxWaitMs;
+
     private boolean enableIdempotence = false;
     private boolean enableTransactions = false;
     private boolean enableCrc = true;

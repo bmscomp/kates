@@ -32,13 +32,40 @@ public record ProbeSpec(
             this.name = name;
         }
 
-        public Builder type(String v) { this.type = v; return this; }
-        public Builder mode(String v) { this.mode = v; return this; }
-        public Builder command(String v) { this.command = v; return this; }
-        public Builder expectedOutput(String v) { this.expectedOutput = v; return this; }
-        public Builder comparator(String v) { this.comparator = v; return this; }
-        public Builder intervalSec(int v) { this.intervalSec = v; return this; }
-        public Builder timeoutSec(int v) { this.timeoutSec = v; return this; }
+        public Builder type(String v) {
+            this.type = v;
+            return this;
+        }
+
+        public Builder mode(String v) {
+            this.mode = v;
+            return this;
+        }
+
+        public Builder command(String v) {
+            this.command = v;
+            return this;
+        }
+
+        public Builder expectedOutput(String v) {
+            this.expectedOutput = v;
+            return this;
+        }
+
+        public Builder comparator(String v) {
+            this.comparator = v;
+            return this;
+        }
+
+        public Builder intervalSec(int v) {
+            this.intervalSec = v;
+            return this;
+        }
+
+        public Builder timeoutSec(int v) {
+            this.timeoutSec = v;
+            return this;
+        }
 
         public ProbeSpec build() {
             return new ProbeSpec(name, type, mode, command, expectedOutput, comparator, intervalSec, timeoutSec);

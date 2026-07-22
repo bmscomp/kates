@@ -8,21 +8,18 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import io.quarkus.scheduler.Scheduled;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-
-import io.quarkus.scheduler.Scheduled;
 
 import com.bmscomp.kates.config.KafkaSecurityConfig;
 
@@ -90,13 +87,11 @@ public class DeadLetterQueueService {
      */
     @Scheduled(every = "30s", identity = "dlq-poller")
     void pollDlq() {
-        if (!running || consumer == null)
-            return;
+        if (!running || consumer == null) return;
 
         try {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
-            if (records.isEmpty())
-                return;
+            if (records.isEmpty()) return;
 
             records.forEach(record -> {
                 totalDlqMessages.incrementAndGet();
@@ -106,9 +101,9 @@ public class DeadLetterQueueService {
                 String source = extractSource(record.key());
                 dlqBySource.computeIfAbsent(source, k -> new AtomicLong(0)).incrementAndGet();
 
-                LOG.warnf("DLQ message [partition=%d offset=%d key=%s]: %s",
-                        record.partition(), record.offset(), record.key(),
-                        truncate(record.value(), 200));
+                LOG.warnf(
+                        "DLQ message [partition=%d offset=%d key=%s]: %s",
+                        record.partition(), record.offset(), record.key(), truncate(record.value(), 200));
             });
 
             consumer.commitSync(Duration.ofSeconds(5));
@@ -124,8 +119,7 @@ public class DeadLetterQueueService {
     void checkDlqAlertThreshold() {
         long recent = dlqMessagesSinceLastCheck.getAndSet(0);
         if (recent > 0) {
-            LOG.warnf("DLQ alert: %d messages received in last 5 minutes (total: %d)",
-                    recent, totalDlqMessages.get());
+            LOG.warnf("DLQ alert: %d messages received in last 5 minutes (total: %d)", recent, totalDlqMessages.get());
         }
     }
 
@@ -158,15 +152,13 @@ public class DeadLetterQueueService {
     }
 
     private String extractSource(String key) {
-        if (key == null)
-            return "unknown";
+        if (key == null) return "unknown";
         int dot = key.indexOf('.');
         return dot > 0 ? key.substring(0, dot) : key;
     }
 
     private String truncate(String value, int maxLen) {
-        if (value == null)
-            return "null";
+        if (value == null) return "null";
         return value.length() <= maxLen ? value : value.substring(0, maxLen) + "...";
     }
 }

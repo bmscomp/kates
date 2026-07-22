@@ -1,12 +1,12 @@
 package com.bmscomp.kates.webhook;
 
+import java.time.Instant;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import java.time.Instant;
 
 @Entity
 @Table(name = "webhook_dlq")
@@ -31,8 +31,7 @@ public class WebhookDlqEntity {
     @Column(name = "failed_at", nullable = false)
     private Instant failedAt;
 
-    public WebhookDlqEntity() {
-    }
+    public WebhookDlqEntity() {}
 
     public WebhookDlqEntity(String webhookName, String url, String payload, String errorMessage) {
         this.webhookName = webhookName;

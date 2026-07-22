@@ -1,8 +1,11 @@
 package com.bmscomp.kates.api;
 
 import org.eclipse.microprofile.openapi.annotations.OpenAPIDefinition;
+import org.eclipse.microprofile.openapi.annotations.enums.SecuritySchemeIn;
+import org.eclipse.microprofile.openapi.annotations.enums.SecuritySchemeType;
 import org.eclipse.microprofile.openapi.annotations.info.Info;
 import org.eclipse.microprofile.openapi.annotations.info.License;
+import org.eclipse.microprofile.openapi.annotations.security.SecurityScheme;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 @OpenAPIDefinition(
@@ -25,4 +28,18 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
             @Tag(name = "Schedules", description = "Manage scheduled and recurring test configurations"),
             @Tag(name = "Trends", description = "Historical performance trend analysis")
         })
+// Document the API-key auth (ApiKeyAuthFilter) in the spec so Swagger UI and
+// generated clients surface the "Authorize" affordance. Declared, not globally
+// required, so public paths (e.g. /api/health) are not mislabeled as secured.
+@SecurityScheme(
+        securitySchemeName = "bearerAuth",
+        type = SecuritySchemeType.HTTP,
+        scheme = "bearer",
+        description = "API key sent as: Authorization: Bearer <key>")
+@SecurityScheme(
+        securitySchemeName = "apiKeyHeader",
+        type = SecuritySchemeType.APIKEY,
+        apiKeyName = "X-API-Key",
+        in = SecuritySchemeIn.HEADER,
+        description = "API key sent as: X-API-Key: <key>")
 public class OpenApiConfig {}
