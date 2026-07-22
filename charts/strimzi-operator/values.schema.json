@@ -38,6 +38,31 @@
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 }
       }
     },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Monitoring of the cluster operator itself (not the Kafka operands).",
+      "properties": {
+        "podMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "labels": { "type": "object" },
+            "interval": { "type": "string" },
+            "scrapeTimeout": { "type": "string" }
+          }
+        }
+      }
+    },
+    "alerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "labels": { "type": "object" }
+      }
+    },
     "strimzi-kafka-operator": {
       "type": "object",
       "description": "Upstream subchart values. additionalProperties stays TRUE here on purpose: upstream exposes ~40 keys that drift every release, and enumerating them would turn each Strimzi bump into a schema chore.",

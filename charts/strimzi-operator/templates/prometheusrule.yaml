@@ -1,0 +1,62 @@
+{{- if .Values.alerts.enabled }}
+{{- /*
+Operator-health alerts. These watch the operator PROCESS, not the Kafka
+operands. The reconciliation-failure and duration alerts key on the metrics the
+PodMonitor above scrapes; the availability alert keys on kube-state-metrics so
+it still fires even if the operator is down and not scraping.
+*/ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- with .Values.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (include "strimzi-operator.annotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  groups:
+    - name: strimzi-cluster-operator
+      rules:
+        - alert: StrimziClusterOperatorDown
+          expr: |
+            kube_deployment_status_replicas_available{deployment="strimzi-cluster-operator",namespace="{{ .Release.Namespace }}"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Strimzi cluster operator has no available replicas"
+            description: "No available replicas of strimzi-cluster-operator in {{ .Release.Namespace }} for 5m. Kafka CRs are not being reconciled."
+        - alert: StrimziClusterOperatorNoLeader
+          expr: |
+            max(kube_deployment_status_replicas_available{deployment="strimzi-cluster-operator",namespace="{{ .Release.Namespace }}"}) < 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Strimzi cluster operator has no leader"
+            description: "strimzi-cluster-operator has fewer than 1 available replica for 10m; leader election cannot elect an active operator."
+        - alert: StrimziReconciliationFailures
+          expr: |
+            sum(rate(strimzi_reconciliations_failed_total{namespace="{{ .Release.Namespace }}"}[10m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Strimzi reconciliations are failing"
+            description: "The cluster operator has been failing reconciliations for 15m. Check the operator log for the failing resource."
+        - alert: StrimziClusterOperatorRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}",container="strimzi-cluster-operator"}[15m]) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Strimzi cluster operator is restarting"
+            description: "strimzi-cluster-operator has restarted more than twice in 15m (possible OOM or crashloop)."
+{{- end }}

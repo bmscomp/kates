@@ -35,6 +35,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
+  # Prod-invariant assertions read the operator's PDB and NetworkPolicy.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -181,4 +188,71 @@ spec:
           echo "❌ watchAnyNamespace=true but STRIMZI_NAMESPACE is not '*'."
           echo "   Kafka clusters outside {{ .Release.Namespace }} would go UNMANAGED."
           exit 1
+{{- end }}
+{{- if or $op.podDisruptionBudget.enabled $op.operatorNetworkPolicy.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-test-prod-invariants
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ $testSA }}
+  securityContext:
+    {{- include "strimzi-operator.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: test
+      image: {{ $kubectl }}
+      securityContext:
+        {{- include "strimzi-operator.containerSecurityContext" . | nindent 8 }}
+      command: ['sh', '-c']
+      args:
+        - |
+          FAIL=0
+          {{- if $op.podDisruptionBudget.enabled }}
+          # The runtime form of scripts/check-pdb-safety.sh: a PDB whose
+          # minAvailable is >= the operator's replica count makes the pod
+          # un-evictable and blocks node drains forever.
+          echo "Checking the operator PodDisruptionBudget is drain-safe..."
+          REPLICAS=$(kubectl get deploy strimzi-cluster-operator -n {{ .Release.Namespace }} -o jsonpath='{.spec.replicas}')
+          PDB_JSON=$(kubectl get pdb -n {{ .Release.Namespace }} \
+            -o jsonpath='{range .items[*]}{.spec.minAvailable}{"\n"}{end}' 2>/dev/null)
+          if [ -z "${PDB_JSON}" ]; then
+            echo "  ❌ podDisruptionBudget.enabled but no PDB found"
+            FAIL=$((FAIL + 1))
+          else
+            MINA=$(echo "${PDB_JSON}" | head -1)
+            echo "  replicas=${REPLICAS} minAvailable=${MINA}"
+            # Integer compare only; skip percentage budgets.
+            case "${MINA}" in
+              ''|*[!0-9]*) echo "  (non-integer minAvailable, skipping numeric check)" ;;
+              *) if [ "${REPLICAS}" -gt "${MINA}" ]; then
+                   echo "  ✅ at least one operator pod is always evictable"
+                 else
+                   echo "  ❌ minAvailable ${MINA} >= replicas ${REPLICAS}: node drains will block"
+                   FAIL=$((FAIL + 1))
+                 fi ;;
+            esac
+          fi
+          {{- end }}
+          {{- if $op.operatorNetworkPolicy.enabled }}
+          echo "Checking the operator NetworkPolicy exists..."
+          if [ "$(kubectl get networkpolicy -n {{ .Release.Namespace }} --no-headers 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "  ✅ NetworkPolicy present"
+          else
+            echo "  ❌ operatorNetworkPolicy.enabled but no NetworkPolicy found"
+            FAIL=$((FAIL + 1))
+          fi
+          {{- end }}
+          if [ "${FAIL}" -gt 0 ]; then
+            echo "❌ ${FAIL} production invariant(s) failed"
+            exit 1
+          fi
+          echo "✅ Production invariants hold"
 {{- end }}
