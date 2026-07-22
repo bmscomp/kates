@@ -38,6 +38,7 @@
       "properties": {
         "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
         "port": { "type": "integer" },
+        "nodePort": { "type": ["integer", "string"] },
         "managementPort": { "type": "integer" }
       }
     },
@@ -190,7 +191,17 @@
         "partitions": { "type": "integer", "minimum": 1 },
         "replicas": { "type": "integer", "minimum": 1 },
         "minInsyncReplicas": { "type": "integer", "minimum": 1 },
-        "extraConfig": { "type": "object" }
+        "extraConfig": { "type": "object" },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "name": { "type": "string" },
+            "partitions": { "type": "integer", "minimum": 1 },
+            "retentionMs": { "type": "integer" }
+          }
+        }
       }
     },
     "global": {

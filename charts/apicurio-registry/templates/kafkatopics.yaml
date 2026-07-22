@@ -27,4 +27,26 @@ spec:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 {{- end }}
+{{- if $t.events.enabled }}
+---
+# Kafka-based eventing topic (registry-events). Unlike the journal it is not a
+# durable log: cleanup.policy=delete with finite retention.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ $t.events.name }}
+  namespace: {{ $t.namespace }}
+  labels:
+    strimzi.io/cluster: {{ $t.clusterName }}
+    {{- include "apicurio-registry.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  partitions: {{ $t.events.partitions }}
+  replicas: {{ $t.replicas }}
+  config:
+    cleanup.policy: delete
+    retention.ms: {{ $t.events.retentionMs }}
+    min.insync.replicas: {{ $t.minInsyncReplicas }}
+{{- end }}
 {{- end }}

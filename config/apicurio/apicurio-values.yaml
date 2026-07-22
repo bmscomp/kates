@@ -1,31 +1,21 @@
-# Apicurio Registry Helm Values Configuration
-
-image:
-  repository: apicurio/apicurio-registry-kafkasql
-  tag: "2.2.5.Final"
-  pullPolicy: IfNotPresent
+# Apicurio Registry — cluster deploy values (KafkaSQL against the Strimzi
+# krafter cluster). Image, probes, and topic provisioning come from the chart
+# defaults (Registry 3.x on quay.io, health/metrics on management port 9000).
 
 replicaCount: 1
 
-# Disable internal Kafka dependency
-kafka:
-  enabled: false
-
-# Configure external Kafka connection (Strimzi)
+# External Kafka connection. Credentials are read by the chart from the
+# Strimzi-managed Secret named below (key sasl.jaas.config) — no password is
+# injected at deploy time.
 global:
   kafka:
     bootstrapServers:
       - "krafter-kafka-bootstrap.kafka.svc:9092"
-    properties:
-      security.protocol: SASL_PLAINTEXT
-      sasl.mechanism: SCRAM-SHA-512
-      sasl.jaas.config: >-
-        org.apache.kafka.common.security.scram.ScramLoginModule required
-        username="apicurio-registry"
-        password="${APICURIO_KAFKA_PASSWORD}";
+    securityProtocol: "SASL_PLAINTEXT"
+    saslMechanism: "SCRAM-SHA-512"
+    saslJaasConfigSecretName: "apicurio-registry"
 
-# Service Configuration
+# Expose the REST API on the documented NodePort (30082).
 service:
   type: NodePort
-  port: 8080
   nodePort: 30082

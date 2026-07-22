@@ -58,6 +58,26 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.ui.resources | nindent 12 }}
+          {{- if .Values.ui.securityContext.readOnlyRootFilesystem }}
+          # nginx (which serves the SPA) writes to these paths; provide them as
+          # tmpfs so the root filesystem can stay read-only.
+          volumeMounts:
+            - name: nginx-tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+          {{- end }}
+      {{- if .Values.ui.securityContext.readOnlyRootFilesystem }}
+      volumes:
+        - name: nginx-tmp
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

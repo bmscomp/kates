@@ -5,4 +5,4 @@ description: A Helm chart for Kubernetes of Apicurio Registry, backed by the
 icon: https://design.jboss.org/apicurio/logo/logofiles/apicurio_icon_lightbkg_color.svg
 name: apicurio-registry
 type: application
-version: 0.3.0
+version: 0.4.0

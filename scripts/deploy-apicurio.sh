@@ -20,25 +20,19 @@ fi
 
 ensure_namespace kafka
 
-info "Fetching Apicurio Registry Kafka credentials..."
-# Wait for the Strimzi User Operator to generate the secret
-kubectl wait secret/apicurio-registry -n kafka --for=jsonpath='{.data.password}' --timeout=60s || true
-APICURIO_KAFKA_PASSWORD=$(kubectl get secret apicurio-registry -n kafka -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
-
-if [ -z "$APICURIO_KAFKA_PASSWORD" ]; then
-    warn "Apicurio Registry Kafka password not found. It may fail to connect."
-fi
+# The chart reads the Kafka SASL JAAS config directly from the Strimzi-managed
+# KafkaUser Secret (key sasl.jaas.config) via a secretKeyRef — no need to fetch
+# or inject the password here. Just make sure the Strimzi User Operator has
+# produced the Secret before the pod starts (it mounts it at boot).
+info "Waiting for the apicurio-registry KafkaUser Secret..."
+kubectl wait secret/apicurio-registry -n kafka \
+  --for=jsonpath='{.data.sasl\.jaas\.config}' --timeout=120s \
+  || warn "KafkaUser Secret not ready yet — the pod will retry until it appears"
 
 info "Installing Apicurio Registry..."
 helm upgrade --install apicurio-registry "${APICURIO_CHART_DIR}" \
   --namespace kafka \
   --values config/apicurio/apicurio-values.yaml \
-  --set "env[0].name=KAFKASQL_SECURITY_PROTOCOL" \
-  --set "env[0].value=SASL_PLAINTEXT" \
-  --set "env[1].name=KAFKASQL_SASL_MECHANISM" \
-  --set "env[1].value=SCRAM-SHA-512" \
-  --set "env[2].name=KAFKASQL_SASL_JAAS_CONFIG" \
-  --set "env[2].value=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"apicurio-registry\" password=\"${APICURIO_KAFKA_PASSWORD}\";" \
   --timeout 10m
 
 info "✅ Apicurio Registry deployment complete!"

@@ -57,6 +57,8 @@ securityContext:
 service:
   type: ClusterIP
   port: 80
+  # -- NodePort for the REST API when service.type is NodePort (else ignored)
+  nodePort: ""
   # -- Quarkus management port: /health/live, /health/ready and /metrics are
   # served here (Registry 3.x moved them off the main 8080 port).
   managementPort: 9000
@@ -201,7 +203,10 @@ ui:
       type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: false
+    # Read-only rootfs; the chart mounts tmpfs at nginx's writable paths
+    # (/tmp, /var/cache/nginx, /var/run). Set false if a custom UI image
+    # writes elsewhere.
+    readOnlyRootFilesystem: true
     capabilities:
       drop:
         - ALL
@@ -260,8 +265,17 @@ kafkaTopics:
   # minInsyncReplicas 2 on production clusters.
   replicas: 1
   minInsyncReplicas: 1
-  # -- Extra topic config merged into both topics
+  # -- Extra topic config merged into the journal and snapshots topics
   extraConfig: {}
+  # -- Also provision the Kafka-based eventing topic. Only needed when the
+  # registry's outbox/eventing feature is enabled; the registry-events topic
+  # uses cleanup.policy=delete but finite retention (not a durable log). The
+  # kafka-cluster KafkaUser already grants the "registry-" topic prefix.
+  events:
+    enabled: false
+    name: "registry-events"
+    partitions: 1
+    retentionMs: 604800000  # 7 days
 
 # Kafka connection for kafkasql storage. The registry has no bundled broker:
 # it targets the Strimzi cluster deployed by this repo's kafka-cluster chart,

@@ -1,0 +1,116 @@
+name: Apicurio Registry E2E
+
+# Stands up a real Strimzi + Kafka (krafter) cluster on kind and deploys the
+# apicurio-registry chart against it, then round-trips a schema through the v3
+# REST API. This is the only gate that actually proves the KafkaSQL wiring:
+# management-port probes, the quay.io 3.x image, SCRAM auth from the Strimzi
+# Secret, the provisioned journal/snapshots topics, and the consumer-group ACL
+# alignment. Heavier than the other jobs, so it is scoped to changes that can
+# affect it and can be run on demand.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "charts/apicurio-registry/**"
+      - "charts/kafka-cluster/**"
+      - "charts/strimzi-operator/**"
+      - "config/apicurio/**"
+      - "scripts/deploy-apicurio.sh"
+      - ".github/workflows/ci-apicurio.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  KIND_VERSION: v0.27.0
+  KUBECTL_VERSION: v1.33.0
+
+jobs:
+  apicurio-e2e:
+    name: KafkaSQL round-trip on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kind
+        run: |
+          curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x kind && sudo mv kind /usr/local/bin/
+
+      - name: Install kubectl
+        run: |
+          curl -Lo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: cli/go.sum
+
+      - name: Create kind cluster (3-zone topology)
+        run: |
+          kind create cluster --config config/cluster.yaml --name apicurio-e2e
+          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      # Reuses the same script `make all` runs locally: installs the Strimzi
+      # operator (charts/strimzi-operator), deploys the krafter Kafka cluster
+      # with the kind overlay, and provisions the apicurio-registry KafkaUser,
+      # ACLs and journal-topic-owning user. Waits for Kafka to be Ready.
+      - name: Deploy Strimzi + Kafka (krafter)
+        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests
+
+      - name: Deploy Apicurio Registry
+        run: ./scripts/deploy-apicurio.sh
+
+      # Reaching Ready is itself the core assertion: the readiness probe hits
+      # /health/ready on the management port, which only passes once the
+      # registry has authenticated to Kafka (SCRAM) and replayed its journal.
+      - name: Wait for the registry to be Ready
+        run: kubectl rollout status deployment/apicurio-registry -n kafka --timeout=300s
+
+      - name: Round-trip a schema through the v3 API
+        run: |
+          set -euo pipefail
+          SVC="apicurio-registry.kafka.svc:8080"
+          run() { kubectl run apicurio-curl-$RANDOM -n kafka --rm -i --restart=Never \
+            --image=curlimages/curl:8.9.1 --quiet -- "$@"; }
+
+          echo "System info (proves the API + storage are up):"
+          run curl -sf "http://${SVC}/apis/registry/v3/system/info"
+
+          echo "Registering a schema (proves a Kafka journal write):"
+          run curl -sf -X POST "http://${SVC}/apis/ccompat/v7/subjects/kates-e2e/versions" \
+            -H 'Content-Type: application/json' \
+            -d '{"schema":"{\"type\":\"string\"}","schemaType":"AVRO"}'
+
+          echo "Reading it back (proves the write is queryable):"
+          run curl -sf "http://${SVC}/apis/ccompat/v7/subjects/kates-e2e/versions/latest" \
+            | grep -q '"schema"'
+          echo "✅ Schema round-trip succeeded"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "== registry pods =="; kubectl get pods -n kafka -l app.kubernetes.io/name=apicurio-registry -o wide || true
+          echo "== registry describe =="; kubectl describe deploy/apicurio-registry -n kafka || true
+          echo "== registry logs =="; kubectl logs -n kafka -l app.kubernetes.io/name=apicurio-registry --tail=100 || true
+          echo "== kafka topics =="; kubectl get kafkatopics -n kafka || true
+          echo "== kafka users =="; kubectl get kafkausers -n kafka || true
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name apicurio-e2e
