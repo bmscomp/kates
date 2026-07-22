@@ -84,9 +84,10 @@ affinity: {}
 networkPolicy:
   enabled: false
 
-kafka:
-  enabled: false
-
+# Kafka connection for kafkasql storage. The registry has no bundled broker:
+# it targets the Strimzi cluster deployed by this repo's kafka-cluster chart,
+# which also provisions the `apicurio-registry` KafkaUser (SCRAM-SHA-512) and
+# its credentials Secret referenced below.
 global:
   kafka:
     bootstrapServers:

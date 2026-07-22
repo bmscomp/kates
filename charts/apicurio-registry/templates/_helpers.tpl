@@ -61,12 +61,12 @@ Create the name of the service account to use
 {{- end }}
 {{- end }}
 
+{{/*
+Kafka bootstrap servers. The registry uses the external Strimzi cluster
+deployed by the kafka-cluster chart in this repository (no bundled broker).
+*/}}
 {{- define "apicurio-registry.kafkaBootstrapServers" -}}
-{{- if .Values.kafka.enabled }}
-{{- include "kafka.fullname" .Subcharts.kafka }}:{{- .Values.kafka.service.port }}
-{{- else }}
-{{- required "Enable Kafka or provide global values for bootstrap servers." (include "apicurio-registry.globalKafkaBootstrapServers" . | trim) }}
-{{- end }}
+{{- required "Provide global.kafka bootstrap values (see the kafka-cluster chart)." (include "apicurio-registry.globalKafkaBootstrapServers" . | trim) }}
 {{- end }}
 
 {{- define "apicurio-registry.globalKafkaBootstrapServers" -}}
