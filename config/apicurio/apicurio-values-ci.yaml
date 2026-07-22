@@ -1,0 +1,8 @@
+# CI / E2E overlay for the registry — layered over apicurio-values.yaml when the
+# backing Kafka is the single-broker values-ci cluster. The journal/snapshots
+# KafkaTopics default to replicas 3, which a one-broker cluster cannot create;
+# pin them to 1. Not for real use.
+kafkaTopics:
+  replicas: 1
+  minInsyncReplicas: 1
+  partitions: 1

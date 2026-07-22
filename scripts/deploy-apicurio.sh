@@ -30,9 +30,12 @@ kubectl wait secret/apicurio-registry -n kafka \
   || warn "KafkaUser Secret not ready yet — the pod will retry until it appears"
 
 info "Installing Apicurio Registry..."
+# Any extra args (e.g. an additional --values overlay for CI) are passed
+# straight through to helm and layered after the base values file.
 helm upgrade --install apicurio-registry "${APICURIO_CHART_DIR}" \
   --namespace kafka \
   --values config/apicurio/apicurio-values.yaml \
+  "$@" \
   --timeout 10m
 
 info "✅ Apicurio Registry deployment complete!"

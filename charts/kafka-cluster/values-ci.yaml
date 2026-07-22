@@ -1,0 +1,54 @@
+# CI / E2E overlay — smallest cluster that actually works: one combined-ish
+# KRaft topology of a single controller + single broker, layered LAST over the
+# detected values and the kind overlay. Not for real use — replication factor
+# 1 has no durability. Sole purpose: fit the apicurio-registry E2E onto a
+# 2-CPU / 7-GB GitHub-hosted runner (the 3-zone default leaves pods Pending).
+
+controllerPools:
+  - name: controllers-ci
+    zone: ""
+    replicas: 1
+    storageSize: 1Gi
+    storageClass: ""
+
+controllerDefaults:
+  resources:
+    requests: { memory: 512Mi, cpu: 250m }
+    limits: { memory: 512Mi, cpu: 500m }
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 256m
+    gcLoggingEnabled: false
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
+  tolerations: []
+
+brokerPools:
+  - name: brokers-ci
+    zone: ""
+    replicas: 1
+    storageSize: 5Gi
+    storageClass: ""
+
+brokerDefaults:
+  deleteClaim: true
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 512m
+    gcLoggingEnabled: false
+  resources:
+    requests: { memory: 1Gi, cpu: 250m }
+    limits: { memory: 1Gi, cpu: 500m }
+  tolerations: []
+
+# A single broker cannot satisfy the production replication factors (3) the base
+# values pin, so its internal topics would never form. Drop everything to 1.
+kafka:
+  config:
+    offsets.topic.replication.factor: 1
+    transaction.state.log.replication.factor: 1
+    transaction.state.log.min.isr: 1
+    default.replication.factor: 1
+    min.insync.replicas: 1

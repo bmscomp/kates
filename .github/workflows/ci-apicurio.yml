@@ -70,11 +70,15 @@ jobs:
       # operator (charts/strimzi-operator), deploys the krafter Kafka cluster
       # with the kind overlay, and provisions the apicurio-registry KafkaUser,
       # ACLs and journal-topic-owning user. Waits for Kafka to be Ready.
+      # values-ci.yaml pins a single controller + single broker (RF1) so the
+      # cluster fits the runner; the 3-zone default leaves pods Pending.
       - name: Deploy Strimzi + Kafka (krafter)
-        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests
+        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests -f charts/kafka-cluster/values-ci.yaml
 
+      # Matching overlay pins the registry's KafkaTopics to RF1 (a single
+      # broker cannot create the default RF3 journal/snapshots topics).
       - name: Deploy Apicurio Registry
-        run: ./scripts/deploy-apicurio.sh
+        run: ./scripts/deploy-apicurio.sh --values config/apicurio/apicurio-values-ci.yaml
 
       # Reaching Ready is itself the core assertion: the readiness probe hits
       # /health/ready on the management port, which only passes once the
