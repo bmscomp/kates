@@ -28,11 +28,35 @@ strimzi-kafka-operator:
       drop: ["ALL"]
 
   # ── Availability ───────────────────────────────────────────────────────────
+  # Two operator replicas in active/standby (leader election is on by default).
+  # This is REQUIRED for the PodDisruptionBudget below to be safe: with a single
+  # replica, minAvailable=1 makes the pod un-evictable, so `kubectl drain`,
+  # cluster-autoscaler scale-down, and node upgrades block on it indefinitely.
+  # Two replicas let the standby be evicted while the leader keeps reconciling.
+  replicas: 2
+
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
     unhealthyPodEvictionPolicy: IfHealthyBudget
   priorityClassName: system-cluster-critical
+
+  # Spread the two replicas across nodes (and zones when present) so the standby
+  # survives losing the leader's node. ScheduleAnyway keeps single-node clusters
+  # (kind, small on-prem) schedulable instead of leaving a replica Pending.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          name: strimzi-cluster-operator
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          name: strimzi-cluster-operator
 
   # ── Reconciliation ─────────────────────────────────────────────────────────
   # Tighter loop than the 120000 default — more responsive, more API traffic.
