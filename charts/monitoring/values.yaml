@@ -107,3 +107,7 @@ dashboards:
   enabled: true
   labels:
     grafana_dashboard: "1"
+
+# Image used by the helm test connectivity pod
+test:
+  image: curlimages/curl:8.7.1

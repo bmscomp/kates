@@ -8,13 +8,14 @@ metadata:
   name: {{ .name }}
   namespace: {{ include "connect-cluster.namespace" $ }}
   labels:
-    {{- include "connect-cluster.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: test-connector
-    kates.io/connector-name: {{ .name }}
-    strimzi.io/cluster: {{ include "connect-cluster.fullname" $ }}
-    {{- with .labels }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
+    {{- /* merge to avoid duplicate app.kubernetes.io/component key; per-connector labels win */}}
+    {{- $labels := mergeOverwrite
+          (include "connect-cluster.labels" $ | fromYaml)
+          (dict "app.kubernetes.io/component" "test-connector"
+                "kates.io/connector-name" .name
+                "strimzi.io/cluster" (include "connect-cluster.fullname" $))
+          (default (dict) .labels) }}
+    {{- toYaml $labels | nindent 4 }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "5"

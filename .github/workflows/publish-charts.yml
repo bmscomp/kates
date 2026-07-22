@@ -1,0 +1,77 @@
+name: Publish Helm Charts
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Packages every chart in charts/ and pushes it to the OCI registry:
+#   oci://ghcr.io/bmscomp/charts/<name>:<Chart.yaml version>
+# Each pushed chart is signed with cosign (keyless, GitHub OIDC) — matching
+# the image publishing pipeline in publish-connect.yml.
+#
+# Trigger: push a tag like `charts-v2026.07.21`, or run manually via
+# workflow_dispatch. Re-publishing an unchanged chart version overwrites the
+# same OCI tag (idempotent).
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - "charts-v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # cosign keyless signing
+
+env:
+  CHART_REGISTRY: oci://ghcr.io/bmscomp/charts
+
+jobs:
+  publish:
+    name: Package, Push & Sign Charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # kates-platform depends on kafka-cluster and kates via local file://
+      # references — build them so the umbrella packages cleanly.
+      - name: Build kates-platform local dependencies
+        run: helm dependency build charts/kates-platform/
+
+      - name: Package charts
+        run: |
+          mkdir -p .build
+          for chart in charts/*/; do
+            name=$(basename "${chart}")
+            helm package "${chart}" --destination .build/
+          done
+          ls -1 .build/
+
+      - name: Push and sign charts
+        run: |
+          rc=0
+          for tgz in .build/*.tgz; do
+            echo "==> ${tgz}"
+            out=$(helm push "${tgz}" "${CHART_REGISTRY}" 2>&1) || { echo "${out}"; rc=1; continue; }
+            echo "${out}"
+            ref=$(echo "${out}"    | awk '/^Pushed:/ {print $2}')
+            digest=$(echo "${out}" | awk '/^Digest:/ {print $2}')
+            if [ -n "${ref}" ] && [ -n "${digest}" ]; then
+              cosign sign --yes "${ref%:*}@${digest}"
+            else
+              echo "::warning::could not parse push output for ${tgz}; skipping signature"
+            fi
+          done
+          exit ${rc}

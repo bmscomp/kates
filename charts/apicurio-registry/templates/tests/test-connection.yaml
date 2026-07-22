@@ -6,10 +6,23 @@ metadata:
     {{- include "apicurio-registry.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   containers:
-    - name: wget
+    - name: registry-api
       image: busybox:1.36
       command: ['wget']
-      args: ['http://{{ include "apicurio-registry.fullname" . }}:{{ .Values.service.port }}']
+      # Hits the v3 REST API, not just the HTTP listener: proves the app is
+      # up, storage initialised, and the API surface actually served.
+      args: ['-q', '-O-', 'http://{{ include "apicurio-registry.fullname" . }}:{{ .Values.service.port }}/apis/registry/v3/system/info']
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 65534
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
   restartPolicy: Never

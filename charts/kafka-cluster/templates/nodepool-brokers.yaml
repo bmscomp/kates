@@ -45,6 +45,7 @@ spec:
             matchLabels:
               strimzi.io/pool-name: {{ .name }}
       {{- end }}
+      {{- if or .zone $.Values.brokerDefaults.podAntiAffinity.enabled }}
       affinity:
         {{- if .zone }}
         nodeAffinity:
@@ -66,6 +67,7 @@ spec:
                     strimzi.io/pool-name: {{ .name }}
                 topologyKey: {{ $.Values.brokerDefaults.podAntiAffinity.topologyKey }}
         {{- end }}
+      {{- end }}
       {{- with $.Values.brokerDefaults.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}

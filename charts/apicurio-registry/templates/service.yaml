@@ -11,5 +11,14 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+    # Health + metrics (Quarkus management interface); scraped by the
+    # ServiceMonitor and probed by humans, never exposed via Ingress.
+    - port: {{ .Values.service.managementPort }}
+      targetPort: management
+      protocol: TCP
+      name: management
   selector:
     {{- include "apicurio-registry.selectorLabels" . | nindent 4 }}

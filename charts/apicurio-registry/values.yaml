@@ -1,44 +1,67 @@
 # Default values for apicurio-registry.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
+#
+# The registry runs KafkaSQL storage against the Strimzi cluster deployed by
+# this repository's kafka-cluster chart. See README.md for the full contract.
 
+# -- Number of registry replicas (each replica independently replays the
+# journal topic; safe to scale horizontally). Ignored when autoscaling.enabled.
 replicaCount: 1
 
+# -- Image configuration. Registry 3.x publishes to quay.io (the Docker Hub
+# apicurio/apicurio-registry repository carries the legacy 2.x line).
 image:
+  registry: quay.io
   repository: apicurio/apicurio-registry
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
+  # -- Image tag — defaults to Chart.appVersion when empty
   tag: ""
+  # -- Optional image digest for pinned deployments (overrides tag when set)
+  # digest: "sha256:abc123..."
+  digest: ""
 
+# -- Image pull secrets for private registries
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# -- ServiceAccount for the registry pod. The registry does not call the
+# Kubernetes API, so the token is not mounted by default.
 serviceAccount:
-  # Specifies whether a service account should be created
   create: true
-  # Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
+  # -- Name (defaults to the fullname when create=true)
   name: ""
+  automountServiceAccountToken: false
 
+# -- Pod annotations
 podAnnotations: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+# -- Pod-level security context. The quay.io image runs as UID 185 (Quarkus).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 185
+  fsGroup: 185
+  seccompProfile:
+    type: RuntimeDefault
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+# -- Container-level security context. readOnlyRootFilesystem is on; the chart
+# mounts an emptyDir at /tmp for Quarkus/Vert.x scratch space and the embedded
+# H2 database the KafkaSQL journal is replayed into.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 service:
   type: ClusterIP
   port: 80
+  # -- NodePort for the REST API when service.type is NodePort (else ignored)
+  nodePort: ""
+  # -- Quarkus management port: /health/live, /health/ready and /metrics are
+  # served here (Registry 3.x moved them off the main 8080 port).
+  managementPort: 9000
 
 ingress:
   enabled: false
@@ -56,37 +79,208 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# -- Pod resource requests and limits (upstream HA guidance: 512Mi–1Gi for a
+# JVM registry instance; the journal replay lives in an in-memory H2 store)
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
 
+# -- Liveness probe (/health/live on the management port)
+livenessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+# -- Readiness probe (/health/ready on the management port). Generous failure
+# threshold: a replica is not Ready until the journal replay completes.
+readinessProbe:
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 12
+
+# -- Startup probe for long journal replays on restart against a large topic
+startupProbe:
+  enabled: false
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+
+# -- Horizontal Pod Autoscaler
 autoscaling:
   enabled: false
   minReplicas: 1
-  maxReplicas: 100
+  maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
 
+# -- PodDisruptionBudget (recommended when replicaCount > 1)
+pdb:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# -- Node selector
 nodeSelector: {}
 
+# -- Tolerations
 tolerations: []
 
+# -- Affinity rules
 affinity: {}
 
+# -- Topology spread constraints (spread replicas across nodes/zones)
+topologySpreadConstraints: []
+
+# -- NetworkPolicy configuration. Namespace names are values, not hardcoded.
 networkPolicy:
   enabled: false
+  # -- Namespaces whose pods may call the registry REST API (8080)
+  clientNamespaces:
+    - connect
+    - kates
+  # -- Namespace of the ingress controller; allowed to reach 8080 when
+  # ingress.enabled is set
+  ingressNamespace: "ingress-nginx"
+  # -- Namespace allowed to scrape /metrics on the management port
+  monitoringNamespace: "monitoring"
+  # -- Namespace of the Kafka cluster (egress target)
+  kafkaNamespace: "kafka"
+  # -- Kafka broker ports the registry may reach (9092 plain, 9093 TLS)
+  kafkaEgressPorts:
+    - 9092
+    - 9093
+  # -- Extra ingress/egress rules appended verbatim
+  extraIngress: []
+  extraEgress: []
 
-kafka:
+# -- Extra environment variables appended to the registry container
+env: []
+
+# -- Web console (separate image in Registry 3.x). Off by default; the chart
+# deploys the backend only unless ui.enabled is set.
+ui:
   enabled: false
+  replicaCount: 1
+  image:
+    repository: apicurio/apicurio-registry-ui
+    tag: ""
+    digest: ""
+  # -- Browser-facing REST API URL baked into the SPA. Leave empty to point at
+  # the backend Service (port-forward); set to the Ingress URL in production.
+  registryApiUrl: ""
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: registry-ui.example.com
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+    tls: []
+  env: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    # Read-only rootfs; the chart mounts tmpfs at nginx's writable paths
+    # (/tmp, /var/cache/nginx, /var/run). Set false if a custom UI image
+    # writes elsewhere.
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
 
+# -- Prometheus monitoring integration
+metrics:
+  serviceMonitor:
+    # -- Create a ServiceMonitor (requires the Prometheus Operator CRDs).
+    # Scrapes /metrics on the management port.
+    enabled: false
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: ""
+    additionalLabels: {}
+
+# -- KafkaSQL storage tuning
+kafkaSql:
+  # -- Escape hatch: skip the registry's startup verification of journal /
+  # snapshots topic configuration. Leave false — the chart provisions
+  # correctly configured topics via kafkaTopics.create instead.
+  topicVerificationOverride: false
+  # -- Consumer group prefix. The registry generates a unique group ID per
+  # replica on every start (never set a FIXED group ID — the H2 store is
+  # rebuilt from the journal each boot). By default that ID is a bare UUID,
+  # which the kafka-cluster chart's KafkaUser ACL (group prefix "apicurio",
+  # Read/Describe) would deny. Setting this prefix makes the generated group
+  # match the ACL so the registry can consume its own journal. Must stay in
+  # sync with the group ACL in charts/kafka-cluster/values.yaml.
+  consumerGroupPrefix: "apicurio"
+
+# -- TLS to the Kafka brokers. Enable to mount the Strimzi cluster CA and set
+# securityProtocol to SASL_SSL (against the kafka-cluster `tls` listener on
+# 9093). The cluster CA Secret is created by Strimzi as <cluster>-cluster-ca-cert.
+tls:
+  enabled: false
+  # -- Secret holding the cluster CA certificate (PEM)
+  truststoreSecretName: "krafter-cluster-ca-cert"
+  # -- Key within the Secret
+  truststoreSecretKey: "ca.crt"
+
+# -- Strimzi KafkaTopic provisioning for KafkaSQL storage. The journal and
+# snapshots topics must use cleanup.policy=delete with infinite retention;
+# the registry refuses to start against misconfigured topics. CRs are created
+# in the Kafka cluster's namespace so the topic operator picks them up.
+kafkaTopics:
+  # -- Create kafkasql-journal and kafkasql-snapshots KafkaTopic CRs
+  create: true
+  # -- Strimzi cluster name (strimzi.io/cluster label)
+  clusterName: "krafter"
+  # -- Namespace of the Kafka cluster / topic operator
+  namespace: "kafka"
+  journalName: "kafkasql-journal"
+  snapshotsName: "kafkasql-snapshots"
+  partitions: 3
+  # -- Keep at 1 for single-broker (kind) clusters; raise to 3 with
+  # minInsyncReplicas 2 on production clusters.
+  replicas: 1
+  minInsyncReplicas: 1
+  # -- Extra topic config merged into the journal and snapshots topics
+  extraConfig: {}
+  # -- Also provision the Kafka-based eventing topic. Only needed when the
+  # registry's outbox/eventing feature is enabled; the registry-events topic
+  # uses cleanup.policy=delete but finite retention (not a durable log). The
+  # kafka-cluster KafkaUser already grants the "registry-" topic prefix.
+  events:
+    enabled: false
+    name: "registry-events"
+    partitions: 1
+    retentionMs: 604800000  # 7 days
+
+# Kafka connection for kafkasql storage. The registry has no bundled broker:
+# it targets the Strimzi cluster deployed by this repo's kafka-cluster chart,
+# which also provisions the `apicurio-registry` KafkaUser (SCRAM-SHA-512) and
+# its credentials Secret referenced below.
 global:
   kafka:
     bootstrapServers:
@@ -94,4 +288,3 @@ global:
     securityProtocol: "SASL_PLAINTEXT"
     saslMechanism: "SCRAM-SHA-512"
     saslJaasConfigSecretName: "apicurio-registry"
-

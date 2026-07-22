@@ -40,8 +40,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-connectivity"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -213,8 +213,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-produce-consume"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -368,8 +368,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-authorization"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -445,8 +445,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-kraft-quorum"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -521,8 +521,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-topics"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -604,8 +604,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-listeners"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -689,8 +689,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-nodepools"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -773,8 +773,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-cruise-control"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test
@@ -847,8 +847,8 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-metrics"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
     {{- include "kafka-cluster.labels" . | nindent 4 }}
-    strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
     kates.io/test-pod: "true"
   annotations:
     helm.sh/hook: test

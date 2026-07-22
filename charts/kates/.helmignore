@@ -1,0 +1,13 @@
+.DS_Store
+*.swp
+*.bak
+*.tmp
+*.orig
+.git/
+.gitignore
+.idea/
+*.tmproj
+.vscode/
+# Environment overlays are deploy-time inputs (passed with -f), not chart
+# content — keep them out of the packaged chart.
+values-*.yaml
