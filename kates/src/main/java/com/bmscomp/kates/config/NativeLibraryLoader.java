@@ -1,10 +1,10 @@
 package com.bmscomp.kates.config;
 
 import java.io.File;
-
-import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+
+import io.quarkus.runtime.Startup;
 import org.jboss.logging.Logger;
 
 /**

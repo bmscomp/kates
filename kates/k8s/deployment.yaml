@@ -18,10 +18,20 @@ spec:
         app: kates
     spec:
       serviceAccountName: kates
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: kates
         image: ghcr.io/bmscomp/kates:1.11.0
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
         ports:
         - containerPort: 8080
           name: http
@@ -29,6 +39,9 @@ spec:
         envFrom:
         - configMapRef:
             name: kates-config
+        # API key + DB credentials — create from secret.yaml.example first.
+        - secretRef:
+            name: kates-secrets
         env:
         - name: KATES_KAFKA_SASL_PASSWORD
           valueFrom:
@@ -37,6 +50,11 @@ spec:
               key: password
         - name: JAVA_TOOL_OPTIONS
           value: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
+        # Writable scratch space — required with readOnlyRootFilesystem
+        # (JVM tmpdir, Vert.x cache, compression JNI extraction).
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         resources:
           requests:
             memory: "2Gi"
@@ -57,3 +75,6 @@ spec:
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 30
+      volumes:
+      - name: tmp
+        emptyDir: {}

@@ -1,7 +1,6 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -52,8 +51,7 @@ public class DisruptionTemplateResource {
     @APIResponse(responseCode = "200", description = "Disruption report from template execution")
     @APIResponse(responseCode = "404", description = "Template not found")
     public Response runTemplate(
-            @Parameter(description = "Template ID") @PathParam("id") String templateId,
-            Map<String, Object> overrides) {
+            @Parameter(description = "Template ID") @PathParam("id") String templateId, Map<String, Object> overrides) {
         try {
             DisruptionPlan plan = templateCatalog.buildPlan(templateId, overrides != null ? overrides : Map.of());
             String id = java.util.UUID.randomUUID().toString().substring(0, 8);

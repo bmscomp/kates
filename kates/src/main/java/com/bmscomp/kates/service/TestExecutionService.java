@@ -192,13 +192,13 @@ public class TestExecutionService {
         JsonNode status = taskStatus.path("status");
         if (!status.isMissingNode()) {
             result = result.withThroughputRecordsPerSec(status.path("totalSent").asDouble(0)
-                    / Math.max(1, status.path("elapsedMs").asDouble(1) / 1000.0))
-                .withAvgLatencyMs(status.path("averageLatencyMs").asDouble(0))
-                .withP50LatencyMs(status.path("p50LatencyMs").asDouble(0))
-                .withP95LatencyMs(status.path("p95LatencyMs").asDouble(0))
-                .withP99LatencyMs(status.path("p99LatencyMs").asDouble(0))
-                .withMaxLatencyMs(status.path("maxLatencyMs").asDouble(0))
-                .withRecordsSent(status.path("totalSent").asLong(0));
+                            / Math.max(1, status.path("elapsedMs").asDouble(1) / 1000.0))
+                    .withAvgLatencyMs(status.path("averageLatencyMs").asDouble(0))
+                    .withP50LatencyMs(status.path("p50LatencyMs").asDouble(0))
+                    .withP95LatencyMs(status.path("p95LatencyMs").asDouble(0))
+                    .withP99LatencyMs(status.path("p99LatencyMs").asDouble(0))
+                    .withMaxLatencyMs(status.path("maxLatencyMs").asDouble(0))
+                    .withRecordsSent(status.path("totalSent").asLong(0));
 
             if (result.getStatus() == TestResult.TaskStatus.DONE) {
                 result = result.withEndTime(Instant.now().toString());
@@ -206,8 +206,7 @@ public class TestExecutionService {
 
             String error = status.path("error").asText(null);
             if (error != null && !error.isEmpty()) {
-                result = result.withError(error)
-                               .withStatus(TestResult.TaskStatus.FAILED);
+                result = result.withError(error).withStatus(TestResult.TaskStatus.FAILED);
             }
         }
         return result;

@@ -17,21 +17,19 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.jboss.logging.Logger;
-
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 
 import com.bmscomp.kates.domain.TestResult;
 
@@ -63,12 +61,13 @@ public class CdcIntegrationService {
             .withPlural("kafkatopics")
             .build();
 
-    private static final CustomResourceDefinitionContext KAFKA_CONNECT_CRD = new CustomResourceDefinitionContext.Builder()
-            .withGroup("kafka.strimzi.io")
-            .withVersion("v1")
-            .withScope("Namespaced")
-            .withPlural("kafkaconnects")
-            .build();
+    private static final CustomResourceDefinitionContext KAFKA_CONNECT_CRD =
+            new CustomResourceDefinitionContext.Builder()
+                    .withGroup("kafka.strimzi.io")
+                    .withVersion("v1")
+                    .withScope("Namespaced")
+                    .withPlural("kafkaconnects")
+                    .build();
 
     @Inject
     KubernetesClient kubernetesClient;
@@ -82,113 +81,139 @@ public class CdcIntegrationService {
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "kates.cdc.topic-namespace")
     Optional<String> configuredCdcTopicNamespace;
 
-    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "kates.topology.kafka-namespace", defaultValue = "kafka")
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "kates.topology.kafka-namespace",
+            defaultValue = "kafka")
     String kafkaNamespace;
 
-    public CompletableFuture<BenchmarkStatus> runCdcTest(BenchmarkTask task, java.util.function.BiConsumer<String, Map<String, Long>> progressCallback) {
-        return CompletableFuture.supplyAsync(() -> {
-            TestResult.TaskStatus endState = TestResult.TaskStatus.RUNNING;
-            String errorMsg = null;
-            int recordsProcessed = 0;
-            Map<String, Long> phaseDurations = new LinkedHashMap<>();
-            List<String> topicNamespacesForCleanup = new ArrayList<>();
-            CdcRunResources runResources = createRunResources(UUID.randomUUID().toString());
+    @jakarta.inject.Inject
+    KatesExecutor executor;
 
-            String connectNamespace = "kafka"; // Default
-            String testDbNS = "database"; // Default
-            String connectName = "krafter-connect"; // Default
-            String kafkaClusterName = "krafter"; // Default
+    public CompletableFuture<BenchmarkStatus> runCdcTest(
+            BenchmarkTask task, java.util.function.BiConsumer<String, Map<String, Long>> progressCallback) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    TestResult.TaskStatus endState = TestResult.TaskStatus.RUNNING;
+                    String errorMsg = null;
+                    int recordsProcessed = 0;
+                    Map<String, Long> phaseDurations = new LinkedHashMap<>();
+                    List<String> topicNamespacesForCleanup = new ArrayList<>();
+                    CdcRunResources runResources =
+                            createRunResources(UUID.randomUUID().toString());
 
-            try {
-                // ── Phase: DB_SETUP ──────────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("DB_SETUP", phaseDurations);
-                Instant phaseStart = Instant.now();
+                    String connectNamespace = "kafka"; // Default
+                    String testDbNS = "database"; // Default
+                    String connectName = "krafter-connect"; // Default
+                    String kafkaClusterName = "krafter"; // Default
 
-                // Auto-discover PostgreSQL namespace (best effort).
-                // Some clusters grant namespace-scoped RBAC only; in that case keep the default namespace.
-                try {
-                    var pgServices = kubernetesClient.services().inAnyNamespace()
-                            .withLabel("app.kubernetes.io/name", "postgresql")
-                            .list()
-                            .getItems();
-                    if (!pgServices.isEmpty()) {
-                        testDbNS = pgServices.get(0).getMetadata().getNamespace();
-                        LOG.info("Auto-discovered PostgreSQL namespace: " + testDbNS);
-                    }
-                } catch (Exception e) {
-                    LOG.warn("Failed to auto-discover PostgreSQL namespace; using default namespace " + testDbNS, e);
-                }
+                    try {
+                        // ── Phase: DB_SETUP ──────────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("DB_SETUP", phaseDurations);
+                        Instant phaseStart = Instant.now();
 
-                // Auto-discover KafkaConnect namespace and cluster name
-                try {
-                    var connectCRs = kubernetesClient.genericKubernetesResources(KAFKA_CONNECT_CRD).inAnyNamespace().list().getItems();
-                    if (connectCRs.size() > 0) {
-                        var connectCr = connectCRs.get(0);
-                        connectName = connectCr.getMetadata().getName();
-                        connectNamespace = connectCr.getMetadata().getNamespace();
-                        Map<String, String> labels = connectCr.getMetadata().getLabels();
-                        if (labels != null && labels.containsKey("strimzi.io/cluster")) {
-                            kafkaClusterName = labels.get("strimzi.io/cluster");
+                        // Auto-discover PostgreSQL namespace (best effort).
+                        // Some clusters grant namespace-scoped RBAC only; in that case keep the default namespace.
+                        try {
+                            var pgServices = kubernetesClient
+                                    .services()
+                                    .inAnyNamespace()
+                                    .withLabel("app.kubernetes.io/name", "postgresql")
+                                    .list()
+                                    .getItems();
+                            if (!pgServices.isEmpty()) {
+                                testDbNS = pgServices.get(0).getMetadata().getNamespace();
+                                LOG.info("Auto-discovered PostgreSQL namespace: " + testDbNS);
+                            }
+                        } catch (Exception e) {
+                            LOG.warn(
+                                    "Failed to auto-discover PostgreSQL namespace; using default namespace " + testDbNS,
+                                    e);
                         }
-                        LOG.info("Auto-discovered KafkaConnect cluster: " + connectName + " (Kafka: " + kafkaClusterName + ") in namespace: " + connectNamespace);
-                    }
-                } catch (Exception e) {
-                    LOG.warn("Failed to auto-discover KafkaConnect CRs, using defaults", e);
-                }
 
-                // Get PostgreSQL password
-                LOG.info("Extracting PostgreSQL credentials from secret in namespace: " + testDbNS);
-                Secret secret = kubernetesClient.secrets()
-                        .inNamespace(testDbNS)
-                        .withName("postgresql")
-                        .get();
+                        // Auto-discover KafkaConnect namespace and cluster name
+                        try {
+                            var connectCRs = kubernetesClient
+                                    .genericKubernetesResources(KAFKA_CONNECT_CRD)
+                                    .inAnyNamespace()
+                                    .list()
+                                    .getItems();
+                            if (connectCRs.size() > 0) {
+                                var connectCr = connectCRs.get(0);
+                                connectName = connectCr.getMetadata().getName();
+                                connectNamespace = connectCr.getMetadata().getNamespace();
+                                Map<String, String> labels =
+                                        connectCr.getMetadata().getLabels();
+                                if (labels != null && labels.containsKey("strimzi.io/cluster")) {
+                                    kafkaClusterName = labels.get("strimzi.io/cluster");
+                                }
+                                LOG.info("Auto-discovered KafkaConnect cluster: " + connectName + " (Kafka: "
+                                        + kafkaClusterName + ") in namespace: " + connectNamespace);
+                            }
+                        } catch (Exception e) {
+                            LOG.warn("Failed to auto-discover KafkaConnect CRs, using defaults", e);
+                        }
 
-                if (secret == null) {
-                    throw new IllegalStateException("PostgreSQL secret not found in namespace " + testDbNS);
-                }
+                        // Get PostgreSQL password
+                        LOG.info("Extracting PostgreSQL credentials from secret in namespace: " + testDbNS);
+                        Secret secret = kubernetesClient
+                                .secrets()
+                                .inNamespace(testDbNS)
+                                .withName("postgresql")
+                                .get();
 
-                String encodedPassword = secret.getData().get("postgres-password");
-                if (encodedPassword == null) {
-                    throw new IllegalStateException("postgres-password not found in secret");
-                }
-                String dbPassword = new String(java.util.Base64.getDecoder().decode(encodedPassword));
+                        if (secret == null) {
+                            throw new IllegalStateException("PostgreSQL secret not found in namespace " + testDbNS);
+                        }
 
-                // Setup test tables (record insert happens after connectors are ready to avoid sink offset race).
-                String uuidStr = "test-" + UUID.randomUUID().toString();
-                String jdbcUrl = "jdbc:postgresql://postgresql." + testDbNS + ".svc:5432/postgres";
-                LOG.infof(
-                        "CDC test run token=%s sourceConnector=%s sinkConnector=%s topic=%s sourceTable=%s sinkTable=%s slot=%s",
-                        runResources.runToken(),
-                        runResources.sourceConnectorName(),
-                        runResources.sinkConnectorName(),
-                        runResources.topicName(),
-                        runResources.sourceTable(),
-                        runResources.sinkTable(),
-                        runResources.slotName());
+                        String encodedPassword = secret.getData().get("postgres-password");
+                        if (encodedPassword == null) {
+                            throw new IllegalStateException("postgres-password not found in secret");
+                        }
+                        String dbPassword =
+                                new String(java.util.Base64.getDecoder().decode(encodedPassword));
 
-                LOG.info("Connecting to PostgreSQL at " + jdbcUrl);
-                try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword);
-                     Statement stmt = conn.createStatement()) {
+                        // Setup test tables (record insert happens after connectors are ready to avoid sink offset
+                        // race).
+                        String uuidStr = "test-" + UUID.randomUUID().toString();
+                        String jdbcUrl = "jdbc:postgresql://postgresql." + testDbNS + ".svc:5432/postgres";
+                        LOG.infof(
+                                "CDC test run token=%s sourceConnector=%s sinkConnector=%s topic=%s sourceTable=%s sinkTable=%s slot=%s",
+                                runResources.runToken(),
+                                runResources.sourceConnectorName(),
+                                runResources.sinkConnectorName(),
+                                runResources.topicName(),
+                                runResources.sourceTable(),
+                                runResources.sinkTable(),
+                                runResources.slotName());
 
-                    // Reset test tables on each run to avoid stale rows/constraints from prior failed runs.
-                    stmt.execute("DROP TABLE IF EXISTS " + runResources.sourceTable());
-                    stmt.execute("DROP TABLE IF EXISTS " + runResources.sinkTable());
-                    stmt.execute("CREATE TABLE " + runResources.sourceTable() + " (id serial primary key, test_uuid varchar(255))");
-                    // Keep sink table non-unique so at-least-once/replayed events never fail the sink task.
-                    stmt.execute("CREATE TABLE " + runResources.sinkTable() + " (id integer, test_uuid varchar(255))");
-                }
-                phaseDurations.put("DB_SETUP", Duration.between(phaseStart, Instant.now()).toMillis());
+                        LOG.info("Connecting to PostgreSQL at " + jdbcUrl);
+                        try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword);
+                                Statement stmt = conn.createStatement()) {
 
-                // ── Phase: TOPIC_CREATE ──────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("TOPIC_CREATE", phaseDurations);
-                phaseStart = Instant.now();
-                LOG.info("Creating KafkaTopic for CDC...");
-                final List<String> topicNamespaceCandidates = resolveTopicNamespaceCandidates(connectNamespace);
-                topicNamespacesForCleanup = new ArrayList<>(topicNamespaceCandidates);
+                            // Reset test tables on each run to avoid stale rows/constraints from prior failed runs.
+                            stmt.execute("DROP TABLE IF EXISTS " + runResources.sourceTable());
+                            stmt.execute("DROP TABLE IF EXISTS " + runResources.sinkTable());
+                            stmt.execute("CREATE TABLE " + runResources.sourceTable()
+                                    + " (id serial primary key, test_uuid varchar(255))");
+                            // Keep sink table non-unique so at-least-once/replayed events never fail the sink task.
+                            stmt.execute("CREATE TABLE " + runResources.sinkTable()
+                                    + " (id integer, test_uuid varchar(255))");
+                        }
+                        phaseDurations.put(
+                                "DB_SETUP",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
 
-                String selectedTopicNamespace = null;
-                for (String topicNamespace : topicNamespaceCandidates) {
-                    String topicYaml = String.format("""
+                        // ── Phase: TOPIC_CREATE ──────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("TOPIC_CREATE", phaseDurations);
+                        phaseStart = Instant.now();
+                        LOG.info("Creating KafkaTopic for CDC...");
+                        final List<String> topicNamespaceCandidates = resolveTopicNamespaceCandidates(connectNamespace);
+                        topicNamespacesForCleanup = new ArrayList<>(topicNamespaceCandidates);
+
+                        String selectedTopicNamespace = null;
+                        for (String topicNamespace : topicNamespaceCandidates) {
+                            String topicYaml = String.format(
+                                    """
                             apiVersion: kafka.strimzi.io/v1
                             kind: KafkaTopic
                             metadata:
@@ -203,37 +228,49 @@ public class CdcIntegrationService {
                               config:
                                 retention.ms: 7200000
                                 segment.bytes: 1073741824
-                            """, runResources.topicResourceName(), topicNamespace, kafkaClusterName, runResources.topicName());
+                            """,
+                                    runResources.topicResourceName(),
+                                    topicNamespace,
+                                    kafkaClusterName,
+                                    runResources.topicName());
 
-                    kubernetesClient.genericKubernetesResources(TOPIC_CRD)
-                            .inNamespace(topicNamespace)
-                            .load(new java.io.ByteArrayInputStream(topicYaml.getBytes()))
-                            .createOrReplace();
+                            kubernetesClient
+                                    .genericKubernetesResources(TOPIC_CRD)
+                                    .inNamespace(topicNamespace)
+                                    .load(new java.io.ByteArrayInputStream(topicYaml.getBytes()))
+                                    .createOrReplace();
 
-                    if (waitForTopicReady(topicNamespace, runResources.topicResourceName(), Duration.ofSeconds(20))) {
-                        selectedTopicNamespace = topicNamespace;
-                        break;
-                    }
+                            if (waitForTopicReady(
+                                    topicNamespace, runResources.topicResourceName(), Duration.ofSeconds(20))) {
+                                selectedTopicNamespace = topicNamespace;
+                                break;
+                            }
 
-                    LOG.warnf("KafkaTopic %s did not become Ready in namespace %s; trying next candidate",
-                            runResources.topicName(), topicNamespace);
-                }
+                            LOG.warnf(
+                                    "KafkaTopic %s did not become Ready in namespace %s; trying next candidate",
+                                    runResources.topicName(), topicNamespace);
+                        }
 
-                if (selectedTopicNamespace == null) {
-                    throw new IllegalStateException("KafkaTopic " + runResources.topicName()
-                            + " did not become Ready in any namespace. Tried: " + topicNamespaceCandidates);
-                }
-                LOG.infof("KafkaTopic %s resolved in namespace %s", runResources.topicName(), selectedTopicNamespace);
-                phaseDurations.put("TOPIC_CREATE", Duration.between(phaseStart, Instant.now()).toMillis());
+                        if (selectedTopicNamespace == null) {
+                            throw new IllegalStateException("KafkaTopic " + runResources.topicName()
+                                    + " did not become Ready in any namespace. Tried: " + topicNamespaceCandidates);
+                        }
+                        LOG.infof(
+                                "KafkaTopic %s resolved in namespace %s",
+                                runResources.topicName(), selectedTopicNamespace);
+                        phaseDurations.put(
+                                "TOPIC_CREATE",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
 
-                // ── Phase: SOURCE_DEPLOY ─────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("SOURCE_DEPLOY", phaseDurations);
-                phaseStart = Instant.now();
-                LOG.info("Deploying Kafka Source Connector...");
-                // Note: database password is embedded in the connector config. This is acceptable
-                // for short-lived integration test connectors that are deleted within minutes.
-                // For production connectors, use KafkaConnect externalConfiguration with mounted secrets.
-                String sourceYaml = String.format("""
+                        // ── Phase: SOURCE_DEPLOY ─────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("SOURCE_DEPLOY", phaseDurations);
+                        phaseStart = Instant.now();
+                        LOG.info("Deploying Kafka Source Connector...");
+                        // Note: database password is embedded in the connector config. This is acceptable
+                        // for short-lived integration test connectors that are deleted within minutes.
+                        // For production connectors, use KafkaConnect externalConfiguration with mounted secrets.
+                        String sourceYaml = String.format(
+                                """
                         apiVersion: kafka.strimzi.io/v1
                         kind: KafkaConnector
                         metadata:
@@ -261,25 +298,29 @@ public class CdcIntegrationService {
                             value.converter: org.apache.kafka.connect.json.JsonConverter
                             value.converter.schemas.enable: true
                         """,
-                        runResources.sourceConnectorName(),
-                        connectNamespace,
-                        connectName,
-                        testDbNS,
-                        dbPassword,
-                        runResources.slotName(),
-                        runResources.sourceTable());
+                                runResources.sourceConnectorName(),
+                                connectNamespace,
+                                connectName,
+                                testDbNS,
+                                dbPassword,
+                                runResources.slotName(),
+                                runResources.sourceTable());
 
-                kubernetesClient.genericKubernetesResources(CONNECTOR_CRD)
-                        .inNamespace(connectNamespace)
-                        .load(new java.io.ByteArrayInputStream(sourceYaml.getBytes()))
-                        .createOrReplace();
-                phaseDurations.put("SOURCE_DEPLOY", Duration.between(phaseStart, Instant.now()).toMillis());
+                        kubernetesClient
+                                .genericKubernetesResources(CONNECTOR_CRD)
+                                .inNamespace(connectNamespace)
+                                .load(new java.io.ByteArrayInputStream(sourceYaml.getBytes()))
+                                .createOrReplace();
+                        phaseDurations.put(
+                                "SOURCE_DEPLOY",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
 
-                // ── Phase: SINK_DEPLOY ───────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("SINK_DEPLOY", phaseDurations);
-                phaseStart = Instant.now();
-                LOG.info("Deploying Kafka Sink Connector...");
-                String sinkYaml = String.format("""
+                        // ── Phase: SINK_DEPLOY ───────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("SINK_DEPLOY", phaseDurations);
+                        phaseStart = Instant.now();
+                        LOG.info("Deploying Kafka Sink Connector...");
+                        String sinkYaml = String.format(
+                                """
                         apiVersion: kafka.strimzi.io/v1
                         kind: KafkaConnector
                         metadata:
@@ -308,164 +349,185 @@ public class CdcIntegrationService {
                             value.converter: org.apache.kafka.connect.json.JsonConverter
                             value.converter.schemas.enable: true
                         """,
-                        runResources.sinkConnectorName(),
-                        connectNamespace,
-                        connectName,
-                        testDbNS,
-                        dbPassword,
-                        runResources.topicName(),
-                        runResources.sinkTable());
+                                runResources.sinkConnectorName(),
+                                connectNamespace,
+                                connectName,
+                                testDbNS,
+                                dbPassword,
+                                runResources.topicName(),
+                                runResources.sinkTable());
 
-                kubernetesClient.genericKubernetesResources(CONNECTOR_CRD)
-                        .inNamespace(connectNamespace)
-                        .load(new java.io.ByteArrayInputStream(sinkYaml.getBytes()))
-                        .createOrReplace();
-                phaseDurations.put("SINK_DEPLOY", Duration.between(phaseStart, Instant.now()).toMillis());
-
-                // ── Phase: CONNECTOR_READY ───────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("CONNECTOR_READY", phaseDurations);
-                phaseStart = Instant.now();
-                LOG.info("Waiting for connectors to be ready...");
-                boolean sourceReady = false;
-                boolean sinkReady = false;
-                for (int i = 0; i < 60; i++) {
-                    if (!sourceReady) {
-                        GenericKubernetesResource srcCr = kubernetesClient.genericKubernetesResources(CONNECTOR_CRD)
+                        kubernetesClient
+                                .genericKubernetesResources(CONNECTOR_CRD)
                                 .inNamespace(connectNamespace)
-                                .withName(runResources.sourceConnectorName())
-                                .get();
-                        // Check for permanent failure first
-                        String srcFailure = extractConnectorFailure(srcCr);
-                        if (srcFailure != null) {
-                            throw new IllegalStateException("Source connector FAILED: " + srcFailure);
-                        }
-                        sourceReady = isConnectorReady(srcCr);
-                    }
-                    if (!sinkReady) {
-                        GenericKubernetesResource sinkCr = kubernetesClient.genericKubernetesResources(CONNECTOR_CRD)
-                                .inNamespace(connectNamespace)
-                                .withName(runResources.sinkConnectorName())
-                                .get();
-                        String sinkFailure = extractConnectorFailure(sinkCr);
-                        if (sinkFailure != null) {
-                            throw new IllegalStateException("Sink connector FAILED: " + sinkFailure);
-                        }
-                        sinkReady = isConnectorReady(sinkCr);
-                    }
-                    if (sourceReady && sinkReady) break;
-                    if (i > 0 && i % 10 == 0) {
-                        LOG.infof("Still waiting for connectors (source=%s, sink=%s) after %ds", sourceReady, sinkReady, i * 2);
-                    }
-                    Thread.sleep(2000);
-                }
+                                .load(new java.io.ByteArrayInputStream(sinkYaml.getBytes()))
+                                .createOrReplace();
+                        phaseDurations.put(
+                                "SINK_DEPLOY",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
 
-                if (!sourceReady || !sinkReady) {
-                    throw new IllegalStateException("Connectors failed to become Ready within timeout (Source: " + sourceReady + ", Sink: " + sinkReady + ")");
-                }
-                phaseDurations.put("CONNECTOR_READY", Duration.between(phaseStart, Instant.now()).toMillis());
-
-                // Insert a fresh row after both connectors are Ready so sink consumers with latest offsets never miss it.
-                try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword);
-                     PreparedStatement ps = conn.prepareStatement("INSERT INTO " + runResources.sourceTable() + " (test_uuid) VALUES (?)")) {
-                    ps.setString(1, uuidStr);
-                    ps.executeUpdate();
-                    LOG.info("Inserted test record with UUID after connectors ready: " + uuidStr);
-                }
-
-                // ── Phase: KAFKA_VERIFY ──────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("KAFKA_VERIFY", phaseDurations);
-                phaseStart = Instant.now();
-                LOG.info("Waiting for CDC event in Kafka...");
-                boolean foundInKafka = false;
-                Properties props = getKafkaConsumerProperties(kafkaClusterName);
-
-                try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
-                    consumer.subscribe(Collections.singletonList(runResources.topicName()));
-
-                    Instant start = Instant.now();
-                    while (Duration.between(start, Instant.now()).getSeconds() < 90) {
-                        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
-                        for (ConsumerRecord<String, String> record : records) {
-                            if (record.value() != null) {
-                                LOG.info("Received Kafka Record: " + record.value());
-                                if (record.value().contains(uuidStr)) {
-                                    foundInKafka = true;
-                                    break;
+                        // ── Phase: CONNECTOR_READY ───────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("CONNECTOR_READY", phaseDurations);
+                        phaseStart = Instant.now();
+                        LOG.info("Waiting for connectors to be ready...");
+                        boolean sourceReady = false;
+                        boolean sinkReady = false;
+                        for (int i = 0; i < 60; i++) {
+                            if (!sourceReady) {
+                                GenericKubernetesResource srcCr = kubernetesClient
+                                        .genericKubernetesResources(CONNECTOR_CRD)
+                                        .inNamespace(connectNamespace)
+                                        .withName(runResources.sourceConnectorName())
+                                        .get();
+                                // Check for permanent failure first
+                                String srcFailure = extractConnectorFailure(srcCr);
+                                if (srcFailure != null) {
+                                    throw new IllegalStateException("Source connector FAILED: " + srcFailure);
                                 }
+                                sourceReady = isConnectorReady(srcCr);
                             }
-                        }
-                        if (foundInKafka) break;
-                    }
-                }
-
-                if (!foundInKafka) {
-                    throw new IllegalStateException("CDC Event not found in Kafka topic after 90 seconds");
-                }
-                LOG.info("CDC Event successfully verified in Kafka!");
-                phaseDurations.put("KAFKA_VERIFY", Duration.between(phaseStart, Instant.now()).toMillis());
-
-                // ── Phase: SINK_VERIFY ───────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("SINK_VERIFY", phaseDurations);
-                phaseStart = Instant.now();
-                boolean foundInDb = false;
-                try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword)) {
-                    // Use parameterized query to prevent SQL injection
-                    try (PreparedStatement ps = conn.prepareStatement(
-                            "SELECT test_uuid FROM " + runResources.sinkTable() + " WHERE test_uuid = ?")) {
-                        ps.setString(1, uuidStr);
-
-                        Instant start = Instant.now();
-                        while (Duration.between(start, Instant.now()).getSeconds() < 90) {
-                            try (ResultSet rs = ps.executeQuery()) {
-                                if (rs.next()) {
-                                    foundInDb = true;
-                                    break;
+                            if (!sinkReady) {
+                                GenericKubernetesResource sinkCr = kubernetesClient
+                                        .genericKubernetesResources(CONNECTOR_CRD)
+                                        .inNamespace(connectNamespace)
+                                        .withName(runResources.sinkConnectorName())
+                                        .get();
+                                String sinkFailure = extractConnectorFailure(sinkCr);
+                                if (sinkFailure != null) {
+                                    throw new IllegalStateException("Sink connector FAILED: " + sinkFailure);
                                 }
+                                sinkReady = isConnectorReady(sinkCr);
+                            }
+                            if (sourceReady && sinkReady) break;
+                            if (i > 0 && i % 10 == 0) {
+                                LOG.infof(
+                                        "Still waiting for connectors (source=%s, sink=%s) after %ds",
+                                        sourceReady, sinkReady, i * 2);
                             }
                             Thread.sleep(2000);
                         }
+
+                        if (!sourceReady || !sinkReady) {
+                            throw new IllegalStateException("Connectors failed to become Ready within timeout (Source: "
+                                    + sourceReady + ", Sink: " + sinkReady + ")");
+                        }
+                        phaseDurations.put(
+                                "CONNECTOR_READY",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
+
+                        // Insert a fresh row after both connectors are Ready so sink consumers with latest offsets
+                        // never miss it.
+                        try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword);
+                                PreparedStatement ps = conn.prepareStatement(
+                                        "INSERT INTO " + runResources.sourceTable() + " (test_uuid) VALUES (?)")) {
+                            ps.setString(1, uuidStr);
+                            ps.executeUpdate();
+                            LOG.info("Inserted test record with UUID after connectors ready: " + uuidStr);
+                        }
+
+                        // ── Phase: KAFKA_VERIFY ──────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("KAFKA_VERIFY", phaseDurations);
+                        phaseStart = Instant.now();
+                        LOG.info("Waiting for CDC event in Kafka...");
+                        boolean foundInKafka = false;
+                        Properties props = getKafkaConsumerProperties(kafkaClusterName);
+
+                        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
+                            consumer.subscribe(Collections.singletonList(runResources.topicName()));
+
+                            Instant start = Instant.now();
+                            while (Duration.between(start, Instant.now()).getSeconds() < 90) {
+                                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
+                                for (ConsumerRecord<String, String> record : records) {
+                                    if (record.value() != null) {
+                                        LOG.info("Received Kafka Record: " + record.value());
+                                        if (record.value().contains(uuidStr)) {
+                                            foundInKafka = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (foundInKafka) break;
+                            }
+                        }
+
+                        if (!foundInKafka) {
+                            throw new IllegalStateException("CDC Event not found in Kafka topic after 90 seconds");
+                        }
+                        LOG.info("CDC Event successfully verified in Kafka!");
+                        phaseDurations.put(
+                                "KAFKA_VERIFY",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
+
+                        // ── Phase: SINK_VERIFY ───────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("SINK_VERIFY", phaseDurations);
+                        phaseStart = Instant.now();
+                        boolean foundInDb = false;
+                        try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword)) {
+                            // Use parameterized query to prevent SQL injection
+                            try (PreparedStatement ps = conn.prepareStatement(
+                                    "SELECT test_uuid FROM " + runResources.sinkTable() + " WHERE test_uuid = ?")) {
+                                ps.setString(1, uuidStr);
+
+                                Instant start = Instant.now();
+                                while (Duration.between(start, Instant.now()).getSeconds() < 90) {
+                                    try (ResultSet rs = ps.executeQuery()) {
+                                        if (rs.next()) {
+                                            foundInDb = true;
+                                            break;
+                                        }
+                                    }
+                                    Thread.sleep(2000);
+                                }
+                            }
+                        }
+
+                        if (!foundInDb) {
+                            throw new IllegalStateException("CDC Event not found in Sink table after 90 seconds");
+                        }
+
+                        LOG.info("CDC Event successfully verified in Sink table!");
+                        phaseDurations.put(
+                                "SINK_VERIFY",
+                                Duration.between(phaseStart, Instant.now()).toMillis());
+                        endState = TestResult.TaskStatus.DONE;
+                        recordsProcessed = 1;
+
+                    } catch (Exception e) {
+                        LOG.error("Integration CDC test failed", e);
+                        endState = TestResult.TaskStatus.FAILED;
+                        errorMsg = e.getMessage();
+                    } finally {
+                        // ── Phase: CLEANUP ───────────────────────────────────────────
+                        if (progressCallback != null) progressCallback.accept("CLEANUP", phaseDurations);
+                        Instant cleanupStart = Instant.now();
+                        cleanupTestResources(connectNamespace, testDbNS, topicNamespacesForCleanup, runResources);
+                        phaseDurations.put(
+                                "CLEANUP",
+                                Duration.between(cleanupStart, Instant.now()).toMillis());
                     }
-                }
 
-                if (!foundInDb) {
-                    throw new IllegalStateException("CDC Event not found in Sink table after 90 seconds");
-                }
-
-                LOG.info("CDC Event successfully verified in Sink table!");
-                phaseDurations.put("SINK_VERIFY", Duration.between(phaseStart, Instant.now()).toMillis());
-                endState = TestResult.TaskStatus.DONE;
-                recordsProcessed = 1;
-
-            } catch (Exception e) {
-                LOG.error("Integration CDC test failed", e);
-                endState = TestResult.TaskStatus.FAILED;
-                errorMsg = e.getMessage();
-            } finally {
-                // ── Phase: CLEANUP ───────────────────────────────────────────
-                if (progressCallback != null) progressCallback.accept("CLEANUP", phaseDurations);
-                Instant cleanupStart = Instant.now();
-                cleanupTestResources(connectNamespace, testDbNS, topicNamespacesForCleanup, runResources);
-                phaseDurations.put("CLEANUP", Duration.between(cleanupStart, Instant.now()).toMillis());
-            }
-
-            BenchmarkStatus.Builder builder = BenchmarkStatus.builder(endState)
-                    .recordsProcessed(recordsProcessed)
-                    .phaseDurations(phaseDurations);
-            if (errorMsg != null) {
-                builder.error(errorMsg);
-            }
-            return builder.build();
-        });
+                    BenchmarkStatus.Builder builder = BenchmarkStatus.builder(endState)
+                            .recordsProcessed(recordsProcessed)
+                            .phaseDurations(phaseDurations);
+                    if (errorMsg != null) {
+                        builder.error(errorMsg);
+                    }
+                    return builder.build();
+                },
+                executor.get());
     }
 
     /**
      * Cleans up all test resources: connectors, topics, and database tables.
      * Each cleanup step is isolated so a failure in one does not prevent others.
      */
-    private void cleanupTestResources(String connectNamespace, String testDbNS, List<String> topicNamespaces, CdcRunResources runResources) {
+    private void cleanupTestResources(
+            String connectNamespace, String testDbNS, List<String> topicNamespaces, CdcRunResources runResources) {
         LOG.info("Cleaning up Integration CDC test resources");
         try {
-            kubernetesClient.genericKubernetesResources(CONNECTOR_CRD)
+            kubernetesClient
+                    .genericKubernetesResources(CONNECTOR_CRD)
                     .inNamespace(connectNamespace)
                     .withName(runResources.sourceConnectorName())
                     .delete();
@@ -473,7 +535,8 @@ public class CdcIntegrationService {
             LOG.warn("Failed to delete source connector", e);
         }
         try {
-            kubernetesClient.genericKubernetesResources(CONNECTOR_CRD)
+            kubernetesClient
+                    .genericKubernetesResources(CONNECTOR_CRD)
                     .inNamespace(connectNamespace)
                     .withName(runResources.sinkConnectorName())
                     .delete();
@@ -493,7 +556,8 @@ public class CdcIntegrationService {
         }
         for (String topicNamespace : topicNamespacesToCleanup) {
             try {
-                kubernetesClient.genericKubernetesResources(TOPIC_CRD)
+                kubernetesClient
+                        .genericKubernetesResources(TOPIC_CRD)
                         .inNamespace(topicNamespace)
                         .withName(runResources.topicResourceName())
                         .delete();
@@ -503,12 +567,17 @@ public class CdcIntegrationService {
         }
 
         try {
-            Secret secret = kubernetesClient.secrets().inNamespace(testDbNS).withName("postgresql").get();
+            Secret secret = kubernetesClient
+                    .secrets()
+                    .inNamespace(testDbNS)
+                    .withName("postgresql")
+                    .get();
             if (secret != null) {
-                String dbPassword = new String(java.util.Base64.getDecoder().decode(secret.getData().get("postgres-password")));
+                String dbPassword = new String(
+                        java.util.Base64.getDecoder().decode(secret.getData().get("postgres-password")));
                 String jdbcUrl = "jdbc:postgresql://postgresql." + testDbNS + ".svc:5432/postgres";
                 try (Connection conn = DriverManager.getConnection(jdbcUrl, "postgres", dbPassword);
-                     Statement stmt = conn.createStatement()) {
+                        Statement stmt = conn.createStatement()) {
                     stmt.execute("DROP TABLE IF EXISTS " + runResources.sourceTable());
                     stmt.execute("DROP TABLE IF EXISTS " + runResources.sinkTable());
                 }
@@ -564,8 +633,7 @@ public class CdcIntegrationService {
             String sinkTable,
             String slotName,
             String topicName,
-            String topicResourceName) {
-    }
+            String topicResourceName) {}
 
     private List<String> resolveTopicNamespaceCandidates(String connectNamespace) {
         String configuredNamespace = configuredCdcTopicNamespace
@@ -590,10 +658,12 @@ public class CdcIntegrationService {
         return new ArrayList<>(candidates);
     }
 
-    private boolean waitForTopicReady(String namespace, String topicResourceName, Duration timeout) throws InterruptedException {
+    private boolean waitForTopicReady(String namespace, String topicResourceName, Duration timeout)
+            throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
-            GenericKubernetesResource topicCr = kubernetesClient.genericKubernetesResources(TOPIC_CRD)
+            GenericKubernetesResource topicCr = kubernetesClient
+                    .genericKubernetesResources(TOPIC_CRD)
                     .inNamespace(namespace)
                     .withName(topicResourceName)
                     .get();
@@ -608,9 +678,11 @@ public class CdcIntegrationService {
     @SuppressWarnings("unchecked")
     private boolean isTopicReady(GenericKubernetesResource cr) {
         if (cr != null && cr.getAdditionalProperties().containsKey("status")) {
-            java.util.Map<String, Object> crStatus = (java.util.Map<String, Object>) cr.getAdditionalProperties().get("status");
+            java.util.Map<String, Object> crStatus =
+                    (java.util.Map<String, Object>) cr.getAdditionalProperties().get("status");
             if (crStatus.containsKey("conditions")) {
-                java.util.List<java.util.Map<String, Object>> conditions = (java.util.List<java.util.Map<String, Object>>) crStatus.get("conditions");
+                java.util.List<java.util.Map<String, Object>> conditions =
+                        (java.util.List<java.util.Map<String, Object>>) crStatus.get("conditions");
                 for (java.util.Map<String, Object> cond : conditions) {
                     if ("Ready".equals(cond.get("type")) && "True".equals(cond.get("status"))) {
                         return true;
@@ -624,9 +696,11 @@ public class CdcIntegrationService {
     @SuppressWarnings("unchecked")
     private boolean isConnectorReady(GenericKubernetesResource cr) {
         if (cr != null && cr.getAdditionalProperties().containsKey("status")) {
-            java.util.Map<String, Object> crStatus = (java.util.Map<String, Object>) cr.getAdditionalProperties().get("status");
+            java.util.Map<String, Object> crStatus =
+                    (java.util.Map<String, Object>) cr.getAdditionalProperties().get("status");
             if (crStatus.containsKey("conditions")) {
-                java.util.List<java.util.Map<String, Object>> conditions = (java.util.List<java.util.Map<String, Object>>) crStatus.get("conditions");
+                java.util.List<java.util.Map<String, Object>> conditions =
+                        (java.util.List<java.util.Map<String, Object>>) crStatus.get("conditions");
                 for (java.util.Map<String, Object> cond : conditions) {
                     if ("Ready".equals(cond.get("type")) && "True".equals(cond.get("status"))) {
                         return true;
@@ -646,7 +720,8 @@ public class CdcIntegrationService {
         if (cr == null || !cr.getAdditionalProperties().containsKey("status")) {
             return null;
         }
-        java.util.Map<String, Object> crStatus = (java.util.Map<String, Object>) cr.getAdditionalProperties().get("status");
+        java.util.Map<String, Object> crStatus =
+                (java.util.Map<String, Object>) cr.getAdditionalProperties().get("status");
         if (!crStatus.containsKey("conditions")) {
             return null;
         }
@@ -668,7 +743,9 @@ public class CdcIntegrationService {
     private Properties getKafkaConsumerProperties(String clusterName) {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, clusterName + "-kafka-bootstrap.kafka.svc:9092");
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "integration-cdc-test-" + UUID.randomUUID().toString());
+        props.put(
+                ConsumerConfig.GROUP_ID_CONFIG,
+                "integration-cdc-test-" + UUID.randomUUID().toString());
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -676,8 +753,11 @@ public class CdcIntegrationService {
         if (kafkaPassword.isPresent() && !kafkaPassword.get().isEmpty()) {
             props.put("security.protocol", "SASL_PLAINTEXT");
             props.put("sasl.mechanism", "SCRAM-SHA-512");
-            String jaasTemplate = "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"%s\" password=\"%s\";";
-            props.put("sasl.jaas.config", String.format(jaasTemplate, kafkaUsername.orElse("kates-backend"), kafkaPassword.get()));
+            String jaasTemplate =
+                    "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"%s\" password=\"%s\";";
+            props.put(
+                    "sasl.jaas.config",
+                    String.format(jaasTemplate, kafkaUsername.orElse("kates-backend"), kafkaPassword.get()));
         }
 
         return props;

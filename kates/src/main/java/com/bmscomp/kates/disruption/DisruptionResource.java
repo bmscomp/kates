@@ -1,7 +1,6 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.*;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -76,8 +75,10 @@ public class DisruptionResource {
         if ("REJECTED".equals(report.getStatus())) {
             return Response.status(422)
                     .entity(Map.of(
-                            "id", id,
-                            "status", "REJECTED",
+                            "id",
+                            id,
+                            "status",
+                            "REJECTED",
                             "validationWarnings",
                             report.getValidationWarnings() != null ? report.getValidationWarnings() : List.of()))
                     .build();
@@ -189,8 +190,11 @@ public class DisruptionResource {
                 .map(step -> {
                     Map<String, Object> entry = new LinkedHashMap<>();
                     entry.put("step", step.stepName());
-                    entry.put("disruptionType",
-                            step.disruptionType() != null ? step.disruptionType().name() : "unknown");
+                    entry.put(
+                            "disruptionType",
+                            step.disruptionType() != null
+                                    ? step.disruptionType().name()
+                                    : "unknown");
 
                     if (step.targetedLeaderBrokerId() != null) {
                         entry.put("targetedLeaderBrokerId", step.targetedLeaderBrokerId());
@@ -198,9 +202,11 @@ public class DisruptionResource {
 
                     if (step.isrMetrics() != null) {
                         Map<String, Object> isr = new LinkedHashMap<>();
-                        isr.put("timeToFullIsr",
+                        isr.put(
+                                "timeToFullIsr",
                                 step.isrMetrics().timeToFullIsr() != null
-                                        ? step.isrMetrics().timeToFullIsr().toMillis() + "ms" : "N/A");
+                                        ? step.isrMetrics().timeToFullIsr().toMillis() + "ms"
+                                        : "N/A");
                         isr.put("minIsrDepth", step.isrMetrics().minIsrDepth());
                         isr.put("underReplicatedPeakCount", step.isrMetrics().underReplicatedPeakCount());
                         isr.put("totalPartitions", step.isrMetrics().totalPartitions());
@@ -212,9 +218,11 @@ public class DisruptionResource {
                         lag.put("baselineLag", step.lagMetrics().baselineLag());
                         lag.put("peakLag", step.lagMetrics().peakLag());
                         lag.put("lagSpike", step.lagMetrics().lagSpike());
-                        lag.put("timeToLagRecovery",
+                        lag.put(
+                                "timeToLagRecovery",
                                 step.lagMetrics().timeToLagRecovery() != null
-                                        ? step.lagMetrics().timeToLagRecovery().toMillis() + "ms" : "N/A");
+                                        ? step.lagMetrics().timeToLagRecovery().toMillis() + "ms"
+                                        : "N/A");
                         entry.put("lag", lag);
                     }
 
@@ -268,24 +276,45 @@ public class DisruptionResource {
 
         if (current.getSummary() != null && baseline.getSummary() != null) {
             Map<String, Object> deltas = new LinkedHashMap<>();
-            deltas.put("recoveryDeltaMs",
-                    durationDeltaMs(current.getSummary().worstRecovery(), baseline.getSummary().worstRecovery()));
-            deltas.put("throughputDeltaPercent",
+            deltas.put(
+                    "recoveryDeltaMs",
+                    durationDeltaMs(
+                            current.getSummary().worstRecovery(),
+                            baseline.getSummary().worstRecovery()));
+            deltas.put(
+                    "throughputDeltaPercent",
                     current.getSummary().avgThroughputDegradation()
                             - baseline.getSummary().avgThroughputDegradation());
-            deltas.put("p99DeltaPercent",
+            deltas.put(
+                    "p99DeltaPercent",
                     current.getSummary().maxP99LatencySpike()
                             - baseline.getSummary().maxP99LatencySpike());
             comparison.put("deltas", deltas);
 
-            comparison.put("current", Map.of(
-                    "status", current.getStatus(),
-                    "slaGrade", current.getSlaVerdict() != null ? current.getSlaVerdict().grade() : "-",
-                    "passedSteps", current.getSummary().passedSteps() + "/" + current.getSummary().totalSteps()));
-            comparison.put("baseline", Map.of(
-                    "status", baseline.getStatus(),
-                    "slaGrade", baseline.getSlaVerdict() != null ? baseline.getSlaVerdict().grade() : "-",
-                    "passedSteps", baseline.getSummary().passedSteps() + "/" + baseline.getSummary().totalSteps()));
+            comparison.put(
+                    "current",
+                    Map.of(
+                            "status",
+                            current.getStatus(),
+                            "slaGrade",
+                            current.getSlaVerdict() != null
+                                    ? current.getSlaVerdict().grade()
+                                    : "-",
+                            "passedSteps",
+                            current.getSummary().passedSteps() + "/"
+                                    + current.getSummary().totalSteps()));
+            comparison.put(
+                    "baseline",
+                    Map.of(
+                            "status",
+                            baseline.getStatus(),
+                            "slaGrade",
+                            baseline.getSlaVerdict() != null
+                                    ? baseline.getSlaVerdict().grade()
+                                    : "-",
+                            "passedSteps",
+                            baseline.getSummary().passedSteps() + "/"
+                                    + baseline.getSummary().totalSteps()));
         }
 
         return Response.ok(comparison).build();

@@ -6,19 +6,18 @@ import static org.mockito.Mockito.*;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
-
 import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
-import org.apache.kafka.clients.admin.DescribeConsumerGroupsResult;
 import org.apache.kafka.clients.admin.ConsumerGroupListing;
-import org.apache.kafka.clients.admin.ListConsumerGroupsResult;
-import org.apache.kafka.common.ConsumerGroupState;
+import org.apache.kafka.clients.admin.DescribeConsumerGroupsResult;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsResult;
+import org.apache.kafka.clients.admin.ListConsumerGroupsResult;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +47,8 @@ class ConsumerGroupServiceTest {
         when(listing.groupId()).thenReturn("test-group");
         when(listing.state()).thenReturn(java.util.Optional.of(ConsumerGroupState.STABLE));
         when(listResult.all()).thenReturn(KafkaFuture.completedFuture(Collections.singletonList(listing)));
-        when(mockClient.listConsumerGroups(any(org.apache.kafka.clients.admin.ListConsumerGroupsOptions.class))).thenReturn(listResult);
+        when(mockClient.listConsumerGroups(any(org.apache.kafka.clients.admin.ListConsumerGroupsOptions.class)))
+                .thenReturn(listResult);
 
         ConsumerGroupDescription desc = mock(ConsumerGroupDescription.class);
         when(desc.groupId()).thenReturn("test-group");

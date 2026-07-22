@@ -8,7 +8,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -48,8 +47,9 @@ public class ConsumerGroupService {
             for (ConsumerGroupListing listing : groups) {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("groupId", listing.groupId());
-                item.put("state", listing.state().isPresent()
-                        ? listing.state().get().toString() : "UNKNOWN");
+                item.put(
+                        "state",
+                        listing.state().isPresent() ? listing.state().get().toString() : "UNKNOWN");
                 result.add(item);
             }
             return result;

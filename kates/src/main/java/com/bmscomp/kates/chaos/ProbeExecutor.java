@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -37,7 +36,9 @@ public class ProbeExecutor {
                 LOG.debugf("Probe '%s' PASSED (%dms)", probe.name(), durationMs);
                 return ProbeResult.pass(probe.name(), output, durationMs);
             } else {
-                LOG.infof("Probe '%s' FAILED: expected '%s' (%s) in output", probe.name(), probe.expectedOutput(), probe.comparator());
+                LOG.infof(
+                        "Probe '%s' FAILED: expected '%s' (%s) in output",
+                        probe.name(), probe.expectedOutput(), probe.comparator());
                 return ProbeResult.fail(probe.name(), output, durationMs);
             }
         } catch (Exception e) {
@@ -85,8 +86,15 @@ public class ProbeExecutor {
                 .withName(targetPod)
                 .writingOutput(out)
                 .usingListener(new io.fabric8.kubernetes.client.dsl.ExecListener() {
-                    @Override public void onClose(int code, String reason) { latch.countDown(); }
-                    @Override public void onFailure(Throwable t, io.fabric8.kubernetes.client.dsl.ExecListener.Response resp) { latch.countDown(); }
+                    @Override
+                    public void onClose(int code, String reason) {
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t, io.fabric8.kubernetes.client.dsl.ExecListener.Response resp) {
+                        latch.countDown();
+                    }
                 })
                 .exec("sh", "-c", probe.command())) {
             latch.await(probe.timeoutSec(), TimeUnit.SECONDS);
@@ -102,8 +110,7 @@ public class ProbeExecutor {
         String command = probe.command();
         if (command.contains("kafka") && command.contains("Ready")) {
             try {
-                var kafkas = client.genericKubernetesResources(
-                                "kafka.strimzi.io/v1", "Kafka")
+                var kafkas = client.genericKubernetesResources("kafka.strimzi.io/v1", "Kafka")
                         .inNamespace(namespace)
                         .list();
 

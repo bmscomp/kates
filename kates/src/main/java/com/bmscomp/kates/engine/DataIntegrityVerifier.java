@@ -4,9 +4,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -35,7 +33,6 @@ public class DataIntegrityVerifier {
 
     private final AckTracker ackTracker;
     private final BitSet consumedSet = new BitSet();
-    private final Map<Long, Integer> consumedCounts = new HashMap<>();
     private final AtomicLong totalConsumed = new AtomicLong();
     private final AtomicLong crcFailures = new AtomicLong();
     private final AtomicLong outOfOrderCount = new AtomicLong();
@@ -62,7 +59,6 @@ public class DataIntegrityVerifier {
     public void recordConsumed(long sequence, boolean crcValid, int partition) {
         int seq = (int) sequence;
         consumedSet.set(seq);
-        consumedCounts.merge(sequence, 1, Integer::sum);
         totalConsumed.incrementAndGet();
 
         if (!crcValid) {
@@ -122,11 +118,10 @@ public class DataIntegrityVerifier {
         lostSet.andNot(consumedSet);
         long lostCount = lostSet.cardinality();
 
-        // duplicates
-        long duplicates = consumedCounts.values().stream()
-                .filter(c -> c > 1)
-                .mapToLong(c -> c - 1)
-                .sum();
+        // duplicates = total consume events minus distinct sequences seen.
+        // Equivalent to the former per-sequence count map, but O(N/8) memory
+        // (BitSet) instead of one boxed map entry per record.
+        long duplicates = Math.max(0, totalConsumed.get() - consumedSet.cardinality());
 
         List<LostRange> lostRanges = computeLostRanges(lostSet);
 

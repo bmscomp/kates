@@ -22,22 +22,16 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
-import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.persistence.BaselineEntity;
 import com.bmscomp.kates.service.AuditService;
 import com.bmscomp.kates.service.BaselineService;
 import com.bmscomp.kates.service.TestRunRepository;
-import com.bmscomp.kates.chaos.ChaosProvider;
-import com.bmscomp.kates.chaos.FaultSpec;
-import com.bmscomp.kates.chaos.DisruptionType;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
@@ -49,7 +43,6 @@ public class TestResource {
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
     private final ChaosProvider chaosProvider;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     BaselineService baselineService;
@@ -58,7 +51,10 @@ public class TestResource {
     AuditService auditService;
 
     @Inject
-    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository, @jakarta.inject.Named("kubernetes") ChaosProvider chaosProvider) {
+    public TestResource(
+            TestOrchestrator orchestrator,
+            TestRunRepository repository,
+            @jakarta.inject.Named("kubernetes") ChaosProvider chaosProvider) {
         this.orchestrator = orchestrator;
         this.repository = repository;
         this.chaosProvider = chaosProvider;
@@ -73,7 +69,8 @@ public class TestResource {
         var result = orchestrator.executeTest(request);
         if (result.isFailure()) {
             return Response.status(400)
-                    .entity(ApiError.of(400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
+                    .entity(ApiError.of(
+                            400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
                     .build();
         }
         TestRun run = result.asSuccess().orElseThrow();
@@ -81,13 +78,11 @@ public class TestResource {
         return Response.accepted(run).build();
     }
 
-
-
     @POST
     @Path("/bulk")
     @Operation(summary = "Create multiple tests", description = "Submits up to 10 test runs in a single request")
     @APIResponse(responseCode = "202", description = "Tests accepted for execution")
-    public Response bulkCreate(List<CreateTestRequest> requests) {
+    public Response bulkCreate(List<@Valid CreateTestRequest> requests) {
         if (requests == null || requests.isEmpty()) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "At least one test request required"))
@@ -103,11 +98,13 @@ public class TestResource {
             try {
                 var testResult = orchestrator.executeTest(req);
                 if (testResult.isFailure()) {
-                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(testResult.asFailure().orElseThrow().getMessage()));
+                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(
+                            testResult.asFailure().orElseThrow().getMessage()));
                 } else {
                     TestRun run = testResult.asSuccess().orElseThrow();
                     auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
-                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.success(run.getId(), run.getStatus().name()));
+                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.success(
+                            run.getId(), run.getStatus().name()));
                 }
             } catch (Exception e) {
                 results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(e.getMessage()));
@@ -173,8 +170,9 @@ public class TestResource {
         if (status != null && !status.isEmpty()) {
             try {
                 TestResult.TaskStatus taskStatus = TestResult.TaskStatus.valueOf(status.toUpperCase());
-                List<TestRun> content = repository.findByStatus(taskStatus);
-                return Response.ok(new PagedResponse<>(content, 0, content.size(), content.size()))
+                List<TestRun> content = repository.findByStatusPaged(taskStatus, safePage, safeSize);
+                long total = repository.countByStatus(taskStatus);
+                return Response.ok(new PagedResponse<>(content, safePage, safeSize, total))
                         .build();
             } catch (IllegalArgumentException e) {
                 return Response.status(Response.Status.BAD_REQUEST)
@@ -246,21 +244,22 @@ public class TestResource {
                     }
                     orchestrator.stopTest(id);
                     run = run.withStatus(com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED);
-                    
+
                     if (run.getResults() != null) {
-                        java.util.List<com.bmscomp.kates.domain.TestResult> updatedResults = new java.util.ArrayList<>();
+                        java.util.List<com.bmscomp.kates.domain.TestResult> updatedResults =
+                                new java.util.ArrayList<>();
                         for (var result : run.getResults()) {
                             if (result.getStatus() == com.bmscomp.kates.domain.TestResult.TaskStatus.RUNNING
                                     || result.getStatus() == com.bmscomp.kates.domain.TestResult.TaskStatus.PENDING) {
                                 result = result.withStatus(com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED)
-                                               .withError("Cancelled by user")
-                                               .withEndTime(java.time.Instant.now().toString());
+                                        .withError("Cancelled by user")
+                                        .withEndTime(java.time.Instant.now().toString());
                             }
                             updatedResults.add(result);
                         }
                         run = run.withResults(updatedResults);
                     }
-                    
+
                     repository.save(run);
                     auditService.record("CANCEL", "test", id, "Test cancelled by user");
                     return Response.ok(java.util.Map.of(
@@ -369,11 +368,7 @@ public class TestResource {
     }
 
     private com.bmscomp.kates.domain.BaselineResponse baselineToResponse(BaselineEntity b) {
-        return new com.bmscomp.kates.domain.BaselineResponse(
-            b.getTestType().name(),
-            b.getRunId(),
-            b.getSetAt()
-        );
+        return new com.bmscomp.kates.domain.BaselineResponse(b.getTestType().name(), b.getRunId(), b.getSetAt());
     }
 
     private TestType parseBaselineType(String typeStr) {

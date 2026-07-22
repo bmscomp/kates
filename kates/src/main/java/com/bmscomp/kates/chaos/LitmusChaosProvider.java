@@ -90,8 +90,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                             continue;
                         }
 
-                        if (existing.getStatus() == null
-                                || existing.getStatus().experimentStatus == null) {
+                        if (existing.getStatus() == null || existing.getStatus().experimentStatus == null) {
                             LOG.debugf("Poll %d: ChaosResult exists but no status yet", i + 1);
                             continue;
                         }
@@ -103,13 +102,25 @@ public class LitmusChaosProvider implements ChaosProvider {
                             var s = existing.getStatus().experimentStatus;
                             if ("Pass".equalsIgnoreCase(v)) {
                                 future.complete(ChaosOutcome.success(
-                                        engineName, experimentName, start, Instant.now(),
-                                        startNanos, s.probeSuccessPercentage, s.failStep, s.phase));
+                                        engineName,
+                                        experimentName,
+                                        start,
+                                        Instant.now(),
+                                        startNanos,
+                                        s.probeSuccessPercentage,
+                                        s.failStep,
+                                        s.phase));
                             } else {
                                 future.complete(ChaosOutcome.failure(
-                                        engineName, experimentName, start, Instant.now(),
-                                        startNanos, "ChaosResult verdict: " + v,
-                                        s.probeSuccessPercentage, s.failStep, s.phase));
+                                        engineName,
+                                        experimentName,
+                                        start,
+                                        Instant.now(),
+                                        startNanos,
+                                        "ChaosResult verdict: " + v,
+                                        s.probeSuccessPercentage,
+                                        s.failStep,
+                                        s.phase));
                             }
                             return;
                         }
@@ -124,9 +135,15 @@ public class LitmusChaosProvider implements ChaosProvider {
                 // Timeout — no result received
                 if (!future.isDone()) {
                     future.complete(ChaosOutcome.failure(
-                            engineName, experimentName, start, Instant.now(),
-                            startNanos, "Timeout polling for ChaosResult after " + timeoutSec + "s",
-                            null, null, null));
+                            engineName,
+                            experimentName,
+                            start,
+                            Instant.now(),
+                            startNanos,
+                            "Timeout polling for ChaosResult after " + timeoutSec + "s",
+                            null,
+                            null,
+                            null));
                 }
             });
 
@@ -236,13 +253,15 @@ public class LitmusChaosProvider implements ChaosProvider {
                     envVars.add(new ChaosEngineSpec.EnvVar("FORCE", "true"));
                     envVars.add(new ChaosEngineSpec.EnvVar("SEQUENCE", "serial"));
                 }
-                case CPU_STRESS -> envVars.add(new ChaosEngineSpec.EnvVar("CPU_CORES", String.valueOf(spec.cpuCores())));
+                case CPU_STRESS ->
+                    envVars.add(new ChaosEngineSpec.EnvVar("CPU_CORES", String.valueOf(spec.cpuCores())));
                 case MEMORY_STRESS -> {
                     envVars.add(new ChaosEngineSpec.EnvVar("MEMORY_CONSUMPTION", String.valueOf(spec.memoryMb())));
                     envVars.add(new ChaosEngineSpec.EnvVar("NUMBER_OF_WORKERS", "1"));
                 }
                 case IO_STRESS -> {
-                    envVars.add(new ChaosEngineSpec.EnvVar("FILESYSTEM_UTILIZATION_PERCENTAGE", String.valueOf(spec.fillPercentage())));
+                    envVars.add(new ChaosEngineSpec.EnvVar(
+                            "FILESYSTEM_UTILIZATION_PERCENTAGE", String.valueOf(spec.fillPercentage())));
                     envVars.add(new ChaosEngineSpec.EnvVar("NUMBER_OF_WORKERS", String.valueOf(spec.ioWorkers())));
                 }
                 case DNS_ERROR -> {
@@ -250,9 +269,11 @@ public class LitmusChaosProvider implements ChaosProvider {
                         envVars.add(new ChaosEngineSpec.EnvVar("TARGET_HOSTNAMES", spec.targetTopic()));
                     }
                 }
-                case NETWORK_LATENCY -> envVars.add(new ChaosEngineSpec.EnvVar("NETWORK_LATENCY", String.valueOf(spec.networkLatencyMs())));
-                case DISK_FILL -> envVars.add(new ChaosEngineSpec.EnvVar("FILL_PERCENTAGE", String.valueOf(spec.fillPercentage())));
-                default -> { }
+                case NETWORK_LATENCY ->
+                    envVars.add(new ChaosEngineSpec.EnvVar("NETWORK_LATENCY", String.valueOf(spec.networkLatencyMs())));
+                case DISK_FILL ->
+                    envVars.add(new ChaosEngineSpec.EnvVar("FILL_PERCENTAGE", String.valueOf(spec.fillPercentage())));
+                default -> {}
             }
         }
 

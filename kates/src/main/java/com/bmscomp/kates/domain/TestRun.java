@@ -26,14 +26,50 @@ public class TestRun {
     private final String cdcPhase;
 
     public TestRun() {
-        this(UUID.randomUUID().toString().substring(0, 8), null, null, TestResult.TaskStatus.PENDING, new ArrayList<>(), Instant.now().toString(), null, null, new LinkedHashMap<>(), null, null, null);
+        this(
+                UUID.randomUUID().toString().substring(0, 8),
+                null,
+                null,
+                TestResult.TaskStatus.PENDING,
+                new ArrayList<>(),
+                Instant.now().toString(),
+                null,
+                null,
+                new LinkedHashMap<>(),
+                null,
+                null,
+                null);
     }
 
     public TestRun(TestType testType, TestSpec spec) {
-        this(UUID.randomUUID().toString().substring(0, 8), testType, spec, TestResult.TaskStatus.PENDING, new ArrayList<>(), Instant.now().toString(), null, null, new LinkedHashMap<>(), null, null, null);
+        this(
+                UUID.randomUUID().toString().substring(0, 8),
+                testType,
+                spec,
+                TestResult.TaskStatus.PENDING,
+                new ArrayList<>(),
+                Instant.now().toString(),
+                null,
+                null,
+                new LinkedHashMap<>(),
+                null,
+                null,
+                null);
     }
 
-    private TestRun(String id, TestType testType, TestSpec spec, TestResult.TaskStatus status, List<TestResult> results, String createdAt, String backend, String scenarioName, Map<String, String> labels, SlaDefinition sla, Map<String, Long> cdcPhases, String cdcPhase) {
+    private TestRun(
+            String id,
+            TestType testType,
+            TestSpec spec,
+            TestResult.TaskStatus status,
+            List<TestResult> results,
+            String createdAt,
+            String backend,
+            String scenarioName,
+            Map<String, String> labels,
+            SlaDefinition sla,
+            Map<String, Long> cdcPhases,
+            String cdcPhase) {
         this.id = id;
         this.testType = testType;
         this.spec = spec;
@@ -51,69 +87,250 @@ public class TestRun {
     public TestRun withResult(TestResult result) {
         List<TestResult> newResults = new ArrayList<>(this.results);
         newResults.add(result);
-        return new TestRun(id, testType, spec, status, newResults, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                newResults,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withId(String id) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withTestType(TestType testType) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withSpec(TestSpec spec) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withStatus(TestResult.TaskStatus status) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withResults(List<TestResult> results) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withCreatedAt(String createdAt) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withBackend(String backend) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withScenarioName(String scenarioName) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withLabels(Map<String, String> labels) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withSla(SlaDefinition sla) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withCdcPhases(Map<String, Long> cdcPhases) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withCdcPhase(String cdcPhase) {
-        return new TestRun(id, testType, spec, status, results, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withAddedResult(TestResult result) {
-        List<TestResult> newResults = new java.util.ArrayList<>(this.results != null ? this.results : java.util.Collections.emptyList());
+        List<TestResult> newResults =
+                new java.util.ArrayList<>(this.results != null ? this.results : java.util.Collections.emptyList());
         newResults.add(result);
-        return new TestRun(id, testType, spec, status, newResults, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                newResults,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public TestRun withUpdatedResult(TestResult updatedResult) {
         if (this.results == null) return this;
         List<TestResult> newResults = this.results.stream()
-            .map(r -> r.getTaskId().equals(updatedResult.getTaskId()) ? updatedResult : r)
-            .collect(java.util.stream.Collectors.toList());
-        return new TestRun(id, testType, spec, status, newResults, createdAt, backend, scenarioName, labels, sla, cdcPhases, cdcPhase);
+                .map(r -> r.getTaskId().equals(updatedResult.getTaskId()) ? updatedResult : r)
+                .collect(java.util.stream.Collectors.toList());
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                newResults,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase);
     }
 
     public String getId() {
