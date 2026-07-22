@@ -75,6 +75,13 @@ spec:
             - name: APICURIO_KAFKASQL_TOPIC_CONFIGURATION_VERIFICATION_OVERRIDE_ENABLED
               value: "true"
             {{- end }}
+            {{- with .Values.kafkaSql.consumerGroupPrefix }}
+            # Keeps the generated consumer group within the KafkaUser's
+            # group-prefix ACL (see kafka-cluster values). Prefix only — the
+            # per-replica group ID stays unique so the journal is replayed.
+            - name: APICURIO_KAFKASQL_CONSUMER_GROUP_PREFIX
+              value: {{ . | quote }}
+            {{- end }}
             - name: APICURIO_KAFKASQL_BOOTSTRAP_SERVERS
               value: {{ include "apicurio-registry.kafkaBootstrapServers" . }}
             {{- if .Values.tls.enabled }}

@@ -165,7 +165,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "topicVerificationOverride": { "type": "boolean" }
+        "topicVerificationOverride": { "type": "boolean" },
+        "consumerGroupPrefix": { "type": "string" }
       }
     },
     "tls": {
