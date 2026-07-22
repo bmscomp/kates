@@ -77,7 +77,14 @@ spec:
             {{- end }}
             - name: APICURIO_KAFKASQL_BOOTSTRAP_SERVERS
               value: {{ include "apicurio-registry.kafkaBootstrapServers" . }}
-            {{- if .Values.global.kafka.securityProtocol }}
+            {{- if .Values.tls.enabled }}
+            - name: APICURIO_KAFKA_COMMON_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: APICURIO_KAFKA_COMMON_SSL_TRUSTSTORE_LOCATION
+              value: "/etc/kafka/tls/{{ .Values.tls.truststoreSecretKey }}"
+            - name: APICURIO_KAFKA_COMMON_SSL_TRUSTSTORE_TYPE
+              value: "PEM"
+            {{- else if .Values.global.kafka.securityProtocol }}
             - name: APICURIO_KAFKA_COMMON_SECURITY_PROTOCOL
               value: {{ .Values.global.kafka.securityProtocol | quote }}
             {{- end }}
@@ -102,9 +109,19 @@ spec:
             # the KafkaSQL journal is replayed into (rootfs is read-only).
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.tls.enabled }}
+            - name: kafka-tls
+              mountPath: /etc/kafka/tls
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.tls.enabled }}
+        - name: kafka-tls
+          secret:
+            secretName: {{ .Values.tls.truststoreSecretName }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

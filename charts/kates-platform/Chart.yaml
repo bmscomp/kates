@@ -2,7 +2,7 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-version: 0.3.0
+version: 0.4.0
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -20,3 +20,7 @@ dependencies:
     version: ">=0.5.0 <1.0.0"
     repository: "file://../kates"
     condition: kates.enabled
+  - name: apicurio-registry
+    version: ">=0.2.0 <1.0.0"
+    repository: "file://../apicurio-registry"
+    condition: apicurio-registry.enabled

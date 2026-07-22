@@ -1,0 +1,24 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- $sm := .Values.metrics.serviceMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "apicurio-registry.fullname" . }}
+  labels:
+    {{- include "apicurio-registry.labels" . | nindent 4 }}
+    {{- with $sm.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "apicurio-registry.selectorLabels" . | nindent 6 }}
+  endpoints:
+    # Registry 3.x serves Prometheus metrics on the management port
+    - port: management
+      path: {{ $sm.path }}
+      interval: {{ $sm.interval }}
+      {{- with $sm.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+{{- end }}

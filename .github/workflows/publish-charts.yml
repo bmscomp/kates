@@ -10,7 +10,6 @@ name: Publish Helm Charts
 # workflow_dispatch. Re-publishing an unchanged chart version overwrites the
 # same OCI tag (idempotent).
 #
-# apicurio-registry is excluded: it is a vendored third-party chart tree.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -56,10 +55,6 @@ jobs:
           mkdir -p .build
           for chart in charts/*/; do
             name=$(basename "${chart}")
-            if [ "${name}" = "apicurio-registry" ]; then
-              echo "skip ${name} (vendored third-party chart)"
-              continue
-            fi
             helm package "${chart}" --destination .build/
           done
           ls -1 .build/

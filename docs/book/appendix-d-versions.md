@@ -14,13 +14,13 @@ Every version the platform pins, in one place. This table is generated from the 
 | Java (backend) | 21 | `kates/pom.xml` |
 | Quarkus | 3.20.6 | `kates/pom.xml` |
 | Go (CLI) | 1.25.7 | `cli/go.mod` |
-| `apicurio-registry` chart | 0.2.0 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
+| `apicurio-registry` chart | 0.3.0 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
 | `connect-cluster` chart | 1.3.1 (app 3.6.0) | `charts/connect-cluster/Chart.yaml` |
 | `headlamp` chart | 0.2.0 (app 0.40.1) | `charts/headlamp/Chart.yaml` |
 | `kafka-cluster` chart | 0.3.0 (app 4.3.0) | `charts/kafka-cluster/Chart.yaml` |
 | `kafka-ui` chart | 0.3.0 (app v1.5.0) | `charts/kafka-ui/Chart.yaml` |
 | `kates-chaos` chart | 2.0.0 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
-| `kates-platform` chart | 0.3.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
+| `kates-platform` chart | 0.4.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
 | `kates` chart | 0.6.0 (app 1.21.0) | `charts/kates/Chart.yaml` |
 | `minio` chart | 17.0.22 (app 2025.7.23) | `charts/minio/Chart.yaml` |
 | `monitoring` chart | 1.1.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
