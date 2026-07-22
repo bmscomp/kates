@@ -7,17 +7,15 @@ name: Apicurio Registry E2E
 # Secret, the provisioned journal/snapshots topics, and the consumer-group ACL
 # alignment. Heavier than the other jobs, so it is scoped to changes that can
 # affect it and can be run on demand.
+#
+# Manual-only: this heavy job does NOT run automatically on pull requests. It
+# stands up a full Strimzi + Kafka cluster on a 2-CPU/7-GB hosted runner, which
+# is resource-tight, so it is gated behind workflow_dispatch. Trigger it
+# deliberately from the Actions tab (or `gh workflow run ci-apicurio.yml`) once
+# the workflow is on the default branch. To re-enable automatic PR runs, add a
+# `pull_request:` trigger with the relevant `paths:` filter back here.
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "charts/apicurio-registry/**"
-      - "charts/kafka-cluster/**"
-      - "charts/strimzi-operator/**"
-      - "config/apicurio/**"
-      - "scripts/deploy-apicurio.sh"
-      - ".github/workflows/ci-apicurio.yml"
   workflow_dispatch: {}
 
 permissions:
