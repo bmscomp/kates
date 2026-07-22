@@ -45,6 +45,7 @@ spec:
             matchLabels:
               strimzi.io/pool-name: {{ .name }}
       {{- end }}
+      {{- if or .zone $.Values.controllerDefaults.podAntiAffinity.enabled }}
       affinity:
         {{- if .zone }}
         nodeAffinity:
@@ -66,6 +67,7 @@ spec:
                     strimzi.io/controller-role: "true"
                 topologyKey: {{ $.Values.controllerDefaults.podAntiAffinity.topologyKey }}
         {{- end }}
+      {{- end }}
       {{- with $.Values.controllerDefaults.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
