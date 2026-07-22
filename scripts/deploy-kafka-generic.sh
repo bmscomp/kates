@@ -59,6 +59,10 @@ bold "════════════════════════�
 echo ""
 
 info "Step 1/6: Detecting cluster configuration..."
+# The detect step writes the generated values here; ensure the directory
+# exists on a clean checkout (make targets create .build/ earlier, but running
+# this script standalone — e.g. in CI — does not).
+mkdir -p "$(dirname "${DETECTED_VALUES}")"
 if command -v kates &> /dev/null; then
     info "  Using kates CLI for cluster detection"
     kates detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
