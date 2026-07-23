@@ -4,6 +4,14 @@ Audit date: 2026-07-23. Scope: `charts/strimzi-operator/` (wrapper over the upst
 
 This chart is already mature: strict `values.schema.json` (`additionalProperties:false` at the wrapper level), an owned CRD-upgrade hook that closes Helm's crds/ gap with download validation + server-side dry-run, watch-scope assertions in the Helm tests, and behavior-preserving documentation on every non-default. The gaps are almost entirely in the **production overlay** — the wrapper is sound; `values-prod.yaml` is under-built and, in one place, actively unsafe.
 
+> **Status 2026-07-23:** P0, P1 and P2 implemented on `feat/strimzi-operator-prod-ha`.
+>
+> - **P0 ✓** — `values-prod.yaml` now sets `replicas: 2` (real active/standby HA; leader election was already on) with `topologySpreadConstraints` (hostname + zone, ScheduleAnyway), which also makes the pre-existing `minAvailable: 1` PDB drain-safe instead of a node-drain deadlock. New `scripts/check-pdb-safety.sh` fails the build if any rendered PDB has `minAvailable >= replicas`; wired into the Helm Lint job.
+> - **P1 ✓** — wrapper-owned `PodMonitor` (operator's own `:8080/metrics`) + `PrometheusRule` (down / no-leader / reconciliation-failure / restart-loop), gated on new `metrics.podMonitor.enabled` / `alerts.enabled` (default off, on in prod, `release: kafka` labels), added to the strict schema; `JAVA_OPTS -Xmx512m` heap pin under the 768Mi limit; config-gated prod-invariant Helm test (in-cluster PDB-safety + NetworkPolicy presence) with extended test RBAC.
+> - **P2 ✓** — watch-scope test verifies the actual scope in both directions (cluster-wide → `*`, scoped → the exact `watchNamespaces` list / release namespace); `featureGates: ""` pinned in prod (reviewed, version-default gates); commented `nodeSelector`/`tolerations` placement scaffold; the airgap recipe expanded to all four egress dependencies (CRD bundle, operator subchart, operator image by digest + imagePullSecrets, operand images via `STRIMZI_*_IMAGES`).
+>
+> **Still open (deliberately not code):** the Grafana dashboard ownership decision (`kafka-cluster` vs. operator — upstream names the 9 ConfigMaps release-independently, so they collide). Enable `dashboards` on exactly one side once ownership is decided.
+
 ## Current state (`values-prod.yaml` today)
 
 | Concern | Prod overlay today | Verdict |
