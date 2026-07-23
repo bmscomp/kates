@@ -12,7 +12,9 @@ This chart is already mature: strict `values.schema.json` (`additionalProperties
 >
 > **Post-P2 hardening ✓** — capability-guarded the operator PodMonitor/PrometheusRule (`.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"`) so enabling metrics on a cluster without the Prometheus Operator no longer fails `helm install`, with a loud NOTES warning + a CI step that validates them with the CRD advertised. Fully-airgapped CRD hook: `crdUpgrade.bundleConfigMap` sources the bundle from a user-created ConfigMap (no per-upgrade egress); `crdUpgrade.networkPolicy.enabled` adds a hook-scoped egress NetworkPolicy (DNS + 443) so the hook works in default-deny namespaces.
 >
-> **Still open (deliberately not code):** the Grafana dashboard ownership decision (`kafka-cluster` vs. operator — upstream names the 9 ConfigMaps release-independently, so they collide). Enable `dashboards` on exactly one side once ownership is decided. A live kind smoke test that runs `helm test` against `values-prod` (exercising the invariant tests + monitor validity) is the remaining optional coverage improvement.
+> **Live smoke test ✓** — `.github/workflows/ci-strimzi.yml` (manual `workflow_dispatch`) installs the chart with the **prod overlay** on kind (Prometheus Operator CRDs installed first so the guarded monitors apply; operator memory trimmed but replicas kept at 2) and runs `helm test`, executing the CRD-upgrade hook and every test hook — operator-Available, CRDs-Established, watch-scope, and the drain-safe-PDB + NetworkPolicy invariants — then asserts the PDB/NetworkPolicy/PodMonitor/PrometheusRule objects exist.
+>
+> **Still open (deliberately not code):** the Grafana dashboard ownership decision (`kafka-cluster` vs. operator — upstream names the 9 ConfigMaps release-independently, so they collide). Enable `dashboards` on exactly one side once ownership is decided.
 
 ## Current state (`values-prod.yaml` today)
 
