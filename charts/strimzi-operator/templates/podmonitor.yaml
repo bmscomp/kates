@@ -1,10 +1,15 @@
-{{- if .Values.metrics.podMonitor.enabled }}
+{{- if and .Values.metrics.podMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
 {{- /*
 Scrapes the cluster operator's OWN metrics endpoint (:8080/metrics) — the
 reconciliation counters and JVM stats for the operator process itself. This is
 distinct from the operand monitoring the operator sets up for Kafka clusters.
 PodMonitor (not ServiceMonitor) because upstream exposes the metrics on the pod
 port directly and ships no Service for the operator.
+
+The capability guard is mandatory: PodMonitor is a Prometheus Operator CRD, so
+without the guard `helm install` fails with "no matches for kind PodMonitor" on
+any cluster that has not installed the Prometheus Operator. When the CRD is
+absent the resource is skipped and NOTES.txt says so, loudly.
 */ -}}
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor

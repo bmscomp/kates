@@ -157,6 +157,21 @@ jobs:
       - name: Assert PodDisruptionBudget leaves a pod evictable
         run: bash scripts/check-pdb-safety.sh
 
+      # The operator's PodMonitor/PrometheusRule are capability-guarded so they
+      # don't fail `helm install` on clusters without the Prometheus Operator.
+      # That means the default render skips them — so validate them explicitly
+      # with the CRD advertised, both that they still render and stay schema-valid.
+      - name: Validate operator monitors (Prometheus CRDs present)
+        run: |
+          OUT=$(helm template strimzi-operator charts/strimzi-operator/ \
+            -n strimzi-operator -f charts/strimzi-operator/values-prod.yaml \
+            --api-versions monitoring.coreos.com/v1)
+          echo "${OUT}" | grep -q "kind: PodMonitor" \
+            || { echo "::error::PodMonitor did not render with the CRD present"; exit 1; }
+          echo "${OUT}" | grep -q "kind: PrometheusRule" \
+            || { echo "::error::PrometheusRule did not render with the CRD present"; exit 1; }
+          echo "OK: operator PodMonitor + PrometheusRule render when the Prometheus Operator CRDs exist"
+
       # The chart's reason to exist is that a typo'd key fails loudly instead of
       # being silently ignored (as leaderElection.enabled was for the lifetime
       # of the old release). Assert the schema actually rejects one.

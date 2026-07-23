@@ -1,9 +1,13 @@
-{{- if .Values.alerts.enabled }}
+{{- if and .Values.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
 {{- /*
 Operator-health alerts. These watch the operator PROCESS, not the Kafka
 operands. The reconciliation-failure and duration alerts key on the metrics the
 PodMonitor above scrapes; the availability alert keys on kube-state-metrics so
 it still fires even if the operator is down and not scraping.
+
+Capability-guarded for the same reason as the PodMonitor: PrometheusRule is a
+Prometheus Operator CRD, and rendering it on a cluster without that CRD fails
+`helm install`. Skipped (with a NOTES warning) when the CRD is absent.
 */ -}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
