@@ -134,11 +134,23 @@ alerts:
 # will fail to install, upgrade, or reconcile operands.
 #
 # 1. CRD BUNDLE (hook, every install AND upgrade). The hook is a pre-upgrade
-#    gate: if the URL is unreachable the upgrade aborts and the release is left
-#    in pending-upgrade. Mirror the bundle and point the hook at it:
-#
+#    gate: if the source is unreachable the upgrade aborts and the release is
+#    left in pending-upgrade. Two airgap options:
+#      a) Mirror the bundle and point the hook at it (still one HTTP call each
+#         install/upgrade):
+#           crdUpgrade:
+#             url: "https://mirror.internal/strimzi-crds-1.1.0.yaml"
+#      b) FULLY offline — vendor the bundle into a ConfigMap and skip egress
+#         entirely. Create it once per version from your mirror:
+#           kubectl -n strimzi-operator create configmap strimzi-crds-1.1.0 \
+#             --from-file=strimzi-crds.yaml=strimzi-crds-1.1.0.yaml
+#         then:
+#           crdUpgrade:
+#             bundleConfigMap: "strimzi-crds-1.1.0"
+#    In a default-deny namespace, also allow the hook Job's egress:
 #      crdUpgrade:
-#        url: "https://mirror.internal/strimzi-crds-1.1.0.yaml"
+#        networkPolicy:
+#          enabled: true
 #
 # 2. OPERATOR SUBCHART (`helm dependency build`, needs quay.io). Vendor the
 #    strimzi-kafka-operator OCI chart into your internal registry/mirror.

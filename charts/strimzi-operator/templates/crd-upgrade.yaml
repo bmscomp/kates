@@ -112,10 +112,27 @@ spec:
             - -c
             - |
               set -e
-              CRD_URL="{{ include "strimzi-operator.crdUrl" . }}"
               EXPECTED_CRDS=10
-
               echo "Applying Strimzi CRDs (v{{ .Values.strimziVersion }})..."
+              {{- if .Values.crdUpgrade.bundleConfigMap }}
+              # AIRGAP MODE: the bundle comes from a ConfigMap the operator
+              # created out-of-band from an internal mirror — NO network egress
+              # on install/upgrade. The chart does not carry the ~0.8 MB bundle
+              # itself (it would bloat the release and risk the 1 MB CM limit as
+              # CRDs grow); create it once per version, e.g.:
+              #   kubectl -n {{ .Release.Namespace }} create configmap {{ .Values.crdUpgrade.bundleConfigMap }} \
+              #     --from-file={{ .Values.crdUpgrade.bundleConfigMapKey }}=strimzi-crds-{{ .Values.strimziVersion }}.yaml
+              CRD_FILE="/crds/{{ .Values.crdUpgrade.bundleConfigMapKey }}"
+              echo "Source: ConfigMap {{ .Values.crdUpgrade.bundleConfigMap }} (no network egress)"
+              if [ ! -s "${CRD_FILE}" ]; then
+                echo "✗ CRD bundle missing/empty at ${CRD_FILE}."
+                echo "  ConfigMap '{{ .Values.crdUpgrade.bundleConfigMap }}' must contain key"
+                echo "  '{{ .Values.crdUpgrade.bundleConfigMapKey }}' with the Strimzi {{ .Values.strimziVersion }} CRD bundle."
+                exit 1
+              fi
+              {{- else }}
+              CRD_URL="{{ include "strimzi-operator.crdUrl" . }}"
+              CRD_FILE="/tmp/strimzi-crds.yaml"
               echo "Source: ${CRD_URL}"
 
               # -f makes HTTP errors exit non-zero. Without it curl exits 0 on a
@@ -129,39 +146,38 @@ spec:
                     --retry 5 --retry-all-errors --retry-connrefused \
                     --max-time 120 \
                     -w '%{http_code}' \
-                    "${CRD_URL}" -o /tmp/strimzi-crds.yaml)
+                    "${CRD_URL}" -o "${CRD_FILE}")
               CURL_RC=$?
               set -e
               if [ "${CURL_RC}" -ne 0 ]; then
                 echo "✗ Download FAILED (curl exit ${CURL_RC}, HTTP ${HTTP_CODE:-unknown})"
                 echo "  URL: ${CRD_URL}"
-                echo "  If this cluster has no egress to the URL above, mirror the"
-                echo "  bundle internally and set crdUpgrade.url — the hook needs"
-                echo "  this URL on EVERY install and upgrade."
+                echo "  No egress to the URL above? Either mirror the bundle and set"
+                echo "  crdUpgrade.url, or vendor it into a ConfigMap and set"
+                echo "  crdUpgrade.bundleConfigMap for a fully airgapped install."
                 exit 1
               fi
               echo "  Downloaded (HTTP ${HTTP_CODE})"
+              {{- end }}
 
               # Validate BEFORE mutating anything.
-              if [ ! -s /tmp/strimzi-crds.yaml ]; then
-                echo "✗ Downloaded bundle is EMPTY — refusing to apply."
-                echo "  URL: ${CRD_URL}"
+              if [ ! -s "${CRD_FILE}" ]; then
+                echo "✗ CRD bundle is EMPTY — refusing to apply."
                 exit 1
               fi
 
-              FOUND=$(grep -c '^kind: CustomResourceDefinition' /tmp/strimzi-crds.yaml || true)
+              FOUND=$(grep -c '^kind: CustomResourceDefinition' "${CRD_FILE}" || true)
               if [ "${FOUND}" -ne "${EXPECTED_CRDS}" ]; then
                 echo "✗ Expected ${EXPECTED_CRDS} CustomResourceDefinitions, found ${FOUND}."
-                echo "  URL: ${CRD_URL}"
-                echo "  The response is probably not the CRD bundle (proxy interstitial?)."
-                head -5 /tmp/strimzi-crds.yaml
+                echo "  The bundle is probably not the Strimzi CRD bundle (proxy interstitial, wrong ConfigMap key?)."
+                head -5 "${CRD_FILE}"
                 exit 1
               fi
               echo "  Bundle contains ${FOUND} CRDs"
 
               echo "Validating against the API server (dry-run)..."
               if ! kubectl apply --server-side --force-conflicts \
-                    --dry-run=server -f /tmp/strimzi-crds.yaml >/dev/null; then
+                    --dry-run=server -f "${CRD_FILE}" >/dev/null; then
                 echo "✗ Server-side dry-run FAILED — refusing to apply."
                 exit 1
               fi
@@ -170,7 +186,7 @@ spec:
               # default, so its field manager co-owns these CRDs and would
               # otherwise conflict with this Job's manager.
               echo "Applying CRDs with server-side apply..."
-              kubectl apply --server-side --force-conflicts -f /tmp/strimzi-crds.yaml
+              kubectl apply --server-side --force-conflicts -f "${CRD_FILE}"
 
               echo "Verifying CRDs..."
               MISSING=0
@@ -205,4 +221,16 @@ spec:
             limits:
               memory: 128Mi
               cpu: 200m
+          {{- if .Values.crdUpgrade.bundleConfigMap }}
+          volumeMounts:
+            - name: crd-bundle
+              mountPath: /crds
+              readOnly: true
+          {{- end }}
+      {{- if .Values.crdUpgrade.bundleConfigMap }}
+      volumes:
+        - name: crd-bundle
+          configMap:
+            name: {{ .Values.crdUpgrade.bundleConfigMap }}
+      {{- end }}
 {{- end }}

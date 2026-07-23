@@ -77,6 +77,20 @@ crdUpgrade:
   # -- Override the CRD bundle URL (empty = derive from strimziVersion).
   # Set this to an internal mirror for airgapped clusters — see values-prod.yaml.
   url: ""
+  # -- Fully-airgapped mode: name of a ConfigMap (created out-of-band from an
+  # internal mirror) holding the CRD bundle. When set, the hook reads the bundle
+  # from this ConfigMap instead of curl-ing url — NO network egress on any
+  # install/upgrade. Takes precedence over url. The chart does not carry the
+  # ~0.8 MB bundle itself; create the ConfigMap once per Strimzi version.
+  bundleConfigMap: ""
+  # -- Key within bundleConfigMap holding the CRD YAML
+  bundleConfigMapKey: "strimzi-crds.yaml"
+  # -- NetworkPolicy for the hook Job. Enable in default-deny namespaces so the
+  # hook can reach the API server (and the bundle URL, in download mode). Off by
+  # default: adding an egress policy where none existed would otherwise RESTRICT
+  # the hook rather than permit it.
+  networkPolicy:
+    enabled: false
   # -- Job retry budget before the install/upgrade is aborted
   backoffLimit: 3
   # -- Seconds to retain a FAILED Job for log inspection. This never applies to
