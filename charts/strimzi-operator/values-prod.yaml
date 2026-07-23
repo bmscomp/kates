@@ -105,12 +105,13 @@ strimzi-kafka-operator:
     - name: JAVA_OPTS
       value: "-Xms256m -Xmx512m"
 
-  # ── Dashboards: left OFF deliberately ──────────────────────────────────────
-  # Upstream creates 9 Grafana ConfigMaps whose names are independent of the
-  # release name, and charts/kafka-cluster/values.yaml has its own dashboards
-  # block targeting the `kafka` namespace. Enabling this without resolving
-  # ownership produces colliding ConfigMaps. Decide who owns the dashboards
-  # first, then enable on ONE side.
+  # ── Dashboards: kafka-cluster owns them (decided) ──────────────────────────
+  # OFF here on purpose. charts/kafka-cluster owns the Grafana dashboards (its
+  # curated set in the `kafka` namespace, dashboards.enabled: true). The
+  # operator subchart ships a separate, overlapping upstream set under the same
+  # `grafana_dashboard` sidecar label, so enabling it here would load two
+  # overlapping sets. Leave false unless you disable kafka-cluster's block and
+  # move ownership to the operator.
   dashboards:
     enabled: false
 
