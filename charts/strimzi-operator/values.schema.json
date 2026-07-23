@@ -34,6 +34,18 @@
           "type": "string",
           "description": "Override the CRD bundle URL. Empty derives it from strimziVersion. Point this at an internal mirror for airgapped clusters."
         },
+        "bundleConfigMap": {
+          "type": "string",
+          "description": "Name of a ConfigMap holding the CRD bundle for fully-airgapped installs (no egress). Takes precedence over url."
+        },
+        "bundleConfigMapKey": { "type": "string", "minLength": 1 },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        },
         "backoffLimit": { "type": "integer", "minimum": 0 },
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 }
       }

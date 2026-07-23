@@ -1,0 +1,51 @@
+{{- if and .Values.crdUpgrade.enabled .Values.crdUpgrade.networkPolicy.enabled }}
+{{- /*
+Egress for the CRD-upgrade hook Job in a default-deny namespace. Without this,
+a namespace-wide default-deny NetworkPolicy (which the operator hardening in
+values-prod encourages) silently blocks the hook's curl AND its kubectl calls
+to the API server, so the pre-upgrade gate hangs until backoffLimit is burned.
+
+It is itself a hook resource (same pre-install/pre-upgrade phase, lower weight
+than the Job) so the policy is in place before the Job pod starts. It allows
+only DNS and 443 egress — enough for the API server and the bundle URL (or,
+in bundleConfigMap mode, just the API server).
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      app: crd-upgrade
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS: the API server (kubectl apply) and, in download mode, the CRD
+    # bundle host. bundleConfigMap mode needs only the API server, but 443 to
+    # any destination covers both without hardcoding the API server IP.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+{{- end }}
