@@ -1,0 +1,104 @@
+name: Strimzi Operator E2E
+
+# Installs the strimzi-operator chart with the PRODUCTION overlay on kind and
+# runs `helm test`, so the assertions that are only rendered in the other jobs
+# are actually executed: the CRD-upgrade hook, the operator-Available and
+# CRDs-Established tests, the watch-scope assertion, and the prod-invariant test
+# (drain-safe PDB + NetworkPolicy presence). The Prometheus Operator CRDs are
+# installed first so the capability-guarded PodMonitor/PrometheusRule also apply.
+#
+# Manual-only: this stands up a real operator (prod overlay = 2 replicas) and is
+# resource-tight on a hosted runner, so it is gated behind workflow_dispatch
+# rather than running on every PR.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  KIND_VERSION: v0.27.0
+  KUBECTL_VERSION: v1.33.0
+  NS: strimzi-operator
+
+jobs:
+  strimzi-e2e:
+    name: helm test on kind (prod overlay)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kind
+        run: |
+          curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          chmod +x kind && sudo mv kind /usr/local/bin/
+
+      - name: Install kubectl
+        run: |
+          curl -Lo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name strimzi-e2e
+          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+      # The operator's PodMonitor/PrometheusRule are capability-guarded on these
+      # CRDs; install them so the prod render actually applies the monitors.
+      - name: Install Prometheus Operator CRDs (PodMonitor, PrometheusRule)
+        run: |
+          base=https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/example/prometheus-operator-crd
+          kubectl apply --server-side -f ${base}/monitoring.coreos.com_podmonitors.yaml
+          kubectl apply --server-side -f ${base}/monitoring.coreos.com_prometheusrules.yaml
+
+      - name: Build chart dependencies
+        run: helm dependency build charts/strimzi-operator/
+
+      # Install the PROD overlay (2 replicas, PDB, NetworkPolicy, monitors, …).
+      # Trim only the operator memory so two replicas fit the runner — replicas
+      # stays 2 so the drain-safe-PDB invariant test is meaningful.
+      - name: Install strimzi-operator (production overlay)
+        run: |
+          kubectl create namespace "${NS}" --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install strimzi-operator charts/strimzi-operator/ \
+            -n "${NS}" \
+            -f charts/strimzi-operator/values-prod.yaml \
+            --set 'strimzi-kafka-operator.resources.requests.memory=256Mi' \
+            --set 'strimzi-kafka-operator.resources.limits.memory=384Mi' \
+            --wait --timeout 10m
+
+      - name: Wait for the operator rollout
+        run: kubectl rollout status deploy/strimzi-cluster-operator -n "${NS}" --timeout=300s
+
+      # Runs every test hook: operator Available, 10 CRDs Established, watch
+      # scope == '*', and the prod invariants (PDB minAvailable < replicas +
+      # NetworkPolicy present).
+      - name: helm test
+        run: helm test strimzi-operator -n "${NS}" --timeout 6m
+
+      - name: Assert the production resources exist
+        run: |
+          echo "PodDisruptionBudget:"; kubectl get pdb -n "${NS}"
+          echo "NetworkPolicies:";     kubectl get networkpolicy -n "${NS}"
+          echo "PodMonitor:";          kubectl get podmonitor -n "${NS}"
+          echo "PrometheusRule:";      kubectl get prometheusrule -n "${NS}"
+          echo "Operator replicas:";   kubectl get deploy strimzi-cluster-operator -n "${NS}" -o jsonpath='{.spec.replicas}{"\n"}'
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -n "${NS}" -o wide || true
+          kubectl describe deploy/strimzi-cluster-operator -n "${NS}" || true
+          kubectl logs -n "${NS}" -l name=strimzi-cluster-operator --tail=100 || true
+          echo "== hook job =="; kubectl get jobs -n "${NS}" || true
+          kubectl logs -n "${NS}" -l app=crd-upgrade --tail=50 || true
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name strimzi-e2e
