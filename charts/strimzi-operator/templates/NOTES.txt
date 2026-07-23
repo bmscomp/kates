@@ -40,6 +40,20 @@ Configuration:
 
       helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} --reset-values
 
+{{- if or .Values.metrics.podMonitor.enabled .Values.alerts.enabled }}
+{{- if not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+
+  ⚠ metrics/alerts are enabled but the Prometheus Operator CRDs
+    (monitoring.coreos.com/v1) are NOT present on this cluster, so the
+    {{ if .Values.metrics.podMonitor.enabled }}PodMonitor{{ end }}{{ if and .Values.metrics.podMonitor.enabled .Values.alerts.enabled }} and {{ end }}{{ if .Values.alerts.enabled }}PrometheusRule{{ end }} were SKIPPED (rendering them would have
+    failed the install). Install the Prometheus Operator — the `monitoring`
+    chart — then upgrade this release to create them.
+{{- else }}
+
+  ✓ Operator self-monitoring active: {{ if .Values.metrics.podMonitor.enabled }}PodMonitor{{ end }}{{ if and .Values.metrics.podMonitor.enabled .Values.alerts.enabled }} + {{ end }}{{ if .Values.alerts.enabled }}PrometheusRule{{ end }}.
+{{- end }}
+{{- end }}
+
 ────────────────────────────────────────────
   Verify
 ────────────────────────────────────────────
