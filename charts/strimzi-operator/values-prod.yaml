@@ -62,6 +62,24 @@ strimzi-kafka-operator:
   # Tighter loop than the 120000 default — more responsive, more API traffic.
   fullReconciliationIntervalMs: 60000
 
+  # ── Feature gates (pin per Strimzi version) ────────────────────────────────
+  # Explicit empty string = "reviewed, run the version's DEFAULT gates". This
+  # pins intent so an operator upgrade cannot silently flip a gate on us. For
+  # Strimzi 1.1.0 the production-relevant gates are all graduated (GA); the only
+  # new gate, UseBackgroundPodDeletion, is alpha and stays OFF in prod. Re-review
+  # this string on every appVersion bump (format: "+GateOn,-GateOff").
+  featureGates: ""
+
+  # ── Node placement (uncomment to pin to an infra pool) ─────────────────────
+  # Cluster-scoped operators commonly run on dedicated infra/system nodes,
+  # consistent with priorityClassName: system-cluster-critical below.
+  # nodeSelector:
+  #   node-role.kubernetes.io/infra: ""
+  # tolerations:
+  #   - key: node-role.kubernetes.io/infra
+  #     operator: Exists
+  #     effect: NoSchedule
+
   # ── Network ────────────────────────────────────────────────────────────────
   # Restricts access to the OPERATOR deployment only. Does NOT control the
   # NetworkPolicies the operator generates for Kafka operands.
@@ -112,18 +130,47 @@ alerts:
     release: kafka
 
 # ── Airgapped / restricted-egress clusters ───────────────────────────────────
-# The CRD hook needs egress to the bundle URL on EVERY install AND upgrade —
-# it is a pre-upgrade gate, so if the URL is unreachable the upgrade aborts and
-# the release is left in pending-upgrade. Mirror the bundle internally and
-# point the hook at it:
+# There are FOUR distinct egress dependencies. Mirror all four or the operator
+# will fail to install, upgrade, or reconcile operands.
 #
-# crdUpgrade:
-#   url: "https://mirror.internal/strimzi-crds-1.1.0.yaml"
+# 1. CRD BUNDLE (hook, every install AND upgrade). The hook is a pre-upgrade
+#    gate: if the URL is unreachable the upgrade aborts and the release is left
+#    in pending-upgrade. Mirror the bundle and point the hook at it:
 #
-# Separately, `helm dependency build` needs egress to quay.io to pull the
-# operator subchart. Registry redirection for the operator IMAGE is
-# strimzi-kafka-operator.defaultImageRegistry (NOT global.imageRegistry, which
-# upstream ignores entirely):
+#      crdUpgrade:
+#        url: "https://mirror.internal/strimzi-crds-1.1.0.yaml"
 #
-# strimzi-kafka-operator:
-#   defaultImageRegistry: registry.internal
+# 2. OPERATOR SUBCHART (`helm dependency build`, needs quay.io). Vendor the
+#    strimzi-kafka-operator OCI chart into your internal registry/mirror.
+#
+# 3. OPERATOR IMAGE. Redirect + pin by digest. This is
+#    defaultImageRegistry/Repository/Tag (NOT global.imageRegistry, which
+#    upstream ignores entirely), plus imagePullSecrets for a private registry:
+#
+#      strimzi-kafka-operator:
+#        defaultImageRegistry: registry.internal
+#        defaultImageRepository: strimzi
+#        image:
+#          # Pin the operator by digest for reproducibility (overrides the tag).
+#          tag: "1.1.0@sha256:<operator-digest>"
+#          imagePullSecrets:
+#            - name: registry-internal
+#
+# 4. OPERAND IMAGES (Kafka, Connect, Bridge, cruise-control, kaniko, …). The
+#    operator resolves these from its own env at RUNTIME. defaultImageRegistry
+#    prefixes them, but to PIN them by digest for a fully offline cluster,
+#    override the STRIMZI_*_IMAGES / STRIMZI_DEFAULT_*_IMAGE env via extraEnvs.
+#    Take the exact list from `kubectl set env deploy/strimzi-cluster-operator
+#    --list` on a connected cluster, then rewrite each to the mirror digest:
+#
+#      strimzi-kafka-operator:
+#        extraEnvs:
+#          - name: STRIMZI_KAFKA_IMAGES
+#            value: |
+#              4.0.0=registry.internal/strimzi/kafka:1.1.0-kafka-4.0.0@sha256:<digest>
+#          - name: STRIMZI_DEFAULT_KAFKA_CONNECT_IMAGE
+#            value: registry.internal/strimzi/kafka:1.1.0-kafka-4.0.0@sha256:<digest>
+#          # …repeat for BRIDGE, CRUISE_CONTROL, KANIKO_EXECUTOR, MAVEN_BUILDER
+#
+# NOTE: the crdUpgrade hook and Helm tests use testImages.kubectl
+# (ghcr.io/bmscomp/kates-tester) — mirror that too, or override it.

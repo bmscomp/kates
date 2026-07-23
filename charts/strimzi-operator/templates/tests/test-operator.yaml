@@ -146,7 +146,20 @@ spec:
             exit 1
           fi
           echo "✅ All 10 Strimzi CRDs Established"
+{{- /*
+Assert the operator's ACTUAL watch scope matches what was configured — in
+either direction. Cluster-wide deployments must resolve STRIMZI_NAMESPACE="*";
+scoped deployments (watchAnyNamespace=false) must resolve to exactly the
+intended namespace list, so a typo that silently shrinks OR widens the blast
+radius is caught. The expected value is computed here the same way upstream
+builds STRIMZI_NAMESPACE.
+*/ -}}
+{{- $expectedScope := .Release.Namespace }}
 {{- if $op.watchAnyNamespace }}
+{{-   $expectedScope = "*" }}
+{{- else if $op.watchNamespaces }}
+{{-   $expectedScope = join "," $op.watchNamespaces }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Pod
@@ -171,24 +184,26 @@ spec:
       command: ['sh', '-c']
       args:
         - |
-          # Defense-in-depth. The chart default makes a watch-scope collapse
-          # unreachable today, but the subchart's values block keeps
+          # Defense-in-depth. The subchart's values block keeps
           # additionalProperties: true (upstream has ~40 keys that drift every
           # release), so a typo inside that block stays silent. This assertion
-          # is what makes it loud.
-          echo "Asserting the operator watches ALL namespaces..."
+          # is what makes a watch-scope drift loud, in either direction.
+          EXPECTED='{{ $expectedScope }}'
+          echo "Asserting the operator watch scope is '${EXPECTED}'..."
           SCOPE=$(kubectl get deploy strimzi-cluster-operator \
             -n {{ .Release.Namespace }} \
             -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}')
-          echo "  STRIMZI_NAMESPACE=${SCOPE:-<unset>}"
-          if [ "${SCOPE}" = "*" ]; then
-            echo "✅ Watch scope is cluster-wide as configured"
+          # Upstream omits STRIMZI_NAMESPACE only when it equals the release
+          # namespace, so an empty result means the release namespace.
+          SCOPE="${SCOPE:-{{ .Release.Namespace }}}"
+          echo "  STRIMZI_NAMESPACE=${SCOPE}"
+          if [ "${SCOPE}" = "${EXPECTED}" ]; then
+            echo "✅ Watch scope matches configuration"
             exit 0
           fi
-          echo "❌ watchAnyNamespace=true but STRIMZI_NAMESPACE is not '*'."
-          echo "   Kafka clusters outside {{ .Release.Namespace }} would go UNMANAGED."
+          echo "❌ Expected watch scope '${EXPECTED}' but operator has '${SCOPE}'."
+          echo "   Kafka clusters in the wrong scope would go UNMANAGED."
           exit 1
-{{- end }}
 {{- if or $op.podDisruptionBudget.enabled $op.operatorNetworkPolicy.enabled }}
 ---
 apiVersion: v1
