@@ -14,7 +14,9 @@ This chart is already mature: strict `values.schema.json` (`additionalProperties
 >
 > **Live smoke test ✓** — `.github/workflows/ci-strimzi.yml` (manual `workflow_dispatch`) installs the chart with the **prod overlay** on kind (Prometheus Operator CRDs installed first so the guarded monitors apply; operator memory trimmed but replicas kept at 2) and runs `helm test`, executing the CRD-upgrade hook and every test hook — operator-Available, CRDs-Established, watch-scope, and the drain-safe-PDB + NetworkPolicy invariants — then asserts the PDB/NetworkPolicy/PodMonitor/PrometheusRule objects exist.
 >
-> **Still open (deliberately not code):** the Grafana dashboard ownership decision (`kafka-cluster` vs. operator — upstream names the 9 ConfigMaps release-independently, so they collide). Enable `dashboards` on exactly one side once ownership is decided.
+> **Dashboard ownership ✓ (decided):** `kafka-cluster` owns the Grafana dashboards — it already ships a curated broker/KRaft/cruise-control/connect set in the `kafka` namespace under the `grafana_dashboard` sidecar label. The operator subchart's dashboards are a separate, overlapping upstream set under that same label, so the operator chart keeps `dashboards.enabled: false` and documents the decision in `values.yaml` + `values-prod.yaml`. Enable on the operator side only if kafka-cluster's block is disabled.
+>
+> **Nothing outstanding.** All plan items (P0–P2), the post-P2 hardening (capability guard, airgap CRD hook, hook NetworkPolicy), the live smoke test, and the dashboard decision are complete.
 
 ## Current state (`values-prod.yaml` today)
 

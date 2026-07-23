@@ -170,9 +170,13 @@ strimzi-kafka-operator:
   # generated policies for Kafka operands)
   operatorNetworkPolicy:
     enabled: false
-  # -- Grafana dashboard ConfigMaps. Upstream names these independently of the
-  # release, so they collide with kafka-cluster's dashboards block. Resolve
-  # ownership before enabling.
+  # -- Grafana dashboard ConfigMaps. OWNERSHIP IS DECIDED: charts/kafka-cluster
+  # owns the Grafana dashboards (its curated broker/KRaft/cruise-control/connect
+  # set in the `kafka` namespace under the `grafana_dashboard` label). The
+  # operator subchart ships a SEPARATE, overlapping upstream set under that same
+  # label, so enabling it here makes the Grafana sidecar load two overlapping
+  # dashboard sets. Keep this false; enable kafka-cluster's block instead. Only
+  # flip this on if kafka-cluster's dashboards are disabled.
   dashboards:
     enabled: false
 
