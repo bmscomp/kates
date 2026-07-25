@@ -118,4 +118,87 @@ class EntityMapperTest {
 
         return run;
     }
+
+    // ── updateEntity child diffing (P3-2) ────────────────────────────────────
+    //
+    // updateEntity used to clear() and rebuild the results collection, which
+    // under cascade=ALL + orphanRemoval issued a DELETE for every row followed
+    // by an INSERT for every row — on every status poll of a running test.
+    // These pin the diffing behaviour that replaced it.
+
+    private static TestResult result(String taskId, TestResult.TaskStatus status, long recordsSent) {
+        return new TestResult().withTaskId(taskId).withStatus(status).withRecordsSent(recordsSent);
+    }
+
+    @Test
+    void updateEntityReusesChildRowsForTheSameTaskId() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
+                .withResults(java.util.List.of(
+                        result("task-1", TestResult.TaskStatus.RUNNING, 10),
+                        result("task-2", TestResult.TaskStatus.RUNNING, 20)));
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+
+        TestResultEntity firstBefore = entity.getResults().get(0);
+        TestResultEntity secondBefore = entity.getResults().get(1);
+
+        // A later poll reports progress on the same two tasks.
+        TestRun updated = initial.withResults(java.util.List.of(
+                result("task-1", TestResult.TaskStatus.DONE, 500),
+                result("task-2", TestResult.TaskStatus.RUNNING, 60)));
+        EntityMapper.updateEntity(entity, updated);
+
+        assertEquals(2, entity.getResults().size());
+        assertSame(firstBefore, entity.getResults().get(0), "same child instance is mutated, not replaced");
+        assertSame(secondBefore, entity.getResults().get(1));
+        assertEquals(TestResult.TaskStatus.DONE, firstBefore.getStatus(), "child was updated in place");
+        assertEquals(500, firstBefore.getRecordsSent());
+        assertEquals(60, secondBefore.getRecordsSent());
+    }
+
+    @Test
+    void updateEntityAddsNewTasksAndDropsRemovedOnes() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
+                .withResults(java.util.List.of(
+                        result("task-1", TestResult.TaskStatus.RUNNING, 1),
+                        result("task-2", TestResult.TaskStatus.RUNNING, 2)));
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+        TestResultEntity keptBefore = entity.getResults().get(0);
+
+        TestRun updated = initial.withResults(java.util.List.of(
+                result("task-1", TestResult.TaskStatus.RUNNING, 5),
+                result("task-3", TestResult.TaskStatus.PENDING, 0)));
+        EntityMapper.updateEntity(entity, updated);
+
+        java.util.Set<String> taskIds = entity.getResults().stream()
+                .map(TestResultEntity::getTaskId)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("task-1", "task-3"), taskIds);
+        assertTrue(entity.getResults().contains(keptBefore), "the surviving child keeps its identity");
+    }
+
+    @Test
+    void updateEntityWithNoResultsClearsChildren() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
+                .withResults(java.util.List.of(result("task-1", TestResult.TaskStatus.RUNNING, 1)));
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+
+        EntityMapper.updateEntity(entity, initial.withResults(java.util.List.of()));
+
+        assertTrue(entity.getResults().isEmpty());
+    }
+
+    @Test
+    void updateEntityLinksNewChildrenBackToTheParent() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec()).withResults(java.util.List.of());
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+
+        EntityMapper.updateEntity(
+                entity, initial.withResults(java.util.List.of(result("task-9", TestResult.TaskStatus.RUNNING, 3))));
+
+        assertEquals(1, entity.getResults().size());
+        assertSame(
+                entity,
+                entity.getResults().get(0).getTestRun(),
+                "a child added through the diff must still own its back-reference");
+    }
 }

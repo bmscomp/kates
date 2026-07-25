@@ -63,11 +63,24 @@ public class TestTimeoutReaper {
                     // persisting FAILED. Marking the DB row failed without this
                     // left the backend workers running — a "timed out" run kept
                     // producing to Kafka and skewing concurrent runs' latency.
+                    // Safe to do before the CAS below: if the run turns out to
+                    // have finished already, its workers are finished too and
+                    // this is a no-op.
                     orchestrator.abortWorkers(run);
-                    repository.save(run);
+
+                    // Compare-and-set on the status. A run can complete between
+                    // the query above and this write, and an unconditional save
+                    // would overwrite that real completion with a bogus timeout.
+                    if (!repository.saveIfStatus(run, TestResult.TaskStatus.RUNNING)) {
+                        LOG.infof("Run %s changed state while being reaped — leaving it alone", run.getId());
+                    }
                 }
             } catch (Exception e) {
-                LOG.debugf("Could not parse createdAt for run %s: %s", run.getId(), e.getMessage());
+                // Covers an unparseable createdAt AND an optimistic-lock
+                // conflict — the latter means a real completion landed while we
+                // were deciding this run had timed out, so leaving it alone is
+                // exactly right. Either way the next sweep re-evaluates.
+                LOG.debugf("Skipping run %s this sweep: %s", run.getId(), e.getMessage());
             }
         }
     }

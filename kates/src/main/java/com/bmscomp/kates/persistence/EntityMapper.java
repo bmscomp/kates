@@ -1,7 +1,12 @@
 package com.bmscomp.kates.persistence;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -91,6 +96,17 @@ public final class EntityMapper {
                         fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
     }
 
+    /**
+     * Applies a domain run onto a MANAGED entity, mutating in place so Hibernate
+     * can dirty-check it.
+     *
+     * <p>Child results are diffed by task id rather than cleared and rebuilt.
+     * With {@code cascade=ALL, orphanRemoval=true}, clearing the collection
+     * issues a DELETE for every result row followed by an INSERT for every one
+     * again — on every status poll of a running multi-task run. Diffing turns
+     * that into a handful of UPDATEs (usually none, since Hibernate skips
+     * unchanged rows) and keeps the child primary keys stable.
+     */
     public static void updateEntity(TestRunEntity entity, TestRun run) {
         entity.setTestType(run.getTestType());
         entity.setStatus(run.getStatus());
@@ -101,16 +117,49 @@ public final class EntityMapper {
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
 
-        entity.getResults().clear();
-        if (run.getResults() != null) {
-            for (TestResult result : run.getResults()) {
-                entity.addResult(toResultEntity(result));
+        mergeResults(entity, run.getResults());
+    }
+
+    private static void mergeResults(TestRunEntity entity, List<TestResult> incoming) {
+        List<TestResultEntity> existing = entity.getResults();
+
+        if (incoming == null || incoming.isEmpty()) {
+            existing.clear();
+            return;
+        }
+
+        Map<String, TestResultEntity> byTaskId = new HashMap<>();
+        for (TestResultEntity child : existing) {
+            if (child.getTaskId() != null) {
+                byTaskId.put(child.getTaskId(), child);
             }
         }
+
+        Set<String> seen = new HashSet<>();
+        for (TestResult result : incoming) {
+            String taskId = result.getTaskId();
+            TestResultEntity target = taskId != null ? byTaskId.get(taskId) : null;
+            if (target == null) {
+                entity.addResult(toResultEntity(result));
+            } else {
+                applyResult(target, result);
+            }
+            if (taskId != null) {
+                seen.add(taskId);
+            }
+        }
+
+        // Drop children the run no longer carries (orphanRemoval deletes them).
+        existing.removeIf(child -> child.getTaskId() == null || !seen.contains(child.getTaskId()));
     }
 
     private static TestResultEntity toResultEntity(TestResult result) {
         TestResultEntity entity = new TestResultEntity();
+        applyResult(entity, result);
+        return entity;
+    }
+
+    private static void applyResult(TestResultEntity entity, TestResult result) {
         entity.setTaskId(result.getTaskId());
         entity.setTestType(result.getTestType());
         entity.setStatus(result.getStatus());
@@ -126,7 +175,6 @@ public final class EntityMapper {
         entity.setEndTime(result.getEndTime());
         entity.setError(result.getError());
         entity.setPhaseName(result.getPhaseName());
-        return entity;
     }
 
     private static TestResult toResultDomain(TestResultEntity entity) {
