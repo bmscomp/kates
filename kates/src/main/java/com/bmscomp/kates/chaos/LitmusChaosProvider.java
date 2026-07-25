@@ -41,6 +41,9 @@ public class LitmusChaosProvider implements ChaosProvider {
     @Inject
     KubernetesClient client;
 
+    @Inject
+    com.bmscomp.kates.engine.KatesExecutor executor;
+
     @Override
     public String name() {
         return "litmus-crd";
@@ -74,78 +77,85 @@ public class LitmusChaosProvider implements ChaosProvider {
             int pollIntervalMs = 5_000;
             int maxPolls = (timeoutSec * 1000) / pollIntervalMs;
 
-            CompletableFuture.runAsync(() -> {
-                for (int i = 0; i < maxPolls && !future.isDone(); i++) {
-                    try {
-                        Thread.sleep(pollIntervalMs);
-                        if (future.isDone()) break;
+            // Runs on the shared bounded executor, NOT the common ForkJoinPool.
+            // This loop sleeps 5s per iteration for up to (chaosDuration + 120)s;
+            // on the common pool (parallelism = cores - 1, shared with every
+            // parallel stream in the JVM) a couple of concurrent experiments
+            // could occupy it entirely while doing nothing but sleeping.
+            CompletableFuture.runAsync(
+                    () -> {
+                        for (int i = 0; i < maxPolls && !future.isDone(); i++) {
+                            try {
+                                Thread.sleep(pollIntervalMs);
+                                if (future.isDone()) break;
 
-                        var existing = client.resources(ChaosResult.class)
-                                .inNamespace(spec.targetNamespace())
-                                .withName(resultName)
-                                .get();
+                                var existing = client.resources(ChaosResult.class)
+                                        .inNamespace(spec.targetNamespace())
+                                        .withName(resultName)
+                                        .get();
 
-                        if (existing == null) {
-                            LOG.debugf("Poll %d: ChaosResult '%s' not found yet", i + 1, resultName);
-                            continue;
-                        }
+                                if (existing == null) {
+                                    LOG.debugf("Poll %d: ChaosResult '%s' not found yet", i + 1, resultName);
+                                    continue;
+                                }
 
-                        if (existing.getStatus() == null || existing.getStatus().experimentStatus == null) {
-                            LOG.debugf("Poll %d: ChaosResult exists but no status yet", i + 1);
-                            continue;
-                        }
+                                if (existing.getStatus() == null || existing.getStatus().experimentStatus == null) {
+                                    LOG.debugf("Poll %d: ChaosResult exists but no status yet", i + 1);
+                                    continue;
+                                }
 
-                        String v = existing.getStatus().experimentStatus.verdict;
-                        LOG.infof("Poll %d: ChaosResult verdict=%s", i + 1, v);
+                                String v = existing.getStatus().experimentStatus.verdict;
+                                LOG.infof("Poll %d: ChaosResult verdict=%s", i + 1, v);
 
-                        if (v != null && !v.equalsIgnoreCase("Awaited")) {
-                            var s = existing.getStatus().experimentStatus;
-                            if ("Pass".equalsIgnoreCase(v)) {
-                                future.complete(ChaosOutcome.success(
-                                        engineName,
-                                        experimentName,
-                                        start,
-                                        Instant.now(),
-                                        startNanos,
-                                        s.probeSuccessPercentage,
-                                        s.failStep,
-                                        s.phase));
-                            } else {
-                                future.complete(ChaosOutcome.failure(
-                                        engineName,
-                                        experimentName,
-                                        start,
-                                        Instant.now(),
-                                        startNanos,
-                                        "ChaosResult verdict: " + v,
-                                        s.probeSuccessPercentage,
-                                        s.failStep,
-                                        s.phase));
+                                if (v != null && !v.equalsIgnoreCase("Awaited")) {
+                                    var s = existing.getStatus().experimentStatus;
+                                    if ("Pass".equalsIgnoreCase(v)) {
+                                        future.complete(ChaosOutcome.success(
+                                                engineName,
+                                                experimentName,
+                                                start,
+                                                Instant.now(),
+                                                startNanos,
+                                                s.probeSuccessPercentage,
+                                                s.failStep,
+                                                s.phase));
+                                    } else {
+                                        future.complete(ChaosOutcome.failure(
+                                                engineName,
+                                                experimentName,
+                                                start,
+                                                Instant.now(),
+                                                startNanos,
+                                                "ChaosResult verdict: " + v,
+                                                s.probeSuccessPercentage,
+                                                s.failStep,
+                                                s.phase));
+                                    }
+                                    return;
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            } catch (Exception e) {
+                                LOG.warnf("Poll error: %s", e.getMessage());
                             }
-                            return;
                         }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (Exception e) {
-                        LOG.warnf("Poll error: %s", e.getMessage());
-                    }
-                }
 
-                // Timeout — no result received
-                if (!future.isDone()) {
-                    future.complete(ChaosOutcome.failure(
-                            engineName,
-                            experimentName,
-                            start,
-                            Instant.now(),
-                            startNanos,
-                            "Timeout polling for ChaosResult after " + timeoutSec + "s",
-                            null,
-                            null,
-                            null));
-                }
-            });
+                        // Timeout — no result received
+                        if (!future.isDone()) {
+                            future.complete(ChaosOutcome.failure(
+                                    engineName,
+                                    experimentName,
+                                    start,
+                                    Instant.now(),
+                                    startNanos,
+                                    "Timeout polling for ChaosResult after " + timeoutSec + "s",
+                                    null,
+                                    null,
+                                    null));
+                        }
+                    },
+                    executor.get());
 
         } catch (Exception e) {
             LOG.error("Litmus fault injection failed", e);

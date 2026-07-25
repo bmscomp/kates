@@ -7,6 +7,7 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -192,8 +193,15 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
                 if (targetNanosPerMsg > 0) {
                     long now = System.nanoTime();
-                    if (now < nextSendNanos) {
-                        Thread.onSpinWait();
+                    long waitNanos = nextSendNanos - now;
+                    if (waitNanos > 0) {
+                        // Park rather than spin. Thread.onSpinWait() in a loop
+                        // pins the carrier thread for the whole inter-send gap,
+                        // so N rate-limited producers burned N cores doing
+                        // nothing — with virtual threads that starves every
+                        // other task on the same carriers. parkNanos yields the
+                        // carrier and is accurate enough at these intervals.
+                        LockSupport.parkNanos(waitNanos);
                         continue;
                     }
                     nextSendNanos = now + targetNanosPerMsg;
@@ -222,7 +230,9 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     } else {
                         double latencyMs = (System.nanoTime() - sendStart) / 1_000_000.0;
                         state.histogram.recordLatency(latencyMs);
-                        state.ackTracker.recordAcked(seq);
+                        // Hand the send timestamp back rather than having the
+                        // tracker keep one per sequence.
+                        state.ackTracker.recordAcked(seq, tsNanos);
                     }
                 });
 
@@ -364,7 +374,9 @@ public class NativeKafkaBackend implements BenchmarkBackend {
          */
         final LatencyHistogram histogram;
 
-        final AckTracker ackTracker = new AckTracker();
+        /** Sized to the run so the acked bitset is exactly as large as needed. */
+        final AckTracker ackTracker;
+
         final long runIdHash;
 
         volatile TaskStatus status = TaskStatus.PENDING;
@@ -382,6 +394,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             String hashSource = task.getRunId() != null ? task.getRunId() : task.getTaskId();
             this.runIdHash = SequencedPayload.hashRunId(hashSource);
             this.histogram = new LatencyHistogram(task.getTaskId());
+            this.ackTracker = new AckTracker(task.getMaxMessages());
         }
 
         BenchmarkStatus toStatus() {

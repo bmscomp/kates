@@ -19,6 +19,14 @@ public class TestRunRepository {
     @Inject
     EntityManager em;
 
+    /**
+     * Shared, thread-safe mapper. A new ObjectMapper was being constructed on
+     * every save — each one builds and warms its own serializer cache, so the
+     * write path paid that cost per persisted run instead of once per process.
+     */
+    private static final com.fasterxml.jackson.databind.ObjectMapper OUTBOX_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
     @Transactional
     public void save(TestRun run) {
         em.merge(EntityMapper.toEntity(run));
@@ -32,8 +40,7 @@ public class TestRunRepository {
                     status,
                     "",
                     System.currentTimeMillis());
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String payload = mapper.writeValueAsString(testEvent);
+            String payload = OUTBOX_MAPPER.writeValueAsString(testEvent);
 
             com.bmscomp.kates.persistence.OutboxEventEntity outboxEvent =
                     new com.bmscomp.kates.persistence.OutboxEventEntity(

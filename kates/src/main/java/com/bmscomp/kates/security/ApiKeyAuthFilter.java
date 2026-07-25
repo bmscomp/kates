@@ -23,7 +23,13 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
 
     private static final Logger LOG = Logger.getLogger(ApiKeyAuthFilter.class);
 
-    private static final Set<String> PUBLIC_PREFIXES = Set.of("/api/health", "/q/", "/openapi");
+    /**
+     * Unauthenticated paths. The blanket {@code /q/} prefix was too broad: it
+     * exposed every Quarkus management endpoint under that root — including
+     * dev-ui and any extension that mounts there — not just the probes and
+     * metrics Kubernetes and Prometheus actually need.
+     */
+    private static final Set<String> PUBLIC_PREFIXES = Set.of("/api/health", "/q/health", "/q/metrics", "/openapi");
 
     private boolean isSecurityEnabled() {
         return ConfigProvider.getConfig()
