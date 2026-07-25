@@ -51,6 +51,17 @@ public class TestOrchestrator {
     private final int maxConcurrentTests;
     private final Semaphore concurrencyGuard;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
+
+    /**
+     * Runs currently holding a concurrency permit. The permit is held for the
+     * run's whole LIFETIME, not just its submission — releasing it when
+     * {@code executeAsync} returned made the cap meaningless, because submission
+     * completes in milliseconds while the workers it starts run for minutes.
+     * Membership here also makes release idempotent: the terminal transition,
+     * the reaper and the failure paths can all call
+     * {@link #releasePermit(String)} without over-releasing the semaphore.
+     */
+    private final java.util.Set<String> permitHolders = ConcurrentHashMap.newKeySet();
     /**
      * Heatmap rows are read by ReportResource after a run completes, so they
      * cannot be dropped on completion — instead retain the most recent
@@ -136,13 +147,19 @@ public class TestOrchestrator {
 
         TestRun run = new TestRun(type, spec).withBackend(backendName);
         repository.save(run);
+        permitHolders.add(run.getId());
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
 
         Thread.startVirtualThread(() -> {
             try {
                 executeAsync(run, type, spec, backendName, backend);
-            } finally {
-                concurrencyGuard.release();
+                // NOTE: no release here. executeAsync only SUBMITS work; the
+                // permit is released on the terminal transition (refreshStatus /
+                // the reconciler), by the reaper, or by executeAsync itself when
+                // the run ends terminal at submission time.
+            } catch (Throwable t) {
+                LOG.error("Test submission failed for run: " + run.getId(), t);
+                releasePermit(run.getId());
             }
         });
 
@@ -205,9 +222,11 @@ public class TestOrchestrator {
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         } else if (run.getStatus() == TestResult.TaskStatus.DONE) {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         }
         org.jboss.logging.MDC.remove("runId");
         org.jboss.logging.MDC.remove("testType");
@@ -226,8 +245,19 @@ public class TestOrchestrator {
                 ? scenario.getBackend()
                 : (request.getBackend() != null ? request.getBackend() : defaultBackend);
 
+        // Scenarios previously bypassed the concurrency cap entirely — executeTest
+        // delegates here BEFORE its tryAcquire, so any number of multi-phase runs
+        // could start at once. They consume the same brokers as plain runs, so
+        // they take a permit on the same terms.
+        if (!concurrencyGuard.tryAcquire()) {
+            return com.bmscomp.kates.util.Result.failure(
+                    new BenchmarkException("Concurrency limit reached: " + maxConcurrentTests
+                            + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
+        }
+
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
+            concurrencyGuard.release();
             return com.bmscomp.kates.util.Result.failure(
                     backendResult.asFailure().orElseThrow());
         }
@@ -241,6 +271,7 @@ public class TestOrchestrator {
                 .withSla(scenario.getSla())
                 .withStatus(TestResult.TaskStatus.RUNNING);
         repository.save(run);
+        permitHolders.add(run.getId());
         fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
         fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
         runStartNanos.put(run.getId(), System.nanoTime());
@@ -302,9 +333,11 @@ public class TestOrchestrator {
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         } else if (run.getStatus() == TestResult.TaskStatus.DONE) {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         }
         return com.bmscomp.kates.util.Result.success(run);
     }
@@ -425,11 +458,26 @@ public class TestOrchestrator {
                 if (r.getThroughputRecordsPerSec() > 0) {
                     katesMetrics.recordFinalThroughput(
                             typeName, r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
+                    // Feed the per-run gauges before they are unregistered. They
+                    // were registered by startRun but never written to, so every
+                    // kates.benchmark.throughput.* series read a constant 0.
+                    benchmarkMetrics.recordThroughput(
+                            runId, r.getPhaseName(), r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
                 }
                 if (r.getRecordsSent() > 0) {
                     katesMetrics.recordRecordsProcessed(typeName, r.getRecordsSent());
                 }
+                if (r.getStatus() == TestResult.TaskStatus.FAILED) {
+                    benchmarkMetrics.recordError(runId, r.getPhaseName());
+                }
             }
+
+            // Unregister the run's meters and hand back its concurrency slot.
+            // Both are keyed on the run and both leaked before: meters accumulated
+            // in the registry forever, and the permit had already been released at
+            // submission time so the cap never applied.
+            benchmarkMetrics.endRun(runId);
+            releasePermit(runId);
         }
 
         repository.save(run);
@@ -437,10 +485,25 @@ public class TestOrchestrator {
     }
 
     /**
-     * Returns the number of concurrency permits currently in use.
+     * Returns the number of runs currently occupying a concurrency slot.
+     * Derived from the permit holders rather than the semaphore's free count so
+     * it reflects live runs exactly — the liveness probe surfaces this, and it
+     * used to read ~0 under real load because permits were released as soon as
+     * submission finished.
      */
     public int activeTestCount() {
-        return maxConcurrentTests - concurrencyGuard.availablePermits();
+        return permitHolders.size();
+    }
+
+    /**
+     * Returns a run's concurrency permit exactly once. Safe to call from any
+     * terminal path (reconciler, reaper, submission failure) and safe to call
+     * repeatedly — only the holder that wins the {@code remove} releases.
+     */
+    private void releasePermit(String runId) {
+        if (permitHolders.remove(runId)) {
+            concurrencyGuard.release();
+        }
     }
 
     /**
@@ -478,6 +541,10 @@ public class TestOrchestrator {
      */
     public void abortWorkers(TestRun run) {
         List<BenchmarkHandle> handles = activeHandles.remove(run.getId());
+        // The run is ending either way, so its meters and concurrency slot must
+        // be reclaimed even when there is nothing left to stop.
+        benchmarkMetrics.endRun(run.getId());
+        releasePermit(run.getId());
         if (handles == null || handles.isEmpty()) {
             return;
         }

@@ -34,6 +34,13 @@ public class KubernetesChaosProvider implements ChaosProvider {
      */
     public static final String ORIGINAL_REPLICAS_ANNOTATION = "kates.io/original-replicas";
 
+    /**
+     * Epoch millis of the scale-down that wrote {@link #ORIGINAL_REPLICAS_ANNOTATION}.
+     * Startup orphan recovery uses this to tell a fault abandoned by a dead pod
+     * from one another replica is still running.
+     */
+    public static final String SCALED_DOWN_AT_ANNOTATION = "kates.io/scaled-down-at";
+
     @Inject
     KubernetesClient client;
 
@@ -227,6 +234,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     boolean alreadySnapshotted =
                             annotations != null && annotations.containsKey(ORIGINAL_REPLICAS_ANNOTATION);
                     if (!alreadySnapshotted) {
+                        String scaledDownAt = String.valueOf(System.currentTimeMillis());
                         client.apps()
                                 .statefulSets()
                                 .inNamespace(spec.targetNamespace())
@@ -234,6 +242,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                                 .edit(s -> new io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder(s)
                                         .editMetadata()
                                         .addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
+                                        .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt)
                                         .endMetadata()
                                         .build());
                     }

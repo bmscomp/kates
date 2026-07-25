@@ -512,7 +512,16 @@ type PartitionHealthReport struct {
 	Problems        []map[string]interface{} `json:"problems,omitempty"`
 }
 
-// DisruptionRunResponse from POST /api/disruptions
+// DisruptionAccepted is the 202 body from POST /api/disruptions — the plan was
+// accepted and is running; the report is fetched separately by id.
+type DisruptionAccepted struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	PlanName string `json:"planName"`
+}
+
+// DisruptionRunResponse is what RunDisruption returns once the plan reaches a
+// terminal state (assembled from the accepted id plus the fetched report).
 type DisruptionRunResponse struct {
 	ID     string           `json:"id"`
 	Report DisruptionReport `json:"report"`

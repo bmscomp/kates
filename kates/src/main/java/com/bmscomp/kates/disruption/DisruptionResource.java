@@ -41,11 +41,15 @@ public class DisruptionResource {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    com.bmscomp.kates.engine.KatesExecutor executor;
+
     @POST
     @Operation(
             summary = "Execute a disruption",
-            description = "Runs a disruption plan against the Kafka cluster with safety guardrails")
-    @APIResponse(responseCode = "200", description = "Disruption report")
+            description =
+                    "Validates a disruption plan and starts it asynchronously. Returns 202 with a report id; poll GET /api/disruptions/{id} for progress and the final report.")
+    @APIResponse(responseCode = "202", description = "Disruption accepted for execution")
     @APIResponse(responseCode = "422", description = "Disruption rejected by safety guard")
     public Response executeDisruption(
             DisruptionPlan plan,
@@ -67,24 +71,56 @@ public class DisruptionResource {
         }
 
         String id = UUID.randomUUID().toString().substring(0, 8);
-        LOG.info("Starting disruption plan '" + plan.getName() + "' with ID: " + id);
 
-        DisruptionReport report = orchestrator.execute(plan);
-        DisruptionPersistence.persistReport(id, report, repository, objectMapper);
-
-        if ("REJECTED".equals(report.getStatus())) {
+        // Validate up front so an unsafe plan still fails fast with 422 rather
+        // than turning into a 202 the caller has to poll to discover was
+        // rejected. The orchestrator re-validates before touching the cluster.
+        DisruptionSafetyGuard.ValidationResult validation = safetyGuard.validatePlan(plan);
+        if (!validation.safe()) {
+            DisruptionReport rejected = new DisruptionReport();
+            rejected.setPlanName(plan.getName());
+            rejected.setStatus("REJECTED");
+            List<String> combined = new ArrayList<>(validation.warnings());
+            combined.addAll(validation.errors().stream().map(e -> "ERROR: " + e).toList());
+            rejected.setValidationWarnings(combined);
+            DisruptionPersistence.persistReport(id, rejected, repository, objectMapper);
             return Response.status(422)
-                    .entity(Map.of(
-                            "id",
-                            id,
-                            "status",
-                            "REJECTED",
-                            "validationWarnings",
-                            report.getValidationWarnings() != null ? report.getValidationWarnings() : List.of()))
+                    .entity(Map.of("id", id, "status", "REJECTED", "validationWarnings", combined))
                     .build();
         }
 
-        return Response.ok(Map.of("id", id, "report", report)).build();
+        // Persist a RUNNING placeholder BEFORE returning so an immediate GET on
+        // the returned id resolves instead of 404-ing, and so a pod that dies
+        // mid-plan leaves a row the startup reconciler can find.
+        DisruptionReport pending = new DisruptionReport();
+        pending.setPlanName(plan.getName());
+        pending.setStatus("RUNNING");
+        pending.setValidationWarnings(validation.warnings());
+        DisruptionPersistence.persistReport(id, pending, repository, objectMapper);
+
+        // A plan is minutes long (steadyState + chaosDuration + observationWindow
+        // + recoveryTimeout per step). Running it inline held a request thread and
+        // the client connection well past any load-balancer read timeout, so the
+        // caller saw a gateway timeout while the chaos kept running.
+        LOG.info("Accepted disruption plan '" + plan.getName() + "' with ID: " + id);
+        executor.get().execute(() -> runPlan(id, plan));
+
+        return Response.accepted(Map.of("id", id, "status", "RUNNING", "planName", plan.getName()))
+                .build();
+    }
+
+    private void runPlan(String id, DisruptionPlan plan) {
+        try {
+            DisruptionReport report = orchestrator.execute(plan);
+            DisruptionPersistence.persistReport(id, report, repository, objectMapper);
+        } catch (Exception e) {
+            LOG.error("Disruption plan failed: " + id, e);
+            DisruptionReport failed = new DisruptionReport();
+            failed.setPlanName(plan.getName());
+            failed.setStatus("FAILED");
+            failed.setValidationWarnings(List.of("Execution error: " + e.getMessage()));
+            DisruptionPersistence.persistReport(id, failed, repository, objectMapper);
+        }
     }
 
     @GET

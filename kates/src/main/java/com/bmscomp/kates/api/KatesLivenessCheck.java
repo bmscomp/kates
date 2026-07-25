@@ -10,8 +10,15 @@ import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Liveness;
 
 /**
- * Liveness probe: verifies JVM health beyond just "running".
- * Checks heap usage, deadlock state, and reports active test count.
+ * Liveness probe: answers only "is this JVM unrecoverably stuck?".
+ *
+ * <p>Deadlocked threads are the one condition a restart actually fixes, so that
+ * is the sole failure signal. Heap pressure is reported as data but NEVER fails
+ * the probe: a large benchmark legitimately drives heap toward the limit, and
+ * failing liveness there had Kubernetes kill the pod MID-TEST — the probe caused
+ * exactly the outage it was meant to detect, in a restart loop that got worse
+ * the more load the pod carried. Genuine exhaustion still surfaces as an
+ * OOMKill, which the kubelet handles on its own.
  */
 @Liveness
 public class KatesLivenessCheck implements HealthCheck {
@@ -26,7 +33,7 @@ public class KatesLivenessCheck implements HealthCheck {
     public HealthCheckResponse call() {
         Runtime rt = Runtime.getRuntime();
         long freeHeapMb = (rt.maxMemory() - rt.totalMemory() + rt.freeMemory()) / (1024 * 1024);
-        boolean heapOk = freeHeapMb >= minFreeHeapMb;
+        boolean heapLow = freeHeapMb < minFreeHeapMb;
 
         ThreadMXBean threads = ManagementFactory.getThreadMXBean();
         long[] deadlocked = threads.findDeadlockedThreads();
@@ -43,10 +50,14 @@ public class KatesLivenessCheck implements HealthCheck {
         var builder = HealthCheckResponse.named("kates-liveness")
                 .withData("freeHeapMb", freeHeapMb)
                 .withData("minFreeHeapMb", minFreeHeapMb)
+                // Advisory only — see the class javadoc. Surfaced so operators
+                // and alerts can see heap pressure without the kubelet acting
+                // on it.
+                .withData("heapLow", heapLow)
                 .withData("deadlockedThreads", deadlocked != null ? deadlocked.length : 0)
                 .withData("activeTests", activeTests + "/" + maxTests);
 
-        if (heapOk && noDeadlocks) {
+        if (noDeadlocks) {
             return builder.up().build();
         }
         return builder.down().build();

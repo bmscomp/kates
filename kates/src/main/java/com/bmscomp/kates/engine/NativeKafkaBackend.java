@@ -107,6 +107,11 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             state.status = TaskStatus.FAILED;
         } finally {
             state.endTimeMs = System.currentTimeMillis();
+            // Unregister the per-task latency gauges: task ids are unbounded, so
+            // leaving them registered would grow the meter registry for the life
+            // of the process. Only the METERS go away — the histogram data stays
+            // readable, so the final poll still reports accurate percentiles.
+            state.histogram.close();
         }
     }
 
@@ -351,7 +356,14 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         final AtomicLong recordsProcessed = new AtomicLong();
         final AtomicLong errors = new AtomicLong();
         final AtomicBoolean stopRequested = new AtomicBoolean();
-        final LatencyHistogram histogram = new LatencyHistogram();
+        /**
+         * Scoped to the TASK, not "global". Micrometer dedups gauges on
+         * name+tags, so the old shared id meant only the very first worker in
+         * the JVM ever exported percentiles — every later run's latency was
+         * silently missing from Prometheus.
+         */
+        final LatencyHistogram histogram;
+
         final AckTracker ackTracker = new AckTracker();
         final long runIdHash;
 
@@ -369,6 +381,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             this.task = task;
             String hashSource = task.getRunId() != null ? task.getRunId() : task.getTaskId();
             this.runIdHash = SequencedPayload.hashRunId(hashSource);
+            this.histogram = new LatencyHistogram(task.getTaskId());
         }
 
         BenchmarkStatus toStatus() {
