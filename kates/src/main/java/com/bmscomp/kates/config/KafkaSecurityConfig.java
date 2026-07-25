@@ -107,8 +107,8 @@ public class KafkaSecurityConfig {
                     props.put(
                             SaslConfigs.SASL_JAAS_CONFIG,
                             "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                                    + "username=\"" + saslUsername.get() + "\" "
-                                    + "password=\"" + saslPassword.get() + "\";");
+                                    + "username=" + jaasQuote(saslUsername.get()) + " "
+                                    + "password=" + jaasQuote(saslPassword.get()) + ";");
                     LOG.infof("SASL/%s enabled for user: %s", mechanism, saslUsername.get());
                 }
             }
@@ -117,20 +117,19 @@ public class KafkaSecurityConfig {
                     props.put(
                             SaslConfigs.SASL_JAAS_CONFIG,
                             "org.apache.kafka.common.security.plain.PlainLoginModule required "
-                                    + "username=\"" + saslUsername.get() + "\" "
-                                    + "password=\"" + saslPassword.get() + "\";");
+                                    + "username=" + jaasQuote(saslUsername.get()) + " "
+                                    + "password=" + jaasQuote(saslPassword.get()) + ";");
                     LOG.infof("SASL/PLAIN enabled for user: %s", saslUsername.get());
                 }
             }
             case "OAUTHBEARER" -> {
                 StringBuilder jaas = new StringBuilder(
                         "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required");
-                oauthTokenEndpointUrl.ifPresent(url ->
-                        jaas.append(" oauth.token.endpoint.uri=\"").append(url).append("\""));
-                oauthClientId.ifPresent(
-                        id -> jaas.append(" oauth.client.id=\"").append(id).append("\""));
-                oauthClientSecret.ifPresent(secret ->
-                        jaas.append(" oauth.client.secret=\"").append(secret).append("\""));
+                oauthTokenEndpointUrl.ifPresent(
+                        url -> jaas.append(" oauth.token.endpoint.uri=").append(jaasQuote(url)));
+                oauthClientId.ifPresent(id -> jaas.append(" oauth.client.id=").append(jaasQuote(id)));
+                oauthClientSecret.ifPresent(
+                        secret -> jaas.append(" oauth.client.secret=").append(jaasQuote(secret)));
                 jaas.append(";");
                 props.put(SaslConfigs.SASL_JAAS_CONFIG, jaas.toString());
                 props.put(
@@ -140,6 +139,21 @@ public class KafkaSecurityConfig {
             }
             default -> LOG.warnf("Unknown SASL mechanism: %s", mechanism);
         }
+    }
+
+    /**
+     * Quotes a value for a JAAS config entry, escaping backslashes and double
+     * quotes.
+     *
+     * <p>These values were concatenated into the JAAS string raw. A password
+     * containing {@code "} closed the quoted value early and produced a config
+     * the login module rejects — authentication then failed with a parse error
+     * that points nowhere near the actual cause. Backslash must be escaped
+     * first, or it would double-escape the quotes added after it.
+     */
+    static String jaasQuote(String value) {
+        String escaped = value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return "\"" + escaped + "\"";
     }
 
     private void applySsl(Properties props) {

@@ -2,15 +2,23 @@ package com.bmscomp.kates.engine;
 
 import java.util.BitSet;
 import java.util.List;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Thread-safe tracker for producer acknowledgments during data integrity tests.
- * Records which sequence numbers were sent, acknowledged, and failed,
- * plus the timestamps needed for RTO computation.
+ * Records which sequence numbers were acknowledged, plus the timestamps needed
+ * for RTO/RPO computation.
+ *
+ * <p><b>Memory.</b> Sequences are dense (0..maxMessages), so acknowledgment is
+ * tracked in a bit per sequence — the same trick {@link DataIntegrityVerifier}
+ * already uses for the consumed set. The previous implementation kept two
+ * {@link java.util.concurrent.ConcurrentSkipListMap}s holding a boxed entry per
+ * sequence: a 10M-record INTEGRITY or ENDURANCE run allocated ~20M map entries
+ * (hundreds of MB, plus the GC pressure of doing it on the ack path) where the
+ * same information now costs ~1.25 MB.
  *
  * <p>All timestamps use {@link System#nanoTime()} (monotonic clock) for accuracy.
  * Failure windows are tracked atomically to prevent race conditions between
@@ -18,11 +26,14 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class AckTracker {
 
-    private enum AckState {
-        SENT,
-        ACKED,
-        FAILED
-    }
+    /**
+     * Upper bound on per-sequence tracking. Beyond this the bitset would cost
+     * more than the information is worth; counters and failure windows continue
+     * to work, only the per-sequence acked set is capped.
+     */
+    private static final long MAX_TRACKED_SEQUENCES = 1_000_000_000L;
+
+    private static final long DEFAULT_CAPACITY = 1_000_000L;
 
     /**
      * A single continuous failure window with start/end nano timestamps.
@@ -37,8 +48,10 @@ public class AckTracker {
         }
     }
 
-    private final ConcurrentSkipListMap<Long, AckState> states = new ConcurrentSkipListMap<>();
-    private final ConcurrentSkipListMap<Long, Long> sendTimestamps = new ConcurrentSkipListMap<>();
+    /** One bit per sequence; CAS-updated so concurrent callbacks are safe. */
+    private final AtomicLongArray ackedBits;
+
+    private final long capacity;
 
     private final AtomicLong totalSent = new AtomicLong();
     private final AtomicLong totalAcked = new AtomicLong();
@@ -57,23 +70,43 @@ public class AckTracker {
 
     private volatile long lastAckedSendNanos = -1;
 
+    /** Uses the default capacity; prefer {@link #AckTracker(long)}. */
+    public AckTracker() {
+        this(DEFAULT_CAPACITY);
+    }
+
+    /**
+     * @param expectedSequences the run's record count, used to size the acked
+     *     bitset exactly. Values ≤ 0 fall back to the default.
+     */
+    public AckTracker(long expectedSequences) {
+        long requested = expectedSequences > 0 ? expectedSequences : DEFAULT_CAPACITY;
+        this.capacity = Math.min(requested, MAX_TRACKED_SEQUENCES);
+        this.ackedBits = new AtomicLongArray((int) ((this.capacity + 63) >>> 6));
+    }
+
     /**
      * Called when a record is sent (before ack).
+     *
+     * <p>The send timestamp is no longer stored per sequence — it is handed
+     * back in {@link #recordAcked(long, long)} by the callback that already
+     * holds it, which removes an entire per-record map.
      */
     public void recordSent(long sequence, long timestampNanos) {
-        states.put(sequence, AckState.SENT);
-        sendTimestamps.put(sequence, timestampNanos);
         totalSent.incrementAndGet();
     }
 
     /**
      * Called in the producer callback on successful ack.
      * Atomically closes an active failure window if one exists.
+     *
+     * @param sendTimestampNanos when the record was handed to the producer;
+     *     drives the RPO calculation.
      */
-    public void recordAcked(long sequence) {
-        states.put(sequence, AckState.ACKED);
+    public void recordAcked(long sequence, long sendTimestampNanos) {
+        setAcked(sequence);
         totalAcked.incrementAndGet();
-        lastAckedSendNanos = sendTimestamps.getOrDefault(sequence, System.nanoTime());
+        lastAckedSendNanos = sendTimestampNanos > 0 ? sendTimestampNanos : System.nanoTime();
 
         long[] window = activeWindow.getAndSet(null);
         if (window != null) {
@@ -81,15 +114,34 @@ public class AckTracker {
         }
     }
 
+    /** Ack without a known send timestamp (RPO falls back to "now"). */
+    public void recordAcked(long sequence) {
+        recordAcked(sequence, -1);
+    }
+
     /**
      * Called in the producer callback on failure.
      * Atomically opens a failure window if none is active.
      */
     public void recordFailed(long sequence) {
-        states.put(sequence, AckState.FAILED);
         totalFailed.incrementAndGet();
 
         activeWindow.compareAndSet(null, new long[] {System.nanoTime()});
+    }
+
+    private void setAcked(long sequence) {
+        if (sequence < 0 || sequence >= capacity) {
+            return; // Outside the tracked range; counters still reflect it.
+        }
+        int word = (int) (sequence >>> 6);
+        long mask = 1L << (sequence & 63);
+        long current;
+        do {
+            current = ackedBits.get(word);
+            if ((current & mask) != 0) {
+                return; // Already set.
+            }
+        } while (!ackedBits.compareAndSet(word, current, current | mask));
     }
 
     public long getTotalSent() {
@@ -154,36 +206,20 @@ public class AckTracker {
 
     /**
      * Returns a BitSet of all acknowledged sequence numbers.
+     *
+     * <p>Materialised on demand for the verifier; the live tracking itself
+     * never allocates per record.
      */
     public BitSet getAckedSet() {
-        BitSet bs = new BitSet();
-        states.forEach((seq, state) -> {
-            if (state == AckState.ACKED) {
-                bs.set(seq.intValue());
-            }
-        });
-        return bs;
+        long[] words = new long[ackedBits.length()];
+        for (int i = 0; i < words.length; i++) {
+            words[i] = ackedBits.get(i);
+        }
+        return BitSet.valueOf(words);
     }
 
-    /**
-     * Returns a BitSet of all sent sequence numbers.
-     */
-    public BitSet getSentSet() {
-        BitSet bs = new BitSet();
-        states.keySet().forEach(seq -> bs.set(seq.intValue()));
-        return bs;
-    }
-
-    /**
-     * Returns a BitSet of all failed sequence numbers.
-     */
-    public BitSet getFailedSet() {
-        BitSet bs = new BitSet();
-        states.forEach((seq, state) -> {
-            if (state == AckState.FAILED) {
-                bs.set(seq.intValue());
-            }
-        });
-        return bs;
+    /** Highest sequence this tracker records individually. */
+    public long trackedCapacity() {
+        return capacity;
     }
 }
