@@ -1,30 +1,68 @@
 package com.bmscomp.kates.engine;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.ToDoubleFunction;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Tags;
 import org.HdrHistogram.Histogram;
 
-public class LatencyHistogram {
+/**
+ * Thread-safe latency recorder backed by an HdrHistogram, exported to
+ * Micrometer as p50/p95/p99/p999/max gauges.
+ *
+ * <p><b>Identity matters.</b> The gauges are tagged {@code id=<id>} and
+ * Micrometer deduplicates on name+tags, so every histogram sharing an id maps to
+ * ONE meter. When every worker constructed this with the default {@code
+ * "global"} id, only the first run of the JVM's lifetime was ever exported —
+ * behind a weak reference that went stale once that run was collected, leaving
+ * every subsequent run's percentiles invisible. Callers must pass an id unique
+ * to the run/task, and {@link #close()} on completion so the series does not
+ * accumulate (run ids are unbounded).
+ */
+public class LatencyHistogram implements AutoCloseable {
 
     private final Histogram histogram = new Histogram(1L, 60_000_000L, 3);
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final String id;
-
-    public LatencyHistogram() {
-        this("global");
-    }
+    private final List<Meter.Id> meterIds = new ArrayList<>();
 
     public LatencyHistogram(String id) {
         this.id = id;
-        Metrics.gauge("kates.latency.p50", Tags.of("id", id), this, h -> h.getPercentile(50));
-        Metrics.gauge("kates.latency.p95", Tags.of("id", id), this, h -> h.getPercentile(95));
-        Metrics.gauge("kates.latency.p99", Tags.of("id", id), this, h -> h.getPercentile(99));
-        Metrics.gauge("kates.latency.p999", Tags.of("id", id), this, h -> h.getPercentile(99.9));
-        Metrics.gauge("kates.latency.max", Tags.of("id", id), this, LatencyHistogram::getMax);
+        registerGauge("kates.latency.p50", h -> h.getPercentile(50));
+        registerGauge("kates.latency.p95", h -> h.getPercentile(95));
+        registerGauge("kates.latency.p99", h -> h.getPercentile(99));
+        registerGauge("kates.latency.p999", h -> h.getPercentile(99.9));
+        registerGauge("kates.latency.max", LatencyHistogram::getMax);
+    }
+
+    private void registerGauge(String name, ToDoubleFunction<LatencyHistogram> reader) {
+        // Weak reference (Micrometer's default for Gauge.builder) so a missed
+        // close() cannot pin the histogram in memory.
+        Gauge gauge = Gauge.builder(name, this, reader).tags(Tags.of("id", id)).register(Metrics.globalRegistry);
+        meterIds.add(gauge.getId());
+    }
+
+    /** The id these gauges are tagged with. */
+    public String getId() {
+        return id;
+    }
+
+    /**
+     * Unregisters this histogram's gauges. Idempotent.
+     */
+    @Override
+    public void close() {
+        for (Meter.Id meterId : meterIds) {
+            Metrics.globalRegistry.remove(meterId);
+        }
+        meterIds.clear();
     }
 
     public void recordLatency(double latencyMs) {

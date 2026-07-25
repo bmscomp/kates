@@ -468,9 +468,53 @@ func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, pay
 	return result, json.Unmarshal(respData, &result)
 }
 
+// Terminal states a disruption report can settle into.
+func isTerminalDisruptionStatus(status string) bool {
+	switch status {
+	case "COMPLETED", "PARTIAL", "FAILED", "REJECTED", "INTERRUPTED":
+		return true
+	default:
+		return false
+	}
+}
+
+// RunDisruption submits a plan and waits for its report.
+//
+// The backend accepts the plan and executes it asynchronously (202 + id), so
+// this polls GET /api/disruptions/{id} rather than holding a single request
+// open for the life of the plan. A plan runs for minutes — the old inline call
+// outlived proxy and load-balancer read timeouts, so callers saw a gateway
+// error while the chaos kept running. The blocking behaviour callers expect is
+// preserved here; only the transport changed.
 func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*DisruptionRunResponse, error) {
-	// Chaos tests are synchronous on the backend and wait for steady state + recovery. Give it 20 mins.
-	return postJSONWithTimeout[*DisruptionRunResponse](c, ctx, "/api/disruptions", plan, 20*time.Minute)
+	accepted, err := postJSON[*DisruptionAccepted](c, ctx, "/api/disruptions", plan)
+	if err != nil {
+		return nil, err
+	}
+	if accepted == nil || accepted.ID == "" {
+		return nil, fmt.Errorf("backend did not return a disruption id")
+	}
+
+	// Same overall budget the synchronous call used.
+	deadline := time.Now().Add(20 * time.Minute)
+	for {
+		report, err := c.DisruptionStatus(ctx, accepted.ID)
+		if err == nil && report != nil && isTerminalDisruptionStatus(report.Status) {
+			return &DisruptionRunResponse{ID: accepted.ID, Report: *report}, nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf(
+				"timed out waiting for disruption %s; it may still be running — check 'kates disruption status %s'",
+				accepted.ID, accepted.ID)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 func (c *Client) RunDryRun(ctx context.Context, plan interface{}) (*DryRunResult, error) {

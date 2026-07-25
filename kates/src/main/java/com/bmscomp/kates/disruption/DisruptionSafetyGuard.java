@@ -298,6 +298,9 @@ public class DisruptionSafetyGuard {
                                         .removeFromAnnotations(
                                                 com.bmscomp.kates.chaos.KubernetesChaosProvider
                                                         .ORIGINAL_REPLICAS_ANNOTATION)
+                                        .removeFromAnnotations(
+                                                com.bmscomp.kates.chaos.KubernetesChaosProvider
+                                                        .SCALED_DOWN_AT_ANNOTATION)
                                         .endMetadata()
                                         .build());
                     }
