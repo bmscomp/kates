@@ -49,8 +49,8 @@ class PersistenceIT {
         Number applied =
                 (Number) em.createNativeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE success = true")
                         .getSingleResult();
-        // V1..V18 at time of writing — never falls below the current set.
-        assertTrue(applied.intValue() >= 18, "expected >= 18 successful migrations, got " + applied);
+        // V1..V19 at time of writing — never falls below the current set.
+        assertTrue(applied.intValue() >= 19, "expected >= 19 successful migrations, got " + applied);
     }
 
     @Test
