@@ -496,6 +496,42 @@ users:
               type: cluster
             operations: ["Describe"]
             host: "*"
+    # MirrorMaker 2 TARGET-side user (mirror-maker2 chart). Writes replicated
+    # topics + owns the MM2 Connect internal/offset-sync/checkpoint topics and
+    # groups on this (target) cluster. The SOURCE-side user lives on the remote
+    # cluster and is provisioned there.
+    - name: kates-mm2
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 52428800
+        consumerByteRate: 52428800
+        requestPercentage: 25
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "*"
+              patternType: literal
+            operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter"]
+            host: "*"
+          - resource:
+              type: group
+              name: "mirror-maker2"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource:
+              type: group
+              name: "connect-"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource:
+              type: cluster
+            operations: ["Describe", "DescribeConfigs", "Create"]
+            host: "*"
 
 # -- PrometheusRule alerting configuration
 alerts:

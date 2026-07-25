@@ -1,0 +1,28 @@
+{{- if and .Values.podMonitors.enabled (not .Values.metrics.enabled) }}
+{{- fail "podMonitors.enabled requires metrics.enabled=true — Strimzi only opens the tcp-prometheus port (which the PodMonitor scrapes) when metricsConfig is set." }}
+{{- end }}
+{{- if and .Values.podMonitors.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+    {{- with .Values.podMonitors.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "mirror-maker2.podSelectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      path: /metrics
+      {{- with .Values.monitoring.interval }}
+      interval: {{ . }}
+      {{- end }}
+      {{- with .Values.monitoring.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+{{- end }}
