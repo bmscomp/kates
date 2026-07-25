@@ -254,18 +254,52 @@ public class DisruptionSafetyGuard {
                 .list()
                 .getItems()
                 .forEach(ss -> {
-                    int desired = ss.getStatus() != null && ss.getStatus().getReplicas() != null
-                            ? ss.getStatus().getReplicas()
-                            : ss.getSpec().getReplicas();
+                    String name = ss.getMetadata().getName();
+                    Map<String, String> annotations = ss.getMetadata().getAnnotations();
+                    String snapshot = annotations != null
+                            ? annotations.get(
+                                    com.bmscomp.kates.chaos.KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION)
+                            : null;
                     int current = ss.getSpec().getReplicas();
+                    // Prefer the snapshot stamped at scale-down. status/spec.replicas
+                    // both reflect the reduced count at rollback time, so falling back
+                    // to them can only restore to the reduced value — the original bug.
+                    int desired;
+                    if (snapshot != null) {
+                        try {
+                            desired = Integer.parseInt(snapshot);
+                        } catch (NumberFormatException e) {
+                            desired = current;
+                        }
+                    } else {
+                        desired = ss.getStatus() != null && ss.getStatus().getReplicas() != null
+                                ? ss.getStatus().getReplicas()
+                                : current;
+                    }
                     if (current < desired) {
-                        LOG.info("Restoring " + ss.getMetadata().getName() + " from " + current + " → " + desired);
+                        LOG.info("Restoring " + name + " from " + current + " → " + desired);
                         kubeClient
                                 .apps()
                                 .statefulSets()
                                 .inNamespace(spec.targetNamespace())
-                                .withName(ss.getMetadata().getName())
+                                .withName(name)
                                 .scale(desired);
+                    }
+                    // Clear the snapshot so a later scale-down re-captures a fresh
+                    // baseline instead of restoring to a stale count.
+                    if (snapshot != null) {
+                        kubeClient
+                                .apps()
+                                .statefulSets()
+                                .inNamespace(spec.targetNamespace())
+                                .withName(name)
+                                .edit(s -> new io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder(s)
+                                        .editMetadata()
+                                        .removeFromAnnotations(
+                                                com.bmscomp.kates.chaos.KubernetesChaosProvider
+                                                        .ORIGINAL_REPLICAS_ANNOTATION)
+                                        .endMetadata()
+                                        .build());
                     }
                 });
     }

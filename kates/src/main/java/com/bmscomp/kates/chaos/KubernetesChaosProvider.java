@@ -26,6 +26,14 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
     private static final Logger LOG = Logger.getLogger(KubernetesChaosProvider.class);
 
+    /**
+     * Annotation stamped on a StatefulSet the first time SCALE_DOWN reduces it,
+     * recording the ORIGINAL replica count. Rollback restores from this value —
+     * reading {@code spec.replicas} at rollback time only ever sees the already
+     * reduced count, so without the snapshot the restore is a silent no-op.
+     */
+    public static final String ORIGINAL_REPLICAS_ANNOTATION = "kates.io/original-replicas";
+
     @Inject
     KubernetesClient client;
 
@@ -211,11 +219,29 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .forEach(ss -> {
                     int current = ss.getSpec().getReplicas();
                     int target = Math.max(1, current - 1);
-                    LOG.info("SCALE_DOWN: " + ss.getMetadata().getName() + " from " + current + " → " + target);
+                    String name = ss.getMetadata().getName();
+                    // Snapshot the ORIGINAL replica count once, before reducing.
+                    // A second SCALE_DOWN step must NOT overwrite it with the
+                    // already-reduced value, so only stamp when absent.
+                    Map<String, String> annotations = ss.getMetadata().getAnnotations();
+                    boolean alreadySnapshotted =
+                            annotations != null && annotations.containsKey(ORIGINAL_REPLICAS_ANNOTATION);
+                    if (!alreadySnapshotted) {
+                        client.apps()
+                                .statefulSets()
+                                .inNamespace(spec.targetNamespace())
+                                .withName(name)
+                                .edit(s -> new io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder(s)
+                                        .editMetadata()
+                                        .addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
+                                        .endMetadata()
+                                        .build());
+                    }
+                    LOG.info("SCALE_DOWN: " + name + " from " + current + " → " + target);
                     client.apps()
                             .statefulSets()
                             .inNamespace(spec.targetNamespace())
-                            .withName(ss.getMetadata().getName())
+                            .withName(name)
                             .scale(target);
                 });
     }
