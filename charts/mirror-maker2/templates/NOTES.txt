@@ -1,0 +1,24 @@
+MirrorMaker 2 {{ .Chart.AppVersion }} — release {{ .Release.Name }} in {{ include "mirror-maker2.namespace" . }}.
+
+Target (MM2 Connect runtime): {{ .Values.target.alias }} @ {{ include "mirror-maker2.bootstrap" (dict "c" .Values.target "ctx" $) }}
+Mirror flows:
+{{- range .Values.mirrors }}
+  - {{ .source.alias }} → {{ $.Values.target.alias }}  topics={{ .topicsPattern | default ".*" }}  groups={{ .groupsPattern | default ".*" }}  (source: {{ include "mirror-maker2.bootstrap" (dict "c" .source "ctx" $) }})
+{{- end }}
+
+⚠ CREDENTIALS ARE A TWO-CLUSTER CONTRACT:
+  • TARGET: provisioned in-repo as KafkaUser "{{ .Values.target.authentication.username }}"
+    by the kafka-cluster chart (or by this chart when kafkaUser.create=true).
+  • SOURCE: on an EXTERNAL cluster — this chart CANNOT create its user. Grant it
+    READ + DESCRIBE on the mirrored topics and groups out-of-band, or the
+    MirrorSourceConnector stalls silently with no data replicated.
+
+Watch it come up:
+  kubectl -n {{ include "mirror-maker2.namespace" . }} get kafkamirrormaker2 {{ include "mirror-maker2.fullname" . }} -w
+  kubectl -n {{ include "mirror-maker2.namespace" . }} wait kafkamirrormaker2/{{ include "mirror-maker2.fullname" . }} --for=condition=Ready --timeout=300s
+
+Verify replication (topics appear as <sourceAlias>.<topic> on the target):
+  kubectl -n kafka get kafkatopics | grep '^{{ (index .Values.mirrors 0).source.alias | default "source" }}\.'
+
+Smoke test:
+  helm test {{ .Release.Name }} -n {{ include "mirror-maker2.namespace" . }}

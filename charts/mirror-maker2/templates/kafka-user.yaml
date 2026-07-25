@@ -1,0 +1,87 @@
+{{- /*
+Optional TARGET-side KafkaUser for MM2. Off by default — the in-repo
+kafka-cluster chart provisions `kates-mm2` centrally. Enable when the target
+cluster is co-located and you want this chart to own the user.
+
+Grants the ACLs MM2 needs on the TARGET: write the replicated topics, own the
+MM2 internal + offset-sync + checkpoint + heartbeat topics, and use the Connect
+groups. The SOURCE-side user is on an external cluster and is NOT created here.
+*/ -}}
+{{- if .Values.kafkaUser.create }}
+{{- $target := .Values.target }}
+{{- $username := .Values.kafkaUser.name | default $target.authentication.username | default "kates-mm2" }}
+{{- $authz := .Values.kafkaUser.authorization | default dict }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ $username }}
+  namespace: {{ .Values.kafkaUser.namespace | default "kafka" }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ .Values.kafkaUser.clusterName | default "krafter" }}
+  annotations:
+    {{- if not (eq (toString .Values.keepOnDelete) "false") }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+spec:
+  authentication:
+    type: {{ $target.authentication.type | default "scram-sha-512" }}
+  {{- with .Values.kafkaUser.quotas }}
+  quotas:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.kafkaUser.template }}
+  template:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if $authz.enabled | default true }}
+  {{- $gid := $target.groupId | default "mirror-maker2" }}
+  authorization:
+    type: {{ $authz.type | default "simple" }}
+    acls:
+      {{- if eq ($authz.mode | default "auto") "custom" }}
+      {{- if not .Values.kafkaUser.acls }}{{- fail "kafkaUser.authorization.mode=custom requires kafkaUser.acls" }}{{- end }}
+      {{- toYaml .Values.kafkaUser.acls | nindent 6 }}
+      {{- else }}
+      # ── MM2 Connect internal topics (<groupId>-configs/offsets/status) ──
+      - resource: { type: topic, name: {{ $gid | quote }}, patternType: prefix }
+        operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs"]
+        host: "*"
+      # ── Replicated data + checkpoints per source alias (<alias>.*) ──────
+      {{- range .Values.mirrors }}
+      - resource: { type: topic, name: {{ printf "%s." (.source.alias | default "source") | quote }}, patternType: prefix }
+        operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter"]
+        host: "*"
+      {{- end }}
+      # ── Offset-sync + heartbeat internal topics ────────────────────────
+      - resource: { type: topic, name: "mm2-offset-syncs.", patternType: prefix }
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
+      - resource: { type: topic, name: "heartbeats", patternType: literal }
+        operations: ["Read", "Write", "Create", "Describe"]
+        host: "*"
+      # ── Extra topic grants (e.g. IdentityReplicationPolicy) ────────────
+      {{- range .Values.kafkaUser.topicGrants }}
+      - resource: { type: topic, name: {{ .name | quote }}, patternType: {{ .patternType | default "prefix" }} }
+        operations: {{ .operations | default (list "Read" "Write" "Create" "Describe") | toJson }}
+        host: "*"
+      {{- end }}
+      # ── Connect worker groups ──────────────────────────────────────────
+      - resource: { type: group, name: {{ $gid | quote }}, patternType: prefix }
+        operations: ["Read", "Describe"]
+        host: "*"
+      - resource: { type: group, name: "connect-", patternType: prefix }
+        operations: ["Read", "Describe"]
+        host: "*"
+      {{- range .Values.kafkaUser.groupGrants }}
+      - resource: { type: group, name: {{ .name | quote }}, patternType: {{ .patternType | default "prefix" }} }
+        operations: ["Read", "Describe"]
+        host: "*"
+      {{- end }}
+      # ── Cluster metadata + topic creation ──────────────────────────────
+      - resource: { type: cluster }
+        operations: ["Describe", "DescribeConfigs", "Create"]
+        host: "*"
+      {{- end }}
+  {{- end }}
+{{- end }}

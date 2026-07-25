@@ -1,0 +1,85 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mirror-maker2.podSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if $np.workerToWorker }}
+    # Worker-to-worker Connect REST (leader forwarding) on 8083
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "mirror-maker2.podSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8083
+          protocol: TCP
+    {{- end }}
+    {{- if $np.monitoring }}
+    # Metrics scrape
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.monitoring.namespace }}
+      ports:
+        - port: {{ $np.monitoring.port }}
+          protocol: TCP
+    {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    # DNS
+    - to:
+        {{- if or $np.dns.namespaceSelector $np.dns.podSelector }}
+        - {{- if $np.dns.namespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.dns.namespaceSelector | nindent 14 }}
+          {{- end }}
+          {{- if $np.dns.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.dns.podSelector | nindent 14 }}
+          {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kafka brokers — source AND target, arbitrary IPs
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        {{- range $np.kafka.ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- if $np.workerToWorker }}
+    # Worker-to-worker egress (8083)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mirror-maker2.podSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8083
+          protocol: TCP
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

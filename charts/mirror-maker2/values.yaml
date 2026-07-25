@@ -1,0 +1,279 @@
+# mirror-maker2 values.yaml
+#
+# Deploys a Strimzi KafkaMirrorMaker2 cluster. MM2 runs on Kafka Connect, so the
+# worker surface (replicas, JVM, resources, metrics, NetworkPolicy) mirrors the
+# connect-cluster chart. The DIFFERENCE: MM2 spans TWO Kafka clusters — a source
+# and a target — declared under `clusters:` and wired by `mirrors:`.
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+# -- Override the release namespace
+namespaceOverride: ""
+
+# -- Keep the CR on `helm uninstall` (avoids tearing down replication by accident)
+keepOnDelete: true
+
+# -- Extra labels added to every resource
+extraLabels: {}
+
+# -- Images used by the Helm test pods
+testImages:
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
+
+# -- Number of MM2 (Connect) worker replicas
+replicas: 3
+# -- MM2 worker image (empty = Strimzi default for the Kafka version)
+image: ""
+# -- Kafka version the workers run
+version: "4.3.0"
+# -- Kubernetes cluster domain (bootstrap FQDN computation)
+clusterDomain: cluster.local
+
+# ── Target cluster ──────────────────────────────────────────────────────────
+# MM2's Connect runtime runs against the TARGET (Strimzi v1 API: spec.target).
+# It owns the Connect internal config/offset/status topics.
+#
+# Reference an in-cluster Strimzi cluster by clusterName + namespace (the
+# bootstrap FQDN is computed), or set bootstrapServers explicitly for an
+# external/inter-cluster target.
+target:
+  alias: target
+  # -- Strimzi cluster name (for computed bootstrap)
+  clusterName: "krafter"
+  # -- Namespace where that Kafka cluster lives
+  namespace: "kafka"
+  # -- Explicit bootstrap override (external/inter-cluster). Wins over
+  # clusterName+namespace when set.
+  bootstrapServers: ""
+  # -- Connect worker group ID; internal topics default to <groupId>-{configs,offsets,status}
+  groupId: "mirror-maker2"
+  configStorageTopic: ""
+  offsetStorageTopic: ""
+  statusStorageTopic: ""
+  tls:
+    enabled: false
+    trustedCertificateSecret: "krafter-cluster-ca-cert"
+    certificateKey: "ca.crt"
+  authentication:
+    type: scram-sha-512
+    username: "kates-mm2"
+    secretName: "kates-mm2"
+    secretKey: "password"
+  # -- Connect internal-topic replication. RF3 for durability; overlays lower
+  # it to 1 for single-broker (kind).
+  config:
+    config.storage.replication.factor: 3
+    offset.storage.replication.factor: 3
+    status.storage.replication.factor: 3
+
+# ── Mirror flows ────────────────────────────────────────────────────────────
+# One entry per source cluster → the target. Each has its OWN source bootstrap,
+# tls and auth. replication.factor and the offset-syncs/checkpoints topic
+# factors must match the TARGET's durability (RF3 in prod, RF1 on kind).
+mirrors:
+  - source:
+      alias: source
+      # -- Reference an in-cluster Strimzi cluster by name + namespace (bootstrap
+      # computed), OR set bootstrapServers for an external/inter-cluster source.
+      # Default is a LOOPBACK on the in-repo krafter cluster (source == target)
+      # so the chart renders and smoke-tests out of the box.
+      clusterName: "krafter"
+      namespace: "kafka"
+      # -- Explicit bootstrap override (external/inter-cluster). Wins when set.
+      bootstrapServers: ""
+      tls:
+        enabled: false
+        trustedCertificateSecret: ""
+        certificateKey: "ca.crt"
+      authentication:
+        # -- scram-sha-512 | scram-sha-256 | tls | plain (empty = none)
+        type: scram-sha-512
+        username: "kates-mm2-source"
+        # -- Secret holding the credential (defaults to username when empty)
+        secretName: ""
+        secretKey: "password"
+      config: {}
+    # -- Topics to mirror (regex)
+    topicsPattern: ".*"
+    # -- Consumer groups whose offsets to checkpoint (regex)
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 3
+      config:
+        replication.factor: 3
+        offset-syncs.topic.replication.factor: 3
+        # Do not mirror source topic ACLs (target ACLs are managed here)
+        sync.topic.acls.enabled: "false"
+        refresh.topics.interval.seconds: 60
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 3
+        # Translate consumer group offsets to the target (failover readiness)
+        sync.group.offsets.enabled: "true"
+        refresh.groups.interval.seconds: 60
+
+# ── JVM & Resources ─────────────────────────────────────────────────────────
+jvmOptions:
+  -Xms: 1024m
+  -Xmx: 1024m
+  gcLoggingEnabled: true
+
+# -- Optional CR passthroughs (empty = Strimzi defaults). Shapes match the
+# KafkaMirrorMaker2 CRD verbatim.
+# livenessProbe:  { initialDelaySeconds: 60, timeoutSeconds: 5 }
+# readinessProbe: { initialDelaySeconds: 60, timeoutSeconds: 5 }
+# logging: { type: inline, loggers: { "log4j.logger.org.apache.kafka.connect.mirror": INFO } }
+# tracing: { type: opentelemetry }
+livenessProbe: {}
+readinessProbe: {}
+logging: {}
+tracing: {}
+
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 1000m
+  limits:
+    memory: 4Gi
+    cpu: 4000m
+
+# ── Scheduling ──────────────────────────────────────────────────────────────
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: ScheduleAnyway
+
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+rack:
+  enabled: false
+  topologyKey: topology.kubernetes.io/zone
+
+podDisruptionBudget:
+  # -- Only rendered when replicas > 1. maxUnavailable keeps the CR drain-safe
+  # regardless of replica count.
+  enabled: true
+  maxUnavailable: 1
+
+tolerations: []
+nodeSelector: {}
+priorityClassName: "system-cluster-critical"
+imagePullSecrets: []
+
+# -- Pod-level security context
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+# ── ServiceAccount ──────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+
+# ── Autoscaling (HPA on the MM2 Connect Deployment) ─────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 80
+
+# ── Managed target KafkaUser ────────────────────────────────────────────────
+# Provisions the TARGET-side KafkaUser + MM2 ACLs (write replicated topics,
+# own the MM2 internal + offset-sync + checkpoint + heartbeat topics, and the
+# Connect groups). Off by default: the in-repo kafka-cluster chart provisions
+# `kates-mm2` centrally. The SOURCE-side user is on an external cluster and is
+# NOT created here — grant it READ on the mirrored topics/groups + DESCRIBE
+# out-of-band (see README).
+kafkaUser:
+  create: false
+  # -- Target cluster name (strimzi.io/cluster label) and namespace
+  clusterName: "krafter"
+  namespace: "kafka"
+  # -- Defaults to the target cluster's authentication.username
+  name: ""
+  authorization:
+    enabled: true
+    type: simple
+    # -- auto: least-privilege ACLs derived from the source aliases + target
+    # groupId (replicated topics <alias>.*, MM2 internal/offset-sync/heartbeat/
+    # checkpoint topics, Connect groups). custom: use `acls` verbatim.
+    mode: auto
+  # -- Extra topic grants appended in auto mode (e.g. IdentityReplicationPolicy,
+  # where replicated topics keep their original names — grant those prefixes).
+  topicGrants: []
+  #   - { name: "orders", patternType: prefix }
+  # -- Extra consumer-group grants appended in auto mode
+  groupGrants: []
+  # -- Used only when authorization.mode=custom
+  acls: []
+  quotas: {}
+  template: {}
+
+# ── Credential secret sync (cross-namespace / inter-cluster) ────────────────
+# MM2 reads each cluster's passwordSecret / TLS cert from ITS OWN namespace.
+# When a source or target Kafka cluster lives in a different namespace than this
+# release, the credential Secret (and CA cert for TLS) must be made available
+# here. This hook Job copies the listed Secrets from their source namespaces
+# into the release namespace on every install/upgrade (picking up rotation).
+# No-op when everything is co-located. Alternative: kubernetes-reflector.
+secretSync:
+  enabled: false
+  timeoutSeconds: 300
+  # -- Image for the sync Job (needs kubectl + jq + sh). Defaults to the tester
+  # image; override with a dedicated runtime image if preferred.
+  image: ""
+  # -- Secrets to copy into the release namespace. Each: name + fromNamespace.
+  # Entries whose fromNamespace equals the release namespace are skipped.
+  secrets: []
+  #   - name: kates-mm2                 # target SCRAM credential
+  #     fromNamespace: kafka
+  #   - name: kates-mm2-source          # source SCRAM credential
+  #     fromNamespace: kafka-dr
+  #   - name: krafter-cluster-ca-cert   # target CA cert (TLS)
+  #     fromNamespace: kafka
+
+# ── Monitoring ──────────────────────────────────────────────────────────────
+podMonitors:
+  # -- Create a PodMonitor for the MM2 worker metrics (requires Prometheus
+  # Operator CRDs; capability-guarded so a missing CRD never fails install)
+  enabled: false
+  labels: {}
+monitoring:
+  interval: 30s
+  scrapeTimeout: ""
+
+# -- Enable JMX Prometheus metrics on the workers (needed for podMonitors)
+metrics:
+  enabled: false
+
+# ── NetworkPolicy ───────────────────────────────────────────────────────────
+# Default-deny for the MM2 worker pods; every allowed flow is explicit.
+networkPolicy:
+  enabled: true
+  # -- Deny-all baseline for the MM2 pods
+  defaultDeny: true
+  # -- DNS egress (empty selectors = anywhere; pin to kube-dns on strict clusters)
+  dns:
+    namespaceSelector: {}
+    podSelector: {}
+  # -- Kafka broker egress (source + target). MM2 reaches arbitrary broker IPs,
+  # so egress is to any destination on these ports.
+  kafka:
+    ports: [9092, 9093]
+  # -- Worker-to-worker Connect REST (8083) for leader forwarding
+  workerToWorker: true
+  # -- Metrics scrape ingress
+  monitoring:
+    namespace: monitoring
+    port: 9404
+  # -- Extra egress/ingress rules appended verbatim
+  extraEgress: []
+  extraIngress: []
