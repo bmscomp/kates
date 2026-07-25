@@ -23,6 +23,7 @@ Every version the platform pins, in one place. This table is generated from the 
 | `kates-platform` chart | 0.4.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
 | `kates` chart | 0.6.0 (app 1.21.0) | `charts/kates/Chart.yaml` |
 | `minio` chart | 17.0.22 (app 2025.7.23) | `charts/minio/Chart.yaml` |
+| `mirror-maker2` chart | 0.1.0 (app 4.3.0) | `charts/mirror-maker2/Chart.yaml` |
 | `monitoring` chart | 1.1.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
 | `strimzi-operator` chart | 0.1.0 (app 1.1.0) | `charts/strimzi-operator/Chart.yaml` |
 | `velero` chart | 11.3.3 (app 1.17.1) | `charts/velero/Chart.yaml` |

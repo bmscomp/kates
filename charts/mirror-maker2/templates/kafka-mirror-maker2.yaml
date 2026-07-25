@@ -1,0 +1,166 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaMirrorMaker2
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+  annotations:
+    {{- if not (eq (toString .Values.keepOnDelete) "false") }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    strimzi.io/use-connector-resources: "false"
+spec:
+  version: {{ .Values.version | quote }}
+  {{- if .Values.image }}
+  image: {{ .Values.image | quote }}
+  {{- end }}
+  {{- /* replicas is REQUIRED by the v1 CRD (no default). When the HPA owns
+         scaling it seeds the initial count from minReplicas; the operator's
+         scale subresource lets the HPA adjust it afterwards. */}}
+  replicas: {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas | default 2 }}{{ else }}{{ .Values.replicas }}{{ end }}
+  {{- $t := .Values.target }}
+  {{- $gid := $t.groupId | default "mirror-maker2" }}
+  target:
+    alias: {{ $t.alias | default "target" | quote }}
+    bootstrapServers: {{ include "mirror-maker2.bootstrap" (dict "c" $t "ctx" $) | quote }}
+    groupId: {{ $gid | quote }}
+    configStorageTopic: {{ $t.configStorageTopic | default (printf "%s-configs" $gid) | quote }}
+    offsetStorageTopic: {{ $t.offsetStorageTopic | default (printf "%s-offsets" $gid) | quote }}
+    statusStorageTopic: {{ $t.statusStorageTopic | default (printf "%s-status" $gid) | quote }}
+    {{- include "mirror-maker2.clusterTlsAuth" (dict "c" $t) | nindent 4 }}
+    {{- with $t.config }}
+    config:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  mirrors:
+    {{- range .Values.mirrors }}
+    - source:
+        alias: {{ .source.alias | default "source" | quote }}
+        bootstrapServers: {{ include "mirror-maker2.bootstrap" (dict "c" .source "ctx" $) | quote }}
+        {{- include "mirror-maker2.clusterTlsAuth" (dict "c" .source) | nindent 8 }}
+        {{- with .source.config }}
+        config:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      topicsPattern: {{ .topicsPattern | default ".*" | quote }}
+      {{- with .topicsExcludePattern }}
+      topicsExcludePattern: {{ . | quote }}
+      {{- end }}
+      groupsPattern: {{ .groupsPattern | default ".*" | quote }}
+      {{- with .groupsExcludePattern }}
+      groupsExcludePattern: {{ . | quote }}
+      {{- end }}
+      {{- with .sourceConnector }}
+      sourceConnector:
+        {{- with .tasksMax }}
+        tasksMax: {{ . }}
+        {{- end }}
+        {{- with .config }}
+        config:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- end }}
+      {{- with .checkpointConnector }}
+      checkpointConnector:
+        {{- with .tasksMax }}
+        tasksMax: {{ . }}
+        {{- end }}
+        {{- with .config }}
+        config:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.resources | nindent 4 }}
+  jvmOptions:
+    {{- toYaml .Values.jvmOptions | nindent 4 }}
+  {{- with .Values.livenessProbe }}
+  livenessProbe:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.readinessProbe }}
+  readinessProbe:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.logging }}
+  logging:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tracing }}
+  tracing:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .Values.rack.enabled }}
+  rack:
+    topologyKey: {{ .Values.rack.topologyKey }}
+  {{- end }}
+  {{- if .Values.metrics.enabled }}
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: {{ include "mirror-maker2.fullname" . }}-metrics
+        key: metrics-config.yml
+  {{- end }}
+  template:
+    {{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicas) 1) }}
+    # Strimzi manages the PDB for its own pods; setting maxUnavailable here
+    # avoids a second, overlapping standalone PDB fighting the operator's.
+    podDisruptionBudget:
+      maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+    {{- end }}
+    pod:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      # nodeSelector is set via affinity below to co-exist with pod anti-affinity
+      {{- end }}
+      {{- if or .Values.podAntiAffinity.enabled .Values.nodeSelector }}
+      affinity:
+        {{- if .Values.podAntiAffinity.enabled }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "mirror-maker2.podSelectorLabels" . | nindent 20 }}
+                topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
+        {{- end }}
+        {{- with .Values.nodeSelector }}
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  {{- range $k, $v := . }}
+                  - key: {{ $k }}
+                    operator: In
+                    values: [{{ $v | quote }}]
+                  {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "mirror-maker2.podSelectorLabels" . | nindent 14 }}
+      {{- end }}

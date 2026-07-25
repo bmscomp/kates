@@ -1,0 +1,45 @@
+# kind overlay — single-broker cluster, so RF1 everywhere and no Prometheus CRDs.
+replicas: 1
+
+target:
+  config:
+    config.storage.replication.factor: 1
+    offset.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+
+mirrors:
+  - source:
+      alias: source
+      clusterName: "krafter"
+      namespace: "kafka"
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2-source"
+        secretName: "kates-mm2-source"
+        secretKey: "password"
+    topicsPattern: "kates\\..*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 1
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        sync.topic.acls.enabled: "false"
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"
+
+jvmOptions:
+  -Xms: 256m
+  -Xmx: 256m
+
+resources:
+  requests: { memory: 512Mi, cpu: 250m }
+  limits: { memory: 1Gi, cpu: 1000m }
+
+podMonitors:
+  enabled: false
+metrics:
+  enabled: false

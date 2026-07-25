@@ -1,0 +1,61 @@
+# Production overlay — HA workers, RF3 durability, monitoring on. Set the REAL
+# source bootstrap + credentials for a genuine cross-cluster mirror (the
+# defaults are an in-repo loopback).
+#
+# TLS is NOT forced on here: the repo's kafka-cluster 9093 listener is mTLS
+# (authentication.type: tls), which needs a tls-type KafkaUser (user.crt/key),
+# not the SCRAM kates-mm2 user. To run over TLS, set on target AND each source:
+#   tls: { enabled: true, trustedCertificateSecret: <cluster>-cluster-ca-cert }
+#   authentication: { type: tls, secretName: <tls-kafka-user> }
+# then narrow networkPolicy.kafka.ports to [9093]. Until then, keep SCRAM/9092.
+replicas: 3
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+rack:
+  enabled: true
+  topologyKey: topology.kubernetes.io/zone
+
+jvmOptions:
+  -Xms: 2048m
+  -Xmx: 2048m
+  gcLoggingEnabled: true
+
+resources:
+  requests: { memory: 4Gi, cpu: 2000m }
+  limits: { memory: 6Gi, cpu: 4000m }
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+priorityClassName: "system-cluster-critical"
+
+# Metrics + PodMonitor (capability-guarded; needs the Prometheus Operator CRDs)
+metrics:
+  enabled: true
+podMonitors:
+  enabled: true
+  labels:
+    release: kafka
+
+networkPolicy:
+  enabled: true
+  # Pin DNS egress to kube-dns on strict clusters
+  dns:
+    namespaceSelector:
+      kubernetes.io/metadata.name: kube-system
+    podSelector:
+      k8s-app: kube-dns
+  # Allow both the plaintext (9092/SCRAM) and TLS (9093) broker ports so egress
+  # works whichever auth mode is configured. Narrow to [9093] once TLS is on.
+  kafka:
+    ports: [9092, 9093]

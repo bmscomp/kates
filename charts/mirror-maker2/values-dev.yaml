@@ -1,0 +1,44 @@
+# dev overlay — single worker, small heap, verbose logs, no monitoring CRDs.
+replicas: 1
+
+target:
+  config:
+    config.storage.replication.factor: 1
+    offset.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+
+mirrors:
+  - source:
+      alias: source
+      clusterName: "krafter"
+      namespace: "kafka"
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2-source"
+        secretName: "kates-mm2-source"
+        secretKey: "password"
+    topicsPattern: ".*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 1
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"
+
+jvmOptions:
+  -Xms: 256m
+  -Xmx: 512m
+
+resources:
+  requests: { memory: 512Mi, cpu: 250m }
+  limits: { memory: 1Gi, cpu: 1000m }
+
+podMonitors:
+  enabled: false
+metrics:
+  enabled: false

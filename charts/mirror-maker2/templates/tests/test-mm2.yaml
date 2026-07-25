@@ -1,0 +1,93 @@
+{{- $kubectl := .Values.testImages.kubectl }}
+{{- $sa := printf "%s-test" (include "mirror-maker2.fullname" .) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkamirrormaker2s"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ include "mirror-maker2.namespace" . }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}-test-ready
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ $sa }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ $kubectl }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      command: ['sh', '-c']
+      args:
+        - |
+          MM2={{ include "mirror-maker2.fullname" . }}
+          NS={{ include "mirror-maker2.namespace" . }}
+          echo "Waiting for KafkaMirrorMaker2/${MM2} to be Ready..."
+          if kubectl wait "kafkamirrormaker2/${MM2}" -n "${NS}" \
+              --for=condition=Ready --timeout=240s; then
+            echo "✅ MM2 is Ready — clusters connected and connectors running"
+            exit 0
+          fi
+          echo "❌ MM2 did not become Ready. Status:"
+          kubectl get "kafkamirrormaker2/${MM2}" -n "${NS}" -o jsonpath='{.status.conditions}' || true
+          echo
+          echo "  Common cause: a source-cluster ACL/credential is missing, so the"
+          echo "  MirrorSourceConnector cannot read. See the chart NOTES."
+          exit 1

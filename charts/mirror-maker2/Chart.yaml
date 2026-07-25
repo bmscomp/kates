@@ -1,0 +1,22 @@
+apiVersion: v2
+name: mirror-maker2
+description: A Helm chart for deploying a Strimzi KafkaMirrorMaker2 cluster (cross-cluster replication / DR / migration)
+type: application
+version: 0.1.0
+# Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
+appVersion: "4.3.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+keywords:
+  - kafka
+  - mirrormaker2
+  - mirror-maker
+  - replication
+  - disaster-recovery
+  - strimzi
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
