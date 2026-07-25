@@ -26,6 +26,9 @@ public class TestTimeoutReaper {
     @Inject
     TestRunRepository repository;
 
+    @Inject
+    TestOrchestrator orchestrator;
+
     @ConfigProperty(name = "kates.engine.max-duration-ms", defaultValue = "1800000")
     long maxDurationMs;
 
@@ -56,6 +59,11 @@ public class TestTimeoutReaper {
                         newResults.add(result);
                     }
                     run = run.withResults(newResults);
+                    // Stop the live producer/consumer virtual threads BEFORE
+                    // persisting FAILED. Marking the DB row failed without this
+                    // left the backend workers running — a "timed out" run kept
+                    // producing to Kafka and skewing concurrent runs' latency.
+                    orchestrator.abortWorkers(run);
                     repository.save(run);
                 }
             } catch (Exception e) {

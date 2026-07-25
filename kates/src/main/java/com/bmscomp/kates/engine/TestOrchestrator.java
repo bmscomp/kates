@@ -14,6 +14,7 @@ import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
+import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -313,6 +314,17 @@ public class TestOrchestrator {
                 .findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
 
+        // Snapshot the status BEFORE this poll so the terminal transition (and
+        // its one-shot events + metrics) fires exactly once. Without this,
+        // polling a run that is already DONE/FAILED — which the scheduled
+        // reconciler and repeat client polls both do — would re-fire the
+        // lifecycle event and double-count completion metrics.
+        TestResult.TaskStatus priorStatus = run.getStatus();
+        if (priorStatus == TestResult.TaskStatus.DONE || priorStatus == TestResult.TaskStatus.FAILED) {
+            activeHandles.remove(runId);
+            return run;
+        }
+
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
@@ -436,6 +448,52 @@ public class TestOrchestrator {
      */
     public int maxConcurrentTests() {
         return maxConcurrentTests;
+    }
+
+    /**
+     * Drives active runs to their terminal state without waiting for a client
+     * to poll. Backend workers finish on their own schedule; nothing else calls
+     * {@link #refreshStatus} unless a client GETs the run, so without this a
+     * completed run stays RUNNING in the DB until the timeout reaper wrongly
+     * marks it FAILED. Runs off the scheduler thread; refreshStatus is
+     * idempotent for terminal runs (see the priorStatus guard).
+     */
+    @Scheduled(every = "{kates.engine.reconcile-interval:5s}", identity = "test-status-reconciler")
+    void reconcileActiveRuns() {
+        for (String runId : activeHandles.keySet()) {
+            try {
+                refreshStatus(runId);
+            } catch (Exception e) {
+                LOG.debugf("Status reconcile failed for run %s: %s", runId, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Stops any live backend workers for a run and drops its handles WITHOUT
+     * changing the persisted status. Used by the timeout reaper, which owns the
+     * FAILED transition — the previous reaper updated the DB row but left the
+     * producer/consumer virtual threads running, so a "failed" run kept
+     * hammering Kafka and skewing concurrent runs.
+     */
+    public void abortWorkers(TestRun run) {
+        List<BenchmarkHandle> handles = activeHandles.remove(run.getId());
+        if (handles == null || handles.isEmpty()) {
+            return;
+        }
+        String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
+        com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
+        if (backendResult.isFailure()) {
+            return;
+        }
+        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
+        for (BenchmarkHandle handle : handles) {
+            try {
+                backend.stop(handle);
+            } catch (Exception e) {
+                LOG.warnf("Reaper: failed to stop task %s: %s", handle.taskId(), e.getMessage());
+            }
+        }
     }
 
     @PreDestroy

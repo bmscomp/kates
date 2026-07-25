@@ -204,20 +204,24 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 byte[] payload = SequencedPayload.encode(seq, tsNanos, state.runIdHash, task.getRecordSize());
                 state.ackTracker.recordSent(seq, tsNanos);
 
-                long sendStart = System.nanoTime();
+                // Produce latency is the broker round-trip, which is only known
+                // when the send is acknowledged in the callback. Measuring it at
+                // send() return would capture accumulator-buffer append time
+                // (near-zero with batching/linger), not real latency. sendStart
+                // is captured here and the sample is recorded in the callback.
+                final long sendStart = System.nanoTime();
                 producer.send(new ProducerRecord<>(task.getTopic(), payload), (metadata, exception) -> {
                     if (exception != null) {
                         state.errors.incrementAndGet();
                         state.ackTracker.recordFailed(seq);
                     } else {
+                        double latencyMs = (System.nanoTime() - sendStart) / 1_000_000.0;
+                        state.histogram.recordLatency(latencyMs);
                         state.ackTracker.recordAcked(seq);
                     }
                 });
-                long latencyNs = System.nanoTime() - sendStart;
-                double latencyMs = latencyNs / 1_000_000.0;
 
                 state.recordsProcessed.incrementAndGet();
-                state.histogram.recordLatency(latencyMs);
                 sent++;
             }
 
