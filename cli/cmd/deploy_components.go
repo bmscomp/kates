@@ -125,20 +125,42 @@ metadata:
 			runExecFn(gCtx, "kubectl", "rollout", "status",
 				"deployment/cert-manager-cainjector", "-n", "cert-manager", "--timeout=90s")
 
-			// The definitive readiness signal: poll the MutatingWebhookConfiguration
-			// until caBundle is non-empty. Only then can the API server verify the
-			// webhook TLS certificate without x509: certificate signed by unknown authority.
+			// The webhook pod must be serving before the API server can call it.
+			// The Group A readiness wait for cert-manager only runs after this
+			// goroutine returns, so without this gate the ClusterIssuer apply
+			// below races the webhook Deployment and dies with
+			// "Internal error occurred: failed calling webhook".
+			dl.Println("    - Waiting for Cert-Manager webhook rollout...")
+			runExecFn(gCtx, "kubectl", "rollout", "status",
+				"deployment/cert-manager-webhook", "-n", "cert-manager", "--timeout=180s")
+
+			// The definitive readiness signal: poll until caBundle is non-empty —
+			// on BOTH webhook configurations. A ClusterIssuer CREATE goes through
+			// the validating webhook as well, and cainjector injects the two
+			// configs independently, so a ready mutating config says nothing
+			// about the validating one; checking only it leaves a window where
+			// the apply still fails with x509: certificate signed by unknown
+			// authority (surfaced by the API server as "Internal error occurred").
 			dl.Println("    - Polling for Cert-Manager CA bundle injection...")
 			const caTimeout = 180 * time.Second
 			const caPoll = 3 * time.Second
 			caDeadline := time.Now().Add(caTimeout)
+			certMgrWebhookConfigs := []string{
+				"mutatingwebhookconfiguration",
+				"validatingwebhookconfiguration",
+			}
 			for {
-				out, err := exec.CommandContext(gCtx,
-					"kubectl", "get",
-					"mutatingwebhookconfiguration", "cert-manager-webhook",
-					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
-				).Output()
-				if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+				injected := 0
+				for _, kind := range certMgrWebhookConfigs {
+					out, err := exec.CommandContext(gCtx,
+						"kubectl", "get", kind, "cert-manager-webhook",
+						"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
+					).Output()
+					if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+						injected++
+					}
+				}
+				if injected == len(certMgrWebhookConfigs) {
 					dl.Println("    - CA bundle injected. Applying ClusterIssuer...")
 					break
 				}
@@ -160,34 +182,49 @@ metadata:
 spec:
   selfSigned: {}`
 
-			// Try applying normally first (3 quick attempts).
+			// Try applying normally first. Early attempts can land in the short
+			// window where the CA bundle is injected but the API server's webhook
+			// client hasn't seen ready endpoints yet — give it a real window
+			// before reaching for the failurePolicy bypass.
 			var lastErr error
-			for attempt := 1; attempt <= 3; attempt++ {
+			const applyAttempts = 5
+			for attempt := 1; attempt <= applyAttempts; attempt++ {
 				if lastErr = runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer); lastErr == nil {
 					return nil
 				}
-				if attempt < 3 {
-					time.Sleep(3 * time.Second)
+				if attempt < applyAttempts {
+					select {
+					case <-gCtx.Done():
+						return gCtx.Err()
+					case <-time.After(5 * time.Second):
+					}
 				}
 			}
 
 			// Hard fallback: temporarily set failurePolicy: Ignore so the API server
 			// allows the resource creation call through even if webhook TLS is still
-			// not verifiable. cert-manager will reconcile the webhook config shortly.
+			// not verifiable. BOTH configs must be bypassed — the validating webhook
+			// blocks the CREATE exactly like the mutating one, so patching only the
+			// mutating config leaves the failure in place. cert-manager reconciles
+			// the webhook configs back to its desired state shortly after.
 			dl.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			for _, kind := range certMgrWebhookConfigs {
+				runExecFn(gCtx, "kubectl", "patch",
+					kind, "cert-manager-webhook",
+					"--type=json", "-p",
+					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			}
 			time.Sleep(2 * time.Second) // let the API server pick up the patch
 
 			applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
 
 			// Always restore failurePolicy: Fail regardless of outcome.
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+			for _, kind := range certMgrWebhookConfigs {
+				runExecFn(gCtx, "kubectl", "patch",
+					kind, "cert-manager-webhook",
+					"--type=json", "-p",
+					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+			}
 
 			if applyErr != nil {
 				return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
