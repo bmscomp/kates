@@ -181,20 +181,28 @@ spec:
           httpGet:
             path: {{ .Values.probes.startup.path | default "/q/health/started" }}
             port: http
-          failureThreshold: {{ .Values.probes.startup.failureThreshold | default 30 }}
+          failureThreshold: {{ .Values.probes.startup.failureThreshold | default 60 }}
           periodSeconds: {{ .Values.probes.startup.periodSeconds | default 2 }}
+          timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds | default 3 }}
         readinessProbe:
           httpGet:
-            path: {{ .Values.probes.readiness.path | default "/api/health" }}
+            # NOT /api/health — that endpoint does a live AdminClient round-trip
+            # per call, so it times out against the probe's 1s default whenever
+            # Kafka is slow or still starting, and the pod never goes Ready.
+            path: {{ .Values.probes.readiness.path | default "/q/health/ready" }}
             port: http
           initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 5 }}
           periodSeconds: {{ .Values.probes.readiness.periodSeconds | default 10 }}
+          timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds | default 5 }}
+          failureThreshold: {{ .Values.probes.readiness.failureThreshold | default 3 }}
         livenessProbe:
           httpGet:
             path: {{ .Values.probes.liveness.path | default "/q/health/live" }}
             port: http
           initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 15 }}
           periodSeconds: {{ .Values.probes.liveness.periodSeconds | default 30 }}
+          timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds | default 5 }}
+          failureThreshold: {{ .Values.probes.liveness.failureThreshold | default 3 }}
         lifecycle:
           preStop:
             exec:

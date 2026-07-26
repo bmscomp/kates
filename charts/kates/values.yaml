@@ -243,22 +243,39 @@ apiKey:
   secretKey: "api-key"
 
 # -- Health probe configuration
+#
+# Every probe points at a MicroProfile health endpoint, never at a business
+# endpoint. `/api/health` looks like the obvious readiness URL but calls
+# ClusterHealthService.isReachable() — an uncached AdminClient round-trip with a
+# 5s blocking get — on every request. Since a probe's timeoutSeconds defaults to
+# 1s, a cluster whose Kafka is still coming up fails EVERY readiness probe and
+# the pod never goes Ready, even though the app is fine. `/q/health/ready` reads
+# the periodically-refreshed KafkaReachabilityCache instead and never blocks on a
+# broker.
 probes:
   # -- Startup probe (gates readiness/liveness probes)
   startup:
     path: /q/health/started
-    failureThreshold: 30
+    # 60 x 2s = 120s of JVM boot budget. 30 (60s) is not enough on a
+    # CPU-constrained node: the kubelet kills the container mid-boot and the
+    # restart loop reads as "kates takes forever to start".
+    failureThreshold: 60
     periodSeconds: 2
+    timeoutSeconds: 3
   # -- Readiness probe
   readiness:
-    path: /api/health
+    path: /q/health/ready
     initialDelaySeconds: 5
     periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
   # -- Liveness probe
   liveness:
     path: /q/health/live
     initialDelaySeconds: 15
     periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
 
 # -- Container lifecycle hooks
 lifecycle:
