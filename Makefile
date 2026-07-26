@@ -1,3 +1,4 @@
+.PHONY: tests test-unit test-java test-java-it test-cli kates-image-local kates-local kates-local-restart
 .PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all chaos-chart-package chaos-chart-push strimzi-chart-package strimzi-chart-push platform-chart-deps platform-chart-lint platform-chart-package platform-chart-push connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
 
 .DEFAULT_GOAL := help
@@ -216,6 +217,29 @@ jaeger:
 	@echo "🔍 Deploying Jaeger (distributed tracing)..."
 	./scripts/deploy-jaeger.sh
 
+# ── Source test suites ───────────────────────────────────────────────────────
+# Note: `make test` and friends below drive Kafka performance runs against a
+# LIVE cluster — they are not the source test suite. These targets are.
+tests: test-unit
+	@echo "✅ Source test suites passed."
+
+test-unit: test-java test-cli
+	@echo "✅ Unit tests passed (Java + CLI)."
+
+test-java:
+	@echo "🧪 Running Java unit tests (kates/)..."
+	cd kates && ./mvnw test -B
+
+# Testcontainers-backed ITs (engine lifecycle, outbox, persistence). Needs a
+# working Docker daemon; skipped tests are worse than a clear failure here.
+test-java-it:
+	@echo "🧪 Running Java integration tests (requires Docker)..."
+	cd kates && ./mvnw verify -B
+
+test-cli:
+	@echo "🧪 Running Go CLI tests (cli/)..."
+	cd cli && go test ./... -timeout 300s
+
 # Run Performance Test
 test:
 	@echo "🧪 Running Performance Test..."
@@ -290,9 +314,9 @@ kates: kates-build kates-deploy
 kates-build:
 	@if docker image inspect kates:latest >/dev/null 2>&1; then \
 		echo "✅ Kates image already exists locally (kates:latest)."; \
-	elif docker pull ghcr.io/bmscomp/kates:1.16.0; then \
+	elif docker pull ghcr.io/bmscomp/kates:$(KATES_APP_VERSION); then \
 		echo "✅ Pulled Kates image from registry."; \
-		docker tag ghcr.io/bmscomp/kates:1.16.0 kates:latest; \
+		docker tag ghcr.io/bmscomp/kates:$(KATES_APP_VERSION) kates:latest; \
 	else \
 		echo "🔨 Building Kates (JVM + CLI) from source..."; \
 		cd kates && ./mvnw package -DskipTests -B && \
@@ -300,6 +324,43 @@ kates-build:
 	fi
 	kind load docker-image kates:latest --name $(CLUSTER_NAME)
 	@echo "✅ Kates image loaded into Kind"
+	@echo "ℹ️  This target prefers a cached or published image. To guarantee your"
+	@echo "   working tree is what runs, use 'make kates-local' instead."
+
+# ── Local-only image: always built from the working tree ─────────────────────
+#
+# Deliberately NOT `kates-build`. That target prefers an existing local tag,
+# then a published image, and only builds as a last resort — so a source fix
+# can silently never run, and you end up debugging the registry's build while
+# reading your own diff. Everything below always compiles what is on disk,
+# tags it kates:local, and pins the deployment to it with pullPolicy: Never so
+# the kubelet cannot substitute a registry image on any later restart.
+kates-image-local:
+	@echo "🔨 Building kates:local from the working tree (no pull, no cache reuse)..."
+	docker build -f kates/Dockerfile -t kates:local .
+	@echo "📦 Loading kates:local into Kind cluster '$(CLUSTER_NAME)'..."
+	kind load docker-image kates:local --name $(CLUSTER_NAME)
+	@echo "✅ kates:local is on the node. Digest:"
+	@docker image inspect kates:local --format '   {{.Id}}  ({{.Created}})'
+
+kates-local: kates-image-local
+	@echo "🚀 Deploying kates:local (namespace: $(KATES_NS))..."
+	helm upgrade --install kates $(CHART_DIR) \
+		-n $(KATES_NS) --create-namespace \
+		-f $(CHART_DIR)/values-local.yaml \
+		--timeout 8m
+	@echo "⏳ Waiting for rollout..."
+	kubectl rollout status deployment/kates -n $(KATES_NS) --timeout=300s
+	@echo "✅ kates:local running. Verify the pod is on YOUR image:"
+	@kubectl get pod -n $(KATES_NS) -l app.kubernetes.io/instance=kates \
+		-o jsonpath='{range .items[*]}   {.metadata.name}  {.spec.containers[0].image}  {.spec.containers[0].imagePullPolicy}{"\n"}{end}'
+
+# Force a fresh pod even when the tag is unchanged: Kubernetes sees no spec
+# change for the same tag, so a plain `helm upgrade` would keep the old pod
+# (running the old bytes) very much alive.
+kates-local-restart: kates-image-local
+	kubectl rollout restart deployment/kates -n $(KATES_NS)
+	kubectl rollout status deployment/kates -n $(KATES_NS) --timeout=300s
 
 kates-native:
 	@if docker image inspect kates:native >/dev/null 2>&1; then \
@@ -424,6 +485,10 @@ KATES_IMAGE    ?= kates:latest
 CHART_REGISTRY ?= oci://ghcr.io/bmscomp/charts
 CHART_DIR      := charts/kates
 CHART_VERSION  := $(shell grep '^version:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}')
+# Read from the chart instead of hardcoding: the pull fallback in kates-build
+# was pinned to 1.16.0 long after appVersion moved on, so "pulled the image"
+# quietly meant "pulled a stale one".
+KATES_APP_VERSION := $(shell grep '^appVersion:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}' | tr -d '"')
 kates-helm: kates-helm-deploy
 
 kates-helm-deploy:

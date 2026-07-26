@@ -46,7 +46,11 @@ ENV HOME=/home/kates
 
 EXPOSE 8080
 
+# /q/health/live, not /api/health: the latter makes a live Kafka AdminClient
+# call per request, so it blows the 3s timeout and reports the container
+# unhealthy whenever the broker under test is slow or down — which for a Kafka
+# testing tool is a normal, expected state, not a broken container.
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:8080/api/health || exit 1
+  CMD curl -f http://localhost:8080/q/health/live || exit 1
 
 ENTRYPOINT ["java", "-jar", "quarkus-run.jar"]
