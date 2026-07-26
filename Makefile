@@ -1,4 +1,4 @@
-.PHONY: tests test-unit test-java test-java-it test-cli kates-image-local kates-local kates-local-restart
+.PHONY: tests test-unit test-java test-java-it test-cli kates-image-local kates-local kates-local-restart kates-local-recreate-db
 .PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all chaos-chart-package chaos-chart-push strimzi-chart-package strimzi-chart-push platform-chart-deps platform-chart-lint platform-chart-package platform-chart-push connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
 
 .DEFAULT_GOAL := help
@@ -345,10 +345,21 @@ kates-image-local:
 
 kates-local: kates-image-local
 	@echo "🚀 Deploying kates:local (namespace: $(KATES_NS))..."
-	helm upgrade --install kates $(CHART_DIR) \
+	@helm upgrade --install kates $(CHART_DIR) \
 		-n $(KATES_NS) --create-namespace \
 		-f $(CHART_DIR)/values-local.yaml \
-		--timeout 8m
+		--timeout 8m \
+	|| { \
+		echo ""; \
+		echo "❌ helm upgrade failed. If it complained that 'updates to statefulset"; \
+		echo "   spec ... are forbidden', an immutable field on kates-postgresql"; \
+		echo "   changed (volumeClaimTemplates, serviceName, selector). Recreate the"; \
+		echo "   StatefulSet without touching the data, then retry:"; \
+		echo ""; \
+		echo "     make kates-local-recreate-db"; \
+		echo ""; \
+		exit 1; \
+	}
 	@echo "⏳ Waiting for rollout..."
 	kubectl rollout status deployment/kates -n $(KATES_NS) --timeout=300s
 	@echo "✅ kates:local running. Verify the pod is on YOUR image:"
@@ -361,6 +372,17 @@ kates-local: kates-image-local
 kates-local-restart: kates-image-local
 	kubectl rollout restart deployment/kates -n $(KATES_NS)
 	kubectl rollout status deployment/kates -n $(KATES_NS) --timeout=300s
+
+# Escape hatch for immutable-field conflicts on the bundled PostgreSQL.
+# --cascade=orphan is the whole point: it removes only the StatefulSet object,
+# leaving the running pod AND the PVC in place, so Helm can recreate the spec
+# and adopt them. The database survives. A plain delete would take the pod and
+# (depending on the retention policy) the volume with it.
+kates-local-recreate-db:
+	@echo "🗄  Recreating the kates-postgresql StatefulSet, keeping pod + PVC..."
+	kubectl delete statefulset kates-postgresql -n $(KATES_NS) \
+		--cascade=orphan --ignore-not-found
+	@echo "✅ StatefulSet removed (data intact). Re-run: make kates-local"
 
 kates-native:
 	@if docker image inspect kates:native >/dev/null 2>&1; then \

@@ -43,8 +43,12 @@ probes:
 
 postgresql:
   enabled: true
-  storage:
-    size: 512Mi
+  # Storage size is deliberately NOT overridden here. It renders into the
+  # StatefulSet's volumeClaimTemplates, which Kubernetes forbids changing after
+  # creation — so any value other than the chart default turns every subsequent
+  # `helm upgrade` into "updates to statefulset spec ... are forbidden" until
+  # someone deletes the StatefulSet. Shrinking a 1Gi dev volume buys nothing
+  # worth that.
 
 # Single-broker local Kafka: replication factor 3 would leave every topic
 # under-replicated and every produce with acks=all hanging.
