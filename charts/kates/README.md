@@ -75,11 +75,16 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `probes.startup.path` | `/q/health/started` | Startup probe path |
-| `probes.readiness.path` | `/api/health` | Readiness probe path |
+| `probes.readiness.path` | `/q/health/ready` | Readiness probe path. Do not point this at `/api/health` — that endpoint makes a live Kafka AdminClient call per request and will fail the probe whenever brokers are slow |
 | `probes.liveness.path` | `/q/health/live` | Liveness probe path |
-| `probes.startup.failureThreshold` | `30` | Startup probe max failures |
+| `probes.startup.failureThreshold` | `60` | Startup probe max failures (x `periodSeconds` = JVM boot budget) |
+| `probes.startup.timeoutSeconds` | `3` | Startup probe timeout |
 | `probes.readiness.periodSeconds` | `10` | Readiness check interval |
+| `probes.readiness.timeoutSeconds` | `5` | Readiness probe timeout (k8s default of 1s is too tight) |
+| `probes.readiness.failureThreshold` | `3` | Readiness probe max failures |
 | `probes.liveness.periodSeconds` | `30` | Liveness check interval |
+| `probes.liveness.timeoutSeconds` | `5` | Liveness probe timeout |
+| `probes.liveness.failureThreshold` | `3` | Liveness probe max failures |
 | `lifecycle.preStopSleepSeconds` | `5` | Pre-stop sleep for graceful drain |
 
 ### Scaling & Availability

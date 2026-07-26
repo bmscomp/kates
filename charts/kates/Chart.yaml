@@ -2,7 +2,7 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-version: 0.6.0
+version: 0.6.1
 appVersion: "1.21.0"
 keywords:
   - kafka
