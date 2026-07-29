@@ -22,7 +22,7 @@
         <snappy.version>1.1.10.8</snappy.version>
         <zstd.version>1.5.7-7</zstd.version>
         <netty.version>4.1.132.Final</netty.version>
-        <spotless.version>3.8.0</spotless.version>
+        <spotless.version>3.9.0</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
     </properties>
 
