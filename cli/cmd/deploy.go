@@ -329,9 +329,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 // Helpers
 
 var (
-	runExecFn                                      = runExecDefault
-	runExecStdinFn                                 = runExecStdinDefault
-	runHelmFn                                      = runHelmDefault
+	runExecFn      = runExecDefault
+	runExecStdinFn = runExecStdinDefault
+	runHelmFn      = runHelmDefault
+	// Reads a command's output. Every command that INSPECTS the cluster used to
+	// call exec.CommandContext directly, which meant the deploy tests really
+	// shelled out to kubectl: with no cluster they fell into the readiness wait
+	// loops and each test sat there for the full two-minute deadline. Routing
+	// reads through an injectable function makes those paths testable in the
+	// same way the write paths already were.
+	runExecOutputFn                                = runExecOutputDefault
+	runExecCombinedFn                              = runExecCombinedDefault
 	isHelmReleaseDeployedFn                        = isHelmReleaseDeployedDefault
 	defaultExecutor         detect.CommandExecutor = detect.NewOSExecutor()
 )
@@ -370,6 +378,17 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 		return err
 	}
 	return nil
+}
+
+// runExecOutputDefault captures stdout, like exec.Cmd.Output().
+func runExecOutputDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// runExecCombinedDefault captures stdout and stderr, like exec.Cmd.CombinedOutput().
+// Used where the caller inspects error text (e.g. "not found") rather than data.
+func runExecCombinedDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 func runExecStdinDefault(ctx context.Context, name string, args []string, stdinData string) error {

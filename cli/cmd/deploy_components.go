@@ -152,10 +152,10 @@ metadata:
 			for {
 				injected := 0
 				for _, kind := range certMgrWebhookConfigs {
-					out, err := exec.CommandContext(gCtx,
+					out, err := runExecOutputFn(gCtx,
 						"kubectl", "get", kind, "cert-manager-webhook",
 						"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
-					).Output()
+					)
 					if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 						injected++
 					}
@@ -278,10 +278,10 @@ spec:
 			deadline := time.Now().Add(180 * time.Second)
 			for _, crd := range kyvernoCRDs {
 				for {
-					out, checkErr := exec.CommandContext(gCtx,
+					out, checkErr := runExecOutputFn(gCtx,
 						"kubectl", "get", "crd", crd,
 						"-o", "jsonpath={.status.conditions[?(@.type==\"Established\")].status}",
-					).Output()
+					)
 					if checkErr == nil && strings.Contains(string(out), "True") {
 						break
 					}
@@ -541,12 +541,12 @@ metadata:
 		dl.Println("    - Waiting for Entity Operator to start...")
 		eoDeadline := time.Now().Add(5 * time.Minute)
 		for time.Now().Before(eoDeadline) {
-			eoOut, _ := exec.CommandContext(ctx,
+			eoOut, _ := runExecOutputFn(ctx,
 				"kubectl", "get", "pods", "-n", kafkaNS,
 				"-l", "app.kubernetes.io/name=entity-operator",
 				"--no-headers",
 				"-o", "custom-columns=PHASE:.status.phase",
-			).Output()
+			)
 			if strings.Contains(string(eoOut), "Running") {
 				dl.Printf("    %s Entity Operator running\n", output.AccentStyle.Render("✔"))
 				break
@@ -597,8 +597,8 @@ metadata:
 	if connectNS != kafkaNS {
 		// Copy kafka-metrics ConfigMap (required by KafkaConnect metricsConfig)
 		dl.Println("    - Copying kafka-metrics ConfigMap to connect namespace...")
-		metricsData, metricsErr := exec.CommandContext(ctx, "kubectl", "get", "configmap", "kafka-metrics",
-			"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}").Output()
+		metricsData, metricsErr := runExecOutputFn(ctx, "kubectl", "get", "configmap", "kafka-metrics",
+			"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}")
 		if metricsErr == nil && len(metricsData) > 0 {
 			// Build a clean ConfigMap without Helm ownership annotations
 			// to avoid field-manager conflicts on kubectl apply.
@@ -622,12 +622,12 @@ metadata:
 		var jaasBytes []byte
 		secretDeadline := time.Now().Add(2 * time.Minute)
 		for {
-			pwOut, pwErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-				"-n", kafkaNS, "-o", "jsonpath={.data.password}").Output()
+			pwOut, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-connect",
+				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
 			if pwErr == nil && len(strings.TrimSpace(string(pwOut))) > 0 {
 				pwBytes = bytes.TrimSpace(pwOut)
-				jaasOut, jaasErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-					"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}").Output()
+				jaasOut, jaasErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-connect",
+					"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}")
 				if jaasErr == nil {
 					jaasBytes = bytes.TrimSpace(jaasOut)
 				}
@@ -681,9 +681,9 @@ stringData:
 		// Helm says deployed, but verify pods actually exist.
 		// A previous deploy may have installed the chart but the
 		// workload never started (e.g. missing ConfigMap).
-		podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
+		podCheck, _ := runExecOutputFn(ctx, "kubectl", "get", "pods",
 			"-n", connectNS, "-l", "strimzi.io/kind=KafkaConnect",
-			"-o", "jsonpath={.items}").Output()
+			"-o", "jsonpath={.items}")
 		if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
 			dl.Println("    ⚠  Kafka Connect release exists but no pods found — upgrading...")
 			connectDeployed = false
@@ -737,7 +737,7 @@ stringData:
 		monitoringEnabled := deployWithMonitoring
 		if monitoringEnabled {
 			// Cleverly detect if CRDs are actually present before enabling monitoring on Connect
-			out, err := exec.CommandContext(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found").CombinedOutput()
+			out, err := runExecCombinedFn(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found")
 			if err != nil || len(bytes.TrimSpace(out)) == 0 {
 				monitoringEnabled = false
 				dl.Printf("    ⚠  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
@@ -766,7 +766,7 @@ stringData:
 	}
 
 	// Deploy Debezium connector
-	checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers").CombinedOutput()
+	checkOut, checkErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers")
 	if checkErr != nil || strings.Contains(string(checkOut), "not found") {
 		dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
 		connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -817,7 +817,7 @@ spec:
 	}
 
 	// Deploy JDBC Sink connector
-	sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers").CombinedOutput()
+	sinkCheckOut, sinkCheckErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers")
 	if sinkCheckErr != nil || strings.Contains(string(sinkCheckOut), "not found") {
 		dl.Println("    - Deploying JDBC Sink connector...")
 		sinkYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -913,9 +913,8 @@ spec: {}`, appNS)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
 			// The KafkaUser was already waited on in Group B — just read the Secret.
-			pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend",
+			pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-backend",
 				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-			pwBytes, pwErr := pwCmd.Output()
 
 			if pwErr == nil && len(pwBytes) > 0 {
 				dl.Println("    - Copying Kafka SASL credentials to app namespace...")
@@ -971,9 +970,8 @@ spec: {}`, kafkaUINS)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
 				dl.Println("    - Copying kafka-ui SASL credentials to UI namespace...")
-				pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kafka-ui",
+				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kafka-ui",
 					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-				pwBytes, pwErr := pwCmd.Output()
 				if pwErr == nil && len(pwBytes) > 0 {
 					secretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -1045,7 +1043,7 @@ data:
 // updateActiveContextAPIKey syncs the API key from the deployed cluster
 // secret into the active CLI context configuration.
 func updateActiveContextAPIKey(ctx context.Context, appNS string) {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}").Output()
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}")
 	if err != nil {
 		return
 	}
@@ -1100,8 +1098,8 @@ func (dc *deployContext) deployComponent(id, namespace, selector string, timeout
 // Without this, a readiness timeout reported nothing and the real cause
 // (an ACL denial, a bad topic) had to be dug out of the CRs by hand.
 func printConnectorDiagnostics(ctx context.Context, namespace string) {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "-n", namespace,
-		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.conditions[0].type}{"\t"}{.status.conditions[0].message}{"\t"}{.status.connectorStatus.tasks[0].trace}{"\n"}{end}`).Output()
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "kafkaconnector", "-n", namespace,
+		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.conditions[0].type}{"\t"}{.status.conditions[0].message}{"\t"}{.status.connectorStatus.tasks[0].trace}{"\n"}{end}`)
 	if err != nil {
 		return
 	}
