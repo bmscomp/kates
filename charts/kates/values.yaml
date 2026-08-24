@@ -125,8 +125,12 @@ resources:
     cpu: "2"
 
 # -- JVM configuration
+#
+# JVM IMAGE ONLY. A GraalVM native image does not read JAVA_TOOL_OPTIONS, so
+# everything here is silently ignored when running a `-native` tag — see
+# values-native.yaml, which empties it for that reason.
 jvm:
-  # -- JVM options passed via JAVA_TOOL_OPTIONS
+  # -- JVM options passed via JAVA_TOOL_OPTIONS (ignored by the native image)
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
 # -- Pod-level security context (PSS restricted compliant)
