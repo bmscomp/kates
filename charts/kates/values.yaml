@@ -20,8 +20,9 @@ replicaCount: 1
 image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
-  # -- Image tag
-  tag: "1.21.0"
+  # -- Image tag. Must be the release that carries the non-blocking health
+  # endpoints the probe defaults below depend on (>= 1.22.0).
+  tag: "1.22.0"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 

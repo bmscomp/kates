@@ -312,7 +312,7 @@ POST /api/disruptions
 Content-Type: application/json
 ```
 
-Executes a multi-step disruption plan. This is a synchronous operation — the response is returned only after all steps have completed (or failed). For real-time progress monitoring, use the SSE endpoint.
+Executes a multi-step disruption plan. This is an asynchronous operation — the plan is validated, then the response is returned immediately with `202 Accepted` and a report id while the steps run in the background. Poll `GET /api/disruptions/{id}` until the status is terminal, or use the SSE endpoint for real-time progress. Only one plan may run against a cluster at a time; starting a second returns `409 Conflict`.
 
 You can also set `dryRun=true` to simulate the disruption without actually injecting any faults:
 
