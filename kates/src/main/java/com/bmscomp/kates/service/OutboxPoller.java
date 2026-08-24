@@ -33,6 +33,12 @@ import com.bmscomp.kates.persistence.OutboxEventEntity;
  * <p>Retries can therefore publish an event more than once. That is the intended
  * at-least-once semantics, and consumers already deduplicate through the
  * {@code processed_events} ledger.
+ *
+ * <p><b>Retries are not infinite.</b> Every failure is counted, and after
+ * {@code kates.outbox.max-attempts} the event moves to
+ * {@code outbox_dead_letters}. Otherwise a single unpublishable row would be
+ * retried on every poll forever while occupying one of the 50 oldest-first slots
+ * this query reads — a few of them starve the outbox completely.
  */
 @ApplicationScoped
 public class OutboxPoller {
@@ -45,6 +51,9 @@ public class OutboxPoller {
 
     @Inject
     OutboxCleaner cleaner;
+
+    @Inject
+    com.bmscomp.kates.engine.KatesExecutor executor;
 
     @Channel("test-events-out")
     Emitter<TestEvent> eventEmitter;
@@ -76,12 +85,16 @@ public class OutboxPoller {
             try {
                 TestEvent testEvent = MAPPER.readValue(event.getPayload(), TestEvent.class);
                 eventEmitter.send(testEvent).whenComplete((ignored, failure) -> {
+                    // This callback runs on a Kafka sender thread. Both branches
+                    // do blocking JDBC, so they are handed to the shared
+                    // executor rather than stalling the sender.
                     try {
                         if (failure != null) {
                             LOG.errorf("Outbox event %s not acknowledged, will retry: %s", id, failure.getMessage());
+                            executor.get().execute(() -> cleaner.recordFailure(id, describe(failure)));
                         } else {
                             // Committed to the broker — safe to forget.
-                            cleaner.delete(id);
+                            executor.get().execute(() -> cleaner.delete(id));
                         }
                     } finally {
                         inFlight.remove(id);
@@ -90,7 +103,16 @@ public class OutboxPoller {
             } catch (Exception e) {
                 inFlight.remove(id);
                 LOG.error("Failed to publish outbox event: " + id, e);
+                // A payload that will not deserialise fails identically on every
+                // poll; count the attempt so it is eventually retired instead of
+                // blocking a slot in the poll window forever. REQUIRES_NEW, so
+                // it commits independently of this transaction.
+                cleaner.recordFailure(id, describe(e));
             }
         }
+    }
+
+    private static String describe(Throwable t) {
+        return t == null ? "unknown" : t.getClass().getSimpleName() + ": " + t.getMessage();
     }
 }

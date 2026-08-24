@@ -4,9 +4,18 @@ import java.time.Instant;
 import java.util.UUID;
 import jakarta.persistence.*;
 
+/**
+ * An outbox event that could not be published after the configured number of
+ * attempts.
+ *
+ * <p>Kept rather than deleted: the outbox exists so an event is never lost, and
+ * dropping the ones that fail hardest would quietly break exactly the guarantee
+ * it provides. Rows here are for operators — inspect, fix the cause, replay by
+ * re-inserting into {@code outbox_events}.
+ */
 @Entity
-@Table(name = "outbox_events")
-public class OutboxEventEntity {
+@Table(name = "outbox_dead_letters")
+public class OutboxDeadLetterEntity {
 
     @Id
     @Column(name = "id")
@@ -27,26 +36,29 @@ public class OutboxEventEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    /**
-     * Failed publish attempts. A row that can never be published (unparseable
-     * payload, permanently rejected message) would otherwise be retried on every
-     * poll forever while holding a slot at the head of the poll window.
-     */
+    @Column(name = "failed_at", nullable = false)
+    private Instant failedAt;
+
     @Column(name = "attempts", nullable = false)
     private int attempts;
 
     @Column(name = "last_error", columnDefinition = "text")
     private String lastError;
 
-    public OutboxEventEntity() {}
+    public OutboxDeadLetterEntity() {}
 
-    public OutboxEventEntity(String aggregateId, String aggregateType, String eventType, String payload) {
-        this.id = UUID.randomUUID();
-        this.aggregateId = aggregateId;
-        this.aggregateType = aggregateType;
-        this.eventType = eventType;
-        this.payload = payload;
-        this.createdAt = Instant.now();
+    public static OutboxDeadLetterEntity from(OutboxEventEntity event, String error) {
+        OutboxDeadLetterEntity dead = new OutboxDeadLetterEntity();
+        dead.id = event.getId();
+        dead.aggregateId = event.getAggregateId();
+        dead.aggregateType = event.getAggregateType();
+        dead.eventType = event.getEventType();
+        dead.payload = event.getPayload();
+        dead.createdAt = event.getCreatedAt();
+        dead.failedAt = Instant.now();
+        dead.attempts = event.getAttempts();
+        dead.lastError = error;
+        return dead;
     }
 
     public UUID getId() {
@@ -73,19 +85,15 @@ public class OutboxEventEntity {
         return createdAt;
     }
 
+    public Instant getFailedAt() {
+        return failedAt;
+    }
+
     public int getAttempts() {
         return attempts;
     }
 
-    public void setAttempts(int attempts) {
-        this.attempts = attempts;
-    }
-
     public String getLastError() {
         return lastError;
-    }
-
-    public void setLastError(String lastError) {
-        this.lastError = lastError;
     }
 }

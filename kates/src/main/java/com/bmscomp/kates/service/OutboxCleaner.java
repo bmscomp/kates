@@ -12,6 +12,7 @@ import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.persistence.OutboxDeadLetterEntity;
 import com.bmscomp.kates.persistence.OutboxEventEntity;
 
 /**
@@ -29,6 +30,14 @@ public class OutboxCleaner {
 
     @ConfigProperty(name = "kates.outbox.processed-events-retention-days", defaultValue = "7")
     int processedRetentionDays;
+
+    /**
+     * Publish attempts before an event is moved to {@code outbox_dead_letters}.
+     * At the default 2s poll interval that is roughly ten minutes of retrying a
+     * transient broker problem before giving up on the row.
+     */
+    @ConfigProperty(name = "kates.outbox.max-attempts", defaultValue = "10")
+    int maxAttempts;
 
     /**
      * Deletes a published event.
@@ -49,6 +58,57 @@ public class OutboxCleaner {
             // consumers deduplicate — never surface it into the messaging layer.
             LOG.warnf("Could not delete published outbox event %s: %s", id, e.getMessage());
         }
+    }
+
+    /**
+     * Records a failed publish attempt, and retires the event once it has
+     * exhausted {@code kates.outbox.max-attempts}.
+     *
+     * <p>Without this an event that can never be published — an unparseable
+     * payload, a message the broker permanently rejects — is retried on every
+     * poll forever. Because the poller reads the OLDEST 50 rows, such a row also
+     * permanently occupies one of those 50 slots, so a handful of them starve
+     * the outbox while the table keeps growing.
+     *
+     * <p>Retired events are moved to {@code outbox_dead_letters} rather than
+     * deleted: losing an event silently is the one failure mode an outbox exists
+     * to prevent.
+     *
+     * @return true if the event was retired to the dead-letter table
+     */
+    @Transactional(Transactional.TxType.REQUIRES_NEW)
+    public boolean recordFailure(UUID id, String error) {
+        try {
+            OutboxEventEntity event = em.find(OutboxEventEntity.class, id);
+            if (event == null) {
+                return false; // Published or retired by another replica.
+            }
+            event.setAttempts(event.getAttempts() + 1);
+            event.setLastError(truncate(error));
+
+            if (event.getAttempts() < maxAttempts) {
+                return false;
+            }
+
+            em.persist(OutboxDeadLetterEntity.from(event, truncate(error)));
+            em.remove(event);
+            LOG.errorf(
+                    "Outbox event %s (%s) moved to outbox_dead_letters after %d attempts: %s",
+                    id, event.getEventType(), event.getAttempts(), error);
+            return true;
+        } catch (Exception e) {
+            // Never surface into the messaging layer: the row simply stays and
+            // is retried on the next poll.
+            LOG.warnf("Could not record outbox failure for %s: %s", id, e.getMessage());
+            return false;
+        }
+    }
+
+    private static String truncate(String error) {
+        if (error == null) {
+            return null;
+        }
+        return error.length() <= 2000 ? error : error.substring(0, 2000) + "…";
     }
 
     /**
