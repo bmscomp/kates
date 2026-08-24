@@ -43,6 +43,18 @@ public class NativeKafkaBackend implements BenchmarkBackend {
     private final CdcIntegrationService cdcIntegrationService;
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
 
+    /**
+     * Task ids that have finished, oldest first. Finished workers used to stay
+     * in {@link #activeWorkers} for the life of the JVM, each still holding its
+     * ack bitset and histogram; the orchestrator polls a task after it ends, so
+     * they cannot be dropped immediately either. Instead a finished worker
+     * releases its heavy state right away and its final status is retained for
+     * the most recent {@link #MAX_RETAINED_COMPLETED} tasks.
+     */
+    private final java.util.Queue<String> completedOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    private static final int MAX_RETAINED_COMPLETED = 500;
+
     @Inject
     public NativeKafkaBackend(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
@@ -76,7 +88,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         if (state == null) {
             return BenchmarkStatus.builder(TaskStatus.DONE).build();
         }
-        return state.toStatus();
+        BenchmarkStatus finalStatus = state.finalStatus;
+        return finalStatus != null ? finalStatus : state.toStatus();
     }
 
     @Override
@@ -108,11 +121,32 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             state.status = TaskStatus.FAILED;
         } finally {
             state.endTimeMs = System.currentTimeMillis();
+            // Snapshot the terminal status BEFORE releasing anything: every
+            // later poll is served from this immutable copy, so percentiles and
+            // record counts survive the cleanup below.
+            state.finalStatus = state.toStatus();
             // Unregister the per-task latency gauges: task ids are unbounded, so
             // leaving them registered would grow the meter registry for the life
             // of the process. Only the METERS go away — the histogram data stays
             // readable, so the final poll still reports accurate percentiles.
             state.histogram.close();
+            state.releaseHeavyState();
+            retireWorker(task.getTaskId());
+        }
+    }
+
+    /**
+     * Records a finished task and evicts the oldest retained ones, so the
+     * worker map stays bounded no matter how many tasks the process runs.
+     */
+    private void retireWorker(String taskId) {
+        completedOrder.add(taskId);
+        while (completedOrder.size() > MAX_RETAINED_COMPLETED) {
+            String evicted = completedOrder.poll();
+            if (evicted == null) {
+                break;
+            }
+            activeWorkers.remove(evicted);
         }
     }
 
@@ -388,6 +422,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         volatile IntegrityResult integrityResult;
         volatile Map<String, Long> cdcPhaseDurations;
         volatile String currentPhase;
+        /** Immutable terminal snapshot; every poll after the run is served from it. */
+        volatile BenchmarkStatus finalStatus;
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
@@ -395,6 +431,16 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             this.runIdHash = SequencedPayload.hashRunId(hashSource);
             this.histogram = new LatencyHistogram(task.getTaskId());
             this.ackTracker = new AckTracker(task.getMaxMessages());
+        }
+
+        /**
+         * Frees what a finished run no longer needs: the ack bitset (up to
+         * ~125 MB on a large integrity run) and the verifier's consumed set.
+         * Must run only after {@link #finalStatus} has been captured.
+         */
+        void releaseHeavyState() {
+            ackTracker.release();
+            verifier = null;
         }
 
         BenchmarkStatus toStatus() {

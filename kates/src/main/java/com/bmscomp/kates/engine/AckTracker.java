@@ -6,6 +6,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 /**
  * Thread-safe tracker for producer acknowledgments during data integrity tests.
@@ -19,6 +20,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * sequence: a 10M-record INTEGRITY or ENDURANCE run allocated ~20M map entries
  * (hundreds of MB, plus the GC pressure of doing it on the ack path) where the
  * same information now costs ~1.25 MB.
+ *
+ * <p><b>Allocation is lazy.</b> Capacity comes from the caller-supplied record
+ * count, which on the API path is whatever the client asked for — sizing the
+ * whole bitset up front let a single request reserve hundreds of MB before
+ * producing one record. The bitset is therefore split into chunks that are
+ * allocated on first write, so memory tracks the sequences actually acked
+ * rather than the number claimed.
  *
  * <p>All timestamps use {@link System#nanoTime()} (monotonic clock) for accuracy.
  * Failure windows are tracked atomically to prevent race conditions between
@@ -35,6 +43,11 @@ public class AckTracker {
 
     private static final long DEFAULT_CAPACITY = 1_000_000L;
 
+    /** Sequences covered by one lazily allocated chunk (512 KB of longs). */
+    private static final int SEQUENCES_PER_CHUNK = 1 << 22;
+
+    private static final int WORDS_PER_CHUNK = SEQUENCES_PER_CHUNK >>> 6;
+
     /**
      * A single continuous failure window with start/end nano timestamps.
      */
@@ -48,8 +61,14 @@ public class AckTracker {
         }
     }
 
-    /** One bit per sequence; CAS-updated so concurrent callbacks are safe. */
-    private final AtomicLongArray ackedBits;
+    /**
+     * One bit per sequence, held in chunks that are allocated on first write.
+     * CAS-updated so concurrent callbacks are safe.
+     */
+    private final AtomicReferenceArray<AtomicLongArray> chunks;
+
+    /** Total words the full capacity would need, if every chunk were allocated. */
+    private final int wordCount;
 
     private final long capacity;
 
@@ -70,6 +89,9 @@ public class AckTracker {
 
     private volatile long lastAckedSendNanos = -1;
 
+    /** Set once the bitset has been released; blocks re-allocation of chunks. */
+    private volatile boolean released;
+
     /** Uses the default capacity; prefer {@link #AckTracker(long)}. */
     public AckTracker() {
         this(DEFAULT_CAPACITY);
@@ -82,7 +104,11 @@ public class AckTracker {
     public AckTracker(long expectedSequences) {
         long requested = expectedSequences > 0 ? expectedSequences : DEFAULT_CAPACITY;
         this.capacity = Math.min(requested, MAX_TRACKED_SEQUENCES);
-        this.ackedBits = new AtomicLongArray((int) ((this.capacity + 63) >>> 6));
+        long words = (this.capacity + 63) >>> 6;
+        this.wordCount = (int) words;
+        int chunkCount = (int) ((words + WORDS_PER_CHUNK - 1) / WORDS_PER_CHUNK);
+        // Only the chunk table is allocated up front: ~2 KB even at the 1e9 cap.
+        this.chunks = new AtomicReferenceArray<>(Math.max(1, chunkCount));
     }
 
     /**
@@ -134,14 +160,36 @@ public class AckTracker {
             return; // Outside the tracked range; counters still reflect it.
         }
         int word = (int) (sequence >>> 6);
+        int chunkIndex = word / WORDS_PER_CHUNK;
+        int offset = word % WORDS_PER_CHUNK;
+        AtomicLongArray chunk = chunkForWrite(chunkIndex);
+        if (chunk == null) {
+            return; // Released after the run finished; counters still hold.
+        }
         long mask = 1L << (sequence & 63);
         long current;
         do {
-            current = ackedBits.get(word);
+            current = chunk.get(offset);
             if ((current & mask) != 0) {
                 return; // Already set.
             }
-        } while (!ackedBits.compareAndSet(word, current, current | mask));
+        } while (!chunk.compareAndSet(offset, current, current | mask));
+    }
+
+    /** Returns the chunk holding {@code chunkIndex}, allocating it on first use. */
+    private AtomicLongArray chunkForWrite(int chunkIndex) {
+        if (released) {
+            return null;
+        }
+        AtomicLongArray chunk = chunks.get(chunkIndex);
+        if (chunk != null) {
+            return chunk;
+        }
+        int size = Math.min(WORDS_PER_CHUNK, wordCount - chunkIndex * WORDS_PER_CHUNK);
+        AtomicLongArray created = new AtomicLongArray(Math.max(1, size));
+        // Losers of the race take the winner's chunk; no bits can be lost,
+        // because a losing thread has not written to its own copy yet.
+        return chunks.compareAndSet(chunkIndex, null, created) ? created : chunks.get(chunkIndex);
     }
 
     public long getTotalSent() {
@@ -211,11 +259,37 @@ public class AckTracker {
      * never allocates per record.
      */
     public BitSet getAckedSet() {
-        long[] words = new long[ackedBits.length()];
-        for (int i = 0; i < words.length; i++) {
-            words[i] = ackedBits.get(i);
+        int highestChunk = -1;
+        for (int i = chunks.length() - 1; i >= 0; i--) {
+            if (chunks.get(i) != null) {
+                highestChunk = i;
+                break;
+            }
         }
-        return BitSet.valueOf(words);
+        if (highestChunk < 0) {
+            return new BitSet();
+        }
+        // Materialise only up to the highest chunk ever written: unallocated
+        // chunks are all zeros, and BitSet drops trailing zero words anyway.
+        int words = Math.min(wordCount, (highestChunk + 1) * WORDS_PER_CHUNK);
+        long[] out = new long[words];
+        for (int i = 0; i < words; i++) {
+            AtomicLongArray chunk = chunks.get(i / WORDS_PER_CHUNK);
+            out[i] = chunk == null ? 0L : chunk.get(i % WORDS_PER_CHUNK);
+        }
+        return BitSet.valueOf(out);
+    }
+
+    /**
+     * Drops the per-sequence bitset once the run is over. Counters, failure
+     * windows and RTO/RPO stay readable; only the memory goes away. Called on
+     * the worker's terminal path so a finished run stops holding its bitset.
+     */
+    public void release() {
+        released = true;
+        for (int i = 0; i < chunks.length(); i++) {
+            chunks.set(i, null);
+        }
     }
 
     /** Highest sequence this tracker records individually. */

@@ -146,9 +146,19 @@ public class TestOrchestrator {
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
         TestRun run = new TestRun(type, spec).withBackend(backendName);
-        repository.save(run);
+        // Register BEFORE the first thing that can throw. A transient failure in
+        // save/fireEvent used to strand the permit forever (the semaphore drained
+        // one permit per failure until restart), because nothing had recorded
+        // this run as a holder yet.
         permitHolders.add(run.getId());
-        fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+        try {
+            repository.save(run);
+            fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+        } catch (RuntimeException e) {
+            releasePermit(run.getId());
+            LOG.error("Failed to register test run: " + run.getId(), e);
+            return com.bmscomp.kates.util.Result.failure(e);
+        }
 
         Thread.startVirtualThread(() -> {
             try {
@@ -270,10 +280,18 @@ public class TestOrchestrator {
                 .withLabels(scenario.getLabels())
                 .withSla(scenario.getSla())
                 .withStatus(TestResult.TaskStatus.RUNNING);
-        repository.save(run);
+        // Same ordering rule as executeTest: hold the permit before anything
+        // that can throw, so a failed save cannot strand it.
         permitHolders.add(run.getId());
-        fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
-        fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
+        try {
+            repository.save(run);
+            fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+            fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
+        } catch (RuntimeException e) {
+            releasePermit(run.getId());
+            LOG.error("Failed to register scenario run: " + run.getId(), e);
+            return com.bmscomp.kates.util.Result.failure(e);
+        }
         runStartNanos.put(run.getId(), System.nanoTime());
 
         try {

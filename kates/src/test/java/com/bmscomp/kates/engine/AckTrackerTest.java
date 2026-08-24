@@ -17,6 +17,49 @@ import org.junit.jupiter.api.Test;
 class AckTrackerTest {
 
     @Test
+    void hugeCapacityAllocatesLazily() {
+        // A client can ask for any record count; sizing the whole bitset up
+        // front reserved ~125 MB per task before a single record was produced.
+        // Constructing many trackers at the cap would OOM if allocation were
+        // still eager (1000 x 125 MB), so this both documents and enforces it.
+        AckTracker[] trackers = new AckTracker[1_000];
+        for (int i = 0; i < trackers.length; i++) {
+            trackers[i] = new AckTracker(1_000_000_000L);
+        }
+
+        // Writes still land at both ends of the range, and only the chunks
+        // actually touched materialise.
+        AckTracker tracker = trackers[0];
+        tracker.recordAcked(0, 1L);
+        tracker.recordAcked(4_000_000L, 2L);
+        BitSet acked = tracker.getAckedSet();
+        assertTrue(acked.get(0));
+        assertTrue(acked.get(4_000_000));
+        assertEquals(2, acked.cardinality());
+        assertEquals(1_000_000_000L, tracker.trackedCapacity());
+    }
+
+    @Test
+    void releaseDropsBitsetButKeepsCounters() {
+        AckTracker tracker = new AckTracker(1_000);
+        tracker.recordSent(1, 10L);
+        tracker.recordAcked(1, 10L);
+        tracker.recordFailed(2);
+
+        tracker.release();
+
+        assertEquals(1, tracker.getTotalSent());
+        assertEquals(1, tracker.getTotalAcked());
+        assertEquals(1, tracker.getTotalFailed());
+        assertEquals(0, tracker.getAckedSet().cardinality(), "bitset is gone after release");
+
+        // Late callbacks after release must not resurrect the bitset.
+        tracker.recordAcked(3, 30L);
+        assertEquals(0, tracker.getAckedSet().cardinality());
+        assertEquals(2, tracker.getTotalAcked());
+    }
+
+    @Test
     void ackedSetReflectsAcknowledgedSequences() {
         AckTracker tracker = new AckTracker(100);
         for (long seq = 0; seq < 10; seq++) {
