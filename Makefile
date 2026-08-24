@@ -1,4 +1,4 @@
-.PHONY: tests test-unit test-java test-java-it test-cli kates-image-local kates-local kates-local-restart kates-local-recreate-db
+.PHONY: tests test-unit test-java test-java-it test-cli kates-image-local kates-local kates-local-restart kates-local-recreate-db kates-image-native-local kates-native-smoke
 .PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all chaos-chart-package chaos-chart-push strimzi-chart-package strimzi-chart-push platform-chart-deps platform-chart-lint platform-chart-package platform-chart-push connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
 
 .DEFAULT_GOAL := help
@@ -115,7 +115,10 @@ monitoring-undeploy:
 	@echo "🗑️ Undeploying monitoring stack..."
 	helm uninstall monitoring -n kafka || true
 	kubectl delete pvc --all -n kafka || true
-	kubectl # delete namespace monitoring || true
+	@# The namespace is deliberately NOT deleted: it is shared with Kafka, and
+	@# removing it here has taken brokers with it. A bare `kubectl` was left on
+	@# this line by a half-finished comment-out, which prints usage and exits 1,
+	@# so the target failed after doing its work.
 
 cert-manager:
 	@echo "🔐 Deploying cert-manager..."
@@ -522,8 +525,12 @@ kates-logs:
 
 kates-undeploy:
 	@echo "🗑️  Removing Kates..."
-	kubectl # kubectl delete namespace kates --ignore-not-found
-	@echo "✅ Kates removed"
+	helm uninstall kates -n $(KATES_NS) --ignore-not-found || true
+	@# The namespace itself is left in place on purpose — it holds the database
+	@# PVC, and dropping it silently destroys every stored run. Delete it by hand
+	@# when that is what you actually want:
+	@#   kubectl delete namespace $(KATES_NS)
+	@echo "✅ Kates removed (namespace $(KATES_NS) and its data kept)"
 
 CLUSTER_NAME   ?= panda
 KATES_NS       ?= kates
@@ -1138,6 +1145,10 @@ help:
 	@echo "  kates                              - Build + deploy Kates (full pipeline)"
 	@echo "  kates-build                        - Build Kates JVM image and load into Kind"
 	@echo "  kates-native                       - Build Kates native image and load into Kind"
+	@echo "  kates-image-local                  - Build kates:local from the working tree (JVM)"
+	@echo "  kates-local                        - Deploy kates:local, pinned with pullPolicy: Never"
+	@echo "  kates-image-native-local           - Build kates:native-local from the working tree"
+	@echo "  kates-native-smoke                 - Smoke-test a native image (IMAGE=... to pick one)"
 	@echo "  tester-build                       - Build Kates Tester image and load into Kind"
 	@echo "  push-images                        - Push kates and tester images to remote registry"
 	@echo "  kates-deploy                       - Apply Kates K8s manifests"
