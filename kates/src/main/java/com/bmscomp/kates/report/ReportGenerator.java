@@ -48,20 +48,42 @@ public class ReportGenerator {
         if (!isTerminal(run.getStatus())) {
             return SlaVerdict.pass();
         }
-        return slaEvaluator.evaluate(run.getSla(), toSlaMetrics(summary));
+        return slaEvaluator.evaluate(run.getSla(), toSlaMetrics(run, summary));
     }
 
     /**
      * Maps an aggregated summary onto the values an SLA is evaluated against.
+     *
+     * <p>Resilience values come from the run's integrity results rather than the
+     * summary, which does not carry them; the worst value across tasks is used,
+     * and -1 means the run had no integrity check so the corresponding
+     * constraint is skipped instead of silently passing.
      */
-    private static com.bmscomp.kates.domain.SlaMetrics toSlaMetrics(ReportSummary summary) {
+    private static com.bmscomp.kates.domain.SlaMetrics toSlaMetrics(TestRun run, ReportSummary summary) {
+        double dataLossPercent = -1;
+        double maxRtoMs = -1;
+        double rpoMs = -1;
+
+        for (TestResult result : run.getResults()) {
+            com.bmscomp.kates.domain.IntegrityResult integrity = result.getIntegrity();
+            if (integrity == null) {
+                continue;
+            }
+            dataLossPercent = Math.max(dataLossPercent, integrity.dataLossPercent());
+            maxRtoMs = Math.max(maxRtoMs, integrity.maxRtoMs());
+            rpoMs = Math.max(rpoMs, integrity.rpoMs());
+        }
+
         return new com.bmscomp.kates.domain.SlaMetrics(
                 summary.p99LatencyMs(),
                 summary.p999LatencyMs(),
                 summary.avgLatencyMs(),
                 summary.avgThroughputRecPerSec(),
                 summary.totalRecords(),
-                summary.errorRate());
+                summary.errorRate(),
+                dataLossPercent,
+                maxRtoMs,
+                rpoMs);
     }
 
     /**
