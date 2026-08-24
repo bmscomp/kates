@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: kates
-        image: ghcr.io/bmscomp/kates:1.11.0
+        image: ghcr.io/bmscomp/kates:1.22.0
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -62,18 +62,31 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "2"
+        # Same probe rules as the Helm chart, which these manifests drifted from.
+        # /api/health is a Kafka reachability report: it makes a blocking
+        # AdminClient round-trip per request, so a cluster whose brokers are
+        # still coming up — or deliberately down, which is normal for a chaos
+        # tool — never goes Ready. /q/health/ready reads a cached value instead.
+        startupProbe:
+          httpGet:
+            path: /q/health/started
+            port: 8080
+          failureThreshold: 60
+          periodSeconds: 2
+          timeoutSeconds: 3
         readinessProbe:
           httpGet:
-            path: /api/health
+            path: /q/health/ready
             port: 8080
           initialDelaySeconds: 5
-          timeoutSeconds: 10
+          timeoutSeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /q/health/live
             port: 8080
           initialDelaySeconds: 10
+          timeoutSeconds: 5
           periodSeconds: 30
       volumes:
       - name: tmp
