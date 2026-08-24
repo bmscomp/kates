@@ -40,11 +40,15 @@ COPY kates/src src
 # march=compatibility: without it the compiler targets the CPU of the BUILD
 # machine (a modern CI runner), and the binary dies with SIGILL on older
 # hardware. Portability is worth more here than a few percent of throughput,
-# since the workload's cost is Kafka I/O, not local computation.
+# since the workload's cost is Kafka I/O, not local computation. It is applied
+# on x86-64 only: -march levels are an AMD64 concept, and passing it on aarch64
+# has been rejected outright by some GraalVM releases.
 RUN --mount=type=cache,target=/root/.m2 \
+  MARCH_ARG=""; \
+  if [ "$(uname -m)" = "x86_64" ]; then MARCH_ARG="-Dquarkus.native.march=compatibility"; fi; \
   ./mvnw package -Dnative -DskipTests -B \
   -Dquarkus.native.native-image-xmx=8g \
-  -Dquarkus.native.march=compatibility \
+  ${MARCH_ARG} \
   && mv target/*-runner target/kates-native
 
 # Extract platform-specific JNI native libraries from Maven JARs
@@ -81,7 +85,7 @@ COPY --from=builder /build/native-libs/ ./lib/
 COPY --from=cli-builder /kates-cli /usr/local/bin/kates
 
 RUN chmod +x kates \
-  && microdnf install -y shadow-utils \
+  && microdnf install -y shadow-utils curl \
   && groupadd -r kates && useradd -r -g kates -d /home/kates kates \
   && mkdir -p /home/kates \
   && printf 'current-context: local\ncontexts:\n  local:\n    url: http://localhost:8080\n    output: table\n' > /home/kates/.kates.yaml \

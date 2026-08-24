@@ -38,7 +38,15 @@ class NativeReflectionRegistryTest {
             "com/bmscomp/kates/domain",
             "com/bmscomp/kates/report",
             "com/bmscomp/kates/export",
-            "com/bmscomp/kates/trogdor");
+            "com/bmscomp/kates/trogdor",
+            // The packages where the gaps actually were: error bodies, trend
+            // responses, disruption reports and their nested types, resilience
+            // payloads. Scanning only the tidy packages proved nothing.
+            "com/bmscomp/kates/api",
+            "com/bmscomp/kates/trend",
+            "com/bmscomp/kates/disruption",
+            "com/bmscomp/kates/chaos",
+            "com/bmscomp/kates/resilience");
 
     /**
      * Classes that live in those packages but never get serialized: CDI beans,
@@ -48,7 +56,19 @@ class NativeReflectionRegistryTest {
     private static final Set<String> NOT_SERIALIZED = Set.of(
             // Internal carrier between the engine and the SLA evaluator; never
             // leaves the process.
-            "com.bmscomp.kates.domain.SlaMetrics");
+            "com.bmscomp.kates.domain.SlaMetrics",
+            // Control-flow result between the launcher and the two disruption
+            // resources; the resources build the HTTP body themselves.
+            "com.bmscomp.kates.disruption.DisruptionLauncher$LaunchResult",
+            // Namespace holder for the request records nested inside it.
+            "com.bmscomp.kates.disruption.DisruptionDtos",
+            // Live Kubernetes watch handle and in-process registries — held, not
+            // serialised.
+            "com.bmscomp.kates.chaos.K8sPodWatcher$WatchSession",
+            "com.bmscomp.kates.chaos.ProbeRegistry",
+            "com.bmscomp.kates.chaos.KafkaProbes",
+            "com.bmscomp.kates.resilience.ResilienceScenarios",
+            "com.bmscomp.kates.api.OpenApiConfig");
 
     @Test
     @DisplayName("every DTO in a payload package is registered for reflection")
@@ -136,6 +156,11 @@ class NativeReflectionRegistryTest {
         if (Throwable.class.isAssignableFrom(type)) {
             return false;
         }
+        // A class that registers itself is registered — the failure message
+        // offers that as a fix, so it has to be accepted as one.
+        if (hasAnnotation(type, "io.quarkus.runtime.annotations.RegisterForReflection")) {
+            return false;
+        }
         // A nested class must be static to be instantiable by Jackson.
         if (type.getEnclosingClass() != null && !Modifier.isStatic(type.getModifiers())) {
             return false;
@@ -143,14 +168,43 @@ class NativeReflectionRegistryTest {
         return !isManagedComponent(type);
     }
 
-    /** CDI beans, JAX-RS resources and JPA entities are not JSON payloads. */
+    /**
+     * Things that are wired into the runtime rather than written to a response:
+     * CDI beans, JAX-RS resources and providers, health checks, JPA entities,
+     * and the Kubernetes custom resources the fabric8 extension registers on our
+     * behalf. Builders are excluded too — Jackson never sees one.
+     */
     private static boolean isManagedComponent(Class<?> type) {
+        if (type.getSimpleName().endsWith("Builder")) {
+            return true;
+        }
+        if (isKubernetesResource(type)) {
+            return true;
+        }
         return hasAnnotation(type, "jakarta.enterprise.context.ApplicationScoped")
                 || hasAnnotation(type, "jakarta.enterprise.context.RequestScoped")
                 || hasAnnotation(type, "jakarta.inject.Singleton")
                 || hasAnnotation(type, "jakarta.ws.rs.Path")
+                || hasAnnotation(type, "jakarta.ws.rs.ext.Provider")
                 || hasAnnotation(type, "jakarta.persistence.Entity")
-                || hasAnnotation(type, "io.quarkus.scheduler.Scheduled");
+                || hasAnnotation(type, "io.quarkus.scheduler.Scheduled")
+                || hasAnnotation(type, "org.eclipse.microprofile.health.Readiness")
+                || hasAnnotation(type, "org.eclipse.microprofile.health.Liveness");
+    }
+
+    /**
+     * Litmus CRD models and anything else in the fabric8 object graph: the
+     * kubernetes-client extension registers those for reflection itself.
+     */
+    private static boolean isKubernetesResource(Class<?> type) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            if (current.getName().startsWith("io.fabric8.kubernetes")) {
+                return true;
+            }
+        }
+        // Nested spec/status models of a custom resource live beside it.
+        Class<?> enclosing = type.getEnclosingClass();
+        return enclosing != null && enclosing != type && isKubernetesResource(enclosing);
     }
 
     private static boolean hasAnnotation(Class<?> type, String annotationName) {

@@ -99,6 +99,13 @@ spec:
             name: {{ include "kates.dbSecretName" . }}
             optional: true
         {{- end }}
+        {{- with .Values.containerArgs }}
+        # Replaces the image's CMD. Its one current use is the native image,
+        # whose heap percentage is set there because a native binary ignores
+        # JAVA_TOOL_OPTIONS entirely.
+        args:
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
         env:
         {{- if .Values.kafka.clientRack }}
         - name: KATES_KAFKA_CLIENT_RACK
