@@ -53,6 +53,9 @@ public class DisruptionOrchestrator {
     @Inject
     KatesMetrics katesMetrics;
 
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
     String kafkaNamespace;
 
@@ -65,7 +68,37 @@ public class DisruptionOrchestrator {
     @ConfigProperty(name = "kates.chaos.recovery.timeout-sec", defaultValue = "300")
     int recoveryTimeoutSec;
 
+    /**
+     * Executes a plan, refusing to start while another plan is running against
+     * the same cluster. Every entry point (API, playbook, scheduler) funnels
+     * through here, so the guard cannot be bypassed by adding a caller.
+     */
     public DisruptionReport execute(DisruptionPlan plan) {
+        String target = concurrencyGuard.currentTarget();
+        String token = plan.getName() + "#" + UUID.randomUUID();
+
+        if (!concurrencyGuard.tryAcquire(target, token)) {
+            String holder = concurrencyGuard.activeToken(target).orElse("unknown");
+            LOG.warnf(
+                    "Plan '%s' rejected: another disruption (%s) is already running against %s",
+                    plan.getName(), holder, target);
+            DisruptionReport rejected = new DisruptionReport();
+            rejected.setPlanName(plan.getName());
+            rejected.setStatus("REJECTED");
+            rejected.setValidationWarnings(List.of("ERROR: another disruption plan is already running against "
+                    + target + " (" + holder + "). Concurrent plans race the rollback"
+                    + " state stored on the target, which can leave the cluster under-scaled."));
+            return rejected;
+        }
+
+        try {
+            return executePlan(plan);
+        } finally {
+            concurrencyGuard.release(target, token);
+        }
+    }
+
+    private DisruptionReport executePlan(DisruptionPlan plan) {
         long startMs = System.currentTimeMillis();
         String disruptionId = plan.getName();
         DisruptionReport report = new DisruptionReport();

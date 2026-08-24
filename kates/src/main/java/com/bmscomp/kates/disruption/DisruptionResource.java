@@ -44,12 +44,16 @@ public class DisruptionResource {
     @Inject
     com.bmscomp.kates.engine.KatesExecutor executor;
 
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
     @POST
     @Operation(
             summary = "Execute a disruption",
             description =
                     "Validates a disruption plan and starts it asynchronously. Returns 202 with a report id; poll GET /api/disruptions/{id} for progress and the final report.")
     @APIResponse(responseCode = "202", description = "Disruption accepted for execution")
+    @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
     @APIResponse(responseCode = "422", description = "Disruption rejected by safety guard")
     public Response executeDisruption(
             DisruptionPlan plan,
@@ -68,6 +72,23 @@ public class DisruptionResource {
             LOG.info("Dry-run for disruption plan: " + plan.getName());
             DisruptionSafetyGuard.DryRunResult result = safetyGuard.dryRun(plan);
             return Response.ok(result).build();
+        }
+
+        // Fast path: refuse an obviously concurrent plan with 409 rather than a
+        // 202 the caller has to poll to discover was rejected. This is a check,
+        // not the lock — the orchestrator takes the authoritative lease when the
+        // background task starts, so two POSTs microseconds apart can both get
+        // 202 and the loser's report lands as REJECTED. Safety never depends on
+        // this check, only the error ergonomics do.
+        String target = concurrencyGuard.currentTarget();
+        if (concurrencyGuard.isBusy(target)) {
+            return Response.status(409)
+                    .entity(ApiError.of(
+                            409,
+                            "Conflict",
+                            "A disruption plan is already running against " + target
+                                    + ". Wait for it to finish before starting another."))
+                    .build();
         }
 
         String id = UUID.randomUUID().toString().substring(0, 8);
