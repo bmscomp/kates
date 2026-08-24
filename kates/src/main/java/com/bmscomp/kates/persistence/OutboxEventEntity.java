@@ -27,6 +27,17 @@ public class OutboxEventEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /**
+     * Failed publish attempts. A row that can never be published (unparseable
+     * payload, permanently rejected message) would otherwise be retried on every
+     * poll forever while holding a slot at the head of the poll window.
+     */
+    @Column(name = "attempts", nullable = false)
+    private int attempts;
+
+    @Column(name = "last_error", columnDefinition = "text")
+    private String lastError;
+
     public OutboxEventEntity() {}
 
     public OutboxEventEntity(String aggregateId, String aggregateType, String eventType, String payload) {
@@ -60,5 +71,21 @@ public class OutboxEventEntity {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public int getAttempts() {
+        return attempts;
+    }
+
+    public void setAttempts(int attempts) {
+        this.attempts = attempts;
+    }
+
+    public String getLastError() {
+        return lastError;
+    }
+
+    public void setLastError(String lastError) {
+        this.lastError = lastError;
     }
 }
