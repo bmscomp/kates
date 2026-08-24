@@ -14,6 +14,41 @@ func init() {
 	// behavior (picking, the kind offer, the blocked states) is covered directly
 	// in cluster_gate_test.go — stubbing it here keeps that concern in one place.
 	resolveClusterFn = func() (string, error) { return "test-context", nil }
+
+	// Cluster READS are stubbed for the whole package. Without this they run
+	// real kubectl: on a machine with no cluster every lookup fails, the deploy
+	// paths fall into their readiness wait loops, and the Kafka Connect tests
+	// sat there for the full two-minute secret deadline before failing. The
+	// canned answers below are the "everything is already healthy" case, which
+	// is what the orchestration tests are about — the waiting itself is not.
+	runExecOutputFn = stubClusterRead
+	runExecCombinedFn = stubClusterRead
+}
+
+// stubClusterRead answers the cluster queries the deploy paths make, in the
+// shape each caller parses. Anything unrecognised returns empty output and no
+// error, i.e. "nothing there", which is the safe default for a probe.
+func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, error) {
+	joined := name + " " + strings.Join(args, " ")
+
+	switch {
+	// Secrets are read for their base64 data field; a non-empty value ends the
+	// wait loops immediately.
+	case strings.Contains(joined, "get secret"):
+		return []byte("dGVzdC1wYXNzd29yZA=="), nil
+	// CRD establishment checks look for "True".
+	case strings.Contains(joined, "get crd") && strings.Contains(joined, "Established"):
+		return []byte("True"), nil
+	case strings.Contains(joined, "get pods") && strings.Contains(joined, "entity-operator"):
+		return []byte("Running"), nil
+	// A non-empty items array means the workload exists, so no repair path runs.
+	case strings.Contains(joined, "get pods") && strings.Contains(joined, "jsonpath={.items}"):
+		return []byte(`[{"metadata":{"name":"connect-0"}}]`), nil
+	case strings.Contains(joined, "get configmap"):
+		return []byte("lowercaseOutputName: true"), nil
+	default:
+		return []byte(""), nil
+	}
 }
 
 type MockExecutor struct{}
