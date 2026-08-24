@@ -42,10 +42,7 @@ public class DisruptionResource {
     ObjectMapper objectMapper;
 
     @Inject
-    com.bmscomp.kates.engine.KatesExecutor executor;
-
-    @Inject
-    DisruptionConcurrencyGuard concurrencyGuard;
+    DisruptionLauncher launcher;
 
     @POST
     @Operation(
@@ -74,74 +71,32 @@ public class DisruptionResource {
             return Response.ok(result).build();
         }
 
-        // Fast path: refuse an obviously concurrent plan with 409 rather than a
-        // 202 the caller has to poll to discover was rejected. This is a check,
-        // not the lock — the orchestrator takes the authoritative lease when the
-        // background task starts, so two POSTs microseconds apart can both get
-        // 202 and the loser's report lands as REJECTED. Safety never depends on
-        // this check, only the error ergonomics do.
-        String target = concurrencyGuard.currentTarget();
-        if (concurrencyGuard.isBusy(target)) {
-            return Response.status(409)
-                    .entity(ApiError.of(
-                            409,
-                            "Conflict",
-                            "A disruption plan is already running against " + target
-                                    + ". Wait for it to finish before starting another."))
-                    .build();
-        }
-
-        String id = UUID.randomUUID().toString().substring(0, 8);
-
-        // Validate up front so an unsafe plan still fails fast with 422 rather
-        // than turning into a 202 the caller has to poll to discover was
-        // rejected. The orchestrator re-validates before touching the cluster.
-        DisruptionSafetyGuard.ValidationResult validation = safetyGuard.validatePlan(plan);
-        if (!validation.safe()) {
-            DisruptionReport rejected = new DisruptionReport();
-            rejected.setPlanName(plan.getName());
-            rejected.setStatus("REJECTED");
-            List<String> combined = new ArrayList<>(validation.warnings());
-            combined.addAll(validation.errors().stream().map(e -> "ERROR: " + e).toList());
-            rejected.setValidationWarnings(combined);
-            DisruptionPersistence.persistReport(id, rejected, repository, objectMapper);
-            return Response.status(422)
-                    .entity(Map.of("id", id, "status", "REJECTED", "validationWarnings", combined))
-                    .build();
-        }
-
-        // Persist a RUNNING placeholder BEFORE returning so an immediate GET on
-        // the returned id resolves instead of 404-ing, and so a pod that dies
-        // mid-plan leaves a row the startup reconciler can find.
-        DisruptionReport pending = new DisruptionReport();
-        pending.setPlanName(plan.getName());
-        pending.setStatus("RUNNING");
-        pending.setValidationWarnings(validation.warnings());
-        DisruptionPersistence.persistReport(id, pending, repository, objectMapper);
-
         // A plan is minutes long (steadyState + chaosDuration + observationWindow
         // + recoveryTimeout per step). Running it inline held a request thread and
         // the client connection well past any load-balancer read timeout, so the
-        // caller saw a gateway timeout while the chaos kept running.
-        LOG.info("Accepted disruption plan '" + plan.getName() + "' with ID: " + id);
-        executor.get().execute(() -> runPlan(id, plan));
-
-        return Response.accepted(Map.of("id", id, "status", "RUNNING", "planName", plan.getName()))
-                .build();
+        // caller saw a gateway timeout while the chaos kept running. The launcher
+        // owns validation, the concurrency lease, the RUNNING placeholder and the
+        // background execution — shared with the playbook endpoint so the two
+        // cannot drift apart.
+        return toResponse(launcher.launch(plan), plan.getName());
     }
 
-    private void runPlan(String id, DisruptionPlan plan) {
-        try {
-            DisruptionReport report = orchestrator.execute(plan);
-            DisruptionPersistence.persistReport(id, report, repository, objectMapper);
-        } catch (Exception e) {
-            LOG.error("Disruption plan failed: " + id, e);
-            DisruptionReport failed = new DisruptionReport();
-            failed.setPlanName(plan.getName());
-            failed.setStatus("FAILED");
-            failed.setValidationWarnings(List.of("Execution error: " + e.getMessage()));
-            DisruptionPersistence.persistReport(id, failed, repository, objectMapper);
-        }
+    /** Maps a launch outcome onto its HTTP result. Shared with the playbook endpoint. */
+    static Response toResponse(DisruptionLauncher.LaunchResult result, String planName) {
+        return switch (result.status()) {
+            case ACCEPTED ->
+                Response.accepted(Map.of("id", result.id(), "status", "RUNNING", "planName", planName))
+                        .build();
+            case REJECTED ->
+                Response.status(422)
+                        .entity(Map.of(
+                                "id", result.id(), "status", "REJECTED", "validationWarnings", result.messages()))
+                        .build();
+            case CONFLICT ->
+                Response.status(409)
+                        .entity(ApiError.of(409, "Conflict", String.join(" ", result.messages())))
+                        .build();
+        };
     }
 
     @GET

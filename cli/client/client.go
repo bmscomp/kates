@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -105,6 +106,27 @@ func (e *APIError) String() string {
 	return fmt.Sprintf("[%d] %s: %s", e.Status, e.Error, e.Message)
 }
 
+// HTTPError is a non-2xx response, carrying the status code so callers can tell
+// a permanent failure from one worth retrying. Poll loops previously saw only an
+// opaque error string and could not distinguish "the server is briefly
+// unreachable" from "your key is wrong", so they retried both for their whole
+// budget and then reported a misleading timeout.
+type HTTPError struct {
+	StatusCode int
+	message    string
+}
+
+func (e *HTTPError) Error() string {
+	return e.message
+}
+
+// Retryable reports whether repeating the request could plausibly succeed.
+func (e *HTTPError) Retryable() bool {
+	return e.StatusCode >= 500 ||
+		e.StatusCode == http.StatusRequestTimeout ||
+		e.StatusCode == http.StatusTooManyRequests
+}
+
 func (c *Client) doRequest(ctx context.Context, req *http.Request, retryable bool) ([]byte, error) {
 	attempts := 1
 	if retryable {
@@ -147,10 +169,13 @@ func (c *Client) doRequest(ctx context.Context, req *http.Request, retryable boo
 			if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
 				var apiErr APIError
 				if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
-					return nil, fmt.Errorf("%s", apiErr.String())
+					return nil, &HTTPError{StatusCode: resp.StatusCode, message: apiErr.String()}
 				}
 			}
-			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			return nil, &HTTPError{
+				StatusCode: resp.StatusCode,
+				message:    fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
+			}
 		}
 
 		return body, nil
@@ -495,24 +520,58 @@ func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*Disrupti
 		return nil, fmt.Errorf("backend did not return a disruption id")
 	}
 
+	return c.awaitDisruption(ctx, accepted.ID)
+}
+
+const (
 	// Same overall budget the synchronous call used.
-	deadline := time.Now().Add(20 * time.Minute)
+	disruptionPollBudget = 20 * time.Minute
+	disruptionPollEvery  = 5 * time.Second
+	// Transient failures tolerated back-to-back before giving up (~25s).
+	maxConsecutivePollFailures = 5
+)
+
+// awaitDisruption polls a report until it reaches a terminal status.
+//
+// Poll errors are not all equal, and treating them as equal is how this used to
+// hide real failures: a 401, a 403 or a permanent 404 would be swallowed on
+// every attempt for the full 20 minutes and then surface as "timed out … it may
+// still be running", which is both wrong and unactionable. Permanent errors now
+// fail immediately; transient ones are tolerated in a bounded run.
+func (c *Client) awaitDisruption(ctx context.Context, id string) (*DisruptionRunResponse, error) {
+	deadline := time.Now().Add(disruptionPollBudget)
+	consecutiveFailures := 0
+
 	for {
-		report, err := c.DisruptionStatus(ctx, accepted.ID)
-		if err == nil && report != nil && isTerminalDisruptionStatus(report.Status) {
-			return &DisruptionRunResponse{ID: accepted.ID, Report: *report}, nil
+		report, err := c.DisruptionStatus(ctx, id)
+		switch {
+		case err == nil:
+			consecutiveFailures = 0
+			if report != nil && isTerminalDisruptionStatus(report.Status) {
+				return &DisruptionRunResponse{ID: id, Report: *report}, nil
+			}
+		default:
+			var httpErr *HTTPError
+			if errors.As(err, &httpErr) && !httpErr.Retryable() {
+				return nil, fmt.Errorf("polling disruption %s: %w", id, err)
+			}
+			consecutiveFailures++
+			if consecutiveFailures >= maxConsecutivePollFailures {
+				return nil, fmt.Errorf(
+					"polling disruption %s failed %d times in a row: %w", id, consecutiveFailures, err)
+			}
 		}
 
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf(
 				"timed out waiting for disruption %s; it may still be running — check 'kates disruption status %s'",
-				accepted.ID, accepted.ID)
+				id, id)
 		}
 
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(disruptionPollEvery):
 		}
 	}
 }
@@ -559,10 +618,22 @@ func (c *Client) PlaybookList(ctx context.Context) ([]PlaybookEntry, error) {
 	return get[[]PlaybookEntry](c, ctx, "/api/disruptions/playbooks")
 }
 
+// PlaybookRun starts a named playbook and waits for its report.
+//
+// Like RunDisruption, the backend now accepts the playbook (202 + id) and runs
+// it in the background, so this polls instead of holding one request open for
+// the life of the plan — which outlived proxy read timeouts and left the caller
+// with a gateway error while the chaos continued.
 func (c *Client) PlaybookRun(ctx context.Context, name string) (*DisruptionRunResponse, error) {
 	path := fmt.Sprintf("/api/disruptions/playbooks/%s", name)
-	// Chaos tests are synchronous on the backend and wait for steady state + recovery. Give it 20 mins.
-	return postJSONWithTimeout[*DisruptionRunResponse](c, ctx, path, nil, 20*time.Minute)
+	accepted, err := postJSON[*DisruptionAccepted](c, ctx, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if accepted == nil || accepted.ID == "" {
+		return nil, fmt.Errorf("backend did not return a disruption id for playbook %q", name)
+	}
+	return c.awaitDisruption(ctx, accepted.ID)
 }
 
 func (c *Client) DisruptionScheduleList(ctx context.Context) ([]DisruptionScheduleEntry, error) {

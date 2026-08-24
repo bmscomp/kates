@@ -28,13 +28,7 @@ public class DisruptionPlaybookResource {
     DisruptionPlaybookCatalog playbookCatalog;
 
     @Inject
-    DisruptionOrchestrator orchestrator;
-
-    @Inject
-    DisruptionReportRepository repository;
-
-    @Inject
-    com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    DisruptionLauncher launcher;
 
     @GET
     @Operation(summary = "List disruption playbooks", description = "Returns pre-defined disruption scenarios")
@@ -51,18 +45,25 @@ public class DisruptionPlaybookResource {
 
     @POST
     @Path("/{name}")
-    @Operation(summary = "Run a playbook", description = "Executes a pre-defined disruption playbook by name")
-    @APIResponse(responseCode = "200", description = "Disruption report from playbook execution")
+    @Operation(
+            summary = "Run a playbook",
+            description = "Validates a pre-defined disruption playbook and starts it asynchronously."
+                    + " Returns 202 with a report id; poll GET /api/disruptions/{id} for progress"
+                    + " and the final report.")
+    @APIResponse(responseCode = "202", description = "Playbook accepted for execution")
     @APIResponse(responseCode = "404", description = "Playbook not found")
+    @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
+    @APIResponse(responseCode = "422", description = "Playbook rejected by safety guard")
     public Response runPlaybook(@Parameter(description = "Playbook name") @PathParam("name") String name) {
         return playbookCatalog
                 .findByName(name)
                 .map(entry -> {
                     DisruptionPlan plan = playbookCatalog.toPlan(entry);
-                    String id = java.util.UUID.randomUUID().toString().substring(0, 8);
-                    DisruptionReport report = orchestrator.execute(plan);
-                    DisruptionPersistence.persistReport(id, report, repository, objectMapper);
-                    return Response.ok(Map.of("id", id, "report", report)).build();
+                    // Goes through the same launcher as POST /api/disruptions.
+                    // This path used to call the orchestrator directly: no safety
+                    // validation at all, and a synchronous call that held the
+                    // request open for the whole plan.
+                    return DisruptionResource.toResponse(launcher.launch(plan), plan.getName());
                 })
                 .orElseGet(() -> Response.status(404)
                         .entity(ApiError.of(404, "Not Found", "Playbook not found: " + name))

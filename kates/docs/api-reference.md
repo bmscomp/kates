@@ -422,9 +422,9 @@ POST /api/disruptions/playbooks/{name}
 POST /api/disruptions/playbooks/{name}?dryRun=true
 ```
 
-Executes a pre-built playbook by name. The playbook is loaded from the catalog and converted to a `DisruptionPlan` automatically.
+Executes a pre-built playbook by name. The playbook is loaded from the catalog, converted to a `DisruptionPlan` automatically, validated against the safety guard, and run asynchronously.
 
-**Response: `200 OK`** — same format as `POST /api/disruptions`.
+**Response: `202 Accepted`** — same format as `POST /api/disruptions`: a report id to poll with `GET /api/disruptions/{id}`. A playbook rejected by the safety guard returns `422`, and one submitted while another plan is running against the cluster returns `409`.
 
 ---
 
