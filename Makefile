@@ -384,18 +384,42 @@ kates-local-recreate-db:
 		--cascade=orphan --ignore-not-found
 	@echo "✅ StatefulSet removed (data intact). Re-run: make kates-local"
 
+# Same pull-then-build fallback as kates-build, and the same reason for reading
+# the tag from Chart.yaml: this was pinned to 1.16.0-native long after appVersion
+# moved on, so "pulled the image" quietly meant "pulled a stale one".
 kates-native:
 	@if docker image inspect kates:native >/dev/null 2>&1; then \
 		echo "✅ Kates native image already exists locally (kates:native)."; \
-	elif docker pull ghcr.io/bmscomp/kates:1.16.0-native; then \
+	elif docker pull ghcr.io/bmscomp/kates:$(KATES_APP_VERSION)-native; then \
 		echo "✅ Pulled Kates native image from registry."; \
-		docker tag ghcr.io/bmscomp/kates:1.16.0-native kates:native; \
+		docker tag ghcr.io/bmscomp/kates:$(KATES_APP_VERSION)-native kates:native; \
 	else \
-		echo "🔨 Building Kates (native) from source..."; \
+		echo "🔨 Building Kates (native) from source (needs ~8GB RAM for the compiler)..."; \
 		docker build -f kates/Dockerfile.native -t kates:native .; \
 	fi
 	kind load docker-image kates:native --name $(CLUSTER_NAME)
 	@echo "✅ Kates native image loaded into Kind"
+
+# Native image built from the working tree, never pulled — the native
+# counterpart of kates-image-local. Use it to verify that a change which works
+# on the JVM also survives ahead-of-time compilation, before a release tag finds
+# out for you.
+kates-image-native-local:
+	@echo "🔨 Building kates:native-local from the working tree..."
+	@echo "   The GraalVM compiler needs ~8GB of memory; on Docker Desktop raise"
+	@echo "   the VM memory limit first or the build dies with an opaque OOM."
+	docker build -f kates/Dockerfile.native -t kates:native-local .
+	@echo "📦 Loading kates:native-local into Kind cluster '$(CLUSTER_NAME)'..."
+	kind load docker-image kates:native-local --name $(CLUSTER_NAME)
+	@echo "✅ kates:native-local is on the node. Digest:"
+	@docker image inspect kates:native-local --format '   {{.Id}}  ({{.Created}})'
+
+# Smoke-test a locally built native image without a cluster: boots it against
+# throwaway Postgres and asserts the endpoints that AOT compilation most often
+# breaks — health, OpenAPI, and the playbook catalog, which is loaded from
+# classpath YAML and silently empties out if the resource pattern is wrong.
+kates-native-smoke:
+	@./scripts/native-smoke-test.sh $(if $(IMAGE),$(IMAGE),kates:native-local)
 
 tester-build:
 	@echo "🔨 Building Kates Tester image..."
