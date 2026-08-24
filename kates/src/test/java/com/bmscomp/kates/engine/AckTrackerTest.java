@@ -40,6 +40,54 @@ class AckTrackerTest {
     }
 
     @Test
+    void outOfOrderAckKeepsTheNewestSendTimestamp() {
+        AckTracker tracker = new AckTracker(10);
+
+        tracker.recordAcked(1, 5_000L);
+        // Acks complete out of order across partitions and retries; an older
+        // timestamp landing later must not become "last acked" and overstate RPO.
+        tracker.recordAcked(0, 1_000L);
+
+        assertEquals(5_000L, tracker.getLastAckedSendNanos());
+    }
+
+    @Test
+    void failureWindowsAreBoundedButRtoSurvivesEviction() {
+        AckTracker tracker = new AckTracker(100_000);
+
+        // A flapping broker opens and closes a window per ack. The first window
+        // is deliberately the longest, so it is also the reported max RTO.
+        tracker.recordFailed(0);
+        sleepNanos();
+        tracker.recordAcked(0, 1L);
+
+        long firstRto = tracker.maxRtoNanos();
+        assertTrue(firstRto > 0);
+
+        for (int i = 1; i < 5_000; i++) {
+            tracker.recordFailed(i);
+            tracker.recordAcked(i, i);
+        }
+
+        assertTrue(
+                tracker.getCompletedWindows().size() <= 1_000,
+                "the retained window list must stay bounded on a flapping broker");
+        assertTrue(tracker.getDroppedWindowCount() > 0, "eviction should be reported, not silent");
+        assertTrue(
+                tracker.maxRtoNanos() >= firstRto,
+                "the worst RTO must survive eviction of the window that produced it");
+        assertTrue(tracker.firstRtoNanos() > 0, "the first window's RTO must survive eviction too");
+    }
+
+    private static void sleepNanos() {
+        try {
+            Thread.sleep(2);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Test
     void releaseDropsBitsetButKeepsCounters() {
         AckTracker tracker = new AckTracker(1_000);
         tracker.recordSent(1, 10L);

@@ -128,9 +128,7 @@ public class TestOrchestrator {
         }
 
         if (!concurrencyGuard.tryAcquire()) {
-            return com.bmscomp.kates.util.Result.failure(
-                    new BenchmarkException("Concurrency limit reached: " + maxConcurrentTests
-                            + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
+            return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
         }
 
         TestType type = request.getType();
@@ -182,6 +180,7 @@ public class TestOrchestrator {
         org.jboss.logging.MDC.put("testType", type.name());
         org.jboss.logging.MDC.put("backend", backendName);
         runStartNanos.put(run.getId(), System.nanoTime());
+        List<BenchmarkHandle> submitted = List.of();
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
@@ -216,7 +215,7 @@ public class TestOrchestrator {
                 }
             }
 
-            activeHandles.put(run.getId(), handles);
+            submitted = handles;
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
@@ -229,6 +228,16 @@ public class TestOrchestrator {
         }
 
         repository.save(run);
+        // Registered only AFTER the row carrying these tasks is persisted.
+        // Publishing the handles first let the 5s reconciler read the run and
+        // write its own version of the row while this method was still building
+        // it — a lost update, or an optimistic-lock failure thrown into the
+        // virtual thread.
+        if (!submitted.isEmpty()
+                && run.getStatus() != TestResult.TaskStatus.DONE
+                && run.getStatus() != TestResult.TaskStatus.FAILED) {
+            activeHandles.put(run.getId(), submitted);
+        }
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
@@ -260,9 +269,7 @@ public class TestOrchestrator {
         // could start at once. They consume the same brokers as plain runs, so
         // they take a permit on the same terms.
         if (!concurrencyGuard.tryAcquire()) {
-            return com.bmscomp.kates.util.Result.failure(
-                    new BenchmarkException("Concurrency limit reached: " + maxConcurrentTests
-                            + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
+            return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
         }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -293,6 +300,7 @@ public class TestOrchestrator {
             return com.bmscomp.kates.util.Result.failure(e);
         }
         runStartNanos.put(run.getId(), System.nanoTime());
+        List<BenchmarkHandle> submitted = List.of();
 
         try {
             createTestTopic(baseSpec, type);
@@ -335,7 +343,7 @@ public class TestOrchestrator {
                 }
             }
 
-            activeHandles.put(run.getId(), allHandles);
+            submitted = allHandles;
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
@@ -348,6 +356,13 @@ public class TestOrchestrator {
         }
 
         repository.save(run);
+        // Same ordering rule as executeAsync: publish handles only once the row
+        // they belong to is persisted, so the reconciler cannot race this write.
+        if (!submitted.isEmpty()
+                && run.getStatus() != TestResult.TaskStatus.DONE
+                && run.getStatus() != TestResult.TaskStatus.FAILED) {
+            activeHandles.put(run.getId(), submitted);
+        }
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
@@ -375,6 +390,12 @@ public class TestOrchestrator {
             activeHandles.remove(runId);
             return run;
         }
+
+        // What the run looks like before this poll. The reconciler calls this
+        // every 5s for every active run, and a poll that finds nothing new used
+        // to write the row anyway — an UPDATE and a version bump per run per
+        // tick, which also collides with concurrent writers for no reason.
+        String signatureBefore = pollSignature(run);
 
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -498,8 +519,47 @@ public class TestOrchestrator {
             releasePermit(runId);
         }
 
-        repository.save(run);
+        if (!pollSignature(run).equals(signatureBefore)) {
+            try {
+                repository.save(run);
+            } catch (jakarta.persistence.OptimisticLockException e) {
+                // Another writer (the reconciler, the reaper, a concurrent GET)
+                // moved the row first. Their write is as valid as this one, so
+                // return what is actually stored rather than turning a plain
+                // read into a 409 for the client.
+                LOG.debugf("Lost the optimistic-lock race refreshing %s; returning the stored run", runId);
+                return repository.findById(runId).orElse(run);
+            }
+        }
         return run;
+    }
+
+    /**
+     * Everything a poll can change about a run, as a comparable string. Used to
+     * skip writes when a reconcile tick found nothing new.
+     */
+    private static String pollSignature(TestRun run) {
+        StringBuilder sb = new StringBuilder(64);
+        sb.append(run.getStatus()).append('|').append(run.getCdcPhase());
+        for (TestResult r : run.getResults()) {
+            sb.append('#')
+                    .append(r.getTaskId())
+                    .append(':')
+                    .append(r.getStatus())
+                    .append(':')
+                    .append(r.getRecordsSent())
+                    .append(':')
+                    .append(r.getThroughputRecordsPerSec())
+                    .append(':')
+                    .append(r.getAvgLatencyMs())
+                    .append(':')
+                    .append(r.getP99LatencyMs())
+                    .append(':')
+                    .append(r.getEndTime())
+                    .append(':')
+                    .append(r.getError());
+        }
+        return sb.toString();
     }
 
     /**
@@ -519,6 +579,11 @@ public class TestOrchestrator {
      * repeatedly — only the holder that wins the {@code remove} releases.
      */
     private void releasePermit(String runId) {
+        // Every terminal path funnels through here, so this is the one place
+        // that reliably runs when a run ends. The duration metric normally
+        // consumes the entry first; the reaper and the submission-failure path
+        // did not, so their runs leaked one map entry each, forever.
+        runStartNanos.remove(runId);
         if (permitHolders.remove(runId)) {
             concurrencyGuard.release();
         }

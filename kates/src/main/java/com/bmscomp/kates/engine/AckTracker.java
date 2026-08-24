@@ -1,8 +1,8 @@
 package com.bmscomp.kates.engine;
 
+import java.util.ArrayDeque;
 import java.util.BitSet;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,6 +49,13 @@ public class AckTracker {
     private static final int WORDS_PER_CHUNK = SEQUENCES_PER_CHUNK >>> 6;
 
     /**
+     * Recovered failure windows retained for reporting. A flapping broker can
+     * close a window per ack, so this list is bounded; the worst and first RTO
+     * are tracked separately and therefore survive eviction.
+     */
+    private static final int MAX_COMPLETED_WINDOWS = 1_000;
+
+    /**
      * A single continuous failure window with start/end nano timestamps.
      */
     public record FailureWindow(long startNanos, long endNanos) {
@@ -82,12 +89,19 @@ public class AckTracker {
      */
     private final AtomicReference<long[]> activeWindow = new AtomicReference<>(null);
 
-    /**
-     * All completed failure windows (recovered).
-     */
-    private final CopyOnWriteArrayList<FailureWindow> completedWindows = new CopyOnWriteArrayList<>();
+    /** Recovered failure windows, newest last, capped at {@link #MAX_COMPLETED_WINDOWS}. */
+    private final ArrayDeque<FailureWindow> completedWindows = new ArrayDeque<>();
 
-    private volatile long lastAckedSendNanos = -1;
+    /** Windows evicted by the cap, so reporting can say the list is partial. */
+    private final AtomicLong droppedWindows = new AtomicLong();
+
+    /** Tracked separately so eviction cannot change the reported worst RTO. */
+    private final AtomicLong maxRtoNanosSeen = new AtomicLong(-1);
+
+    /** Kept explicitly: the oldest window may be evicted from the deque. */
+    private final AtomicReference<FailureWindow> firstCompletedWindow = new AtomicReference<>();
+
+    private final AtomicLong lastAckedSendNanos = new AtomicLong(-1);
 
     /** Set once the bitset has been released; blocks re-allocation of chunks. */
     private volatile boolean released;
@@ -132,12 +146,48 @@ public class AckTracker {
     public void recordAcked(long sequence, long sendTimestampNanos) {
         setAcked(sequence);
         totalAcked.incrementAndGet();
-        lastAckedSendNanos = sendTimestampNanos > 0 ? sendTimestampNanos : System.nanoTime();
+
+        // Acks complete out of order across partitions and retries, so a plain
+        // write could leave an OLDER send timestamp as "last acked" and overstate
+        // RPO. Keep the maximum instead.
+        long candidate = sendTimestampNanos > 0 ? sendTimestampNanos : System.nanoTime();
+        long current;
+        do {
+            current = lastAckedSendNanos.get();
+        } while (candidate > current && !lastAckedSendNanos.compareAndSet(current, candidate));
 
         long[] window = activeWindow.getAndSet(null);
         if (window != null) {
-            completedWindows.add(new FailureWindow(window[0], System.nanoTime()));
+            recordCompletedWindow(new FailureWindow(window[0], System.nanoTime()));
         }
+    }
+
+    /**
+     * Appends a recovered failure window, keeping at most
+     * {@link #MAX_COMPLETED_WINDOWS}.
+     *
+     * <p>The list is on the ack path, and a flapping broker can open and close a
+     * window per ack. Unbounded, that grew without limit; on a copy-on-write list
+     * each append also copies the whole array, so the ack path degraded
+     * quadratically exactly when the cluster was least healthy. The oldest
+     * windows are dropped, and the count of dropped ones is kept so RTO
+     * reporting can say the list is partial.
+     */
+    private void recordCompletedWindow(FailureWindow window) {
+        synchronized (completedWindows) {
+            if (completedWindows.size() >= MAX_COMPLETED_WINDOWS) {
+                completedWindows.removeFirst();
+                droppedWindows.incrementAndGet();
+            }
+            completedWindows.addLast(window);
+        }
+        firstCompletedWindow.compareAndSet(null, window);
+
+        long durationNanos = window.durationNanos();
+        long currentMax;
+        do {
+            currentMax = maxRtoNanosSeen.get();
+        } while (durationNanos > currentMax && !maxRtoNanosSeen.compareAndSet(currentMax, durationNanos));
     }
 
     /** Ack without a known send timestamp (RPO falls back to "now"). */
@@ -205,44 +255,52 @@ public class AckTracker {
     }
 
     public long getLastAckedSendNanos() {
-        return lastAckedSendNanos;
+        return lastAckedSendNanos.get();
     }
 
     /**
-     * Returns all completed failure windows (failure → recovery transitions).
+     * Returns the retained completed failure windows (failure → recovery
+     * transitions), oldest first. Capped at {@link #MAX_COMPLETED_WINDOWS} —
+     * see {@link #getDroppedWindowCount()} for how many older ones were evicted.
      */
     public List<FailureWindow> getCompletedWindows() {
-        return List.copyOf(completedWindows);
+        synchronized (completedWindows) {
+            return List.copyOf(completedWindows);
+        }
+    }
+
+    /** Completed windows discarded by the retention cap. */
+    public long getDroppedWindowCount() {
+        return droppedWindows.get();
     }
 
     /**
-     * Returns the maximum RTO in nanoseconds across all failure windows.
+     * Returns the maximum RTO in nanoseconds across all failure windows,
+     * including any that have since been evicted from the retained list.
      * Returns -1 if no completed failure window exists.
      */
     public long maxRtoNanos() {
-        return completedWindows.stream()
-                .mapToLong(FailureWindow::durationNanos)
-                .max()
-                .orElse(-1);
+        return maxRtoNanosSeen.get();
     }
 
     /**
      * Returns the first failure window's RTO, or -1 if none.
      */
     public long firstRtoNanos() {
-        if (completedWindows.isEmpty()) return -1;
-        return completedWindows.getFirst().durationNanos();
+        FailureWindow first = firstCompletedWindow.get();
+        return first != null ? first.durationNanos() : -1;
     }
 
     /**
      * Returns the first failure start nano timestamp, or -1.
      */
     public long getFirstFailureNanos() {
-        if (completedWindows.isEmpty()) {
-            long[] window = activeWindow.get();
-            return window != null ? window[0] : -1;
+        FailureWindow first = firstCompletedWindow.get();
+        if (first != null) {
+            return first.startNanos();
         }
-        return completedWindows.getFirst().startNanos();
+        long[] window = activeWindow.get();
+        return window != null ? window[0] : -1;
     }
 
     /**
