@@ -1,0 +1,79 @@
+name: Native Image
+
+# The native image ships alongside the JVM one, but until now nothing built it
+# outside a release tag. Ahead-of-time compilation breaks in ways no JVM test can
+# see — a type Jackson can no longer introspect, a classpath resource that was
+# not packaged, a class initialised at build time that needed a runtime
+# initialiser — so the first sign of a break was a failed release, or a shipped
+# image whose endpoints return {}.
+#
+# This builds the real Dockerfile.native and smoke-tests the resulting binary.
+# It is slow (the compiler needs ~20 minutes and most of the runner's memory),
+# so it runs only when the backend actually changes, plus nightly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "kates/**"
+      - ".github/workflows/native.yml"
+      - "scripts/native-smoke-test.sh"
+      - "!**/*.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - "kates/**"
+      - ".github/workflows/native.yml"
+      - "scripts/native-smoke-test.sh"
+      - "!**/*.md"
+  schedule:
+    # 03:17 UTC — catches breakage from dependency updates that land without
+    # touching kates/**, and the odd-minute offset avoids the top-of-hour rush.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke-test:
+    name: Build & Smoke Test
+    runs-on: ubuntu-latest
+    # A native compile is 15-25 minutes on a 4-core runner; the timeout is a
+    # backstop against a hung compiler burning an hour of runner time.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Builds the SAME Dockerfile the release publishes, so this validates what
+      # ships rather than an approximation of it.
+      - name: Build native image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: kates/Dockerfile.native
+          tags: kates:native-ci
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the native binary
+        run: ./scripts/native-smoke-test.sh kates:native-ci
+
+      # Size is a headline reason to ship native at all; surfacing it in the log
+      # makes an accidental regression visible instead of something you notice
+      # months later on a slow node pull.
+      - name: Report image size
+        if: always()
+        run: |
+          docker image inspect kates:native-ci \
+            --format 'native image size: {{.Size}} bytes ({{len .RootFS.Layers}} layers)' \
+            || true

@@ -29,8 +29,22 @@ RUN --mount=type=cache,target=/root/.m2 \
   chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
 COPY kates/src src
+# Memory for the COMPILER goes through quarkus.native.native-image-xmx, not
+# additional-build-args. Passing -J-Xmx8g through the latter looked equivalent
+# but silently REPLACED the whole additional-build-args value configured in
+# application.properties — the --initialize-at-run-time list that keeps the
+# Kafka security and compression JNI classes out of the build-time heap. The
+# result was either a failed build or, worse, a binary whose compression
+# libraries blow up the first time they are used.
+#
+# march=compatibility: without it the compiler targets the CPU of the BUILD
+# machine (a modern CI runner), and the binary dies with SIGILL on older
+# hardware. Portability is worth more here than a few percent of throughput,
+# since the workload's cost is Kafka I/O, not local computation.
 RUN --mount=type=cache,target=/root/.m2 \
-  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g" \
+  ./mvnw package -Dnative -DskipTests -B \
+  -Dquarkus.native.native-image-xmx=8g \
+  -Dquarkus.native.march=compatibility \
   && mv target/*-runner target/kates-native
 
 # Extract platform-specific JNI native libraries from Maven JARs
@@ -80,8 +94,19 @@ ENV LD_LIBRARY_PATH=/app/lib
 
 EXPOSE 8080
 
+# /q/health/live, not /api/health: the latter makes a live Kafka AdminClient
+# call per request, so it blows the 3s timeout and reports the container
+# unhealthy whenever the broker under test is slow or down — which for a Kafka
+# testing tool is a normal, expected state, not a broken container. Kept
+# identical to the JVM Dockerfile on purpose; the two drifted before.
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -sf http://localhost:8080/api/health || exit 1
+  CMD curl -sf http://localhost:8080/q/health/live || exit 1
 
 ENTRYPOINT ["./kates"]
+# A native image does NOT read JAVA_TOOL_OPTIONS, so the chart's jvm.options —
+# heap sizes, GC selection — are silently inert here, and the default heap is a
+# share of the container limit chosen by the runtime rather than by us. These
+# defaults are CMD, not ENTRYPOINT, so `args:` in the pod spec (or arguments to
+# docker run) replace them without rebuilding the image.
+CMD ["-XX:MaximumHeapSizePercent=75"]
 
