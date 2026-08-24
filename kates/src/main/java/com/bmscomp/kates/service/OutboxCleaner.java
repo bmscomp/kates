@@ -83,25 +83,42 @@ public class OutboxCleaner {
             if (event == null) {
                 return false; // Published or retired by another replica.
             }
-            event.setAttempts(event.getAttempts() + 1);
-            event.setLastError(truncate(error));
-
-            if (event.getAttempts() < maxAttempts) {
-                return false;
-            }
-
-            em.persist(OutboxDeadLetterEntity.from(event, truncate(error)));
-            em.remove(event);
-            LOG.errorf(
-                    "Outbox event %s (%s) moved to outbox_dead_letters after %d attempts: %s",
-                    id, event.getEventType(), event.getAttempts(), error);
-            return true;
+            return recordFailure(event, error);
         } catch (Exception e) {
             // Never surface into the messaging layer: the row simply stays and
             // is retried on the next poll.
             LOG.warnf("Could not record outbox failure for %s: %s", id, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Same bookkeeping for an event that is ALREADY managed and row-locked by
+     * the caller's transaction.
+     *
+     * <p>Deliberately not transactional. The poller holds {@code FOR UPDATE} on
+     * every row it read, so calling the {@code REQUIRES_NEW} variant from inside
+     * that transaction suspends it and then blocks the new one on a lock the
+     * suspended transaction still holds — a self-deadlock PostgreSQL cannot
+     * detect (it sees two sessions, one simply never asking for anything), so
+     * the scheduler thread and its connection hang until {@code lock_timeout},
+     * which is disabled by default. That fires on exactly the poison-pill case
+     * this method exists for.
+     */
+    public boolean recordFailure(OutboxEventEntity event, String error) {
+        event.setAttempts(event.getAttempts() + 1);
+        event.setLastError(truncate(error));
+
+        if (event.getAttempts() < maxAttempts) {
+            return false;
+        }
+
+        em.persist(OutboxDeadLetterEntity.from(event, truncate(error)));
+        em.remove(event);
+        LOG.errorf(
+                "Outbox event %s (%s) moved to outbox_dead_letters after %d attempts: %s",
+                event.getId(), event.getEventType(), event.getAttempts(), error);
+        return true;
     }
 
     private static String truncate(String error) {

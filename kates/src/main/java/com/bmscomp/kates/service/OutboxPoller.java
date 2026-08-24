@@ -105,9 +105,12 @@ public class OutboxPoller {
                 LOG.error("Failed to publish outbox event: " + id, e);
                 // A payload that will not deserialise fails identically on every
                 // poll; count the attempt so it is eventually retired instead of
-                // blocking a slot in the poll window forever. REQUIRES_NEW, so
-                // it commits independently of this transaction.
-                cleaner.recordFailure(id, describe(e));
+                // blocking a slot in the poll window forever.
+                //
+                // The entity overload, NOT the id one: this row is already
+                // managed and row-locked by THIS transaction, and a REQUIRES_NEW
+                // call would suspend it and then block forever on its own lock.
+                cleaner.recordFailure(event, describe(e));
             }
         }
     }
