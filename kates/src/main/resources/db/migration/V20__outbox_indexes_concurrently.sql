@@ -1,4 +1,6 @@
--- flyway executeInTransaction=false
+-- Runs outside a transaction. The setting that does that lives in the sidecar
+-- V20__outbox_indexes_concurrently.sql.conf — Flyway 11 reads script config
+-- from that file, not from a comment in here. Keep the two together.
 --
 -- CREATE INDEX (the plain form) takes an ACCESS EXCLUSIVE lock for the whole
 -- build, blocking every read and write on the table until it finishes. One of

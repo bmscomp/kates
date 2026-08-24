@@ -32,9 +32,9 @@ class OutboxCleanerTest {
         cleaner.em = em;
         cleaner.maxAttempts = 3;
 
-        id = UUID.randomUUID();
         event = new OutboxEventEntity("run-1", "TestRun", "test.lifecycle", "{\"broken\":");
-        when(em.find(OutboxEventEntity.class, id)).thenReturn(event);
+        id = event.getId();
+        lenient().when(em.find(OutboxEventEntity.class, id)).thenReturn(event);
     }
 
     @Test
@@ -76,6 +76,18 @@ class OutboxCleanerTest {
         when(em.find(OutboxEventEntity.class, unknown)).thenReturn(null);
 
         assertFalse(cleaner.recordFailure(unknown, "boom"));
+    }
+
+    @Test
+    @DisplayName("the entity overload joins the caller's transaction, no lookup")
+    void entityOverloadDoesNotReloadTheRow() {
+        // The poller calls this from inside the transaction that holds FOR UPDATE
+        // on the row; a fresh lookup in a new transaction would block on that
+        // lock forever.
+        cleaner.recordFailure(event, "boom");
+
+        assertEquals(1, event.getAttempts());
+        verify(em, never()).find(eq(OutboxEventEntity.class), any());
     }
 
     @Test

@@ -227,16 +227,16 @@ public class TestOrchestrator {
             run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
-        repository.save(run);
         // Registered only AFTER the row carrying these tasks is persisted.
         // Publishing the handles first let the 5s reconciler read the run and
         // write its own version of the row while this method was still building
         // it — a lost update, or an optimistic-lock failure thrown into the
-        // virtual thread.
-        if (!submitted.isEmpty()
-                && run.getStatus() != TestResult.TaskStatus.DONE
-                && run.getStatus() != TestResult.TaskStatus.FAILED) {
-            activeHandles.put(run.getId(), submitted);
+        // virtual thread. The finally matters: workers are already running by
+        // now, so a failed save must not leave them with no handle to stop them.
+        try {
+            repository.save(run);
+        } finally {
+            registerHandles(run, submitted);
         }
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
@@ -355,13 +355,14 @@ public class TestOrchestrator {
             run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
-        repository.save(run);
         // Same ordering rule as executeAsync: publish handles only once the row
-        // they belong to is persisted, so the reconciler cannot race this write.
-        if (!submitted.isEmpty()
-                && run.getStatus() != TestResult.TaskStatus.DONE
-                && run.getStatus() != TestResult.TaskStatus.FAILED) {
-            activeHandles.put(run.getId(), submitted);
+        // they belong to is persisted, so the reconciler cannot race this write
+        // — but publish them even if that write fails, so running workers stay
+        // stoppable.
+        try {
+            repository.save(run);
+        } finally {
+            registerHandles(run, submitted);
         }
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
@@ -532,6 +533,21 @@ public class TestOrchestrator {
             }
         }
         return run;
+    }
+
+    /**
+     * Publishes a run's backend handles so the reconciler, the reaper and
+     * shutdown can poll and stop its workers.
+     *
+     * <p>Registered even when the run already looks terminal: a partial
+     * submission can leave workers running behind a FAILED status, and without a
+     * handle nothing can stop them. The terminal path in
+     * {@link #refreshStatus(String)} drops the entry once the run is settled.
+     */
+    private void registerHandles(TestRun run, List<BenchmarkHandle> handles) {
+        if (!handles.isEmpty()) {
+            activeHandles.put(run.getId(), handles);
+        }
     }
 
     /**
