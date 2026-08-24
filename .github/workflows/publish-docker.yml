@@ -263,11 +263,16 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
           SUFFIX: ${{ matrix.variant == 'native' && '-native' || '' }}
         run: |
+          # The suffix belongs on the TAG, not the repository: metadata-action
+          # is configured with `flavor: suffix=-native`, so what actually gets
+          # pushed is bmscomp/kates:1.22.0-native. Signing looked for
+          # bmscomp/kates-native:1.22.0, which has never existed, so the native
+          # variant was silently never signed.
           for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
-            IMAGE="${REPO}${SUFFIX}:${VERSION}"
+            IMAGE="${REPO}:${VERSION}${SUFFIX}"
             DIGEST=$(docker manifest inspect "${IMAGE}" -v 2>/dev/null | jq -r '.digest // empty' || true)
             if [[ -n "${DIGEST}" ]]; then
-              cosign sign --yes "${REPO}${SUFFIX}@${DIGEST}"
+              cosign sign --yes "${REPO}@${DIGEST}"
             else
               echo "⚠️ Could not resolve digest for ${IMAGE}, skipping sign"
             fi
@@ -286,8 +291,11 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
           SUFFIX: ${{ matrix.variant == 'native' && '-native' || '' }}
         run: |
+          # Same suffix-on-the-tag rule as the signing step: this looked for a
+          # repository that is never pushed, so the native leg of `verify`
+          # failed and update-charts (which needs it) never ran on a release.
           for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
-            IMAGE="${REPO}${SUFFIX}:${VERSION}"
+            IMAGE="${REPO}:${VERSION}${SUFFIX}"
             echo "Inspecting ${IMAGE}..."
             docker manifest inspect "${IMAGE}" | head -20
             echo "---"

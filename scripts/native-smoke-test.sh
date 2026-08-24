@@ -47,7 +47,7 @@ trap cleanup EXIT
 fail() {
     error "❌ $*"
     echo "--- last 60 lines of application log ---" >&2
-    docker logs --tail 60 "${APP}" 2>&1 >&2 || true
+    docker logs --tail 60 "${APP}" >&2 2>&1 || true
     exit 1
 }
 
@@ -114,12 +114,45 @@ case "${PLAYBOOKS}" in
    Check quarkus.native.resources.includes in application.properties."
         ;;
 esac
-echo "${PLAYBOOKS}" | grep -q '"name"' \
-    || fail "playbook entries have no fields — PlaybookEntry is not registered for reflection"
-info "  ok   /api/disruptions/playbooks (catalog loaded and serialised)"
+info "  ok   /api/disruptions/playbooks (catalog loaded from classpath YAML)"
 
-RUNS="$(curl -sf "${BASE}/api/tests" || true)"
-[ -n "${RUNS}" ] || fail "/api/tests did not respond"
-info "  ok   /api/tests (domain payload serialises)"
+# Reflection check that actually exercises a domain type. Creating a run
+# serialises a TestRun back to the caller; an unregistered class comes back as
+# {} rather than an error, so assert on a field that only a real TestRun has.
+# The engine will fail asynchronously without Kafka — irrelevant here, the
+# response body is what is being tested.
+CREATED="$(curl -sf -X POST "${BASE}/api/tests" \
+    -H 'Content-Type: application/json' \
+    -d '{"type":"LOAD","spec":{"topic":"native-smoke","numRecords":1,"recordSize":128}}' || true)"
+[ -n "${CREATED}" ] || fail "POST /api/tests did not respond"
+echo "${CREATED}" | grep -q '"testType"' \
+    || fail "TestRun came back without its fields — a domain type is not registered for reflection.
+   Response was: ${CREATED}"
+info "  ok   POST /api/tests (domain payload serialises)"
+
+RUN_ID="$(echo "${CREATED}" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+[ -n "${RUN_ID}" ] || fail "could not read the run id out of the create response"
+
+FETCHED="$(curl -sf "${BASE}/api/tests/${RUN_ID}" || true)"
+echo "${FETCHED}" | grep -q '"testType"' \
+    || fail "GET /api/tests/{id} lost the payload — check reflection registration and the DB round-trip"
+info "  ok   GET /api/tests/{id} (round-trips through Postgres)"
+
+# The report path pulls in the widest object graph — summary, phases, SLA
+# verdict — so it is the best single check that nested types are registered.
+REPORT="$(curl -sf "${BASE}/api/tests/${RUN_ID}/report" || true)"
+[ -n "${REPORT}" ] || fail "/api/tests/{id}/report did not respond"
+echo "${REPORT}" | grep -q '"summary"' \
+    || fail "report is missing its nested objects — a report type is not registered for reflection.
+   Response was: ${REPORT}"
+info "  ok   /api/tests/{id}/report (nested payloads serialise)"
+
+# An error body is its own payload type, and ApiError being unregistered would
+# turn every 4xx in the product into an empty object.
+NOT_FOUND="$(curl -s "${BASE}/api/tests/does-not-exist" || true)"
+echo "${NOT_FOUND}" | grep -q '"message"' \
+    || fail "404 body is empty — ApiError is not registered for reflection.
+   Response was: ${NOT_FOUND}"
+info "  ok   error bodies serialise"
 
 info "✅ Native image smoke test passed: ${IMAGE}"

@@ -29,9 +29,17 @@ image:
 jvm:
   options: ""
 
+# The image's own default is -XX:MaximumHeapSizePercent=75. Set explicitly here
+# so the number is visible next to the memory limit it is a percentage of.
+containerArgs:
+  - "-XX:MaximumHeapSizePercent=75"
+
 resources:
   requests:
-    memory: "256Mi"
+    # Deliberately close to the limit: the heap is sized as a percentage of the
+    # LIMIT, so a small request would let the scheduler pack pods that then grow
+    # to several times what they reserved.
+    memory: "768Mi"
     cpu: "200m"
   limits:
     # Well above the resident set of an idle native binary, sized for the

@@ -124,6 +124,12 @@ resources:
     memory: "4Gi"
     cpu: "2"
 
+# -- Container args, replacing the image's CMD. Empty means "use the image's
+# own default". The native image sets its heap percentage through CMD, since a
+# native binary ignores JAVA_TOOL_OPTIONS; override it here rather than
+# rebuilding the image.
+containerArgs: []
+
 # -- JVM configuration
 #
 # JVM IMAGE ONLY. A GraalVM native image does not read JAVA_TOOL_OPTIONS, so
