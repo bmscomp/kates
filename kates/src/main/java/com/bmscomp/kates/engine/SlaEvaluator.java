@@ -24,6 +24,7 @@ public class SlaEvaluator {
         if (status == null) {
             return SlaVerdict.pass();
         }
+        var integrity = status.getIntegrityResult();
         return evaluate(
                 sla,
                 new SlaMetrics(
@@ -35,7 +36,12 @@ public class SlaEvaluator {
                         // A task status carries no error count; -1 means "unknown"
                         // so the error-rate constraint is skipped rather than
                         // silently passing as if there were zero errors.
-                        -1));
+                        -1,
+                        // Resilience values exist only once an integrity check has
+                        // run; -1 again means "unknown", never "clean".
+                        integrity != null ? integrity.dataLossPercent() : -1,
+                        integrity != null ? integrity.maxRtoMs() : -1,
+                        integrity != null ? integrity.rpoMs() : -1));
     }
 
     /** Evaluates against aggregated metrics (report or phase summary). */
@@ -73,6 +79,27 @@ public class SlaEvaluator {
         // Skipped when the caller cannot supply an error rate (negative).
         if (sla.getMaxErrorRate() != null && metrics.errorRate() >= 0 && metrics.errorRate() > sla.getMaxErrorRate()) {
             violations.add(SlaViolation.critical("errorRate", sla.getMaxErrorRate(), metrics.errorRate()));
+        }
+
+        // Resilience thresholds. These counted towards hasConstraints() but
+        // nothing evaluated them, so an SLA declaring ONLY a data-loss, RTO or
+        // RPO limit passed by construction — the same green-by-default bug the
+        // error-rate check above fixed. Negative observations mean the run
+        // carried no integrity check, in which case the constraint is skipped
+        // rather than passed.
+        if (sla.getMaxDataLossPercent() != null
+                && metrics.dataLossPercent() >= 0
+                && metrics.dataLossPercent() > sla.getMaxDataLossPercent()) {
+            violations.add(
+                    SlaViolation.critical("dataLossPercent", sla.getMaxDataLossPercent(), metrics.dataLossPercent()));
+        }
+
+        if (sla.getMaxRtoMs() != null && metrics.maxRtoMs() >= 0 && metrics.maxRtoMs() > sla.getMaxRtoMs()) {
+            violations.add(SlaViolation.critical("maxRtoMs", sla.getMaxRtoMs(), metrics.maxRtoMs()));
+        }
+
+        if (sla.getMaxRpoMs() != null && metrics.rpoMs() >= 0 && metrics.rpoMs() > sla.getMaxRpoMs()) {
+            violations.add(SlaViolation.critical("rpoMs", sla.getMaxRpoMs(), metrics.rpoMs()));
         }
 
         if (violations.isEmpty()) {

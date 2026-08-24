@@ -20,4 +20,38 @@ public record SlaMetrics(
          * it — the evaluator then skips the error-rate constraint rather than
          * treating "unknown" as "zero errors".
          */
-        double errorRate) {}
+        double errorRate,
+        /**
+         * Percentage of records produced but never consumed, from the integrity
+         * verifier. Negative when the run carried no integrity check.
+         */
+        double dataLossPercent,
+        /** Worst observed recovery time in ms; negative when unknown. */
+        double maxRtoMs,
+        /** Observed recovery point objective in ms; negative when unknown. */
+        double rpoMs) {
+
+    /**
+     * Metrics with no resilience data — for callers that only observe latency,
+     * throughput and errors. The resilience constraints are then skipped rather
+     * than passing on absent evidence.
+     */
+    public static SlaMetrics of(
+            double p99LatencyMs,
+            double p999LatencyMs,
+            double avgLatencyMs,
+            double throughputRecPerSec,
+            long recordsProcessed,
+            double errorRate) {
+        return new SlaMetrics(
+                p99LatencyMs,
+                p999LatencyMs,
+                avgLatencyMs,
+                throughputRecPerSec,
+                recordsProcessed,
+                errorRate,
+                -1,
+                -1,
+                -1);
+    }
+}
