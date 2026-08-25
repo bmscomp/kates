@@ -288,6 +288,15 @@ info "  ${BROKERS} broker(s) → replication-factor ${RF}, min-isr ${MIN_ISR}"
 
 # lz4 on purpose: compression is JNI, and a native image that failed to ship or
 # initialise those libraries only finds out here, minutes into a run.
+# The CLI's exit code is the authoritative verdict — cmd/test.go returns an
+# error when a run ends FAILED, with a comment saying that exiting 0 there is
+# "how CI stayed green while load tests failed". Discarding it with `|| true`
+# reproduced exactly that: a run that ended FAILED, followed by
+# "✅ Native end-to-end passed".
+# tee to a FILE, not to /dev/tty: there is no controlling terminal in CI or
+# when make's output is redirected, and tee then fails on every run.
+RUN_LOG="$(mktemp)"
+set +e
 RUN_OUTPUT="$("${KATES_CLI}" test create \
     --url "${BASE}" \
     --api-key "${API_KEY}" \
@@ -298,33 +307,34 @@ RUN_OUTPUT="$("${KATES_CLI}" test create \
     --compression lz4 \
     --replication-factor "${RF}" \
     --min-isr "${MIN_ISR}" \
-    --wait 2>&1 | tee /dev/tty)" || true
+    --wait 2>&1 | tee "${RUN_LOG}")"
+CLI_STATUS=${PIPESTATUS[0]}
+set -e
+rm -f "${RUN_LOG}"
 
-RUN_ID="$(echo "${RUN_OUTPUT}" | sed -n 's/.*ID[[:space:]]\{2,\}\([0-9a-f]\{8\}\).*/\1/p' | head -1)"
+# Strip ANSI before parsing: the id is printed in a styled column, and the
+# escape sequence sits between "ID" and the value.
+RUN_ID="$(printf '%s' "${RUN_OUTPUT}" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | sed -n 's/.*ID[[:space:]]\{2,\}\([0-9a-f]\{8\}\).*/\1/p' \
+    | head -1)"
 
-# The CLI shows a live progress view; when a task fails it reports FAILED and
-# 0 rec/s and stops there. The REASON is on the run itself, and reading it out
-# is the difference between "the benchmark failed" and "the producer could not
-# authenticate to the broker".
-if [ -n "${RUN_ID}" ]; then
-    RUN_JSON="$(api_get "/api/tests/${RUN_ID}" 200 'final run state')"
-    case "${RUN_JSON}" in
-        *'"status":"DONE"'*) : ;;
-        *)
-            error "❌ the benchmark did not finish cleanly (run ${RUN_ID})"
-            echo "" >&2
-            echo "Task failures:" >&2
-            echo "${RUN_JSON}" \
-                | tr ',' '\n' \
-                | grep -E '"(taskId|status|error)"' \
-                | sed 's/^/  /' >&2
-            echo "" >&2
-            echo "  Full detail:  ${KATES_CLI} test get ${RUN_ID} --url ${BASE} --api-key <key>" >&2
-            fail "benchmark run ${RUN_ID} did not reach DONE"
-            ;;
-    esac
-else
-    warn "could not determine the run id; skipping the result check"
+if [ "${CLI_STATUS}" -ne 0 ]; then
+    error "❌ the benchmark did not finish cleanly (CLI exit ${CLI_STATUS})"
+    if [ -n "${RUN_ID}" ]; then
+        # The reason lives on the run, not in the progress view. Printing the
+        # per-task status and error is the difference between "the benchmark
+        # failed" and "the producer could not authenticate to the broker".
+        echo "" >&2
+        echo "Task detail for run ${RUN_ID}:" >&2
+        api_get "/api/tests/${RUN_ID}" 200 'final run state' \
+            | tr ',' '\n' \
+            | grep -E '"(taskId|status|error|phaseName)"' \
+            | sed 's/^/  /' >&2 || true
+        echo "" >&2
+        echo "  Full detail:  ${KATES_CLI} test get ${RUN_ID} --url ${BASE} --api-key <key>" >&2
+    fi
+    fail "benchmark run ${RUN_ID:-<unknown>} did not succeed"
 fi
 info "✓ benchmark completed on the native backend"
 
