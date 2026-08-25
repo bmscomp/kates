@@ -288,7 +288,7 @@ info "  ${BROKERS} broker(s) → replication-factor ${RF}, min-isr ${MIN_ISR}"
 
 # lz4 on purpose: compression is JNI, and a native image that failed to ship or
 # initialise those libraries only finds out here, minutes into a run.
-"${KATES_CLI}" test create \
+RUN_OUTPUT="$("${KATES_CLI}" test create \
     --url "${BASE}" \
     --api-key "${API_KEY}" \
     --type LOAD \
@@ -298,9 +298,34 @@ info "  ${BROKERS} broker(s) → replication-factor ${RF}, min-isr ${MIN_ISR}"
     --compression lz4 \
     --replication-factor "${RF}" \
     --min-isr "${MIN_ISR}" \
-    --wait \
-    || fail "the benchmark did not complete — this exercises reflection, the JNI
-   compression libraries and the Kafka client together, so read the pod logs"
+    --wait 2>&1 | tee /dev/tty)" || true
+
+RUN_ID="$(echo "${RUN_OUTPUT}" | sed -n 's/.*ID[[:space:]]\{2,\}\([0-9a-f]\{8\}\).*/\1/p' | head -1)"
+
+# The CLI shows a live progress view; when a task fails it reports FAILED and
+# 0 rec/s and stops there. The REASON is on the run itself, and reading it out
+# is the difference between "the benchmark failed" and "the producer could not
+# authenticate to the broker".
+if [ -n "${RUN_ID}" ]; then
+    RUN_JSON="$(api_get "/api/tests/${RUN_ID}" 200 'final run state')"
+    case "${RUN_JSON}" in
+        *'"status":"DONE"'*) : ;;
+        *)
+            error "❌ the benchmark did not finish cleanly (run ${RUN_ID})"
+            echo "" >&2
+            echo "Task failures:" >&2
+            echo "${RUN_JSON}" \
+                | tr ',' '\n' \
+                | grep -E '"(taskId|status|error)"' \
+                | sed 's/^/  /' >&2
+            echo "" >&2
+            echo "  Full detail:  ${KATES_CLI} test get ${RUN_ID} --url ${BASE} --api-key <key>" >&2
+            fail "benchmark run ${RUN_ID} did not reach DONE"
+            ;;
+    esac
+else
+    warn "could not determine the run id; skipping the result check"
+fi
 info "✓ benchmark completed on the native backend"
 
 echo ""
