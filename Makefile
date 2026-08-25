@@ -493,6 +493,26 @@ kates-image-native-local:  ## Build kates:native-local from the working tree
 kates-native-smoke:  ## Smoke-test a native image (IMAGE=... to pick one)
 	@./scripts/native-smoke-test.sh $(if $(IMAGE),$(IMAGE),kates:native-local)
 
+# Deploy the locally built NATIVE image, pinned so the kubelet cannot silently
+# substitute the published one — the native counterpart of kates-local.
+kates-native-local: kates-image-native-local  ## Deploy kates:native-local, pinned with pullPolicy Never
+	@echo "🚀 Deploying kates:native-local (namespace: $(KATES_NS))..."
+	@helm upgrade --install $(KATES_RELEASE) $(CHART_DIR) \
+		-n $(KATES_NS) --create-namespace \
+		-f $(CHART_DIR)/values-native-local.yaml \
+		--timeout 8m
+	@echo "⏳ Waiting for rollout..."
+	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
+	@echo "✅ Running. Verify the pod is on YOUR image:"
+	@kubectl get pod -n $(KATES_NS) -l app.kubernetes.io/instance=$(KATES_RELEASE) \
+		-o jsonpath='{range .items[*]}   {.metadata.name}  {.spec.containers[0].image}  {.spec.containers[0].imagePullPolicy}{"\n"}{end}'
+
+# The whole loop in one command: CLI + native image from the working tree,
+# Kafka, the chart pinned to that image, chart tests, the endpoints AOT
+# compilation breaks, and a real benchmark driven through the CLI.
+native-e2e:  ## Build CLI + native image, deploy and test the whole stack
+	@./scripts/native-e2e.sh $(NATIVE_E2E_ARGS)
+
 tester-build:  ## Build Kates Tester image and load into Kind
 	@echo "🔨 Building Kates Tester image..."
 	docker build -f tester/Dockerfile -t kates-tester:latest tester/
