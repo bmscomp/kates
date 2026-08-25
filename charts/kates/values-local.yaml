@@ -31,7 +31,10 @@ resources:
     cpu: "1000m"
 
 jvm:
-  options: "-Xms256m -Xmx512m -XX:+UseZGC"
+  # Same collector as the default values, generational included: a local run
+  # that quietly used legacy ZGC would exercise a different GC than production,
+  # which is exactly the kind of difference you do not want to discover later.
+  options: "-Xms256m -Xmx512m -XX:+UseZGC -XX:+ZGenerational"
 
 probes:
   startup:

@@ -348,7 +348,7 @@ kates-image-local:
 
 kates-local: kates-image-local
 	@echo "🚀 Deploying kates:local (namespace: $(KATES_NS))..."
-	@helm upgrade --install kates $(CHART_DIR) \
+	@helm upgrade --install $(KATES_RELEASE) $(CHART_DIR) \
 		-n $(KATES_NS) --create-namespace \
 		-f $(CHART_DIR)/values-local.yaml \
 		--timeout 8m \
@@ -364,17 +364,17 @@ kates-local: kates-image-local
 		exit 1; \
 	}
 	@echo "⏳ Waiting for rollout..."
-	kubectl rollout status deployment/kates -n $(KATES_NS) --timeout=300s
+	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
 	@echo "✅ kates:local running. Verify the pod is on YOUR image:"
-	@kubectl get pod -n $(KATES_NS) -l app.kubernetes.io/instance=kates \
+	@kubectl get pod -n $(KATES_NS) -l app.kubernetes.io/instance=$(KATES_RELEASE) \
 		-o jsonpath='{range .items[*]}   {.metadata.name}  {.spec.containers[0].image}  {.spec.containers[0].imagePullPolicy}{"\n"}{end}'
 
 # Force a fresh pod even when the tag is unchanged: Kubernetes sees no spec
 # change for the same tag, so a plain `helm upgrade` would keep the old pod
 # (running the old bytes) very much alive.
 kates-local-restart: kates-image-local
-	kubectl rollout restart deployment/kates -n $(KATES_NS)
-	kubectl rollout status deployment/kates -n $(KATES_NS) --timeout=300s
+	kubectl rollout restart deployment/$(KATES_RELEASE) -n $(KATES_NS)
+	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
 
 # Escape hatch for immutable-field conflicts on the bundled PostgreSQL.
 # --cascade=orphan is the whole point: it removes only the StatefulSet object,
@@ -382,8 +382,8 @@ kates-local-restart: kates-image-local
 # and adopt them. The database survives. A plain delete would take the pod and
 # (depending on the retention policy) the volume with it.
 kates-local-recreate-db:
-	@echo "🗄  Recreating the kates-postgresql StatefulSet, keeping pod + PVC..."
-	kubectl delete statefulset kates-postgresql -n $(KATES_NS) \
+	@echo "🗄  Recreating the $(KATES_RELEASE)-postgresql StatefulSet, keeping pod + PVC..."
+	kubectl delete statefulset $(KATES_RELEASE)-postgresql -n $(KATES_NS) \
 		--cascade=orphan --ignore-not-found
 	@echo "✅ StatefulSet removed (data intact). Re-run: make kates-local"
 
@@ -525,7 +525,7 @@ kates-logs:
 
 kates-undeploy:
 	@echo "🗑️  Removing Kates..."
-	helm uninstall kates -n $(KATES_NS) --ignore-not-found || true
+	helm uninstall $(KATES_RELEASE) -n $(KATES_NS) --ignore-not-found || true
 	@# The namespace itself is left in place on purpose — it holds the database
 	@# PVC, and dropping it silently destroys every stored run. Delete it by hand
 	@# when that is what you actually want:
@@ -534,6 +534,12 @@ kates-undeploy:
 
 CLUSTER_NAME   ?= panda
 KATES_NS       ?= kates
+# The Helm release name, and therefore the prefix of every resource the chart
+# creates. The local targets below derive `deployment/$(KATES_RELEASE)` and
+# `statefulset $(KATES_RELEASE)-postgresql` from it — they used to hardcode
+# "kates", which silently targets the wrong (or no) object as soon as the
+# release is installed under another name.
+KATES_RELEASE  ?= kates
 KATES_IMAGE    ?= kates:latest
 CHART_REGISTRY ?= oci://ghcr.io/bmscomp/charts
 CHART_DIR      := charts/kates
