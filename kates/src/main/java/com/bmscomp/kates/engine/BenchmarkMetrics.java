@@ -42,35 +42,57 @@ public class BenchmarkMetrics {
                 .register(registry);
     }
 
+    /**
+     * Registers a run's meters, replacing any the same run id already had.
+     *
+     * <p><b>Unregister-then-register, atomically.</b> Micrometer identifies a
+     * meter by name plus tags, and every meter here is tagged with the run id —
+     * so an old set and a new set for the same run ARE the same ids. Two
+     * consequences, both of which have to be handled in one step:
+     *
+     * <ul>
+     *   <li>Registering first and cleaning up after deletes the meters just
+     *       registered, leaving a restarted run exporting nothing at all.
+     *   <li>Registering a gauge whose id already exists does NOT rebind it:
+     *       Micrometer keeps the first state object and silently drops the new
+     *       one. The gauge then reports a {@code DoubleAccumulator} nothing
+     *       writes to any more, frozen at its last value.
+     * </ul>
+     *
+     * <p>Doing this as a bare remove followed by a put leaves a window where a
+     * concurrent start or end for the same run interleaves and produces exactly
+     * that second case. {@code compute} holds the map's per-key lock across the
+     * whole transition, so the two can no longer overlap.
+     */
     public void startRun(String runId, String testType, String backend) {
-        // Guard against a double start (retry, replayed event): otherwise
-        // activeRuns drifts upward and the previous meters leak.
-        //
-        // Order matters. Registering first and unregistering the old set after
-        // wiped the NEW meters: Micrometer identifies a meter by name+tags, and
-        // both sets carry the same run_id, so the old ids ARE the new ids. A
-        // restarted run was left exporting nothing at all.
-        RunMeters previous = runMeters.remove(runId);
-        if (previous != null) {
-            previous.unregister();
-        } else {
-            activeRuns.incrementAndGet();
-        }
-        runMeters.put(runId, new RunMeters(runId, testType, backend));
+        runMeters.compute(runId, (id, previous) -> {
+            if (previous != null) {
+                // A double start (retry, replayed event). Without this the
+                // active-run gauge drifts upward and the old meters leak.
+                previous.unregister();
+            } else {
+                activeRuns.incrementAndGet();
+            }
+            return new RunMeters(runId, testType, backend);
+        });
     }
 
     /**
      * Ends a run and UNREGISTERS its meters. Idempotent: the terminal
      * transition, the timeout reaper and the submission-failure path may all
      * reach here for the same run.
+     *
+     * <p>Also under {@code compute}, so it cannot land between a restart's
+     * unregister and its re-register and take the new meters with it.
      */
     public void endRun(String runId) {
-        RunMeters meters = runMeters.remove(runId);
-        if (meters == null) {
-            return;
-        }
-        activeRuns.decrementAndGet();
-        meters.unregister();
+        runMeters.compute(runId, (id, meters) -> {
+            if (meters != null) {
+                activeRuns.decrementAndGet();
+                meters.unregister();
+            }
+            return null;
+        });
     }
 
     public void recordThroughput(String runId, String phaseName, double recPerSec, double mbPerSec) {
