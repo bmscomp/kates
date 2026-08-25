@@ -124,6 +124,17 @@ resources:
     memory: "4Gi"
     cpu: "2"
 
+# -- Flyway schema migration behaviour
+flyway:
+  # -- Repair the schema history on startup before migrating.
+  #
+  # DEVELOPMENT ONLY. It fixes "Migration checksum mismatch", which happens when
+  # an unreleased migration is edited after a local database already applied it.
+  # On a real database that mismatch means the file and the schema genuinely
+  # disagree, and silently rewriting the history hides it — so this stays off by
+  # default and is enabled in the local overlays.
+  repairAtStart: false
+
 # -- Container args, replacing the image's CMD. Empty means "use the image's
 # own default". The native image sets its heap percentage through CMD, since a
 # native binary ignores JAVA_TOOL_OPTIONS; override it here rather than
