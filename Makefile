@@ -131,6 +131,9 @@ check-cli-compat: ## Verify CLI output degrades correctly across terminals
 # the previous hand-written help had drifted to 39 undocumented targets.
 # NOTE: a description must not itself contain the comment marker — help splits
 # on the LAST one, so it would print only the tail of the line.
+check-chart-tests: ## Fail if a chart test calls an endpoint that does not exist
+	@./scripts/check-chart-test-paths.sh
+
 check-help: ## Fail if any target is missing its help description
 	@undocumented=$$(awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ && $$0 !~ /##/ {print "  " $$1}' $(MAKEFILE_LIST)); \
 	if [ -n "$$undocumented" ]; then \

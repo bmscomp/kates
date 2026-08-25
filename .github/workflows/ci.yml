@@ -131,6 +131,13 @@ jobs:
       - name: Check Strimzi version pins agree
         run: bash scripts/check-versions.sh
 
+      # A chart test that calls a 404 exits 0 and reports success, so `helm
+      # test` passing proves nothing. This compares the paths against the
+      # JAX-RS resources; test-kafka asked for /api/cluster, which has no
+      # method at its root, for the whole life of that test.
+      - name: Check chart test endpoints exist
+        run: bash scripts/check-chart-test-paths.sh
+
       # The wrapper chart does not render until its subchart is fetched.
       # `build` resolves from Chart.lock so the pinned version cannot drift.
       - name: Fetch strimzi-operator chart dependencies
