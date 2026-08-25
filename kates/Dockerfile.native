@@ -51,29 +51,61 @@ RUN --mount=type=cache,target=/root/.m2 \
   ${MARCH_ARG} \
   && mv target/*-runner target/kates-native
 
-# Extract platform-specific JNI native libraries from Maven JARs
+# Extract the compression JNI libraries for THIS architecture.
+#
+# The three jars each bury their natives under a different layout:
+#
+#   zstd-jni      linux/aarch64/libzstd-jni-1.5.7-7.so
+#   lz4-java      net/jpountz/util/linux/aarch64/liblz4-java.so
+#   snappy-java   org/xerial/snappy/native/Linux/aarch64/libsnappyjava.so
+#
+# The previous version hardcoded those three paths and chained `jar xf` calls
+# with `||` fallbacks. That silently produced an image with no lz4: `jar xf`
+# EXITS 0 when the path you asked for is not in the archive and extracts
+# nothing, so the fallback to lz4's real path never ran, the following `cp`
+# failed into a `|| true`, and only the guard at the end noticed. Matching on
+# the architecture instead of the layout removes the whole class of problem —
+# a jar that reorganises its natives keeps working.
+#
+# Two details in the recipe below that are not obvious:
+#   * android and musl paths are excluded — snappy ships android-aarch64 and
+#     x86_64-musl under the SAME file name as the glibc build, and whichever
+#     sorts last wins the copy. The runtime is glibc-based UBI9, so a musl
+#     library loads on nobody's machine and fails the first time snappy runs;
+#   * zstd-jni dlopens the VERSIONED file name, so an unversioned alias is kept
+#     next to it.
+#
+# The guard at the end is what stops a broken extraction from shipping: without
+# it the image starts happily and fails minutes into a benchmark, where a
+# missing compression library reads like a Kafka problem.
 RUN --mount=type=cache,target=/root/.m2 \
-  ARCH=$(uname -m) && \
-  if [ "$ARCH" = "x86_64" ]; then JNI_ARCH="amd64"; SNAPPY_ARCH="linux/x86_64"; \
-  elif [ "$ARCH" = "aarch64" ]; then JNI_ARCH="aarch64"; SNAPPY_ARCH="linux/aarch64"; \
-  else JNI_ARCH="$ARCH"; SNAPPY_ARCH="linux/$ARCH"; fi && \
-  mkdir -p /build/native-libs && \
-  ZSTD_JAR=$(find /root/.m2/repository/com/github/luben/zstd-jni -name "*.jar" | sort -V | tail -1) && \
-  LZ4_JAR=$(find /root/.m2/repository/org/lz4/lz4-java -name "*.jar" | sort -V | tail -1) && \
-  SNAPPY_JAR=$(find /root/.m2/repository/org/xerial/snappy/snappy-java -name "*.jar" | sort -V | tail -1) && \
-  echo "=== Extracting native libs (arch=$JNI_ARCH) ===" && \
-  if [ -n "$ZSTD_JAR" ]; then cd /tmp && jar xf "$ZSTD_JAR" "linux/$JNI_ARCH/" && cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null && cd /build/native-libs/ && for f in libzstd-jni-*.so; do [ -e "$f" ] && cp "$f" libzstd-jni.so; done || true; fi && \
-  if [ -n "$LZ4_JAR" ]; then cd /tmp && jar xf "$LZ4_JAR" "linux/$JNI_ARCH/" 2>/dev/null || jar xf "$LZ4_JAR" "net/jpountz/util/linux/$JNI_ARCH/" 2>/dev/null && cp -v net/jpountz/util/linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  if [ -n "$SNAPPY_JAR" ]; then cd /tmp && jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/Linux/$JNI_ARCH/" 2>/dev/null || jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/$SNAPPY_ARCH/" 2>/dev/null && cp -v org/xerial/snappy/native/Linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v org/xerial/snappy/native/$SNAPPY_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  ls -la /build/native-libs/ && \
+  set -eu; \
+  ARCH="$(uname -m)"; \
+  case "$ARCH" in \
+    x86_64)  ARCH_ALT="amd64" ;; \
+    aarch64) ARCH_ALT="arm64" ;; \
+    *)       ARCH_ALT="$ARCH" ;; \
+  esac; \
+  echo "=== Extracting compression JNI libs (arch=$ARCH, also matching $ARCH_ALT) ==="; \
+  mkdir -p /build/native-libs /tmp/jni; \
+  for coords in com/github/luben/zstd-jni org/lz4/lz4-java org/xerial/snappy/snappy-java; do \
+    JAR="$(find "/root/.m2/repository/${coords}" -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort -V | tail -1)"; \
+    [ -n "$JAR" ] || { echo "FATAL: no jar found under ${coords} — did dependency resolution run?"; exit 1; }; \
+    ( cd /tmp/jni && jar xf "$JAR" ); \
+  done; \
+  find /tmp/jni \
+       \( -ipath "*linux*${ARCH}*" -o -ipath "*linux*${ARCH_ALT}*" \) \
+       ! -ipath "*android*" ! -ipath "*musl*" -name '*.so' -exec cp -v {} /build/native-libs/ \; ; \
+  for f in /build/native-libs/libzstd-jni-*.so; do \
+    if [ -e "$f" ]; then cp "$f" /build/native-libs/libzstd-jni.so; fi; \
+    break; \
+  done; \
+  rm -rf /tmp/jni; \
+  ls -la /build/native-libs/; \
   for lib in zstd lz4 snappy; do \
-    ls /build/native-libs/ | grep -qi "$lib" || { echo "FATAL: no $lib native library extracted into /build/native-libs"; exit 1; }; \
+    ls /build/native-libs/ | grep -qi "$lib" \
+      || { echo "FATAL: no $lib native library for $ARCH in any of the extracted jars"; exit 1; }; \
   done
-
-# NOTE: the guard above fails the build if any compression JNI lib is missing.
-# The per-command `|| true` in the extraction tolerates arch/path variation,
-# so without this final check a broken extraction would silently ship an image
-# that crashes the first time lz4/snappy/zstd compression is used at runtime.
 
 
 # Stage 3: Minimal runtime
