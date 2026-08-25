@@ -129,7 +129,9 @@ check-cli-compat: ## Verify CLI output degrades correctly across terminals
 # cannot list a target that no longer exists — but it CAN miss a new one that
 # was added without a comment. This is what stops that from creeping back:
 # the previous hand-written help had drifted to 39 undocumented targets.
-check-help: ## Fail if any target is missing its ## description
+# NOTE: a description must not itself contain the comment marker — help splits
+# on the LAST one, so it would print only the tail of the line.
+check-help: ## Fail if any target is missing its help description
 	@undocumented=$$(awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ && $$0 !~ /##/ {print "  " $$1}' $(MAKEFILE_LIST)); \
 	if [ -n "$$undocumented" ]; then \
 		echo "❌ These targets have no '## description', so 'make help' will not list them:"; \
