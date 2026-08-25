@@ -419,8 +419,11 @@ Returns the list of pre-built disruption playbooks. Each playbook is a curated, 
 
 ```
 POST /api/disruptions/playbooks/{name}
-POST /api/disruptions/playbooks/{name}?dryRun=true
 ```
+
+There is no `dryRun` on this endpoint — the parameter was documented but never
+implemented. To preview a playbook, fetch it from the catalog and post the plan
+to `POST /api/disruptions?dryRun=true`.
 
 Executes a pre-built playbook by name. The playbook is loaded from the catalog, converted to a `DisruptionPlan` automatically, validated against the safety guard, and run asynchronously.
 
