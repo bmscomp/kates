@@ -44,6 +44,18 @@ data:
   QUARKUS_HIBERNATE_ORM_DATABASE_GENERATION: "none"
   QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
   QUARKUS_FLYWAY_BASELINE_ON_MIGRATE: "true"
+  {{- if .Values.flyway.repairAtStart }}
+  {{- /*
+    Rewrites the schema-history checksums to match the migration files on
+    startup. Development only: it exists for the case where an UNRELEASED
+    migration was edited after a local database already applied it, which
+    otherwise fails the boot with "Migration checksum mismatch". Against a
+    real database that mismatch is a warning worth heeding — the file and
+    the schema genuinely disagree — so repairing automatically would paper
+    over it.
+  */}}
+  QUARKUS_FLYWAY_REPAIR_AT_START: "true"
+  {{- end }}
   {{- end }}
 
   KATES_DEFAULTS_REPLICATION_FACTOR: {{ .Values.defaults.replicationFactor | quote }}

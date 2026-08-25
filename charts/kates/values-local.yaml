@@ -62,3 +62,10 @@ defaults:
 
 monitoring:
   enabled: false
+
+# Local databases outlive the migrations that built them. Editing an unreleased
+# migration then redeploying fails the boot with a checksum mismatch, which is
+# correct behaviour and useless feedback when the "drift" is a comment you added
+# five minutes ago. Repair on start, here only.
+flyway:
+  repairAtStart: true

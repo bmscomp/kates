@@ -66,10 +66,54 @@ trap cleanup EXIT
 fail() {
     error "❌ $*"
     echo "" >&2
-    echo "Diagnostics:" >&2
+    echo "Pods:" >&2
     kubectl get pods -n "${KATES_NS}" 2>&1 | sed 's/^/  /' >&2 || true
-    kubectl logs -n "${KATES_NS}" -l "app.kubernetes.io/instance=${KATES_RELEASE}" --tail=60 2>&1 \
-        | sed 's/^/  /' >&2 || true
+
+    # Logs from THIS deploy's newest pod only. Selecting on the instance label
+    # alone also matches pods left over from earlier releases, and a crash-loop
+    # is easy to misread when most of the output belongs to a pod that has been
+    # running happily for a month.
+    POD=$(kubectl get pods -n "${KATES_NS}" \
+        -l "app.kubernetes.io/instance=${KATES_RELEASE}" \
+        --sort-by=.metadata.creationTimestamp \
+        -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
+    LOGS=""
+    if [ -n "${POD}" ]; then
+        LOGS=$(kubectl logs -n "${KATES_NS}" "${POD}" -c kates --tail=200 2>&1 || true)
+    fi
+
+    # Name the failure when its signature is recognisable, because the cause is
+    # otherwise buried in a few hundred lines of Kafka connection warnings that
+    # are a symptom of the pod not starting, not the reason for it.
+    echo "" >&2
+    case "${LOGS}" in
+        *FlywayValidateException*|*"checksum mismatch"*)
+            error "Cause: a migration file was edited after this database applied it."
+            echo "  The schema history and the file genuinely disagree, so Flyway refuses to" >&2
+            echo "  boot. values-native-local.yaml sets flyway.repairAtStart for exactly this" >&2
+            echo "  case — check you deployed with it. To repair by hand:" >&2
+            echo "" >&2
+            echo "    helm upgrade ${KATES_RELEASE} charts/kates -n ${KATES_NS} \\" >&2
+            echo "      -f charts/kates/values-native-local.yaml --set flyway.repairAtStart=true" >&2
+            ;;
+        *"Failed to obtain JDBC connection"*|*"Connection to"*"refused"*)
+            error "Cause: the database is unreachable — check ${KATES_RELEASE}-postgresql-0."
+            ;;
+        *OutOfMemoryError*|*"Java heap space"*)
+            error "Cause: the container ran out of memory — raise resources.limits.memory."
+            ;;
+        *UnsatisfiedLinkError*)
+            error "Cause: a JNI library is missing from the image (compression)."
+            echo "  Check the native-libs extraction stage in kates/Dockerfile.native." >&2
+            ;;
+        *)
+            error "No recognised failure signature; the last 60 log lines follow."
+            ;;
+    esac
+
+    echo "" >&2
+    echo "Last 60 lines from ${POD:-<no pod>}:" >&2
+    echo "${LOGS}" | tail -60 | sed 's/^/  /' >&2
     exit 1
 }
 
