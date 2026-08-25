@@ -494,6 +494,10 @@ func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, pay
 }
 
 // Terminal states a disruption report can settle into.
+//
+// REJECTED belongs here even though a plan rejected at submission never reaches
+// a poll (that is a 422): a plan can also be rejected asynchronously, when it
+// loses the race for the cluster's concurrency lease after being accepted.
 func isTerminalDisruptionStatus(status string) bool {
 	switch status {
 	case "COMPLETED", "PARTIAL", "FAILED", "REJECTED", "INTERRUPTED":
@@ -520,7 +524,7 @@ func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*Disrupti
 		return nil, fmt.Errorf("backend did not return a disruption id")
 	}
 
-	return c.awaitDisruption(ctx, accepted.ID)
+	return c.awaitDisruptionFrom(ctx, accepted.ID, accepted.Status)
 }
 
 const (
@@ -539,6 +543,23 @@ const (
 // still be running", which is both wrong and unactionable. Permanent errors now
 // fail immediately; transient ones are tolerated in a bounded run.
 func (c *Client) awaitDisruption(ctx context.Context, id string) (*DisruptionRunResponse, error) {
+	return c.awaitDisruptionFrom(ctx, id, "")
+}
+
+// awaitDisruptionFrom skips the first poll when the accept response already
+// carried a terminal status — there is nothing to wait for, and a five-second
+// sleep before reporting it is just latency.
+func (c *Client) awaitDisruptionFrom(ctx context.Context, id, acceptedStatus string) (*DisruptionRunResponse, error) {
+	if isTerminalDisruptionStatus(acceptedStatus) {
+		report, err := c.DisruptionStatus(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("fetching disruption %s: %w", id, err)
+		}
+		if report != nil {
+			return &DisruptionRunResponse{ID: id, Report: *report}, nil
+		}
+	}
+
 	deadline := time.Now().Add(disruptionPollBudget)
 	consecutiveFailures := 0
 
@@ -633,7 +654,7 @@ func (c *Client) PlaybookRun(ctx context.Context, name string) (*DisruptionRunRe
 	if accepted == nil || accepted.ID == "" {
 		return nil, fmt.Errorf("backend did not return a disruption id for playbook %q", name)
 	}
-	return c.awaitDisruption(ctx, accepted.ID)
+	return c.awaitDisruptionFrom(ctx, accepted.ID, accepted.Status)
 }
 
 func (c *Client) DisruptionScheduleList(ctx context.Context) ([]DisruptionScheduleEntry, error) {
