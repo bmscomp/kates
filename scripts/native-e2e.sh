@@ -226,16 +226,51 @@ curl -sf "${BASE}/q/health/live" >/dev/null 2>&1 || fail "port-forward never bec
 curl -sf "${BASE}/q/health/ready" >/dev/null || fail "readiness is down — check Flyway migrations"
 info "  ok   readiness (all migrations applied, including the non-transactional V20)"
 
-PLAYBOOKS="$(curl -sf "${BASE}/api/disruptions/playbooks" || true)"
-case "${PLAYBOOKS}" in
-    ""|"[]") fail "playbook catalog is EMPTY — playbooks/*.yaml missing from the image.
-   Check quarkus.native.resources.includes in application.properties." ;;
+# Everything under /api is authenticated (apiKey.enabled defaults to true), and
+# the chart generates the key into a Secret. Read it rather than turning auth
+# off: a native image can break the auth filter as easily as anything else, and
+# a run that skipped it would not notice.
+API_KEY="$(kubectl get secret "${KATES_RELEASE}-api-key" -n "${KATES_NS}" \
+    -o jsonpath='{.data.api-key}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+[ -n "${API_KEY}" ] || fail "could not read the API key from secret ${KATES_RELEASE}-api-key"
+info "  ok   API key read from ${KATES_RELEASE}-api-key"
+
+# Returns the body, but only after asserting the STATUS. Conflating the two is
+# how a 401 came to be reported as an empty playbook catalog — curl -sf fails
+# silently on any 4xx, leaving an empty string that looks exactly like a feature
+# that did not ship.
+api_get() {  # api_get <path> <expected-status> <what-it-proves>
+    _path="$1"; _expected="$2"; _what="$3"
+    _body="$(mktemp)"
+    _status="$(curl -s -o "${_body}" -w '%{http_code}' \
+        -H "X-API-Key: ${API_KEY}" "${BASE}${_path}" || echo "000")"
+    if [ "${_status}" != "${_expected}" ]; then
+        _preview="$(head -c 300 "${_body}" 2>/dev/null || true)"
+        rm -f "${_body}"
+        case "${_status}" in
+            401|403) fail "${_path} returned ${_status}: the API key was rejected.
+   The key comes from secret ${KATES_RELEASE}-api-key; if the release was
+   upgraded since the pod started, the running pod may hold an older one." ;;
+            000)     fail "${_path} could not be reached — the port-forward died." ;;
+            *)       fail "${_path} returned ${_status}, expected ${_expected} (${_what}): ${_preview}" ;;
+        esac
+    fi
+    cat "${_body}"
+    rm -f "${_body}"
+}
+
+PLAYBOOKS="$(api_get /api/disruptions/playbooks 200 'playbook catalog')"
+case "$(echo "${PLAYBOOKS}" | tr -d '[:space:]')" in
+    ""|"[]") fail "the playbook catalog is EMPTY.
+   The endpoint answered 200, so the app is fine — playbooks/*.yaml were not
+   shipped in the image. Check quarkus.native.resources.includes." ;;
 esac
 info "  ok   playbook catalog loaded from classpath YAML"
 
-NOT_FOUND="$(curl -s "${BASE}/api/tests/does-not-exist" || true)"
+NOT_FOUND="$(api_get /api/tests/does-not-exist 404 'error body serialisation')"
 echo "${NOT_FOUND}" | grep -q '"message"' \
-    || fail "404 body is empty — ApiError is not registered for reflection: ${NOT_FOUND}"
+    || fail "the 404 body has no fields — ApiError is not registered for reflection.
+   Body was: ${NOT_FOUND}"
 info "  ok   error bodies serialise"
 
 # ── Step 7: a real benchmark, through the CLI ────────────────────────────────
@@ -255,6 +290,7 @@ info "  ${BROKERS} broker(s) → replication-factor ${RF}, min-isr ${MIN_ISR}"
 # initialise those libraries only finds out here, minutes into a run.
 "${KATES_CLI}" test create \
     --url "${BASE}" \
+    --api-key "${API_KEY}" \
     --type LOAD \
     --topic native-e2e \
     --records 10000 \
