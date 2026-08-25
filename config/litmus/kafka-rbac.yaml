@@ -1,0 +1,64 @@
+# RBAC that lets LitmusChaos run experiments against the Kafka namespace.
+#
+# scripts/setup-kafka-chaos.sh applies this as its Step 4, but the file did not
+# exist: with `set -e` the setup died right after installing the experiments,
+# and the permissions were only ever created as a side effect of applying
+# kafka-pod-delete.yaml, which carries an inline copy. Anyone installing a
+# different experiment first got a chaos runner with no rights, failing later
+# with a Forbidden that reads like a Litmus bug.
+#
+# This is the canonical copy. Keep it in step with the inline block in
+# experiments/kafka-pod-delete.yaml, which is left in place so that file stays
+# self-contained.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litmus-admin
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: litmus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: litmus-admin
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: litmus
+rules:
+  # Experiments create helper pods and read their logs; pods/exec is what the
+  # stress and network experiments use to act inside a broker container.
+  - apiGroups: [""]
+    resources: ["pods", "events", "pods/log", "pods/exec"]
+    verbs: ["create", "list", "get", "patch", "update", "delete", "deletecollection"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "list", "get", "patch", "update", "delete", "deletecollection"]
+  # Scale-down and rolling-restart experiments patch the workload itself.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["list", "get", "patch", "update"]
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosengines", "chaosexperiments", "chaosresults"]
+    verbs: ["create", "list", "get", "patch", "update", "delete"]
+  # Steady-state probes read the Kafka CR to decide whether the cluster
+  # recovered.
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: litmus-admin
+  namespace: kafka
+  labels:
+    app.kubernetes.io/name: litmus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: litmus-admin
+subjects:
+  - kind: ServiceAccount
+    name: litmus-admin
+    namespace: kafka
