@@ -49,6 +49,10 @@ public class KatesReadinessCheck implements HealthCheck {
         builder.withData("kafka", kafkaOk ? "UP" : "DOWN");
         builder.withData("kafkaConsecutiveFailures", kafkaFailures);
         builder.withData("kafkaGatesReadiness", requireKafka);
+        // How old the Kafka verdict is. Without this the probe reports
+        // "kafka: UP" forever if the refresh is disabled or wedged — the
+        // initial optimistic value, indistinguishable from a fresh success.
+        builder.withData("kafkaCheckedSecondsAgo", kafkaCheckedSecondsAgo());
         builder.withData("database", dbOk ? "UP" : "DOWN");
 
         boolean kafkaBlocks = requireKafka && kafkaFailures >= kafkaFailureThreshold;
@@ -56,6 +60,15 @@ public class KatesReadinessCheck implements HealthCheck {
             return builder.up().build();
         }
         return builder.down().build();
+    }
+
+    /** Age of the cached Kafka verdict; -1 when no refresh has run yet. */
+    private long kafkaCheckedSecondsAgo() {
+        long lastChecked = kafkaReachability.lastCheckedEpochMs();
+        if (lastChecked <= 0) {
+            return -1;
+        }
+        return Math.max(0, (System.currentTimeMillis() - lastChecked) / 1000);
     }
 
     private boolean checkDatabase() {

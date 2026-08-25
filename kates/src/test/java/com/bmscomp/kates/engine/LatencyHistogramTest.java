@@ -199,4 +199,23 @@ class LatencyHistogramTest {
             Metrics.removeRegistry(registry);
         }
     }
+
+    @Test
+    void samplesBeyondTheTrackedRangeAreCounted() {
+        LatencyHistogram histogram = new LatencyHistogram("run-clamped");
+
+        histogram.recordLatency(10.0);
+        assertEquals(0, histogram.clampedSampleCount());
+
+        // 60s is the ceiling; a five-minute stall is recorded AT it, which makes
+        // max and p999 look far healthier than the run actually was.
+        histogram.recordLatency(300_000.0);
+        histogram.recordLatency(120_000.0);
+
+        assertEquals(2, histogram.clampedSampleCount(), "clamped samples must be visible, not silent");
+        assertTrue(histogram.getMax() > 0);
+
+        histogram.reset();
+        assertEquals(0, histogram.clampedSampleCount(), "reset clears the clamp count with everything else");
+    }
 }

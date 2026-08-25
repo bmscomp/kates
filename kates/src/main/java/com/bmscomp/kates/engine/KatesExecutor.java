@@ -10,8 +10,16 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 /**
- * Shared, bounded executor for long-running, blocking async work (benchmark
+ * Shared executor for long-running, blocking async work (benchmark
  * orchestration, CDC verification, chaos/K8s calls).
+ *
+ * <p>It is NOT bounded — an earlier version of this comment said it was, which
+ * is worth correcting because callers reason about back-pressure from it.
+ * {@code newThreadPerTaskExecutor} starts a virtual thread per task and queues
+ * nothing. That is deliberate: the work here is blocking I/O, where virtual
+ * threads are cheap and a fixed pool would deadlock as soon as one task waited
+ * on another. Concurrency limits belong at the point where work is admitted —
+ * the engine's permit semaphore and the disruption lease — not here.
  *
  * <p>Previously this work ran on {@code CompletableFuture.supplyAsync(...)}
  * with no executor — i.e. the common {@link java.util.concurrent.ForkJoinPool},
