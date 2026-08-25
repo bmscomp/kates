@@ -74,7 +74,11 @@ public class OutboxPoller {
                         "SELECT e FROM OutboxEventEntity e ORDER BY e.createdAt ASC", OutboxEventEntity.class)
                 .setMaxResults(50)
                 .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-                .setHint("jakarta.persistence.lock.timeout", -2) // -2 maps to SKIP LOCKED in Hibernate
+                // SKIP_LOCKED, so replicas drain disjoint batches instead of
+                // queueing behind each other. Spelled with Hibernate's own
+                // constant rather than the bare -2 that was here: the number is
+                // meaningless on sight and easy to "tidy" into a real timeout.
+                .setHint(org.hibernate.jpa.SpecHints.HINT_SPEC_LOCK_TIMEOUT, org.hibernate.LockOptions.SKIP_LOCKED)
                 .getResultList();
 
         for (OutboxEventEntity event : events) {

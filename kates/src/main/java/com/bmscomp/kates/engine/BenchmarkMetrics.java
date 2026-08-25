@@ -45,12 +45,18 @@ public class BenchmarkMetrics {
     public void startRun(String runId, String testType, String backend) {
         // Guard against a double start (retry, replayed event): otherwise
         // activeRuns drifts upward and the previous meters leak.
-        RunMeters previous = runMeters.put(runId, new RunMeters(runId, testType, backend));
+        //
+        // Order matters. Registering first and unregistering the old set after
+        // wiped the NEW meters: Micrometer identifies a meter by name+tags, and
+        // both sets carry the same run_id, so the old ids ARE the new ids. A
+        // restarted run was left exporting nothing at all.
+        RunMeters previous = runMeters.remove(runId);
         if (previous != null) {
             previous.unregister();
         } else {
             activeRuns.incrementAndGet();
         }
+        runMeters.put(runId, new RunMeters(runId, testType, backend));
     }
 
     /**
@@ -79,7 +85,12 @@ public class BenchmarkMetrics {
         RunMeters meters = runMeters.get(runId);
         if (meters == null) return;
 
-        meters.errorCount(phaseName).increment();
+        Counter counter = meters.errorCount(phaseName);
+        // null once the run's meters have been unregistered — the error still
+        // happened, but there is no live series to add it to.
+        if (counter != null) {
+            counter.increment();
+        }
     }
 
     private class RunMeters {
@@ -91,6 +102,9 @@ public class BenchmarkMetrics {
 
         /** Every meter this run registered, so endRun can remove all of them. */
         private final List<Meter.Id> meterIds = new CopyOnWriteArrayList<>();
+
+        /** Set by unregister(); stops a late error from registering a new meter. */
+        private volatile boolean unregistered;
 
         RunMeters(String runId, String testType, String backend) {
             this.runId = runId;
@@ -114,6 +128,15 @@ public class BenchmarkMetrics {
         }
 
         Counter errorCount(String phase) {
+            // Returns null once the run is over. A late recordError racing
+            // unregister() used to register a fresh counter AFTER the id list
+            // had been cleared, so that run_id series stayed in the registry
+            // for the life of the process — the leak unregister() exists to
+            // prevent, reintroduced by the last error of every run that fails
+            // at the finish line.
+            if (unregistered) {
+                return null;
+            }
             return errorCounters.computeIfAbsent(phase == null ? "default" : phase, p -> {
                 Counter counter = Counter.builder("kates.benchmark.errors.total")
                         .tags("run_id", runId, "test_type", testType, "phase", p)
@@ -125,6 +148,7 @@ public class BenchmarkMetrics {
         }
 
         void unregister() {
+            unregistered = true;
             for (Meter.Id id : meterIds) {
                 registry.remove(id);
             }

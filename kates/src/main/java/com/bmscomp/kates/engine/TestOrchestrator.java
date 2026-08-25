@@ -155,6 +155,7 @@ public class TestOrchestrator {
         } catch (RuntimeException e) {
             releasePermit(run.getId());
             LOG.error("Failed to register test run: " + run.getId(), e);
+            markStrandedAsFailed(run);
             return com.bmscomp.kates.util.Result.failure(e);
         }
 
@@ -253,8 +254,15 @@ public class TestOrchestrator {
     }
 
     /**
-     * Executes a multi-phase scenario: each phase runs sequentially,
-     * using the resolved spec (base + phase overrides + type defaults).
+     * Executes a multi-phase scenario, using the resolved spec per phase
+     * (base + phase overrides + type defaults).
+     *
+     * <p>Phases are SUBMITTED in order, not run one after another: the loop
+     * below hands every phase's tasks to the backend without waiting for the
+     * previous phase to finish, so they overlap. The javadoc here used to claim
+     * they ran sequentially, which is worth correcting because it changes how
+     * you read a scenario's results — a ramp defined as three phases produces
+     * three concurrent loads, not a staircase.
      */
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeScenario")
     com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
@@ -297,6 +305,7 @@ public class TestOrchestrator {
         } catch (RuntimeException e) {
             releasePermit(run.getId());
             LOG.error("Failed to register scenario run: " + run.getId(), e);
+            markStrandedAsFailed(run);
             return com.bmscomp.kates.util.Result.failure(e);
         }
         runStartNanos.put(run.getId(), System.nanoTime());
@@ -454,6 +463,12 @@ public class TestOrchestrator {
                                 }
                                 heatmapRows.remove(eldest);
                             }
+                            // An id evicted above can be re-added by a later
+                            // poll of the same run, leaving its earlier entry
+                            // in the deque. Those stale duplicates are never
+                            // removed by the loop (the map no longer has them),
+                            // so the deque grows even though the map does not.
+                            heatmapOrder.removeIf(id -> !heatmapRows.containsKey(id));
                         }
                     } catch (Exception e) {
                         LOG.warn("Failed to poll task: " + result.getTaskId(), e);
@@ -533,6 +548,23 @@ public class TestOrchestrator {
             }
         }
         return run;
+    }
+
+    /**
+     * Best-effort FAILED for a run whose registration blew up half-way.
+     *
+     * <p>If the save succeeded and only the event failed, the row is left
+     * PENDING — a state nothing scans: orphan recovery looks for RUNNING and the
+     * timeout reaper only reaps RUNNING, so the run would sit there forever
+     * looking like it was about to start. Failing to write this is not worth
+     * masking the original error, so it only logs.
+     */
+    private void markStrandedAsFailed(TestRun run) {
+        try {
+            repository.save(run.withStatus(TestResult.TaskStatus.FAILED));
+        } catch (RuntimeException e) {
+            LOG.warnf("Could not mark stranded run %s as FAILED: %s", run.getId(), e.getMessage());
+        }
     }
 
     /**

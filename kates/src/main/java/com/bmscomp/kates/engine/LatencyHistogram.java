@@ -53,6 +53,9 @@ public class LatencyHistogram implements AutoCloseable {
      */
     private final Object readLock = new Object();
 
+    /** Samples recorded at the ceiling because they exceeded the tracked range. */
+    private final java.util.concurrent.atomic.AtomicLong clampedSamples = new java.util.concurrent.atomic.AtomicLong();
+
     private final String id;
     private final List<Meter.Id> meterIds = new ArrayList<>();
 
@@ -91,6 +94,11 @@ public class LatencyHistogram implements AutoCloseable {
     /** Hot path: no lock taken. */
     public void recordLatency(double latencyMs) {
         long latencyUs = (long) (Math.max(0, latencyMs) * 1000.0);
+        if (latencyUs > HIGHEST_TRACKABLE_US) {
+            // Counted, not just clamped: silently recording a 5-minute stall as
+            // the 60s ceiling makes max and p999 look like a healthy tail.
+            clampedSamples.incrementAndGet();
+        }
         recorder.recordValue(Math.min(HIGHEST_TRACKABLE_US, Math.max(1, latencyUs)));
     }
 
@@ -144,12 +152,29 @@ public class LatencyHistogram implements AutoCloseable {
 
     public void reset() {
         synchronized (readLock) {
-            // Drain first so in-flight samples are discarded with everything
-            // else instead of surfacing in the next read.
+            // recorder.reset() discards the active interval outright, so there
+            // is nothing to drain first — an earlier comment here claimed there
+            // was, describing code that never existed. The recycle buffer goes
+            // with it: reusing a histogram that belonged to the discarded
+            // interval would fold stale samples into the next read.
             recorder.reset();
             intervalRecycle = null;
             cumulative.reset();
+            clampedSamples.set(0);
         }
+    }
+
+    /**
+     * Samples that exceeded {@link #HIGHEST_TRACKABLE_US} and were recorded at
+     * the ceiling instead.
+     *
+     * <p>Worth surfacing: a stalled broker produces latencies far beyond the
+     * tracked range, and clamping quietly understates max and the top
+     * percentiles exactly when they matter most. A non-zero count here means
+     * "the tail is at least this bad", not "the tail is this bad".
+     */
+    public long clampedSampleCount() {
+        return clampedSamples.get();
     }
 
     public static final double[] HEATMAP_BOUNDARIES = {
