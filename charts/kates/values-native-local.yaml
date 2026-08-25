@@ -1,0 +1,60 @@
+# Run the NATIVE image you just built, and nothing else.
+#
+#   make kates-native-local          # build + deploy
+#   helm upgrade --install kates charts/kates -n kates \
+#     -f charts/kates/values-native-local.yaml
+#
+# values-native.yaml is the production counterpart: it points at the published
+# <appVersion>-native tag. That is exactly what you do NOT want when validating
+# a local build — the kubelet would pull the registry image and you would test
+# somebody else's bytes while reading your own diff. This file is self-contained
+# rather than layered on top of it, so there is one -f and no ordering to get
+# wrong.
+
+replicaCount: 1
+
+image:
+  # Bare repository name, no registry — this tag only ever exists on the node,
+  # loaded there by `kind load docker-image`.
+  repository: kates
+  tag: native-local
+  # The whole point of the file. Without it the kubelet is free to reach for
+  # ghcr.io on any restart; with it, a missing image fails loudly as
+  # ErrImageNeverPull instead of quietly running the published one.
+  pullPolicy: Never
+
+# A native image does not read JAVA_TOOL_OPTIONS, so anything set here would be
+# silently ignored. Heap comes from the image's CMD, overridden below.
+jvm:
+  options: ""
+
+containerArgs:
+  - "-XX:MaximumHeapSizePercent=75"
+
+# Laptop-sized, and sized against the LIMIT the heap percentage is taken from.
+# A native binary has no JIT, no class metadata and no warmup heap, so it needs
+# a fraction of what the JVM image is given.
+resources:
+  requests:
+    memory: "384Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "1000m"
+
+probes:
+  startup:
+    # A native binary serves within a second or two even on a contended kind
+    # node. 30 x 1s still leaves an order of magnitude of headroom, while
+    # surfacing a genuine boot failure in seconds rather than two minutes.
+    failureThreshold: 30
+    periodSeconds: 1
+
+postgresql:
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"

@@ -25,15 +25,51 @@ That gives three failure modes, none of which fail the JVM tests:
 The last one is the nastiest: it surfaces during a long test run, not at
 startup, so it looks like a Kafka problem rather than a packaging one.
 
+## The whole loop, in one command
+
+```bash
+make cluster      # once, if you do not already have a Kind cluster
+make native-e2e
+```
+
+`native-e2e` builds the CLI and the native image from your working tree, loads
+the image onto the node, deploys Kafka if none is running, installs the chart
+pinned to that image, and then proves it works rather than merely starts:
+
+| Step | What it catches |
+|---|---|
+| `pullPolicy: Never` + image assertion | the kubelet substituting the published image, so you test bytes that are not yours |
+| Chart tests | probes, service wiring, API key handling |
+| Playbook catalog non-empty | classpath YAML dropped from the image — the endpoint returns `200` with `[]` |
+| A 404 body with fields | an unregistered DTO serialising as `{}`, native-only |
+| A real 10k-record LOAD test through the CLI | reflection, the JNI compression libraries and the Kafka client, together |
+
+Useful flags: `--skip-build` reuses an existing image, `--skip-kafka` assumes a
+cluster is already up, `--keep` leaves the release installed. Pass them through
+make with `NATIVE_E2E_ARGS="--skip-build --keep"`.
+
+Budget 15–25 minutes for a cold run; almost all of it is the compiler.
+
 ## Building
 
 ```bash
 # From the working tree, through the same Dockerfile the release uses
 make kates-image-native-local
 
-# Or directly
+# Deploy it, pinned so the kubelet cannot reach for the registry
+make kates-native-local
+
+# Or build directly
 docker build -f kates/Dockerfile.native -t kates:native-local .
 ```
+
+Two chart overlays exist for the native image, and picking the wrong one is the
+easiest way to waste a build:
+
+| File | Image | Use |
+|---|---|---|
+| `values-native.yaml` | `ghcr.io/bmscomp/kates:<appVersion>-native` | Real deployments |
+| `values-native-local.yaml` | `kates:native-local`, `pullPolicy: Never` | Validating a local build |
 
 The compiler needs roughly **8 GB of memory** and 15–25 minutes on four cores.
 On Docker Desktop, raise the VM memory limit first — below about 6 GB the build
