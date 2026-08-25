@@ -149,6 +149,27 @@ extracted into `/app/lib`. The Dockerfile's extraction step has a guard that
 fails the build when zstd, lz4 or snappy is missing; if it passed and the error
 still happens, check `LD_LIBRARY_PATH` in the runtime stage.
 
+**`ClassNotFoundException: net.jpountz.lz4.LZ4JavaSafeCompressor`, wrapped in an
+`AssertionError`, from the producer** — the compression codec, not the native
+library. lz4-java never names its implementations in code: `LZ4Factory` builds
+`"net.jpountz.lz4.LZ4" + impl + "Compressor"` for impl in `JNI`, `JavaSafe`,
+`JavaUnsafe`, calls `Class.forName` on it and reads the static `INSTANCE` field.
+`XXHashFactory` does the same for the checksums in Kafka's LZ4 framing.
+
+Two things must therefore be true in `reflect-config.json`, and both have been
+wrong here:
+
+1. **All three impls registered, not just JNI.** The factory falls back
+   JNI → JavaUnsafe → JavaSafe, so registering only the JNI variants leaves the
+   fallback path missing from the image.
+2. **`allDeclaredFields` on each.** The class being present is not enough —
+   `getField("INSTANCE")` needs field access, and without it even the JNI path
+   fails, which is what silently pushed it into the fallback.
+
+`CompressionReflectionConfigTest` asserts both, and that every registered name
+exists on the classpath. It runs in the normal unit suite, so a missing codec
+fails the build rather than a benchmark twenty minutes into a native run.
+
 **The container is killed shortly after start** — the native image ignores
 `JAVA_TOOL_OPTIONS`, so the chart's `jvm.options` does nothing here. Heap is
 governed by the image's `CMD` (`-XX:MaximumHeapSizePercent=75`), overridable
