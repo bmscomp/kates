@@ -15,7 +15,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.20.6</quarkus.platform.version>
+        <quarkus.platform.version>3.38.3</quarkus.platform.version>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
         <kafka.version>3.9.0</kafka.version>
         <lz4.version>1.8.0</lz4.version>
