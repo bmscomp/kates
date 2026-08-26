@@ -500,9 +500,13 @@ kates-native-smoke:  ## Smoke-test a native image (IMAGE=... to pick one)
 # substitute the published one — the native counterpart of kates-local.
 kates-native-local: kates-image-native-local  ## Deploy kates:native-local, pinned with pullPolicy Never
 	@echo "🚀 Deploying kates:native-local (namespace: $(KATES_NS))..."
+	@# The tag never changes, so without the image-id annotation the manifest is
+	@# identical between builds, nothing rolls, and the old pod keeps serving the
+	@# old binary — the same trap kates-local-restart exists for.
 	@helm upgrade --install $(KATES_RELEASE) $(CHART_DIR) \
 		-n $(KATES_NS) --create-namespace \
 		-f $(CHART_DIR)/values-native-local.yaml \
+		--set-string podAnnotations.kates-image-id="$$(docker image inspect --format '{{.Id}}' kates:native-local)" \
 		--timeout 8m
 	@echo "⏳ Waiting for rollout..."
 	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
