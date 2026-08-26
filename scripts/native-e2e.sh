@@ -159,6 +159,8 @@ if [ "${SKIP_BUILD}" = true ]; then
     step "Step 2: Reusing existing ${IMAGE} (--skip-build)..."
     docker image inspect "${IMAGE}" >/dev/null 2>&1 \
         || { error "${IMAGE} not found locally"; exit 1; }
+    warn "  built $(docker image inspect --format '{{.Created}}' "${IMAGE}") — anything"
+    warn "  changed in kates/src since then is NOT in this image."
 else
     step "Step 2: Building ${IMAGE} (GraalVM, ~15-25 min)..."
     docker build -f kates/Dockerfile.native -t "${IMAGE}" .
@@ -186,9 +188,20 @@ fi
 # ── Step 4: deploy the chart against the local native image ──────────────────
 echo ""
 step "Step 4: Deploying the chart with values-native-local.yaml..."
+
+# Stamp the image ID into the pod template. The tag never changes, so without
+# this the manifest is byte-identical between runs, Kubernetes sees no reason to
+# roll, and the OLD pod keeps serving the OLD binary — you rebuild, redeploy,
+# and test the bytes you were trying to replace. The Makefile already warns
+# about this for the JVM image ("a plain helm upgrade would keep the old pod,
+# running the old bytes, very much alive"); this script was doing exactly that.
+IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE}")"
+info "  image id: ${IMAGE_ID}"
+
 helm upgrade --install "${KATES_RELEASE}" charts/kates \
     -n "${KATES_NS}" --create-namespace \
     -f charts/kates/values-native-local.yaml \
+    --set-string podAnnotations.kates-image-id="${IMAGE_ID}" \
     --timeout 8m \
     || fail "helm upgrade failed"
 INSTALLED=true
@@ -202,7 +215,17 @@ RUNNING_IMAGE=$(kubectl get pod -n "${KATES_NS}" -l "app.kubernetes.io/instance=
     -o jsonpath='{.items[0].spec.containers[0].image}')
 [ "${RUNNING_IMAGE}" = "${IMAGE}" ] \
     || fail "pod is running ${RUNNING_IMAGE}, not ${IMAGE}"
-info "✓ pod is running ${RUNNING_IMAGE}"
+
+# The tag matching proves nothing on its own — it is the same tag it always is.
+# The stamp is what proves the pod was created for THIS build.
+RUNNING_ID=$(kubectl get pod -n "${KATES_NS}" -l "app.kubernetes.io/instance=${KATES_RELEASE}" \
+    -o jsonpath='{.items[0].metadata.annotations.kates-image-id}')
+[ "${RUNNING_ID}" = "${IMAGE_ID}" ] \
+    || fail "the running pod was built from a different image.
+   expected ${IMAGE_ID}
+   running  ${RUNNING_ID:-<no stamp>}
+   An old pod survived the upgrade; everything after this would test stale bytes."
+info "✓ pod is running ${RUNNING_IMAGE} from this build"
 
 # ── Step 5: chart tests ──────────────────────────────────────────────────────
 echo ""
