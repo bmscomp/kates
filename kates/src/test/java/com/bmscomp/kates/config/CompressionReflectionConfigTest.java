@@ -2,15 +2,11 @@ package com.bmscomp.kates.config;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -24,20 +20,18 @@ import org.junit.jupiter.api.Test;
  * {@code XXHashFactory}, which Kafka's LZ4 framing uses for checksums, does the
  * same.
  *
- * <p>A native image contains only what was registered, and only the JNI
- * variants were. So the moment the JNI path was unavailable, the fallback threw
- * {@code ClassNotFoundException: net.jpountz.lz4.LZ4JavaSafeCompressor} wrapped
- * in an AssertionError, and every benchmark using lz4 — the default compression
- * — failed on native while passing on the JVM.
+ * <p>A native image contains only what was registered. When only the JNI
+ * variants were, the fallback threw {@code ClassNotFoundException:
+ * net.jpountz.lz4.LZ4JavaSafeCompressor} wrapped in an AssertionError, and every
+ * benchmark using lz4 — the default compression — failed on native while
+ * passing on the JVM.
  *
- * <p>The classes are package-private, so they cannot be listed in
- * {@code @RegisterForReflection}; they live in reflect-config.json, which
- * nothing else validates. Hence this test.
+ * <p>The classes are package-private, so they cannot be listed as
+ * {@code targets}; they are registered by name on {@link
+ * CompressionReflectionConfig}, and nothing else validates that list. Hence this
+ * test.
  */
 class CompressionReflectionConfigTest {
-
-    private static final Path CONFIG =
-            Path.of("src", "main", "resources", "META-INF", "native-image", "reflect-config.json");
 
     /** Exactly the names the two factories construct at runtime. */
     private static List<String> requiredNames() {
@@ -55,15 +49,17 @@ class CompressionReflectionConfigTest {
         return names;
     }
 
-    private static Set<String> registered() throws Exception {
-        JsonNode root = new ObjectMapper().readTree(Files.readString(CONFIG));
-        return root.findValues("name").stream().map(JsonNode::asText).collect(Collectors.toSet());
+    private static RegisterForReflection registration() {
+        RegisterForReflection annotation =
+                CompressionReflectionConfig.class.getAnnotation(RegisterForReflection.class);
+        assertNotNull(annotation, "CompressionReflectionConfig exists to carry this annotation");
+        return annotation;
     }
 
     @Test
     @DisplayName("every lz4 and xxhash implementation the factories can pick is registered")
-    void allImplementationsAreRegistered() throws Exception {
-        Set<String> registered = registered();
+    void allImplementationsAreRegistered() {
+        Set<String> registered = Set.of(registration().classNames());
 
         List<String> missing =
                 requiredNames().stream().filter(n -> !registered.contains(n)).toList();
@@ -72,45 +68,39 @@ class CompressionReflectionConfigTest {
                 missing.isEmpty(),
                 "These classes are resolved by name at runtime and would throw\n"
                         + "ClassNotFoundException in the NATIVE image only. Add them to\n"
-                        + CONFIG + ":\n  " + String.join("\n  ", missing));
+                        + "CompressionReflectionConfig:\n  " + String.join("\n  ", missing));
     }
 
     @Test
     @DisplayName("registered names exist on the classpath — a typo fails identically at runtime")
-    void registeredNamesResolve() throws Exception {
+    void registeredNamesResolve() {
         List<String> unresolvable = new ArrayList<>();
-        for (String name : registered()) {
-            if (!name.startsWith("net.jpountz") && !name.startsWith("org.xerial") && !name.startsWith("com.github")) {
-                continue; // application classes are covered by NativeReflectionRegistryTest
-            }
+        for (String name : registration().classNames()) {
             try {
                 Class.forName(name, false, Thread.currentThread().getContextClassLoader());
             } catch (ClassNotFoundException e) {
                 unresolvable.add(name);
             }
         }
-        assertTrue(unresolvable.isEmpty(), "reflect-config.json names classes that do not exist: " + unresolvable);
+        assertTrue(
+                unresolvable.isEmpty(),
+                "CompressionReflectionConfig names classes that do not exist: " + unresolvable);
     }
 
     @Test
     @DisplayName("the INSTANCE field the factories read is exposed by the registration")
-    void instanceFieldIsReachable() throws Exception {
-        JsonNode root = new ObjectMapper().readTree(Files.readString(CONFIG));
-        List<String> withoutFields = new ArrayList<>();
-        for (JsonNode entry : root) {
-            String name = entry.path("name").asText();
-            if (!name.startsWith("net.jpountz")) {
-                continue;
-            }
-            // LZ4Factory does getField("INSTANCE"); without field access the
-            // class is in the image but its INSTANCE cannot be read.
-            if (!entry.path("allDeclaredFields").asBoolean(false)
-                    && !entry.path("allPublicFields").asBoolean(false)) {
-                withoutFields.add(name);
-            }
-        }
-        assertTrue(
-                withoutFields.isEmpty(),
-                "these entries need allDeclaredFields for the INSTANCE lookup: " + withoutFields);
+    void instanceFieldIsReachable() {
+        // LZ4Factory does getField("INSTANCE"). Registering the class without
+        // field access puts it in the image with its INSTANCE unreadable, which
+        // fails in exactly the same way as not registering it at all.
+        assertTrue(registration().fields(), "fields = true is what makes INSTANCE readable");
+    }
+
+    @Test
+    @DisplayName("the codecs actually resolve here, so the startup check has something to prove")
+    void factoriesResolveOnTheJvm() {
+        assertNotNull(net.jpountz.lz4.LZ4Factory.fastestInstance());
+        assertNotNull(net.jpountz.lz4.LZ4Factory.safeInstance());
+        assertNotNull(net.jpountz.xxhash.XXHashFactory.fastestInstance());
     }
 }

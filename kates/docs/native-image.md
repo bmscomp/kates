@@ -156,19 +156,40 @@ library. lz4-java never names its implementations in code: `LZ4Factory` builds
 `JavaUnsafe`, calls `Class.forName` on it and reads the static `INSTANCE` field.
 `XXHashFactory` does the same for the checksums in Kafka's LZ4 framing.
 
-Two things must therefore be true in `reflect-config.json`, and both have been
-wrong here:
+Two things must therefore be true of the registration:
 
 1. **All three impls registered, not just JNI.** The factory falls back
    JNI → JavaUnsafe → JavaSafe, so registering only the JNI variants leaves the
    fallback path missing from the image.
-2. **`allDeclaredFields` on each.** The class being present is not enough —
-   `getField("INSTANCE")` needs field access, and without it even the JNI path
-   fails, which is what silently pushed it into the fallback.
+2. **Field access on each.** The class being present is not enough —
+   `getField("INSTANCE")` needs it, and without it even the JNI path fails,
+   which is what silently pushes it into the fallback.
 
-`CompressionReflectionConfigTest` asserts both, and that every registered name
-exists on the classpath. It runs in the normal unit suite, so a missing codec
-fails the build rather than a benchmark twenty minutes into a native run.
+**Register these in `CompressionReflectionConfig`, not in
+`reflect-config.json`.** The first attempt at this fix went into
+`META-INF/native-image/reflect-config.json` and did not take: the rebuilt image
+threw the same `ClassNotFoundException` from all three implementations, which is
+what a registration that was never read looks like. Quarkus's
+`@RegisterForReflection` is applied by a build step rather than found by
+scanning, and the SASL classes registered that way in `KafkaSecurityConfig` have
+always survived into the image. Treat the JSON files here as covering only what
+the extensions already handle.
+
+`CompressionReflectionConfigTest` asserts the list is complete, that
+`fields = true`, and that every registered name exists on the classpath. It runs
+in the normal unit suite, so a missing codec fails the build rather than a
+benchmark twenty minutes into a native run.
+
+The same class resolves both factories on `StartupEvent` and logs the winner:
+
+```
+INFO  [com.bms.kat.con.CompressionReflectionConfig] lz4 available: JNI
+INFO  [com.bms.kat.con.CompressionReflectionConfig] xxhash available: JNI
+```
+
+If a codec is missing, that becomes an ERROR at boot naming it. Check for those
+two lines first when a native benchmark fails on its first record — one
+`kubectl logs | grep available` settles it in a second.
 
 **The container is killed shortly after start** — the native image ignores
 `JAVA_TOOL_OPTIONS`, so the chart's `jvm.options` does nothing here. Heap is
