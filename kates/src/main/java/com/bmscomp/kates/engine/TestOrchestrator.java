@@ -199,6 +199,7 @@ public class TestOrchestrator {
                     TestResult result = new TestResult()
                             .withTaskId(task.getTaskId())
                             .withTestType(type)
+                            .withPhaseName(phaseNameFor(task))
                             .withStatus(TestResult.TaskStatus.RUNNING)
                             .withStartTime(Instant.now().toString());
                     run = run.withAddedResult(result);
@@ -208,6 +209,7 @@ public class TestOrchestrator {
                     TestResult failedResult = new TestResult()
                             .withTaskId(task.getTaskId())
                             .withTestType(type)
+                            .withPhaseName(phaseNameFor(task))
                             .withStatus(TestResult.TaskStatus.FAILED)
                             .withError(e.getMessage())
                             .withStartTime(Instant.now().toString())
@@ -476,6 +478,12 @@ public class TestOrchestrator {
                 }
             }
 
+            updatedResults.add(result);
+        }
+
+        updatedResults = abortStrandedConsumers(updatedResults, backend, handleMap);
+
+        for (TestResult result : updatedResults) {
             if (result.getStatus() != TestResult.TaskStatus.DONE
                     && result.getStatus() != TestResult.TaskStatus.FAILED) {
                 allDone = false;
@@ -483,7 +491,6 @@ public class TestOrchestrator {
             if (result.getStatus() == TestResult.TaskStatus.FAILED) {
                 anyFailed = true;
             }
-            updatedResults.add(result);
         }
         run = run.withResults(updatedResults);
 
@@ -966,6 +973,95 @@ public class TestOrchestrator {
                         .recordSize(spec.getRecordSize())
                         .producerConfig(producerConfig)
                         .build());
+        };
+    }
+
+    /**
+     * Ends consumers that are waiting for records nobody will ever send.
+     *
+     * <p>The producer and the consumer of a run share a run id and nothing else:
+     * they are submitted together and then run independently. So when the
+     * producer died on its first record, the consumer went on polling an empty
+     * topic for the run's full duration — ten minutes by default — before
+     * reporting anything at all. The whole run sat at RUNNING with 0 records
+     * while the reason for it had already been decided in the first second.
+     *
+     * <p>The condition is deliberately narrow: every producer in the run has
+     * finished, at least one failed, and between them they sent nothing. Only
+     * then is an empty topic a certainty rather than a slow start.
+     */
+    private List<TestResult> abortStrandedConsumers(
+            List<TestResult> results, BenchmarkBackend backend, Map<String, BenchmarkHandle> handleMap) {
+
+        boolean anyProducer = false;
+        boolean allProducersFinished = true;
+        boolean anyProducerFailed = false;
+        double producedRecords = 0;
+
+        for (TestResult r : results) {
+            if (!isProducer(r)) {
+                continue;
+            }
+            anyProducer = true;
+            producedRecords += r.getRecordsSent();
+            if (r.getStatus() == TestResult.TaskStatus.FAILED) {
+                anyProducerFailed = true;
+            } else if (r.getStatus() != TestResult.TaskStatus.DONE) {
+                allProducersFinished = false;
+            }
+        }
+
+        if (!anyProducer || !allProducersFinished || !anyProducerFailed || producedRecords > 0) {
+            return results;
+        }
+
+        List<TestResult> updated = new java.util.ArrayList<>(results.size());
+        for (TestResult r : results) {
+            boolean stranded = "consume".equals(r.getPhaseName())
+                    && r.getStatus() != TestResult.TaskStatus.DONE
+                    && r.getStatus() != TestResult.TaskStatus.FAILED;
+            if (!stranded) {
+                updated.add(r);
+                continue;
+            }
+
+            BenchmarkHandle handle = handleMap.get(r.getTaskId());
+            if (handle != null) {
+                try {
+                    backend.stop(handle);
+                } catch (Exception e) {
+                    LOG.warn("Failed to stop stranded consumer: " + r.getTaskId(), e);
+                }
+            }
+            LOG.warnf("Aborting consumer %s: every producer in this run failed without sending", r.getTaskId());
+            updated.add(r.withStatus(TestResult.TaskStatus.FAILED)
+                    .withError("Aborted: every producer in this run failed without sending a record,"
+                            + " so nothing would ever arrive on the topic.")
+                    .withEndTime(Instant.now().toString()));
+        }
+        return updated;
+    }
+
+    private static boolean isProducer(TestResult result) {
+        String phase = result.getPhaseName();
+        return "produce".equals(phase) || "round-trip".equals(phase) || "integrity".equals(phase);
+    }
+
+    /**
+     * A name for the row this task will occupy in a result table.
+     *
+     * <p>Only scenario phases used to set one, so every task in an ordinary run
+     * fell back to the CLI's placeholder. A LOAD run therefore printed two rows
+     * both labelled "main" — one FAILED and one RUNNING, with no way to tell
+     * which was the producer.
+     */
+    private static String phaseNameFor(BenchmarkTask task) {
+        return switch (task.getWorkloadType()) {
+            case PRODUCE -> "produce";
+            case CONSUME -> "consume";
+            case ROUND_TRIP -> "round-trip";
+            case INTEGRITY -> "integrity";
+            case INTEGRITY_CDC -> "integrity-cdc";
         };
     }
 
