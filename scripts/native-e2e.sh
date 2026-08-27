@@ -227,6 +227,30 @@ RUNNING_ID=$(kubectl get pod -n "${KATES_NS}" -l "app.kubernetes.io/instance=${K
    An old pod survived the upgrade; everything after this would test stale bytes."
 info "✓ pod is running ${RUNNING_IMAGE} from this build"
 
+# An upgrade must not rotate the API key. It did: the secret template called
+# randAlphaNum inline, Helm re-evaluates templates on every upgrade, and so
+# every redeploy handed the pod a new key while every client kept the old one.
+# The only symptom was a 403 from a CLI that had been working a minute earlier.
+# Nothing but a second upgrade catches this, so the second upgrade happens here.
+KEY_BEFORE="$(kubectl get secret "${KATES_RELEASE}-api-key" -n "${KATES_NS}" \
+    -o jsonpath='{.data.api-key}' 2>/dev/null || true)"
+if [ -n "${KEY_BEFORE}" ]; then
+    helm upgrade "${KATES_RELEASE}" charts/kates \
+        -n "${KATES_NS}" \
+        -f charts/kates/values-native-local.yaml \
+        --set-string podAnnotations.kates-image-id="${IMAGE_ID}" \
+        --timeout 8m \
+        || fail "the second helm upgrade failed"
+    KEY_AFTER="$(kubectl get secret "${KATES_RELEASE}-api-key" -n "${KATES_NS}" \
+        -o jsonpath='{.data.api-key}' 2>/dev/null || true)"
+    [ "${KEY_BEFORE}" = "${KEY_AFTER}" ] \
+        || fail "the API key changed across a helm upgrade.
+   Every existing client is now getting 403 from a key it had no reason to
+   think had expired. charts/kates/templates/api-key-secret.yaml must read the
+   existing secret back rather than generating a new value."
+    info "✓ the API key survived an upgrade"
+fi
+
 # ── Step 5: chart tests ──────────────────────────────────────────────────────
 echo ""
 step "Step 5: Running the chart's own tests..."
