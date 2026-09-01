@@ -285,6 +285,20 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <!--
+                        Surefire's default includes are Test*.java, *Test.java,
+                        *Tests.java and *TestCase.java. The FIRST of those also
+                        matches integration tests whose name starts with "Test"
+                        (TestApiIT, TestOrchestratorIT, ...), which drags them
+                        into the unit-test phase where no Docker daemon is
+                        expected — they fail to boot, and the cascade takes the
+                        next @QuarkusTest class down with it. Failsafe owns
+                        *IT.java; make surefire's half of the split explicit so
+                        the naming of a new IT can never re-open this.
+                    -->
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                    </excludes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
