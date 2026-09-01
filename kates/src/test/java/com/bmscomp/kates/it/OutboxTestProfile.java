@@ -1,8 +1,5 @@
 package com.bmscomp.kates.it;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /**
  * Integration profile with the scheduled outbox poller switched OFF.
  *
@@ -11,16 +8,8 @@ import java.util.Map;
  * and would publish and delete rows mid-assertion. The tests drive
  * {@code processOutbox()} explicitly instead, which is also what makes the
  * publish→ack→delete ordering observable.
+ *
+ * <p>The overrides themselves live in {@link NoSchedulersTestProfile}, which
+ * several read-side ITs share for the same reason.
  */
-public class OutboxTestProfile extends IntegrationTestProfile {
-
-    @Override
-    public Map<String, String> getConfigOverrides() {
-        Map<String, String> overrides = new HashMap<>(super.getConfigOverrides());
-        overrides.put("kates.outbox.poll-interval", "off");
-        // Keep the reaper and reconciler away from these runs too: this test
-        // asserts exact persisted state, not lifecycle behaviour.
-        overrides.put("kates.engine.reconcile-interval", "off");
-        return overrides;
-    }
-}
+public class OutboxTestProfile extends NoSchedulersTestProfile {}

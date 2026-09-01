@@ -138,7 +138,7 @@ class EngineLifecycleIT {
         TestSpec spec = new TestSpec();
         // VOLUME is producer-only, so the run finishes as soon as the records
         // are acked — no consumer holding it open for its full duration.
-        spec.setTopic("engine-it-" + System.nanoTime());
+        spec.setTopic(ItSupport.uniqueTopic("engine-it"));
         spec.setNumRecords(RECORDS);
         spec.setRecordSize(512);
         spec.setPartitions(1);
@@ -169,7 +169,7 @@ class EngineLifecycleIT {
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.LINGER_MS_CONFIG, "0");
 
-        String topic = "engine-it-reference-" + System.nanoTime();
+        String topic = ItSupport.uniqueTopic("engine-it-reference");
         double best = Double.MAX_VALUE;
         try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(props)) {
             for (int i = 0; i < 3; i++) {

@@ -82,7 +82,13 @@ jobs:
         if: always()
         uses: mikepenz/action-junit-report@v5
         with:
-          report_paths: kates/target/surefire-reports/TEST-*.xml
+          # `mvnw verify` runs surefire (*Test) AND failsafe (*IT). Globbing
+          # only surefire meant every integration-test result — including
+          # failures — was invisible in the checks UI; the job still went red,
+          # but with no indication of which test broke.
+          report_paths: |
+            kates/target/surefire-reports/TEST-*.xml
+            kates/target/failsafe-reports/TEST-*.xml
           check_name: "JUnit Tests"
 
       - name: Upload coverage report
