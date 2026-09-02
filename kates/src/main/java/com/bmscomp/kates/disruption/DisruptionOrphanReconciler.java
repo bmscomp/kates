@@ -58,6 +58,25 @@ public class DisruptionOrphanReconciler {
             LOG.debug("Disruption orphan recovery disabled");
             return;
         }
+        // Off the startup thread, deliberately.
+        //
+        // Every call below goes to the Kubernetes API, and a StartupEvent
+        // observer runs BEFORE the HTTP server accepts connections. With no
+        // reachable API server — the native smoke test, a dev laptop, any
+        // deployment without chaos RBAC — fabric8 does not fail fast: it
+        // retries with exponential backoff (~100s at the default backoff
+        // limit) per call. The catch below made failure harmless but not
+        // fast, so the whole API stayed dark for the duration and the pod
+        // failed its startup probe, with nothing in the log to say why:
+        // boot-time categories are at WARN, so a blocked boot prints nothing
+        // at all.
+        //
+        // Recovery is cleanup of faults at least `min-age-sec` old. Nothing
+        // about it needs to happen before the first request is served.
+        Thread.ofVirtual().name("disruption-orphan-recovery").start(this::reconcile);
+    }
+
+    private void reconcile() {
         try {
             int policies = reconcileNetworkPolicies();
             int scaled = reconcileScaledDownStatefulSets();

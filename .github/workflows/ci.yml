@@ -251,6 +251,14 @@ jobs:
           sudo mv kyverno /usr/local/bin/
           kyverno version
 
+      # kates-chaos depends on litmus-core from the LitmusChaos repo. Only the
+      # Helm Lint job added the repo, so `helm dependency build
+      # charts/kates-chaos/` in the last step of this job died with "no
+      # repository definition for https://litmuschaos.github.io/litmus-helm/"
+      # — every run of this job that got that far was red.
+      - name: Add chart repositories
+        run: helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
+
       - name: Fetch chart dependencies
         run: helm dependency build charts/kates/
 

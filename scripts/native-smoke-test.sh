@@ -46,8 +46,25 @@ trap cleanup EXIT
 
 fail() {
     error "❌ $*"
+    # A boot that blocks before Quarkus's own startup line logs NOTHING —
+    # every boot-time category is at WARN. The first version of this printed
+    # "last 60 lines" followed by nothing at all, which reads like a lost log
+    # rather than the symptom it is, so say so explicitly and add the state
+    # that distinguishes a hung boot from a crashed one.
+    echo "--- container state ---" >&2
+    docker inspect -f 'running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}}' \
+        "${APP}" >&2 2>&1 || true
     echo "--- last 60 lines of application log ---" >&2
-    docker logs --tail 60 "${APP}" >&2 2>&1 || true
+    LOGS="$(docker logs --tail 60 "${APP}" 2>&1 || true)"
+    if [ -n "${LOGS}" ]; then
+        echo "${LOGS}" >&2
+    else
+        echo "(the binary logged nothing — it never got as far as its startup line," >&2
+        echo " so boot is blocked, not failing. Check StartupEvent observers.)" >&2
+        echo "--- stacks of the blocked process ---" >&2
+        docker exec "${APP}" sh -c 'kill -QUIT 1' >/dev/null 2>&1 && sleep 2 || true
+        docker logs --tail 80 "${APP}" >&2 2>&1 || true
+    fi
     exit 1
 }
 
