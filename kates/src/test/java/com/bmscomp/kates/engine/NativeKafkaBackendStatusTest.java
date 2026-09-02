@@ -2,9 +2,10 @@ package com.bmscomp.kates.engine;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import com.bmscomp.kates.domain.TestResult.TaskStatus;
 
 /**
  * Pins the outcome of a task that finished without throwing.
@@ -52,8 +53,7 @@ class NativeKafkaBackendStatusTest {
     @Test
     @DisplayName("a consumer that received nothing has not succeeded")
     void consumerWithNoRecordsFails() {
-        NativeKafkaBackend.WorkerState state =
-                finish(BenchmarkTask.WorkloadType.CONSUME, 0, 0, false);
+        NativeKafkaBackend.WorkerState state = finish(BenchmarkTask.WorkloadType.CONSUME, 0, 0, false);
 
         assertEquals(TaskStatus.FAILED, state.status);
         assertNotNull(state.error, "a failure with no explanation is barely better than a false pass");
@@ -63,8 +63,7 @@ class NativeKafkaBackendStatusTest {
     @Test
     @DisplayName("a consumer that received records succeeds")
     void consumerWithRecordsSucceeds() {
-        NativeKafkaBackend.WorkerState state =
-                finish(BenchmarkTask.WorkloadType.CONSUME, 1000, 0, false);
+        NativeKafkaBackend.WorkerState state = finish(BenchmarkTask.WorkloadType.CONSUME, 1000, 0, false);
 
         assertEquals(TaskStatus.DONE, state.status);
         assertNull(state.error);

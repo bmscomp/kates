@@ -50,8 +50,7 @@ class CompressionReflectionConfigTest {
     }
 
     private static RegisterForReflection registration() {
-        RegisterForReflection annotation =
-                CompressionReflectionConfig.class.getAnnotation(RegisterForReflection.class);
+        RegisterForReflection annotation = CompressionReflectionConfig.class.getAnnotation(RegisterForReflection.class);
         assertNotNull(annotation, "CompressionReflectionConfig exists to carry this annotation");
         return annotation;
     }
@@ -83,8 +82,7 @@ class CompressionReflectionConfigTest {
             }
         }
         assertTrue(
-                unresolvable.isEmpty(),
-                "CompressionReflectionConfig names classes that do not exist: " + unresolvable);
+                unresolvable.isEmpty(), "CompressionReflectionConfig names classes that do not exist: " + unresolvable);
     }
 
     @Test

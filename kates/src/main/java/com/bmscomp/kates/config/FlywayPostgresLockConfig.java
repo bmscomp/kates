@@ -39,8 +39,14 @@ public class FlywayPostgresLockConfig implements FlywayConfigurationCustomizer {
 
     @Override
     public void customize(FluentConfiguration configuration) {
+        // Reached through the plugin register, not Configuration
+        // #getConfigurationExtension: that accessor is Flyway 11, and the
+        // Quarkus 3.20 LTS platform resolves Flyway 10, where the extension is
+        // only available this way. getPlugin returns null rather than throwing
+        // when flyway-database-postgresql is absent, so the null check is what
+        // keeps a non-Postgres classpath from failing at boot.
         PostgreSQLConfigurationExtension postgres =
-                configuration.getConfigurationExtension(PostgreSQLConfigurationExtension.class);
+                configuration.getPluginRegister().getPlugin(PostgreSQLConfigurationExtension.class);
         if (postgres != null) {
             postgres.setTransactionalLock(false);
         }

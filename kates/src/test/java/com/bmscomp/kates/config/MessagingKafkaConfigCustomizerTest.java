@@ -35,8 +35,7 @@ class MessagingKafkaConfigCustomizerTest {
     }
 
     private static KafkaSecurityConfig scram(String user, String password) {
-        return security(
-                "SASL_PLAINTEXT", Optional.of("SCRAM-SHA-512"), Optional.of(user), Optional.of(password));
+        return security("SASL_PLAINTEXT", Optional.of("SCRAM-SHA-512"), Optional.of(user), Optional.of(password));
     }
 
     private static KafkaSecurityConfig security(
@@ -61,8 +60,7 @@ class MessagingKafkaConfigCustomizerTest {
      * two agree in production, so a test that seeds only one of them is testing
      * a situation that cannot happen.
      */
-    private static Map<String, Object> customize(
-            KafkaSecurityConfig security, Map<String, String> channelProperties) {
+    private static Map<String, Object> customize(KafkaSecurityConfig security, Map<String, String> channelProperties) {
         Map<String, Object> derived = new java.util.HashMap<>(channelProperties);
         derived.remove("tls-configuration-name"); // a connector option, not a client one
         return new MessagingKafkaConfigCustomizer(REAL_BROKER, security)
@@ -142,9 +140,8 @@ class MessagingKafkaConfigCustomizerTest {
         // SmallRye passes a map it may reuse; Map.of() would throw, but an
         // ordinary HashMap would silently accumulate across channels.
         Map<String, Object> original = new java.util.HashMap<>(Map.of("key.serializer", "StringSerializer"));
-        Map<String, Object> result =
-                new MessagingKafkaConfigCustomizer(REAL_BROKER, plaintext())
-                        .customize("test-events-out", channelConfig(Map.of()), original);
+        Map<String, Object> result = new MessagingKafkaConfigCustomizer(REAL_BROKER, plaintext())
+                .customize("test-events-out", channelConfig(Map.of()), original);
 
         assertEquals(Map.of("key.serializer", "StringSerializer"), original);
         assertEquals(REAL_BROKER, result.get("bootstrap.servers"));
