@@ -135,6 +135,13 @@ public class ReportGenerator {
         report.setGeneratedAt(Instant.now().toString());
 
         Map<String, String> metadata = new LinkedHashMap<>();
+        // First, and not optional: the exported formats carry no other copy of
+        // the run id. A markdown or CSV report saved to a file said which type
+        // of test it was and how it did, but not WHICH run produced it — so two
+        // reports from the same suite were indistinguishable once downloaded.
+        if (run.getId() != null) {
+            metadata.put("runId", run.getId());
+        }
         metadata.put("testType", run.getTestType() != null ? run.getTestType().name() : "UNKNOWN");
         metadata.put("backend", run.getBackend());
         metadata.put("status", run.getStatus() != null ? run.getStatus().name() : "UNKNOWN");

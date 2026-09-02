@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.Properties;
 import java.util.function.BooleanSupplier;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -57,8 +58,28 @@ class EngineLifecycleIT {
     @Inject
     TestRunRepository repository;
 
+    @Inject
+    EntityManager em;
+
     @ConfigProperty(name = "kates.kafka.bootstrap-servers")
     String bootstrapServers;
+
+    /**
+     * Re-reads the run from the DATABASE, not from the session cache.
+     *
+     * <p>The test method runs inside one request context, so every
+     * {@code repository.findById} in a polling loop shares a persistence
+     * context — and {@code em.find} answers the second and every later call
+     * from the first-level cache. The run object therefore stayed RUNNING for
+     * the full 90s no matter what the reconciler committed on its own thread,
+     * and the test failed with no error anywhere: the assertion was reading a
+     * cached copy of the row it was waiting on. {@code OutboxIT} clears the
+     * context for the same reason.
+     */
+    private TestRun reread(String runId) {
+        em.clear();
+        return repository.findById(runId).orElse(null);
+    }
 
     @Test
     void runReachesDoneViaReconcilerAndRecordsRoundTripLatency() {
@@ -74,16 +95,11 @@ class EngineLifecycleIT {
         // Before P0-2 nothing drove a finished run to DONE unless a client polled
         // it, so this loop would time out (and the reaper would eventually mark
         // the run FAILED instead).
-        boolean terminal = waitUntil(
-                Duration.ofSeconds(90),
-                () -> repository
-                        .findById(submitted.getId())
-                        .map(r -> r.getStatus() == TestResult.TaskStatus.DONE
-                                || r.getStatus() == TestResult.TaskStatus.FAILED)
-                        .orElse(false));
+        boolean terminal = waitUntil(Duration.ofSeconds(90), () -> isTerminal(reread(submitted.getId())));
         assertTrue(terminal, "the scheduled reconciler must drive the run to a terminal state without client polling");
 
-        TestRun finished = repository.findById(submitted.getId()).orElseThrow();
+        TestRun finished = reread(submitted.getId());
+        assertFalse(finished == null, "the run must still be readable after it completes");
         assertEquals(
                 TestResult.TaskStatus.DONE,
                 finished.getStatus(),
@@ -119,13 +135,7 @@ class EngineLifecycleIT {
         // cap never applied.
         TestRun submitted = submitVolumeRun();
 
-        boolean terminal = waitUntil(
-                Duration.ofSeconds(90),
-                () -> repository
-                        .findById(submitted.getId())
-                        .map(r -> r.getStatus() == TestResult.TaskStatus.DONE
-                                || r.getStatus() == TestResult.TaskStatus.FAILED)
-                        .orElse(false));
+        boolean terminal = waitUntil(Duration.ofSeconds(90), () -> isTerminal(reread(submitted.getId())));
         assertTrue(terminal, "run reached a terminal state");
 
         // The slot must come back once the run is terminal, otherwise the engine
@@ -183,6 +193,11 @@ class EngineLifecycleIT {
             }
         }
         return best;
+    }
+
+    private static boolean isTerminal(TestRun run) {
+        return run != null
+                && (run.getStatus() == TestResult.TaskStatus.DONE || run.getStatus() == TestResult.TaskStatus.FAILED);
     }
 
     private static boolean waitUntil(Duration timeout, BooleanSupplier condition) {
