@@ -61,9 +61,13 @@ fail() {
     else
         echo "(the binary logged nothing — it never got as far as its startup line," >&2
         echo " so boot is blocked, not failing. Check StartupEvent observers.)" >&2
+        # Deep tail on purpose: the frame that says WHERE it is blocked sits at
+        # the TOP of the main thread's stack, and every other thread's dump is
+        # printed after it. A tail of 80 cut off exactly the frames worth
+        # having and left only idle pool threads.
         echo "--- stacks of the blocked process ---" >&2
         docker exec "${APP}" sh -c 'kill -QUIT 1' >/dev/null 2>&1 && sleep 2 || true
-        docker logs --tail 80 "${APP}" >&2 2>&1 || true
+        docker logs --tail 400 "${APP}" >&2 2>&1 || true
     fi
     exit 1
 }

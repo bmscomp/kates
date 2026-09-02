@@ -173,6 +173,16 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-flyway</artifactId>
         </dependency>
+        <!-- Flyway's PostgreSQL support. It already arrived transitively via
+             quarkus-flyway, but FlywayPostgresLockConfig compiles against
+             PostgreSQLConfigurationExtension from it, and a compile-time
+             dependency on a transitive artifact breaks silently the day the
+             extension reorganises its dependencies. Version comes from the
+             Quarkus BOM. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-hibernate-validator</artifactId>
