@@ -245,6 +245,13 @@ public class TestResource {
 
     @POST
     @Path("/{id}/cancel")
+    // Overrides the class-level @Consumes(APPLICATION_JSON). Cancel takes no
+    // body, so a client sends none and therefore no Content-Type — which JAX-RS
+    // treats as application/octet-stream, matches against application/json, and
+    // rejects with 415. `curl -X POST .../cancel` could never cancel anything;
+    // only a client that invented a Content-Type header for an empty body got
+    // through.
+    @Consumes(MediaType.WILDCARD)
     @Operation(
             summary = "Cancel a running test",
             description = "Safely stops all tasks and marks the test as CANCELLED")
