@@ -86,12 +86,40 @@ docker run -d --name "${DB}" --network "${NET}" \
     -e POSTGRES_USER=kates -e POSTGRES_PASSWORD=kates -e POSTGRES_DB=kates \
     postgres:16-alpine >/dev/null
 
-for _ in $(seq 1 30); do
-    docker exec "${DB}" pg_isready -U kates >/dev/null 2>&1 && break
+# -h forces the TCP path, and that is the whole point of it.
+#
+# The postgres entrypoint runs initdb against a TEMPORARY server started with
+# listen_addresses='' — reachable on the container's Unix socket, invisible over
+# the network. `pg_isready -U kates` with no host talks to that socket, so it
+# answered "accepting connections" while the real server had not started
+# listening yet. The binary then launched against a closed port and Flyway
+# killed the boot with "Connection refused", which reads like a broken image
+# rather than a race in this script.
+db_accepting_tcp() {
+    docker exec "${DB}" pg_isready -h 127.0.0.1 -p 5432 -U kates >/dev/null 2>&1
+}
+
+for _ in $(seq 1 60); do
+    db_accepting_tcp && break
     sleep 1
 done
-docker exec "${DB}" pg_isready -U kates >/dev/null 2>&1 || {
-    error "❌ Postgres never became ready"
+db_accepting_tcp || {
+    error "❌ Postgres never accepted a TCP connection"
+    docker logs --tail 30 "${DB}" >&2 2>&1 || true
+    exit 1
+}
+
+# initdb's temporary server is torn down and restarted once initialisation
+# finishes, so "accepting connections" is true, briefly, of a server that is
+# about to go away. A real query on the real database is the check that cannot
+# pass early.
+for _ in $(seq 1 30); do
+    docker exec "${DB}" psql -U kates -d kates -c 'SELECT 1' >/dev/null 2>&1 && break
+    sleep 1
+done
+docker exec "${DB}" psql -U kates -d kates -c 'SELECT 1' >/dev/null 2>&1 || {
+    error "❌ Postgres accepted TCP but the kates database never answered a query"
+    docker logs --tail 30 "${DB}" >&2 2>&1 || true
     exit 1
 }
 
