@@ -96,6 +96,13 @@ docker exec "${DB}" pg_isready -U kates >/dev/null 2>&1 || {
 }
 
 step "🚀 Starting the native binary..."
+# No broker runs here, and no SASL secret exists to reach one with. The shipped
+# default is SASL_PLAINTEXT/SCRAM against the Strimzi cluster, so leaving it
+# alone means the reactive-messaging channels build SASL clients with no
+# credentials — which is a hard boot failure, not a background connection
+# warning, because SmallRye constructs those clients from a StartupEvent
+# observer. Say PLAINTEXT, and the channels fail to connect asynchronously the
+# way this test already assumes they will.
 docker run -d --name "${APP}" --network "${NET}" \
     -p "${APP_PORT}:8080" \
     -e QUARKUS_DATASOURCE_JDBC_URL="jdbc:postgresql://${DB}:5432/kates" \
@@ -104,6 +111,7 @@ docker run -d --name "${APP}" --network "${NET}" \
     -e KATES_API_SECURITY_ENABLED=false \
     -e KATES_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
     -e KATES_HEALTH_KAFKA_REFRESH_INTERVAL=off \
+    -e KATES_KAFKA_SECURITY_PROTOCOL=PLAINTEXT \
     "${IMAGE}" >/dev/null
 
 BASE="http://localhost:${APP_PORT}"

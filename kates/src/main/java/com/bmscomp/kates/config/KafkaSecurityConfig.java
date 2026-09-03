@@ -1,7 +1,10 @@
 package com.bmscomp.kates.config;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -37,6 +40,9 @@ import org.jboss.logging.Logger;
 public class KafkaSecurityConfig {
 
     private static final Logger LOG = Logger.getLogger(KafkaSecurityConfig.class);
+
+    /** SASL mechanisms whose login module needs a username and password. */
+    private static final Set<String> CREDENTIAL_MECHANISMS = Set.of("SCRAM-SHA-512", "SCRAM-SHA-256", "PLAIN");
 
     private final String securityProtocol;
     private final Optional<String> saslMechanism;
@@ -75,6 +81,54 @@ public class KafkaSecurityConfig {
         this.sslTruststorePassword = sslTruststorePassword;
         this.sslKeystoreLocation = sslKeystoreLocation;
         this.sslKeystorePassword = sslKeystorePassword;
+        validate();
+    }
+
+    /**
+     * Refuses a SASL protocol that has no credentials to go with it.
+     *
+     * <p>This used to be silent: {@link #applySasl} set {@code security.protocol}
+     * and {@code sasl.mechanism} and then skipped {@code sasl.jaas.config}
+     * whenever the username or password was absent. Kafka does not treat a
+     * missing JAAS entry as "no authentication" — it falls back to the JVM-wide
+     * JAAS file, finds nothing there, and every client constructor dies with
+     * {@code Could not find a 'KafkaClient' entry in the JAAS configuration.
+     * System property 'java.security.auth.login.config' is not set}. That
+     * message points at a JVM security file nobody in this project has ever
+     * touched, rather than at the unset {@code KATES_KAFKA_SASL_PASSWORD} that
+     * actually caused it.
+     *
+     * <p>It also fails late and loudly: the reactive-messaging channels build
+     * their clients from a StartupEvent observer, so an unset secret takes the
+     * whole application down at boot with that same misdirecting stack trace.
+     *
+     * <p>Degrading to PLAINTEXT instead would be worse — a deployment whose
+     * secret failed to mount would quietly start talking to the broker
+     * unauthenticated. So: fail, and say which property is missing.
+     */
+    private void validate() {
+        if (!securityProtocol.startsWith("SASL")) {
+            return;
+        }
+        String mechanism = saslMechanism.orElse("SCRAM-SHA-512");
+        if (!CREDENTIAL_MECHANISMS.contains(mechanism)) {
+            return;
+        }
+        if (saslUsername.isPresent() && saslPassword.isPresent()) {
+            return;
+        }
+        List<String> missing = new ArrayList<>(2);
+        if (saslUsername.isEmpty()) {
+            missing.add("kates.kafka.sasl.username (KATES_KAFKA_SASL_USERNAME)");
+        }
+        if (saslPassword.isEmpty()) {
+            missing.add("kates.kafka.sasl.password (KATES_KAFKA_SASL_PASSWORD)");
+        }
+        throw new IllegalStateException("kates.kafka.security.protocol=" + securityProtocol
+                + " with kates.kafka.sasl.mechanism=" + mechanism + " requires credentials, but "
+                + String.join(" and ", missing) + " is not set. Set it, or set "
+                + "kates.kafka.security.protocol=PLAINTEXT (KATES_KAFKA_SECURITY_PROTOCOL=PLAINTEXT) "
+                + "for a broker without authentication.");
     }
 
     /**
@@ -101,26 +155,28 @@ public class KafkaSecurityConfig {
         String mechanism = saslMechanism.orElse("SCRAM-SHA-512");
         props.put(SaslConfigs.SASL_MECHANISM, mechanism);
 
+        // The credential mechanisms are unconditional here on purpose: the
+        // constructor has already refused a SASL protocol without credentials,
+        // so there is no case left in which this emits security.protocol and
+        // sasl.mechanism but no sasl.jaas.config. That combination is what sent
+        // Kafka to the JVM's JAAS file and killed boot with an error naming a
+        // file this project does not use.
         switch (mechanism) {
             case "SCRAM-SHA-512", "SCRAM-SHA-256" -> {
-                if (saslUsername.isPresent() && saslPassword.isPresent()) {
-                    props.put(
-                            SaslConfigs.SASL_JAAS_CONFIG,
-                            "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                                    + "username=" + jaasQuote(saslUsername.get()) + " "
-                                    + "password=" + jaasQuote(saslPassword.get()) + ";");
-                    LOG.infof("SASL/%s enabled for user: %s", mechanism, saslUsername.get());
-                }
+                props.put(
+                        SaslConfigs.SASL_JAAS_CONFIG,
+                        "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                                + "username=" + jaasQuote(saslUsername.orElseThrow()) + " "
+                                + "password=" + jaasQuote(saslPassword.orElseThrow()) + ";");
+                LOG.infof("SASL/%s enabled for user: %s", mechanism, saslUsername.orElseThrow());
             }
             case "PLAIN" -> {
-                if (saslUsername.isPresent() && saslPassword.isPresent()) {
-                    props.put(
-                            SaslConfigs.SASL_JAAS_CONFIG,
-                            "org.apache.kafka.common.security.plain.PlainLoginModule required "
-                                    + "username=" + jaasQuote(saslUsername.get()) + " "
-                                    + "password=" + jaasQuote(saslPassword.get()) + ";");
-                    LOG.infof("SASL/PLAIN enabled for user: %s", saslUsername.get());
-                }
+                props.put(
+                        SaslConfigs.SASL_JAAS_CONFIG,
+                        "org.apache.kafka.common.security.plain.PlainLoginModule required "
+                                + "username=" + jaasQuote(saslUsername.orElseThrow()) + " "
+                                + "password=" + jaasQuote(saslPassword.orElseThrow()) + ";");
+                LOG.infof("SASL/PLAIN enabled for user: %s", saslUsername.orElseThrow());
             }
             case "OAUTHBEARER" -> {
                 StringBuilder jaas = new StringBuilder(
