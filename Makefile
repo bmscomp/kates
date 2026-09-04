@@ -115,9 +115,10 @@ all: check-prerequisites  ## Complete setup (cluster, all services)
 	@echo "  - Chaos:             execution plane only (no UI) — 'make chaos-status'"
 	@echo ""
 
-# Assert the Strimzi version pins agree across all five places that declare one.
+# Assert the Strimzi pins agree across all five places that declare one, and the
+# kind toolchain pins between versions.env and config/cluster.yaml.
 # Also run in CI (.github/workflows/ci.yml, Helm Lint job).
-check-versions: ## Verify the Strimzi version pins agree
+check-versions: ## Verify the Strimzi and kind version pins agree
 	@./scripts/check-versions.sh
 
 # Terminal-compatibility gate: runs the real binary piped, with NO_COLOR,

@@ -21,9 +21,8 @@ on:
 permissions:
   contents: read
 
-env:
-  KIND_VERSION: v0.27.0
-  KUBECTL_VERSION: v1.33.0
+# Pins come from versions.env, loaded below — see the note in integration.yml,
+# which carried a duplicate of the block that used to be here.
 
 jobs:
   apicurio-e2e:
@@ -32,6 +31,12 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load toolchain pins from versions.env
+        run: |
+          set -euo pipefail
+          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
+            | tr -d '"' | tee -a "$GITHUB_ENV"
 
       - name: Install kind
         run: |
