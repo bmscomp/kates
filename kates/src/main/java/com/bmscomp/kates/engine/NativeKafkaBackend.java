@@ -7,6 +7,7 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -42,6 +43,18 @@ public class NativeKafkaBackend implements BenchmarkBackend {
     private final CdcIntegrationService cdcIntegrationService;
     private final Map<String, WorkerState> activeWorkers = new ConcurrentHashMap<>();
 
+    /**
+     * Task ids that have finished, oldest first. Finished workers used to stay
+     * in {@link #activeWorkers} for the life of the JVM, each still holding its
+     * ack bitset and histogram; the orchestrator polls a task after it ends, so
+     * they cannot be dropped immediately either. Instead a finished worker
+     * releases its heavy state right away and its final status is retained for
+     * the most recent {@link #MAX_RETAINED_COMPLETED} tasks.
+     */
+    private final java.util.Queue<String> completedOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    private static final int MAX_RETAINED_COMPLETED = 500;
+
     @Inject
     public NativeKafkaBackend(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
@@ -71,19 +84,45 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
     @Override
     public BenchmarkStatus poll(BenchmarkHandle handle) {
-        WorkerState state = activeWorkers.get(handle.taskId());
+        WorkerState state = resolve(handle);
         if (state == null) {
-            return BenchmarkStatus.builder(TaskStatus.DONE).build();
+            // Previously this returned DONE. An unknown task is not a finished
+            // task: the only ways to get here are a handle from a process that
+            // has since restarted, or one the caller invented. Reporting success
+            // for either turns "we lost track of your run" into "your run
+            // passed", with zero records to show for it.
+            return BenchmarkStatus.builder(TaskStatus.FAILED)
+                    .error("Task " + handle.taskId() + " is not known to this backend."
+                            + " Its worker was lost, most likely because the process restarted.")
+                    .build();
         }
-        return state.toStatus();
+        BenchmarkStatus finalStatus = state.finalStatus;
+        return finalStatus != null ? finalStatus : state.toStatus();
     }
 
     @Override
     public void stop(BenchmarkHandle handle) {
-        WorkerState state = activeWorkers.get(handle.taskId());
+        WorkerState state = resolve(handle);
         if (state != null) {
             state.stopRequested.set(true);
         }
+    }
+
+    /**
+     * The worker behind a handle, from the live map or from the handle itself.
+     *
+     * <p>Looking only in the map made both {@code poll} and {@code stop} depend
+     * on the retention limit: past {@link #MAX_RETAINED_COMPLETED} completed
+     * tasks the entry is evicted, and a still-running task would then poll as if
+     * it had never existed and ignore a stop request. The handle has held the
+     * state all along.
+     */
+    private WorkerState resolve(BenchmarkHandle handle) {
+        WorkerState state = activeWorkers.get(handle.taskId());
+        if (state != null) {
+            return state;
+        }
+        return handle.internalRef() instanceof WorkerState fromHandle ? fromHandle : null;
     }
 
     private void executeTask(BenchmarkTask task, WorkerState state) {
@@ -99,14 +138,118 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 case INTEGRITY_CDC -> runIntegrityCdc(task, state);
             }
             if (state.status != TaskStatus.FAILED) {
-                state.status = TaskStatus.DONE;
+                applyPostConditions(task, state);
             }
-        } catch (Exception e) {
-            LOG.warn("Native benchmark failed: " + task.getTaskId(), e);
-            state.error = e.getMessage();
+        } catch (Throwable t) {
+            // Throwable, not Exception. The compression codecs surface a missing
+            // implementation as an AssertionError, which is an Error — it slipped
+            // past a catch of Exception, killed the virtual thread, and left the
+            // snapshot taken below reading RUNNING. The task then polled as
+            // running forever, until the timeout reaper eventually killed it,
+            // half an hour after the thing had already died.
+            LOG.warn("Native benchmark failed: " + task.getTaskId(), t);
+            state.error = describe(t);
             state.status = TaskStatus.FAILED;
+            if (t instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         } finally {
             state.endTimeMs = System.currentTimeMillis();
+            // Snapshot the terminal status BEFORE releasing anything: every
+            // later poll is served from this immutable copy, so percentiles and
+            // record counts survive the cleanup below.
+            state.finalStatus = state.toStatus();
+            // Unregister the per-task latency gauges: task ids are unbounded, so
+            // leaving them registered would grow the meter registry for the life
+            // of the process. Only the METERS go away — the histogram data stays
+            // readable, so the final poll still reports accurate percentiles.
+            state.histogram.close();
+            state.releaseHeavyState();
+            retireWorker(task.getTaskId());
+        }
+    }
+
+    /**
+     * Decides DONE or FAILED for a workload that ran to completion without
+     * throwing.
+     *
+     * <p>"The method returned" used to be the whole test, which made success the
+     * default outcome for anything that failed quietly. A consumer whose
+     * producer never produced polls an empty topic for its full duration and
+     * returns normally: it was reported DONE, having received nothing. That is
+     * how a run could show a failed produce task at 0 records/s next to a
+     * consume task marked DONE, also at 0 records/s.
+     *
+     * <p>A producer had the mirror image of the problem. Send failures arrive on
+     * a callback, where they were counted into {@code errors} and never read
+     * again, so a producer whose every record was rejected by the broker also
+     * returned normally and was also called DONE.
+     */
+    // Package-private: this is the whole DONE/FAILED decision, and reaching it
+    // through a real run would need a broker.
+    void applyPostConditions(BenchmarkTask task, WorkerState state) {
+        state.status = TaskStatus.DONE;
+
+        if (state.stopRequested.get()) {
+            // Asked to stop early, so a short count is the instruction being
+            // obeyed rather than a failure.
+            return;
+        }
+
+        long processed = state.recordsProcessed.get();
+        long failedSends = state.errors.get();
+
+        switch (task.getWorkloadType()) {
+            case CONSUME -> {
+                if (processed == 0) {
+                    state.status = TaskStatus.FAILED;
+                    state.error = "Consumed 0 records from " + task.getTopic() + " in "
+                            + task.getDurationMs() + "ms. The topic was empty for the whole run"
+                            + " — check whether the producer in this run failed.";
+                }
+            }
+            case PRODUCE, ROUND_TRIP, INTEGRITY -> {
+                // recordsProcessed counts sends handed to the client; errors
+                // counts the ones the broker then rejected. Everything rejected
+                // means nothing reached the topic.
+                if (processed > 0 && failedSends >= processed) {
+                    state.status = TaskStatus.FAILED;
+                    state.error = "All " + processed + " sends were rejected by the broker"
+                            + (state.firstSendError != null ? ": " + state.firstSendError : ".");
+                } else if (failedSends > 0) {
+                    // Partial loss is a benchmark result, not a broken run, but
+                    // it must be visible rather than rounded away.
+                    LOG.warnf(
+                            "Task %s: %d of %d sends were rejected: %s",
+                            task.getTaskId(), failedSends, processed, state.firstSendError);
+                    state.error = failedSends + " of " + processed + " sends were rejected"
+                            + (state.firstSendError != null ? ": " + state.firstSendError : ".");
+                }
+            }
+            case INTEGRITY_CDC -> {
+                // runIntegrityCdc sets its own status from the CDC service.
+            }
+        }
+    }
+
+    /** A message for a failure, falling back to the type when there is none. */
+    private static String describe(Throwable t) {
+        String message = t.getMessage();
+        return message != null && !message.isBlank() ? message : t.getClass().getName();
+    }
+
+    /**
+     * Records a finished task and evicts the oldest retained ones, so the
+     * worker map stays bounded no matter how many tasks the process runs.
+     */
+    private void retireWorker(String taskId) {
+        completedOrder.add(taskId);
+        while (completedOrder.size() > MAX_RETAINED_COMPLETED) {
+            String evicted = completedOrder.poll();
+            if (evicted == null) {
+                break;
+            }
+            activeWorkers.remove(evicted);
         }
     }
 
@@ -187,8 +330,15 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
                 if (targetNanosPerMsg > 0) {
                     long now = System.nanoTime();
-                    if (now < nextSendNanos) {
-                        Thread.onSpinWait();
+                    long waitNanos = nextSendNanos - now;
+                    if (waitNanos > 0) {
+                        // Park rather than spin. Thread.onSpinWait() in a loop
+                        // pins the carrier thread for the whole inter-send gap,
+                        // so N rate-limited producers burned N cores doing
+                        // nothing — with virtual threads that starves every
+                        // other task on the same carriers. parkNanos yields the
+                        // carrier and is accurate enough at these intervals.
+                        LockSupport.parkNanos(waitNanos);
                         continue;
                     }
                     nextSendNanos = now + targetNanosPerMsg;
@@ -204,20 +354,30 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                 byte[] payload = SequencedPayload.encode(seq, tsNanos, state.runIdHash, task.getRecordSize());
                 state.ackTracker.recordSent(seq, tsNanos);
 
-                long sendStart = System.nanoTime();
+                // Produce latency is the broker round-trip, which is only known
+                // when the send is acknowledged in the callback. Measuring it at
+                // send() return would capture accumulator-buffer append time
+                // (near-zero with batching/linger), not real latency. sendStart
+                // is captured here and the sample is recorded in the callback.
+                final long sendStart = System.nanoTime();
                 producer.send(new ProducerRecord<>(task.getTopic(), payload), (metadata, exception) -> {
                     if (exception != null) {
                         state.errors.incrementAndGet();
                         state.ackTracker.recordFailed(seq);
+                        // Keep the first one. A count alone says a send was
+                        // rejected but not why, which is the difference between
+                        // a diagnosis and a shrug.
+                        state.recordSendError(exception);
                     } else {
-                        state.ackTracker.recordAcked(seq);
+                        double latencyMs = (System.nanoTime() - sendStart) / 1_000_000.0;
+                        state.histogram.recordLatency(latencyMs);
+                        // Hand the send timestamp back rather than having the
+                        // tracker keep one per sequence.
+                        state.ackTracker.recordAcked(seq, tsNanos);
                     }
                 });
-                long latencyNs = System.nanoTime() - sendStart;
-                double latencyMs = latencyNs / 1_000_000.0;
 
                 state.recordsProcessed.incrementAndGet();
-                state.histogram.recordLatency(latencyMs);
                 sent++;
             }
 
@@ -347,8 +507,17 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         final AtomicLong recordsProcessed = new AtomicLong();
         final AtomicLong errors = new AtomicLong();
         final AtomicBoolean stopRequested = new AtomicBoolean();
-        final LatencyHistogram histogram = new LatencyHistogram();
-        final AckTracker ackTracker = new AckTracker();
+        /**
+         * Scoped to the TASK, not "global". Micrometer dedups gauges on
+         * name+tags, so the old shared id meant only the very first worker in
+         * the JVM ever exported percentiles — every later run's latency was
+         * silently missing from Prometheus.
+         */
+        final LatencyHistogram histogram;
+
+        /** Sized to the run so the acked bitset is exactly as large as needed. */
+        final AckTracker ackTracker;
+
         final long runIdHash;
 
         volatile TaskStatus status = TaskStatus.PENDING;
@@ -360,11 +529,37 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         volatile IntegrityResult integrityResult;
         volatile Map<String, Long> cdcPhaseDurations;
         volatile String currentPhase;
+        /** Immutable terminal snapshot; every poll after the run is served from it. */
+        volatile BenchmarkStatus finalStatus;
+
+        /**
+         * Why the first rejected send was rejected. Set once, from a Kafka
+         * sender thread, and read when the task ends.
+         */
+        volatile String firstSendError;
+
+        void recordSendError(Throwable t) {
+            if (firstSendError == null) {
+                firstSendError = describe(t);
+            }
+        }
 
         WorkerState(BenchmarkTask task) {
             this.task = task;
             String hashSource = task.getRunId() != null ? task.getRunId() : task.getTaskId();
             this.runIdHash = SequencedPayload.hashRunId(hashSource);
+            this.histogram = new LatencyHistogram(task.getTaskId());
+            this.ackTracker = new AckTracker(task.getMaxMessages());
+        }
+
+        /**
+         * Frees what a finished run no longer needs: the ack bitset (up to
+         * ~125 MB on a large integrity run) and the verifier's consumed set.
+         * Must run only after {@link #finalStatus} has been captured.
+         */
+        void releaseHeavyState() {
+            ackTracker.release();
+            verifier = null;
         }
 
         BenchmarkStatus toStatus() {

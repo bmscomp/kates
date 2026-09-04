@@ -1,0 +1,56 @@
+# Overrides for running the NATIVE image.
+#
+# Use with:
+#   helm upgrade --install kates charts/kates -n kates \
+#     -f charts/kates/values-native.yaml
+#
+# The chart defaults assume the JVM image. Two of them are actively wrong for a
+# native binary:
+#
+#   jvm.options    becomes JAVA_TOOL_OPTIONS, which a GraalVM native image does
+#                  not read at all. Heap sizes and GC flags set there are
+#                  silently ignored — not rejected, ignored — so the pod runs
+#                  with whatever the image decides. It is emptied here so nobody
+#                  reads a setting that has no effect. The native image ships
+#                  its own default (-XX:MaximumHeapSizePercent=75) as CMD; to
+#                  change it, set `args` on the container rather than jvm.options.
+#
+#   resources      a native binary has no JIT, no class metadata and no warmup
+#                  heap, and boots in tens of milliseconds instead of tens of
+#                  seconds. The JVM-sized 2Gi request just reserves memory the
+#                  process will never touch, which on a small cluster means
+#                  fewer pods scheduled for no benefit.
+
+image:
+  # Published as <appVersion>-native alongside the JVM tag.
+  tag: "1.22.0-native"
+
+# Not read by a native image — see above.
+jvm:
+  options: ""
+
+# The image's own default is -XX:MaximumHeapSizePercent=75. Set explicitly here
+# so the number is visible next to the memory limit it is a percentage of.
+containerArgs:
+  - "-XX:MaximumHeapSizePercent=75"
+
+resources:
+  requests:
+    # Deliberately close to the limit: the heap is sized as a percentage of the
+    # LIMIT, so a small request would let the scheduler pack pods that then grow
+    # to several times what they reserved.
+    memory: "768Mi"
+    cpu: "200m"
+  limits:
+    # Well above the resident set of an idle native binary, sized for the
+    # benchmark engine's buffers under load rather than for the runtime itself.
+    memory: "1Gi"
+    cpu: "2"
+
+probes:
+  startup:
+    # A native binary is serving within a second or two. 30 x 1s still leaves an
+    # order of magnitude of headroom on a contended node, while surfacing a
+    # genuine boot failure in seconds instead of two minutes.
+    failureThreshold: 30
+    periodSeconds: 1

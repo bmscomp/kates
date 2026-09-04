@@ -14,6 +14,7 @@ import jakarta.enterprise.inject.Any;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
+import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -50,6 +51,17 @@ public class TestOrchestrator {
     private final int maxConcurrentTests;
     private final Semaphore concurrencyGuard;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
+
+    /**
+     * Runs currently holding a concurrency permit. The permit is held for the
+     * run's whole LIFETIME, not just its submission — releasing it when
+     * {@code executeAsync} returned made the cap meaningless, because submission
+     * completes in milliseconds while the workers it starts run for minutes.
+     * Membership here also makes release idempotent: the terminal transition,
+     * the reaper and the failure paths can all call
+     * {@link #releasePermit(String)} without over-releasing the semaphore.
+     */
+    private final java.util.Set<String> permitHolders = ConcurrentHashMap.newKeySet();
     /**
      * Heatmap rows are read by ReportResource after a run completes, so they
      * cannot be dropped on completion — instead retain the most recent
@@ -116,9 +128,7 @@ public class TestOrchestrator {
         }
 
         if (!concurrencyGuard.tryAcquire()) {
-            return com.bmscomp.kates.util.Result.failure(
-                    new BenchmarkException("Concurrency limit reached: " + maxConcurrentTests
-                            + " tests already running. Retry later or increase kates.engine.max-concurrent-tests."));
+            return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
         }
 
         TestType type = request.getType();
@@ -134,14 +144,31 @@ public class TestOrchestrator {
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
         TestRun run = new TestRun(type, spec).withBackend(backendName);
-        repository.save(run);
-        fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+        // Register BEFORE the first thing that can throw. A transient failure in
+        // save/fireEvent used to strand the permit forever (the semaphore drained
+        // one permit per failure until restart), because nothing had recorded
+        // this run as a holder yet.
+        permitHolders.add(run.getId());
+        try {
+            repository.save(run);
+            fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+        } catch (RuntimeException e) {
+            releasePermit(run.getId());
+            LOG.error("Failed to register test run: " + run.getId(), e);
+            markStrandedAsFailed(run);
+            return com.bmscomp.kates.util.Result.failure(e);
+        }
 
         Thread.startVirtualThread(() -> {
             try {
                 executeAsync(run, type, spec, backendName, backend);
-            } finally {
-                concurrencyGuard.release();
+                // NOTE: no release here. executeAsync only SUBMITS work; the
+                // permit is released on the terminal transition (refreshStatus /
+                // the reconciler), by the reaper, or by executeAsync itself when
+                // the run ends terminal at submission time.
+            } catch (Throwable t) {
+                LOG.error("Test submission failed for run: " + run.getId(), t);
+                releasePermit(run.getId());
             }
         });
 
@@ -154,6 +181,7 @@ public class TestOrchestrator {
         org.jboss.logging.MDC.put("testType", type.name());
         org.jboss.logging.MDC.put("backend", backendName);
         runStartNanos.put(run.getId(), System.nanoTime());
+        List<BenchmarkHandle> submitted = List.of();
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
@@ -171,6 +199,7 @@ public class TestOrchestrator {
                     TestResult result = new TestResult()
                             .withTaskId(task.getTaskId())
                             .withTestType(type)
+                            .withPhaseName(phaseNameFor(task))
                             .withStatus(TestResult.TaskStatus.RUNNING)
                             .withStartTime(Instant.now().toString());
                     run = run.withAddedResult(result);
@@ -180,6 +209,7 @@ public class TestOrchestrator {
                     TestResult failedResult = new TestResult()
                             .withTaskId(task.getTaskId())
                             .withTestType(type)
+                            .withPhaseName(phaseNameFor(task))
                             .withStatus(TestResult.TaskStatus.FAILED)
                             .withError(e.getMessage())
                             .withStartTime(Instant.now().toString())
@@ -188,7 +218,7 @@ public class TestOrchestrator {
                 }
             }
 
-            activeHandles.put(run.getId(), handles);
+            submitted = handles;
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
@@ -200,13 +230,25 @@ public class TestOrchestrator {
             run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
-        repository.save(run);
+        // Registered only AFTER the row carrying these tasks is persisted.
+        // Publishing the handles first let the 5s reconciler read the run and
+        // write its own version of the row while this method was still building
+        // it — a lost update, or an optimistic-lock failure thrown into the
+        // virtual thread. The finally matters: workers are already running by
+        // now, so a failed save must not leave them with no handle to stop them.
+        try {
+            repository.save(run);
+        } finally {
+            registerHandles(run, submitted);
+        }
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         } else if (run.getStatus() == TestResult.TaskStatus.DONE) {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         }
         org.jboss.logging.MDC.remove("runId");
         org.jboss.logging.MDC.remove("testType");
@@ -214,8 +256,15 @@ public class TestOrchestrator {
     }
 
     /**
-     * Executes a multi-phase scenario: each phase runs sequentially,
-     * using the resolved spec (base + phase overrides + type defaults).
+     * Executes a multi-phase scenario, using the resolved spec per phase
+     * (base + phase overrides + type defaults).
+     *
+     * <p>Phases are SUBMITTED in order, not run one after another: the loop
+     * below hands every phase's tasks to the backend without waiting for the
+     * previous phase to finish, so they overlap. The javadoc here used to claim
+     * they ran sequentially, which is worth correcting because it changes how
+     * you read a scenario's results — a ramp defined as three phases produces
+     * three concurrent loads, not a staircase.
      */
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeScenario")
     com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
@@ -225,8 +274,17 @@ public class TestOrchestrator {
                 ? scenario.getBackend()
                 : (request.getBackend() != null ? request.getBackend() : defaultBackend);
 
+        // Scenarios previously bypassed the concurrency cap entirely — executeTest
+        // delegates here BEFORE its tryAcquire, so any number of multi-phase runs
+        // could start at once. They consume the same brokers as plain runs, so
+        // they take a permit on the same terms.
+        if (!concurrencyGuard.tryAcquire()) {
+            return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
+        }
+
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
+            concurrencyGuard.release();
             return com.bmscomp.kates.util.Result.failure(
                     backendResult.asFailure().orElseThrow());
         }
@@ -239,10 +297,21 @@ public class TestOrchestrator {
                 .withLabels(scenario.getLabels())
                 .withSla(scenario.getSla())
                 .withStatus(TestResult.TaskStatus.RUNNING);
-        repository.save(run);
-        fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
-        fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
+        // Same ordering rule as executeTest: hold the permit before anything
+        // that can throw, so a failed save cannot strand it.
+        permitHolders.add(run.getId());
+        try {
+            repository.save(run);
+            fireEvent(run, TestLifecycleEvent.EventKind.CREATED);
+            fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
+        } catch (RuntimeException e) {
+            releasePermit(run.getId());
+            LOG.error("Failed to register scenario run: " + run.getId(), e);
+            markStrandedAsFailed(run);
+            return com.bmscomp.kates.util.Result.failure(e);
+        }
         runStartNanos.put(run.getId(), System.nanoTime());
+        List<BenchmarkHandle> submitted = List.of();
 
         try {
             createTestTopic(baseSpec, type);
@@ -285,7 +354,7 @@ public class TestOrchestrator {
                 }
             }
 
-            activeHandles.put(run.getId(), allHandles);
+            submitted = allHandles;
 
             boolean allFailed = run.getResults().stream().allMatch(r -> r.getStatus() == TestResult.TaskStatus.FAILED);
             if (allFailed) {
@@ -297,13 +366,23 @@ public class TestOrchestrator {
             run = run.withStatus(TestResult.TaskStatus.FAILED);
         }
 
-        repository.save(run);
+        // Same ordering rule as executeAsync: publish handles only once the row
+        // they belong to is persisted, so the reconciler cannot race this write
+        // — but publish them even if that write fails, so running workers stay
+        // stoppable.
+        try {
+            repository.save(run);
+        } finally {
+            registerHandles(run, submitted);
+        }
         if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         } else if (run.getStatus() == TestResult.TaskStatus.DONE) {
             fireEvent(run, TestLifecycleEvent.EventKind.DONE);
             benchmarkMetrics.endRun(run.getId());
+            releasePermit(run.getId());
         }
         return com.bmscomp.kates.util.Result.success(run);
     }
@@ -312,6 +391,23 @@ public class TestOrchestrator {
         TestRun run = repository
                 .findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
+
+        // Snapshot the status BEFORE this poll so the terminal transition (and
+        // its one-shot events + metrics) fires exactly once. Without this,
+        // polling a run that is already DONE/FAILED — which the scheduled
+        // reconciler and repeat client polls both do — would re-fire the
+        // lifecycle event and double-count completion metrics.
+        TestResult.TaskStatus priorStatus = run.getStatus();
+        if (priorStatus == TestResult.TaskStatus.DONE || priorStatus == TestResult.TaskStatus.FAILED) {
+            activeHandles.remove(runId);
+            return run;
+        }
+
+        // What the run looks like before this poll. The reconciler calls this
+        // every 5s for every active run, and a poll that finds nothing new used
+        // to write the row anyway — an UPDATE and a version bump per run per
+        // tick, which also collides with concurrent writers for no reason.
+        String signatureBefore = pollSignature(run);
 
         String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
@@ -369,6 +465,12 @@ public class TestOrchestrator {
                                 }
                                 heatmapRows.remove(eldest);
                             }
+                            // An id evicted above can be re-added by a later
+                            // poll of the same run, leaving its earlier entry
+                            // in the deque. Those stale duplicates are never
+                            // removed by the loop (the map no longer has them),
+                            // so the deque grows even though the map does not.
+                            heatmapOrder.removeIf(id -> !heatmapRows.containsKey(id));
                         }
                     } catch (Exception e) {
                         LOG.warn("Failed to poll task: " + result.getTaskId(), e);
@@ -376,6 +478,12 @@ public class TestOrchestrator {
                 }
             }
 
+            updatedResults.add(result);
+        }
+
+        updatedResults = abortStrandedConsumers(updatedResults, backend, handleMap);
+
+        for (TestResult result : updatedResults) {
             if (result.getStatus() != TestResult.TaskStatus.DONE
                     && result.getStatus() != TestResult.TaskStatus.FAILED) {
                 allDone = false;
@@ -383,7 +491,6 @@ public class TestOrchestrator {
             if (result.getStatus() == TestResult.TaskStatus.FAILED) {
                 anyFailed = true;
             }
-            updatedResults.add(result);
         }
         run = run.withResults(updatedResults);
 
@@ -413,22 +520,128 @@ public class TestOrchestrator {
                 if (r.getThroughputRecordsPerSec() > 0) {
                     katesMetrics.recordFinalThroughput(
                             typeName, r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
+                    // Feed the per-run gauges before they are unregistered. They
+                    // were registered by startRun but never written to, so every
+                    // kates.benchmark.throughput.* series read a constant 0.
+                    benchmarkMetrics.recordThroughput(
+                            runId, r.getPhaseName(), r.getThroughputRecordsPerSec(), r.getThroughputMBPerSec());
                 }
                 if (r.getRecordsSent() > 0) {
                     katesMetrics.recordRecordsProcessed(typeName, r.getRecordsSent());
                 }
+                if (r.getStatus() == TestResult.TaskStatus.FAILED) {
+                    benchmarkMetrics.recordError(runId, r.getPhaseName());
+                }
             }
+
+            // Unregister the run's meters and hand back its concurrency slot.
+            // Both are keyed on the run and both leaked before: meters accumulated
+            // in the registry forever, and the permit had already been released at
+            // submission time so the cap never applied.
+            benchmarkMetrics.endRun(runId);
+            releasePermit(runId);
         }
 
-        repository.save(run);
+        if (!pollSignature(run).equals(signatureBefore)) {
+            try {
+                repository.save(run);
+            } catch (jakarta.persistence.OptimisticLockException e) {
+                // Another writer (the reconciler, the reaper, a concurrent GET)
+                // moved the row first. Their write is as valid as this one, so
+                // return what is actually stored rather than turning a plain
+                // read into a 409 for the client.
+                LOG.debugf("Lost the optimistic-lock race refreshing %s; returning the stored run", runId);
+                return repository.findById(runId).orElse(run);
+            }
+        }
         return run;
     }
 
     /**
-     * Returns the number of concurrency permits currently in use.
+     * Best-effort FAILED for a run whose registration blew up half-way.
+     *
+     * <p>If the save succeeded and only the event failed, the row is left
+     * PENDING — a state nothing scans: orphan recovery looks for RUNNING and the
+     * timeout reaper only reaps RUNNING, so the run would sit there forever
+     * looking like it was about to start. Failing to write this is not worth
+     * masking the original error, so it only logs.
+     */
+    private void markStrandedAsFailed(TestRun run) {
+        try {
+            repository.save(run.withStatus(TestResult.TaskStatus.FAILED));
+        } catch (RuntimeException e) {
+            LOG.warnf("Could not mark stranded run %s as FAILED: %s", run.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Publishes a run's backend handles so the reconciler, the reaper and
+     * shutdown can poll and stop its workers.
+     *
+     * <p>Registered even when the run already looks terminal: a partial
+     * submission can leave workers running behind a FAILED status, and without a
+     * handle nothing can stop them. The terminal path in
+     * {@link #refreshStatus(String)} drops the entry once the run is settled.
+     */
+    private void registerHandles(TestRun run, List<BenchmarkHandle> handles) {
+        if (!handles.isEmpty()) {
+            activeHandles.put(run.getId(), handles);
+        }
+    }
+
+    /**
+     * Everything a poll can change about a run, as a comparable string. Used to
+     * skip writes when a reconcile tick found nothing new.
+     */
+    private static String pollSignature(TestRun run) {
+        StringBuilder sb = new StringBuilder(64);
+        sb.append(run.getStatus()).append('|').append(run.getCdcPhase());
+        for (TestResult r : run.getResults()) {
+            sb.append('#')
+                    .append(r.getTaskId())
+                    .append(':')
+                    .append(r.getStatus())
+                    .append(':')
+                    .append(r.getRecordsSent())
+                    .append(':')
+                    .append(r.getThroughputRecordsPerSec())
+                    .append(':')
+                    .append(r.getAvgLatencyMs())
+                    .append(':')
+                    .append(r.getP99LatencyMs())
+                    .append(':')
+                    .append(r.getEndTime())
+                    .append(':')
+                    .append(r.getError());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Returns the number of runs currently occupying a concurrency slot.
+     * Derived from the permit holders rather than the semaphore's free count so
+     * it reflects live runs exactly — the liveness probe surfaces this, and it
+     * used to read ~0 under real load because permits were released as soon as
+     * submission finished.
      */
     public int activeTestCount() {
-        return maxConcurrentTests - concurrencyGuard.availablePermits();
+        return permitHolders.size();
+    }
+
+    /**
+     * Returns a run's concurrency permit exactly once. Safe to call from any
+     * terminal path (reconciler, reaper, submission failure) and safe to call
+     * repeatedly — only the holder that wins the {@code remove} releases.
+     */
+    private void releasePermit(String runId) {
+        // Every terminal path funnels through here, so this is the one place
+        // that reliably runs when a run ends. The duration metric normally
+        // consumes the entry first; the reaper and the submission-failure path
+        // did not, so their runs leaked one map entry each, forever.
+        runStartNanos.remove(runId);
+        if (permitHolders.remove(runId)) {
+            concurrencyGuard.release();
+        }
     }
 
     /**
@@ -436,6 +649,56 @@ public class TestOrchestrator {
      */
     public int maxConcurrentTests() {
         return maxConcurrentTests;
+    }
+
+    /**
+     * Drives active runs to their terminal state without waiting for a client
+     * to poll. Backend workers finish on their own schedule; nothing else calls
+     * {@link #refreshStatus} unless a client GETs the run, so without this a
+     * completed run stays RUNNING in the DB until the timeout reaper wrongly
+     * marks it FAILED. Runs off the scheduler thread; refreshStatus is
+     * idempotent for terminal runs (see the priorStatus guard).
+     */
+    @Scheduled(every = "{kates.engine.reconcile-interval:5s}", identity = "test-status-reconciler")
+    void reconcileActiveRuns() {
+        for (String runId : activeHandles.keySet()) {
+            try {
+                refreshStatus(runId);
+            } catch (Exception e) {
+                LOG.debugf("Status reconcile failed for run %s: %s", runId, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Stops any live backend workers for a run and drops its handles WITHOUT
+     * changing the persisted status. Used by the timeout reaper, which owns the
+     * FAILED transition — the previous reaper updated the DB row but left the
+     * producer/consumer virtual threads running, so a "failed" run kept
+     * hammering Kafka and skewing concurrent runs.
+     */
+    public void abortWorkers(TestRun run) {
+        List<BenchmarkHandle> handles = activeHandles.remove(run.getId());
+        // The run is ending either way, so its meters and concurrency slot must
+        // be reclaimed even when there is nothing left to stop.
+        benchmarkMetrics.endRun(run.getId());
+        releasePermit(run.getId());
+        if (handles == null || handles.isEmpty()) {
+            return;
+        }
+        String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
+        com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
+        if (backendResult.isFailure()) {
+            return;
+        }
+        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
+        for (BenchmarkHandle handle : handles) {
+            try {
+                backend.stop(handle);
+            } catch (Exception e) {
+                LOG.warnf("Reaper: failed to stop task %s: %s", handle.taskId(), e.getMessage());
+            }
+        }
     }
 
     @PreDestroy
@@ -710,6 +973,95 @@ public class TestOrchestrator {
                         .recordSize(spec.getRecordSize())
                         .producerConfig(producerConfig)
                         .build());
+        };
+    }
+
+    /**
+     * Ends consumers that are waiting for records nobody will ever send.
+     *
+     * <p>The producer and the consumer of a run share a run id and nothing else:
+     * they are submitted together and then run independently. So when the
+     * producer died on its first record, the consumer went on polling an empty
+     * topic for the run's full duration — ten minutes by default — before
+     * reporting anything at all. The whole run sat at RUNNING with 0 records
+     * while the reason for it had already been decided in the first second.
+     *
+     * <p>The condition is deliberately narrow: every producer in the run has
+     * finished, at least one failed, and between them they sent nothing. Only
+     * then is an empty topic a certainty rather than a slow start.
+     */
+    private List<TestResult> abortStrandedConsumers(
+            List<TestResult> results, BenchmarkBackend backend, Map<String, BenchmarkHandle> handleMap) {
+
+        boolean anyProducer = false;
+        boolean allProducersFinished = true;
+        boolean anyProducerFailed = false;
+        double producedRecords = 0;
+
+        for (TestResult r : results) {
+            if (!isProducer(r)) {
+                continue;
+            }
+            anyProducer = true;
+            producedRecords += r.getRecordsSent();
+            if (r.getStatus() == TestResult.TaskStatus.FAILED) {
+                anyProducerFailed = true;
+            } else if (r.getStatus() != TestResult.TaskStatus.DONE) {
+                allProducersFinished = false;
+            }
+        }
+
+        if (!anyProducer || !allProducersFinished || !anyProducerFailed || producedRecords > 0) {
+            return results;
+        }
+
+        List<TestResult> updated = new java.util.ArrayList<>(results.size());
+        for (TestResult r : results) {
+            boolean stranded = "consume".equals(r.getPhaseName())
+                    && r.getStatus() != TestResult.TaskStatus.DONE
+                    && r.getStatus() != TestResult.TaskStatus.FAILED;
+            if (!stranded) {
+                updated.add(r);
+                continue;
+            }
+
+            BenchmarkHandle handle = handleMap.get(r.getTaskId());
+            if (handle != null) {
+                try {
+                    backend.stop(handle);
+                } catch (Exception e) {
+                    LOG.warn("Failed to stop stranded consumer: " + r.getTaskId(), e);
+                }
+            }
+            LOG.warnf("Aborting consumer %s: every producer in this run failed without sending", r.getTaskId());
+            updated.add(r.withStatus(TestResult.TaskStatus.FAILED)
+                    .withError("Aborted: every producer in this run failed without sending a record,"
+                            + " so nothing would ever arrive on the topic.")
+                    .withEndTime(Instant.now().toString()));
+        }
+        return updated;
+    }
+
+    private static boolean isProducer(TestResult result) {
+        String phase = result.getPhaseName();
+        return "produce".equals(phase) || "round-trip".equals(phase) || "integrity".equals(phase);
+    }
+
+    /**
+     * A name for the row this task will occupy in a result table.
+     *
+     * <p>Only scenario phases used to set one, so every task in an ordinary run
+     * fell back to the CLI's placeholder. A LOAD run therefore printed two rows
+     * both labelled "main" — one FAILED and one RUNNING, with no way to tell
+     * which was the producer.
+     */
+    private static String phaseNameFor(BenchmarkTask task) {
+        return switch (task.getWorkloadType()) {
+            case PRODUCE -> "produce";
+            case CONSUME -> "consume";
+            case ROUND_TRIP -> "round-trip";
+            case INTEGRITY -> "integrity";
+            case INTEGRITY_CDC -> "integrity-cdc";
         };
     }
 

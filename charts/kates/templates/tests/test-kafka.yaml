@@ -22,6 +22,15 @@ spec:
       capabilities:
         drop:
           - ALL
+    {{- if .Values.apiKey.enabled }}
+    env:
+    - name: KATES_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.apiKey.existingSecret | default (printf "%s-api-key" (include "kates.fullname" .)) }}
+          key: {{ .Values.apiKey.secretKey | default "api-key" }}
+          optional: true
+    {{- end }}
     resources:
       requests:
         memory: "32Mi"
@@ -36,21 +45,53 @@ spec:
       - sh
       - -c
       - |
+        # /api/cluster/info, NOT /api/cluster: the latter is only a class-level
+        # path with no method at its root, so it answers 404 for everything.
+        # This test asked for it for as long as it has existed — first hidden
+        # behind a 401 because it sent no API key, then reported as "Kafka may
+        # be unreachable", exiting 0 either way. It has never once checked Kafka.
+        #
+        # /info returns 200 with the cluster description, or 500 with
+        # "Failed to connect to Kafka cluster" when the brokers are gone, which
+        # is the distinction this test exists to make.
         echo "Testing Kafka connectivity via KATES API..."
-        CODE=$(curl -s -o /tmp/body -w "%{http_code}" http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/cluster)
+        CODE=$(curl -s -o /tmp/body -w "%{http_code}" \
+          ${KATES_API_KEY:+-H "X-API-Key: ${KATES_API_KEY}"} \
+          http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/cluster/info)
         BODY=$(cat /tmp/body 2>/dev/null)
         echo "HTTP $CODE"
         echo "$BODY" | head -20
-        if [ "$CODE" = "200" ]; then
-          echo "Kafka cluster reachable"
-          exit 0
-        elif [ "$CODE" = "000" ]; then
-          echo "FAIL: Kates API not reachable"
-          exit 1
-        else
-          echo "WARN: Kates responded but Kafka may be unreachable (HTTP $CODE)"
-          exit 0
-        fi
+        case "$CODE" in
+          200)
+            echo "PASS: Kafka cluster reachable"
+            exit 0
+            ;;
+          401|403)
+            # The test's own credentials, not the cluster's health. Warning
+            # about Kafka here is what hid the problem in the first place.
+            echo "FAIL: the API rejected this test's key (HTTP $CODE)."
+            echo "      Check the ${KATES_API_KEY:+existing }api-key Secret and apiKey.enabled."
+            exit 1
+            ;;
+          404)
+            # The endpoint moved or never existed. That is this test being
+            # wrong, and it must not be reported as a property of Kafka.
+            echo "FAIL: /api/cluster/info does not exist on this build (HTTP 404)."
+            echo "      The chart test and the API have drifted apart."
+            exit 1
+            ;;
+          000)
+            echo "FAIL: Kates API not reachable at all"
+            exit 1
+            ;;
+          *)
+            # A Kafka-testing tool routinely runs against brokers that are down,
+            # partitioned or mid-experiment, so this stays a warning — but only
+            # once the two failures above have been ruled out.
+            echo "WARN: Kates is up but cannot reach Kafka (HTTP $CODE)"
+            exit 0
+            ;;
+        esac
   volumes:
   - name: tmp
     emptyDir: {}

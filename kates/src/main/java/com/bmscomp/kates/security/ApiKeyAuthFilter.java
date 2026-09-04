@@ -23,7 +23,18 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
 
     private static final Logger LOG = Logger.getLogger(ApiKeyAuthFilter.class);
 
-    private static final Set<String> PUBLIC_PREFIXES = Set.of("/api/health", "/q/", "/openapi");
+    /**
+     * Unauthenticated paths.
+     *
+     * <p>The {@code /q/} entries are belt-and-braces only: those are Quarkus
+     * non-application routes served by Vert.x, which never reach a JAX-RS
+     * filter, so listing them here neither exposes nor protects anything. The
+     * one that matters is {@code /api/health}. Access control for the
+     * management root is a deployment concern — bind it to a separate port
+     * (`quarkus.management.enabled`) or keep it off the Ingress; do not assume
+     * this filter is guarding it.
+     */
+    private static final Set<String> PUBLIC_PREFIXES = Set.of("/api/health", "/q/health", "/q/metrics", "/openapi");
 
     private boolean isSecurityEnabled() {
         return ConfigProvider.getConfig()
@@ -50,7 +61,11 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
 
         String token = extractToken(ctx);
         if (token == null || token.isBlank()) {
-            LOG.warnf("Unauthenticated request to %s from %s", path, ctx.getHeaderString("X-Forwarded-For"));
+            // X-Forwarded-For is attacker-controlled: logged at DEBUG and
+            // sanitised, so an unauthenticated caller cannot forge log lines
+            // (CRLF injection) or flood WARN-level logs at will.
+            LOG.warnf("Unauthenticated request to %s", path);
+            LOG.debugf("  claimed origin (unverified): %s", sanitizeHeader(ctx.getHeaderString("X-Forwarded-For")));
             ctx.abortWith(errorResponse(
                     Response.Status.UNAUTHORIZED,
                     "Missing API key",
@@ -73,6 +88,15 @@ public class ApiKeyAuthFilter implements ContainerRequestFilter {
     private static boolean constantTimeEquals(String expected, String provided) {
         return MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.UTF_8), provided.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Strips control characters and caps length before a client-supplied header is logged. */
+    private static String sanitizeHeader(String value) {
+        if (value == null || value.isBlank()) {
+            return "unknown";
+        }
+        String cleaned = value.replaceAll("[\\p{Cntrl}]", "");
+        return cleaned.length() <= 128 ? cleaned : cleaned.substring(0, 128) + "…";
     }
 
     private boolean isPublicPath(String path) {

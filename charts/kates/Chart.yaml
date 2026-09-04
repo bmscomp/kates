@@ -2,8 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-version: 0.6.0
-appVersion: "1.21.0"
+# Minor bump, not a patch: the default readiness path and startup probe
+# thresholds changed, so a default install behaves differently after upgrade.
+version: 0.7.0
+# The non-blocking health endpoints this chart's probes now point at come from
+# a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
+# exist in the image built from this branch. Keep appVersion and
+# image.tag in values.yaml pinned to that release.
+appVersion: "1.22.0"
 keywords:
   - kafka
   - testing

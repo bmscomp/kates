@@ -8,6 +8,8 @@ import java.util.concurrent.TimeoutException;
 
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.apps.StatefulSet;
+import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -144,6 +146,53 @@ public class KubernetesChaosProviderTest {
         assertEquals(
                 "chaos-io-stress",
                 updatedPod.getSpec().getEphemeralContainers().get(0).getName());
+    }
+
+    @Test
+    void testScaleDownSnapshotsOriginalReplicas() throws ExecutionException, InterruptedException, TimeoutException {
+        StatefulSet ss = new StatefulSetBuilder()
+                .withNewMetadata()
+                .withName("kafka")
+                .withNamespace("default")
+                .addToLabels("app", "kafka")
+                .endMetadata()
+                .withNewSpec()
+                .withReplicas(3)
+                .endSpec()
+                .build();
+        client.apps().statefulSets().inNamespace("default").resource(ss).create();
+
+        FaultSpec spec = FaultSpec.builder("scale-down")
+                .targetNamespace("default")
+                .targetLabel("app=kafka")
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .build();
+
+        // First SCALE_DOWN: 3 → 2, and the ORIGINAL count (3) is snapshotted.
+        provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+        StatefulSet after = client.apps()
+                .statefulSets()
+                .inNamespace("default")
+                .withName("kafka")
+                .get();
+        assertEquals(2, after.getSpec().getReplicas(), "one replica removed");
+        assertEquals(
+                "3",
+                after.getMetadata().getAnnotations().get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION),
+                "original replica count snapshotted for rollback");
+
+        // Second SCALE_DOWN: 2 → 1, snapshot must NOT be overwritten with 2.
+        provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+        StatefulSet after2 = client.apps()
+                .statefulSets()
+                .inNamespace("default")
+                .withName("kafka")
+                .get();
+        assertEquals(1, after2.getSpec().getReplicas());
+        assertEquals(
+                "3",
+                after2.getMetadata().getAnnotations().get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION),
+                "snapshot preserved across repeated scale-downs");
     }
 
     @Test

@@ -2,38 +2,73 @@ package com.bmscomp.kates.api;
 
 import jakarta.inject.Inject;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Readiness;
 
-import com.bmscomp.kates.service.ClusterHealthService;
+import com.bmscomp.kates.service.KafkaReachabilityCache;
 
 /**
- * Readiness probe: checks Kafka and database connectivity.
- * Used by Kubernetes to gate traffic to the pod.
+ * Readiness probe: gates traffic to the pod.
+ *
+ * <p>The database is a hard dependency — every request path touches it. Kafka is
+ * NOT a readiness gate by default: most endpoints (runs, reports, schedules,
+ * trends) serve fine without a broker, and failing readiness on a transient
+ * Kafka blip pulled the entire API out of the Service for no benefit. The Kafka
+ * signal is reported as data, read from a periodically refreshed cache so the
+ * probe never blocks on a broker round-trip.
+ *
+ * <p>Set {@code kates.health.readiness.require-kafka=true} to gate on Kafka
+ * anyway; even then it only fails after
+ * {@code kates.health.readiness.kafka-failure-threshold} consecutive failed
+ * refreshes, so a blip cannot flap the pod out of the Service.
  */
 @Readiness
 public class KatesReadinessCheck implements HealthCheck {
 
     @Inject
-    ClusterHealthService clusterHealthService;
+    KafkaReachabilityCache kafkaReachability;
 
     @Inject
     jakarta.persistence.EntityManager em;
 
+    @ConfigProperty(name = "kates.health.readiness.require-kafka", defaultValue = "false")
+    boolean requireKafka;
+
+    @ConfigProperty(name = "kates.health.readiness.kafka-failure-threshold", defaultValue = "3")
+    int kafkaFailureThreshold;
+
     @Override
     public HealthCheckResponse call() {
-        boolean kafkaOk = clusterHealthService.isReachable();
+        boolean kafkaOk = kafkaReachability.isReachable();
+        int kafkaFailures = kafkaReachability.consecutiveFailures();
         boolean dbOk = checkDatabase();
 
         var builder = HealthCheckResponse.named("kates-readiness");
         builder.withData("kafka", kafkaOk ? "UP" : "DOWN");
+        builder.withData("kafkaConsecutiveFailures", kafkaFailures);
+        builder.withData("kafkaGatesReadiness", requireKafka);
+        // How old the Kafka verdict is. Without this the probe reports
+        // "kafka: UP" forever if the refresh is disabled or wedged — the
+        // initial optimistic value, indistinguishable from a fresh success.
+        builder.withData("kafkaCheckedSecondsAgo", kafkaCheckedSecondsAgo());
         builder.withData("database", dbOk ? "UP" : "DOWN");
 
-        if (kafkaOk && dbOk) {
+        boolean kafkaBlocks = requireKafka && kafkaFailures >= kafkaFailureThreshold;
+        if (dbOk && !kafkaBlocks) {
             return builder.up().build();
         }
         return builder.down().build();
+    }
+
+    /** Age of the cached Kafka verdict; -1 when no refresh has run yet. */
+    private long kafkaCheckedSecondsAgo() {
+        long lastChecked = kafkaReachability.lastCheckedEpochMs();
+        if (lastChecked <= 0) {
+            return -1;
+        }
+        return Math.max(0, (System.currentTimeMillis() - lastChecked) / 1000);
     }
 
     private boolean checkDatabase() {

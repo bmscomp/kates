@@ -41,11 +41,16 @@ public class DisruptionResource {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    DisruptionLauncher launcher;
+
     @POST
     @Operation(
             summary = "Execute a disruption",
-            description = "Runs a disruption plan against the Kafka cluster with safety guardrails")
-    @APIResponse(responseCode = "200", description = "Disruption report")
+            description =
+                    "Validates a disruption plan and starts it asynchronously. Returns 202 with a report id; poll GET /api/disruptions/{id} for progress and the final report.")
+    @APIResponse(responseCode = "202", description = "Disruption accepted for execution")
+    @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
     @APIResponse(responseCode = "422", description = "Disruption rejected by safety guard")
     public Response executeDisruption(
             DisruptionPlan plan,
@@ -66,25 +71,32 @@ public class DisruptionResource {
             return Response.ok(result).build();
         }
 
-        String id = UUID.randomUUID().toString().substring(0, 8);
-        LOG.info("Starting disruption plan '" + plan.getName() + "' with ID: " + id);
+        // A plan is minutes long (steadyState + chaosDuration + observationWindow
+        // + recoveryTimeout per step). Running it inline held a request thread and
+        // the client connection well past any load-balancer read timeout, so the
+        // caller saw a gateway timeout while the chaos kept running. The launcher
+        // owns validation, the concurrency lease, the RUNNING placeholder and the
+        // background execution — shared with the playbook endpoint so the two
+        // cannot drift apart.
+        return toResponse(launcher.launch(plan), plan.getName());
+    }
 
-        DisruptionReport report = orchestrator.execute(plan);
-        DisruptionPersistence.persistReport(id, report, repository, objectMapper);
-
-        if ("REJECTED".equals(report.getStatus())) {
-            return Response.status(422)
-                    .entity(Map.of(
-                            "id",
-                            id,
-                            "status",
-                            "REJECTED",
-                            "validationWarnings",
-                            report.getValidationWarnings() != null ? report.getValidationWarnings() : List.of()))
-                    .build();
-        }
-
-        return Response.ok(Map.of("id", id, "report", report)).build();
+    /** Maps a launch outcome onto its HTTP result. Shared with the playbook endpoint. */
+    static Response toResponse(DisruptionLauncher.LaunchResult result, String planName) {
+        return switch (result.status()) {
+            case ACCEPTED ->
+                Response.accepted(Map.of("id", result.id(), "status", "RUNNING", "planName", planName))
+                        .build();
+            case REJECTED ->
+                Response.status(422)
+                        .entity(Map.of(
+                                "id", result.id(), "status", "REJECTED", "validationWarnings", result.messages()))
+                        .build();
+            case CONFLICT ->
+                Response.status(409)
+                        .entity(ApiError.of(409, "Conflict", String.join(" ", result.messages())))
+                        .build();
+        };
     }
 
     @GET

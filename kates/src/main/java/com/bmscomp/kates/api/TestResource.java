@@ -40,6 +40,12 @@ import com.bmscomp.kates.service.TestRunRepository;
 @Tag(name = "Tests")
 public class TestResource {
 
+    /**
+     * Retry-After for a 429. Runs last minutes, so a short retry would just
+     * bounce; a minute is the smallest interval likely to find a free slot.
+     */
+    private static final String RETRY_AFTER_SECONDS = "60";
+
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
     private final ChaosProvider chaosProvider;
@@ -65,12 +71,22 @@ public class TestResource {
             summary = "Create and execute a test",
             description = "Submits a new performance test run for asynchronous execution")
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
+    @APIResponse(responseCode = "429", description = "Concurrency limit reached — retry later")
     public Response createTest(@Valid CreateTestRequest request) {
         var result = orchestrator.executeTest(request);
         if (result.isFailure()) {
+            Exception failure = result.asFailure().orElseThrow();
+            // A full engine is a temporary condition, not a malformed request.
+            // Returning 400 for it made the two indistinguishable to clients and
+            // to CI, which then retried nothing and failed the build instead.
+            if (failure instanceof com.bmscomp.kates.engine.ConcurrencyLimitException) {
+                return Response.status(429)
+                        .header("Retry-After", RETRY_AFTER_SECONDS)
+                        .entity(ApiError.of(429, "Too Many Requests", failure.getMessage()))
+                        .build();
+            }
             return Response.status(400)
-                    .entity(ApiError.of(
-                            400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
+                    .entity(ApiError.of(400, "Bad Request", failure.getMessage()))
                     .build();
         }
         TestRun run = result.asSuccess().orElseThrow();
@@ -80,7 +96,11 @@ public class TestResource {
 
     @POST
     @Path("/bulk")
-    @Operation(summary = "Create multiple tests", description = "Submits up to 10 test runs in a single request")
+    @Operation(
+            summary = "Create multiple tests",
+            description = "Submits up to 10 test runs in a single request. Requests beyond"
+                    + " kates.engine.max-concurrent-tests (default 3) are reported as"
+                    + " per-item failures rather than being queued.")
     @APIResponse(responseCode = "202", description = "Tests accepted for execution")
     public Response bulkCreate(List<@Valid CreateTestRequest> requests) {
         if (requests == null || requests.isEmpty()) {
@@ -225,6 +245,13 @@ public class TestResource {
 
     @POST
     @Path("/{id}/cancel")
+    // Overrides the class-level @Consumes(APPLICATION_JSON). Cancel takes no
+    // body, so a client sends none and therefore no Content-Type — which JAX-RS
+    // treats as application/octet-stream, matches against application/json, and
+    // rejects with 415. `curl -X POST .../cancel` could never cancel anything;
+    // only a client that invented a Content-Type header for an empty body got
+    // through.
+    @Consumes(MediaType.WILDCARD)
     @Operation(
             summary = "Cancel a running test",
             description = "Safely stops all tasks and marks the test as CANCELLED")

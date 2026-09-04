@@ -1,21 +1,31 @@
 package com.bmscomp.kates.engine;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAccumulator;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 
 /**
  * Bridges internal benchmark metrics to Micrometer for Prometheus export.
  * Each active run registers its own set of labeled meters.
+ *
+ * <p><b>Cardinality contract.</b> These meters are tagged with {@code run_id},
+ * which is unbounded over time, so every meter registered here MUST be removed
+ * when the run ends. {@link #endRun(String)} unregisters them; previously it
+ * dropped only the map entry and left the meters in the registry forever, so
+ * each run permanently added time series and Prometheus memory grew without
+ * bound. The number of run_ids alive at once is bounded by the engine's
+ * concurrency cap.
  */
 @ApplicationScoped
 public class BenchmarkMetrics {
@@ -32,23 +42,57 @@ public class BenchmarkMetrics {
                 .register(registry);
     }
 
+    /**
+     * Registers a run's meters, replacing any the same run id already had.
+     *
+     * <p><b>Unregister-then-register, atomically.</b> Micrometer identifies a
+     * meter by name plus tags, and every meter here is tagged with the run id —
+     * so an old set and a new set for the same run ARE the same ids. Two
+     * consequences, both of which have to be handled in one step:
+     *
+     * <ul>
+     *   <li>Registering first and cleaning up after deletes the meters just
+     *       registered, leaving a restarted run exporting nothing at all.
+     *   <li>Registering a gauge whose id already exists does NOT rebind it:
+     *       Micrometer keeps the first state object and silently drops the new
+     *       one. The gauge then reports a {@code DoubleAccumulator} nothing
+     *       writes to any more, frozen at its last value.
+     * </ul>
+     *
+     * <p>Doing this as a bare remove followed by a put leaves a window where a
+     * concurrent start or end for the same run interleaves and produces exactly
+     * that second case. {@code compute} holds the map's per-key lock across the
+     * whole transition, so the two can no longer overlap.
+     */
     public void startRun(String runId, String testType, String backend) {
-        activeRuns.incrementAndGet();
-        RunMeters meters = new RunMeters(runId, testType, backend);
-        runMeters.put(runId, meters);
+        runMeters.compute(runId, (id, previous) -> {
+            if (previous != null) {
+                // A double start (retry, replayed event). Without this the
+                // active-run gauge drifts upward and the old meters leak.
+                previous.unregister();
+            } else {
+                activeRuns.incrementAndGet();
+            }
+            return new RunMeters(runId, testType, backend);
+        });
     }
 
+    /**
+     * Ends a run and UNREGISTERS its meters. Idempotent: the terminal
+     * transition, the timeout reaper and the submission-failure path may all
+     * reach here for the same run.
+     *
+     * <p>Also under {@code compute}, so it cannot land between a restart's
+     * unregister and its re-register and take the new meters with it.
+     */
     public void endRun(String runId) {
-        activeRuns.decrementAndGet();
-        runMeters.remove(runId);
-    }
-
-    public void recordLatency(String runId, String phaseName, double latencyMs) {
-        RunMeters meters = runMeters.get(runId);
-        if (meters == null) return;
-
-        meters.latencySummary(phaseName).record(latencyMs);
-        meters.recordCount(phaseName).increment();
+        runMeters.compute(runId, (id, meters) -> {
+            if (meters != null) {
+                activeRuns.decrementAndGet();
+                meters.unregister();
+            }
+            return null;
+        });
     }
 
     public void recordThroughput(String runId, String phaseName, double recPerSec, double mbPerSec) {
@@ -63,15 +107,12 @@ public class BenchmarkMetrics {
         RunMeters meters = runMeters.get(runId);
         if (meters == null) return;
 
-        meters.errorCount(phaseName).increment();
-    }
-
-    public void recordSlaViolation(String runId, String metric, String severity) {
-        Counter.builder("kates.benchmark.sla.violations")
-                .tags("run_id", runId, "metric", metric, "severity", severity)
-                .description("SLA violation events")
-                .register(registry)
-                .increment();
+        Counter counter = meters.errorCount(phaseName);
+        // null once the run's meters have been unregistered — the error still
+        // happened, but there is no live series to add it to.
+        if (counter != null) {
+            counter.increment();
+        }
     }
 
     private class RunMeters {
@@ -79,9 +120,13 @@ public class BenchmarkMetrics {
         final String testType;
         final DoubleAccumulator throughputRecPerSec;
         final DoubleAccumulator throughputMBPerSec;
-        private final Map<String, DistributionSummary> latencySummaries = new ConcurrentHashMap<>();
-        private final Map<String, Counter> recordCounters = new ConcurrentHashMap<>();
         private final Map<String, Counter> errorCounters = new ConcurrentHashMap<>();
+
+        /** Every meter this run registered, so endRun can remove all of them. */
+        private final List<Meter.Id> meterIds = new CopyOnWriteArrayList<>();
+
+        /** Set by unregister(); stops a late error from registering a new meter. */
+        private volatile boolean unregistered;
 
         RunMeters(String runId, String testType, String backend) {
             this.runId = runId;
@@ -90,43 +135,47 @@ public class BenchmarkMetrics {
             this.throughputRecPerSec = new DoubleAccumulator((a, b) -> b, 0);
             this.throughputMBPerSec = new DoubleAccumulator((a, b) -> b, 0);
 
-            Tags baseTags = Tags.of("run_id", runId, "test_type", testType);
-            Gauge.builder("kates.benchmark.throughput.rec.sec", throughputRecPerSec, DoubleAccumulator::get)
-                    .tags(baseTags)
-                    .description("Current throughput in records/sec")
-                    .register(registry);
-            Gauge.builder("kates.benchmark.throughput.mb.sec", throughputMBPerSec, DoubleAccumulator::get)
+            Tags baseTags = Tags.of("run_id", runId, "test_type", testType, "backend", backend);
+            meterIds.add(
+                    Gauge.builder("kates.benchmark.throughput.rec.sec", throughputRecPerSec, DoubleAccumulator::get)
+                            .tags(baseTags)
+                            .description("Current throughput in records/sec")
+                            .register(registry)
+                            .getId());
+            meterIds.add(Gauge.builder("kates.benchmark.throughput.mb.sec", throughputMBPerSec, DoubleAccumulator::get)
                     .tags(baseTags)
                     .description("Current throughput in MB/sec")
-                    .register(registry);
-        }
-
-        DistributionSummary latencySummary(String phase) {
-            return latencySummaries.computeIfAbsent(
-                    phase,
-                    p -> DistributionSummary.builder("kates.benchmark.latency.ms")
-                            .tags("run_id", runId, "test_type", testType, "phase", p)
-                            .description("Request latency distribution")
-                            .publishPercentiles(0.5, 0.95, 0.99, 0.999)
-                            .register(registry));
-        }
-
-        Counter recordCount(String phase) {
-            return recordCounters.computeIfAbsent(
-                    phase,
-                    p -> Counter.builder("kates.benchmark.records.total")
-                            .tags("run_id", runId, "test_type", testType, "phase", p)
-                            .description("Total records processed")
-                            .register(registry));
+                    .register(registry)
+                    .getId());
         }
 
         Counter errorCount(String phase) {
-            return errorCounters.computeIfAbsent(
-                    phase,
-                    p -> Counter.builder("kates.benchmark.errors.total")
-                            .tags("run_id", runId, "test_type", testType, "phase", p)
-                            .description("Total errors")
-                            .register(registry));
+            // Returns null once the run is over. A late recordError racing
+            // unregister() used to register a fresh counter AFTER the id list
+            // had been cleared, so that run_id series stayed in the registry
+            // for the life of the process — the leak unregister() exists to
+            // prevent, reintroduced by the last error of every run that fails
+            // at the finish line.
+            if (unregistered) {
+                return null;
+            }
+            return errorCounters.computeIfAbsent(phase == null ? "default" : phase, p -> {
+                Counter counter = Counter.builder("kates.benchmark.errors.total")
+                        .tags("run_id", runId, "test_type", testType, "phase", p)
+                        .description("Total errors")
+                        .register(registry);
+                meterIds.add(counter.getId());
+                return counter;
+            });
+        }
+
+        void unregister() {
+            unregistered = true;
+            for (Meter.Id id : meterIds) {
+                registry.remove(id);
+            }
+            meterIds.clear();
+            errorCounters.clear();
         }
     }
 }

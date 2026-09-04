@@ -112,6 +112,39 @@ class ClusterHealthServiceTest {
         assertEquals(0, clusterHealthService.brokerCount());
     }
 
+    /**
+     * brokerCount() used to route through describeCluster(), which opens with a
+     * 30-second get. Both callers — the advisor and the cost estimate — treat 0
+     * as "no cluster information", so an absent broker made them wait half a
+     * minute for an answer they already had. The IT suite failed with "Read
+     * timed out" whenever /advisor lost that race.
+     */
+    @Test
+    void brokerCountGivesUpOnceWhenTheClusterIsAbsent() throws Exception {
+        DescribeClusterResult result = mock(DescribeClusterResult.class);
+        @SuppressWarnings("unchecked")
+        KafkaFuture<Collection<Node>> unanswered = mock(KafkaFuture.class);
+        when(unanswered.get(anyLong(), any()))
+                .thenThrow(new java.util.concurrent.TimeoutException("no broker listening"));
+        when(result.nodes()).thenReturn(unanswered);
+        when(mockClient.describeCluster()).thenReturn(result);
+
+        assertEquals(0, clusterHealthService.brokerCount());
+        // One describe, and the short deadline rather than describeCluster()'s.
+        verify(mockClient, times(1)).describeCluster();
+        verify(unanswered).get(eq((long) 5), eq(java.util.concurrent.TimeUnit.SECONDS));
+    }
+
+    @Test
+    void brokerCountAnswersFromAWarmCacheWithoutTouchingTheBroker() {
+        stubDescribeCluster();
+        clusterHealthService.describeCluster();
+        clearInvocations(mockClient);
+
+        assertEquals(3, clusterHealthService.brokerCount());
+        verify(mockClient, never()).describeCluster();
+    }
+
     @Test
     void evictCacheForcesRefresh() {
         stubDescribeCluster();

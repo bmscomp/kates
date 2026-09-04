@@ -45,7 +45,7 @@ echo ""
 # ── Prerequisites ─────────────────────────────────────────────────────────
 step "Step 1: Verifying prerequisites..."
 if ! kubectl get chaosexperiment pod-io-stress -n "${NAMESPACE}" &>/dev/null; then
-    error "ChaosExperiment 'pod-io-stress' not found. Run 'make chaos' first."
+    error "ChaosExperiment 'pod-io-stress' not found. Run './scripts/setup-kafka-chaos.sh' first."
     exit 1
 fi
 info "✓ Prerequisites satisfied"

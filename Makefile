@@ -1,4 +1,8 @@
-.PHONY: all detect cluster monitoring deploy-all kafka kafka-deploy kafka-upgrade kafka-undeploy kafka-detect kafka-verify-policies kafka-deploy-auto kafka-deploy-generic ui ui-deploy ui-upgrade ui-undeploy ui-chart-lint ui-chart-template test test-load test-stress test-spike test-endurance test-volume test-capacity destroy clean download-charts litmus litmus-generic litmus-undeploy litmus-test litmus-gameday kates kates-generic kates-prod kates-build kates-native kates-deploy kates-logs kates-undeploy kates-helm kates-helm-deploy kates-helm-upgrade kates-helm-undeploy kates-helm-test kates-secret cli-build cli-install cli-clean logs chaos-ui chaos-status chaos-helm-test chart-lint chart-package chart-push connect-chart-lint connect-chart-template connect-chart-package connect-chart-push connect-chart-test connect-chart-all chaos-chart-package chaos-chart-push strimzi-chart-package strimzi-chart-push platform-chart-deps platform-chart-lint platform-chart-package platform-chart-push connect-deploy connect-undeploy kafka-chart-test helm-test-all gameday jaeger kyverno kyverno-undeploy book-html book-pdf book-clean
+# Every target in this file is a command, not a file on disk. The list used to
+# be maintained by hand across two long lines and had drifted — 31 targets were
+# missing, so a file of the same name in the repo would have silently shadowed
+# them. Deriving it from the file itself cannot drift.
+.PHONY: $(shell awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ {print $$1}' $(MAKEFILE_LIST))
 
 .DEFAULT_GOAL := help
 
@@ -11,8 +15,58 @@ include versions.env
 KATES_BIN := $(shell command -v kates 2>/dev/null || echo "./build/kates")
 DETECTED_VALUES := .build/values-detected.yaml
 
+# ── Configuration ────────────────────────────────────────────────────────────
+#
+# Every tunable lives here rather than scattered through the file, where a
+# variable could be defined hundreds of lines below the first target that used
+# it. Override any of them on the command line:
+#
+#   make kates-local KATES_NS=staging
+#   make kafka-deploy ENV=prod
+
+# Target environment overlay: kind | dev | staging | prod
+ENV                    ?= kind
+# Extra values file layered on top of an overlay (kafka-deploy-generic-custom)
+VALUES_FILE            ?=
+
+# Kind cluster and image registry
+CLUSTER_NAME           ?= panda
+REGISTRY               ?= ghcr.io/bmscomp
+CHART_REGISTRY         ?= oci://ghcr.io/bmscomp/charts
+
+# Kates release. KATES_RELEASE is the Helm release name and therefore the
+# prefix of every resource the chart creates, so the local targets derive
+# `deployment/$(KATES_RELEASE)` and `$(KATES_RELEASE)-postgresql` from it
+# rather than hardcoding names that break under a different release.
+KATES_NS               ?= kates
+KATES_RELEASE          ?= kates
+KATES_IMAGE            ?= kates:latest
+
+# Chart locations. Versions are read FROM the charts, never duplicated here —
+# a hardcoded pull tag once sat five releases behind appVersion, so "pulled the
+# image" quietly meant "pulled a stale one".
+CHART_DIR              := charts/kates
+UI_CHART_DIR           := charts/kafka-ui
+KAFKA_CHART_DIR        := charts/kafka-cluster
+CONNECT_CHART_DIR      := charts/connect-cluster
+CHAOS_CHART_DIR        := charts/kates-chaos
+STRIMZI_CHART_DIR      := charts/strimzi-operator
+PLATFORM_CHART_DIR     := charts/kates-platform
+
+chart_version           = $(shell grep '^version:' $(1)/Chart.yaml | awk '{print $$2}')
+CHART_VERSION          := $(call chart_version,charts/kates)
+KAFKA_CHART_VERSION    := $(call chart_version,charts/kafka-cluster)
+CONNECT_CHART_VERSION  := $(call chart_version,charts/connect-cluster)
+CHAOS_CHART_VERSION    := $(call chart_version,charts/kates-chaos)
+STRIMZI_CHART_VERSION  := $(call chart_version,charts/strimzi-operator)
+PLATFORM_CHART_VERSION := $(call chart_version,charts/kates-platform)
+KATES_APP_VERSION      := $(shell grep '^appVersion:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}' | tr -d '"')
+
+
 # ── Cluster detection (single source of truth) ───────────────────────────────
-detect: check-prerequisites
+
+##@ Cluster & Infrastructure
+detect: check-prerequisites  ## Detect cluster capabilities into .build/values-detected.yaml
 	@mkdir -p .build
 	@echo "🔍 Detecting cluster configuration..."
 	@if [ ! -x "$(KATES_BIN)" ]; then \
@@ -24,7 +78,7 @@ detect: check-prerequisites
 	@echo "✅ Detection complete → $(DETECTED_VALUES)"
 
 # ── Main deployment pipeline ─────────────────────────────────────────────────
-all: check-prerequisites
+all: check-prerequisites  ## Complete setup (cluster, all services)
 	@echo "🚀 Launching complete cluster setup via Kates Unified Orchestrator..."
 	@echo ""
 	@# ── Step 1: Cluster connectivity ──
@@ -71,20 +125,38 @@ check-versions: ## Verify the Strimzi version pins agree
 check-cli-compat: ## Verify CLI output degrades correctly across terminals
 	@./scripts/check-cli-compat.sh
 
+# The help text is generated from the `## ` comments on each target, so it
+# cannot list a target that no longer exists — but it CAN miss a new one that
+# was added without a comment. This is what stops that from creeping back:
+# the previous hand-written help had drifted to 39 undocumented targets.
+# NOTE: a description must not itself contain the comment marker — help splits
+# on the LAST one, so it would print only the tail of the line.
+check-chart-tests: ## Fail if a chart test calls an endpoint that does not exist
+	@./scripts/check-chart-test-paths.sh
+
+check-help: ## Fail if any target is missing its help description
+	@undocumented=$$(awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ && $$0 !~ /##/ {print "  " $$1}' $(MAKEFILE_LIST)); \
+	if [ -n "$$undocumented" ]; then \
+		echo "❌ These targets have no '## description', so 'make help' will not list them:"; \
+		echo "$$undocumented"; \
+		exit 1; \
+	fi; \
+	echo "OK: all $$(awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ {print $$1}' $(MAKEFILE_LIST) | sort -u | wc -l | tr -d ' ') targets are documented"
+
 # Check prerequisites — only kubectl and helm are strictly required for generic clusters
-check-prerequisites:
+check-prerequisites:  ## Verify docker, kind, kubectl and helm are installed
 	@echo "🔍 Checking prerequisites..."
 	@command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
 	@command -v helm >/dev/null 2>&1 || { echo "❌ helm not found"; exit 1; }
 	@echo "✅ All prerequisites met"
 
 # Start Kind cluster only
-cluster:
+cluster:  ## Start Kind cluster only
 	@echo "🎯 Starting Kind cluster..."
 	./scripts/start-cluster.sh
 
 # Deploy monitoring stack (auto-detect provider)
-monitoring:
+monitoring:  ## Deploy Prometheus & Grafana
 	@echo "📊 Deploying monitoring stack..."
 	@helm dependency build charts/monitoring 2>/dev/null || true
 	@PROVIDER="generic"; \
@@ -102,7 +174,7 @@ monitoring:
 		--timeout 10m --wait
 	@echo "✅ Monitoring stack deployed"
 
-monitoring-generic:
+monitoring-generic:  ## Deploy Prometheus & Grafana (generic K8s overlay)
 	@echo "📊 Deploying monitoring stack (Generic)..."
 	helm dependency build charts/monitoring
 	helm upgrade --install monitoring charts/monitoring \
@@ -110,17 +182,20 @@ monitoring-generic:
 		-f charts/monitoring/values-generic.yaml \
 		--timeout 10m --wait
 
-monitoring-undeploy:
+monitoring-undeploy:  ## Remove the monitoring stack (keeps the namespace)
 	@echo "🗑️ Undeploying monitoring stack..."
 	helm uninstall monitoring -n kafka || true
 	kubectl delete pvc --all -n kafka || true
-	kubectl # delete namespace monitoring || true
+	@# The namespace is deliberately NOT deleted: it is shared with Kafka, and
+	@# removing it here has taken brokers with it. A bare `kubectl` was left on
+	@# this line by a half-finished comment-out, which prints usage and exits 1,
+	@# so the target failed after doing its work.
 
-cert-manager:
+cert-manager:  ## Deploy cert-manager
 	@echo "🔐 Deploying cert-manager..."
 	./scripts/deploy-cert-manager.sh
 
-kyverno:
+kyverno:  ## Deploy Kyverno policy engine
 	@echo "🛡️  Deploying Kyverno policy engine..."
 	helm repo add kyverno https://kyverno.github.io/kyverno/ 2>/dev/null || true
 	helm repo update kyverno 2>/dev/null || true
@@ -131,14 +206,14 @@ kyverno:
 	@echo "✅ Kyverno deployed"
 	@kubectl get pods -n kyverno
 
-kyverno-undeploy:
+kyverno-undeploy:  ## Remove Kyverno
 	@echo "🗑️ Removing Kyverno..."
 	helm uninstall kyverno -n kyverno || true
 	kubectl delete namespace kyverno --ignore-not-found
 	@echo "✅ Kyverno removed"
 
 # Deploy full stack (monitoring, Kafka, UI, Litmus) — without cluster/images
-deploy-all:
+deploy-all:  ## Deploy the full stack onto an existing cluster
 	@echo "🚀 Deploying full stack..."
 	$(MAKE) monitoring
 	./scripts/deploy-kafka-generic.sh --yes
@@ -149,25 +224,20 @@ deploy-all:
 	./scripts/port-forward.sh
 	@echo "✅ Full stack deployed!"
 
-ENV ?= kind
-
 # Deploy Kafka (shorthand for kafka-deploy)
-kafka: kafka-deploy
+kafka: kafka-deploy  ## Deploy Kafka (shorthand for kafka-deploy)
 
 # Deploy Kafka UI only (legacy script — applies raw manifests)
-ui:
+ui:  ## Deploy Kafka UI (raw manifests)
 	@echo "🖥️ Deploying Kafka UI (raw manifests)..."
 	./scripts/deploy-kafka-ui.sh
 
-# ── Kafka UI Helm Chart ─────────────────────────────────────────────────────
-UI_CHART_DIR := charts/kafka-ui
-
-ui-chart-lint:
+ui-chart-lint:  ## Lint the kafka-ui chart
 	@echo "🔍 Linting Kafka UI chart..."
 	helm lint $(UI_CHART_DIR)
 	@echo "✅ Kafka UI chart lint passed"
 
-ui-chart-template:
+ui-chart-template:  ## Render kafka-ui templates (ENV=...)
 	@echo "📄 Rendering Kafka UI templates (ENV=$(ENV))..."
 	@OVERLAY=""; \
 	if [ -f "$(UI_CHART_DIR)/values-$(ENV).yaml" ]; then \
@@ -176,7 +246,7 @@ ui-chart-template:
 	helm template kafka-ui $(UI_CHART_DIR) \
 		--namespace kafka $$OVERLAY
 
-ui-deploy:
+ui-deploy:  ## Deploy Kafka UI via Helm (ENV=kind|dev|staging|prod)
 	@echo "🖥️  Deploying Kafka UI via Helm (ENV=$(ENV))..."
 	@OVERLAY=""; \
 	if [ -f "$(UI_CHART_DIR)/values-$(ENV).yaml" ]; then \
@@ -189,7 +259,7 @@ ui-deploy:
 		--timeout 5m --wait
 	@echo "✅ Kafka UI deployed"
 
-ui-upgrade:
+ui-upgrade:  ## Upgrade Kafka UI Helm release (ENV=...)
 	@echo "🔄 Upgrading Kafka UI (ENV=$(ENV))..."
 	@OVERLAY=""; \
 	if [ -f "$(UI_CHART_DIR)/values-$(ENV).yaml" ]; then \
@@ -202,74 +272,101 @@ ui-upgrade:
 		--timeout 5m --wait
 	@echo "✅ Kafka UI upgraded"
 
-ui-undeploy:
+ui-undeploy:  ## Remove Kafka UI Helm release
 	@echo "🗑️  Removing Kafka UI..."
 	helm uninstall kafka-ui -n kafka 2>/dev/null || true
 	@echo "✅ Kafka UI removed"
 
 # Deploy Apicurio Registry
-apicurio:
+apicurio:  ## Deploy Apicurio Registry
 	@echo "📝 Deploying Apicurio Registry..."
 	./scripts/deploy-apicurio.sh
 
-jaeger:
+jaeger:  ## Deploy Jaeger (distributed tracing)
 	@echo "🔍 Deploying Jaeger (distributed tracing)..."
 	./scripts/deploy-jaeger.sh
 
+# ── Source test suites ───────────────────────────────────────────────────────
+# Note: `make test` and friends below drive Kafka performance runs against a
+# LIVE cluster — they are not the source test suite. These targets are.
+
+##@ Tests
+tests: test-unit  ## Run every source test suite (Java + CLI)
+	@echo "✅ Source test suites passed."
+
+test-unit: test-java test-cli  ## Run unit tests only (Java + CLI, no Docker)
+	@echo "✅ Unit tests passed (Java + CLI)."
+
+test-java:  ## Run the Java unit tests
+	@echo "🧪 Running Java unit tests (kates/)..."
+	cd kates && ./mvnw test -B
+
+# Testcontainers-backed ITs (engine lifecycle, outbox, persistence). Needs a
+# working Docker daemon; skipped tests are worse than a clear failure here.
+test-java-it:  ## Run the Java integration tests (requires Docker)
+	@echo "🧪 Running Java integration tests (requires Docker)..."
+	cd kates && ./mvnw verify -B
+
+test-cli:  ## Run the Go CLI tests
+	@echo "🧪 Running Go CLI tests (cli/)..."
+	cd cli && go test ./... -timeout 300s
+
 # Run Performance Test
-test:
+test:  ## Run baseline 1M-message perf test
 	@echo "🧪 Running Performance Test..."
 	./scripts/test-kafka-performance.sh
 
-test-load:
+test-load:  ## Run load test (concurrent producers)
 	@echo "🧪 Running Load Test..."
 	./scripts/test-perf-load.sh
 
-test-stress:
+test-stress:  ## Run stress test (ramp to breaking point)
 	@echo "🧪 Running Stress Test..."
 	./scripts/test-perf-stress.sh
 
-test-spike:
+test-spike:  ## Run spike test (flash sale simulation)
 	@echo "🧪 Running Spike Test..."
 	./scripts/test-perf-spike.sh
 
-test-endurance:
+test-endurance:  ## Run endurance/soak test (sustained load)
 	@echo "🧪 Running Endurance (Soak) Test..."
 	./scripts/test-perf-endurance.sh
 
-test-volume:
+test-volume:  ## Run volume test (large data)
 	@echo "🧪 Running Volume Test..."
 	./scripts/test-perf-volume.sh
 
-test-capacity:
+test-capacity:  ## Run capacity test (find max throughput)
 	@echo "🧪 Running Capacity Test..."
 	./scripts/test-perf-capacity.sh
 
-test-net-kafka:
+test-net-kafka:  ## Test TCP connectivity to Kafka from default namespace
 	@domain=$$(source scripts/common.sh && get_cluster_domain); \
 	echo "🌐 Testing TCP connectivity to Kafka from 'default' namespace (Domain: $$domain)..."; \
 	kubectl run -i --tty --rm debug-nc --image=busybox:1.36 --namespace=default --restart=Never -- nc -vz krafter-kafka-bootstrap.kafka.svc.$$domain 9092
 
-test-net-api:
+test-net-api:  ## Test HTTP connectivity to Kates API from default namespace
 	@domain=$$(source scripts/common.sh && get_cluster_domain); \
 	echo "🌐 Testing HTTP connectivity to Kates API from 'default' namespace (Domain: $$domain)..."; \
 	kubectl run -i --tty --rm debug-curl --image=curlimages/curl:8.7.1 --namespace=default --restart=Never -- curl -sv http://kates.kafka.svc.$$domain:8080/api/health
 
-test-net: test-net-kafka test-net-api
+test-net: test-net-kafka test-net-api  ## Run cross-namespace network connectivity tests
 	@echo "✅ Cross-namespace network tests complete."
 
-cluster-domain:
+cluster-domain:  ## Print the detected cluster DNS domain
 	@domain=$$(source scripts/common.sh && get_cluster_domain); \
 	echo "🌐 Cluster domain: $$domain"
 
 # Kates CLI (standalone install)
-cli-build:
+
+##@ Kates CLI
+cli-build:  ## Cross-compile CLI (macOS + Linux)
 	@echo "🔨 Building Kates CLI locally..."
 	cd cli && go build -ldflags="-s -w" -o dist/kates .
 	@echo "🔨 Cross-compiling Kates CLI for all platforms..."
 	cd cli && bash build.sh
 
-cli-install:
+cli-install:  ## Build and install CLI on this machine
 	@echo "🔨 Building Kates CLI from source..."
 	cd cli && go build -ldflags="-s -w" -o dist/kates .
 	@echo "📦 Installing to /usr/local/bin/kates..."
@@ -279,20 +376,22 @@ cli-install:
 	sudo codesign -f -s - /usr/local/bin/kates
 	@echo "✅ Installed: $$(kates version 2>/dev/null || echo '/usr/local/bin/kates')"
 
-cli-clean:
+cli-clean:  ## Remove CLI build artifacts
 	@echo "🧹 Removing CLI build artifacts..."
 	rm -rf cli/dist
 
 # Kates Application (Docker + Kind)
-kates: kates-build kates-deploy
+
+##@ Kates Application (Docker + Kind)
+kates: kates-build kates-deploy  ## Build + deploy Kates (full pipeline)
 	@echo "✅ Kates deployed! Run 'make ports' to access at http://localhost:30083"
 
-kates-build:
+kates-build:  ## Build Kates JVM image and load into Kind
 	@if docker image inspect kates:latest >/dev/null 2>&1; then \
 		echo "✅ Kates image already exists locally (kates:latest)."; \
-	elif docker pull ghcr.io/bmscomp/kates:1.16.0; then \
+	elif docker pull ghcr.io/bmscomp/kates:$(KATES_APP_VERSION); then \
 		echo "✅ Pulled Kates image from registry."; \
-		docker tag ghcr.io/bmscomp/kates:1.16.0 kates:latest; \
+		docker tag ghcr.io/bmscomp/kates:$(KATES_APP_VERSION) kates:latest; \
 	else \
 		echo "🔨 Building Kates (JVM + CLI) from source..."; \
 		cd kates && ./mvnw package -DskipTests -B && \
@@ -300,27 +399,134 @@ kates-build:
 	fi
 	kind load docker-image kates:latest --name $(CLUSTER_NAME)
 	@echo "✅ Kates image loaded into Kind"
+	@echo "ℹ️  This target prefers a cached or published image. To guarantee your"
+	@echo "   working tree is what runs, use 'make kates-local' instead."
 
-kates-native:
+# ── Local-only image: always built from the working tree ─────────────────────
+#
+# Deliberately NOT `kates-build`. That target prefers an existing local tag,
+# then a published image, and only builds as a last resort — so a source fix
+# can silently never run, and you end up debugging the registry's build while
+# reading your own diff. Everything below always compiles what is on disk,
+# tags it kates:local, and pins the deployment to it with pullPolicy: Never so
+# the kubelet cannot substitute a registry image on any later restart.
+kates-image-local:  ## Build kates:local from the working tree (JVM)
+	@echo "🔨 Building kates:local from the working tree (no pull, no cache reuse)..."
+	docker build -f kates/Dockerfile -t kates:local .
+	@echo "📦 Loading kates:local into Kind cluster '$(CLUSTER_NAME)'..."
+	kind load docker-image kates:local --name $(CLUSTER_NAME)
+	@echo "✅ kates:local is on the node. Digest:"
+	@docker image inspect kates:local --format '   {{.Id}}  ({{.Created}})'
+
+kates-local: kates-image-local  ## Deploy kates:local, pinned with pullPolicy: Never
+	@echo "🚀 Deploying kates:local (namespace: $(KATES_NS))..."
+	@helm upgrade --install $(KATES_RELEASE) $(CHART_DIR) \
+		-n $(KATES_NS) --create-namespace \
+		-f $(CHART_DIR)/values-local.yaml \
+		--timeout 8m \
+	|| { \
+		echo ""; \
+		echo "❌ helm upgrade failed. If it complained that 'updates to statefulset"; \
+		echo "   spec ... are forbidden', an immutable field on kates-postgresql"; \
+		echo "   changed (volumeClaimTemplates, serviceName, selector). Recreate the"; \
+		echo "   StatefulSet without touching the data, then retry:"; \
+		echo ""; \
+		echo "     make kates-local-recreate-db"; \
+		echo ""; \
+		exit 1; \
+	}
+	@echo "⏳ Waiting for rollout..."
+	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
+	@echo "✅ kates:local running. Verify the pod is on YOUR image:"
+	@kubectl get pod -n $(KATES_NS) -l app.kubernetes.io/instance=$(KATES_RELEASE) \
+		-o jsonpath='{range .items[*]}   {.metadata.name}  {.spec.containers[0].image}  {.spec.containers[0].imagePullPolicy}{"\n"}{end}'
+
+# Force a fresh pod even when the tag is unchanged: Kubernetes sees no spec
+# change for the same tag, so a plain `helm upgrade` would keep the old pod
+# (running the old bytes) very much alive.
+kates-local-restart: kates-image-local  ## Rebuild kates:local and restart the running pod
+	kubectl rollout restart deployment/$(KATES_RELEASE) -n $(KATES_NS)
+	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
+
+# Escape hatch for immutable-field conflicts on the bundled PostgreSQL.
+# --cascade=orphan is the whole point: it removes only the StatefulSet object,
+# leaving the running pod AND the PVC in place, so Helm can recreate the spec
+# and adopt them. The database survives. A plain delete would take the pod and
+# (depending on the retention policy) the volume with it.
+kates-local-recreate-db:  ## Recreate the PostgreSQL StatefulSet, keeping pod + PVC
+	@echo "🗄  Recreating the $(KATES_RELEASE)-postgresql StatefulSet, keeping pod + PVC..."
+	kubectl delete statefulset $(KATES_RELEASE)-postgresql -n $(KATES_NS) \
+		--cascade=orphan --ignore-not-found
+	@echo "✅ StatefulSet removed (data intact). Re-run: make kates-local"
+
+# Same pull-then-build fallback as kates-build, and the same reason for reading
+# the tag from Chart.yaml: this was pinned to 1.16.0-native long after appVersion
+# moved on, so "pulled the image" quietly meant "pulled a stale one".
+kates-native:  ## Build Kates native image and load into Kind
 	@if docker image inspect kates:native >/dev/null 2>&1; then \
 		echo "✅ Kates native image already exists locally (kates:native)."; \
-	elif docker pull ghcr.io/bmscomp/kates:1.16.0-native; then \
+	elif docker pull ghcr.io/bmscomp/kates:$(KATES_APP_VERSION)-native; then \
 		echo "✅ Pulled Kates native image from registry."; \
-		docker tag ghcr.io/bmscomp/kates:1.16.0-native kates:native; \
+		docker tag ghcr.io/bmscomp/kates:$(KATES_APP_VERSION)-native kates:native; \
 	else \
-		echo "🔨 Building Kates (native) from source..."; \
+		echo "🔨 Building Kates (native) from source (needs ~8GB RAM for the compiler)..."; \
 		docker build -f kates/Dockerfile.native -t kates:native .; \
 	fi
 	kind load docker-image kates:native --name $(CLUSTER_NAME)
 	@echo "✅ Kates native image loaded into Kind"
 
-tester-build:
+# Native image built from the working tree, never pulled — the native
+# counterpart of kates-image-local. Use it to verify that a change which works
+# on the JVM also survives ahead-of-time compilation, before a release tag finds
+# out for you.
+kates-image-native-local:  ## Build kates:native-local from the working tree
+	@echo "🔨 Building kates:native-local from the working tree..."
+	@echo "   The GraalVM compiler needs ~8GB of memory; on Docker Desktop raise"
+	@echo "   the VM memory limit first or the build dies with an opaque OOM."
+	docker build -f kates/Dockerfile.native -t kates:native-local .
+	@echo "📦 Loading kates:native-local into Kind cluster '$(CLUSTER_NAME)'..."
+	kind load docker-image kates:native-local --name $(CLUSTER_NAME)
+	@echo "✅ kates:native-local is on the node. Digest:"
+	@docker image inspect kates:native-local --format '   {{.Id}}  ({{.Created}})'
+
+# Smoke-test a locally built native image without a cluster: boots it against
+# throwaway Postgres and asserts the endpoints that AOT compilation most often
+# breaks — health, OpenAPI, and the playbook catalog, which is loaded from
+# classpath YAML and silently empties out if the resource pattern is wrong.
+kates-native-smoke:  ## Smoke-test a native image (IMAGE=... to pick one)
+	@./scripts/native-smoke-test.sh $(if $(IMAGE),$(IMAGE),kates:native-local)
+
+# Deploy the locally built NATIVE image, pinned so the kubelet cannot silently
+# substitute the published one — the native counterpart of kates-local.
+kates-native-local: kates-image-native-local  ## Deploy kates:native-local, pinned with pullPolicy Never
+	@echo "🚀 Deploying kates:native-local (namespace: $(KATES_NS))..."
+	@# The tag never changes, so without the image-id annotation the manifest is
+	@# identical between builds, nothing rolls, and the old pod keeps serving the
+	@# old binary — the same trap kates-local-restart exists for.
+	@helm upgrade --install $(KATES_RELEASE) $(CHART_DIR) \
+		-n $(KATES_NS) --create-namespace \
+		-f $(CHART_DIR)/values-native-local.yaml \
+		--set-string podAnnotations.kates-image-id="$$(docker image inspect --format '{{.Id}}' kates:native-local)" \
+		--timeout 8m
+	@echo "⏳ Waiting for rollout..."
+	kubectl rollout status deployment/$(KATES_RELEASE) -n $(KATES_NS) --timeout=300s
+	@echo "✅ Running. Verify the pod is on YOUR image:"
+	@kubectl get pod -n $(KATES_NS) -l app.kubernetes.io/instance=$(KATES_RELEASE) \
+		-o jsonpath='{range .items[*]}   {.metadata.name}  {.spec.containers[0].image}  {.spec.containers[0].imagePullPolicy}{"\n"}{end}'
+
+# The whole loop in one command: CLI + native image from the working tree,
+# Kafka, the chart pinned to that image, chart tests, the endpoints AOT
+# compilation breaks, and a real benchmark driven through the CLI.
+native-e2e:  ## Build CLI + native image, deploy and test the whole stack
+	@./scripts/native-e2e.sh $(NATIVE_E2E_ARGS)
+
+tester-build:  ## Build Kates Tester image and load into Kind
 	@echo "🔨 Building Kates Tester image..."
 	docker build -f tester/Dockerfile -t kates-tester:latest tester/
 	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
 	@echo "✅ Kates Tester image built and available"
 
-connect-build:
+connect-build:  ## Build the Kafka Connect image with enterprise plugins
 	@echo "🔌 Building Kafka Connect image with enterprise plugins..."
 	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -n1 | cut -d= -f2); \
 	TAG=$${DBZ_VERSION%.Final}; \
@@ -336,7 +542,7 @@ connect-build:
 	echo "✅ connect:$${TAG} built successfully" && \
 	echo "   Plugins: debezium-postgres, debezium-mysql, debezium-mongodb, debezium-sqlserver, debezium-oracle, debezium-db2, apicurio-converter, debezium-jdbc, debezium-scripting, aiven-jdbc"
 
-connect-push:
+connect-push:  ## Push the Kafka Connect image to $(REGISTRY)
 	@echo "🚀 Pushing Kafka Connect image to $(REGISTRY)..."
 	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -n1 | cut -d= -f2); \
 	TAG=$${DBZ_VERSION%.Final}; \
@@ -344,8 +550,7 @@ connect-push:
 	docker push $(REGISTRY)/connect:latest && \
 	echo "✅ Pushed: $(REGISTRY)/connect:$${TAG}"
 
-REGISTRY ?= ghcr.io/bmscomp
-push-images:
+push-images:  ## Push kates and tester images to remote registry
 	@echo "🚀 Pushing images to $(REGISTRY)..."
 	docker tag kates:latest $(REGISTRY)/kates:latest
 	docker push $(REGISTRY)/kates:latest
@@ -353,7 +558,7 @@ push-images:
 	docker push $(REGISTRY)/kates-tester:latest
 	@echo "✅ Images pushed successfully to $(REGISTRY)!"
 
-kates-deploy:
+kates-deploy:  ## Apply Kates K8s manifests
 	@echo "🚀 Deploying Kates to Kubernetes..."
 	kubectl apply -f kates/k8s/namespace.yaml
 	kubectl apply -f kates/k8s/rbac.yaml
@@ -383,12 +588,12 @@ kates-deploy:
 		echo "  kates ctx set local --url http://localhost:30083 --api-key changeme"; \
 	fi
 
-kates-redeploy:
+kates-redeploy:  ## Restart Kates deployment
 	@echo "🔄 Redeploying Kates..."
 	kubectl rollout restart deployment/kates -n kafka
 	kubectl rollout status deployment/kates -n kafka --timeout=300s
 
-kates-secret:
+kates-secret:  ## Create the Kafka SASL credentials secret for Kates
 	@echo "🔐 Setting up Kafka SASL credentials in kates namespace..."
 	@./scripts/ensure-kafka-user.sh || true
 	@if kubectl get secret kates-backend -n kafka >/dev/null 2>&1; then \
@@ -409,46 +614,46 @@ kates-secret:
 		echo "✅ Secret created successfully"; \
 	fi
 
-kates-logs:
+kates-logs:  ## Stream Kates logs
 	@echo "📋 Streaming Kates logs..."
 	kubectl logs -f -l app=kates -n kafka
 
-kates-undeploy:
+kates-undeploy:  ## Remove Kates namespace
 	@echo "🗑️  Removing Kates..."
-	kubectl # kubectl delete namespace kates --ignore-not-found
-	@echo "✅ Kates removed"
+	helm uninstall $(KATES_RELEASE) -n $(KATES_NS) --ignore-not-found || true
+	@# The namespace itself is left in place on purpose — it holds the database
+	@# PVC, and dropping it silently destroys every stored run. Delete it by hand
+	@# when that is what you actually want:
+	@#   kubectl delete namespace $(KATES_NS)
+	@echo "✅ Kates removed (namespace $(KATES_NS) and its data kept)"
 
-CLUSTER_NAME   ?= panda
-KATES_NS       ?= kates
-KATES_IMAGE    ?= kates:latest
-CHART_REGISTRY ?= oci://ghcr.io/bmscomp/charts
-CHART_DIR      := charts/kates
-CHART_VERSION  := $(shell grep '^version:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}')
-kates-helm: kates-helm-deploy
+##@ Kates Application (Helm chart)
+kates-helm: kates-helm-deploy  ## Deploy via Helm (shorthand)
 
-kates-helm-deploy:
+kates-helm-deploy:  ## Deploy via Helm (ENV=kind|dev|staging|prod)
 	@echo "📦 Deploying Kates via Helm (ENV=$(ENV))..."
 	ENV=$(ENV) ./scripts/deploy-kates.sh
 
-kates-helm-upgrade:
+kates-helm-upgrade:  ## Upgrade existing release (ENV=...)
 	@echo "🔄 Upgrading Kates via Helm (ENV=$(ENV))..."
 	ENV=$(ENV) ./scripts/deploy-kates.sh
 
-kates-generic:
+kates-generic:  ## Deploy Kates via Helm (generic Kubernetes overlay)
 	@echo "📦 Deploying Kates via Helm (generic Kubernetes)..."
 	ENV=generic ./scripts/deploy-kates.sh
 
-kates-prod:
+kates-prod:  ## Deploy Kates via Helm (production overlay)
 	@echo "📦 Deploying Kates via Helm (production)..."
 	ENV=prod ./scripts/deploy-kates.sh
 
-kates-helm-undeploy:
+kates-helm-undeploy:  ## Remove Kates Helm release
 	@echo "🗑️  Removing Kates (Helm release)..."
 	helm uninstall kates -n $(KATES_NS) 2>/dev/null || true
 	kubectl delete namespace $(KATES_NS) --ignore-not-found
 	@echo "✅ Kates Helm release removed"
 
-chart-lint:
+##@ Helm Charts
+chart-lint:  ## Lint the Helm chart
 	@echo "🔍 Linting Kates chart..."
 	helm lint $(CHART_DIR) --strict
 	@if command -v ct >/dev/null 2>&1; then \
@@ -458,27 +663,24 @@ chart-lint:
 	fi
 	@echo "✅ Chart lint passed"
 
-readme-check:
+readme-check:  ## Verify README chart table matches Chart.yaml sources
 	@echo "🔍 Checking README chart table against charts/*/Chart.yaml..."
 	@./scripts/gen-chart-table.sh --check
 
-chart-package:
+chart-package:  ## Package the Helm chart
 	@echo "📦 Packaging Kates chart v$(CHART_VERSION)..."
 	helm package $(CHART_DIR) --destination .build/
 	@echo "✅ Chart packaged: .build/kates-$(CHART_VERSION).tgz"
 
-chart-push: chart-package
+chart-push: chart-package  ## Push the chart to OCI registry
 	@echo "🚀 Pushing to $(CHART_REGISTRY)..."
 	helm push .build/kates-$(CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Chart pushed: $(CHART_REGISTRY)/kates:$(CHART_VERSION)"
 
-KAFKA_CHART_DIR     := charts/kafka-cluster
-KAFKA_CHART_VERSION := $(shell grep '^version:' $(KAFKA_CHART_DIR)/Chart.yaml | awk '{print $$2}')
-
-kafka-chart-deps:
+kafka-chart-deps:  ## Fetch kafka-cluster chart dependencies
 	helm dependency build $(KAFKA_CHART_DIR)
 
-kafka-chart-lint: kafka-chart-deps
+kafka-chart-lint: kafka-chart-deps  ## Lint the kafka-cluster chart (all environments)
 	@echo "🔍 Linting kafka-cluster chart (all environments)..."
 	helm lint $(KAFKA_CHART_DIR)
 	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-dev.yaml
@@ -486,7 +688,7 @@ kafka-chart-lint: kafka-chart-deps
 	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-prod.yaml
 	@echo "✅ Kafka chart lint passed"
 
-kafka-chart-template: kafka-chart-deps
+kafka-chart-template: kafka-chart-deps  ## Render kafka-cluster templates into .build/
 	@mkdir -p .build
 	helm template kafka-cluster $(KAFKA_CHART_DIR) \
 		--namespace kafka \
@@ -495,16 +697,17 @@ kafka-chart-template: kafka-chart-deps
 		> .build/kafka-rendered.yaml
 	@echo "Rendered $$(grep -c '^kind:' .build/kafka-rendered.yaml) resources → .build/kafka-rendered.yaml"
 
-kafka-chart-package: kafka-chart-deps
+kafka-chart-package: kafka-chart-deps  ## Package the kafka-cluster chart into .build/
 	@mkdir -p .build
 	helm package $(KAFKA_CHART_DIR) --destination .build/
 	@echo "✅ Kafka chart packaged: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
 
-kafka-chart-push: kafka-chart-package
+kafka-chart-push: kafka-chart-package  ## Push the packaged kafka-cluster chart to the registry
 	helm push .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Kafka chart pushed: $(CHART_REGISTRY)/kafka-cluster:$(KAFKA_CHART_VERSION)"
 
-kafka-chart-test:
+##@ Helm Test Suite
+kafka-chart-test:  ## Run Helm tests for Kafka cluster (KAFKA_RELEASE=... KAFKA_NAMESPACE=...)
 	@echo ""
 	@echo "╭────────────────────────────────────────────────────────────────╮"
 	@echo "│  🧪 Helm Test · Kafka Cluster                                 │"
@@ -536,7 +739,7 @@ kafka-chart-test:
 	fi; \
 	exit $$EXIT
 
-kates-helm-test:
+kates-helm-test:  ## Run Helm tests for Kates API (KATES_RELEASE=... KATES_NAMESPACE=...)
 	@echo ""
 	@echo "╭────────────────────────────────────────────────────────────────╮"
 	@echo "│  🧪 Helm Test · Kates API                                     │"
@@ -562,7 +765,7 @@ kates-helm-test:
 	fi; \
 	exit $$EXIT
 
-chaos-helm-test:
+chaos-helm-test:  ## Run Helm tests for Chaos stack (CHAOS_RELEASE=... CHAOS_NAMESPACE=...)
 	@echo ""
 	@echo "╭────────────────────────────────────────────────────────────────╮"
 	@echo "│  🧪 Helm Test · Chaos (LitmusChaos)                           │"
@@ -597,7 +800,7 @@ chaos-helm-test:
 #   TIMEOUT          Helm test timeout per suite   (default: 180s)
 #   SKIP_CHAOS       Set to 1 to skip chaos tests  (default: 0)
 #   SKIP_KATES       Set to 1 to skip kates tests  (default: 0)
-helm-test-all:
+helm-test-all:  ## Run all Helm tests across all components with summary
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════════╗"
 	@echo "║  🧪 Helm Test Suite · All Components                          ║"
@@ -697,76 +900,65 @@ helm-test-all:
 	echo ""; \
 	[ $$FAILED -eq 0 ]
 
-kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package
+kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package  ## Lint, template, test and package the kafka-cluster chart
 	@echo "✅ All kafka chart checks passed: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
 
-CONNECT_CHART_DIR     := charts/connect-cluster
-CONNECT_CHART_VERSION := $(shell grep '^version:' $(CONNECT_CHART_DIR)/Chart.yaml | awk '{print $$2}')
-
-connect-chart-lint:
+##@ Connect, Chaos, Strimzi & Platform Charts
+connect-chart-lint:  ## Lint the connect-cluster chart
 	@echo "🔍 Linting connect-cluster chart..."
 	helm lint $(CONNECT_CHART_DIR)
 	@echo "✅ Connect chart lint passed"
 
-connect-chart-template:
+connect-chart-template:  ## Render connect-cluster templates
 	@mkdir -p .build
 	helm template connect-cluster $(CONNECT_CHART_DIR) \
 		--namespace kafka \
 		> .build/connect-rendered.yaml
 	@echo "Rendered $$(grep -c '^kind:' .build/connect-rendered.yaml) resources → .build/connect-rendered.yaml"
 
-connect-chart-package:
+connect-chart-package:  ## Package the connect-cluster chart
 	@mkdir -p .build
 	helm package $(CONNECT_CHART_DIR) --destination .build/
 	@echo "✅ Connect chart packaged: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
 
-connect-chart-push: connect-chart-package
+connect-chart-push: connect-chart-package  ## Push connect-cluster to OCI registry
 	helm push .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Connect chart pushed: $(CHART_REGISTRY)/connect-cluster:$(CONNECT_CHART_VERSION)"
 
-CHAOS_CHART_DIR     := charts/kates-chaos
-CHAOS_CHART_VERSION := $(shell grep '^version:' $(CHAOS_CHART_DIR)/Chart.yaml | awk '{print $$2}')
-
-chaos-chart-package:
+chaos-chart-package:  ## Package the kates-chaos chart into .build/
 	@mkdir -p .build
 	helm package $(CHAOS_CHART_DIR) --destination .build/
 	@echo "✅ Chaos chart packaged: .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz"
 
-chaos-chart-push: chaos-chart-package
+chaos-chart-push: chaos-chart-package  ## Push the packaged kates-chaos chart to the registry
 	helm push .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Chaos chart pushed: $(CHART_REGISTRY)/kates-chaos:$(CHAOS_CHART_VERSION)"
 
-STRIMZI_CHART_DIR     := charts/strimzi-operator
-STRIMZI_CHART_VERSION := $(shell grep '^version:' $(STRIMZI_CHART_DIR)/Chart.yaml | awk '{print $$2}')
-
-strimzi-chart-package:
+strimzi-chart-package:  ## Package the strimzi-operator chart into .build/
 	@mkdir -p .build
 	helm package $(STRIMZI_CHART_DIR) --destination .build/
 	@echo "✅ Strimzi operator chart packaged: .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz"
 
-strimzi-chart-push: strimzi-chart-package
+strimzi-chart-push: strimzi-chart-package  ## Push the packaged strimzi-operator chart to the registry
 	helm push .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Strimzi operator chart pushed: $(CHART_REGISTRY)/strimzi-operator:$(STRIMZI_CHART_VERSION)"
 
-PLATFORM_CHART_DIR     := charts/kates-platform
-PLATFORM_CHART_VERSION := $(shell grep '^version:' $(PLATFORM_CHART_DIR)/Chart.yaml | awk '{print $$2}')
-
-platform-chart-deps:
+platform-chart-deps:  ## Fetch kates-platform chart dependencies
 	helm dependency build $(PLATFORM_CHART_DIR)
 
-platform-chart-lint: platform-chart-deps
+platform-chart-lint: platform-chart-deps  ## Lint the kates-platform umbrella chart
 	helm lint $(PLATFORM_CHART_DIR)
 
-platform-chart-package: platform-chart-deps
+platform-chart-package: platform-chart-deps  ## Package the kates-platform chart into .build/
 	@mkdir -p .build
 	helm package $(PLATFORM_CHART_DIR) --destination .build/
 	@echo "✅ Platform chart packaged: .build/kates-platform-$(PLATFORM_CHART_VERSION).tgz"
 
-platform-chart-push: platform-chart-package
+platform-chart-push: platform-chart-package  ## Push the packaged kates-platform chart to the registry
 	helm push .build/kates-platform-$(PLATFORM_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Platform chart pushed: $(CHART_REGISTRY)/kates-platform:$(PLATFORM_CHART_VERSION)"
 
-connect-chart-test:
+connect-chart-test:  ## Run Helm tests for connect-cluster
 	@echo ""
 	@echo "╭────────────────────────────────────────────────────────────────╮"
 	@echo "│  🧪 Helm Test · Kafka Connect                                 │"
@@ -789,10 +981,10 @@ connect-chart-test:
 	fi; \
 	exit $$EXIT
 
-connect-chart-all: connect-chart-lint connect-chart-template connect-chart-package
+connect-chart-all: connect-chart-lint connect-chart-template connect-chart-package  ## lint + template + package
 	@echo "✅ All connect chart checks passed: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
 
-connect-deploy:
+connect-deploy:  ## Deploy Kafka Connect via Helm (ENV=kind|dev|staging|prod)
 	@echo "🔌 Deploying Kafka Connect cluster (ENV=$(ENV))..."
 	@OVERLAY=""; \
 	if [ -f "$(CONNECT_CHART_DIR)/values-$(ENV).yaml" ]; then \
@@ -804,26 +996,27 @@ connect-deploy:
 		--timeout 10m --wait
 	@echo "✅ Kafka Connect deployed"
 
-connect-undeploy:
+connect-undeploy:  ## Remove Kafka Connect Helm release
 	@echo "🗑️  Removing Kafka Connect cluster..."
 	helm uninstall connect-cluster -n kafka 2>/dev/null || true
 	@echo "✅ Kafka Connect removed"
 
-kafka-deploy: kafka-chart-deps
+##@ Kafka Deployment
+kafka-deploy: kafka-chart-deps  ## Deploy Kafka via Helm (ENV=kind|dev|staging|prod)
 	@echo "📦 Deploying Kafka cluster (ENV=$(ENV))..."
 	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
-kafka-upgrade: kafka-chart-deps
+kafka-upgrade: kafka-chart-deps  ## Upgrade existing Kafka release (ENV=...)
 	@echo "🔄 Upgrading Kafka cluster (ENV=$(ENV))..."
 	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
-kafka-detect:
+kafka-detect:  ## Deep cluster compatibility report for Kafka
 	@./scripts/kafka-cluster-report.sh
 
-kafka-verify-policies:
+kafka-verify-policies:  ## Verify Kyverno/network policy compliance for generic cluster
 	@./scripts/verify-kafka-policies.sh
 
-kafka-deploy-auto:
+kafka-deploy-auto:  ## Auto-detect cluster config and deploy Kafka
 	@echo "🤖 Starting Kates Auto-Deploy..."
 	cd cli && go run . auto --chart-dir ../$(KAFKA_CHART_DIR)
 	@echo ""
@@ -831,21 +1024,20 @@ kafka-deploy-auto:
 	@echo "  Run tests:     helm test kafka-cluster -n kafka"
 	@echo "  Check status:  kubectl get kafka,kafkanodepools -n kafka"
 
-VALUES_FILE ?=
-kafka-deploy-generic: kafka-chart-deps
+kafka-deploy-generic: kafka-chart-deps  ## Full pipeline: detect → deploy → wait → verify
 	@./scripts/deploy-kafka-generic.sh --yes
 
-kafka-deploy-generic-interactive: kafka-chart-deps
+kafka-deploy-generic-interactive: kafka-chart-deps  ## Same but prompts before deploy
 	@./scripts/deploy-kafka-generic.sh
 
-kafka-deploy-generic-custom: kafka-chart-deps
+kafka-deploy-generic-custom: kafka-chart-deps  ## Generic + extra overlay (VALUES_FILE=...)
 	@if [ -z "$(VALUES_FILE)" ]; then \
 		echo "❌ VALUES_FILE is required. Usage: make kafka-deploy-generic-custom VALUES_FILE=my-values.yaml"; \
 		exit 1; \
 	fi
 	@./scripts/deploy-kafka-generic.sh --yes -f $(VALUES_FILE)
 
-kafka-undeploy:
+kafka-undeploy:  ## Remove Kafka Helm release + PVCs
 	@echo "🗑️  Removing Kafka cluster..."
 	helm uninstall kafka-cluster -n kafka 2>/dev/null || true
 	@echo "Cleaning up PVCs..."
@@ -853,17 +1045,19 @@ kafka-undeploy:
 	@echo "✅ Kafka cluster removed"
 
 # Port Forwarding
-ports:
+
+##@ Chaos & Operations
+ports:  ## Start port forwarding
 	@echo "🔌 Starting Port Forwarding..."
 	./scripts/port-forward.sh
 
 # Download all Helm charts
-download-charts:
+download-charts:  ## Download all third-party Helm charts locally
 	@echo "📦 Downloading all Helm charts..."
 	./scripts/download-charts.sh
 
 # Kates Chaos Management (LitmusChaos via kates-chaos chart)
-litmus:
+litmus:  ## Deploy Kates Chaos (Kind overlay)
 	@echo "⚡ Deploying Kates Chaos (LitmusChaos)..."
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
@@ -872,7 +1066,7 @@ litmus:
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed"
 
-litmus-undeploy:
+litmus-undeploy:  ## Remove Kates Chaos stack completely
 	@echo "🧹 Removing Kates Chaos (LitmusChaos)..."
 	@helm uninstall chaos -n kafka 2>/dev/null || true
 	@kubectl delete pvc --all -n kafka 2>/dev/null || true
@@ -880,14 +1074,14 @@ litmus-undeploy:
 	@kubectl # delete namespace litmus 2>/dev/null || true
 	@echo "✅ Kates Chaos removed"
 
-chaos-ui:
+chaos-ui:  ## Explain chaos access (no UI in execution-plane chart)
 	@echo "ℹ️  The kates-chaos chart deploys the LitmusChaos execution plane only —"
 	@echo "   there is no web portal to port-forward. Drive chaos via ChaosEngine"
 	@echo "   resources / the 'engines:' values, and inspect state with:"
 	@echo "     make chaos-status"
 	@echo "   To get the ChaosCenter UI, install upstream ChaosCenter separately."
 
-chaos-status:
+chaos-status:  ## Show chaos infrastructure status
 	@echo "📊 Chaos Status:"
 	@echo ""
 	@echo "Helm Release:"
@@ -905,7 +1099,7 @@ chaos-status:
 	@echo "ChaosResults (kafka):"
 	@kubectl get chaosresults -n kafka 2>/dev/null || echo "No results found"
 
-litmus-generic:
+litmus-generic:  ## Deploy Kates Chaos (generic K8s overlay)
 	@echo "⚡ Deploying Kates Chaos (generic Kubernetes)..."
 	helm dependency update charts/kates-chaos
 	helm upgrade --install chaos charts/kates-chaos \
@@ -914,11 +1108,11 @@ litmus-generic:
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed (generic)"
 
-litmus-test:
+litmus-test:  ## Run Helm tests for chaos stack
 	@echo "🧪 Running Helm tests..."
 	helm test chaos -n kafka
 
-litmus-gameday:
+litmus-gameday:  ## Trigger GameDay validation run
 	@echo "🎮 Triggering GameDay validation..."
 	helm upgrade chaos charts/kates-chaos \
 		-n kafka \
@@ -927,16 +1121,16 @@ litmus-gameday:
 		--timeout 5m --wait
 
 # Velero backup
-velero:
+velero:  ## Deploy Velero backup
 	@echo "💾 Deploying Velero backup..."
 	./scripts/deploy-velero.sh
 
-gameday:
+gameday:  ## Run automated GameDay validation
 	@echo "🎮 Running Automated GameDay Validation..."
 	./scripts/gameday.sh
 
 # Status check
-status:
+status:  ## Check cluster status
 	@echo "📊 Cluster Status:"
 	@echo ""
 	@echo "=== Pods by Namespace ==="
@@ -946,129 +1140,38 @@ status:
 	@kubectl get pods -A | grep -v Running | grep -v Completed || echo "All pods are running!"
 
 # Destroy Cluster (FORCE=1 skips confirmation prompt)
-destroy:
+destroy:  ## Destroy cluster (FORCE=1 to skip prompt)
 	FORCE=$(FORCE) ./scripts/destroy.sh
 
 # Alias for destroy
-clean: destroy
+clean: destroy  ## Alias for destroy — tear the cluster down
 
-kyverno-permissive:
+kyverno-permissive:  ## Make Kyverno completely permissive (ignore all)
 	@echo "🔓 Making Kyverno completely permissive (ignoring all resources)..."
 	@kubectl patch configmap kyverno -n kyverno --type merge -p '{"data":{"resourceFilters":"[*,*,*]"}}' 2>/dev/null || echo "⚠️  Could not patch Kyverno ConfigMap (is it installed?)"
 	@echo "🔄 Restarting Kyverno pods to apply changes..."
 	@kubectl rollout restart deployment -n kyverno -l app.kubernetes.io/name=kyverno 2>/dev/null || true
 	@echo "✅ Kyverno is now in permissive mode."
 
-kyverno-audit:
+kyverno-audit:  ## Set all Kyverno policies to Audit mode
 	@echo "👁️  Setting all Kyverno policies to Audit mode..."
 	@kubectl get clusterpolicy -o name 2>/dev/null | xargs -I {} kubectl patch {} --type='json' -p='[{"op": "replace", "path": "/spec/validationFailureAction", "value": "Audit"}]' 2>/dev/null || true
 	@kubectl get policy -A -o name 2>/dev/null | xargs -I {} kubectl patch {} --type='json' -p='[{"op": "replace", "path": "/spec/validationFailureAction", "value": "Audit"}]' 2>/dev/null || true
 	@echo "✅ All policies set to Audit mode."
 
 # Help
-help:
-	@echo "Available targets:"
+help:  ## Show this help
 	@echo ""
-	@echo "  Cluster & Infrastructure"
-	@echo "  all                                - Complete setup (cluster, all services)"
-	@echo "  cluster                            - Start Kind cluster only"
-	@echo "  monitoring                         - Deploy Prometheus & Grafana"
-	@echo "  cert-manager                       - Deploy cert-manager"
-	@echo "  kafka                              - Deploy Kafka (shorthand for kafka-deploy)"
-	@echo "  kafka-deploy                       - Deploy Kafka via Helm (ENV=kind|dev|staging|prod)"
-	@echo "  kafka-detect                       - Deep cluster compatibility report for Kafka"
-	@echo "  kafka-verify-policies              - Verify Kyverno/network policy compliance for generic cluster"
-	@echo "  kafka-deploy-auto                  - Auto-detect cluster config and deploy Kafka"
-	@echo "  kafka-deploy-generic               - Full pipeline: detect → deploy → wait → verify"
-	@echo "  kafka-deploy-generic-interactive   - Same but prompts before deploy"
-	@echo "  kafka-deploy-generic-custom        - Generic + extra overlay (VALUES_FILE=...)"
-	@echo "  kafka-upgrade                      - Upgrade existing Kafka release (ENV=...)"
-	@echo "  kafka-undeploy                     - Remove Kafka Helm release + PVCs"
-	@echo "  ui                                 - Deploy Kafka UI (raw manifests)"
-	@echo "  ui-deploy                          - Deploy Kafka UI via Helm (ENV=kind|dev|staging|prod)"
-	@echo "  ui-upgrade                         - Upgrade Kafka UI Helm release (ENV=...)"
-	@echo "  ui-undeploy                        - Remove Kafka UI Helm release"
-	@echo "  ui-chart-lint                      - Lint the kafka-ui chart"
-	@echo "  ui-chart-template                  - Render kafka-ui templates (ENV=...)"
-	@echo "  apicurio                           - Deploy Apicurio Registry"
-	@echo "  jaeger                             - Deploy Jaeger (distributed tracing)"
-	@echo "  kyverno                            - Deploy Kyverno policy engine"
-	@echo "  kyverno-undeploy                   - Remove Kyverno"
-	@echo "  litmus                             - Deploy Kates Chaos (Kind overlay)"
-	@echo "  litmus-generic                     - Deploy Kates Chaos (generic K8s overlay)"
-	@echo "  litmus-undeploy                    - Remove Kates Chaos stack completely"
-	@echo "  litmus-test                        - Run Helm tests for chaos stack"
-	@echo "  litmus-gameday                     - Trigger GameDay validation run"
-	@echo "  velero                             - Deploy Velero backup"
+	@echo "  Kates — Kafka Advanced Testing & Engineering Suite"
 	@echo ""
-	@echo "  Kafka Connect Chart"
-	@echo "  connect-chart-lint                 - Lint the connect-cluster chart"
-	@echo "  connect-chart-template             - Render connect-cluster templates"
-	@echo "  connect-chart-package              - Package the connect-cluster chart"
-	@echo "  connect-chart-push                 - Push connect-cluster to OCI registry"
-	@echo "  connect-chart-test                 - Run Helm tests for connect-cluster"
-	@echo "  connect-chart-all                  - lint + template + package"
-	@echo "  connect-deploy                     - Deploy Kafka Connect via Helm (ENV=kind|dev|staging|prod)"
-	@echo "  connect-undeploy                   - Remove Kafka Connect Helm release"
+	@awk 'BEGIN {FS = ":.*##"} \
+		/^##@/ { printf "\n  \033[1m%s\033[0m\n", substr($$0, 5); next } \
+		/^[a-zA-Z0-9_-]+:.*##/ { printf "  \033[36m%-34s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
-	@echo "  Helm Test Suite"
-	@echo "  kafka-chart-test                   - Run Helm tests for Kafka cluster (KAFKA_RELEASE=... KAFKA_NAMESPACE=...)"
-	@echo "  kates-helm-test                    - Run Helm tests for Kates API (KATES_RELEASE=... KATES_NAMESPACE=...)"
-	@echo "  chaos-helm-test                    - Run Helm tests for Chaos stack (CHAOS_RELEASE=... CHAOS_NAMESPACE=...)"
-	@echo "  helm-test-all                      - Run all Helm tests across all components with summary"
-	@echo "                                       TIMEOUT=180s SKIP_CHAOS=0 SKIP_KATES=0"
+	@echo "  Common variables: ENV=kind|dev|staging|prod  CLUSTER_NAME=$(CLUSTER_NAME)  KATES_NS=$(KATES_NS)"
 	@echo ""
-	@echo "  Kates CLI"
-	@echo "  cli-build                          - Cross-compile CLI (macOS + Linux)"
-	@echo "  cli-install                        - Build and install CLI on this machine"
-	@echo "  cli-clean                          - Remove CLI build artifacts"
-	@echo ""
-	@echo "  Kates Application (Docker + Kind)"
-	@echo "  kates                              - Build + deploy Kates (full pipeline)"
-	@echo "  kates-build                        - Build Kates JVM image and load into Kind"
-	@echo "  kates-native                       - Build Kates native image and load into Kind"
-	@echo "  tester-build                       - Build Kates Tester image and load into Kind"
-	@echo "  push-images                        - Push kates and tester images to remote registry"
-	@echo "  kates-deploy                       - Apply Kates K8s manifests"
-	@echo "  kates-redeploy                     - Restart Kates deployment"
-	@echo "  kates-logs                         - Stream Kates logs"
-	@echo "  kates-undeploy                     - Remove Kates namespace"
-	@echo ""
-	@echo "  Kates Application (Helm chart)"
-	@echo "  kates-helm                         - Deploy via Helm (shorthand)"
-	@echo "  kates-helm-deploy                  - Deploy via Helm (ENV=kind|dev|staging|prod)"
-	@echo "  kates-helm-upgrade                 - Upgrade existing release (ENV=...)"
-	@echo "  kates-helm-undeploy                - Remove Kates Helm release"
-	@echo "  chart-lint                         - Lint the Helm chart"
-	@echo "  readme-check                       - Verify README chart table matches Chart.yaml sources"
-	@echo "  chart-package                      - Package the Helm chart"
-	@echo "  chart-push                         - Push the chart to OCI registry"
-	@echo ""
-	@echo "  Performance Tests"
-	@echo "  test                               - Run baseline 1M-message perf test"
-	@echo "  test-load                          - Run load test (concurrent producers)"
-	@echo "  test-stress                        - Run stress test (ramp to breaking point)"
-	@echo "  test-spike                         - Run spike test (flash sale simulation)"
-	@echo "  test-endurance                     - Run endurance/soak test (sustained load)"
-	@echo "  test-volume                        - Run volume test (large data)"
-	@echo "  test-capacity                      - Run capacity test (find max throughput)"
-	@echo "  test-net                           - Run cross-namespace network connectivity tests"
-	@echo "  test-net-kafka                     - Test TCP connectivity to Kafka from default namespace"
-	@echo "  test-net-api                       - Test HTTP connectivity to Kates API from default namespace"
-	@echo ""
-	@echo "  Operations"
-	@echo "  ports                              - Start port forwarding"
-	@echo "  logs                               - Stream logs from all services"
-	@echo "  status                             - Check cluster status"
-	@echo "  chaos-ui                           - Explain chaos access (no UI in execution-plane chart)"
-	@echo "  chaos-status                       - Show chaos infrastructure status"
-	@echo "  gameday                            - Run automated GameDay validation"
-	@echo "  kyverno-permissive                 - Make Kyverno completely permissive (ignore all)"
-	@echo "  kyverno-audit                      - Set all Kyverno policies to Audit mode"
-	@echo "  destroy                            - Destroy cluster (FORCE=1 to skip prompt)"
-	@echo "  help                               - Show this help"
 
-logs:
+logs:  ## Stream logs from all services
 	@echo "📋 Streaming logs from all services (Ctrl+C to stop)..."
 	@echo ""
 	@kubectl logs -f -l app=kates -n kafka --prefix --tail=20 2>/dev/null &
@@ -1079,6 +1182,7 @@ logs:
 
 # ─── Book Generation ─────────────────────────────────────────────────────────
 
+##@ Documentation
 book-html: ## Generate HTML book site
 	@echo "📖 Building HTML book..."
 	@cd docs/book && quarto render --to html

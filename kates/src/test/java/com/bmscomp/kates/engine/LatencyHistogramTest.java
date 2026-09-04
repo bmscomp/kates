@@ -3,17 +3,28 @@ package com.bmscomp.kates.engine;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class LatencyHistogramTest {
 
+    private static final AtomicInteger IDS = new AtomicInteger();
+
     private LatencyHistogram histogram;
 
     @BeforeEach
     void setUp() {
-        histogram = new LatencyHistogram();
+        histogram = new LatencyHistogram("test-" + IDS.incrementAndGet());
+    }
+
+    @AfterEach
+    void tearDown() {
+        histogram.close();
     }
 
     @Test
@@ -132,5 +143,79 @@ class LatencyHistogramTest {
         histogram.recordLatency(15_000.0);
         assertEquals(1, histogram.getTotalCount());
         assertEquals(15_000.0, histogram.getMax(), 15.0);
+    }
+
+    /**
+     * Pins P1-3: histograms with distinct ids must export SEPARATE gauges.
+     * Every worker used to construct this with the shared id "global", and
+     * Micrometer dedups on name+tags — so only the first run in the JVM was ever
+     * exported and every later run's percentiles silently vanished.
+     */
+    @Test
+    void distinctIdsExportDistinctGauges() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try (LatencyHistogram first = new LatencyHistogram("run-a");
+                LatencyHistogram second = new LatencyHistogram("run-b")) {
+            first.recordLatency(10.0);
+            second.recordLatency(500.0);
+
+            Double a = registry.find("kates.latency.p99")
+                    .tag("id", "run-a")
+                    .gauge()
+                    .value();
+            Double b = registry.find("kates.latency.p99")
+                    .tag("id", "run-b")
+                    .gauge()
+                    .value();
+
+            assertNotNull(a, "run-a must export its own p99");
+            assertNotNull(b, "run-b must export its own p99");
+            assertTrue(b > a, "each run reports its OWN latency, not the first one registered");
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    @Test
+    void closeUnregistersGauges() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            LatencyHistogram scoped = new LatencyHistogram("run-closing");
+            scoped.recordLatency(5.0);
+            assertNotNull(
+                    registry.find("kates.latency.p50").tag("id", "run-closing").gauge(),
+                    "gauge registered while the run is live");
+
+            scoped.close();
+
+            assertNull(
+                    registry.find("kates.latency.p50").tag("id", "run-closing").gauge(),
+                    "gauges removed on close so unbounded run ids cannot grow the registry");
+            // Idempotent: terminal paths may close more than once.
+            scoped.close();
+        } finally {
+            Metrics.removeRegistry(registry);
+        }
+    }
+
+    @Test
+    void samplesBeyondTheTrackedRangeAreCounted() {
+        LatencyHistogram histogram = new LatencyHistogram("run-clamped");
+
+        histogram.recordLatency(10.0);
+        assertEquals(0, histogram.clampedSampleCount());
+
+        // 60s is the ceiling; a five-minute stall is recorded AT it, which makes
+        // max and p999 look far healthier than the run actually was.
+        histogram.recordLatency(300_000.0);
+        histogram.recordLatency(120_000.0);
+
+        assertEquals(2, histogram.clampedSampleCount(), "clamped samples must be visible, not silent");
+        assertTrue(histogram.getMax() > 0);
+
+        histogram.reset();
+        assertEquals(0, histogram.clampedSampleCount(), "reset clears the clamp count with everything else");
     }
 }

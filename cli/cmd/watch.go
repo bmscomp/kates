@@ -258,6 +258,8 @@ func (m pollModel) View() string {
 				phaseStatus = output.SuccessStyle.Render("✓ " + r.Status)
 			} else if strings.EqualFold(r.Status, "RUNNING") {
 				phaseStatus = output.AccentStyle.Render("● " + r.Status)
+			} else if strings.EqualFold(r.Status, "FAILED") {
+				phaseStatus = output.ErrorStyle.Render("✖ " + r.Status)
 			}
 			b.WriteString(fmt.Sprintf("  %-12s %s  %s rec/s  p99=%sms\n",
 				phase,
@@ -265,6 +267,12 @@ func (m pollModel) View() string {
 				fmtFloat(r.ThroughputRecordsPerSec, 1),
 				fmtFloat(r.P99LatencyMs, 2),
 			))
+			// The API sends the reason with the status. Printing only "FAILED"
+			// left you watching a red word for the rest of the run and reaching
+			// for kubectl to find out what it meant.
+			if r.Error != "" {
+				b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("   └ "+truncate(r.Error, 100))))
+			}
 		}
 	}
 

@@ -82,7 +82,13 @@ jobs:
         if: always()
         uses: mikepenz/action-junit-report@v5
         with:
-          report_paths: kates/target/surefire-reports/TEST-*.xml
+          # `mvnw verify` runs surefire (*Test) AND failsafe (*IT). Globbing
+          # only surefire meant every integration-test result — including
+          # failures — was invisible in the checks UI; the job still went red,
+          # but with no indication of which test broke.
+          report_paths: |
+            kates/target/surefire-reports/TEST-*.xml
+            kates/target/failsafe-reports/TEST-*.xml
           check_name: "JUnit Tests"
 
       - name: Upload coverage report
@@ -130,6 +136,13 @@ jobs:
       # silently. This is the only thing that catches that.
       - name: Check Strimzi version pins agree
         run: bash scripts/check-versions.sh
+
+      # A chart test that calls a 404 exits 0 and reports success, so `helm
+      # test` passing proves nothing. This compares the paths against the
+      # JAX-RS resources; test-kafka asked for /api/cluster, which has no
+      # method at its root, for the whole life of that test.
+      - name: Check chart test endpoints exist
+        run: bash scripts/check-chart-test-paths.sh
 
       # The wrapper chart does not render until its subchart is fetched.
       # `build` resolves from Chart.lock so the pinned version cannot drift.
@@ -237,6 +250,14 @@ jobs:
           tar -xzf kyverno-cli_*.tar.gz
           sudo mv kyverno /usr/local/bin/
           kyverno version
+
+      # kates-chaos depends on litmus-core from the LitmusChaos repo. Only the
+      # Helm Lint job added the repo, so `helm dependency build
+      # charts/kates-chaos/` in the last step of this job died with "no
+      # repository definition for https://litmuschaos.github.io/litmus-helm/"
+      # — every run of this job that got that far was red.
+      - name: Add chart repositories
+        run: helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
 
       - name: Fetch chart dependencies
         run: helm dependency build charts/kates/

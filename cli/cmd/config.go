@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
@@ -79,12 +80,29 @@ var ctxSetCmd = &cobra.Command{
 	Example: `  kates ctx set local    --url http://localhost:30083
   kates ctx set staging  --url https://kates-staging.company.com
   kates ctx set prod     --url https://kates.company.com --output json --api-key mykey`,
-	Run: func(cmd *cobra.Command, args []string) {
+	// RunE, not Run: this validates its input, and a command that rejects what
+	// you gave it must exit non-zero. With Run the errors below printed and then
+	// returned 0, so a script could not tell a stored context from a refused one.
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if ctxSetURL == "" {
-			output.Error("--url is required")
-			return
+			return cmdErr("--url is required")
 		}
+
+		// An --api-key that was PASSED but is empty is almost always a command
+		// substitution that failed — most often
+		//   --api-key "$(kubectl get secret ... )"
+		// against a release that is not installed, where kubectl prints
+		// "NotFound" to stderr and nothing to stdout. Storing that quietly and
+		// reporting success buys a 401 on the next command with no clue why, so
+		// it is rejected here instead.
+		if cmd.Flags().Changed("api-key") && strings.TrimSpace(ctxSetAPIKey) == "" {
+			output.Hint("  If it came from a command, that command produced nothing.")
+			output.Hint("  Check with: kubectl get secret <release>-api-key -n <namespace>")
+			output.Hint("  Omit --api-key entirely to store a context without one.")
+			return cmdErr("--api-key was given but is empty")
+		}
+
 		cfg := loadConfig()
 		out := ctxSetOutput
 		if out == "" {
@@ -104,8 +122,7 @@ var ctxSetCmd = &cobra.Command{
 		}
 
 		if err := saveConfig(cfg); err != nil {
-			output.Error("Failed to save: " + err.Error())
-			return
+			return cmdErr("Failed to save: " + err.Error())
 		}
 		output.Success(fmt.Sprintf("Context '%s' → %s", name, ctxSetURL))
 		if ctxSetAPIKey != "" {
@@ -116,6 +133,7 @@ var ctxSetCmd = &cobra.Command{
 		} else {
 			output.Hint(fmt.Sprintf("  Switch to it: kates ctx use %s", name))
 		}
+		return nil
 	},
 }
 

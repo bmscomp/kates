@@ -50,7 +50,7 @@ if ! kubectl get kafka krafter -n kafka &>/dev/null; then
 fi
 if ! kubectl get chaosexperiment pod-delete -n "${NAMESPACE}" &>/dev/null; then
     error "ChaosExperiment 'pod-delete' not found in namespace ${NAMESPACE}."
-    error "Run 'make chaos' or './scripts/setup-kafka-chaos.sh' first."
+    error "Run './scripts/setup-kafka-chaos.sh' first."
     exit 1
 fi
 info "✓ Kafka and LitmusChaos prerequisites satisfied"

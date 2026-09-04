@@ -34,6 +34,14 @@ public class ClusterHealthService {
 
     private static final Logger LOG = Logger.getLogger(ClusterHealthService.class);
     private static final int TIMEOUT_SECONDS = 30;
+
+    /**
+     * Deadline for the advisory lookups that would rather answer "unknown" than
+     * make the caller wait. Matches {@link #isReachable()}'s bound on purpose:
+     * both are asking whether a cluster is there at all.
+     */
+    private static final int BEST_EFFORT_TIMEOUT_SECONDS = 5;
+
     private static final long CACHE_TTL_MS = 30_000;
 
     private final KafkaAdminService adminService;
@@ -95,11 +103,48 @@ public class ClusterHealthService {
         }
     }
 
+    /**
+     * Best-effort broker count, bounded so an absent cluster costs seconds
+     * rather than most of a minute.
+     *
+     * <p>This used to delegate to {@link #describeCluster()}, which opens with a
+     * 30-second get on the cluster id. Its {@code @Retry} and {@code @Timeout}
+     * do not bound that from here — a self-invocation inside the bean bypasses
+     * the interceptors — so with no broker reachable every call blocked for the
+     * full 30 seconds before returning the 0 the catch block was always going to
+     * return, and failures are never cached, so the next caller paid it again.
+     *
+     * <p>Both callers advise on this number rather than depend on it — the
+     * advisor weighs it into a recommendation, the cost endpoint into an
+     * estimate — and both already read 0 as "no cluster information". Neither is
+     * worth a 35-second request. The IT suite is where it surfaced: {@code
+     * /api/tests/{id}/advisor} outlived the HTTP client's patience and the run
+     * failed with "Read timed out", intermittently, depending on which test
+     * raced the timeout first.
+     *
+     * <p>A warm cache still answers instantly and exactly. Only the cold path is
+     * bounded, and it deliberately does not retry: if one describe against a
+     * 5-second deadline did not answer, two more will not either. It also does
+     * not populate the cache — a count taken under a short deadline is not the
+     * full cluster picture {@link #describeCluster()} promises its callers.
+     */
     public int brokerCount() {
+        Map<String, Object> cached = cachedClusterInfo;
+        if (cached != null && System.currentTimeMillis() < clusterCacheExpiry) {
+            return cached.get("brokerCount") instanceof Integer count ? count : 0;
+        }
         try {
-            Object count = describeCluster().get("brokerCount");
-            return count instanceof Integer ? (Integer) count : 0;
+            Collection<Node> nodes = adminService
+                    .getClient()
+                    .describeCluster()
+                    .nodes()
+                    .get(BEST_EFFORT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return nodes == null ? 0 : nodes.size();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 0;
         } catch (Exception e) {
+            LOG.debugf("Broker count unavailable (%s); advising without it", e.toString());
             return 0;
         }
     }

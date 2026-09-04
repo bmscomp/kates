@@ -125,20 +125,42 @@ metadata:
 			runExecFn(gCtx, "kubectl", "rollout", "status",
 				"deployment/cert-manager-cainjector", "-n", "cert-manager", "--timeout=90s")
 
-			// The definitive readiness signal: poll the MutatingWebhookConfiguration
-			// until caBundle is non-empty. Only then can the API server verify the
-			// webhook TLS certificate without x509: certificate signed by unknown authority.
+			// The webhook pod must be serving before the API server can call it.
+			// The Group A readiness wait for cert-manager only runs after this
+			// goroutine returns, so without this gate the ClusterIssuer apply
+			// below races the webhook Deployment and dies with
+			// "Internal error occurred: failed calling webhook".
+			dl.Println("    - Waiting for Cert-Manager webhook rollout...")
+			runExecFn(gCtx, "kubectl", "rollout", "status",
+				"deployment/cert-manager-webhook", "-n", "cert-manager", "--timeout=180s")
+
+			// The definitive readiness signal: poll until caBundle is non-empty —
+			// on BOTH webhook configurations. A ClusterIssuer CREATE goes through
+			// the validating webhook as well, and cainjector injects the two
+			// configs independently, so a ready mutating config says nothing
+			// about the validating one; checking only it leaves a window where
+			// the apply still fails with x509: certificate signed by unknown
+			// authority (surfaced by the API server as "Internal error occurred").
 			dl.Println("    - Polling for Cert-Manager CA bundle injection...")
 			const caTimeout = 180 * time.Second
 			const caPoll = 3 * time.Second
 			caDeadline := time.Now().Add(caTimeout)
+			certMgrWebhookConfigs := []string{
+				"mutatingwebhookconfiguration",
+				"validatingwebhookconfiguration",
+			}
 			for {
-				out, err := exec.CommandContext(gCtx,
-					"kubectl", "get",
-					"mutatingwebhookconfiguration", "cert-manager-webhook",
-					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
-				).Output()
-				if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+				injected := 0
+				for _, kind := range certMgrWebhookConfigs {
+					out, err := runExecOutputFn(gCtx,
+						"kubectl", "get", kind, "cert-manager-webhook",
+						"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
+					)
+					if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+						injected++
+					}
+				}
+				if injected == len(certMgrWebhookConfigs) {
 					dl.Println("    - CA bundle injected. Applying ClusterIssuer...")
 					break
 				}
@@ -160,34 +182,49 @@ metadata:
 spec:
   selfSigned: {}`
 
-			// Try applying normally first (3 quick attempts).
+			// Try applying normally first. Early attempts can land in the short
+			// window where the CA bundle is injected but the API server's webhook
+			// client hasn't seen ready endpoints yet — give it a real window
+			// before reaching for the failurePolicy bypass.
 			var lastErr error
-			for attempt := 1; attempt <= 3; attempt++ {
+			const applyAttempts = 5
+			for attempt := 1; attempt <= applyAttempts; attempt++ {
 				if lastErr = runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer); lastErr == nil {
 					return nil
 				}
-				if attempt < 3 {
-					time.Sleep(3 * time.Second)
+				if attempt < applyAttempts {
+					select {
+					case <-gCtx.Done():
+						return gCtx.Err()
+					case <-time.After(5 * time.Second):
+					}
 				}
 			}
 
 			// Hard fallback: temporarily set failurePolicy: Ignore so the API server
 			// allows the resource creation call through even if webhook TLS is still
-			// not verifiable. cert-manager will reconcile the webhook config shortly.
+			// not verifiable. BOTH configs must be bypassed — the validating webhook
+			// blocks the CREATE exactly like the mutating one, so patching only the
+			// mutating config leaves the failure in place. cert-manager reconciles
+			// the webhook configs back to its desired state shortly after.
 			dl.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			for _, kind := range certMgrWebhookConfigs {
+				runExecFn(gCtx, "kubectl", "patch",
+					kind, "cert-manager-webhook",
+					"--type=json", "-p",
+					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			}
 			time.Sleep(2 * time.Second) // let the API server pick up the patch
 
 			applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
 
 			// Always restore failurePolicy: Fail regardless of outcome.
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+			for _, kind := range certMgrWebhookConfigs {
+				runExecFn(gCtx, "kubectl", "patch",
+					kind, "cert-manager-webhook",
+					"--type=json", "-p",
+					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+			}
 
 			if applyErr != nil {
 				return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
@@ -241,10 +278,10 @@ spec:
 			deadline := time.Now().Add(180 * time.Second)
 			for _, crd := range kyvernoCRDs {
 				for {
-					out, checkErr := exec.CommandContext(gCtx,
+					out, checkErr := runExecOutputFn(gCtx,
 						"kubectl", "get", "crd", crd,
 						"-o", "jsonpath={.status.conditions[?(@.type==\"Established\")].status}",
-					).Output()
+					)
 					if checkErr == nil && strings.Contains(string(out), "True") {
 						break
 					}
@@ -504,12 +541,12 @@ metadata:
 		dl.Println("    - Waiting for Entity Operator to start...")
 		eoDeadline := time.Now().Add(5 * time.Minute)
 		for time.Now().Before(eoDeadline) {
-			eoOut, _ := exec.CommandContext(ctx,
+			eoOut, _ := runExecOutputFn(ctx,
 				"kubectl", "get", "pods", "-n", kafkaNS,
 				"-l", "app.kubernetes.io/name=entity-operator",
 				"--no-headers",
 				"-o", "custom-columns=PHASE:.status.phase",
-			).Output()
+			)
 			if strings.Contains(string(eoOut), "Running") {
 				dl.Printf("    %s Entity Operator running\n", output.AccentStyle.Render("✔"))
 				break
@@ -560,8 +597,8 @@ metadata:
 	if connectNS != kafkaNS {
 		// Copy kafka-metrics ConfigMap (required by KafkaConnect metricsConfig)
 		dl.Println("    - Copying kafka-metrics ConfigMap to connect namespace...")
-		metricsData, metricsErr := exec.CommandContext(ctx, "kubectl", "get", "configmap", "kafka-metrics",
-			"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}").Output()
+		metricsData, metricsErr := runExecOutputFn(ctx, "kubectl", "get", "configmap", "kafka-metrics",
+			"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}")
 		if metricsErr == nil && len(metricsData) > 0 {
 			// Build a clean ConfigMap without Helm ownership annotations
 			// to avoid field-manager conflicts on kubectl apply.
@@ -585,12 +622,12 @@ metadata:
 		var jaasBytes []byte
 		secretDeadline := time.Now().Add(2 * time.Minute)
 		for {
-			pwOut, pwErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-				"-n", kafkaNS, "-o", "jsonpath={.data.password}").Output()
+			pwOut, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-connect",
+				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
 			if pwErr == nil && len(strings.TrimSpace(string(pwOut))) > 0 {
 				pwBytes = bytes.TrimSpace(pwOut)
-				jaasOut, jaasErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-					"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}").Output()
+				jaasOut, jaasErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-connect",
+					"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}")
 				if jaasErr == nil {
 					jaasBytes = bytes.TrimSpace(jaasOut)
 				}
@@ -644,9 +681,9 @@ stringData:
 		// Helm says deployed, but verify pods actually exist.
 		// A previous deploy may have installed the chart but the
 		// workload never started (e.g. missing ConfigMap).
-		podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
+		podCheck, _ := runExecOutputFn(ctx, "kubectl", "get", "pods",
 			"-n", connectNS, "-l", "strimzi.io/kind=KafkaConnect",
-			"-o", "jsonpath={.items}").Output()
+			"-o", "jsonpath={.items}")
 		if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
 			dl.Println("    ⚠  Kafka Connect release exists but no pods found — upgrading...")
 			connectDeployed = false
@@ -700,7 +737,7 @@ stringData:
 		monitoringEnabled := deployWithMonitoring
 		if monitoringEnabled {
 			// Cleverly detect if CRDs are actually present before enabling monitoring on Connect
-			out, err := exec.CommandContext(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found").CombinedOutput()
+			out, err := runExecCombinedFn(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found")
 			if err != nil || len(bytes.TrimSpace(out)) == 0 {
 				monitoringEnabled = false
 				dl.Printf("    ⚠  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
@@ -729,7 +766,7 @@ stringData:
 	}
 
 	// Deploy Debezium connector
-	checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers").CombinedOutput()
+	checkOut, checkErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers")
 	if checkErr != nil || strings.Contains(string(checkOut), "not found") {
 		dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
 		connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -780,7 +817,7 @@ spec:
 	}
 
 	// Deploy JDBC Sink connector
-	sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers").CombinedOutput()
+	sinkCheckOut, sinkCheckErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers")
 	if sinkCheckErr != nil || strings.Contains(string(sinkCheckOut), "not found") {
 		dl.Println("    - Deploying JDBC Sink connector...")
 		sinkYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -876,9 +913,8 @@ spec: {}`, appNS)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
 			// The KafkaUser was already waited on in Group B — just read the Secret.
-			pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend",
+			pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-backend",
 				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-			pwBytes, pwErr := pwCmd.Output()
 
 			if pwErr == nil && len(pwBytes) > 0 {
 				dl.Println("    - Copying Kafka SASL credentials to app namespace...")
@@ -934,9 +970,8 @@ spec: {}`, kafkaUINS)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
 				dl.Println("    - Copying kafka-ui SASL credentials to UI namespace...")
-				pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kafka-ui",
+				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kafka-ui",
 					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-				pwBytes, pwErr := pwCmd.Output()
 				if pwErr == nil && len(pwBytes) > 0 {
 					secretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -1008,7 +1043,7 @@ data:
 // updateActiveContextAPIKey syncs the API key from the deployed cluster
 // secret into the active CLI context configuration.
 func updateActiveContextAPIKey(ctx context.Context, appNS string) {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}").Output()
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}")
 	if err != nil {
 		return
 	}
@@ -1063,8 +1098,8 @@ func (dc *deployContext) deployComponent(id, namespace, selector string, timeout
 // Without this, a readiness timeout reported nothing and the real cause
 // (an ACL denial, a bad topic) had to be dug out of the CRs by hand.
 func printConnectorDiagnostics(ctx context.Context, namespace string) {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "-n", namespace,
-		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.conditions[0].type}{"\t"}{.status.conditions[0].message}{"\t"}{.status.connectorStatus.tasks[0].trace}{"\n"}{end}`).Output()
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "kafkaconnector", "-n", namespace,
+		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.conditions[0].type}{"\t"}{.status.conditions[0].message}{"\t"}{.status.connectorStatus.tasks[0].trace}{"\n"}{end}`)
 	if err != nil {
 		return
 	}

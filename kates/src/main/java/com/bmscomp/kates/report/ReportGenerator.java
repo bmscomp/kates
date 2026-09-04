@@ -33,6 +33,59 @@ public class ReportGenerator {
     @Inject
     KatesMetrics katesMetrics;
 
+    @Inject
+    com.bmscomp.kates.engine.SlaEvaluator slaEvaluator;
+
+    /**
+     * Evaluates the run's SLA, but only once the run is terminal.
+     *
+     * <p>A report can be generated while a run is still in flight, and partial
+     * metrics routinely sit below their target mid-ramp — grading those would
+     * report a breach the finished run does not have. In-flight runs therefore
+     * carry a passing verdict until there is a complete result to judge.
+     */
+    private SlaVerdict evaluateSla(TestRun run, ReportSummary summary) {
+        if (!isTerminal(run.getStatus())) {
+            return SlaVerdict.pass();
+        }
+        return slaEvaluator.evaluate(run.getSla(), toSlaMetrics(run, summary));
+    }
+
+    /**
+     * Maps an aggregated summary onto the values an SLA is evaluated against.
+     *
+     * <p>Resilience values come from the run's integrity results rather than the
+     * summary, which does not carry them; the worst value across tasks is used,
+     * and -1 means the run had no integrity check so the corresponding
+     * constraint is skipped instead of silently passing.
+     */
+    private static com.bmscomp.kates.domain.SlaMetrics toSlaMetrics(TestRun run, ReportSummary summary) {
+        double dataLossPercent = -1;
+        double maxRtoMs = -1;
+        double rpoMs = -1;
+
+        for (TestResult result : run.getResults()) {
+            com.bmscomp.kates.domain.IntegrityResult integrity = result.getIntegrity();
+            if (integrity == null) {
+                continue;
+            }
+            dataLossPercent = Math.max(dataLossPercent, integrity.dataLossPercent());
+            maxRtoMs = Math.max(maxRtoMs, integrity.maxRtoMs());
+            rpoMs = Math.max(rpoMs, integrity.rpoMs());
+        }
+
+        return new com.bmscomp.kates.domain.SlaMetrics(
+                summary.p99LatencyMs(),
+                summary.p999LatencyMs(),
+                summary.avgLatencyMs(),
+                summary.avgThroughputRecPerSec(),
+                summary.totalRecords(),
+                summary.errorRate(),
+                dataLossPercent,
+                maxRtoMs,
+                rpoMs);
+    }
+
     /**
      * Reports embed histograms and timelines; an uncapped cache grows without
      * bound in a long-running service. LRU-evict beyond MAX_CACHED_REPORTS —
@@ -82,6 +135,13 @@ public class ReportGenerator {
         report.setGeneratedAt(Instant.now().toString());
 
         Map<String, String> metadata = new LinkedHashMap<>();
+        // First, and not optional: the exported formats carry no other copy of
+        // the run id. A markdown or CSV report saved to a file said which type
+        // of test it was and how it did, but not WHICH run produced it — so two
+        // reports from the same suite were indistinguishable once downloaded.
+        if (run.getId() != null) {
+            metadata.put("runId", run.getId());
+        }
         metadata.put("testType", run.getTestType() != null ? run.getTestType().name() : "UNKNOWN");
         metadata.put("backend", run.getBackend());
         metadata.put("status", run.getStatus() != null ? run.getStatus().name() : "UNKNOWN");
@@ -95,8 +155,11 @@ public class ReportGenerator {
 
         List<TestResult> results = run.getResults();
         if (results == null || results.isEmpty()) {
-            report.setSummary(MetricUtils.computeSummary(List.of()));
-            report.setOverallSlaVerdict(SlaVerdict.pass());
+            ReportSummary empty = MetricUtils.computeSummary(List.of());
+            report.setSummary(empty);
+            // A terminal run that produced nothing still fails a
+            // minRecordsProcessed / minThroughput SLA — that IS the breach.
+            report.setOverallSlaVerdict(evaluateSla(run, empty));
             return report;
         }
 
@@ -111,7 +174,9 @@ public class ReportGenerator {
             for (Map.Entry<String, List<TestResult>> entry : byPhase.entrySet()) {
                 PhaseReport pr = new PhaseReport();
                 pr.setPhaseName(entry.getKey());
-                pr.setMetrics(MetricUtils.computeSummary(entry.getValue()));
+                ReportSummary phaseMetrics = MetricUtils.computeSummary(entry.getValue());
+                pr.setMetrics(phaseMetrics);
+                pr.setSlaVerdict(evaluateSla(run, phaseMetrics));
                 phases.add(pr);
             }
             report.setPhases(phases);
@@ -129,7 +194,12 @@ public class ReportGenerator {
             }
         }
 
-        report.setOverallSlaVerdict(SlaVerdict.pass());
+        // Actually evaluate the run's SLA. This was hardcoded to pass(), so a
+        // declared SLA was stored, rendered and exported as PASSED no matter what
+        // the run did — every gate built on it (report verdict, JUnit export,
+        // --fail-on-sla-breach) was green by construction. Runs without an SLA
+        // still pass: SlaEvaluator returns pass() for a null/empty definition.
+        report.setOverallSlaVerdict(evaluateSla(run, report.getSummary()));
 
         String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
         katesMetrics.recordSlaEvaluation(typeName, report.getOverallSlaVerdict().passed());

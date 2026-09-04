@@ -312,7 +312,7 @@ POST /api/disruptions
 Content-Type: application/json
 ```
 
-Executes a multi-step disruption plan. This is a synchronous operation — the response is returned only after all steps have completed (or failed). For real-time progress monitoring, use the SSE endpoint.
+Executes a multi-step disruption plan. This is an asynchronous operation — the plan is validated, then the response is returned immediately with `202 Accepted` and a report id while the steps run in the background. Poll `GET /api/disruptions/{id}` until the status is terminal, or use the SSE endpoint for real-time progress. Only one plan may run against a cluster at a time; starting a second returns `409 Conflict`.
 
 You can also set `dryRun=true` to simulate the disruption without actually injecting any faults:
 
@@ -419,12 +419,15 @@ Returns the list of pre-built disruption playbooks. Each playbook is a curated, 
 
 ```
 POST /api/disruptions/playbooks/{name}
-POST /api/disruptions/playbooks/{name}?dryRun=true
 ```
 
-Executes a pre-built playbook by name. The playbook is loaded from the catalog and converted to a `DisruptionPlan` automatically.
+There is no `dryRun` on this endpoint — the parameter was documented but never
+implemented. To preview a playbook, fetch it from the catalog and post the plan
+to `POST /api/disruptions?dryRun=true`.
 
-**Response: `200 OK`** — same format as `POST /api/disruptions`.
+Executes a pre-built playbook by name. The playbook is loaded from the catalog, converted to a `DisruptionPlan` automatically, validated against the safety guard, and run asynchronously.
+
+**Response: `202 Accepted`** — same format as `POST /api/disruptions`: a report id to poll with `GET /api/disruptions/{id}`. A playbook rejected by the safety guard returns `422`, and one submitted while another plan is running against the cluster returns `409`.
 
 ---
 

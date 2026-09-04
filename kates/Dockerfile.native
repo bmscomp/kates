@@ -29,33 +29,83 @@ RUN --mount=type=cache,target=/root/.m2 \
   chmod +x mvnw && ./mvnw dependency:go-offline -B 2>/dev/null || true
 
 COPY kates/src src
+# Memory for the COMPILER goes through quarkus.native.native-image-xmx, not
+# additional-build-args. Passing -J-Xmx8g through the latter looked equivalent
+# but silently REPLACED the whole additional-build-args value configured in
+# application.properties — the --initialize-at-run-time list that keeps the
+# Kafka security and compression JNI classes out of the build-time heap. The
+# result was either a failed build or, worse, a binary whose compression
+# libraries blow up the first time they are used.
+#
+# march=compatibility: without it the compiler targets the CPU of the BUILD
+# machine (a modern CI runner), and the binary dies with SIGILL on older
+# hardware. Portability is worth more here than a few percent of throughput,
+# since the workload's cost is Kafka I/O, not local computation. It is applied
+# on x86-64 only: -march levels are an AMD64 concept, and passing it on aarch64
+# has been rejected outright by some GraalVM releases.
 RUN --mount=type=cache,target=/root/.m2 \
-  ./mvnw package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args="-J-Xmx8g" \
+  MARCH_ARG=""; \
+  if [ "$(uname -m)" = "x86_64" ]; then MARCH_ARG="-Dquarkus.native.march=compatibility"; fi; \
+  ./mvnw package -Dnative -DskipTests -B \
+  -Dquarkus.native.native-image-xmx=8g \
+  ${MARCH_ARG} \
   && mv target/*-runner target/kates-native
 
-# Extract platform-specific JNI native libraries from Maven JARs
+# Extract the compression JNI libraries for THIS architecture.
+#
+# The three jars each bury their natives under a different layout:
+#
+#   zstd-jni      linux/aarch64/libzstd-jni-1.5.7-7.so
+#   lz4-java      net/jpountz/util/linux/aarch64/liblz4-java.so
+#   snappy-java   org/xerial/snappy/native/Linux/aarch64/libsnappyjava.so
+#
+# The previous version hardcoded those three paths and chained `jar xf` calls
+# with `||` fallbacks. That silently produced an image with no lz4: `jar xf`
+# EXITS 0 when the path you asked for is not in the archive and extracts
+# nothing, so the fallback to lz4's real path never ran, the following `cp`
+# failed into a `|| true`, and only the guard at the end noticed. Matching on
+# the architecture instead of the layout removes the whole class of problem —
+# a jar that reorganises its natives keeps working.
+#
+# Two details in the recipe below that are not obvious:
+#   * android and musl paths are excluded — snappy ships android-aarch64 and
+#     x86_64-musl under the SAME file name as the glibc build, and whichever
+#     sorts last wins the copy. The runtime is glibc-based UBI9, so a musl
+#     library loads on nobody's machine and fails the first time snappy runs;
+#   * zstd-jni dlopens the VERSIONED file name, so an unversioned alias is kept
+#     next to it.
+#
+# The guard at the end is what stops a broken extraction from shipping: without
+# it the image starts happily and fails minutes into a benchmark, where a
+# missing compression library reads like a Kafka problem.
 RUN --mount=type=cache,target=/root/.m2 \
-  ARCH=$(uname -m) && \
-  if [ "$ARCH" = "x86_64" ]; then JNI_ARCH="amd64"; SNAPPY_ARCH="linux/x86_64"; \
-  elif [ "$ARCH" = "aarch64" ]; then JNI_ARCH="aarch64"; SNAPPY_ARCH="linux/aarch64"; \
-  else JNI_ARCH="$ARCH"; SNAPPY_ARCH="linux/$ARCH"; fi && \
-  mkdir -p /build/native-libs && \
-  ZSTD_JAR=$(find /root/.m2/repository/com/github/luben/zstd-jni -name "*.jar" | sort -V | tail -1) && \
-  LZ4_JAR=$(find /root/.m2/repository/org/lz4/lz4-java -name "*.jar" | sort -V | tail -1) && \
-  SNAPPY_JAR=$(find /root/.m2/repository/org/xerial/snappy/snappy-java -name "*.jar" | sort -V | tail -1) && \
-  echo "=== Extracting native libs (arch=$JNI_ARCH) ===" && \
-  if [ -n "$ZSTD_JAR" ]; then cd /tmp && jar xf "$ZSTD_JAR" "linux/$JNI_ARCH/" && cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null && cd /build/native-libs/ && for f in libzstd-jni-*.so; do [ -e "$f" ] && cp "$f" libzstd-jni.so; done || true; fi && \
-  if [ -n "$LZ4_JAR" ]; then cd /tmp && jar xf "$LZ4_JAR" "linux/$JNI_ARCH/" 2>/dev/null || jar xf "$LZ4_JAR" "net/jpountz/util/linux/$JNI_ARCH/" 2>/dev/null && cp -v net/jpountz/util/linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  if [ -n "$SNAPPY_JAR" ]; then cd /tmp && jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/Linux/$JNI_ARCH/" 2>/dev/null || jar xf "$SNAPPY_JAR" "org/xerial/snappy/native/$SNAPPY_ARCH/" 2>/dev/null && cp -v org/xerial/snappy/native/Linux/$JNI_ARCH/*.so /build/native-libs/ 2>/dev/null || cp -v org/xerial/snappy/native/$SNAPPY_ARCH/*.so /build/native-libs/ 2>/dev/null || true; fi && \
-  ls -la /build/native-libs/ && \
+  set -eu; \
+  ARCH="$(uname -m)"; \
+  case "$ARCH" in \
+    x86_64)  ARCH_ALT="amd64" ;; \
+    aarch64) ARCH_ALT="arm64" ;; \
+    *)       ARCH_ALT="$ARCH" ;; \
+  esac; \
+  echo "=== Extracting compression JNI libs (arch=$ARCH, also matching $ARCH_ALT) ==="; \
+  mkdir -p /build/native-libs /tmp/jni; \
+  for coords in com/github/luben/zstd-jni org/lz4/lz4-java org/xerial/snappy/snappy-java; do \
+    JAR="$(find "/root/.m2/repository/${coords}" -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort -V | tail -1)"; \
+    [ -n "$JAR" ] || { echo "FATAL: no jar found under ${coords} — did dependency resolution run?"; exit 1; }; \
+    ( cd /tmp/jni && jar xf "$JAR" ); \
+  done; \
+  find /tmp/jni \
+       \( -ipath "*linux*${ARCH}*" -o -ipath "*linux*${ARCH_ALT}*" \) \
+       ! -ipath "*android*" ! -ipath "*musl*" -name '*.so' -exec cp -v {} /build/native-libs/ \; ; \
+  for f in /build/native-libs/libzstd-jni-*.so; do \
+    if [ -e "$f" ]; then cp "$f" /build/native-libs/libzstd-jni.so; fi; \
+    break; \
+  done; \
+  rm -rf /tmp/jni; \
+  ls -la /build/native-libs/; \
   for lib in zstd lz4 snappy; do \
-    ls /build/native-libs/ | grep -qi "$lib" || { echo "FATAL: no $lib native library extracted into /build/native-libs"; exit 1; }; \
+    ls /build/native-libs/ | grep -qi "$lib" \
+      || { echo "FATAL: no $lib native library for $ARCH in any of the extracted jars"; exit 1; }; \
   done
-
-# NOTE: the guard above fails the build if any compression JNI lib is missing.
-# The per-command `|| true` in the extraction tolerates arch/path variation,
-# so without this final check a broken extraction would silently ship an image
-# that crashes the first time lz4/snappy/zstd compression is used at runtime.
 
 
 # Stage 3: Minimal runtime
@@ -66,13 +116,25 @@ COPY --from=builder /build/target/kates-native ./kates
 COPY --from=builder /build/native-libs/ ./lib/
 COPY --from=cli-builder /kates-cli /usr/local/bin/kates
 
-RUN chmod +x kates \
-  && microdnf install -y shadow-utils \
-  && groupadd -r kates && useradd -r -g kates -d /home/kates kates \
-  && mkdir -p /home/kates \
-  && printf 'current-context: local\ncontexts:\n  local:\n    url: http://localhost:8080\n    output: table\n' > /home/kates/.kates.yaml \
-  && chown -R kates:kates /home/kates \
-  && microdnf clean all
+# curl is NOT installed unconditionally. ubi9-minimal ships curl-minimal, and
+# the full curl package CONFLICTS with it — `microdnf install curl` fails the
+# build outright rather than upgrading. The HEALTHCHECK below only needs a curl
+# binary, and curl-minimal provides one, so this installs only if the base image
+# ever stops shipping either.
+RUN set -eu; \
+  chmod +x kates; \
+  microdnf install -y shadow-utils; \
+  if command -v curl >/dev/null 2>&1; then \
+    echo "curl already present: $(command -v curl)"; \
+  else \
+    microdnf install -y curl; \
+  fi; \
+  groupadd -r kates; \
+  useradd -r -g kates -d /home/kates kates; \
+  mkdir -p /home/kates; \
+  printf 'current-context: local\ncontexts:\n  local:\n    url: http://localhost:8080\n    output: table\n' > /home/kates/.kates.yaml; \
+  chown -R kates:kates /home/kates; \
+  microdnf clean all
 
 USER kates
 ENV HOME=/home/kates
@@ -80,8 +142,19 @@ ENV LD_LIBRARY_PATH=/app/lib
 
 EXPOSE 8080
 
+# /q/health/live, not /api/health: the latter makes a live Kafka AdminClient
+# call per request, so it blows the 3s timeout and reports the container
+# unhealthy whenever the broker under test is slow or down — which for a Kafka
+# testing tool is a normal, expected state, not a broken container. Kept
+# identical to the JVM Dockerfile on purpose; the two drifted before.
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -sf http://localhost:8080/api/health || exit 1
+  CMD curl -sf http://localhost:8080/q/health/live || exit 1
 
 ENTRYPOINT ["./kates"]
+# A native image does NOT read JAVA_TOOL_OPTIONS, so the chart's jvm.options —
+# heap sizes, GC selection — are silently inert here, and the default heap is a
+# share of the container limit chosen by the runtime rather than by us. These
+# defaults are CMD, not ENTRYPOINT, so `args:` in the pod spec (or arguments to
+# docker run) replace them without rebuilding the image.
+CMD ["-XX:MaximumHeapSizePercent=75"]
 

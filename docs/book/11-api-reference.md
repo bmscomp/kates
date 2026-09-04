@@ -394,7 +394,7 @@ Non-default configuration entries for a specific broker.
 
 #### POST /api/disruptions
 
-Execute a disruption plan. Execution is **synchronous** — the call blocks until every step has run (including observation windows) and returns the finished report. Add the `dryRun=true` query parameter to validate the plan without injecting any faults.
+Execute a disruption plan. Execution is **asynchronous** — the plan is validated, accepted, and run in the background, so the call returns immediately with a report id. A plan runs for minutes (steady state + chaos duration + observation window + recovery timeout per step), which is longer than most proxies and load balancers will hold a connection open; poll `GET /api/disruptions/{id}` for progress and the final report. Add the `dryRun=true` query parameter to validate the plan without injecting any faults.
 
 **Request Body:**
 
@@ -415,31 +415,40 @@ Execute a disruption plan. Execution is **synchronous** — the call blocks unti
 }
 ```
 
-**Response:** `200 OK`
+**Response:** `202 Accepted`
 
 ```json
 {
   "id": "7f8e9d0c",
-  "report": {
-    "planName": "broker-kill-test",
-    "status": "COMPLETED",
-    "stepReports": [{
-      "stepName": "kill-broker-0",
-      "disruptionType": "POD_KILL",
-      "timeToFirstReady": "PT27S",
-      "timeToAllReady": "PT41S",
-      "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
-      "rolledBack": false
-    }],
-    "summary": {
-      "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
-      "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
-    }
+  "status": "RUNNING",
+  "planName": "broker-kill-test"
+}
+```
+
+Then poll `GET /api/disruptions/{id}` until the status is terminal:
+
+```json
+{
+  "planName": "broker-kill-test",
+  "status": "COMPLETED",
+  "stepReports": [{
+    "stepName": "kill-broker-0",
+    "disruptionType": "POD_KILL",
+    "timeToFirstReady": "PT27S",
+    "timeToAllReady": "PT41S",
+    "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
+    "rolledBack": false
+  }],
+  "summary": {
+    "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
+    "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
   }
 }
 ```
 
-Disruption IDs are 8-character UUID prefixes. `report.status` is one of `COMPLETED`, `PARTIAL` (some steps failed), or `FAILED`. Plans that violate the safety guard are not executed and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)).
+Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the plan executes, then one of `COMPLETED`, `PARTIAL` (some steps failed), `FAILED`, or `INTERRUPTED` (the process running the plan died; see below). Plans that violate the safety guard are rejected up front and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)). Only one plan may run against a cluster at a time — a `POST` while another plan is in flight returns `409 Conflict`, because concurrent plans race the rollback state stored on the target and can leave the StatefulSet under-scaled.
+
+> **Orphan recovery.** If the Kates pod is killed mid-plan, the injected faults would otherwise persist with nothing left to undo them. On startup Kates removes abandoned `managed-by=kates` NetworkPolicies, restores StatefulSets still carrying a scale-down snapshot, and marks stranded `RUNNING` reports as `INTERRUPTED`. Only faults older than `kates.chaos.orphan-recovery.min-age-sec` (default 900) are touched, so a plan running on another replica is never disturbed.
 
 **Dry run** — `POST /api/disruptions?dryRun=true` with the same request body returns `200 OK`:
 
@@ -688,7 +697,7 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 | 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
 | 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
-| 409 | Conflict | Conflicts with current state | Cancelling a test that is not running |
+| 409 | Conflict | Conflicts with current state | Cancelling a test that is not running; starting a disruption while one is already running |
 | 422 | Unprocessable Entity | Rejected by safety guards | `maxAffectedBrokers` exceeded, plan would affect all brokers |
 | 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable |
 | 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
@@ -749,7 +758,7 @@ curl -s "$BASE/api/tests/$TEST_ID/report/junit" -o report.xml
 
 ### Workflow 2: Validate and Execute a Disruption
 
-Disruption execution is synchronous — there is nothing to poll. The `POST` returns only when every step (including observation windows) has finished, so set generous client timeouts for long plans.
+Disruption execution is asynchronous. The `POST` validates the plan, returns `202 Accepted` with a report id, and runs the steps in the background — poll `GET /api/disruptions/{id}` until the status is terminal. Only one plan runs against a cluster at a time; a second `POST` while one is in flight is refused with `409 Conflict`.
 
 ```bash
 #!/usr/bin/env bash
@@ -760,10 +769,17 @@ PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"ste
 # Dry-run to validate (no faults injected)
 curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "Content-Type: application/json" -d "$PLAN" | jq .
 
-# Execute — blocks until the plan completes, then returns the report
-RESULT=$(curl -s --max-time 600 -X POST "$BASE/api/disruptions" -H "Content-Type: application/json" -d "$PLAN")
-DISRUPT_ID=$(jq -r '.id' <<<"$RESULT")
-echo "Disruption finished: $DISRUPT_ID (status: $(jq -r '.report.status' <<<"$RESULT"))"
+# Execute — returns 202 immediately with the report id
+DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions" -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
+echo "Disruption started: $DISRUPT_ID"
+
+# Poll until the report reaches a terminal status
+while true; do
+  STATUS=$(curl -s "$BASE/api/disruptions/$DISRUPT_ID" | jq -r '.status')
+  echo "Status: $STATUS"
+  case "$STATUS" in COMPLETED|PARTIAL|FAILED|REJECTED|INTERRUPTED) break ;; esac
+  sleep 10
+done
 
 # Inspect recovery timings and Kafka impact
 curl -s "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.[] | {step, timeToFirstReady, timeToAllReady}'
@@ -824,7 +840,7 @@ The health check works with no key, the create call returns `202 Accepted` with 
 
 - Every CLI action maps to a REST endpoint — anything you do interactively can be scripted with `curl` and `jq` against the same backend service layer
 - Authentication is on by default: pass the key as `Authorization: Bearer` or `X-API-Key`, expect `401` without one and `403` with a wrong one; only `/api/health`, `/openapi`, and everything under `/q/` stay public
-- Test execution is asynchronous — `POST /api/tests` returns `202 Accepted` and you poll `GET /api/tests/{id}` — while disruption execution is synchronous and blocks until the report is ready
+- Test execution and disruption execution are both asynchronous — the `POST` returns `202 Accepted` with an id and you poll `GET /api/tests/{id}` or `GET /api/disruptions/{id}` until the status is terminal
 - One report feeds many consumers: JSON for dashboards, CSV for spreadsheets, JUnit XML for CI gates, and heatmap data for latency visualization
 - This chapter covers the core endpoint families only; the complete, always-current spec lives at `/q/openapi`
 
