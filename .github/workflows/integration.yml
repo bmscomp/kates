@@ -28,9 +28,10 @@ on:
 permissions:
   contents: read
 
-env:
-  KIND_VERSION: v0.27.0
-  KUBECTL_VERSION: v1.33.0
+# KIND_VERSION and KUBECTL_VERSION are NOT declared here. They live in
+# versions.env with every other pin and are loaded below, because the same two
+# lines used to sit in this file and in ci-apicurio.yml with nothing keeping
+# them in sync.
 
 jobs:
   integration:
@@ -39,6 +40,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      # versions.env is the single source of truth. grep fails the step if a pin
+      # is missing, which is the point: a silently empty KIND_VERSION would
+      # request https://kind.sigs.k8s.io/dl//kind-linux-amd64 and install a 404.
+      - name: Load toolchain pins from versions.env
+        run: |
+          set -euo pipefail
+          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
+            | tr -d '"' | tee -a "$GITHUB_ENV"
 
       - name: Install Kind
         run: |
