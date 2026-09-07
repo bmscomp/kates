@@ -28,10 +28,10 @@ Before you begin, make sure you have the following tools and infrastructure read
 
 | Tool | Minimum Version | Why You Need It |
 |------|:---------------:|--------------------|
-| **kubectl** | 1.28+ | Communicates with your Kubernetes cluster. Every command in this guide uses `kubectl` to inspect or modify cluster state. |
+| **kubectl** | 1.33+ | Communicates with your Kubernetes cluster. Every command in this guide uses `kubectl` to inspect or modify cluster state. Stay within one minor of your cluster: the local topology runs Kubernetes 1.34. |
 | **Helm** | 3.14+ | The Kubernetes package manager. The kafka-cluster chart is a Helm chart — Helm renders YAML templates from `values.yaml` and applies them to your cluster. |
 | **Docker** | 24+ | Required only if using a local Kind/k3d cluster. Docker runs the Kubernetes nodes as containers on your machine. |
-| **Kind** *(optional)* | 0.22+ | A lightweight tool to run Kubernetes *in Docker*. Perfect for local development. Not needed if deploying to EKS, GKE, AKS, or an existing cluster. |
+| **Kind** *(optional)* | 0.33+ | A lightweight tool to run Kubernetes *in Docker*. Perfect for local development. Not needed if deploying to EKS, GKE, AKS, or an existing cluster. Older kind releases do not publish the node image `config/cluster.yaml` asks for. |
 
 **Install check — run all four:**
 

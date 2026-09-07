@@ -172,6 +172,60 @@ elif [[ -n "$env_node_version" && "${cluster_node_versions[0]}" != "$env_node_ve
   fail=1
 fi
 
+# kind chooses the kubeadm API version from the NODE IMAGE, not from its own
+# release: below Kubernetes 1.36 it renders v1beta3, from 1.36 up it renders
+# v1beta4 (kind/pkg/cluster/internal/kubeadm/config.go). The two are not
+# compatible — kubeletExtraArgs is a map in one and a list of name/value in the
+# other, and timeoutForControlPlane moved onto a timeouts struct — and the
+# mismatch does NOT surface at config load. It surfaces minutes later, inside
+# `kubeadm init`, as
+#
+#   cannot unmarshal array into Go struct field ... of type map[string]string
+#
+# after kind has already pulled images and started containers. This assertion is
+# here because that is an expensive way to learn it.
+if [[ -n "$env_node_version" ]] && [[ -f "$CLUSTER_YAML" ]]; then
+  node_minor_for_api="$(echo "${env_node_version#v}" | cut -d. -f2)"
+  patch_has_list_args=0
+  patch_has_map_args=0
+  # Inside the `kubeletExtraArgs:` block of each patch, a "- name:" item means
+  # the v1beta4 list shape; a plain "key: value" means the v1beta3 map.
+  awk '
+    /kubeletExtraArgs:/ { inargs = 1; next }
+    inargs && /^[[:space:]]*-[[:space:]]*name:/ { print "LIST"; inargs = 0; next }
+    inargs && /^[[:space:]]*[A-Za-z][A-Za-z0-9_-]*:[[:space:]]*[^[:space:]]/ { print "MAP"; inargs = 0; next }
+    inargs && /^[[:space:]]*$/ { inargs = 0 }
+  ' "$CLUSTER_YAML" > /tmp/.kubeadm_arg_shapes.$$ 2>/dev/null || true
+  grep -q LIST /tmp/.kubeadm_arg_shapes.$$ && patch_has_list_args=1
+  grep -q MAP  /tmp/.kubeadm_arg_shapes.$$ && patch_has_map_args=1
+  rm -f /tmp/.kubeadm_arg_shapes.$$
+
+  patch_has_v4_timeouts=0
+  grep -qE '^[[:space:]]*timeouts:' "$CLUSTER_YAML" && patch_has_v4_timeouts=1
+  patch_has_v3_timeout=0
+  grep -qE '^[[:space:]]*timeoutForControlPlane:' "$CLUSTER_YAML" && patch_has_v3_timeout=1
+
+  if [[ "$node_minor_for_api" -ge 36 ]]; then
+    expected_api="v1beta4"
+    if [[ "$patch_has_map_args" -eq 1 || "$patch_has_v3_timeout" -eq 1 ]]; then
+      echo "DRIFT: ${CLUSTER_YAML} uses kubeadm v1beta3 patches, but node ${env_node_version} renders v1beta4." >&2
+      echo "  kubeletExtraArgs must be a list of name/value pairs, and" >&2
+      echo "  timeoutForControlPlane must become timeouts.controlPlaneComponentHealthCheck." >&2
+      fail=1
+    fi
+  else
+    expected_api="v1beta3"
+    if [[ "$patch_has_list_args" -eq 1 || "$patch_has_v4_timeouts" -eq 1 ]]; then
+      echo "DRIFT: ${CLUSTER_YAML} uses kubeadm v1beta4 patches, but node ${env_node_version} renders v1beta3." >&2
+      echo "  kubeletExtraArgs must be a map, and the timeouts struct must go back" >&2
+      echo "  to apiServer.timeoutForControlPlane on ClusterConfiguration." >&2
+      echo "  kind only renders v1beta4 for Kubernetes 1.36 and above." >&2
+      fail=1
+    fi
+  fi
+  printf '  %-46s %s\n' "kubeadm API for node ${env_node_version}:" "${expected_api}"
+fi
+
 # The docs figure is a MINIMUM, so it may legitimately trail the pin — but it
 # must never exceed it, or the guide asks readers for a kind newer than the one
 # CI proves works. sort -V orders versions, not strings, so 0.9 < 0.27.
@@ -188,18 +242,18 @@ if [[ "$fail" -eq 0 ]]; then
   echo "OK: toolchain pins agree (kind ${env_kind_version}, node ${env_node_version})."
 fi
 
-# kubectl is supported within one minor of the API server. This is a WARNING
-# rather than a failure on purpose: the pins are two minors apart as they stand,
-# and turning that red would block every chart PR on an unrelated upgrade. The
-# kind bump closes the gap, and this becomes an error once it does.
+# kubectl is supported within one minor of the API server. This was a warning
+# while the pins sat two minors apart — failing then would have blocked every
+# chart PR on an unrelated upgrade. They now agree, so it fails.
 if [[ -n "$env_kubectl_version" && -n "$env_node_version" ]]; then
   kubectl_minor="$(echo "${env_kubectl_version#v}" | cut -d. -f2)"
   node_minor="$(echo "${env_node_version#v}" | cut -d. -f2)"
   skew=$(( kubectl_minor - node_minor )); [[ "$skew" -lt 0 ]] && skew=$(( -skew ))
   if [[ "$skew" -gt 1 ]]; then
-    echo "WARNING: kubectl ${env_kubectl_version} is ${skew} minors from the node image ${env_node_version}." >&2
-    echo "  Supported skew is ±1. CI has been running outside it." >&2
-    echo >&2
+    echo "DRIFT: kubectl ${env_kubectl_version} is ${skew} minors from the node image ${env_node_version}." >&2
+    echo "  Supported kubectl skew against the API server is ±1." >&2
+    echo "  Move KUBECTL_VERSION and KINDEST_NODE_VERSION together." >&2
+    fail=1
   else
     echo "OK: kubectl ${env_kubectl_version} is within ±1 minor of ${env_node_version}."
   fi
