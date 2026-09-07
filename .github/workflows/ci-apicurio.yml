@@ -21,9 +21,8 @@ on:
 permissions:
   contents: read
 
-env:
-  KIND_VERSION: v0.27.0
-  KUBECTL_VERSION: v1.33.0
+# Pins come from versions.env, loaded below — see the note in integration.yml,
+# which carried a duplicate of the block that used to be here.
 
 jobs:
   apicurio-e2e:
@@ -33,15 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install kind
+      - name: Load toolchain pins from versions.env
         run: |
-          curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
-          chmod +x kind && sudo mv kind /usr/local/bin/
-
-      - name: Install kubectl
-        run: |
-          curl -Lo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          set -euo pipefail
+          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
+            | tr -d '"' | tee -a "$GITHUB_ENV"
 
       - uses: azure/setup-helm@v5
         with:
@@ -52,10 +47,20 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: cli/go.sum
 
+      # See the note in integration.yml: the action replaces two hand-rolled
+      # curls, and node_image stays out of it so config/cluster.yaml remains the
+      # only place the image is named.
       - name: Create kind cluster (3-zone topology)
-        run: |
-          kind create cluster --config config/cluster.yaml --name apicurio-e2e
-          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+        uses: helm/kind-action@v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: apicurio-e2e
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
 
       - name: Apply storage classes
         run: kubectl apply -f config/storage/storage-classes.yaml
@@ -113,6 +118,4 @@ jobs:
           echo "== kafka topics =="; kubectl get kafkatopics -n kafka || true
           echo "== kafka users =="; kubectl get kafkausers -n kafka || true
 
-      - name: Cleanup
-        if: always()
-        run: kind delete cluster --name apicurio-e2e
+      # Teardown is helm/kind-action's post step — see integration.yml.

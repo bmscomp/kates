@@ -28,9 +28,10 @@ on:
 permissions:
   contents: read
 
-env:
-  KIND_VERSION: v0.27.0
-  KUBECTL_VERSION: v1.33.0
+# KIND_VERSION and KUBECTL_VERSION are NOT declared here. They live in
+# versions.env with every other pin and are loaded below, because the same two
+# lines used to sit in this file and in ci-apicurio.yml with nothing keeping
+# them in sync.
 
 jobs:
   integration:
@@ -40,27 +41,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Kind
+      # versions.env is the single source of truth. grep fails the step if a pin
+      # is missing, which is the point: a silently empty KIND_VERSION would
+      # request https://kind.sigs.k8s.io/dl//kind-linux-amd64 and install a 404.
+      - name: Load toolchain pins from versions.env
         run: |
-          curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
-          chmod +x kind
-          sudo mv kind /usr/local/bin/
-
-      - name: Install kubectl
-        run: |
-          curl -Lo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
+          set -euo pipefail
+          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
+            | tr -d '"' | tee -a "$GITHUB_ENV"
 
       - uses: azure/setup-helm@v5
         with:
           version: v3.17.0
 
+      # helm/kind-action rather than two hand-rolled curls. Those hardcoded
+      # kind-linux-amd64, verified no checksum, cached nothing, and — being shell
+      # inside a run block — were invisible to Dependabot, which is how the pin
+      # reached eighteen months old without anyone noticing.
+      #
+      # node_image is deliberately NOT passed: config/cluster.yaml names the
+      # image per node and check-versions.sh asserts it against versions.env.
+      # Passing it here as well would create a second source of truth, and the
+      # flag silently wins over the file.
       - name: Create Kind cluster
+        uses: helm/kind-action@v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: ci-test
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
         run: |
-          kind create cluster --config config/cluster.yaml --name ci-test
           kubectl cluster-info --context kind-ci-test
-          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+          # kind-action's `wait` covers the control plane; the workers join after
+          # it returns, and the zone checks below need all three.
+          kubectl wait --for=condition=Ready nodes --all --timeout=180s
 
       - name: Validate cluster topology
         run: |
@@ -167,6 +184,6 @@ jobs:
           echo "| NetworkPolicies | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| Jaeger manifests | ✅ |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Cleanup
-        if: always()
-        run: kind delete cluster --name ci-test
+      # No explicit teardown: helm/kind-action registers a post step that deletes
+      # the cluster it created, on success and on failure alike. A `kind delete`
+      # here would only race it.

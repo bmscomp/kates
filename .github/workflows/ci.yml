@@ -57,6 +57,9 @@ jobs:
               - 'charts/**'
               - 'versions.env'
               - 'scripts/check-versions.sh'
+              # check-versions.sh now also asserts the kind node image tags in
+              # this file against versions.env, so editing it has to run it.
+              - 'config/cluster.yaml'
             yaml:
               - 'config/**'
 
@@ -134,7 +137,11 @@ jobs:
       # strimziVersion drifts from the Chart.yaml dependency version, the CRD
       # hook applies CRDs for a different operator than the one installed —
       # silently. This is the only thing that catches that.
-      - name: Check Strimzi version pins agree
+      #
+      # It also asserts the local-cluster toolchain: versions.env against the
+      # kindest/node tags in config/cluster.yaml, which kind reads literally and
+      # so cannot be generated from the pin.
+      - name: Check version pins agree
         run: bash scripts/check-versions.sh
 
       # A chart test that calls a 404 exits 0 and reports success, so `helm
