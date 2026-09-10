@@ -252,3 +252,6 @@ bower_components
 .metals
 charts/*/charts/
 charts/*/*.lock
+
+# helm dependency update scratch dirs (left behind when a run is interrupted)
+charts/*/tmpcharts-*/

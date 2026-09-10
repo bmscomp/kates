@@ -2,7 +2,11 @@ apiVersion: v2
 name: kafka-cluster
 description: Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability
 type: application
-version: 0.3.0
+# Minor bump: the chart now renders correctly as an ADDITIONAL cluster beside
+# the primary (values-additional.yaml, derived NetworkPolicy selectors, the
+# operator policy handed to the strimzi-operator wrapper, share groups gated on
+# the Kafka version, extraLabels) and declares its Kafka floor.
+version: 0.4.0
 appVersion: "4.3.0"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -22,3 +26,29 @@ dependencies:
     version: "3.68.0"
     repository: "https://seaweedfs.github.io/seaweedfs/helm"
     condition: seaweedfs.enabled
+annotations:
+  # The oldest Kafka this chart's PRIMARY configuration can run. values.yaml
+  # turns on share groups (kafka.config `group.share.enable: true`), which need
+  # Kafka >= 4.2 and a metadata version >= 4.2; the chart therefore renders the
+  # share-group keys only for kafkaVersion >= this floor, and an additional
+  # cluster below it starts without them. The CLI reads this annotation to
+  # decide which operators can host the primary (window ∩ >= floor must be
+  # non-empty); scripts/check-versions.sh asserts the default kafkaVersion is
+  # at or above it. Raise it when the platform's configuration needs something
+  # newer; never lower it without removing the feature that set it.
+  kates.io/kafka-floor: "4.2.0"
+  artifacthub.io/changes: |
+    - kind: added
+      description: kates.io/kafka-floor annotation (4.2.0, because the default configuration enables share groups); scripts/check-versions.sh asserts the default kafkaVersion against it
+    - kind: added
+      description: values-additional.yaml — an additional cluster beside the primary, with every shared or fixed-name resource off and single-node sizing
+    - kind: added
+      description: networkPolicies.operatorPolicy.enabled gates the strimzi-operator NetworkPolicy this chart writes into the operator namespace, so the strimzi-operator wrapper can own it once per operator
+    - kind: added
+      description: extraLabels, merged into every resource's labels (the CLI stamps kates.io/lab labels through it)
+    - kind: changed
+      description: The share-group keys in kafka.config (group.share.*, share.*) render only when kafkaVersion >= 4.2.0, so a 4.1.x additional cluster starts; a metadata version newer than the Kafka version is refused at render time
+    - kind: changed
+      description: networkPolicies.defaultDenySelector and allowDNSSelector default to an empty map and derive app.kubernetes.io/part-of strimzi-<clusterName> in the template, so a cluster not named krafter is actually selected; an explicit value still wins
+    - kind: changed
+      description: values.schema.json accepts kafka.metadataVersion in the short (4.2) and -IV (4.2-IV1) forms; NOTES print the Kafka version, the metadata version and the operator expected to reconcile the cluster

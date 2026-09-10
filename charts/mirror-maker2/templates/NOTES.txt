@@ -1,9 +1,21 @@
 MirrorMaker 2 {{ .Chart.AppVersion }} — release {{ .Release.Name }} in {{ include "mirror-maker2.namespace" . }}.
 
 Target (MM2 Connect runtime): {{ .Values.target.alias }} @ {{ include "mirror-maker2.bootstrap" (dict "c" .Values.target "ctx" $) }}
+Replication policy: {{ if include "mirror-maker2.isIdentityPolicy" . }}IDENTITY — topic names are PRESERVED on the target{{ else }}default — topics are renamed <alias>{{ (.Values.replicationPolicy).separator | default "." }}<topic> on the target{{ end }}
+
 Mirror flows:
 {{- range .Values.mirrors }}
-  - {{ .source.alias }} → {{ $.Values.target.alias }}  topics={{ .topicsPattern | default ".*" }}  groups={{ .groupsPattern | default ".*" }}  (source: {{ include "mirror-maker2.bootstrap" (dict "c" .source "ctx" $) }})
+  - {{ .source.alias }} → {{ $.Values.target.alias }}{{ if .source.kafkaVersion }}  (source runs Kafka {{ .source.kafkaVersion }}){{ end }}
+      from   {{ include "mirror-maker2.bootstrap" (dict "c" .source "ctx" $) }}
+      topics {{ .topicsPattern | default ".*" }}   groups {{ .groupsPattern | default ".*" }}
+      lands as {{ include "mirror-maker2.replicatedTopic" (dict "topic" "<topic>" "alias" (.source.alias | default "source") "ctx" $) }}
+{{- end }}
+{{- if .Values.cutover.enabled }}
+
+⚠ CUTOVER MODE IS ACTIVE.
+  source connectors: {{ .Values.cutover.sourceConnectorState }} — data replication has stopped
+  checkpoint connectors: {{ .Values.cutover.checkpointConnectorState }} — offset translation continues
+  Consumers that have not moved yet still depend on the checkpoint connector.
 {{- end }}
 
 ⚠ CREDENTIALS ARE A TWO-CLUSTER CONTRACT:
@@ -14,11 +26,72 @@ Mirror flows:
     MirrorSourceConnector stalls silently with no data replicated.
 
 Watch it come up:
-  kubectl -n {{ include "mirror-maker2.namespace" . }} get kafkamirrormaker2 {{ include "mirror-maker2.fullname" . }} -w
   kubectl -n {{ include "mirror-maker2.namespace" . }} wait kafkamirrormaker2/{{ include "mirror-maker2.fullname" . }} --for=condition=Ready --timeout=300s
 
-Verify replication (topics appear as <sourceAlias>.<topic> on the target):
-  kubectl -n kafka get kafkatopics | grep '^{{ (index .Values.mirrors 0).source.alias | default "source" }}\.'
+Ready is NOT "it is replicating" — it means the Connect workers are up. The
+connector status is where a mirror actually reports itself broken:
 
-Smoke test:
-  helm test {{ .Release.Name }} -n {{ include "mirror-maker2.namespace" . }}
+  kubectl -n {{ include "mirror-maker2.namespace" . }} get kafkamirrormaker2 {{ include "mirror-maker2.fullname" . }} \
+    -o jsonpath='{range .status.connectors[*]}{.name}{"\t"}{.connector.state}{"\n"}{end}'
+
+Verify replication on the target. Ask the BROKERS, not the Topic Operator: it
+is unidirectional, so topics MirrorMaker creates never become KafkaTopic CRs
+and `kubectl get kafkatopics` will not show them.
+{{- if include "mirror-maker2.isIdentityPolicy" . }}
+  # Identity policy — replicated topics keep their ORIGINAL names, so look for
+  # the source's topic names appearing on the target rather than a prefix.
+  make mm2-topics KAFKA_NAMESPACE={{ .Values.target.namespace | default "kafka" }} KAFKA_CLUSTER={{ .Values.target.clusterName | default "krafter" }}
+{{- else }}
+  make mm2-topics KAFKA_NAMESPACE={{ .Values.target.namespace | default "kafka" }} KAFKA_CLUSTER={{ .Values.target.clusterName | default "krafter" }} | grep '^{{ (index .Values.mirrors 0).source.alias | default "source" }}{{ (.Values.replicationPolicy).separator | default "." | regexQuoteMeta }}'
+{{- end }}
+
+Smoke test (CR Ready + every connector RUNNING, or deliberately paused/stopped):
+  helm test {{ .Release.Name }} -n {{ include "mirror-maker2.namespace" . }} --logs
+{{- if not .Values.tests.replication.enabled }}
+
+  For a test that moves actual data, set tests.replication.enabled=true.
+{{- end }}
+{{- if .Values.preflight.enabled }}
+
+Preflight ran before this install — it probed every source with a {{ .Values.version }}
+client, which is the same client the workers use. See:
+  kubectl -n {{ include "mirror-maker2.namespace" . }} logs job/{{ include "mirror-maker2.fullname" . }}-preflight
+{{- end }}
+
+{{- $tasks := int (include "mirror-maker2.totalTasks" .) }}
+{{- $replicas := int (ternary (.Values.autoscaling.maxReplicas | default 0) .Values.replicas .Values.autoscaling.enabled) }}
+
+Capacity: {{ $tasks }} connector task(s) across {{ len .Values.mirrors }} mirror(s), {{ $replicas }} worker(s){{ if .Values.autoscaling.enabled }} at most{{ end }}.
+{{- if gt $replicas $tasks }}
+  {{ $replicas }} workers for {{ $tasks }} tasks: Connect never runs more tasks than that,
+  so {{ sub $replicas $tasks }} worker(s) will idle. Raise tasksMax (its ceiling is the
+  source's partition count) or lower the worker count.
+{{- end }}
+
+Offset-syncs topic:
+{{- range .Values.mirrors }}
+  {{ .source.alias | default "source" }}: {{ include "mirror-maker2.offsetSyncsLocation" (dict "m" . "ctx" $) }}
+  {{- if eq (include "mirror-maker2.offsetSyncsLocation" (dict "m" . "ctx" $)) "source" }}
+    The SOURCE principal needs Create + Write + Describe on mm2-offset-syncs.* —
+    more than a read-only contract implies. If you may only READ that cluster,
+    set readOnlySource: true (or offsetSyncs.location=target) BEFORE first
+    install: changing it later restarts translation from an empty topic.
+  {{- end }}
+{{- end }}
+
+{{- if .Values.cutover.enabled }}
+
+Posture: CUTOVER/FAILOVER — source connector {{ .Values.cutover.sourceConnectorState }},
+checkpoint connector {{ .Values.cutover.checkpointConnectorState }}.
+  Resume replication:  helm upgrade {{ .Release.Name }} <chart> -n {{ include "mirror-maker2.namespace" . }} --set cutover.enabled=false
+  Remove the mirror:   helm uninstall {{ .Release.Name }} -n {{ include "mirror-maker2.namespace" . }}{{ if .Values.keepOnDelete }} && kubectl -n {{ include "mirror-maker2.namespace" . }} delete kafkamirrormaker2 {{ include "mirror-maker2.fullname" . }}{{ end }}
+{{- else }}
+
+Posture: REPLICATING. What to run next:
+  Cut over (planned):  helm upgrade {{ .Release.Name }} <chart> -n {{ include "mirror-maker2.namespace" . }} -f <chart>/values-cutover.yaml
+  Fail over (source lost): ... -f <chart>/values-failover.yaml
+  Fail back afterwards:    a SEPARATE release, see <chart>/values-failback.yaml
+{{- end }}
+
+Migrating? docs/tutorials/11-migrating-kafka-2x-to-4x.md (2.x) or 12 (3.x),
+and docs/mirror-maker2-runbook.md for the cutover checklist.

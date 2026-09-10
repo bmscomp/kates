@@ -1002,6 +1002,31 @@ kates deploy --yes
 | `--port-forward`, `-P` | After deploying, hold the terminal forwarding every service until Ctrl+C |
 | `--with-schema-registry` | `none`, `apicurio`, or `confluent` (default: `apicurio`) |
 | `--with-*` | Per-component toggles — `kates deploy --help` lists them, along with the per-component `*-ns` flags |
+| `--operator-scope` | `cluster` (default): one Strimzi operator watching every namespace. `namespace`: one operator per Kafka namespace, so older Kafka lines can run beside the primary under an operator of their own |
+| `--strimzi-version` | Operator version to install. Default: the repository pin; `latest` for the newest published. The chart is fetched and read before anything is installed |
+| `--strimzi-chart` | A local `strimzi-kafka-operator` tarball for air-gapped mirrors |
+| `--kafka-version` | Kafka version of the primary cluster. Default: the newest the selected operator supports; `latest` spells the default |
+| `--kafka-name` | Name of the primary Kafka cluster (default: `krafter`) |
+| `--with-mirror-maker2` | Deploy MirrorMaker 2 as a loopback mirror of the primary — the chart's shipped shape, enough to exercise connectors, offset syncs, checkpoints and the `kates-mm2` ACLs without a second cluster (default: `false`). Real sources are `kates migrate up --from …` |
+| `--mm2-ns` | Namespace for MirrorMaker 2 in the isolated topology (default: `kafka`, where the `kates-mm2` credential lives; elsewhere the credential is copied) |
+
+**The wizard.** `kates deploy -i` (or a bare `kates deploy` on a terminal) walks four screens, and nothing is installed until the last one is confirmed:
+
+| Screen | What it asks |
+|:---|:---|
+| What to deploy | topology, schema registry, HA sizing, and the components — Strimzi, Kafka Connect + PostgreSQL, Kafka UI, MirrorMaker 2, chaos, monitoring, Cert-Manager, Kyverno |
+| Versions | the operator scope — *mono cluster* (one Strimzi, one Kafka version, the operator watching every namespace) or *namespace-scoped* (one operator per Kafka namespace); the Strimzi version (the pin first, then the catalogue when reachable); then the Kafka version for the primary, whose options are exactly the chosen operator's window — pick 1.0.1 and the list is `4.2.0 4.1.2 4.1.1 4.1.0`, pick 1.1.0 and it is `4.3.0 4.2.1 4.2.0` |
+| Namespaces | one input per selected component (isolated topology only) |
+| Review | every choice as it will resolve — operator and where its chart came from, Kafka version and metadata version, window, components, sizing, namespaces — and a Deploy/Cancel confirmation |
+
+Versions are resolved before the first Helm call — the "Resolving Versions" phase prints the operator version and where its chart came from, the Kafka window it supports, the Kafka version chosen (and whether it was defaulted), the metadata version, and what the operator already on the cluster allows: the same version converges; an older one is upgraded after a confirmation that lists the clusters that will roll; a newer one is refused (Strimzi does not downgrade); a Kafka version outside the window is refused with the window and every way forward. Under cluster scope the refusal says why no second operator can help — a cluster-wide operator watches every namespace — and names the legacy provider and namespace scope as the ways out.
+
+```bash
+kates deploy --kafka-version 4.2.1                      # a supported version other than the newest
+kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0
+kates deploy --operator-scope namespace                 # one operator per Kafka namespace
+kates deploy --dry-run --strimzi-version latest          # shows the resolution, installs nothing
+```
 
 ::: {.callout-warning}
 `--dry-run` is not inert. It stops before the Helm pipeline, but the cluster gate, pre-flight introspection, and Kind StorageClass bootstrap all run first — the last of these writes StorageClasses into the cluster. It will not create a Kind cluster, but it is a plan preview, not a read-only mode.
@@ -1121,6 +1146,79 @@ kates upgrade
 ```
 
 **See also:** [Deployment Guide](12-deployment.md) for detailed deployment topologies and configuration, [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) for step-by-step setup.
+
+---
+
+### Versions and Operators
+
+What can run here is read from the charts and the cluster, never from a table inside the CLI: each operator chart states the Kafka versions it supports, the live operator Deployment states what it watches, and the Strimzi Helm index states which operator versions exist.
+
+#### versions
+
+```bash
+kates versions                       # operators on this cluster (or the pin), their windows, the legacy range
+kates versions strimzi [--resolve]   # the catalogue of published operator versions and their status
+kates versions kafka --strimzi-version 1.0.1
+kates versions --offline             # never touch the network
+```
+
+`versions strimzi` marks each version `pinned`, `newer than pinned`, `supported`, or `below floor` (hidden without `--all`); the Kafka window is shown for every chart already cached, and `--resolve` pulls the rest. `versions kafka` prints one operator's window, the newest entry, the CRD API it serves and stores, and the metadata version derived for each entry.
+
+#### operators list
+
+```bash
+kates operators list
+kates operators list -o json
+```
+
+Every Strimzi Cluster Operator on the cluster, discovered from its Deployment: namespace, version, scope (`cluster` or `namespaces`), watched namespaces, Kafka window, and role — the primary's operator owns the CRDs and cluster-scoped RBAC; additional operators are marked adjacent to it (the configuration Strimzi tests) or not. A cluster-wide and a namespaced operator together is flagged: they would reconcile the same namespaces.
+
+---
+
+### Migration Commands
+
+`kates migrate` stands up an old Kafka beside the platform's primary, mirrors it with MirrorMaker 2, proves the records and the consumer offsets arrived, rehearses the cutover and tears everything down — from one pair of versions. It replaces `scripts/test-mm2-migration.sh`, `scripts/mm2-kafka-cli.sh` and `scripts/build-legacy-kafka-image.sh`, and the Makefile `mm2-*` targets now call it.
+
+```bash
+kates migrate pairs                          # every old → new pair this cluster can stand up, with the provider each source gets
+kates migrate plan --from 2.8.2              # what up would create — nothing changes
+kates migrate up   --from 2.8.2 [--to 4.3.0] [-i]
+kates migrate up   --from 2.8.2 --from 3.9.1 # two sources, one target, one MirrorMaker 2 release
+kates migrate status | verify | cutover | rollback | down [--name m282-430]
+kates migrate run  --from 2.8.2 [--keep] [--skip-build] [-o json]    # up → verify → cutover → down, one report
+```
+
+`--from` is resolved to a provider: a version the primary's operator supports becomes a Strimzi cluster; 2.x and 3.x become a `legacy-kafka` cluster (ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0); a version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the backend, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` (`m282-430`), every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster — there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
+
+#### Several sources in one release
+
+`--from` is repeatable on `plan`, `up` and `run`. Each source gets its own **alias** derived from its version (`src282`, `src391` — lowercase and dash-free, because a dot is MirrorMaker's own separator between alias and topic), and from that alias its own namespace (`kafka-m282-391-430-src282`), release, credential, corpus topic (`kates.orders.src282`) and entry in the generated `mirrors:` list — one MirrorMaker 2 release reading both. The lab is named for all of them (`m282-391-430`); with one `--from` nothing changes: the lab is `m282-430`, the alias is `source`, the release is `m282-430-src`.
+
+Every per-source assertion becomes its own leg of the report, named by the alias (`record count [src391]`), while the rows about the release itself — `MirrorMaker 2 installed`, `CR Ready`, `connectors RUNNING`, `cutover applied` — stay single. `status` prints one `source <alias>` block per leg and `down` removes every source it finds under the lab's label.
+
+Two combinations the chart refuses at render time are refused by the CLI first, naming both `--from` values and touching nothing:
+
+- **the same alias twice** (`--from 2.8.2 --from 2.8.2`) — an alias names the replicated topic prefix, the offset-syncs topic and the checkpoints topic, so two sources sharing one interleave into a single set of target topics without any error;
+- **an identity fan-in over one topic name** (`--from 2.8.2 --from 3.9.1 --topics orders`) — under the identity policy topic names are kept, so both legs would write `orders` on the target. The refusal names the three ways out: `--policy default` (each source's topics land as `<alias>.<topic>`), dropping `--topics` so the lab gives each source its own corpus, or one lab per source.
+
+#### Read-only sources
+
+`--read-only-source` (on `plan`, `up`, `run` and `migrate mirror deploy`) sets `readOnlySource: true` on every mirror, which the chart turns into `offset-syncs.topic.location: target` ([KIP-716](https://cwiki.apache.org/confluence/display/KAFKA/KIP-716:+Allow+configuring+the+location+of+the+offset-syncs+topic+with+MirrorMaker2)) on both connectors and into the matching target ACL. It is **off by default**, and the difference is what the source principal must be granted:
+
+| `--read-only-source` | `offset-syncs.topic.location` | The source principal needs |
+|:---|:---|:---|
+| off (default) | `source` — Kafka's own | `Read` + `Describe` on the mirrored topics, **and** `Create` + `Write` + `Describe` on `mm2-offset-syncs.*` |
+| on | `target` | `Read` + `Describe`, and nothing else — the mirror writes nothing to the source |
+
+`plan` prints both lines under **offset-syncs**, and the `run` report header carries the same sentence. The lab's own `legacy-kafka` source is a cluster the CLI owns both ends of, so the default stands there; the flag is for `--from-bootstrap` against a cluster you do not own. Flipping it on a **running** mirror restarts translation from scratch: the new offset-syncs topic starts empty, so checkpoints regress until it catches up.
+
+The building blocks the front door is made of are commands too: `migrate image build`, `migrate source deploy|status|remove`, `migrate mirror deploy|status|cutover|rollback|remove`, `migrate target topics|offsets <topic>|groups|group <id>`.
+
+::: {.callout-note}
+In this version every source is `legacy-kafka`: a Strimzi-operated source (an in-window version, or a dropped line under its own operator with `--operator-scope namespace`) is described by `plan` and refused by `up` with "not yet implemented — use --source-provider legacy". That is true of a `--from` in a set as much as on its own: a fan-in that includes a Strimzi source stays `plan`-only. `--to` other than the primary's version is `plan`-only for the same reason.
+:::
+
+**See also:** [Migrating Kafka 2.x to 4.x](../tutorials/11-migrating-kafka-2x-to-4x.md), [Migrating Kafka 3.x to 4.x](../tutorials/12-migrating-kafka-3x-to-4x.md), the [MirrorMaker 2 runbook](../mirror-maker2-runbook.md).
 
 ---
 

@@ -202,6 +202,24 @@ Why this matters to you:
 
 ## 3. Installation
 
+### 3.0 Choosing the operator scope and versions
+
+The CLI decides three things before it installs anything, and each has a flag:
+
+| Choice | Flag | Default | Where the answer comes from |
+|:---|:---|:---|:---|
+| Operator scope | `--operator-scope cluster\|namespace` | `cluster` — one Strimzi operator watching every namespace | `kates operators list` shows what is installed |
+| Operator version | `--strimzi-version` | the repository pin (`charts/strimzi-operator` `appVersion`); `latest` for the newest published | `kates versions strimzi` — the Strimzi Helm index |
+| Kafka version | `--kafka-version` | the newest the selected operator supports | `kates versions kafka --strimzi-version …` — read from that operator's chart |
+
+Under cluster scope, only the Kafka versions in the one operator's window can run under Strimzi; asking for another is refused with the window and the ways out (the `legacy-kafka` provider through `kates migrate`, or namespace scope). Under namespace scope, the primary's operator watches only the primary's namespaces, and an older Kafka line can later run beside it under an operator of its own. `kates deploy --dry-run` prints the whole resolution — operator, window, Kafka version, metadata version, what the installed operator allows — and installs nothing.
+
+```bash
+kates versions                                            # what this cluster can run today
+kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0
+kates deploy --operator-scope namespace
+```
+
 ### 3.1 Step 1 — Storage Classes (Local/Kind Only)
 
 If you're deploying to Kind or a local cluster without dynamic provisioning, create a StorageClass. Cloud clusters (EKS/GKE/AKS) can skip this step.

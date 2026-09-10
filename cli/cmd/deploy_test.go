@@ -5,6 +5,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/pkg/kafkaversion"
+	"github.com/bmscomp/kates/cli/pkg/strimzi"
 )
 
 func init() {
@@ -23,6 +26,45 @@ func init() {
 	// is what the orchestration tests are about — the waiting itself is not.
 	runExecOutputFn = stubClusterRead
 	runExecCombinedFn = stubClusterRead
+
+	// Version resolution reads chart files and the cluster; the orchestration
+	// tests get the pinned answer directly (its own logic is covered in
+	// deploy_versions_test.go).
+	resolveVersionPlanFn = func(_ context.Context, _ strimzi.Runner, o versionOptions) (*versionPlan, error) {
+		return stubVersionPlan(o), nil
+	}
+}
+
+// stubVersionPlan is the "pin, fresh cluster, newest Kafka" plan.
+func stubVersionPlan(o versionOptions) *versionPlan {
+	window := kafkaversion.NewWindow(kafkaversion.MustParse("4.2.0"), kafkaversion.MustParse("4.2.1"), kafkaversion.MustParse("4.3.0"))
+	scope := o.Scope
+	if scope == "" {
+		scope = scopeCluster
+	}
+	vp := &versionPlan{
+		Scope:          scope,
+		StrimziVersion: "1.1.0",
+		StrimziSource:  "pinned",
+		Pinned:         true,
+		PinnedVersion:  "1.1.0",
+		ChartDir:       "charts/strimzi-operator",
+		Window:         window.Strings(),
+		KafkaVersion:   "4.3.0",
+		KafkaDefaulted: o.KafkaVersion == "",
+		Metadata:       "4.2",
+		OperatorAction: "install",
+		kafka:          kafkaversion.MustParse("4.3.0"),
+	}
+	if o.KafkaVersion != "" && o.KafkaVersion != "latest" {
+		vp.kafka = kafkaversion.MustParse(o.KafkaVersion)
+		vp.KafkaVersion = o.KafkaVersion
+		vp.Metadata = kafkaversion.MetadataFor(vp.kafka, window)
+	}
+	if scope == scopeNamespace {
+		vp.Watch = o.watchList()
+	}
+	return vp
 }
 
 // stubClusterRead answers the cluster queries the deploy paths make, in the
@@ -277,27 +319,39 @@ func TestDeployCommand_Idempotency(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	// Everything already deployed => no `helm upgrade`, with ONE deliberate
-	// exception: the Strimzi operator is always reconciled.
+	// Everything already deployed => no `helm upgrade`, with TWO deliberate
+	// exceptions: the Strimzi operator and the Kates backend are always
+	// reconciled.
 	//
 	// Skipping is not idempotency — `helm upgrade --install` converges, which is
 	// the real thing. Skipping strimzi-operator when its release exists means
 	// charts/strimzi-operator's pre-upgrade CRD hook never fires on an existing
 	// cluster, so the CRDs freeze at whatever version first installed them while
 	// the API server silently prunes fields the newer operator needs.
-	var strimziUpgraded bool
+	//
+	// The backend was skipped the same way, and the cost was worse: a release
+	// record says a helm install once succeeded, not that anything runs. A
+	// backend stuck in ImagePullBackOff satisfied the check, so deploy called
+	// it done and no re-run could repair it — and a change in the values an
+	// install should get never reached an existing release.
+	reconciled := map[string]bool{}
 	for _, cmd := range executedCommands {
 		if !strings.Contains(cmd, "helm upgrade") {
 			continue
 		}
-		if strings.Contains(cmd, "strimzi-operator") {
-			strimziUpgraded = true
-			continue
+		switch {
+		case strings.Contains(cmd, "strimzi-operator"):
+			reconciled["strimzi-operator"] = true
+		case strings.Contains(cmd, "--install kates charts/kates"):
+			reconciled["kates"] = true
+		default:
+			t.Errorf("Expected no helm upgrade commands to run due to idempotency, got: %s", cmd)
 		}
-		t.Errorf("Expected no helm upgrade commands to run due to idempotency, got: %s", cmd)
 	}
-	if !strimziUpgraded {
-		t.Error("Expected strimzi-operator to be reconciled unconditionally, but no helm upgrade ran for it")
+	for _, want := range []string{"strimzi-operator", "kates"} {
+		if !reconciled[want] {
+			t.Errorf("Expected %s to be reconciled unconditionally, but no helm upgrade ran for it", want)
+		}
 	}
 }
 
@@ -486,11 +540,18 @@ func TestDeployCommand_KafkaConnectIdempotent(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	// When everything is already deployed, no helm upgrade should be called
+	// When everything is already deployed, no helm upgrade should be called —
+	// except for the two components that are reconciled unconditionally
+	// because a release record is not evidence that anything is running (see
+	// TestDeployCommand_Idempotency).
 	for _, cmd := range executedCommands {
-		if strings.Contains(cmd, "helm upgrade") {
-			t.Errorf("Expected no helm upgrade commands due to idempotency, got: %s", cmd)
+		if !strings.Contains(cmd, "helm upgrade") {
+			continue
 		}
+		if strings.Contains(cmd, "strimzi-operator") || strings.Contains(cmd, "--install kates charts/kates") {
+			continue
+		}
+		t.Errorf("Expected no helm upgrade commands due to idempotency, got: %s", cmd)
 	}
 
 	// Specifically, PostgreSQL should NOT be deployed

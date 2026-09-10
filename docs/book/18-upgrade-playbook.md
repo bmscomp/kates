@@ -111,14 +111,14 @@ Revert `spec.kafka.version` in `config/kafka/kafka.yaml` and re-apply — Strimz
 
 **Step 1 — Check release notes** for breaking changes at [Strimzi releases](https://github.com/strimzi/strimzi-kafka-operator/releases).
 
-**Step 2 — Upgrade via Helm.** The operator is installed from the OCI chart as the `strimzi-operator` release in its own `strimzi-operator` namespace (see `scripts/deploy-kafka.sh`):
+**Step 2 — Upgrade through the CLI.** The operator is the `strimzi-operator` release of the wrapper chart (`charts/strimzi-operator`) in its own `strimzi-operator` namespace; the CLI drives the upgrade so the wrapper's values, schema and CRD hook apply, and so the checks run first:
 
 ```bash
-helm upgrade strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version <new-version> \
-  --namespace strimzi-operator \
-  --reuse-values
+kates deploy --strimzi-version <new-version> --dry-run   # what would change, and whether it is allowed
+kates deploy --strimzi-version <new-version>             # fetches and reads the chart, then upgrades
 ```
+
+Before anything is installed the CLI refuses a downgrade, refuses a version whose Kafka window does not contain every cluster the operator runs (it names the cluster and suggests an operator whose window has both), refuses to cross Strimzi 1.0 while any CRD still stores `v1beta2`, and otherwise asks once, listing the clusters that will roll. `kates versions strimzi` shows the versions that exist and their windows. Upgrading around the CLI with a raw `helm upgrade` of the upstream chart bypasses the wrapper and its CRD hook — the CRDs then freeze at the version first installed.
 
 **Step 3 — Verify:**
 

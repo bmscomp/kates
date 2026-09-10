@@ -69,6 +69,7 @@ spec:
   containers:
     - name: test
       image: {{ $kubectl }}
+      {{- include "mirror-maker2.imagePullPolicy" $ | nindent 6 }}
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true

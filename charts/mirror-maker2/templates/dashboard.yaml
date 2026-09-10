@@ -1,0 +1,436 @@
+{{- if .Values.dashboard.enabled }}
+{{- $name := include "mirror-maker2.fullname" . }}
+{{- $ns := include "mirror-maker2.namespace" . }}
+{{- $identity := include "mirror-maker2.isIdentityPolicy" . }}
+{{- $sep := (.Values.replicationPolicy).separator | default "." }}
+{{- /*
+The panel list is GENERATED, like the alerts, so a fan-in release shows one row
+per source instead of a sum that hides the dead leg. The release-wide rows come
+first (is it replicating, connector task states, throughput, workers) and the
+per-source rows are appended, each collapsed, in `mirrors` order.
+
+Two things this file has to get right and nothing checks at install time:
+
+1. The `.data` value must be valid JSON. Grafana's sidecar does not report a
+   parse failure anywhere the operator will see; the dashboard simply never
+   appears. Every generated fragment therefore emits its LEADING comma, so a
+   release with zero, one or ten mirrors closes the array the same way. CI
+   parses the rendered ConfigMap for both the one-mirror and the fan-in case.
+
+2. Backslashes cross three layers. A PromQL regex needs a literal dot, JSON
+   needs the backslash doubled, and YAML block scalars pass both through
+   untouched — so the alias prefix is written as a character class,
+   `topic=~\"<alias>[.].*\"`, which needs no backslash at any layer.
+
+The metric names are the JMX exporter's (metrics-configmap.yml). Under
+metrics.type=strimziMetricsReporter the reporter names the same numbers
+differently and these panels read empty. Unlike the alerts, the dashboard does
+NOT refuse to render there: an empty panel is visible to the person looking at
+it, whereas an alert that cannot fire is silent by construction.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-dashboard
+  namespace: {{ $ns }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+    {{ .Values.dashboard.label }}: {{ .Values.dashboard.labelValue | quote }}
+  annotations:
+    grafana_folder: {{ .Values.dashboard.folder | quote }}
+data:
+  mirror-maker2.json: |
+    {
+      "title": "Kafka MirrorMaker 2 — {{ $name }}",
+      "uid": "kates-mm2-{{ $name | trunc 30 | trimSuffix "-" }}",
+      "tags": ["kafka", "mirrormaker2", "replication", "kates"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "type": "constant",
+            "query": "{{ $ns }}",
+            "current": { "text": "{{ $ns }}", "value": "{{ $ns }}" },
+            "hide": 2
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "row",
+          "title": "Is it replicating?",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "Records replicated /s",
+          "description": "The one number that says the mirror is alive. Zero here with connectors RUNNING is the signature of a missing source-side ACL.",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+          "targets": [
+            {
+              "expr": "sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"{{ $ns }}\"}[5m]))",
+              "legendFormat": "records/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 0.001 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Replication lag (max)",
+          "description": "End-to-end latency, source append to target write. This is the number that decides whether a cutover is safe.",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+          "targets": [
+            {
+              "expr": "max(kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "lag"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 10000 },
+                  { "color": "red", "value": {{ .Values.alerts.thresholds.replicationLatencyMs }} }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Failed tasks",
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+          "targets": [
+            {
+              "expr": "sum(kafka_connect_worker_metrics_connector_failed_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "failed"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Running tasks",
+          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+          "targets": [
+            {
+              "expr": "sum(kafka_connect_worker_metrics_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "tasks"
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "title": "Connector task states",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 }
+        },
+        {
+          "type": "table",
+          "title": "Tasks by connector and state",
+          "description": "The panel that makes a PARTIALLY failed connector visible. A MirrorSourceConnector with 3 tasks, 2 running and 1 failed, reports RUNNING on the CR and keeps replicating most partitions — the ones the dead task owned simply stop, silently. One row per connector: the connector name carries the source alias, so on a fan-in release you can see which leg lost a task.",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+          "targets": [
+            {
+              "expr": "sum by (connector) (kafka_connect_worker_metrics_connector_running_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "running",
+              "instant": true,
+              "format": "table",
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (connector) (kafka_connect_worker_metrics_connector_failed_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "failed",
+              "instant": true,
+              "format": "table",
+              "refId": "B"
+            },
+            {
+              "expr": "sum by (connector) (kafka_connect_worker_metrics_connector_paused_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "paused",
+              "instant": true,
+              "format": "table",
+              "refId": "C"
+            },
+            {
+              "expr": "sum by (connector) (kafka_connect_worker_metrics_connector_unassigned_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "unassigned",
+              "instant": true,
+              "format": "table",
+              "refId": "D"
+            },
+            {
+              "expr": "sum by (connector) (kafka_connect_worker_metrics_connector_total_task_count{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "total",
+              "instant": true,
+              "format": "table",
+              "refId": "E"
+            }
+          ],
+          "transformations": [
+            { "id": "merge", "options": {} },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true },
+                "renameByName": {
+                  "connector": "Connector",
+                  "Value #A": "Running",
+                  "Value #B": "Failed",
+                  "Value #C": "Paused",
+                  "Value #D": "Unassigned",
+                  "Value #E": "Total"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "custom": { "align": "auto" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Failed" },
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        { "color": "green", "value": null },
+                        { "color": "red", "value": 1 }
+                      ]
+                    }
+                  },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "row",
+          "title": "Throughput & lag over time",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Replication lag by source",
+          "description": "The fan-in panel: one series per mirror, so a stuck leg stands out instead of being averaged into three healthy ones. Watch this go to zero before a cutover, not just low.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+          "targets": [
+{{- /* Leading comma from the second entry on, so an empty `mirrors` still
+       closes this array cleanly. */}}
+{{- range $i, $m := .Values.mirrors }}
+{{- $alias := $m.source.alias | default "source" }}
+            {{ if $i }},{{ end }}{
+              {{- if $identity }}
+              "expr": "max(kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"{{ $ns }}\"})",
+              {{- else }}
+              "expr": "max(kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"{{ $ns }}\",topic=~\"{{ $alias }}[{{ $sep }}].*\"})",
+              {{- end }}
+              "legendFormat": "{{ $alias }}"
+            }
+{{- end }}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": {{ .Values.alerts.thresholds.replicationLatencyMs }} }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Records written to target",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+          "targets": [
+            {
+              "expr": "sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"{{ $ns }}\"}[5m]))",
+              "legendFormat": "{{ "{{" }}connector{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Replication latency",
+          "description": "Per topic. Under a prefixing policy the topic name starts with the source alias, so this is the same information as the panel above broken down one level further.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+          "targets": [
+            {
+              "expr": "max by (topic) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "{{ "{{" }}topic{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Record age at source (how far behind the fetchers are)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+          "targets": [
+            {
+              "expr": "max by (topic) (kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "{{ "{{" }}topic{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Bytes replicated /s",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+          "targets": [
+            {
+              "expr": "sum by (topic) (rate(kafka_connect_mirror_source_connector_byte_rate{namespace=\"{{ $ns }}\"}[5m]))",
+              "legendFormat": "{{ "{{" }}topic{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "Bps" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Offset translation age (checkpoint latency)",
+          "description": "How old the translated consumer position is, per source and group. Flat while records are flowing is the failure MirrorMaker2OffsetSyncStale fires on: a failover would resume consumers at a position that stopped moving.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+          "targets": [
+            {
+              "expr": "max by (source, group) (kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max{namespace=\"{{ $ns }}\"})",
+              "legendFormat": "{{ "{{" }}source{{ "}}" }} / {{ "{{" }}group{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms" } }
+        },
+        {
+          "type": "row",
+          "title": "Workers",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 }
+        },
+        {
+          "type": "timeseries",
+          "title": "JVM heap used",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+          "targets": [
+            {
+              "expr": "sum by (pod) ((jvm_memory_used_bytes{area=\"heap\",namespace=\"{{ $ns }}\",pod=~\"{{ $name }}-mirrormaker2-.*\"} or jvm_memory_bytes_used{area=\"heap\",namespace=\"{{ $ns }}\",pod=~\"{{ $name }}-mirrormaker2-.*\"}))",
+              "legendFormat": "{{ "{{" }}pod{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Rebalances completed",
+          "description": "Tasks do not replicate during a rebalance, so a storm reads as intermittent lag with no failed tasks.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+          "targets": [
+            {
+              "expr": "sum(rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"{{ $ns }}\"}[5m]))",
+              "legendFormat": "rebalances/s"
+            }
+          ]
+        }
+{{- /*
+Per-source rows. Each fragment leads with its own comma, so the array above
+closes correctly whether `mirrors` has one entry or ten. Rows start collapsed:
+on a fan-in release the release-wide view is what you open the dashboard for,
+and the per-source detail is what you expand once it looks wrong.
+
+Row y positions continue from 50 (the Workers row ends at 42 + 8), nine per
+source: one for the row header, eight for its panels.
+*/}}
+{{- $base := 50 }}
+{{- range $i, $m := .Values.mirrors }}
+{{- $alias := $m.source.alias | default "source" }}
+{{- $y := add $base (mul $i 9) }}
+        ,{
+          "type": "row",
+          "title": "Source: {{ $alias }}",
+          "collapsed": true,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": {{ $y }} },
+          "panels": [
+            {
+              "type": "timeseries",
+              "title": "{{ $alias }} — records /s",
+              "description": "Throughput for this leg only. The connector name carries the alias, which is the one label that separates the sources on every worker and task metric.",
+              "gridPos": { "h": 8, "w": 8, "x": 0, "y": {{ add $y 1 }} },
+              "targets": [
+                {
+                  "expr": "sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"{{ $ns }}\",connector=~\"{{ $alias }}->.*\"}[5m]))",
+                  "legendFormat": "{{ "{{" }}connector{{ "}}" }}"
+                }
+              ],
+              "fieldConfig": { "defaults": { "unit": "reqps" } }
+            },
+            {
+              "type": "timeseries",
+              "title": "{{ $alias }} — replication lag",
+              {{- if $identity }}
+              "description": "Under an identity policy the replicated topic keeps its source name, so the mirror metric carries no per-source dimension and this panel shows every topic in the release. Set add.source.alias.to.metrics on the connector to get a real source label back.",
+              {{- else }}
+              "description": "Selected by the replicated topic prefix: under a prefixing policy the alias IS the first segment of the target topic name.",
+              {{- end }}
+              "gridPos": { "h": 8, "w": 8, "x": 8, "y": {{ add $y 1 }} },
+              "targets": [
+                {
+                  {{- if $identity }}
+                  "expr": "max by (topic) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"{{ $ns }}\"})",
+                  {{- else }}
+                  "expr": "max by (topic) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"{{ $ns }}\",topic=~\"{{ $alias }}[{{ $sep }}].*\"})",
+                  {{- end }}
+                  "legendFormat": "{{ "{{" }}topic{{ "}}" }}"
+                }
+              ],
+              "fieldConfig": { "defaults": { "unit": "ms" } }
+            },
+            {
+              "type": "timeseries",
+              "title": "{{ $alias }} — offset translation age",
+              "description": "Checkpoint latency per consumer group for this source. The checkpoint metric is tagged with the source alias unconditionally, so this one needs no prefix guess.",
+              "gridPos": { "h": 8, "w": 8, "x": 16, "y": {{ add $y 1 }} },
+              "targets": [
+                {
+                  "expr": "max by (group) (kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max{namespace=\"{{ $ns }}\",source=\"{{ $alias }}\"})",
+                  "legendFormat": "{{ "{{" }}group{{ "}}" }}"
+                }
+              ],
+              "fieldConfig": { "defaults": { "unit": "ms" } }
+            }
+          ]
+        }
+{{- end }}
+      ]
+    }
+{{- end }}

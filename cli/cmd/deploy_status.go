@@ -40,12 +40,14 @@ func init() {
 	deployStatusCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
 	deployStatusCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	deployStatusCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 	deployStatusCmd.Flags().StringVar(&deployConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 
 	deployStatusCmd.Flags().BoolVarP(&deployStatusInteractive, "interactive", "i", false, "Enable interactive Bubble Tea status loader")
 	deployStatusCmd.Flags().StringVarP(&deployStatusOutput, "output", "o", "table", "Output format: table or json")
@@ -168,31 +170,48 @@ type componentSpec struct {
 	Resource  string
 }
 
+// statusComponents is what `kates deploy status` inspects, in display order.
+// It is a function so a test can assert every Kind here is one the health
+// check handles — the check used to name the Strimzi kinds it knew, and a
+// component whose kind was not on that list reported a blank "Unknown"
+// forever without anything failing.
+func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string) []componentSpec {
+	return []componentSpec{
+		{"A", "🦊", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
+		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
+		{"A", "🚦", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
+		{"B", "📨", "Kafka (" + deployKafkaName + ")", deployKafkaName, kafkaNS, "kafkas.kafka.strimzi.io", deployKafkaName},
+		{"B", "🐘", "PostgreSQL (CDC)", "postgresql", dbNS, "statefulset", "postgresql"},
+		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster"},
+		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
+		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
+		{"C", "📦", "Kates Backend", "kates", appNS, "pod", "-l app.kubernetes.io/instance=kates"},
+		{"C", "💻", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
+		{"C", "🔁", "MirrorMaker 2", "mm2", deployMM2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2"},
+		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
+	}
+}
+
+// healthCheckKinds is every Kind getHealthStatusV2 knows how to check. The
+// test walks statusComponents against it.
+func healthCheckKinds(kind string) bool {
+	return kind == "pod" || kind == "statefulset" || kind == "deployment" || strimziCR(kind)
+}
+
 func runDeployStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string
 	if deployTopology == "single" {
 		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
+		deployMM2NS = deployNamespace
 	} else {
 		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS, deployKafkaUINS
 	}
 
 	helmIndex := loadHelmReleaseIndex(ctx)
 
-	components := []componentSpec{
-		{"A", "☸️", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
-		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
-		{"A", "🛡️", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
-		{"B", "📨", "Kafka (krafter)", "krafter", kafkaNS, "kafkas.kafka.strimzi.io", "krafter"},
-		{"B", "🐘", "PostgreSQL (CDC)", "postgresql", dbNS, "statefulset", "postgresql"},
-		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster"},
-		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
-		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
-		{"C", "📦", "Kates Backend", "kates", appNS, "pod", "-l app.kubernetes.io/instance=kates"},
-		{"C", "🖥️", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
-		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
-	}
+	components := statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS)
 
 	// Route based on flags
 	if deployStatusOutput == "json" {
@@ -320,64 +339,38 @@ func getHelmStatus(ctx context.Context, release, namespace string) string {
 	return "missing"
 }
 
-func getHealthStatus(ctx context.Context, kind, resource, namespace string) (string, string) {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if kind == "pod" {
-		args := append([]string{"get", "pods", "-n", namespace}, strings.Split(resource, " ")...)
-		args = append(args, "--no-headers")
-		cmd := exec.CommandContext(checkCtx, "kubectl", args...)
-		out, err := cmd.Output()
-		if err != nil || len(out) == 0 {
-			return "Unknown", "No pods found"
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		running := 0
-		for _, l := range lines {
-			if strings.Contains(l, "Running") || strings.Contains(l, "Completed") {
-				running++
-			}
-		}
-		if running == len(lines) {
-			return "Healthy", fmt.Sprintf("%d/%d pods running", running, len(lines))
-		}
-		return "Degraded", fmt.Sprintf("%d/%d pods running", running, len(lines))
-	} else if kind == "kafkas.kafka.strimzi.io" || kind == "kafkaconnects.kafka.strimzi.io" {
-		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		if err != nil {
-			errMsg := strings.TrimSpace(stderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			return "Unknown", "Error: " + errMsg
-		}
-		status := strings.TrimSpace(string(out))
-		if status == "True" {
-			return "Healthy", kind + " CRD is Ready"
-		}
-		return "Degraded", kind + " CRD not ready"
-	} else if kind == "statefulset" || kind == "deployment" {
-		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "jsonpath={.status.readyReplicas}/{.status.replicas}")
-		out, err := cmd.Output()
-		if err != nil {
-			return "Unknown", "Resource not found"
-		}
-		val := string(out)
-		if val == "" || val == "/" {
-			return "Degraded", "0/0 replicas ready"
-		}
-		parts := strings.Split(val, "/")
-		if len(parts) == 2 && parts[0] == parts[1] {
-			return "Healthy", val + " replicas ready"
-		}
-		return "Degraded", val + " replicas ready"
+// strimziCR reports whether a component's kind is a Strimzi custom resource.
+//
+// Every Strimzi CR carries the operator's Ready condition, so one test serves
+// all of them — Kafka, Connect, MirrorMaker 2, and whatever is added next.
+// This used to be two hard-coded names, which is how MirrorMaker 2 came to
+// report a blank "Unknown" in the status table: nobody added
+// kafkamirrormaker2s to the list. The V2 path had the same shape with a
+// DIFFERENT list ("kafka", "kafkaconnect") that no component spec has ever
+// passed, so in JSON and interactive output every Strimzi resource was
+// Unknown — a list of names is a thing that goes stale, and this had gone
+// stale twice.
+func strimziCR(kind string) bool {
+	if strings.HasSuffix(kind, ".kafka.strimzi.io") {
+		return true
 	}
+	// The short forms kubectl also accepts, for a caller that passes one.
+	switch kind {
+	case "kafka", "kafkaconnect", "kafkamirrormaker2", "kafkatopic", "kafkauser", "kafkanodepool":
+		return true
+	}
+	return false
+}
 
-	return "Unknown", ""
+// getHealthStatus is the table view's health check: the same check the JSON
+// and interactive views run, without the structured detail. Sharing one
+// implementation means the three views cannot disagree about whether a
+// component is healthy, and the table gains what only V2 used to report — the
+// REASON something is degraded ("container kates in CrashLoopBackOff" rather
+// than a bare "0/1 pods running").
+func getHealthStatus(ctx context.Context, kind, resource, namespace string) (string, string) {
+	health, details, _ := getHealthStatusV2(ctx, kind, resource, namespace)
+	return health, details
 }
 
 // ── V2 Enhanced Logic (Used in Interactive and JSON output modes) ──
@@ -399,11 +392,20 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		}
 		health, details, raw := parsePodListHealth(out)
 		return health, details, raw
-	} else if kind == "kafka" || kind == "kafkaconnect" {
+	} else if strimziCR(kind) {
 		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			return "Unknown", "Resource not found: " + err.Error(), nil
+			// kubectl's own words: "NotFound" and "the server doesn't have a
+			// resource type" are different problems and the reader can act on
+			// the difference.
+			msg := strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = err.Error()
+			}
+			return "Unknown", msg, nil
 		}
 		health, details, raw := parseKafkaHealth(out, kind)
 		return health, details, raw
@@ -417,7 +419,9 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		return health, details, raw
 	}
 
-	return "Unknown", "", nil
+	// A kind nobody checks is a bug in the component table, not a mystery to
+	// print as an empty cell: say which kind went unhandled.
+	return "Unknown", "no health check for kind " + kind, nil
 }
 
 // ── JSON Parsers ──
@@ -812,9 +816,10 @@ func printStatusRow(s ComponentStatus) {
 		iconStr += " "
 	}
 	nameStr := iconStr + " " + s.Name
-	// Emoji icons render as 2 cells in terminals, but runewidth often
-	// miscounts them (e.g. ☸️ with VS16 reports width 1 instead of 2).
-	// Use a fixed 2-cell icon slot + 1 space + text width for padding.
+	// The icon slot is a fixed two cells. That holds because every component
+	// icon is an Emoji_Presentation=Yes code point (see deploy_ui.go): the
+	// terminal draws two cells and runewidth counts two. The visualWidth==1
+	// guard above is the fallback for anything that slips past that rule.
 	nameLen := 2 + 1 + visualWidth(s.Name)
 	namePad := 25 - nameLen
 	if namePad < 1 {

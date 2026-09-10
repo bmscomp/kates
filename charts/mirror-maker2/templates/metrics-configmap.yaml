@@ -1,4 +1,12 @@
-{{- if .Values.metrics.enabled }}
+{{- /*
+The exporter's file, and ONLY the exporter's file. With
+metrics.type=strimziMetricsReporter there is no JMX exporter agent to read it:
+the reporter is a Kafka MetricsReporter plugin inside the worker that publishes
+Prometheus text itself, configured by metrics.allowList on the CR. Rendering
+this ConfigMap anyway would leave an orphan that nothing mounts and that the
+next reader would reasonably believe is in effect.
+*/}}
+{{- if and .Values.metrics.enabled (ne (.Values.metrics.type | default "jmxPrometheusExporter") "strimziMetricsReporter") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,18 +16,124 @@ metadata:
     {{- include "mirror-maker2.labels" . | nindent 4 }}
 data:
   metrics-config.yml: |
-    # JMX Prometheus exporter rules for MM2 (Connect) workers.
+    # JMX Prometheus exporter rules for MirrorMaker 2 (Connect) workers.
+    #
+    # ORDER MATTERS: the exporter applies the first matching rule and stops, so
+    # the specific MM2 mirror patterns come BEFORE the generic Connect ones.
+    # With the generic rules first, every mirror metric collapsed into
+    # kafka_connect_<type>_<attr> with a client label and the topic/partition
+    # dimensions were lost — which is precisely the dimension you need to answer
+    # "which topic is lagging".
     lowercaseOutputName: true
     rules:
-      - pattern: "kafka.connect<type=connect-worker-metrics>([^:]+):"
-        name: kafka_connect_worker_$1
-      - pattern: "kafka.connect<type=connect-metrics, client-id=([^:]+)><>([^:]+)"
-        name: kafka_connect_$2
+      # ── MirrorSourceConnector, per topic/partition ───────────────────────
+      # record-age-ms      how far behind the fetchers are at the source
+      # replication-latency-ms  end-to-end, source append → target write
+      # byte-rate / record-rate throughput
+      #
+      # The `topic` tag is the REPLICATED name (Kafka records these against
+      # replicationPolicy.formatRemoteTopic(source, topic)), which is why the
+      # per-source lag alert can select on the alias prefix under a prefixing
+      # policy — and why it cannot under an identity one.
+      #
+      # THE FOUR-TAG FORM FIRST. Kafka adds a `source` tag to these beans only
+      # when the connector runs with `add.source.alias.to.metrics: true`
+      # (KIP-1006, off by default). With it on, the three-tag pattern below
+      # would not match and every MirrorSourceConnector metric would silently
+      # disappear — first match wins, and there is no "no rule matched"
+      # warning anywhere. So the wider shape is tried first and, when it hits,
+      # the alias arrives as a real label rather than a topic-prefix guess.
+      - pattern: "kafka.connect.mirror<type=MirrorSourceConnector, source=([^,]+), target=([^,]+), topic=([^,]+), partition=([0-9]+)><>([a-z0-9-]+)"
+        name: kafka_connect_mirror_source_connector_$5
         labels:
-          client: "$1"
-      - pattern: "kafka.connect<type=MirrorSourceConnector.*"
-        name: kafka_connect_mirror_source
-      - pattern: kafka.connect<type=(.+), client-id=(.+)><>(.+): (.+)
+          source: "$1"
+          target: "$2"
+          topic: "$3"
+          partition: "$4"
+        help: "MirrorSourceConnector $5 for $3-$4"
+        type: GAUGE
+
+      - pattern: "kafka.connect.mirror<type=MirrorSourceConnector, target=([^,]+), topic=([^,]+), partition=([0-9]+)><>([a-z0-9-]+)"
+        name: kafka_connect_mirror_source_connector_$4
+        labels:
+          target: "$1"
+          topic: "$2"
+          partition: "$3"
+        help: "MirrorSourceConnector $4 for $2-$3"
+        type: GAUGE
+
+      # ── MirrorCheckpointConnector, per consumer group ────────────────────
+      # checkpoint-latency-ms{,-avg,-max,-min}: how old the translated consumer
+      # position is. The `source` tag is unconditional here (unlike the source
+      # connector above), so it is the per-source selector the offset-sync
+      # staleness alert uses. Keep the tag ORDER: the exporter matches the
+      # key-property list as a string, and a rule listing the same five tags in
+      # another order matches nothing at all.
+      - pattern: "kafka.connect.mirror<type=MirrorCheckpointConnector, source=([^,]+), target=([^,]+), group=([^,]+), topic=([^,]+), partition=([0-9]+)><>([a-z0-9-]+)"
+        name: kafka_connect_mirror_checkpoint_connector_$6
+        labels:
+          source: "$1"
+          target: "$2"
+          group: "$3"
+          topic: "$4"
+          partition: "$5"
+        type: GAUGE
+
+      # ── Connect worker ──────────────────────────────────────────────────
+      - pattern: "kafka.connect<type=connect-worker-metrics><>([a-z0-9-]+)"
+        name: kafka_connect_worker_metrics_$1
+        type: GAUGE
+      - pattern: "kafka.connect<type=connect-worker-metrics, connector=([^,]+)><>([a-z0-9-]+)"
+        name: kafka_connect_worker_metrics_$2
+        labels:
+          connector: "$1"
+        type: GAUGE
+      - pattern: "kafka.connect<type=connect-worker-rebalance-metrics><>([a-z0-9-]+)"
+        name: kafka_connect_worker_rebalance_metrics_$1
+        type: GAUGE
+
+      # ── Source task + error metrics (the "is anything moving" numbers) ───
+      - pattern: "kafka.connect<type=source-task-metrics, connector=([^,]+), task=([0-9]+)><>([a-z0-9-]+)"
+        name: kafka_connect_source_task_metrics_$3
+        labels:
+          connector: "$1"
+          task: "$2"
+        type: GAUGE
+      - pattern: "kafka.connect<type=task-error-metrics, connector=([^,]+), task=([0-9]+)><>([a-z0-9-]+)"
+        name: kafka_connect_task_error_metrics_$3
+        labels:
+          connector: "$1"
+          task: "$2"
+        type: GAUGE
+      - pattern: "kafka.connect<type=connector-task-metrics, connector=([^,]+), task=([0-9]+)><>([a-z0-9-]+)"
+        name: kafka_connect_connector_task_metrics_$3
+        labels:
+          connector: "$1"
+          task: "$2"
+        type: GAUGE
+
+      # ── Underlying clients ──────────────────────────────────────────────
+      - pattern: "kafka.consumer<type=consumer-fetch-manager-metrics, client-id=([^,]+), topic=([^,]+)><>([a-z0-9-]+)"
+        name: kafka_consumer_fetch_manager_$3
+        labels:
+          client_id: "$1"
+          topic: "$2"
+        type: GAUGE
+      - pattern: "kafka.producer<type=producer-metrics, client-id=([^,]+)><>([a-z0-9-]+)"
+        name: kafka_producer_$2
+        labels:
+          client_id: "$1"
+        type: GAUGE
+
+      # No java.lang<type=Memory> rule on purpose: the JMX exporter agent
+      # already registers the standard JVM collectors, which export the heap
+      # series the alert and dashboard read (jvm_memory_bytes_used in the 0.x
+      # agent, jvm_memory_used_bytes in 1.x — both are selected). A
+      # hand-written rule re-exported the same metric names under
+      # area="HeapMemoryUsage" and produced duplicate families.
+
+      # ── Catch-all, LAST ─────────────────────────────────────────────────
+      - pattern: "kafka.connect<type=(.+), client-id=(.+)><>(.+): (.+)"
         name: kafka_connect_$1_$3
         labels:
           client: "$2"

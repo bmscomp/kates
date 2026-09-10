@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -26,8 +28,12 @@ var upgradeCmd = &cobra.Command{
 Replaces 'make cli-install'. Automatically detects the source directory,
 builds an optimised binary, and copies it to the install path.
 
+By default it installs over the kates the shell already runs (the first one
+on PATH), so the upgrade takes effect where you type it. Pass --install-dir
+to choose another directory.
+
 Examples:
-  kates upgrade                            # auto-detect source, install to /usr/local/bin
+  kates upgrade                            # auto-detect source, install where kates resolves
   kates upgrade --source ~/codes/kates/cli # explicit source dir
   kates upgrade --install-dir ~/.local/bin # install to a custom directory (no sudo)
   kates upgrade --dry-run                  # show what would happen without doing it`,
@@ -38,7 +44,7 @@ Examples:
 
 func init() {
 	upgradeCmd.Flags().StringVar(&upgradeSourceDir, "source", "", "Path to the CLI source directory (default: auto-detect from git)")
-	upgradeCmd.Flags().StringVar(&upgradeInstallDir, "install-dir", "", "Directory to install the binary into (default: /usr/local/bin)")
+	upgradeCmd.Flags().StringVar(&upgradeInstallDir, "install-dir", "", "Directory to install the binary into (default: where `kates` already resolves on PATH, else /usr/local/bin)")
 	upgradeCmd.Flags().BoolVar(&upgradeDryRun, "dry-run", false, "Show what would happen without making changes")
 	rootCmd.AddCommand(upgradeCmd)
 }
@@ -78,7 +84,13 @@ func runUpgrade() error {
 	upgradeRow("Source", srcDir)
 	upgradeRow("Branch", gitBranch+gitDirty)
 	upgradeRow("Commit", gitCommit)
-	upgradeRow("Install", installPath)
+	installNote := installPath
+	if upgradeInstallDir == "" {
+		if found, lerr := exec.LookPath("kates"); lerr == nil && filepath.Dir(found) == installDir {
+			installNote += "  (where `kates` resolves)"
+		}
+	}
+	upgradeRow("Install", installNote)
 	if needsSudo {
 		upgradeRow("Sudo", "required")
 	}
@@ -90,6 +102,13 @@ func runUpgrade() error {
 
 	if upgradeDryRun {
 		fmt.Println("    ⏸  Dry run — no changes made")
+		// Worth knowing before the sudo password, not after: whether this
+		// path is a package manager's, and whether installing here would
+		// change what `kates` runs at all.
+		if err := guardForeignSymlink(installPath); err != nil {
+			output.Warn(err.Error())
+		}
+		printPathShadowWarning(installPath)
 		return nil
 	}
 
@@ -148,6 +167,9 @@ func runUpgrade() error {
 	fmt.Printf("    ✅ Built  %s  (%s)\n", filepath.Base(tmpBin), humanSize(info.Size()))
 
 	// ── 7. Install ───────────────────────────────────────────────────────────
+	if err := guardForeignSymlink(installPath); err != nil {
+		return err
+	}
 	fmt.Printf("    📦 Installing to %s...\n", installPath)
 	if err := installBinary(tmpBin, installPath, needsSudo); err != nil {
 		return err
@@ -171,7 +193,75 @@ func runUpgrade() error {
 	fmt.Println("    ╰────────────────────────────────────────────────────────────────────────────╯")
 	fmt.Println()
 
+	// ── 10. Is the file we just wrote the one `kates` runs? ──────────────────
+	// Installing and verifying the same absolute path proves nothing about
+	// what the shell will execute: another kates earlier on PATH keeps
+	// winning, silently, and every new feature looks missing. Say so here,
+	// where the answer is still in front of the user.
+	printPathShadowWarning(installPath)
+
 	return nil
+}
+
+// pathShadow describes a kates on PATH that is not the one just installed.
+type pathShadow struct {
+	// Resolved is the binary the shell would run, with symlinks resolved.
+	Resolved string
+	// NotOnPath is true when no kates at all resolves on PATH.
+	NotOnPath bool
+}
+
+// checkPathShadow answers "does `kates` run the file at installPath?".
+// lookPath and resolve are injected so the check is testable without
+// touching the real PATH or filesystem.
+func checkPathShadow(installPath string, lookPath func(string) (string, error), resolve func(string) (string, error)) *pathShadow {
+	found, err := lookPath("kates")
+	if err != nil || strings.TrimSpace(found) == "" {
+		return &pathShadow{NotOnPath: true}
+	}
+	// Compare the real files: /usr/local/bin/kates and a symlink to it are
+	// the same binary, and reporting them as rivals would be noise.
+	a, err1 := resolve(found)
+	if err1 != nil {
+		a = found
+	}
+	b, err2 := resolve(installPath)
+	if err2 != nil {
+		b = installPath
+	}
+	if a == b {
+		return nil
+	}
+	return &pathShadow{Resolved: a}
+}
+
+// printPathShadowWarning reports, in the terminal's own voice, that the
+// upgraded binary is not the one PATH resolves to — and what to do.
+func printPathShadowWarning(installPath string) {
+	shadow := checkPathShadow(installPath, exec.LookPath, filepath.EvalSymlinks)
+	if shadow == nil {
+		return
+	}
+	if shadow.NotOnPath {
+		output.Warn(fmt.Sprintf("%s is not on your PATH — typing `kates` will not find it.", installPath))
+		output.Hint(fmt.Sprintf("Add it:  export PATH=\"%s:$PATH\"", filepath.Dir(installPath)))
+		return
+	}
+
+	output.Warn(fmt.Sprintf("`kates` still runs %s, not the binary just installed.", shadow.Resolved))
+	if v := captureInstalledVersion(shadow.Resolved); v != "" {
+		output.Hint("That one reports: " + v)
+	}
+	output.Hint("It comes earlier in PATH, so every new command and flag will look missing.")
+	fmt.Println()
+	fmt.Println("      Install where the shell already looks:")
+	fmt.Printf("        kates upgrade --install-dir %s\n", filepath.Dir(shadow.Resolved))
+	fmt.Println("      or remove the stale copy:")
+	fmt.Printf("        rm %s\n", shadow.Resolved)
+	fmt.Println("      or put the new one first:")
+	fmt.Printf("        export PATH=\"%s:$PATH\"\n", filepath.Dir(installPath))
+	fmt.Println()
+	fmt.Println("      Then run `hash -r` so the shell forgets the old location.")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -220,12 +310,76 @@ func resolveSourceDir() (string, error) {
 			"  Use: kates upgrade --source /path/to/kates/cli")
 }
 
+// resolveInstallDir decides where the new binary goes. With no flag it
+// follows the kates the shell already runs: upgrading somewhere the shell
+// does not look is the one outcome nobody wants, and /usr/local/bin loses
+// to ~/.local/bin, ~/go/bin or Homebrew's bin on most PATHs.
 func resolveInstallDir() string {
 	if upgradeInstallDir != "" {
 		abs, _ := filepath.Abs(upgradeInstallDir)
 		return abs
 	}
+	if found, err := exec.LookPath("kates"); err == nil {
+		if dir := filepath.Dir(found); dir != "" && dir != "." {
+			// Not the symlink target: /opt/homebrew/bin is the directory on
+			// PATH, ../Cellar/... is where the file happens to live.
+			return dir
+		}
+	}
 	return "/usr/local/bin"
+}
+
+// foreignSymlink describes an install destination that is a symlink into
+// another directory — Homebrew links /opt/homebrew/bin/<x> to its Cellar,
+// and `cp` onto that link overwrites the package manager's own file.
+type foreignSymlink struct {
+	Target  string
+	Manager string // "Homebrew" when the target is in a Cellar, else ""
+}
+
+// checkForeignSymlink reports whether writing to dst would follow a symlink
+// out of its own directory. lstat and resolve are injected for testing.
+func checkForeignSymlink(dst string, lstat func(string) (os.FileInfo, error), resolve func(string) (string, error)) *foreignSymlink {
+	info, err := lstat(dst)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	target, err := resolve(dst)
+	if err != nil || filepath.Dir(target) == filepath.Dir(dst) {
+		return nil
+	}
+	fs := &foreignSymlink{Target: target}
+	if strings.Contains(target, "/Cellar/") {
+		fs.Manager = "Homebrew"
+	}
+	return fs
+}
+
+// guardForeignSymlink refuses an install that would clobber a
+// package-manager-owned binary, and says how to proceed instead.
+func guardForeignSymlink(installPath string) error {
+	return guardForeignSymlinkAt(installPath)
+}
+
+// guardForeignSymlinkAt is guardForeignSymlink against the real filesystem,
+// separated so a test can point it at a Homebrew-shaped layout in a tempdir.
+func guardForeignSymlinkAt(installPath string) error {
+	fs := checkForeignSymlink(installPath, os.Lstat, filepath.EvalSymlinks)
+	if fs == nil {
+		return nil
+	}
+	owner := "another package"
+	if fs.Manager != "" {
+		owner = fs.Manager
+	}
+	msg := fmt.Sprintf("%s is a symlink to %s, which %s owns.\n", installPath, fs.Target, owner) +
+		"  Installing here would overwrite that package's binary, and its next upgrade would silently undo yours.\n" +
+		"  Install somewhere you own instead, e.g.:\n" +
+		"    kates upgrade --install-dir ~/.local/bin"
+	if fs.Manager == "Homebrew" {
+		msg += "\n  Or remove the formula first:  brew uninstall kates"
+	}
+	return errors.New(msg)
 }
 
 func needsSudoForPath(dir string) bool {

@@ -97,8 +97,15 @@ func detectASCIIEnv(getenv func(string) string) bool {
 // Glyphs returns the active glyph set. --plain implies ASCII: plain output is
 // a statement that a machine (or the most limited terminal) is reading.
 func Glyphs() GlyphSet {
-	if plainMode || asciiForced {
+	if ASCII() {
 		return asciiGlyphs
 	}
 	return utf8Glyphs
+}
+
+// ASCII reports whether output must stay inside ASCII. Callers that lay out
+// columns need this as well as the glyph set: an emoji icon has to become a
+// two-letter tag, and no glyph substitution can do that for them.
+func ASCII() bool {
+	return plainMode || asciiForced
 }

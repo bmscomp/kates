@@ -57,9 +57,21 @@ metadata:
 			clusterDomain := dc.resolveClusterDomain()
 			// The wrapper chart does not render until its subchart is fetched.
 			// `build` (not `update`) resolves from Chart.lock, so the pinned
-			// Strimzi version cannot drift.
-			if err := runHelmFn(gCtx, "dependency", "build", "charts/strimzi-operator"); err != nil {
-				return err
+			// Strimzi version cannot drift. A non-pinned version installs
+			// from the generated wrapper under the cache, whose charts/
+			// already holds the pulled tarball (deploy_versions.go).
+			chartDir := "charts/strimzi-operator"
+			var versionArgs []string
+			if dc.versions != nil {
+				if !dc.versions.Pinned {
+					chartDir = dc.versions.ChartDir
+				}
+				versionArgs = dc.versions.operatorHelmArgs()
+			}
+			if dc.versions == nil || dc.versions.Pinned {
+				if err := runHelmFn(gCtx, "dependency", "build", "charts/strimzi-operator"); err != nil {
+					return err
+				}
 			}
 			// Everything this call site used to --set is now pinned in the
 			// chart's values.yaml; only the cluster domain is environment-
@@ -71,12 +83,13 @@ metadata:
 			//
 			// --reset-values: pre-chart releases stored flat upstream keys that
 			// now live under the subchart key, and the schema rejects them.
-			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "charts/strimzi-operator", "-n", "strimzi-operator",
+			opArgs := []string{"upgrade", "--install", "strimzi-operator", chartDir, "-n", "strimzi-operator",
 				"--reset-values",
 				"-f", dc.chartOverlay("charts/strimzi-operator"),
-				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain="+clusterDomain,
-				"--timeout", "10m")
-			if err != nil {
+				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain}
+			opArgs = append(opArgs, versionArgs...)
+			opArgs = append(opArgs, "--timeout", "10m")
+			if err := runHelmFn(gCtx, opArgs...); err != nil {
 				return err
 			}
 			return nil
@@ -358,7 +371,7 @@ func deployGroupB(dc *deployContext) error {
 	// GROUP B: Core Infrastructure (Parallel)
 	// ---------------------------------------------------------
 
-	deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", kafkaNS)
+	deployKafka := !isHelmReleaseDeployedFn(ctx, dc.primary.Name, kafkaNS)
 	deployMon := false
 	if deployWithMonitoring {
 		deployMon = !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS)
@@ -451,7 +464,7 @@ metadata:
 			// operator drives reconciliation asynchronously. waitKafkaReady()
 			// below is the real readiness gate.
 			clusterDomain := dc.resolveClusterDomain()
-			kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
+			kafkaArgs := []string{"upgrade", "--install", dc.primary.Name, "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
 
 			kafkaArgs = append(kafkaArgs,
 				"-f", dc.valuesFile,
@@ -461,6 +474,12 @@ metadata:
 			)
 			if dc.isKind {
 				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
+			}
+			// The resolved versions and the cluster name go last so they win
+			// over every values file above (§3.3: derived settings travel
+			// with the version).
+			if dc.versions != nil {
+				kafkaArgs = append(kafkaArgs, dc.versions.kafkaHelmArgs(dc.primary)...)
 			}
 
 			if deployHA {
@@ -498,7 +517,7 @@ metadata:
 	// ---------------------------------------------------------
 	// 1. Kafka Cluster
 	if deployKafka {
-		if err := dc.deployComponent("kafka", kafkaNS, "strimzi.io/cluster=krafter", 15*time.Minute, ""); err != nil {
+		if err := dc.deployComponent("kafka", kafkaNS, dc.primary.ReadySelector(), 15*time.Minute, ""); err != nil {
 			return fmt.Errorf("kafka readiness failed: %w", err)
 		}
 	}
@@ -591,7 +610,7 @@ metadata:
 	runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectNsYaml)
 
 	connectDomain := dc.resolveClusterDomain()
-	bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+	bootstrap := dc.primary.Bootstrap(connectDomain)
 
 	// Copy kates-connect secret and kafka-metrics ConfigMap from kafka namespace to connect namespace (cross-namespace)
 	if connectNS != kafkaNS {
@@ -696,7 +715,7 @@ stringData:
 			kafkaNS, connectDomain)
 
 		// Use the same FQDN pattern as the kates backend for bootstrap servers
-		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+		bootstrap := dc.primary.Bootstrap(connectDomain)
 
 		connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
 			"-n", connectNS, "--create-namespace",
@@ -710,6 +729,11 @@ stringData:
 			"--set", "databaseEgress[0].port=5432",
 			"--set", "databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
 			"--timeout", "10m",
+		}
+		// Connect's spec.version must be inside the operator's window, so it
+		// follows the primary's Kafka version rather than the chart's pin.
+		if dc.versions != nil {
+			connectArgs = append(connectArgs, dc.versions.connectHelmArgs()...)
 		}
 
 		// Enable NetworkPolicy on non-Kind clusters (same as kates backend)
@@ -896,9 +920,27 @@ func deployGroupC(dc *deployContext) error {
 		}
 	}
 
-	// Deploy Kates
-	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
-		dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+	// Deploy Kates.
+	//
+	// Reconciled unconditionally, for the same reason as the Strimzi operator
+	// in Group A. This used to skip when a Helm release named "kates" existed,
+	// which reads "already deployed" off a release record — a record that says
+	// a helm install once succeeded, not that anything is running. A release
+	// stuck in ImagePullBackOff satisfied it, so `kates deploy` reported the
+	// backend as done and left it broken, and no amount of re-running could
+	// repair the one component the platform is named after. It also meant a
+	// change in the values a release should get (the kind image overlay
+	// below, say) never reached an existing install.
+	//
+	// `helm upgrade --install` converges: same values, no-op; different
+	// values, a rollout.
+	katesInstalled := isHelmReleaseDeployedFn(ctx, "kates", appNS)
+	{
+		verb := "Deploying"
+		if katesInstalled {
+			verb = "Reconciling"
+		}
+		dl.Printf("\n📦 %s Kates Backend (Namespace: %s)...\n", verb, appNS)
 		// Auto-cleanup stale ClusterRole ownership from previous topology switches
 		cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
 		cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
@@ -932,32 +974,52 @@ data:
 			}
 		}
 
-		katesBootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, dc.report.Network.ClusterDomain)
-		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
-			"-n", appNS, "--create-namespace",
-			"-f", dc.valuesFile,
-			"-f", dc.chartOverlay("charts/kates"),
+		katesBootstrap := dc.primary.Bootstrap(dc.report.Network.ClusterDomain)
+
+		// On kind the backend runs the native image built from the working
+		// tree (deploy_localimage.go). Checked before the Helm call, because
+		// the overlay pins pullPolicy: Never: a missing image would otherwise
+		// be an ErrImageNeverPull discovered eight minutes later, at the
+		// timeout, instead of now with the command that fixes it.
+		var localImage string
+		if dc.isKind {
+			img, err := ensureLocalNativeImage(ctx, dc.report.Context)
+			if err != nil {
+				return err
+			}
+			localImage = img
+		} else {
+			dl.Println("    - Backend image: the chart's published image (not a kind cluster)")
+		}
+
+		katesArgs := []string{"upgrade", "--install", "kates", "charts/kates",
+			"-n", appNS, "--create-namespace"}
+		katesArgs = append(katesArgs, dc.katesChartValues()...)
+		if localImage != "" {
+			// After the values files, so the tag that actually exists wins
+			// over the one the overlay names.
+			katesArgs = append(katesArgs, localImageArgs(localImage)...)
+		}
+		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
 			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring),
-			"--timeout", "8m"); err != nil {
+			"--timeout", "8m")
+
+		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
+		if err := runHelmFn(ctx, katesArgs...); err != nil {
 			return err
 		}
 
 		if err := dc.deployComponent("kates", appNS, "app.kubernetes.io/instance=kates", 8*time.Minute, ""); err != nil {
 			return err
 		}
-	} else {
-		dl.Println(output.Glyphs().Skip + "  Kates Backend already deployed.")
-		dl.FinishComponent("kates", true)
-		dc.advanceStep()
 	}
 
 	// Deploy Kafka UI
 	if deployWithKafkaUI {
 		if !isHelmReleaseDeployedFn(ctx, "kafka-ui", kafkaUINS) {
-			dl.Printf("\n🖥  Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
+			dl.Printf("\n💻 Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
 			dl.StartComponent("kafka-ui", 5*time.Minute)
 
 			// Cross-namespace secret copy (KafkaUser secret lives in Kafka NS)
@@ -1006,6 +1068,79 @@ data:
 		} else {
 			dl.Println(output.Glyphs().Skip + "  Kafka UI already deployed.")
 			dl.FinishComponent("kafka-ui", true)
+			dc.advanceStep()
+		}
+	}
+
+	// Deploy MirrorMaker 2 — the chart's loopback: the primary mirrored into
+	// itself under a renamed topic set, which is enough to exercise every
+	// MM2 mechanism (connectors, offset syncs, checkpoints, the ACLs of the
+	// kates-mm2 user) without a second cluster. Real sources are `kates
+	// migrate up --from …`.
+	if deployWithMirrorMaker2 {
+		mm2NS := dc.ns.mm2
+		if !isHelmReleaseDeployedFn(ctx, "mm2", mm2NS) {
+			dl.Printf("\n🔁 Deploying MirrorMaker 2 (Namespace: %s)...\n", mm2NS)
+			dl.StartComponent("mirror-maker2", 10*time.Minute)
+
+			// The kates-mm2 credential is a KafkaUser of the primary, so its
+			// Secret lives in the Kafka namespace; MM2 reads it from its own.
+			if mm2NS != kafkaNS {
+				nsYaml := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+spec: {}`, mm2NS)
+				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+				dl.Println("    - Copying kates-mm2 SASL credentials to the MirrorMaker 2 namespace...")
+				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-mm2",
+					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
+				if pwErr == nil && len(pwBytes) > 0 {
+					secretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: kates-mm2
+  namespace: %s
+type: Opaque
+data:
+  password: %s`, mm2NS, string(pwBytes))
+					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
+				} else {
+					dl.Printf("    ⚠  Secret 'kates-mm2' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+				}
+			}
+
+			helmArgs := []string{
+				"upgrade", "--install", "mm2", "charts/mirror-maker2",
+				"-n", mm2NS, "--create-namespace",
+			}
+			if overlay := dc.chartOverlay("charts/mirror-maker2"); dc.fileExists(overlay) {
+				helmArgs = append(helmArgs, "-f", overlay)
+			}
+			// Both ends are the primary; the versions follow the resolved
+			// pair so the worker image exists in the operator's window.
+			helmArgs = append(helmArgs,
+				"--set", "target.clusterName="+dc.primary.Name,
+				"--set", "target.namespace="+kafkaNS,
+				"--set", "mirrors[0].source.clusterName="+dc.primary.Name,
+				"--set", "mirrors[0].source.namespace="+kafkaNS,
+			)
+			if dc.versions != nil {
+				helmArgs = append(helmArgs,
+					"--set-string", "version="+dc.versions.KafkaVersion,
+					"--set-string", "strimziVersion="+dc.versions.StrimziVersion,
+				)
+			}
+			helmArgs = append(helmArgs, "--timeout", "10m")
+			if err := runHelmFn(ctx, helmArgs...); err != nil {
+				dl.FinishComponent("mirror-maker2", false)
+				return err
+			}
+			dl.FinishComponent("mirror-maker2", true)
+			dc.advanceStep()
+		} else {
+			dl.Println(output.Glyphs().Skip + "  MirrorMaker 2 already deployed.")
+			dl.FinishComponent("mirror-maker2", true)
 			dc.advanceStep()
 		}
 	}

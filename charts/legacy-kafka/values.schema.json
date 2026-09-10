@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "legacy-kafka values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kafka", "listeners"],
+  "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "namespaceOverride": { "type": "string" },
+    "extraLabels": { "type": "object" },
+    "clusterDomain": { "type": "string" },
+    "mode": {
+      "description": "zookeeper for Kafka 2.x; kraft for Kafka 3.3+; empty derives it from kafka.version (zookeeper below 3.3.0, kraft from 3.3.0)",
+      "enum": ["", "zookeeper", "kraft"]
+    },
+    "legacyImageRegistry": {
+      "type": "string",
+      "description": "Registry of the built kates-legacy-kafka image used when kafka.image is empty and kafka.version is below 3.7.0"
+    },
+    "kafka": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "replicas", "replicationFactor"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1, "pattern": "^[0-9]+\\.[0-9]+" },
+        "image": { "type": "string", "description": "Empty derives apache/kafka:<version> from 3.7.0 and <legacyImageRegistry>/kates-legacy-kafka:<version> below" },
+        "imagePullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "replicationFactor": { "type": "integer", "minimum": 1 },
+        "logDir": { "type": "string" },
+        "config": { "type": "object" },
+        "heapOpts": { "type": "string" },
+        "resources": { "type": "object" },
+        "clusterId": { "type": "string", "minLength": 16 }
+      }
+    },
+    "zookeeper": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1 },
+        "dataDir": { "type": "string" },
+        "heapOpts": { "type": "string" },
+        "resources": { "type": "object" }
+      }
+    },
+    "listeners": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plaintext": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "sasl": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "users": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["username", "password"],
+                "properties": {
+                  "username": { "type": "string", "minLength": 1 },
+                  "password": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size": { "type": "string" },
+        "storageClass": { "type": "string" }
+      }
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "partitions": { "type": "integer", "minimum": 1 },
+          "replicationFactor": { "type": "integer", "minimum": 1 },
+          "config": { "type": "object" }
+        }
+      }
+    },
+    "topicsJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 },
+        "backoffLimit": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "podSecurityContext": { "type": "object" },
+    "containerSecurityContext": { "type": "object" },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "priorityClassName": { "type": "string" },
+    "imagePullSecrets": { "type": "array" },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "allowFromNamespaces": { "type": "array", "items": { "type": "string" } },
+        "extraIngress": { "type": "array" },
+        "extraEgress": { "type": "array" }
+      }
+    },
+    "testImage": { "type": "string" }
+  }
+}

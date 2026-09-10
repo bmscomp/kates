@@ -1,7 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["clusterName", "kafkaVersion", "brokerPools", "controllerPools"],
+  "required": [
+    "clusterName",
+    "kafkaVersion",
+    "brokerPools",
+    "controllerPools"
+  ],
   "properties": {
     "clusterName": {
       "type": "string",
@@ -13,53 +18,115 @@
     "kafkaVersion": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-      "description": "Apache Kafka version"
+      "description": "Apache Kafka version, any x.y.z. Whether the operator can run it is the operator's and the CLI's check (the window is read from the operator chart), not this schema's — the chart must stay usable with a newer operator than the one pinned here."
     },
     "strimziVersion": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "description": "Strimzi operator version"
     },
+    "extraLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Extra labels merged into every resource's labels (never selectors). The CLI stamps kates.io/lab and kates.io/lab-role here."
+    },
     "kafka": {
       "type": "object",
-      "required": ["listeners", "config"],
+      "required": [
+        "listeners",
+        "config"
+      ],
       "properties": {
+        "metadataVersion": {
+          "type": ["string", "number"],
+          "pattern": "^[0-9]+\\.[0-9]+(-IV[0-9]+)?$",
+          "description": "KRaft metadata version: the short form (4.2 — Kafka resolves it to the newest 4.2-IVn) or the explicit -IV form (4.2-IV1). A bare 4.2 arrives as a number from --set or an unquoted YAML value, which is why numbers are accepted; the template quotes it. Empty = the operator's default for kafkaVersion, which forecloses a rollback."
+        },
         "listeners": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["name", "port", "type"],
+            "required": [
+              "name",
+              "port",
+              "type"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-              "type": { "type": "string", "enum": ["internal", "route", "loadbalancer", "nodeport", "ingress", "cluster-ip"] },
-              "tls": { "type": "boolean" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal",
+                  "route",
+                  "loadbalancer",
+                  "nodeport",
+                  "ingress",
+                  "cluster-ip"
+                ]
+              },
+              "tls": {
+                "type": "boolean"
+              }
             }
           }
         },
         "authorization": {
           "type": "object",
           "properties": {
-            "type": { "type": "string", "enum": ["simple", "opa", "keycloak", "custom"] },
-            "superUsers": { "type": "array", "items": { "type": "string" } }
+            "type": {
+              "type": "string",
+              "enum": [
+                "simple",
+                "opa",
+                "keycloak",
+                "custom"
+              ]
+            },
+            "superUsers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
-        "config": { "type": "object" },
+        "config": {
+          "type": "object"
+        },
         "rack": {
           "type": "object",
           "properties": {
-            "topologyKey": { "type": "string" }
+            "topologyKey": {
+              "type": "string"
+            }
           }
         },
         "metricsConfig": {
           "type": "object",
           "properties": {
-            "type": { "type": "string", "enum": ["jmxPrometheusExporter"] }
+            "type": {
+              "type": "string",
+              "enum": [
+                "jmxPrometheusExporter"
+              ]
+            }
           }
         },
-        "clusterCa": { "$ref": "#/$defs/caConfig" },
-        "clientsCa": { "$ref": "#/$defs/caConfig" }
+        "clusterCa": {
+          "$ref": "#/$defs/caConfig"
+        },
+        "clientsCa": {
+          "$ref": "#/$defs/caConfig"
+        }
       }
     },
     "controllerPools": {
@@ -67,39 +134,82 @@
       "minItems": 0,
       "items": {
         "type": "object",
-        "required": ["name", "replicas", "storageSize"],
+        "required": [
+          "name",
+          "replicas",
+          "storageSize"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "zone": { "type": "string" },
-          "replicas": { "type": "integer", "minimum": 1, "maximum": 9 },
-          "storageSize": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
-          "storageClass": { "type": "string" }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "zone": {
+            "type": "string"
+          },
+          "replicas": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9
+          },
+          "storageSize": {
+            "type": "string",
+            "pattern": "^[0-9]+(Gi|Ti|Mi)$"
+          },
+          "storageClass": {
+            "type": "string"
+          }
         }
       }
     },
     "controllerDefaults": {
       "type": "object",
       "properties": {
-        "deleteClaim": { "type": "boolean" },
-        "resources": { "$ref": "#/$defs/resources" },
-        "jvmOptions": { "$ref": "#/$defs/jvmOptions" },
+        "deleteClaim": {
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "jvmOptions": {
+          "$ref": "#/$defs/jvmOptions"
+        },
         "topologySpreadConstraints": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "maxSkew": { "type": "integer", "minimum": 1 },
-            "topologyKey": { "type": "string" },
-            "whenUnsatisfiable": { "type": "string", "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxSkew": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "topologyKey": {
+              "type": "string"
+            },
+            "whenUnsatisfiable": {
+              "type": "string",
+              "enum": [
+                "DoNotSchedule",
+                "ScheduleAnyway"
+              ]
+            }
           }
         },
         "podAntiAffinity": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "topologyKey": { "type": "string" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "topologyKey": {
+              "type": "string"
+            }
           }
         },
-        "priorityClassName": { "type": "string" }
+        "priorityClassName": {
+          "type": "string"
+        }
       }
     },
     "brokerPools": {
@@ -107,57 +217,123 @@
       "minItems": 0,
       "items": {
         "type": "object",
-        "required": ["name", "replicas", "storageSize"],
+        "required": [
+          "name",
+          "replicas",
+          "storageSize"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "zone": { "type": "string" },
-          "replicas": { "type": "integer", "minimum": 1, "maximum": 100 },
-          "storageSize": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
-          "storageClass": { "type": "string" },
-          "resources": { "$ref": "#/$defs/resources" },
-          "jvmOptions": { "$ref": "#/$defs/jvmOptions" }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "zone": {
+            "type": "string"
+          },
+          "replicas": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "storageSize": {
+            "type": "string",
+            "pattern": "^[0-9]+(Gi|Ti|Mi)$"
+          },
+          "storageClass": {
+            "type": "string"
+          },
+          "resources": {
+            "$ref": "#/$defs/resources"
+          },
+          "jvmOptions": {
+            "$ref": "#/$defs/jvmOptions"
+          }
         }
       }
     },
     "brokerDefaults": {
       "type": "object",
       "properties": {
-        "deleteClaim": { "type": "boolean" },
-        "resources": { "$ref": "#/$defs/resources" },
-        "jvmOptions": { "$ref": "#/$defs/jvmOptions" },
+        "deleteClaim": {
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "jvmOptions": {
+          "$ref": "#/$defs/jvmOptions"
+        },
         "topologySpreadConstraints": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "maxSkew": { "type": "integer", "minimum": 1 },
-            "topologyKey": { "type": "string" },
-            "whenUnsatisfiable": { "type": "string", "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxSkew": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "topologyKey": {
+              "type": "string"
+            },
+            "whenUnsatisfiable": {
+              "type": "string",
+              "enum": [
+                "DoNotSchedule",
+                "ScheduleAnyway"
+              ]
+            }
           }
         },
         "podAntiAffinity": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "topologyKey": { "type": "string" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "topologyKey": {
+              "type": "string"
+            }
           }
         },
-        "priorityClassName": { "type": "string" }
+        "priorityClassName": {
+          "type": "string"
+        }
       }
     },
     "topics": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "items": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "partitions", "replicas"],
+            "required": [
+              "name",
+              "partitions",
+              "replicas"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "partitions": { "type": "integer", "minimum": 1, "maximum": 10000 },
-              "replicas": { "type": "integer", "minimum": 1, "maximum": 10 },
-              "config": { "type": "object" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "partitions": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "replicas": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "config": {
+                "type": "object"
+              }
             }
           }
         }
@@ -166,19 +342,36 @@
     "users": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "items": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "authentication"],
+            "required": [
+              "name",
+              "authentication"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
               "authentication": {
                 "type": "object",
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "properties": {
-                  "type": { "type": "string", "enum": ["scram-sha-512", "tls", "tls-external"] }
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "scram-sha-512",
+                      "tls",
+                      "tls-external"
+                    ]
+                  }
                 }
               }
             }
@@ -189,41 +382,81 @@
     "kafkaConnect": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "replicas": { "type": "integer", "minimum": 1 },
-        "version": { "type": "string" },
-        "groupId": { "type": "string" },
-        "jvmOptions": { "$ref": "#/$defs/jvmOptions" },
-        "resources": { "$ref": "#/$defs/resources" },
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "jvmOptions": {
+          "$ref": "#/$defs/jvmOptions"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
         "config": {
           "type": "object",
           "properties": {
-            "replicationFactor": { "type": "integer", "minimum": 1 },
-            "keyConverter": { "type": "string" },
-            "valueConverter": { "type": "string" },
-            "keyConverterSchemasEnable": { "type": "boolean" },
-            "valueConverterSchemasEnable": { "type": "boolean" }
+            "replicationFactor": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "keyConverter": {
+              "type": "string"
+            },
+            "valueConverter": {
+              "type": "string"
+            },
+            "keyConverterSchemasEnable": {
+              "type": "boolean"
+            },
+            "valueConverterSchemasEnable": {
+              "type": "boolean"
+            }
           }
         },
-        "extraConfig": { "type": "object" },
+        "extraConfig": {
+          "type": "object"
+        },
         "logging": {
           "type": "object",
           "properties": {
-            "type": { "type": "string", "enum": ["inline", "external"] },
-            "loggers": { "type": "object" }
+            "type": {
+              "type": "string",
+              "enum": [
+                "inline",
+                "external"
+              ]
+            },
+            "loggers": {
+              "type": "object"
+            }
           }
         },
         "tls": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
+            "enabled": {
+              "type": "boolean"
+            },
             "trustedCertificates": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "secretName": { "type": "string" },
-                  "certificate": { "type": "string" }
+                  "secretName": {
+                    "type": "string"
+                  },
+                  "certificate": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -232,46 +465,86 @@
         "rack": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "topologyKey": { "type": "string" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "topologyKey": {
+              "type": "string"
+            }
           }
         },
         "autoRestart": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "maxRestarts": { "type": "integer", "minimum": 0 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxRestarts": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
-        "tolerations": { "type": "array" },
+        "tolerations": {
+          "type": "array"
+        },
         "topologySpreadConstraints": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "maxSkew": { "type": "integer", "minimum": 1 },
-            "topologyKey": { "type": "string" },
-            "whenUnsatisfiable": { "type": "string", "enum": ["DoNotSchedule", "ScheduleAnyway"] }
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxSkew": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "topologyKey": {
+              "type": "string"
+            },
+            "whenUnsatisfiable": {
+              "type": "string",
+              "enum": [
+                "DoNotSchedule",
+                "ScheduleAnyway"
+              ]
+            }
           }
         },
         "podAntiAffinity": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "topologyKey": { "type": "string" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "topologyKey": {
+              "type": "string"
+            }
           }
         },
         "readinessProbe": {
           "type": "object",
           "properties": {
-            "initialDelaySeconds": { "type": "integer", "minimum": 0 },
-            "timeoutSeconds": { "type": "integer", "minimum": 1 }
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
         "livenessProbe": {
           "type": "object",
           "properties": {
-            "initialDelaySeconds": { "type": "integer", "minimum": 0 },
-            "timeoutSeconds": { "type": "integer", "minimum": 1 }
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
         "externalConfiguration": {
@@ -281,10 +554,19 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["name", "secretName"],
+                "required": [
+                  "name",
+                  "secretName"
+                ],
                 "properties": {
-                  "name": { "type": "string", "minLength": 1 },
-                  "secretName": { "type": "string", "minLength": 1 }
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "secretName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             }
@@ -294,68 +576,170 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["namespace"],
+            "required": [
+              "namespace"
+            ],
             "properties": {
-              "namespace": { "type": "string", "minLength": 1 },
-              "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-              "podSelector": { "type": "object" }
+              "namespace": {
+                "type": "string",
+                "minLength": 1
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "podSelector": {
+                "type": "object"
+              }
             }
           }
         },
         "schemaRegistry": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "serviceName": { "type": "string" },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "path": { "type": "string" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "serviceName": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "path": {
+              "type": "string"
+            }
           }
         },
         "connectors": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "class"],
+            "required": [
+              "name",
+              "class"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "class": { "type": "string", "minLength": 1 },
-              "tasksMax": { "type": "integer", "minimum": 1 },
-              "config": { "type": "object" },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "class": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tasksMax": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "config": {
+                "type": "object"
+              },
               "autoRestart": {
                 "type": "object",
                 "properties": {
-                  "enabled": { "type": "boolean" },
-                  "maxRestarts": { "type": "integer", "minimum": 0 }
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "maxRestarts": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
                 }
               }
             }
           }
         },
-        "build": { "type": "object" }
+        "build": {
+          "type": "object"
+        }
       }
     },
     "alerts": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "networkPolicies": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "allowedClientNamespaces": { "type": "array", "items": { "type": "string" } },
-        "monitoringNamespace": { "type": "string" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "defaultDeny": {
+          "type": "boolean"
+        },
+        "defaultDenySelector": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "podSelector.matchLabels of the default-deny policy. Empty derives app.kubernetes.io/part-of: strimzi-<clusterName>; an explicit map wins."
+        },
+        "allowDNS": {
+          "type": "boolean"
+        },
+        "allowDNSSelector": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "podSelector.matchLabels of the allow-dns policy. Empty derives app.kubernetes.io/part-of: strimzi-<clusterName>; an explicit map wins."
+        },
+        "operatorPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Write the Cluster Operator's `strimzi-operator` NetworkPolicy into operatorNamespace. Off when the strimzi-operator wrapper renders it (operatorPolicy.enabled there) and for every additional cluster."
+            }
+          }
+        },
+        "allowedClientNamespaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "monitoringNamespace": {
+          "type": "string"
+        },
+        "connectNamespace": {
+          "type": "string"
+        },
+        "mirrorMaker2Namespace": {
+          "type": "string"
+        },
+        "kafkaUINamespace": {
+          "type": "string"
+        },
+        "operatorNamespace": {
+          "type": "string",
+          "description": "Namespace of the Cluster Operator that reconciles this cluster (empty = strimzi-operator). For a co-located additional operator, this cluster's own namespace."
+        },
+        "apicurioNamespace": {
+          "type": "string"
+        },
+        "kafkaUI": {
+          "type": "boolean"
+        }
       }
     },
     "tieredStorage": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "credentials": {
           "type": "object",
           "properties": {
-            "existingSecret": { "type": "string" }
+            "existingSecret": {
+              "type": "string"
+            }
           }
         }
       }
@@ -363,18 +747,39 @@
     "backup": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "schedule": { "type": "string", "pattern": "^[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+$" },
-        "ttl": { "type": "string", "pattern": "^[0-9]+h[0-9]+m[0-9]+s$" },
-        "veleroNamespace": { "type": "string" },
-        "snapshotVolumes": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string",
+          "pattern": "^[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+\\s+[0-9*,/-]+$"
+        },
+        "ttl": {
+          "type": "string",
+          "pattern": "^[0-9]+h[0-9]+m[0-9]+s$"
+        },
+        "veleroNamespace": {
+          "type": "string"
+        },
+        "snapshotVolumes": {
+          "type": "boolean"
+        },
         "persistence": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "size": { "type": "string", "pattern": "^[0-9]+(Gi|Ti|Mi)$" },
-            "storageClass": { "type": "string" },
-            "existingClaim": { "type": "string" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "size": {
+              "type": "string",
+              "pattern": "^[0-9]+(Gi|Ti|Mi)$"
+            },
+            "storageClass": {
+              "type": "string"
+            },
+            "existingClaim": {
+              "type": "string"
+            }
           }
         }
       }
@@ -382,80 +787,130 @@
     "drainCleaner": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "podMonitors": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "strimziOperator": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "crdUpgrade": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "dashboards": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "namespace": { "type": "string" },
-        "label": { "type": "string" },
-        "labelValue": { "type": "string" },
-        "brokerDashboard": { "type": "boolean" },
-        "kraftDashboard": { "type": "boolean" },
-        "cruiseControlDashboard": { "type": "boolean" },
-        "connectDashboard": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "labelValue": {
+          "type": "string"
+        },
+        "brokerDashboard": {
+          "type": "boolean"
+        },
+        "kraftDashboard": {
+          "type": "boolean"
+        },
+        "cruiseControlDashboard": {
+          "type": "boolean"
+        },
+        "connectDashboard": {
+          "type": "boolean"
+        }
       }
     },
     "podSecurityPolicy": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
-    "strimzi-kafka-operator": { "type": "object" },
+    "strimzi-kafka-operator": {
+      "type": "object"
+    },
     "lifecycle": {
       "type": "object",
       "properties": {
-        "preStopSleepSeconds": { "type": "integer", "minimum": 0, "maximum": 120 }
+        "preStopSleepSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120
+        }
       }
     },
     "rbac": {
       "type": "object",
       "properties": {
-        "create": { "type": "boolean" },
-        "extraRules": { "type": "array" }
+        "create": {
+          "type": "boolean"
+        },
+        "extraRules": {
+          "type": "array"
+        }
       }
     },
     "serviceAccount": {
       "type": "object",
       "properties": {
-        "annotations": { "type": "object" }
+        "annotations": {
+          "type": "object"
+        }
       }
     },
     "externalSecrets": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "secretStore": {
           "type": "object",
           "properties": {
-            "create": { "type": "boolean" },
-            "provider": { "type": "object" }
+            "create": {
+              "type": "boolean"
+            },
+            "provider": {
+              "type": "object"
+            }
           }
         },
-        "push": { "type": "array" },
-        "pull": { "type": "array" },
-        "sync": { "type": "array" }
+        "push": {
+          "type": "array"
+        },
+        "pull": {
+          "type": "array"
+        },
+        "sync": {
+          "type": "array"
+        }
       }
     }
   },
@@ -466,15 +921,23 @@
         "requests": {
           "type": "object",
           "properties": {
-            "memory": { "type": "string" },
-            "cpu": { "type": "string" }
+            "memory": {
+              "type": "string"
+            },
+            "cpu": {
+              "type": "string"
+            }
           }
         },
         "limits": {
           "type": "object",
           "properties": {
-            "memory": { "type": "string" },
-            "cpu": { "type": "string" }
+            "memory": {
+              "type": "string"
+            },
+            "cpu": {
+              "type": "string"
+            }
           }
         }
       }
@@ -482,18 +945,38 @@
     "jvmOptions": {
       "type": "object",
       "properties": {
-        "-Xms": { "type": "string" },
-        "-Xmx": { "type": "string" },
-        "gcLoggingEnabled": { "type": "boolean" }
+        "-Xms": {
+          "type": "string"
+        },
+        "-Xmx": {
+          "type": "string"
+        },
+        "gcLoggingEnabled": {
+          "type": "boolean"
+        }
       }
     },
     "caConfig": {
       "type": "object",
       "properties": {
-        "generateCertificateAuthority": { "type": "boolean" },
-        "validityDays": { "type": "integer", "minimum": 1 },
-        "renewalDays": { "type": "integer", "minimum": 1 },
-        "certificateExpirationPolicy": { "type": "string", "enum": ["replace-key", "renew-certificate"] }
+        "generateCertificateAuthority": {
+          "type": "boolean"
+        },
+        "validityDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "renewalDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "certificateExpirationPolicy": {
+          "type": "string",
+          "enum": [
+            "replace-key",
+            "renew-certificate"
+          ]
+        }
       }
     }
   }

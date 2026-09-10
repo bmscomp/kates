@@ -15,7 +15,15 @@ Hands-on tutorials for learning Kates — from your first test to advanced chaos
 | 7 | [Kyverno & Security](07-kyverno-security.md) | Intermediate | 30 min | Tutorial 1 |
 | 8 | [Deploy, Detect & Clean](08-deploy-and-detect.md) | Beginner → Intermediate | 25 min | Tutorial 1 |
 | 9 | [Kafka Connect Working Examples (CDC + JDBC)](09-kafka-connect-working-examples.md) | Intermediate | 35 min | Tutorial 1 |
-| 10 | [Kafka Connect Source/Sink Quick Runbook](kafka-connect-simple-source-sink-demo.md) | Intermediate | 15 min | Tutorial 1 |
+| – | [Kafka Connect Source/Sink Quick Runbook](kafka-connect-simple-source-sink-demo.md) | Intermediate | 15 min | Tutorial 1 |
+| 10 | [Installing and Setting Up MirrorMaker 2](10-mirror-maker2-installation.md) | Intermediate | 30 min | Tutorial 1 |
+| 11 | [Migrating Kafka 2.x to 4.x](11-migrating-kafka-2x-to-4x.md) | Advanced | 60 min | Tutorial 10 |
+| 12 | [Migrating Kafka 3.x to 4.x](12-migrating-kafka-3x-to-4x.md) | Intermediate | 40 min | Tutorial 10 |
+
+Tutorials 10–12 rehearse a migration on Kind, where nothing costs anything if
+it goes wrong. When you are ready to migrate a real cluster, the chart's own
+[migration guides](../../charts/mirror-maker2/docs/) cover the decisions,
+credentials and checks that a lab does not have.
 
 ## Skill Progression
 
@@ -28,7 +36,8 @@ Tutorial 1 (Getting Started)
     ├── Tutorial 6 (CI/CD) ← requires Tutorial 2
     ├── Tutorial 7 (Security)
     ├── Tutorial 8 (Deploy & Detect)
-    └── Tutorials 9–10 (Kafka Connect)
+    ├── Tutorial 9 (Kafka Connect)
+    └── Tutorial 10 (MirrorMaker 2) ──── Tutorials 11–12 (cross-version migration)
 ```
 
 - **Start here:** Tutorial 1 is required for all others.

@@ -15,7 +15,7 @@ What it manages:
 - **A strict schema** — `values.schema.json` rejects the stale flat keys the old call sites used, so a mistake fails loudly instead of being silently ignored.
 - **Helm tests** — the operator is `Available`, all ten CRDs are `Established`, and the watch scope did not collapse.
 
-The chart is a **cluster singleton**: 13 of the operator's 17 resources are cluster-scoped with hardcoded names. Two releases can never coexist.
+In its default shape the chart is a **cluster singleton**: 13 of the operator's 17 resources are cluster-scoped with hardcoded names, and a cluster-wide operator watches every namespace, so two such releases can never coexist. The one other shape it knows is an **additional, namespace-scoped operator** — `values-namespace-scope.yaml` — which watches only its own namespace, reuses the primary's cluster-scoped RBAC (`createGlobalResources: false`), never touches the CRDs, and binds its ServiceAccount through unique-name copies of the three bindings that flag skips (`globalBindings.enabled`). The rules for when a second operator may exist — namespace scope only, same CRD generation, no newer than the primary's — are the CLI's to enforce and are written down in [the multi-version plan](../../docs/kafka-multi-version-deploy-plan.md) (§2.3, §2.10).
 
 ## Prerequisites
 
@@ -66,6 +66,7 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 | `values-dev.yaml` | Dev — `logLevel: DEBUG` |
 | `values-prod.yaml` | Prod **uplift** — hardening, PDB, NetworkPolicy. Never applied to any cluster before; read the header. |
 | `values-generic.yaml` | Unknown clusters — documents DNS-domain injection and registry redirection |
+| `values-namespace-scope.yaml` | An **additional** operator, co-located with the Kafka namespace it watches: `watchAnyNamespace: false`, `createGlobalResources: false`, `crdUpgrade.enabled: false`, `globalBindings.enabled: true`, kind-sized. Never for the primary. |
 
 ## Configuration Reference
 
@@ -79,6 +80,8 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 | `crdUpgrade.url` | `""` | Override the bundle URL (empty = derive from `strimziVersion`). Use an internal mirror when airgapped. |
 | `crdUpgrade.backoffLimit` | `3` | Job retries before the install/upgrade aborts |
 | `crdUpgrade.ttlSecondsAfterFinished` | `300` | Retention of a **failed** Job for log inspection. A successful Job is deleted immediately by Helm's `hook-succeeded` policy, so this only governs the failure path. |
+| `globalBindings.enabled` | `false` | Render `ClusterRoleBinding`s named `strimzi-cluster-operator-<namespace>-{global,kafka-broker-delegation,kafka-client-delegation}` binding this release's ServiceAccount to the primary's `strimzi-cluster-operator-global`, `strimzi-kafka-broker` and `strimzi-kafka-client` ClusterRoles. On for additional operators (`createGlobalResources: false` skips upstream's fixed-name copies). |
+| `operatorPolicy.enabled` | `false` | Render the Cluster Operator's NetworkPolicy in the release namespace: probe/metrics ingress on 8080, egress to DNS, the API server and every `strimzi.io/kind` pod in the watched namespaces (all namespaces under `watchAnyNamespace`). This is the policy `charts/kafka-cluster` used to write into the operator namespace; set `networkPolicies.operatorPolicy.enabled=false` there when enabling it here — both render the same name and Helm refuses two owners. |
 | `nameOverride` / `fullnameOverride` | `""` | Standard name overrides |
 | `commonLabels` / `commonAnnotations` | `{}` | Applied to chart-owned resources |
 
@@ -95,7 +98,8 @@ Only these deviate from stock upstream. Everything else in the [upstream values]
 | `strimzi-kafka-operator.leaderElection.enable` | `true` | The **correct** key. See [Upgrading](#upgrading). |
 | `strimzi-kafka-operator.kubernetesServiceDnsDomain` | `cluster.local` | Upstream only emits `KUBERNETES_SERVICE_DNS_DOMAIN` when this differs — callers on custom domains **must** inject it. |
 | `strimzi-kafka-operator.fullReconciliationIntervalMs` | `120000` | Upstream default, verified live |
-| `strimzi-kafka-operator.createGlobalResources` | `true` | `false` leaves four bindings with dangling roleRefs |
+| `strimzi-kafka-operator.createGlobalResources` | `true` | `false` is the additional-operator shape: the fixed-name ClusterRoles and bindings come from the primary's release. On its own it leaves the ServiceAccount unbound from three of them — pair it with `globalBindings.enabled: true`. |
+| `strimzi-kafka-operator.watchNamespaces` | `[]` | With `watchAnyNamespace: false`, the namespaces to watch. The release namespace is always included, so `[]` means "only my own namespace". |
 
 > **There is no `global` block.** Upstream contains zero `.Values.global` references and ignores `global.imageRegistry` entirely. Declaring it to satisfy the schema would convert a loud failure into a silent one, so `--set global.*` is rejected. For registry redirection use `strimzi-kafka-operator.defaultImageRegistry`.
 
@@ -130,7 +134,9 @@ Helm applies a chart's `crds/` directory **on install only**. Per `helm upgrade 
 
 The upstream chart ships all ten Strimzi CRDs in `crds/`. Left alone, they would freeze at whatever version was first installed while the operator moved on, and the API server would **silently prune** fields the frozen schema does not know about — no error, no event.
 
-The `crdUpgrade` hook closes that gap: it fetches the pinned bundle, validates it (non-empty, exactly ten CRDs, server-side dry-run) **before** mutating anything, then applies with `--server-side --force-conflicts`.
+The `crdUpgrade` hook closes that gap: it fetches the pinned bundle, validates it (non-empty; every one of the ten CRDs this platform renders CRs for is defined in it — not an exact count, since other Strimzi releases ship more or fewer; server-side dry-run) **before** mutating anything, then applies with `--server-side --force-conflicts`.
+
+CRDs belong to the **newest** operator on the cluster — the primary's release. An additional operator (`values-namespace-scope.yaml`) runs with the hook disabled, because an older release's bundle would roll the CRDs back.
 
 The CRDs deliberately stay in the subchart's `crds/` and are **never templated**. Templating them would break adoption of the existing release with an ownership error and — far worse — would grant `helm uninstall` the power to cascade-delete every Kafka CR in the cluster (`CRD → Kafka/KafkaNodePool → StrimziPodSet → Pods`).
 
@@ -172,7 +178,7 @@ Adoption is a pure in-place patch — every resource name is identical, so nothi
 
 2. **`helm upgrade` does not update CRDs.** The `crdUpgrade` hook does. See [CRD Lifecycle](#crd-lifecycle).
 
-3. **This chart is a cluster singleton.** 13 of 17 resources are cluster-scoped with hardcoded names, and the leader-election Lease is namespace-scoped with a hardcoded name — so two releases cannot arbitrate, would both win, and would fight over StrimziPodSet writes. There is no parallel install-then-cutover.
+3. **A cluster-wide operator is a cluster singleton.** 13 of 17 resources are cluster-scoped with hardcoded names, and the leader-election Lease is namespace-scoped with a hardcoded name — so two cluster-wide releases cannot arbitrate, would both win, and would fight over StrimziPodSet writes. There is no parallel install-then-cutover. Additional operators are possible only in the namespace-scoped shape (`values-namespace-scope.yaml`), in their own namespaces, beside a primary that is itself namespace-scoped.
 
 4. **Adopting rolls the entire Kafka data plane.** The operand image tracks the operator version and no node pool pins an image, so every broker and controller restarts. This needs a maintenance window and the `strimzi.io/pause-reconciliation` procedure — see the [book chapter](../../docs/book/deploying-strimzi-operator.md).
 

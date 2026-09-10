@@ -1,0 +1,67 @@
+# Fan-in — several sources into one target (consolidation).
+#
+#   helm upgrade --install mm2 charts/mirror-maker2 \
+#     -f charts/mirror-maker2/values-kind.yaml \
+#     -f charts/mirror-maker2/values-fan-in.yaml
+#
+# Each source keeps its own alias, credential, pattern and task budget. The
+# alias is what separates them everywhere it matters: the replicated topic
+# prefix, the offset-syncs topic, the checkpoints topic, the ACLs, the
+# NetworkPolicy egress, the alerts and the tests.
+#
+# The replication policy is DEFAULT here, deliberately. Under an identity
+# policy replicated topics keep their source names, so two sources whose
+# patterns overlap write the same target topics — interleaved records in one
+# offset space, with no error anywhere. The chart refuses the cases it can
+# prove overlap; disjointness beyond that is your assertion
+# (replicationPolicy.allowIdentityFanIn).
+replicationPolicy:
+  mode: default
+
+# Two sources, two task budgets — and the autoscaler ceiling follows the sum.
+mirrors:
+  - source:
+      alias: east
+      clusterName: "krafter"
+      namespace: "kafka"
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        secretName: "kates-mm2"
+        secretKey: "password"
+    topics: ["kates.orders"]
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 1
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        sync.topic.acls.enabled: "false"
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"
+
+  - source:
+      alias: west
+      clusterName: "krafter"
+      namespace: "kafka"
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        secretName: "kates-mm2"
+        secretKey: "password"
+    topics: ["kates.payments"]
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 1
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        sync.topic.acls.enabled: "false"
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"

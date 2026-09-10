@@ -114,6 +114,12 @@ jobs:
           severity: CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Named explicitly rather than relying on Trivy finding a
+          # .trivyignore beside the scan target: scan-ref is `kates`, the file
+          # lives at the repository root, and an ignore file that is silently
+          # not loaded is the worst of both worlds — the build stays red and
+          # the reasoning goes unread. Every entry in it carries an expiry.
+          trivyignores: .trivyignore.yaml
 
   helm-lint:
     name: Helm Lint

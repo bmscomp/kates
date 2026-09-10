@@ -1,8 +1,11 @@
 apiVersion: v2
 name: mirror-maker2
-description: A Helm chart for deploying a Strimzi KafkaMirrorMaker2 cluster (cross-cluster replication / DR / migration)
+description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-version: 0.1.0
+# Minor bump: read-only sources, fan-in, failover/failback, exactly-once,
+# and the rails that make each of them refuse the configurations that fail
+# silently at runtime.
+version: 0.4.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.0"
 kubeVersion: ">=1.27.0-0"
@@ -18,5 +21,46 @@ keywords:
   - mirror-maker
   - replication
   - disaster-recovery
+  - migration
   - strimzi
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+annotations:
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: imagePullPolicy for the pods this chart owns (pre-flight, secret-sync, tests) — not the workers, whose policy is operator-wide
+    - kind: added
+      description: values-dev.yaml and values-prod.yaml carry image guidance — IfNotPresent and a local-worker path for kind, digest pinning and imagePullSecrets for production
+    - kind: added
+      description: A floating image tag (:latest, or no tag at all) is refused at render time for every image key, since it makes the Kafka client version depend on when a pod last restarted
+    - kind: added
+      description: offsetSyncs.location (KIP-716) and the readOnlySource shorthand — mirror a cluster you may only read
+    - kind: added
+      description: Fan-in — several sources per release, with per-source ACLs, egress, alerts and tests
+    - kind: added
+      description: values-failover.yaml and values-failback.yaml, and a rail that refuses a reverse mirror while the forward one is live under an identity policy
+    - kind: added
+      description: target.exactlyOnce — the worker property, the source isolation level and the ACLs from one flag
+    - kind: added
+      description: values-readonly-source.yaml, values-fan-in.yaml, values-scale.yaml
+    - kind: added
+      description: strimziMetricsReporter as an alternative to the JMX exporter; jmxOptions, connectContainer, templateExtra, clientRackInitImage, per-connector version, consumer.client.rack
+    - kind: added
+      description: topics/groups as lists, compiled to escaped patterns
+    - kind: added
+      description: secretSync.watch — an opt-in CronJob that re-copies rotated credentials
+    - kind: added
+      description: NetworkPolicy per-source egress (networkPolicy.kafka.perSource) instead of 0.0.0.0/0
+    - kind: fixed
+      description: The mm2-offset-syncs ACL is granted only when a mirror keeps that topic on the target; with Kafka's default it named a topic that is not on this cluster
+    - kind: fixed
+      description: Dropped the heartbeats ACL — the v1 API removed heartbeatConnector, so nothing here creates that topic
+    - kind: fixed
+      description: An autoscaler whose maxReplicas exceeds sum(tasksMax) is refused; Connect never runs more tasks than that, so the extra workers idle
+    - kind: fixed
+      description: Duplicate source aliases are refused — they silently interleave two sources into one set of target topics
+    - kind: added
+      description: secretSync.secrets[].as — the name a synced Secret is created under, so a source and a target that both call their credential kates-mm2 can coexist in the release namespace
+    - kind: added
+      description: values-migrate-4x.yaml — a migration preset for a Strimzi-operated 4.x source beside the target (SCRAM on its 9092 listener, the credential copied by secretSync under another name), for the dropped-line and in-window cases

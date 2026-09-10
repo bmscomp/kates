@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/bmscomp/kates/cli/output"
@@ -21,12 +23,13 @@ var versionCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if outputMode == "json" {
 			output.JSON(map[string]interface{}{
-				"cli":       Version,
-				"commit":    Commit,
-				"buildDate": BuildDate,
-				"go":        runtime.Version(),
-				"os":        runtime.GOOS,
-				"arch":      runtime.GOARCH,
+				"cli":        Version,
+				"commit":     Commit,
+				"buildDate":  BuildDate,
+				"executable": runningBinaryPath(),
+				"go":         runtime.Version(),
+				"os":         runtime.GOOS,
+				"arch":       runtime.GOARCH,
 			})
 			return
 		}
@@ -35,6 +38,10 @@ var versionCmd = &cobra.Command{
 		output.KeyValue("Kates CLI", Version)
 		output.KeyValue("Commit", Commit)
 		output.KeyValue("Built", BuildDate)
+		// Which file is this? A stale copy earlier in PATH is the usual
+		// reason a freshly installed feature looks missing, and the answer
+		// belongs next to the version it reports.
+		output.KeyValue("Binary", runningBinaryPath())
 		output.KeyValue("Go", runtime.Version())
 		output.KeyValue("OS/Arch", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 
@@ -49,6 +56,19 @@ var versionCmd = &cobra.Command{
 			output.KeyValue("API", output.DimStyle.Render("not reachable"))
 		}
 	},
+}
+
+// runningBinaryPath is the file this process was started from, with
+// symlinks resolved, so `kates version` names the copy that actually ran.
+func runningBinaryPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "unknown"
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
 }
 
 func init() {

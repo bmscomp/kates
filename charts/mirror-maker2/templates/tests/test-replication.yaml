@@ -1,0 +1,338 @@
+{{/*
+════════════════════════════════════════════════════════════════════════════
+Conventions shared by the three data-plane tests (replication, offset
+translation, failover). They live here, beside the test that establishes
+them, rather than in _helpers.tpl: they are the test suite's own naming
+rules, not part of the chart's rendering contract, and nothing outside
+templates/tests/ reads them.
+
+mirror-maker2.testTopic — the topic ON THE SOURCE that a mirror's leg uses.
+Precedence, and the reason for each step:
+
+  1. tests.replication.topicByAlias.<alias> — an explicit per-source override.
+  2. The mirror's first `topics:` entry, when it declares topics as a LIST
+     and sets no `topicsPattern`. A list is an exact, closed set: any name
+     the test invents is one the mirror provably does NOT select, so the
+     records would never leave the source and the leg would time out for a
+     values mismatch dressed up as a replication failure. Choosing a topic
+     the mirror is known to carry is the only default that can pass.
+  3. tests.replication.topic suffixed with the alias, when the release has
+     more than one mirror — so a fan-in release does not point two sources
+     at ONE topic name. Two sources writing one target topic is precisely
+     the corruption the chart's identity rail refuses; a test must not
+     manufacture it.
+  4. tests.replication.topic, for the single-mirror case.
+
+The test only ever writes its own corpus. It creates the topic if it can
+and produces records prefixed with the leg's alias; it deletes nothing and
+rewrites nothing.
+*/}}
+{{- define "mirror-maker2.testTopic" -}}
+{{- $m := .m -}}{{- $ctx := .ctx -}}
+{{- $t := $ctx.Values.tests.replication -}}
+{{- $alias := $m.source.alias | default "source" -}}
+{{- $over := $t.topicByAlias | default dict -}}
+{{- if hasKey $over $alias -}}
+{{- index $over $alias -}}
+{{- else if and (not $m.topicsPattern) $m.topics -}}
+{{- index $m.topics 0 -}}
+{{- else if gt (len $ctx.Values.mirrors) 1 -}}
+{{- printf "%s.%s" $t.topic $alias -}}
+{{- else -}}
+{{- $t.topic -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+mirror-maker2.testGroup — a consumer group name, per leg. Call with
+(dict "base" <name> "m" <mirror> "ctx" $).
+
+Suffixed with the alias on a multi-source release for the same reason the
+topic is: the legs of a fan-in may share a physical cluster (the shipped
+values-fan-in.yaml points both at one), and two legs committing one group
+name would each be reading the other's position.
+*/}}
+{{- define "mirror-maker2.testGroup" -}}
+{{- if gt (len .ctx.Values.mirrors) 1 -}}
+{{- printf "%s-%s" .base (.m.source.alias | default "source") -}}
+{{- else -}}
+{{- .base -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+mirror-maker2.testMirrors is not a template — a template cannot return a
+list — so each test file selects with the same three lines. Kept here as
+the canonical form so the three agree:
+
+  {{- $mirrors := .Values.mirrors }}
+  {{- if $t.sourceAlias }} … filter … {{- end }}
+*/}}
+
+{{- if .Values.tests.replication.enabled }}
+{{- $t := .Values.tests.replication }}
+{{- $fullname := include "mirror-maker2.fullname" . }}
+{{- $ns := include "mirror-maker2.namespace" . }}
+{{- $target := .Values.target }}
+{{- /* Which mirrors to exercise — the named alias, else EVERY mirror. */}}
+{{- $mirrors := .Values.mirrors }}
+{{- if $t.sourceAlias }}
+{{- $sel := list }}
+{{- range .Values.mirrors }}{{ if eq (.source.alias | default "source") $t.sourceAlias }}{{ $sel = append $sel . }}{{ end }}{{ end }}
+{{- if not $sel }}
+{{- fail (printf "tests.replication.sourceAlias is %q, which is not the alias of any mirror in this release. Leave it empty to test every mirror." $t.sourceAlias) }}
+{{- end }}
+{{- $mirrors = $sel }}
+{{- end }}
+{{- /*
+Refuse to render rather than emit a test that cannot connect. The test pods
+build a client.properties from an env-supplied password; TLS needs a
+truststore and mTLS a keystore assembled from user.crt/user.key, and neither
+is something this pod builds. A test that fails on its own configuration
+tells you nothing about replication.
+*/}}
+{{- range $mirrors }}
+{{- if include "mirror-maker2.testAuthUnsupported" (dict "c" .source) }}
+{{- fail (printf "tests.replication.enabled: source %q uses TLS/mTLS, which this test cannot configure (it would need a truststore, and for mTLS a keystore built from user.crt/user.key). Run scripts/test-mm2-migration.sh instead, or disable this test — a test that cannot connect is not a test that passed." (.source.alias | default "source")) }}
+{{- end }}
+{{- end }}
+{{- if include "mirror-maker2.testAuthUnsupported" (dict "c" $target) }}
+{{- fail "tests.replication.enabled: the target uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
+{{- end }}
+{{- $image := $t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
+{{- /*
+THE test. Everything else in this chart's test suite asks Kubernetes whether
+things look right; this one asks Kafka whether the data arrived.
+
+For EVERY mirror in the release it produces a known corpus to that source's
+own topic and consumes it back from the target under the name the replication
+policy in force gives it, then diffs the corpus against what arrived. Under an
+identity policy that name is unchanged, which is also a check that the policy
+is actually in force: if it silently were not, the records would land under the
+<alias>. prefix and the leg would time out.
+
+ONE POD, N LEGS, ONE FAILURE COUNTER. A pod per mirror would report the first
+failure and leave the rest unrun; a fan-in release needs to know whether one
+leg is broken or both, and the two are different diagnoses. Every line carries
+its leg's alias for the same reason.
+
+READ-ONLY SOURCES. The test writes to the source — its own corpus, with its
+own credentials — and that is not the thing §3.1 is about. What it must not do
+is ASSUME MirrorMaker may write there: the offset-syncs topic moves to the
+target under offsetSyncs.location=target, so nothing here looks for
+mm2-offset-syncs on the source, and the diagnostics below name the cluster the
+setting actually puts it on. If the source principal cannot create topics, the
+create step degrades to a warning and the topic must already exist.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-test-replication
+  namespace: {{ $ns }}
+  labels:
+    {{- include "mirror-maker2.componentLabels" (dict "component" "test" "ctx" .) | nindent 4 }}
+    # The selector the kafka-cluster broker NetworkPolicy admits. Without it
+    # this pod is denied at the network layer and reports a replication failure.
+    kates.io/test-pod: "true"
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ $image | quote }}
+      {{- include "mirror-maker2.imagePullPolicy" $ | nindent 6 }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      env:
+        - name: LOG_DIR
+          value: /tmp
+        {{- range $i, $m := $mirrors }}
+        {{- with $m.source.authentication }}
+        {{- if and .type (ne .type "tls") }}
+        # Credentials reach the pod as env from a secretKeyRef and are written
+        # into a properties file by the helper — never on a command line, where
+        # they would be visible in `ps` and in the rendered manifest.
+        - name: SOURCE_PW_{{ $i }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .secretName | default .username | quote }}
+              key: {{ .secretKey | default "password" }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- with $target.authentication }}
+        {{- if and .type (ne .type "tls") }}
+        - name: TARGET_PW
+          valueFrom:
+            secretKeyRef:
+              name: {{ .secretName | default .username | quote }}
+              key: {{ .secretKey | default "password" }}
+        {{- end }}
+        {{- end }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -u
+          # comm needs both sides sorted the same way, and a locale that
+          # collates differently on the two `sort` calls would report every
+          # record as missing.
+          LC_ALL=C
+          export LC_ALL
+
+          TGT="{{ include "mirror-maker2.bootstrap" (dict "c" $target "ctx" $) }}"
+          N={{ $t.messages }}
+          LEGS={{ len $mirrors }}
+          FAILED=0
+          {{- include "mirror-maker2.testClientProps" (dict "c" $target "env" "TARGET_PW" "file" "/tmp/target.properties") | nindent 10 }}
+
+          {{- range $i, $m := $mirrors }}
+          {{- $alias := $m.source.alias | default "source" }}
+          {{- $topic := include "mirror-maker2.testTopic" (dict "m" $m "ctx" $) }}
+          {{- $replicated := include "mirror-maker2.replicatedTopic" (dict "topic" $topic "alias" $alias "ctx" $) }}
+          {{- $group := include "mirror-maker2.testGroup" (dict "base" ($t.group | default "kates-mm2-test") "m" $m "ctx" $) }}
+
+          # ── leg {{ $i }}: {{ $alias }} ────────────────────────────────────
+          # Numbered, not named: a POSIX function name is
+          # [A-Za-z_][A-Za-z0-9_]* and an alias is allowed a dot or a dash.
+          leg_{{ $i }}() {
+            ALIAS="{{ $alias }}"
+            SRC="{{ include "mirror-maker2.bootstrap" (dict "c" $m.source "ctx" $) }}"
+            TOPIC="{{ $topic }}"
+            REPLICATED="{{ $replicated }}"
+            GROUP="{{ $group }}"
+            DEADLINE=$(( $(date +%s) + {{ $t.timeoutSeconds }} ))
+            {{- include "mirror-maker2.testClientProps" (dict "c" $m.source "env" (printf "SOURCE_PW_%d" $i) "file" (printf "/tmp/source-%d.properties" $i)) | nindent 12 }}
+
+            echo "══ [$ALIAS] ensuring $TOPIC exists on the source"
+            # A production source almost always has auto.create.topics.enable=
+            # false (the legacy-kafka chart does too), so producing into a topic
+            # that does not exist fails on the PRODUCER and gets read as a
+            # replication failure — the one thing this test is supposed to be
+            # able to tell you about.
+            #
+            # A genuinely read-only source will DENY this, which is not a fault:
+            # the topic has to pre-exist there. The corpus below is still the
+            # test's own data; what read-only changes is where MirrorMaker keeps
+            # its offset-syncs topic, not what this pod may write.
+            /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$SRC" \
+              --command-config /tmp/source-{{ $i }}.properties \
+              --create --if-not-exists --topic "$TOPIC" \
+              --partitions {{ $t.partitions | default 1 }} \
+              --replication-factor {{ $t.replicationFactor | default 1 }} \
+              2>/tmp/create-{{ $i }}.err || {
+                echo "⚠ [$ALIAS] could not create $TOPIC (it may already exist, or the user lacks Create):"
+                sed 's/^/    /' /tmp/create-{{ $i }}.err | head -5
+              }
+
+            echo "══ [$ALIAS] producing $N records to $TOPIC on the source ($SRC)"
+            # The corpus carries the alias, so a fan-in target holding several
+            # legs' records still says which leg wrote which.
+            i=1
+            while [ "$i" -le "$N" ]; do
+              echo "kates-mm2-e2e-$ALIAS-$i"
+              i=$((i + 1))
+            done | sort > /tmp/expected-{{ $i }}
+            if ! /opt/kafka/bin/kafka-console-producer.sh \
+                   --bootstrap-server "$SRC" \
+                   --producer.config /tmp/source-{{ $i }}.properties \
+                   --topic "$TOPIC" < /tmp/expected-{{ $i }} 2>/tmp/produce-{{ $i }}.err; then
+              echo "❌ [$ALIAS] produce failed:"; sed 's/^/   /' /tmp/produce-{{ $i }}.err | head -10
+              return 1
+            fi
+            echo "  ✅ [$ALIAS] produced"
+
+            echo "══ [$ALIAS] waiting for $REPLICATED to appear on the target ($TGT)"
+            until /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$TGT" \
+                    --command-config /tmp/target.properties --list 2>/dev/null \
+                  | grep -Fqx "$REPLICATED"; do
+              if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                echo "❌ [$ALIAS] $REPLICATED never appeared on the target."
+                echo "   Topics that DID appear:"
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$TGT" \
+                  --command-config /tmp/target.properties --list | sed 's/^/     /'
+                {{- if include "mirror-maker2.isIdentityPolicy" $ }}
+                echo "   If you see {{ $alias }}{{ ($.Values.replicationPolicy).separator | default "." }}$TOPIC there, the identity policy is NOT in"
+                echo "   force — the records were renamed. Check replicationPolicy.mode."
+                {{- else }}
+                echo "   If you see $TOPIC there under its ORIGINAL name, an identity policy IS"
+                echo "   in force while this test expected the default one, which renames."
+                echo "   Check replicationPolicy.mode."
+                {{- end }}
+                echo "   If you see NOTHING for this leg, check that the mirror selects"
+                echo "   $TOPIC (topics / topicsPattern) — tests.replication.topicByAlias.$ALIAS"
+                echo "   overrides which topic this leg uses."
+                return 1
+              fi
+              sleep 5
+            done
+            echo "  ✅ [$ALIAS] topic exists"
+
+            echo "══ [$ALIAS] consuming from the target"
+            REMAINING=$(( DEADLINE - $(date +%s) ))
+            [ "$REMAINING" -lt 30 ] && REMAINING=30
+            # A NAMED group. Without --group the console consumer joins
+            # console-consumer-<random>, which no ACL grant covers, and the
+            # resulting GroupAuthorizationException is indistinguishable from
+            # "nothing replicated" once stderr is discarded.
+            #
+            # The cap is 2N, not N: MirrorMaker 2 is at-least-once, so a retry
+            # can duplicate records, and capping at N would stop short of the
+            # corpus the moment one record arrived twice.
+            /opt/kafka/bin/kafka-console-consumer.sh \
+              --bootstrap-server "$TGT" \
+              --consumer.config /tmp/target.properties \
+              --topic "$REPLICATED" --group "$GROUP" \
+              --from-beginning \
+              --timeout-ms $(( REMAINING * 1000 )) \
+              --max-messages $(( N * 2 )) 2>/tmp/consume-{{ $i }}.err \
+              | sort -u > /tmp/got-{{ $i }}
+
+            # A CONTENT diff, not a count. Counting lines lets a duplicated
+            # corpus with a hole in it pass as complete; comm names the records
+            # that are actually missing, which is also the only output that
+            # tells you WHERE replication stopped.
+            PRESENT=$(comm -12 /tmp/expected-{{ $i }} /tmp/got-{{ $i }} | wc -l | tr -dc '0-9')
+            echo "  [$ALIAS] $PRESENT distinct of $N corpus records arrived"
+            if [ "${PRESENT:-0}" -lt "$N" ]; then
+              echo "❌ [$ALIAS] replication incomplete — missing $(( N - PRESENT )) record(s), first few:"
+              comm -23 /tmp/expected-{{ $i }} /tmp/got-{{ $i }} | head -5 | sed 's/^/     /'
+              if grep -qi 'authorization' /tmp/consume-{{ $i }}.err; then
+                echo "   the consumer was DENIED — the target user needs Read+Describe on"
+                echo "   the group and Read on the topic. See the README's credential contract."
+              fi
+              sed 's/^/   /' /tmp/consume-{{ $i }}.err | grep -v '^   $' | head -5
+              return 1
+            fi
+            echo "✅ [$ALIAS] all $N records replicated $TOPIC → $REPLICATED"
+            return 0
+          }
+          leg_{{ $i }} || FAILED=$(( FAILED + 1 ))
+          {{- end }}
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo ""
+            echo "❌ $FAILED of $LEGS replication leg(s) failed — the ❌ lines above name which."
+            exit 1
+          fi
+          echo ""
+          echo "✅ every one of the $LEGS replication leg(s) round-tripped"
+      resources:
+        requests: { memory: 384Mi, cpu: 100m }
+        limits: { memory: 1Gi, cpu: 1000m }
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}

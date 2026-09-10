@@ -1,0 +1,144 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $l := .Values.listeners }}
+{{- $ns := include "legacy-kafka.namespace" . }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "legacy-kafka.fullname" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "legacy-kafka.brokerSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Clients — MirrorMaker 2 lives in another namespace, so an empty
+    # allowFromNamespaces means "any namespace", which is the lab default.
+    - from:
+        {{- if $np.allowFromNamespaces }}
+        {{- range $np.allowFromNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        {{- if $l.plaintext.enabled }}
+        - port: {{ $l.plaintext.port }}
+          protocol: TCP
+        {{- end }}
+        {{- if $l.sasl.enabled }}
+        - port: {{ $l.sasl.port }}
+          protocol: TCP
+        {{- end }}
+    # Broker-to-broker: replication, and (KRaft) the controller quorum.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "legacy-kafka.selectorLabels" . | nindent 14 }}
+      ports:
+        {{- if $l.plaintext.enabled }}
+        - port: {{ $l.plaintext.port }}
+          protocol: TCP
+        {{- end }}
+        {{- if $l.sasl.enabled }}
+        - port: {{ $l.sasl.port }}
+          protocol: TCP
+        {{- end }}
+        {{- if eq (include "legacy-kafka.mode" .) "kraft" }}
+        - port: 9093
+          protocol: TCP
+        {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Peers, and (ZooKeeper mode) the ensemble.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "legacy-kafka.selectorLabels" . | nindent 14 }}
+      ports:
+        {{- if $l.plaintext.enabled }}
+        - port: {{ $l.plaintext.port }}
+          protocol: TCP
+        {{- end }}
+        {{- if $l.sasl.enabled }}
+        - port: {{ $l.sasl.port }}
+          protocol: TCP
+        {{- end }}
+        {{- if eq (include "legacy-kafka.mode" .) "kraft" }}
+        - port: 9093
+          protocol: TCP
+        {{- else }}
+        - port: 2181
+          protocol: TCP
+        - port: 2888
+          protocol: TCP
+        - port: 3888
+          protocol: TCP
+        {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- if eq (include "legacy-kafka.mode" .) "zookeeper" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "legacy-kafka.fullname" . }}-zookeeper
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "legacy-kafka.zookeeperSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "legacy-kafka.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 2181
+          protocol: TCP
+        - port: 2888
+          protocol: TCP
+        - port: 3888
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "legacy-kafka.zookeeperSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 2888
+          protocol: TCP
+        - port: 3888
+          protocol: TCP
+{{- end }}
+{{- end }}

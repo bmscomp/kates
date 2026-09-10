@@ -74,7 +74,7 @@ func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selecto
 }
 
 func waitKafkaUsersReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {
-	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster=krafter", timeout)
+	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster="+deployKafkaName, timeout)
 }
 
 func waitConnectorReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {

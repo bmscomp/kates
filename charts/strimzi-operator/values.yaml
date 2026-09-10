@@ -64,6 +64,42 @@ crdUpgrade:
   # the TTL to govern. On failure the Job survives, and this is its retention.
   ttlSecondsAfterFinished: 300
 
+# ── Additional (namespace-scoped) operators ──────────────────────────────────
+# One Kubernetes cluster has ONE set of Strimzi CRDs and ONE set of the
+# fixed-name cluster-scoped roles and bindings. They belong to the newest
+# operator on the cluster — the primary's release. Every other operator runs
+# with `strimzi-kafka-operator.createGlobalResources: false` and reuses them
+# (see values-namespace-scope.yaml). What that flag also skips are the three
+# fixed-name ClusterRoleBindings that tie the operator's ServiceAccount to
+# `strimzi-cluster-operator-global`, `strimzi-kafka-broker` and
+# `strimzi-kafka-client` — without them a second operator has no rack
+# awareness and no volume-expansion checks. This block renders those three
+# bindings under names unique to the release namespace
+# (`strimzi-cluster-operator-<namespace>-…`) so the additional operator keeps
+# parity without touching upstream's names.
+globalBindings:
+  # -- Render the three unique-name ClusterRoleBindings for this release's
+  # operator ServiceAccount. Off for the primary (upstream renders its own
+  # under createGlobalResources: true); on for every additional operator.
+  enabled: false
+
+# ── Operator NetworkPolicy (kates-owned) ─────────────────────────────────────
+# The policy that used to be written into the operator's namespace by
+# charts/kafka-cluster (`networkPolicies.operatorPolicy`). Two clusters
+# pointing at one operator namespace fought over that single fixed-name
+# policy, so it now lives with the operator: one policy per operator, egress
+# to every namespace it watches. When you enable it here, set
+# `networkPolicies.operatorPolicy.enabled=false` on every kafka-cluster
+# release that names this operator namespace — the two render the same
+# NetworkPolicy name, and Helm refuses to let two releases own it.
+#
+# Not to be confused with `strimzi-kafka-operator.operatorNetworkPolicy`,
+# upstream's shell that renders whatever ingress/egress you hand it and
+# nothing else.
+operatorPolicy:
+  # -- Render the operator's NetworkPolicy in the release namespace
+  enabled: false
+
 # ── Upstream Strimzi operator (subchart) ─────────────────────────────────────
 # The ONLY place operator settings take effect. Full key reference:
 #   https://github.com/strimzi/strimzi-kafka-operator/blob/main/helm-charts/helm3/strimzi-kafka-operator/values.yaml
@@ -110,8 +146,12 @@ strimzi-kafka-operator:
     enable: true
 
   # ── Pinned for safety (restating upstream defaults on purpose) ─────────────
-  # -- Create the cluster-scoped ClusterRoles/ClusterRoleBindings. Setting this
-  # false leaves exactly four bindings with dangling roleRefs.
+  # -- Create the cluster-scoped ClusterRoles/ClusterRoleBindings. true for the
+  # primary operator, which owns them. false is the ADDITIONAL-operator shape
+  # (values-namespace-scope.yaml): the fixed-name roles come from the primary's
+  # release, and `globalBindings.enabled: true` restores the three bindings
+  # this flag skips — on its own, false leaves the operator's ServiceAccount
+  # unbound from strimzi-cluster-operator-global and the two delegation roles.
   createGlobalResources: true
   # -- Aggregate ClusterRoles that extend existing roles with Strimzi CRD access
   createAggregateRoles: false

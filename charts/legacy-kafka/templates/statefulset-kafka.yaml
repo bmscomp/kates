@@ -1,0 +1,185 @@
+{{- $fullname := include "legacy-kafka.fullname" . }}
+{{- $ns := include "legacy-kafka.namespace" . }}
+{{- $k := .Values.kafka }}
+{{- $l := .Values.listeners }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  serviceName: {{ include "legacy-kafka.headlessService" . }}
+  replicas: {{ $k.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "legacy-kafka.brokerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "legacy-kafka.labels" . | nindent 8 }}
+        app.kubernetes.io/component: broker
+      annotations:
+        # Roll the brokers when the generated config changes — otherwise a
+        # values edit produces a ConfigMap nobody re-reads.
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") . | sha256sum }}
+        {{- if $l.sasl.enabled }}
+        checksum/jaas: {{ include (print $.Template.BasePath "/secret-jaas.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "legacy-kafka.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      {{- if eq (include "legacy-kafka.mode" .) "zookeeper" }}
+      initContainers:
+        # A 2.x broker that starts before ZooKeeper answers does not retry
+        # forever — it exits, and the resulting CrashLoop looks like a config
+        # error rather than a race.
+        - name: wait-for-zookeeper
+          image: {{ include "legacy-kafka.image" . | quote }}
+          imagePullPolicy: {{ $k.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # zookeeper-shell.sh rather than a /dev/tcp probe: it is Java, so it
+          # works on any base image (alpine has no bash), and it proves the
+          # ensemble is actually SERVING, not merely listening. The verdict is
+          # read from the OUTPUT — a root listing always contains the
+          # `zookeeper` znode — because the shell's exit code on a lost
+          # connection is not something every bundled ZooKeeper version agrees
+          # on, and a probe that passes on a failed connection defeats itself.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ZK={{ include "legacy-kafka.zookeeperService" . }}.{{ $ns }}.svc.{{ $.Values.clusterDomain | default "cluster.local" }}:2181
+              i=0
+              until /opt/kafka/bin/zookeeper-shell.sh "$ZK" ls / 2>&1 | grep -q '\[.*zookeeper.*\]'; do
+                i=$((i + 1))
+                if [ "$i" -gt 60 ]; then echo "zookeeper never answered at $ZK"; exit 1; fi
+                echo "waiting for zookeeper at $ZK ..."
+                sleep 3
+              done
+              echo "zookeeper is serving"
+          env:
+            - name: LOG_DIR
+              value: /tmp
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits: { memory: 512Mi, cpu: 500m }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      {{- end }}
+      containers:
+        - name: kafka
+          image: {{ include "legacy-kafka.image" . | quote }}
+          imagePullPolicy: {{ $k.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/bin/sh", "/opt/kates/bin/kafka-entrypoint.sh"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KAFKA_HEAP_OPTS
+              value: {{ $k.heapOpts | quote }}
+            # The official apache/kafka image runs its own setup script when
+            # KAFKA_* config env vars are present. This entrypoint bypasses it,
+            # so the log dir is set in server.properties, not here.
+            - name: LOG_DIR
+              value: /tmp/kafka-logs
+          ports:
+            {{- if $l.plaintext.enabled }}
+            - name: plaintext
+              containerPort: {{ $l.plaintext.port }}
+            {{- end }}
+            {{- if $l.sasl.enabled }}
+            - name: sasl
+              containerPort: {{ $l.sasl.port }}
+            {{- end }}
+            {{- if eq (include "legacy-kafka.mode" .) "kraft" }}
+            - name: controller
+              containerPort: 9093
+            {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ if $l.plaintext.enabled }}{{ $l.plaintext.port }}{{ else }}{{ $l.sasl.port }}{{ end }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: {{ if $l.plaintext.enabled }}{{ $l.plaintext.port }}{{ else }}{{ $l.sasl.port }}{{ end }}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml $k.resources | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/kates/bin
+            - name: data
+              mountPath: {{ $k.logDir }}
+            - name: tmp
+              mountPath: /tmp
+            {{- if $l.sasl.enabled }}
+            - name: jaas
+              mountPath: /etc/kafka-jaas
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ $fullname }}-scripts
+            defaultMode: 0755
+        - name: tmp
+          emptyDir: {}
+        {{- if $l.sasl.enabled }}
+        - name: jaas
+          secret:
+            secretName: {{ $fullname }}-jaas
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

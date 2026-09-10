@@ -1,0 +1,106 @@
+{{- if .Values.operatorPolicy.enabled }}
+{{- $op := index .Values "strimzi-kafka-operator" -}}
+{{- /*
+The Cluster Operator's NetworkPolicy. Moved here from charts/kafka-cluster,
+which wrote a fixed-name policy INTO the operator's namespace with egress to
+one cluster's pods — so two kafka-cluster releases naming the same operator
+namespace fought over a single policy, and the second one lost.
+
+One policy per operator, owned by the operator's own release. Ingress and the
+API-server/DNS egress are what the original allowed. Operand egress goes to
+every pod labelled strimzi.io/kind (Kafka, Connect, MirrorMaker 2, ... — the
+operator reaches brokers on 9090-9093/2181 and Connect workers on 8083) in the
+namespaces this operator watches: every namespace when watchAnyNamespace is
+set, otherwise watchNamespaces plus the release namespace, which upstream
+always watches.
+
+Same name as the policy kafka-cluster used to write, on purpose: if a
+kafka-cluster release still has networkPolicies.operatorPolicy.enabled=true
+for this namespace, Helm refuses the second owner instead of leaving two
+overlapping policies behind. Turn it off there first.
+*/ -}}
+{{- $watched := list }}
+{{- if not $op.watchAnyNamespace }}
+{{- $watched = append ($op.watchNamespaces | default list) .Release.Namespace | uniq | sortAlpha }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    kates.io/watch-scope: {{ if $op.watchAnyNamespace }}"*"{{ else }}{{ join "," $watched | quote }}{{ end }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/kind: cluster-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Keep open for kubelet probes and metrics scraping.
+    # Kubelet probes originate from node network, not pod namespaces.
+    - ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # DNS
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kubernetes API server
+    - to: []
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    # Strimzi operands in the watched namespaces: brokers and controllers
+    # (9090 control plane, 9091 replication, 9092/9093 clients, 2181 ZooKeeper
+    # on releases that still have it) and Connect / MirrorMaker 2 workers (8083
+    # REST, through which connectors are created and polled).
+    - to:
+        {{- if $op.watchAnyNamespace }}
+        - namespaceSelector: {}
+          podSelector:
+            matchExpressions:
+              - key: strimzi.io/kind
+                operator: Exists
+        {{- else }}
+        {{- range $ns := $watched }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchExpressions:
+              - key: strimzi.io/kind
+                operator: Exists
+        {{- end }}
+        {{- end }}
+      ports:
+        - port: 9090
+          protocol: TCP
+        - port: 9091
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP
+        - port: 2181
+          protocol: TCP
+        - port: 8083
+          protocol: TCP
+    # Its own namespace's operator pods (leader-election peers)
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/kind: cluster-operator
+{{- end }}

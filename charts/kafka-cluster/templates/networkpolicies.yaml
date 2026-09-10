@@ -4,6 +4,15 @@
 {{- $monitoringNs := .Values.networkPolicies.monitoringNamespace -}}
 {{- $operatorNamespace := .Values.networkPolicies.operatorNamespace | default "strimzi-operator" -}}
 {{- $kafkaUINamespace := .Values.networkPolicies.kafkaUINamespace | default "kafka-ui" -}}
+{{- /*
+  The default-deny and allow-dns selectors default to the label Strimzi puts on
+  every pod of THIS cluster, app.kubernetes.io/part-of: strimzi-<clusterName>.
+  They used to be a values literal naming krafter, so a second cluster's pods
+  were never selected. An explicit (non-empty) value still wins.
+*/ -}}
+{{- $partOfSelector := dict "app.kubernetes.io/part-of" (printf "strimzi-%s" $clusterName) -}}
+{{- $defaultDenySelector := .Values.networkPolicies.defaultDenySelector | default $partOfSelector -}}
+{{- $allowDNSSelector := .Values.networkPolicies.allowDNSSelector | default $partOfSelector -}}
 {{- if .Values.networkPolicies.defaultDeny }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -15,7 +24,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- .Values.networkPolicies.defaultDenySelector | toYaml | nindent 6 }}
+      {{- $defaultDenySelector | toYaml | nindent 6 }}
   policyTypes:
     - Ingress
     - Egress
@@ -32,7 +41,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- .Values.networkPolicies.allowDNSSelector | toYaml | nindent 6 }}
+      {{- $allowDNSSelector | toYaml | nindent 6 }}
   policyTypes:
     - Egress
   egress:
@@ -108,6 +117,27 @@ spec:
           podSelector:
             matchLabels:
               strimzi.io/kind: KafkaConnect
+        {{- /*
+          MirrorMaker 2. Its workers ARE Kafka Connect workers, but Strimzi
+          labels them strimzi.io/kind: KafkaMirrorMaker2, so the KafkaConnect
+          rule above does not match them and every mirror against this cluster
+          was denied at the network layer — silently, as a connector that stays
+          RUNNING and replicates nothing. See charts/mirror-maker2.
+        */}}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.mirrorMaker2Namespace | default .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: KafkaMirrorMaker2
+        {{- /*
+          Helm-test and CLI pods in this namespace. Same convention as
+          connect-cluster's test pods: without it, every `kubectl run` client
+          used to verify the cluster times out against its own brokers.
+        */}}
+        - podSelector:
+            matchLabels:
+              kates.io/test-pod: "true"
       ports:
         - port: 9092
           protocol: TCP
@@ -221,6 +251,14 @@ spec:
         - port: 6443
           protocol: TCP
 ---
+{{- if .Values.networkPolicies.operatorPolicy.enabled }}
+{{- /*
+  The Cluster Operator's own policy, written into ANOTHER namespace under a
+  fixed name — a standalone-install convenience. Two clusters naming the same
+  operator fight over it, so the strimzi-operator wrapper chart owns it once
+  per operator (its operatorPolicy.enabled); turn this off on every release
+  that names an operator whose wrapper renders it (values-additional.yaml does).
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -295,6 +333,7 @@ spec:
             matchLabels:
               strimzi.io/kind: cluster-operator
 ---
+{{- end }}
 {{- if .Values.networkPolicies.kafkaUI }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

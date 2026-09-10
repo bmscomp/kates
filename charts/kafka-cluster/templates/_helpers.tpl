@@ -14,7 +14,8 @@ Falls back to the release name when clusterName is not set.
 {{- end }}
 
 {{/*
-Common labels applied to every resource.
+Common labels applied to every resource, including user-supplied extraLabels
+(the CLI stamps kates.io/lab and kates.io/lab-role through them).
 */}}
 {{- define "kafka-cluster.labels" -}}
 helm.sh/chart: {{ include "kafka-cluster.name" . }}-{{ .Chart.Version | replace "+" "_" }}
@@ -24,6 +25,61 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: {{ include "kafka-cluster.name" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+{{- with .Values.extraLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Normalise a version to x.y.z so semverCompare accepts it: "4.2" and "4.2-IV1"
+both become 4.2.0, "4.1.2-rc1" becomes 4.1.2. Call with the version string.
+*/}}
+{{- define "kafka-cluster.semver" -}}
+{{- $v := regexReplaceAll "[^0-9.].*$" (toString .) "" | trimSuffix "." -}}
+{{- $p := splitList "." $v -}}
+{{- if eq (len $p) 1 -}}{{- printf "%s.0.0" (index $p 0) -}}
+{{- else if eq (len $p) 2 -}}{{- printf "%s.%s.0" (index $p 0) (index $p 1) -}}
+{{- else -}}{{- printf "%s.%s.%s" (index $p 0) (index $p 1) (index $p 2) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The Kafka broker configuration to render: kafka.config, minus the share-group
+keys (group.share.*, share.*) when kafkaVersion is below 4.2.0 — share groups
+are the feature behind Chart.yaml's kates.io/kafka-floor, and a 4.1.x cluster
+must be able to start without them. Emits YAML at column 0; the caller nindents.
+*/}}
+{{- define "kafka-cluster.kafkaConfig" -}}
+{{- $config := .Values.kafka.config | default dict -}}
+{{- if semverCompare "<4.2.0" (include "kafka-cluster.semver" .Values.kafkaVersion) -}}
+{{- /* A filtered COPY — .Values is never mutated. */ -}}
+{{- $filtered := dict -}}
+{{- range $key, $value := $config -}}
+{{- if not (or (hasPrefix "group.share." $key) (hasPrefix "share." $key)) -}}
+{{- $_ := set $filtered $key $value -}}
+{{- end -}}
+{{- end -}}
+{{- $config = $filtered -}}
+{{- end -}}
+{{- range $key, $value := $config }}
+{{ $key }}: {{ $value | toJson }}
+{{- end }}
+{{- end }}
+
+{{/*
+Render-time guardrail: a metadata version newer than the Kafka version can
+never work — the brokers would refuse to start — and Strimzi only reports it
+minutes later as a NotReady Kafka. Fail here instead.
+*/}}
+{{- define "kafka-cluster.validateVersions" -}}
+{{- if .Values.kafka.metadataVersion -}}
+{{- $kafka := include "kafka-cluster.semver" .Values.kafkaVersion -}}
+{{- $meta := include "kafka-cluster.semver" .Values.kafka.metadataVersion -}}
+{{- $kafkaMinor := printf "%s.%s.0" (index (splitList "." $kafka) 0) (index (splitList "." $kafka) 1) -}}
+{{- if semverCompare (printf ">%s" $kafkaMinor) $meta -}}
+{{- fail (printf "kafka-cluster: kafka.metadataVersion %q is newer than kafkaVersion %q — a broker cannot run metadata from a release it does not have. Set kafka.metadataVersion to %s or older (the CLI derives one step behind the Kafka version)." (toString .Values.kafka.metadataVersion) (toString .Values.kafkaVersion) (printf "%s.%s" (index (splitList "." $kafka) 0) (index (splitList "." $kafka) 1))) -}}
+{{- end -}}
+{{- end -}}
 {{- end }}
 
 {{/*

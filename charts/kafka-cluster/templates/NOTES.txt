@@ -3,7 +3,12 @@
 └──────────────────────────────────────────────────────────────────┘
 
   Version:     Kafka {{ .Values.kafkaVersion }} / Strimzi {{ .Values.strimziVersion }}
+  Metadata:    {{ if .Values.kafka.metadataVersion }}{{ .Values.kafka.metadataVersion }}{{ else }}operator default for Kafka {{ .Values.kafkaVersion }} (forecloses a rollback){{ end }}
+  Operator:    Cluster Operator in namespace {{ .Values.networkPolicies.operatorNamespace | default "strimzi-operator" }} (must watch {{ .Release.Namespace }} and support Kafka {{ .Values.kafkaVersion }})
   Mode:        KRaft (node pools enabled)
+{{- if semverCompare "<4.2.0" (include "kafka-cluster.semver" .Values.kafkaVersion) }}
+  Share groups: not rendered — kafka.config's group.share.*/share.* keys need Kafka >= 4.2.0 (Chart.yaml kates.io/kafka-floor)
+{{- end }}
   Brokers:     {{ len .Values.brokerPools }} zone-aware pool(s)
   Controllers: {{ len .Values.controllerPools }} zone-aware pool(s)
 {{- if .Values.topics.enabled }}

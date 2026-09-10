@@ -1,0 +1,57 @@
+# Failover overlay — the DR sibling of values-cutover.yaml.
+#
+#   helm upgrade mm2 charts/mirror-maker2 -n kafka \
+#     -f charts/mirror-maker2/values-prod.yaml \
+#     -f charts/mirror-maker2/values-failover.yaml
+#
+# THE DIFFERENCE FROM A CUTOVER: a cutover is planned and the source is
+# healthy — you stop producing, wait for lag to reach zero, then switch. A
+# failover is not: the source is gone, whatever had not replicated is not
+# coming, and the only question left is where consumers resume on the target.
+#
+# WHAT IT DOES:
+#
+#   sourceConnectorState: stopped
+#     There is nothing to read. `stopped` releases the tasks too, so a worker
+#     restart cannot reconnect to a cluster that is coming back up with a
+#     partial log and resume mirroring into a target that has since moved on.
+#
+#   checkpointConnectorState: running
+#     Kept running exactly as in a cutover: consumers still need their
+#     translated positions, and the checkpoints topic is on the target, so it
+#     survives the source's loss.
+#
+# WHERE CONSUMERS RESUME. Two ways, in order of preference:
+#
+#   1. The application reads the checkpoints itself, through
+#      RemoteClusterUtils / the translated offsets in `<alias>.checkpoints.internal`.
+#      This is the supported path and needs nothing from this chart.
+#
+#   2. Seed the groups on the target from a ConfigMap of offsets. Strimzi
+#      exposes this as alterOffsets on the connector, and it applies only
+#      while the connector is STOPPED — which it is, above. Produce the
+#      ConfigMap first with listOffsets against the checkpoint connector,
+#      then name it here:
+#
+#        mirrors:
+#          - sourceConnector:
+#              alterOffsets:
+#                fromConfigMap:
+#                  name: mm2-failover-offsets
+#
+#      That block is left commented rather than shipped: a wrong offsets
+#      ConfigMap silently rewinds or skips every consumer in the group, and
+#      the name is specific to one incident.
+#
+# AFTERWARDS: the target is now the system of record. Failing BACK is a
+# separate, opposite mirror — see values-failback.yaml — and never a matter of
+# re-enabling this one.
+cutover:
+  enabled: true
+  sourceConnectorState: stopped
+  checkpointConnectorState: running
+
+# The source is unreachable by definition. Restarting into it repeatedly buys
+# nothing but noise in the connector log and the alerting.
+autoRestart:
+  enabled: false

@@ -1,0 +1,164 @@
+# Additional cluster overlay — a SECOND (third, …) Kafka cluster beside the
+# primary, in its own namespace, on another Kafka version.
+#
+# Usage (hand-run; `kates clusters add` layers this file the same way):
+#   helm upgrade --install krafter-42 charts/kafka-cluster \
+#     -n kafka-krafter-42 --create-namespace \
+#     -f charts/kafka-cluster/values-kind.yaml \
+#     -f charts/kafka-cluster/values-additional.yaml \
+#     --set clusterName=krafter-42 --set kafkaVersion=4.2.1 \
+#     --set kafka.metadataVersion=4.2 \
+#     --set networkPolicies.operatorNamespace=<the operator that reconciles it>
+#
+# ONE NAMESPACE PER CLUSTER. Everything the chart creates is keyed on
+# clusterName except a handful of fixed-name, namespaced resources (the
+# kafka-metrics ConfigMap, the default-deny/allow-dns/kafka-brokers policies,
+# the PodMonitors); sharing a namespace with another cluster is a Helm
+# ownership error at best and a silent selector overlap at worst.
+#
+# WHY EACH SHARED THING IS OFF — one Kubernetes cluster has exactly one of each:
+#
+#   drainCleaner      cluster-scoped, fixed names (strimzi-drain-cleaner
+#                     ClusterRole, ClusterRoleBinding, ValidatingWebhook-
+#                     Configuration). One webhook serves every cluster; a second
+#                     release is an ownership conflict. Off by default already;
+#                     an additional cluster must never enable it.
+#   crdUpgrade        applies strimzi-crds-<strimziVersion>.yaml. CRDs belong
+#                     to the NEWEST operator on the cluster (the primary's
+#                     release); an additional cluster carrying an OLDER
+#                     strimziVersion would roll them back. Mandatory off.
+#   dashboards        Grafana ConfigMaps with fixed names — duplicates across
+#                     namespaces, conflicts within one. The primary's serve.
+#   podSecurityPolicy the Kyverno ClusterPolicy kafka-pod-security-standards
+#                     is cluster-scoped with a fixed name. Off by default; keep
+#                     it off.
+#   networkPolicies.operatorPolicy
+#                     the `strimzi-operator` NetworkPolicy written INTO the
+#                     operator's namespace — a fixed name in ANOTHER release's
+#                     namespace, which two clusters would fight over. The
+#                     strimzi-operator wrapper owns it, once per operator.
+#
+# SIZING. Single controller, single broker, replication factor 1: the smaller
+# of values-ci.yaml (pools) and values-kind.yaml (entity operator), because two
+# three-zone clusters do not fit a laptop and an additional cluster exists to
+# be migrated to or from, not to be durable. `kates clusters add --ha` and an
+# explicit -f of your own override these. Cruise Control, the exporter and the
+# rebalance CRs are pointless on one broker and off.
+#
+# WHAT IS NOT HERE. Listeners, users and the strimzi.io labels are the chart
+# defaults — the kates-mm2 user on both ends is exactly what a migration
+# needs. Topics are off: the platform's topic set (RF3, min.insync 2) is the
+# PRIMARY's, cannot be created on one broker, and a migration lab creates its
+# own corpus topics on the source. Set networkPolicies.operatorNamespace to
+# the namespace of the operator that reconciles this cluster (the primary's
+# `strimzi-operator`, or this namespace for a co-located one), and
+# networkPolicies.mirrorMaker2Namespace to wherever the mirror runs.
+
+drainCleaner:
+  enabled: false
+
+crdUpgrade:
+  enabled: false
+
+dashboards:
+  enabled: false
+
+podSecurityPolicy:
+  enabled: false
+
+networkPolicies:
+  operatorPolicy:
+    enabled: false
+
+# ── Single-node sizing ───────────────────────────────────────────────────────
+controllerPools:
+  - name: controllers
+    zone: ""
+    replicas: 1
+    storageSize: 1Gi
+    storageClass: ""
+
+controllerDefaults:
+  deleteClaim: true
+  resources:
+    requests: { memory: 512Mi, cpu: 250m }
+    limits: { memory: 512Mi, cpu: 500m }
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 256m
+    gcLoggingEnabled: false
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
+  tolerations: []
+
+brokerPools:
+  - name: brokers
+    zone: ""
+    replicas: 1
+    storageSize: 5Gi
+    storageClass: ""
+
+brokerDefaults:
+  deleteClaim: true
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 512m
+    gcLoggingEnabled: false
+  resources:
+    requests: { memory: 1Gi, cpu: 250m }
+    limits: { memory: 1Gi, cpu: 500m }
+  topologySpreadConstraints:
+    enabled: false
+  podAntiAffinity:
+    enabled: false
+  tolerations: []
+
+# A single broker cannot satisfy the production replication factors (3) the
+# base values pin, so its internal topics would never form. Drop them to 1.
+kafka:
+  config:
+    offsets.topic.replication.factor: 1
+    transaction.state.log.replication.factor: 1
+    transaction.state.log.min.isr: 1
+    default.replication.factor: 1
+    min.insync.replicas: 1
+
+entityOperator:
+  topicOperator:
+    reconciliationIntervalMs: 10000
+    jvmOptions:
+      -Xms: 64m
+      -Xmx: 128m
+    resources:
+      requests:
+        memory: 96Mi
+        cpu: 50m
+      limits:
+        memory: 192Mi
+        cpu: 200m
+  userOperator:
+    reconciliationIntervalMs: 10000
+    jvmOptions:
+      -Xms: 64m
+      -Xmx: 128m
+    resources:
+      requests:
+        memory: 96Mi
+        cpu: 50m
+      limits:
+        memory: 192Mi
+        cpu: 200m
+
+topics:
+  enabled: false
+
+kafkaExporter:
+  enabled: false
+
+cruiseControl:
+  enabled: false
+
+rebalance:
+  enabled: false

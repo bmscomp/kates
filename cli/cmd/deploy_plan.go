@@ -38,24 +38,40 @@ func runInteractiveForms() error {
 				Title("Enable High Availability (Multi-AZ)?").
 				Description("Sets replicas=3, min.insync.replicas=2, and enables Topology Spread Constraints").
 				Value(&deployHA),
+		),
 
+		// ── Group 2: Components ──────────────────────────────────────────────
+		// On its own page so the whole list fits a 24-line terminal: a huh
+		// group scrolls per focused field, not per option, so a long
+		// multi-select squeezed under three other fields could hide its
+		// last entries until the cursor reached them.
+		huh.NewGroup(
 			huh.NewMultiSelect[string]().
-				Title("Select Additional Components").
-				Description("Use space to toggle, enter to confirm").
+				Title("Select Components").
+				Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed.").
 				Options(
 					huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
 					huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
-					huh.NewOption("🖥  Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
+					huh.NewOption("💻 Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
+					huh.NewOption("🔁 MirrorMaker 2 (loopback mirror of the primary)", "mirror-maker2").Selected(deployWithMirrorMaker2),
 					huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
 					huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
 					huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
-					huh.NewOption("🛡  Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
+					huh.NewOption("🚦 Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
 				).
 				Value(&components),
 		),
 	).WithTheme(ThemeKates())
 
 	if err := form1.Run(); err != nil {
+		return err
+	}
+
+	// ── Form: Versions and scope ─────────────────────────────────────────
+	// The Kafka options are a function of the operator chosen above them:
+	// pick 1.0.1 and the list is its window, pick 1.1.0 and it is 1.1.0's.
+	// Nothing here is a table in Go — the options come from the charts.
+	if err := runVersionPickerForm(); err != nil {
 		return err
 	}
 
@@ -111,6 +127,15 @@ func runInteractiveForms() error {
 			))
 		}
 
+		if sliceContains(components, "mirror-maker2") {
+			nsGroups = append(nsGroups, huh.NewGroup(
+				huh.NewInput().
+					Title("MirrorMaker 2 Namespace").
+					Description("Namespace for the loopback mirror (the Kafka namespace is the simplest: the kates-mm2 credential lives there)").
+					Value(&deployMM2NS),
+			))
+		}
+
 		if sliceContains(components, "kafka-ui") {
 			nsGroups = append(nsGroups, huh.NewGroup(
 				huh.NewInput().
@@ -132,6 +157,7 @@ func runInteractiveForms() error {
 	deployWithKyverno = false
 	deployWithStrimzi = false
 	deployWithKafkaUI = false
+	deployWithMirrorMaker2 = false
 
 	for _, c := range components {
 		switch c {
@@ -141,6 +167,8 @@ func runInteractiveForms() error {
 			deployWithKafkaConnect = true
 		case "kafka-ui":
 			deployWithKafkaUI = true
+		case "mirror-maker2":
+			deployWithMirrorMaker2 = true
 		case "chaos":
 			deployWithChaos = true
 		case "monitoring":
@@ -152,7 +180,10 @@ func runInteractiveForms() error {
 		}
 	}
 
-	return nil
+	// ── Review ───────────────────────────────────────────────────────────
+	// Everything chosen, in one screen, before a single Helm call: the
+	// versions as they will resolve, the components, the namespaces.
+	return runDeployReviewForm()
 }
 
 // printTopologyResolution prints the resolved namespace topology (Phase 1).
@@ -204,6 +235,9 @@ func printComponentSelection() {
 	if deployWithKafkaUI {
 		PrintPhaseSuccess("Kafka UI (Dashboard)")
 	}
+	if deployWithMirrorMaker2 {
+		PrintPhaseSuccess("MirrorMaker 2 (loopback mirror)")
+	}
 }
 
 // resolvedNamespaces holds the resolved namespace values for each component group.
@@ -214,6 +248,7 @@ type resolvedNamespaces struct {
 	chaos   string
 	jaeger  string
 	kafkaUI string
+	mm2     string
 }
 
 // resolveNamespaces resolves namespace values based on the selected topology.
@@ -226,6 +261,7 @@ func resolveNamespaces() resolvedNamespaces {
 			chaos:   deployNamespace,
 			jaeger:  deployNamespace,
 			kafkaUI: deployNamespace,
+			mm2:     deployNamespace,
 		}
 	}
 	return resolvedNamespaces{
@@ -235,6 +271,7 @@ func resolveNamespaces() resolvedNamespaces {
 		chaos:   deployChaosNS,
 		jaeger:  deployMonitoringNS,
 		kafkaUI: deployKafkaUINS,
+		mm2:     deployMM2NS,
 	}
 }
 
@@ -243,28 +280,31 @@ func resolveNamespaces() resolvedNamespaces {
 func buildSharedEntries(ns resolvedNamespaces) []DeploySummaryEntry {
 	var entries []DeploySummaryEntry
 	if deployWithStrimzi {
-		entries = append(entries, DeploySummaryEntry{Icon: "☸", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
+		entries = append(entries, DeploySummaryEntry{Icon: "🦊", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
 	}
 	if deployWithCertManager {
 		entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
 	}
 	if deployWithKyverno {
-		entries = append(entries, DeploySummaryEntry{Icon: "🛡", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
+		entries = append(entries, DeploySummaryEntry{Icon: "🚦", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
 	}
-	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (krafter)", Release: "krafter", Namespace: ns.kafka, Group: "B"})
+	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (" + deployKafkaName + ")", Release: deployKafkaName, Namespace: ns.kafka, Group: "B"})
 	if deployWithKafkaConnect {
-		entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL (CDC)", Release: "postgresql", Namespace: deployDbNS, Group: "B"})
+		entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL", Release: "postgresql", Namespace: deployDbNS, Group: "B"})
 		entries = append(entries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: ns.connect, Group: "B"})
 	}
 	if deployWithMonitoring {
-		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring Stack", Release: "monitoring", Namespace: ns.jaeger, Group: "B"})
+		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring", Release: "monitoring", Namespace: ns.jaeger, Group: "B"})
 	}
 	if deployWithSchemaRegistry == "apicurio" {
-		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio Registry", Release: "apicurio", Namespace: ns.kafka, Group: "C"})
+		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio", Release: "apicurio", Namespace: ns.kafka, Group: "C"})
 	}
 	entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: ns.app, Group: "C"})
 	if deployWithKafkaUI {
-		entries = append(entries, DeploySummaryEntry{Icon: "🖥", Name: "Kafka UI", Release: "kafka-ui", Namespace: ns.kafkaUI, Group: "C"})
+		entries = append(entries, DeploySummaryEntry{Icon: "💻", Name: "Kafka UI", Release: "kafka-ui", Namespace: ns.kafkaUI, Group: "C"})
+	}
+	if deployWithMirrorMaker2 {
+		entries = append(entries, DeploySummaryEntry{Icon: "🔁", Name: "MirrorMaker 2", Release: "mm2", Namespace: ns.mm2, Group: "C"})
 	}
 	if deployWithChaos {
 		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: ns.chaos, Group: "C"})
@@ -299,6 +339,9 @@ func countDeploySteps() int {
 	if deployWithKafkaUI {
 		totalSteps++
 	}
+	if deployWithMirrorMaker2 {
+		totalSteps++
+	}
 	if deployWithChaos {
 		totalSteps++
 	}
@@ -317,7 +360,7 @@ func registerDashboardComponents(dashboard *deployDashboardModel, ns resolvedNam
 	if deployWithKyverno {
 		dashboard.RegisterComponent("kyverno", "Kyverno", "A", Target{"kyverno", "app.kubernetes.io/instance=kyverno"})
 	}
-	dashboard.RegisterComponent("kafka", "Kafka Cluster", "B", Target{ns.kafka, "strimzi.io/cluster=krafter"})
+	dashboard.RegisterComponent("kafka", "Kafka Cluster", "B", Target{ns.kafka, "strimzi.io/cluster=" + deployKafkaName})
 	dashboard.RegisterComponent("kafka-users", "Kafka Users", "B", Target{ns.kafka, "app.kubernetes.io/name=entity-operator"})
 	if deployWithMonitoring {
 		dashboard.RegisterComponent("monitoring", "Monitoring Stack", "B", Target{ns.jaeger, "release=monitoring"})
@@ -336,6 +379,9 @@ func registerDashboardComponents(dashboard *deployDashboardModel, ns resolvedNam
 	dashboard.RegisterComponent("kates", "Kates Backend", "C", Target{ns.app, "app.kubernetes.io/instance=kates"})
 	if deployWithKafkaUI {
 		dashboard.RegisterComponent("kafka-ui", "Kafka UI", "C", Target{ns.kafkaUI, "app.kubernetes.io/name=kafka-ui"})
+	}
+	if deployWithMirrorMaker2 {
+		dashboard.RegisterComponent("mirror-maker2", "MirrorMaker 2", "C", Target{ns.mm2, "strimzi.io/kind=KafkaMirrorMaker2"})
 	}
 	if deployWithChaos {
 		dashboard.RegisterComponent("chaos", "Litmus Chaos", "C", Target{ns.chaos, "app.kubernetes.io/instance=chaos"})
@@ -367,4 +413,8 @@ type deployContext struct {
 	chartOverlay func(string) string
 	fileExists   func(string) bool
 	advanceStep  func()
+	// versions is the resolved operator/Kafka plan; primary the cluster it
+	// describes. Both replace the "krafter"/pinned-version literals.
+	versions *versionPlan
+	primary  primaryCluster
 }

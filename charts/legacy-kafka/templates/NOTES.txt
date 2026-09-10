@@ -1,0 +1,47 @@
+legacy-kafka {{ .Values.kafka.version }} ({{ include "legacy-kafka.mode" . }} mode) — release {{ .Release.Name }} in {{ include "legacy-kafka.namespace" . }}.
+
+⚠ THIS IS A MIGRATION SOURCE, NOT A CLUSTER. Single-broker defaults, RF{{ .Values.kafka.replicationFactor }},
+  {{ if .Values.persistence.enabled }}a PVC{{ else }}emptyDir storage (everything is lost on restart, on purpose){{ end }}.
+  Never point production traffic at it.
+
+Bootstrap address — this is the string that belongs in the mirror-maker2 chart:
+
+  mirrors:
+    - source:
+        alias: legacy
+        bootstrapServers: {{ include "legacy-kafka.bootstrapAddress" . }}
+        kafkaVersion: "{{ .Values.kafka.version }}"
+{{- if .Values.listeners.sasl.enabled }}
+        authentication:
+          type: plain
+          username: {{ (index .Values.listeners.sasl.users 0).username }}
+          secretName: <a Secret you create in the MM2 namespace>
+{{- else }}
+        authentication:
+          type: ""          # PLAINTEXT — no credentials
+{{- end }}
+
+`kafkaVersion` is not decoration: the mirror-maker2 chart compares it against
+the KIP-896 floor (Kafka 2.1) that 4.x clients enforce, and refuses to render
+below it rather than letting the connector fail at runtime.
+
+Watch it come up:
+  kubectl -n {{ include "legacy-kafka.namespace" . }} rollout status sts/{{ include "legacy-kafka.fullname" . }} --timeout=300s
+{{- if eq (include "legacy-kafka.mode" .) "zookeeper" }}
+  kubectl -n {{ include "legacy-kafka.namespace" . }} rollout status sts/{{ include "legacy-kafka.fullname" . }}-zookeeper --timeout=300s
+{{- end }}
+
+Topics pre-created by the post-install Job:
+{{- range .Values.topics }}
+  • {{ .name }} ({{ .partitions | default 1 }} partitions)
+{{- end }}
+
+Produce something to mirror (--command replaces the image ENTRYPOINT rather
+than appending to it; LOG_DIR keeps the CLI's log4j output off a read-only tree):
+  kubectl -n {{ include "legacy-kafka.namespace" . }} run producer --rm -it --restart=Never \
+    --image={{ include "legacy-kafka.image" . }} --env=LOG_DIR=/tmp --command -- \
+    /opt/kafka/bin/kafka-console-producer.sh \
+      --bootstrap-server {{ include "legacy-kafka.bootstrapAddress" . }} --topic {{ (index .Values.topics 0).name | default "kates.orders" }}
+
+Smoke test:
+  helm test {{ .Release.Name }} -n {{ include "legacy-kafka.namespace" . }}
