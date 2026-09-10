@@ -1,0 +1,241 @@
+{{- if and .Values.alerts.enabled (not .Values.metrics.enabled) }}
+{{- fail "alerts.enabled requires metrics.enabled=true — without metricsConfig on the CR, Strimzi never opens the scrape port and every rule below would evaluate against no data (i.e. never fire)." }}
+{{- end }}
+{{- if and .Values.alerts.enabled (eq (.Values.metrics.type | default "jmxPrometheusExporter") "strimziMetricsReporter") (not .Values.alerts.allowReporterMetrics) }}
+{{- fail "alerts.enabled with metrics.type=strimziMetricsReporter: the rules below are written against the JMX exporter's metric names (kafka_connect_source_task_metrics_*, kafka_connect_mirror_*, jvm_memory_*), which come from the pattern rules in metrics-configmap.yml. The Strimzi Metrics Reporter publishes Kafka's own metric registry directly and names the same numbers differently, so these rules would install, evaluate against nothing, and never fire — an alert that cannot fire is worse than no alert. Two ways forward: keep metrics.type=jmxPrometheusExporter for now, or verify the reporter's names in your Prometheus, port the exprs, and set alerts.allowReporterMetrics=true." }}
+{{- end }}
+{{- if and .Values.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- $name := include "mirror-maker2.fullname" . }}
+{{- $ns := include "mirror-maker2.namespace" . }}
+{{- $th := .Values.alerts.thresholds }}
+{{- $rb := .Values.alerts.runbookBaseUrl }}
+{{- $identity := include "mirror-maker2.isIdentityPolicy" . }}
+{{- $sep := (.Values.replicationPolicy).separator | default "." }}
+{{- /*
+WHY THESE RULES: a KafkaMirrorMaker2 stays Ready while its mirror is dead.
+Ready means the Connect workers are up; it says nothing about whether records
+are crossing. Everything below is a way for the mirror to be broken without the
+CR noticing — and replication lag in particular is the number that decides
+whether a cutover is safe to run.
+
+WHY PER SOURCE: `mirrors` is a list, and every rule that sums over the release
+sums over all of them. A fan-in release with three healthy legs and one stuck
+one has a healthy total, so the rules about a MIRROR are rendered once per
+alias and carry a `source` label; the rules about the WORKERS (heap,
+rebalances) stay release-wide, because there is one Connect cluster.
+
+The alert NAMES do not carry the alias on purpose. Alertmanager groups and
+routes on `alertname`, and silences are written against it, so a fan-in
+release would otherwise fork every receiver and every runbook heading per
+source. The alias goes in the `source` label and the summary, which is where
+a human and a route both read it.
+
+HOW A SOURCE IS SELECTED. Connect names the MM2 connectors
+`<sourceAlias>-><targetAlias>.MirrorSourceConnector` (and
+`.MirrorCheckpointConnector`), and the JMX exporter carries that string as the
+`connector` label on the worker, source-task and task-error metrics — so
+`connector=~"<alias>->.*"` is the per-source selector for those. PromQL
+regexes are anchored and case-sensitive, which is why `.*checkpoint.*` matched
+nothing when these rules were first written.
+
+The two `kafka.connect.mirror` beans are different. MirrorCheckpointConnector
+tags its metrics with `source`, so its per-source selector is
+`source="<alias>"`. MirrorSourceConnector does NOT (Kafka only adds that tag
+under `add.source.alias.to.metrics`, off by default); what it does carry is
+the REPLICATED topic name, which under a prefixing policy already starts with
+the alias — hence `topic=~"<alias>[<sep>].*"`. Under an identity policy the
+replicated name is the source name and no per-source dimension survives, so
+the lag rule falls back to release-wide and names the topic instead.
+
+The `{{ "{{" }} $value {{ "}}" }}` escaping is Helm getting out of Prometheus's
+way: both use the same delimiters.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}-alerts
+  namespace: {{ $ns }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+    {{- with .Values.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kafka-mirror-maker2
+      rules:
+        {{- range $m := .Values.mirrors }}
+        {{- $alias := $m.source.alias | default "source" }}
+        {{- /* Every connector of THIS mirror, source and checkpoint both. */}}
+        {{- $conn := printf "%s->.*" $alias }}
+        {{- $src := printf "%s->.*MirrorSourceConnector" $alias }}
+        {{- $chk := printf "%s->.*MirrorCheckpointConnector" $alias }}
+
+        # ── {{ $alias }} → {{ $.Values.target.alias | default "target" }} ─────
+        # ── Critical ─────────────────────────────────────────────────────
+        - alert: MirrorMaker2TaskFailed
+          expr: kafka_connect_worker_metrics_connector_failed_task_count{namespace="{{ $ns }}",connector=~"{{ $conn }}"} > 0
+          for: 2m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          annotations:
+            summary: "MirrorMaker 2 has failed tasks mirroring {{ $alias }}"
+            description: "{{ "{{" }} $value {{ "}}" }} failed task(s) on {{ "{{" }} $labels.connector {{ "}}" }} for over 2 minutes. Replication has stopped for the affected partitions of the {{ $alias }} mirror. Check the connector status: kubectl -n {{ $ns }} get kafkamirrormaker2 {{ $name }} -o jsonpath='{.status.connectors}'"
+            runbook_url: "{{ $rb }}#everything-is-ready-and-nothing-is-replicating"
+
+        {{- if not $.Values.cutover.enabled }}
+        # Not rendered while cutover.enabled: with the source connector stopped
+        # on purpose, "nothing replicated for N minutes" is the plan, not an
+        # incident. The rule comes back when the overlay is removed.
+        - alert: MirrorMaker2NoRecordsReplicated
+          # `or vector(0)`: a sum over an ABSENT series is an empty result, not
+          # zero, and `== 0` on nothing never fires — which is exactly the case
+          # this rule is for (the source task never started at all). The
+          # fallback makes "no series" read as "no records".
+          expr: |
+            (sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace="{{ $ns }}",connector=~"{{ $src }}"}[10m])) or vector(0)) == 0
+          for: {{ $th.noRecordsMinutes }}m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          annotations:
+            summary: "MirrorMaker 2 has replicated nothing from {{ $alias }} for {{ $th.noRecordsMinutes }} minutes"
+            description: "The workers are up and the {{ $alias }} connector reports RUNNING, but zero records have been written to the target from it. This is what a missing SOURCE-side ACL looks like — the connector cannot read, and says so nowhere the CR can see. It is also what an idle source looks like, so check {{ $alias }}'s end offsets before panicking."
+            runbook_url: "{{ $rb }}#everything-is-ready-and-nothing-is-replicating"
+        {{- end }}
+
+        # ── Warning ──────────────────────────────────────────────────────
+        {{- if not $identity }}
+        - alert: MirrorMaker2ReplicationLagHigh
+          # Per source via the replicated topic prefix: MirrorSourceMetrics
+          # tags each partition with the topic name AFTER the replication
+          # policy has renamed it, so under a prefixing policy the alias is
+          # the first path segment. `[{{ $sep }}]` rather than an escaped dot
+          # because a character class needs no backslash and therefore no
+          # second round of escaping on the way through YAML.
+          expr: |
+            max(kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="{{ $ns }}",topic=~"{{ $alias }}[{{ $sep }}].*"}) > {{ $th.replicationLatencyMs }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          annotations:
+            summary: "Replication lag from {{ $alias }} above {{ div $th.replicationLatencyMs 1000 }}s"
+            description: "End-to-end replication latency for the {{ $alias }} mirror is {{ "{{" }} $value {{ "}}" }}ms. DO NOT CUT OVER while this is non-trivial: records written to {{ $alias }} in the last {{ "{{" }} $value {{ "}}" }}ms are not yet on the target."
+            runbook_url: "{{ $rb }}#replication-is-slow-but-healthy"
+        {{- end }}
+
+        - alert: MirrorMaker2CheckpointStalled
+          expr: |
+            (sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace="{{ $ns }}",connector=~"{{ $chk }}"}[{{ $th.checkpointStaleMinutes }}m])) or vector(0)) == 0
+            and
+            sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace="{{ $ns }}",connector=~"{{ $src }}"}[{{ $th.checkpointStaleMinutes }}m])) > 0
+          for: {{ $th.checkpointStaleMinutes }}m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          annotations:
+            summary: "Offset translation from {{ $alias }} has stalled while data is still replicating"
+            description: "The {{ $alias }} MirrorSourceConnector is moving records but its MirrorCheckpointConnector has emitted no checkpoints for {{ $th.checkpointStaleMinutes }} minutes. Consumers will have data on the target and no translated position to resume from — the failure that turns a clean cutover into a full replay."
+            runbook_url: "{{ $rb }}#consumer-groups-have-no-offsets-on-the-target"
+
+        - alert: MirrorMaker2OffsetSyncStale
+          # The sibling of the rule above, for the case it cannot see. That one
+          # asks whether checkpoints are being WRITTEN; this one asks whether
+          # they are MOVING. A checkpoint task that keeps re-emitting the same
+          # translated position — because the offset-syncs topic stopped
+          # advancing, or the source consumer group stopped committing — still
+          # writes records, so the write rate stays non-zero and nothing above
+          # fires. The failover then resumes consumers at a position that
+          # stopped moving hours ago, and nothing in the CR, the connector
+          # status or the record counts says so.
+          #
+          # checkpoint-latency-ms is recorded once per (group, topic,
+          # partition) each time a checkpoint is emitted, so `changes()` over
+          # the window is 0 exactly when nothing new was translated. The
+          # `or vector(0)` keeps "the checkpoint series is absent entirely"
+          # (the task never started) reading as stale rather than as no data.
+          expr: |
+            sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace="{{ $ns }}",connector=~"{{ $src }}"}[{{ $th.offsetSyncStaleMinutes }}m])) > 0
+            and
+            (sum(changes(kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max{namespace="{{ $ns }}",source="{{ $alias }}"}[{{ $th.offsetSyncStaleMinutes }}m])) or vector(0)) == 0
+          for: {{ $th.offsetSyncStaleMinutes }}m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          annotations:
+            summary: "Offset syncs from {{ $alias }} are stale while records are flowing"
+            description: "Records from {{ $alias }} are still arriving on the target, but the translated consumer positions have not advanced for {{ $th.offsetSyncStaleMinutes }} minutes. A failover now would restart consumers at a position that is at least that old and replay everything since. Check that the checkpoint connector can read mm2-offset-syncs (its location follows offsetSyncs.location) and that the source groups are still committing."
+            runbook_url: "{{ $rb }}#consumer-groups-have-no-offsets-on-the-target"
+
+        - alert: MirrorMaker2HighErrorRate
+          expr: rate(kafka_connect_task_error_metrics_total_errors_logged{namespace="{{ $ns }}",connector=~"{{ $conn }}"}[5m]) > {{ $th.errorRatePerSecond }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          annotations:
+            summary: "MirrorMaker 2 error rate for {{ $alias }} above {{ $th.errorRatePerSecond }}/s"
+            description: "Tasks on {{ "{{" }} $labels.connector {{ "}}" }} are logging errors at {{ "{{" }} $value {{ "}}" }}/s."
+            runbook_url: "{{ $rb }}#topicauthorizationexception-on-every-refresh-connector-still-running"
+        {{- end }}
+
+        {{- if $identity }}
+        # ── Release-wide lag (identity policy) ───────────────────────────
+        # Under IdentityReplicationPolicy the replicated topic keeps its source
+        # name, so the mirror bean carries nothing that says WHICH source a
+        # latency belongs to (Kafka only adds a `source` tag under
+        # `add.source.alias.to.metrics`, which is off by default). Rather than
+        # ship a per-source rule whose selector cannot match, this one stays
+        # release-wide and puts the topic in the alert instead — the topic is
+        # what you act on anyway.
+        - alert: MirrorMaker2ReplicationLagHigh
+          expr: |
+            max by (topic) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="{{ $ns }}"}) > {{ $th.replicationLatencyMs }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Replication lag above {{ div $th.replicationLatencyMs 1000 }}s"
+            description: "End-to-end replication latency for {{ "{{" }} $labels.topic {{ "}}" }} is {{ "{{" }} $value {{ "}}" }}ms. DO NOT CUT OVER while this is non-trivial: records written to the source in the last {{ "{{" }} $value {{ "}}" }}ms are not yet on the target."
+            runbook_url: "{{ $rb }}#replication-is-slow-but-healthy"
+        {{- end }}
+
+        # ── Workers (release-wide: there is one Connect cluster) ──────────
+        - alert: MirrorMaker2WorkerHeapHigh
+          # Both JVM metric spellings: the JMX exporter agent renamed
+          # jvm_memory_bytes_used to jvm_memory_used_bytes in its 1.x line, and
+          # which one the worker image ships is not something a rule should
+          # have to know.
+          expr: |
+            sum by (pod) ((jvm_memory_used_bytes{area="heap", namespace="{{ $ns }}", pod=~"{{ $name }}-mirrormaker2-.*"} or jvm_memory_bytes_used{area="heap", namespace="{{ $ns }}", pod=~"{{ $name }}-mirrormaker2-.*"}))
+            / sum by (pod) ((jvm_memory_max_bytes{area="heap", namespace="{{ $ns }}", pod=~"{{ $name }}-mirrormaker2-.*"} or jvm_memory_bytes_max{area="heap", namespace="{{ $ns }}", pod=~"{{ $name }}-mirrormaker2-.*"}))
+            > {{ divf $th.heapUsagePercent 100.0 }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "MirrorMaker 2 worker heap above {{ $th.heapUsagePercent }}%"
+            description: "Worker {{ "{{" }} $labels.pod {{ "}}" }} heap is at {{ "{{" }} $value | humanizePercentage {{ "}}" }}. A mirror under memory pressure slows down long before it crashes, and shows up as lag rather than an error."
+            runbook_url: "{{ $rb }}#workers-restart-repeatedly--rebalance-storms"
+
+        - alert: MirrorMaker2RebalanceStorm
+          expr: rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace="{{ $ns }}"}[5m]) > {{ $th.rebalancesPerSecond }}
+          for: 10m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "MirrorMaker 2 workers are rebalancing repeatedly"
+            description: "Rebalances at {{ "{{" }} $value {{ "}}" }}/s, above {{ $th.rebalancesPerSecond }}/s. Tasks spend the rebalance not replicating, so a storm looks like intermittent lag with no failed tasks. Every mirror in this release is affected, not one."
+            runbook_url: "{{ $rb }}#workers-restart-repeatedly--rebalance-storms"
+{{- end }}

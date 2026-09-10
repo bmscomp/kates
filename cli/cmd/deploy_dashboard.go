@@ -27,8 +27,13 @@ type DashboardController struct {
 	p *tea.Program
 }
 
+// Every method tolerates a nil receiver. dl is a package-level pointer set
+// when the dashboard starts, so any path that runs without one — a unit test,
+// a step that moved earlier than the dashboard's construction — would
+// otherwise panic mid-deploy on a log line. Logging is never worth a crash.
+
 func (c *DashboardController) Printf(format string, a ...any) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(logMsg{text: fmt.Sprintf(format, a...)})
 	} else {
 		fmt.Printf(format, a...)
@@ -36,7 +41,7 @@ func (c *DashboardController) Printf(format string, a ...any) {
 }
 
 func (c *DashboardController) Println(a ...any) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(logMsg{text: fmt.Sprint(a...)})
 	} else {
 		fmt.Println(a...)
@@ -44,19 +49,19 @@ func (c *DashboardController) Println(a ...any) {
 }
 
 func (c *DashboardController) StartComponent(id string, timeout time.Duration) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(compStatusMsg{id: id, active: true, timeout: timeout})
 	}
 }
 
 func (c *DashboardController) FinishComponent(id string, success bool) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(compStatusMsg{id: id, active: false, done: true, success: success})
 	}
 }
 
 func (c *DashboardController) UpdateProgress(current, total int) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(progressMsg{current: current, total: total})
 	}
 }

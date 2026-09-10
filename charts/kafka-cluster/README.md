@@ -119,6 +119,13 @@ The **Kind** overlay (`values-kind.yaml`) layers on top of `values-dev.yaml` and
 - Simplified listeners (no external NodePort)
 - All cloud/production features disabled
 
+Two more overlays are not environments but *roles*:
+
+| Overlay | For |
+|---------|-----|
+| `values-ci.yaml` | The smallest cluster that works: one controller, one broker, RF1 — layered last on a 2-CPU runner |
+| `values-additional.yaml` | A **second cluster beside the primary**, in its own namespace, on another Kafka version — everything shared or fixed-name off (Drain Cleaner, CRD hook, dashboards, Kyverno policy, the operator's NetworkPolicy), single-node sizing, no platform topics. `kates clusters add` layers it; a hand-run install passes it after the environment overlay together with `clusterName`, `kafkaVersion`, `kafka.metadataVersion` and `networkPolicies.operatorNamespace`. Read its header for why each toggle is off. |
+
 ## Architecture
 
 ### Cluster Components
@@ -218,8 +225,10 @@ graph LR
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `clusterName` | Kafka cluster name (Kubernetes resource name) | `krafter` |
-| `kafkaVersion` | Apache Kafka version | `4.3.0` |
+| `kafkaVersion` | Apache Kafka version — any `x.y.z`; the default is the newest in the pinned operator's window and must stay at or above `Chart.yaml`'s `kates.io/kafka-floor` (`4.2.0`, because the default configuration enables share groups). Whether an operator can run it is the operator's and the CLI's check. | `4.3.0` |
+| `kafka.metadataVersion` | KRaft metadata version, `4.2` or `4.2-IV1`; never newer than `kafkaVersion` (refused at render time); empty = the operator's default, which forecloses a rollback | `4.2-IV1` |
 | `strimziVersion` | Strimzi operator version | `1.1.0` |
+| `extraLabels` | Labels merged into every resource (never selectors); the CLI stamps `kates.io/lab` here | `{}` |
 
 ### Global Image Configuration
 
@@ -303,6 +312,8 @@ kafka:
     message.max.bytes: 10485760        # 10 MiB
     group.share.enable: true           # Kafka 4.x Share Groups
 ```
+
+Every `group.share.*` and `share.*` key is rendered only when `kafkaVersion` is `4.2.0` or newer — share groups are the feature behind the chart's `kates.io/kafka-floor`, and an additional cluster on 4.1.x starts without them.
 
 ### KRaft Controllers
 
@@ -508,6 +519,9 @@ Zero-trust network segmentation:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `networkPolicies.enabled` | Enable default-deny + allow rules | `true` |
+| `networkPolicies.defaultDenySelector` / `allowDNSSelector` | `matchLabels` of the default-deny / allow-dns policies. Empty derives `app.kubernetes.io/part-of: strimzi-<clusterName>` — the label on every pod of this cluster — so a cluster not named `krafter` is selected; an explicit map wins | `{}` |
+| `networkPolicies.operatorPolicy.enabled` | Write the Cluster Operator's `strimzi-operator` NetworkPolicy into `operatorNamespace`. A fixed name in another release's namespace: fine standalone, but two clusters naming one operator fight over it, so the `strimzi-operator` wrapper owns it (`operatorPolicy.enabled` there) and every release naming that operator turns this off — `values-additional.yaml` does | `true` |
+| `networkPolicies.operatorNamespace` | Namespace of the operator that reconciles this cluster (`strimzi-operator` when empty; the cluster's own namespace for a co-located additional operator) | `""` |
 | `networkPolicies.allowedClientNamespaces` | Namespaces allowed to reach brokers | `[kates, litmus]` |
 | `networkPolicies.monitoringNamespace` | Namespace for Prometheus scrape access | `monitoring` |
 

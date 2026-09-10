@@ -1,7 +1,27 @@
 {{- if and .Values.podMonitors.enabled (not .Values.metrics.enabled) }}
-{{- fail "podMonitors.enabled requires metrics.enabled=true — Strimzi only opens the tcp-prometheus port (which the PodMonitor scrapes) when metricsConfig is set." }}
+{{- fail "podMonitors.enabled requires metrics.enabled=true — Strimzi only opens the metrics port (which the PodMonitor scrapes) when metricsConfig is set." }}
 {{- end }}
 {{- if and .Values.podMonitors.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- $type := .Values.metrics.type | default "jmxPrometheusExporter" }}
+{{- /*
+The scrape target follows metrics.type, because the two are different
+mechanisms and only one of them is a sidecar-shaped JMX scrape:
+
+  jmxPrometheusExporter   the Prometheus JMX exporter agent runs beside the
+                          worker, reads the MBeans through the rules in
+                          metrics-configmap.yml, and serves them on the
+                          container port Strimzi opens for it.
+  strimziMetricsReporter  a Kafka MetricsReporter plugin inside the worker
+                          publishes the metric registry as Prometheus text on
+                          its own HTTP listener. No exporter, no JMX, no
+                          ConfigMap — the allow-list on the CR is the whole
+                          configuration.
+
+Both are values (podMonitors.scrape.<type>) rather than constants: a PodMonitor
+naming a port the pod does not have scrapes nothing and reports nothing, and
+that failure is invisible until an alert that should have fired did not.
+*/}}
+{{- $ep := (index (.Values.podMonitors.scrape | default dict) $type) | default dict }}
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -17,8 +37,8 @@ spec:
     matchLabels:
       {{- include "mirror-maker2.podSelectorLabels" . | nindent 6 }}
   podMetricsEndpoints:
-    - port: tcp-prometheus
-      path: /metrics
+    - port: {{ $ep.port | default "tcp-prometheus" }}
+      path: {{ $ep.path | default "/metrics" }}
       {{- with .Values.monitoring.interval }}
       interval: {{ . }}
       {{- end }}

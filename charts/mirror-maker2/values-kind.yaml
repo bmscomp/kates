@@ -14,8 +14,8 @@ mirrors:
       namespace: "kafka"
       authentication:
         type: scram-sha-512
-        username: "kates-mm2-source"
-        secretName: "kates-mm2-source"
+        username: "kates-mm2"
+        secretName: "kates-mm2"
         secretKey: "password"
     topicsPattern: "kates\\..*"
     groupsPattern: ".*"

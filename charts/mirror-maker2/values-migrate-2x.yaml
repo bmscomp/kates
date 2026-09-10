@@ -1,0 +1,110 @@
+# Migration preset — Kafka 2.8.2 → 4.3.0.
+#
+# Pairs with charts/legacy-kafka -f values-kafka-2x.yaml. Everything here is a
+# migration decision, not a tuning knob:
+#
+#   • identity replication policy — topic names are PRESERVED, because the point
+#     of a migration is that consumers repoint and find what they know. Under
+#     the default policy they would have to be rewritten to read `legacy.orders`.
+#   • kafkaVersion declared — 2.8.2 is above the KIP-896 floor (2.1), and this
+#     chart checks that at render time instead of letting the connector fail
+#     with UNSUPPORTED_VERSION an hour later.
+#   • preflight on — 20 seconds of ApiVersions handshake against the real source,
+#     with the real client, before anything is deployed.
+#   • sync.group.offsets.enabled — consumers must be able to resume on the
+#     target at the right position. Without it a migration is data-only and
+#     every consumer restarts from its auto.offset.reset.
+#   • RF1 and brokerCount: 1 — the kind target. In a real migration set both to
+#     the target's actual broker count; RF1 is not durable and never should be.
+#
+# Adjust bootstrapServers to your legacy-kafka release/namespace:
+#   <release>-legacy-kafka-bootstrap.<namespace>.svc.cluster.local:9092
+
+replicas: 1
+
+replicationPolicy:
+  mode: identity
+  excludeInternalTopics: true
+
+compatibility:
+  enforce: true
+  minSourceVersion: "2.1.0"
+  requireDeclaredVersion: true
+
+preflight:
+  enabled: true
+  failOnError: true
+
+target:
+  alias: target
+  clusterName: "krafter"
+  namespace: "kafka"
+  brokerCount: 1
+  # Keeps the `mirror-maker2` prefix on purpose: it is the group prefix the
+  # kafka-cluster chart's kates-mm2 user is granted, so the workers can join
+  # their own Connect group on a target whose ACLs predate the wildcard grant.
+  groupId: "mirror-maker2-migrate-2x"
+  authentication:
+    type: scram-sha-512
+    username: "kates-mm2"
+    secretName: "kates-mm2"
+    secretKey: "password"
+  config:
+    config.storage.replication.factor: 1
+    offset.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+
+mirrors:
+  - source:
+      alias: legacy
+      bootstrapServers: "legacy-legacy-kafka-bootstrap.kafka-legacy-2x.svc.cluster.local:9092"
+      kafkaVersion: "2.8.2"
+      authentication:
+        # PLAINTEXT source — the legacy-kafka chart's default. Switch to
+        # `plain` (and create the Secret) when using -f values-sasl.yaml there.
+        type: ""
+    topicsPattern: "kates\\..*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 2
+      state: running
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        # The target's ACLs are managed by the kafka-cluster chart; copying the
+        # source's would fight them, and a 2.x ACL model does not map cleanly
+        # onto a 4.x one anyway.
+        sync.topic.acls.enabled: "false"
+        refresh.topics.interval.seconds: 30
+        # Topic configuration IS worth carrying: retention and cleanup policy
+        # are part of what the consumer is migrating onto.
+        sync.topic.configs.enabled: "true"
+    checkpointConnector:
+      tasksMax: 1
+      state: running
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"
+        sync.group.offsets.interval.seconds: 20
+        emit.checkpoints.interval.seconds: 20
+        refresh.groups.interval.seconds: 30
+
+jvmOptions:
+  -Xms: 512m
+  -Xmx: 512m
+
+resources:
+  requests: { memory: 768Mi, cpu: 250m }
+  limits: { memory: 1536Mi, cpu: 1000m }
+
+podMonitors:
+  enabled: false
+metrics:
+  enabled: false
+alerts:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  kafka:
+    ports: [9092, 9093, 9094]

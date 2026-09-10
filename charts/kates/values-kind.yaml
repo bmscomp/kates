@@ -1,5 +1,14 @@
 # Kind cluster overlay — layers on top of values-dev.yaml
 # Usage: helm upgrade --install ... -f values-dev.yaml -f values-kind.yaml
+#
+# This file deliberately does NOT set image.repository/tag. `kates deploy`
+# adds -f values-native-local.yaml AFTER this one on a kind cluster, so the
+# backend runs the native image built from the working tree
+# (kates:native-local, pullPolicy: Never) while everything below — NodePort
+# service, tolerations, production features off — still applies. Setting an
+# image here would be overridden anyway, and installing this file by hand
+# leaves the chart default: ghcr.io/bmscomp/kates:<appVersion>, which is only
+# pullable once that version has actually been published.
 
 image:
   pullPolicy: IfNotPresent

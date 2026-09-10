@@ -1,0 +1,144 @@
+# Migration preset — a Strimzi-operated 4.x SOURCE beside the target.
+#
+# Pairs with a second charts/kafka-cluster release (-f values-additional.yaml)
+# in its own namespace: the "dropped line" case — a 4.1.2 cluster kept alive
+# under its own, older operator (namespace scope) beside the 1.1.0 primary —
+# and the in-window case, a 4.2.x cluster on the primary's operator. Both look
+# the same from here: the source is a Kafka CR, not a StatefulSet.
+#
+# What differs from the 2.x/3.x presets, and why — they mirror FROM a
+# legacy-kafka StatefulSet with no auth; this one mirrors from a cluster the
+# kafka-cluster chart shaped, and both ends are operated:
+#
+#   • The source AUTHENTICATES. kafka-cluster provisions the same user set on
+#     every cluster, so the source has its own `kates-mm2` KafkaUser (SCRAM-
+#     SHA-512) with the mirror's read grants. Its listener 9092 is
+#     SASL_PLAINTEXT with scram-sha-512 (9093 is mTLS-only, `tls` auth; 9094 a
+#     NodePort with TLS + SCRAM), so this preset uses SCRAM on 9092 without
+#     TLS. For TLS from the source's Cluster CA switch to 9093 with a `tls`
+#     KafkaUser — values-mtls.yaml shows the shape.
+#   • Two credentials with ONE name. The target's `kates-mm2` Secret already
+#     lives in this namespace; the source's `kates-mm2` lives in ITS namespace
+#     under the same name. secretSync copies it here `as: kates-mm2-legacy41`,
+#     and the source's authentication.secretName points at the copy.
+#   • In-cluster reference by name. The source is `clusterName` + `namespace`,
+#     so its bootstrap FQDN is computed, like the target's — not a hand-typed
+#     bootstrapServers.
+#   • No protocol risk, still declared. A 4.1 source is far above the KIP-896
+#     floor; the compatibility gate stays on because a preset that only
+#     enforces when it matters teaches people to ignore it.
+#   • Identity policy, preflight on, offsets synced, RF1 and brokerCount: 1 —
+#     for the same reasons as the 2.x preset, which documents them.
+#
+# The source's NetworkPolicy must admit the mirror: on the SOURCE release set
+# networkPolicies.mirrorMaker2Namespace to this release's namespace, or it is
+# denied at the network layer while the CR reports itself Ready.
+#
+# Adjust `legacy41` / `kafka-legacy41` to your source cluster's name/namespace
+# (kates migrate writes them from --from). The preset carries its own sizing;
+# if you also pass values-kind.yaml, pass it FIRST — Helm replaces lists
+# wholesale, and that overlay's `mirrors:` is a loopback on krafter that would
+# otherwise discard the source declared here.
+
+replicas: 1
+
+replicationPolicy:
+  mode: identity
+  excludeInternalTopics: true
+
+compatibility:
+  enforce: true
+  minSourceVersion: "2.1.0"
+  requireDeclaredVersion: true
+
+preflight:
+  enabled: true
+  failOnError: true
+
+target:
+  alias: target
+  clusterName: "krafter"
+  namespace: "kafka"
+  brokerCount: 1
+  # Keeps the `mirror-maker2` prefix on purpose: it is the group prefix the
+  # kafka-cluster chart's kates-mm2 user is granted, so the workers can join
+  # their own Connect group on a target whose ACLs predate the wildcard grant.
+  groupId: "mirror-maker2-migrate-4x"
+  authentication:
+    type: scram-sha-512
+    username: "kates-mm2"
+    secretName: "kates-mm2"
+    secretKey: "password"
+  config:
+    config.storage.replication.factor: 1
+    offset.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+
+mirrors:
+  - source:
+      alias: legacy41
+      # A Strimzi cluster: bootstrap computed as
+      # <clusterName>-kafka-bootstrap.<namespace>.svc.<clusterDomain>:9092
+      clusterName: "legacy41"
+      namespace: "kafka-legacy41"
+      kafkaVersion: "4.1.2"
+      tls:
+        enabled: false
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        # The copy secretSync makes below, NOT `kates-mm2` — that is the
+        # target's credential in this namespace.
+        secretName: "kates-mm2-legacy41"
+        secretKey: "password"
+    topicsPattern: "kates\\..*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 4
+      state: running
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        # Both ends' ACLs are managed by the kafka-cluster chart; copying the
+        # source's would fight the target's.
+        sync.topic.acls.enabled: "false"
+        sync.topic.configs.enabled: "true"
+        refresh.topics.interval.seconds: 30
+    checkpointConnector:
+      tasksMax: 1
+      state: running
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"
+        sync.group.offsets.interval.seconds: 10
+        emit.checkpoints.interval.seconds: 10
+        refresh.groups.interval.seconds: 30
+
+# The source's kates-mm2 credential, copied into this namespace under a name
+# that cannot clash with the target's.
+secretSync:
+  enabled: true
+  secrets:
+    - name: kates-mm2
+      fromNamespace: kafka-legacy41
+      as: kates-mm2-legacy41
+
+jvmOptions:
+  -Xms: 512m
+  -Xmx: 512m
+
+resources:
+  requests: { memory: 768Mi, cpu: 250m }
+  limits: { memory: 1536Mi, cpu: 1000m }
+
+podMonitors:
+  enabled: false
+metrics:
+  enabled: false
+alerts:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  kafka:
+    ports: [9092, 9093, 9094]

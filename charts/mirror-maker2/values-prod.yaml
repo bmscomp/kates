@@ -10,6 +10,48 @@
 # then narrow networkPolicy.kafka.ports to [9093]. Until then, keep SCRAM/9092.
 replicas: 3
 
+# ── Images ──────────────────────────────────────────────────────────────────
+# Pin by DIGEST in production, not by tag.
+#
+# A tag is a pointer someone can move. Re-point
+# quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 and the next rolling restart changes
+# the Kafka client version underneath a running mirror — which is the one
+# variable every compatibility rail in this chart exists to hold still. A
+# `@sha256:` digest is the content, so a restart cannot change it and the
+# rendered CR records exactly what ran.
+#
+# Left empty here because a digest is specific to the image you have verified;
+# a placeholder digest in a shared file is worse than none. Resolve and pin:
+#
+#   docker buildx imagetools inspect quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 \
+#     --format '{{ "{{" }}.Manifest.Digest{{ "}}" }}'
+#   # then, in your own values:
+#   image: "quay.io/strimzi/kafka@sha256:<digest>"
+#
+# The same applies to the helper images below. `:latest` on any of them is
+# refused at render time.
+image: ""
+
+# preflight.image must be the SAME Kafka line as the workers, or the
+# handshake it performs proves the wrong thing. Empty derives it from
+# `version`, which keeps that true automatically; pin it to a digest only
+# alongside the worker's.
+preflight:
+  enabled: true
+  failOnError: true
+
+# With digest-pinned images there is nothing to re-pull: the content is
+# addressed by hash. IfNotPresent keeps every helper pod start independent of
+# the registry, so a registry outage cannot stop a preflight or a cutover
+# verification. (Use Always only if you pin by mutable tag, which the block
+# above argues against.)
+imagePullPolicy: IfNotPresent
+
+# Private registry or pull-through mirror. The workers honour this through the
+# CR's template.pod.imagePullSecrets; the chart's own pods take it directly.
+imagePullSecrets: []
+# - name: registry-credentials
+
 topologySpreadConstraints:
   enabled: true
   maxSkew: 1

@@ -1,3 +1,4 @@
+{{- include "kafka-cluster.validateVersions" . -}}
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
@@ -11,18 +12,20 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   kafka:
-    version: {{ .Values.kafkaVersion }}
+    version: {{ .Values.kafkaVersion | quote }}
     {{- if .Values.kafka.metadataVersion }}
-    metadataVersion: {{ .Values.kafka.metadataVersion }}
+    metadataVersion: {{ .Values.kafka.metadataVersion | quote }}
     {{- end }}
     listeners:
       {{- toYaml .Values.kafka.listeners | nindent 6 }}
     authorization:
       {{- toYaml .Values.kafka.authorization | nindent 6 }}
+    {{- /*
+      kafka.config, minus the share-group keys below Kafka 4.2.0 — see
+      kafka-cluster.kafkaConfig in _helpers.tpl and Chart.yaml's kafka-floor.
+    */}}
     config:
-      {{- range $key, $value := .Values.kafka.config }}
-      {{ $key }}: {{ $value | toJson }}
-      {{- end }}
+      {{- include "kafka-cluster.kafkaConfig" . | trim | nindent 6 }}
     metricsConfig:
       type: {{ .Values.kafka.metricsConfig.type }}
       valueFrom:

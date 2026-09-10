@@ -1,0 +1,49 @@
+{{- if .Values.globalBindings.enabled }}
+{{- $op := index .Values "strimzi-kafka-operator" -}}
+{{- /*
+Unique-name copies of the three ClusterRoleBindings upstream renders ONLY when
+createGlobalResources is true (templates 021, 030 and 033 in the subchart):
+
+  strimzi-cluster-operator                       → strimzi-cluster-operator-global
+  strimzi-cluster-operator-kafka-broker-delegation → strimzi-kafka-broker
+  strimzi-cluster-operator-kafka-client-delegation → strimzi-kafka-client
+
+An ADDITIONAL operator runs with createGlobalResources: false so it does not
+fight the primary's release for those fixed names — and so loses the
+bindings: no `nodes` list (rack awareness), no `storageclasses` get (volume
+expansion), no delegation of the broker/client roles. These three bind the
+same ClusterRoles — created by the primary's release, never by this one — to
+THIS release's ServiceAccount, under names that carry the release namespace
+so two additional operators cannot collide either.
+
+The roleRefs are dangling until the primary's operator is installed; Kubernetes
+accepts that, and the binding starts working the moment the role appears.
+*/ -}}
+{{- $sa := $op.serviceAccount | default "strimzi-cluster-operator" }}
+{{- range $b := list
+      (dict "suffix" "global"                  "role" "strimzi-cluster-operator-global" "component" "role-binding")
+      (dict "suffix" "kafka-broker-delegation" "role" "strimzi-kafka-broker"            "component" "broker-role-binding")
+      (dict "suffix" "kafka-client-delegation" "role" "strimzi-kafka-client"            "component" "client-role-binding") }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: strimzi-cluster-operator-{{ $.Release.Namespace }}-{{ $b.suffix }}
+  labels:
+    {{- include "strimzi-operator.labels" $ | nindent 4 }}
+    strimzi.io/component: {{ $b.component }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" $) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    kates.io/binds-role: {{ $b.role }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $b.role }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

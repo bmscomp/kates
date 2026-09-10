@@ -1,0 +1,34 @@
+# SASL/PLAIN overlay — adds an authenticated listener on 9094 alongside the
+# plaintext one on 9092.
+#
+# Use this to exercise the mirror-maker2 chart's `authentication.type: plain`
+# path against an old broker. The MM2 side needs a Secret in ITS namespace
+# holding the password under the key `password`:
+#
+#   kubectl -n kafka create secret generic legacy-mm2-reader \
+#     --from-literal=password=mm2reader-secret
+#
+# then in the mirror-maker2 values:
+#
+#   mirrors:
+#     - source:
+#         bootstrapServers: <release>-legacy-kafka-bootstrap.<ns>.svc:9094
+#         authentication: { type: plain, username: mm2reader, secretName: legacy-mm2-reader }
+#
+# SASL/PLAIN — not SCRAM — because it configures identically on 2.x
+# (ZooKeeper) and 3.x (KRaft). The point of this chart is to vary the Kafka
+# version and nothing else; an auth mechanism that is bootstrapped differently
+# per era would smuggle a second variable into the test.
+#
+# The password below is a lab literal in a values file. It is not a secret and
+# must never be reused anywhere that matters.
+listeners:
+  plaintext:
+    enabled: true
+    port: 9092
+  sasl:
+    enabled: true
+    port: 9094
+    users:
+      - username: mm2reader
+        password: mm2reader-secret

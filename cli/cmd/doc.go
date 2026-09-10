@@ -177,6 +177,7 @@ func renderDocsIndex(width int) string {
 		"Core", "Cluster", "Kafka", "Test", "Report",
 		"Analysis", "Disruption", "Scheduling", "Resilience",
 		"Config", "Observability", "Toolbox",
+		"Versions", "Migration",
 	}
 
 	for _, cat := range categories {

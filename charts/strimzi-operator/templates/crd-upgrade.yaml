@@ -21,6 +21,15 @@ fetched here is the same pin as the subchart's crds/.
 ORDERING: hook-weight 1 creates the identity, weight 5 runs the Job. Helm
 defers hook-succeeded deletion to a second pass after all hooks in the phase
 complete, so the weight-1 ServiceAccount survives for the weight-5 Job.
+
+ADDITIONAL OPERATORS: this hook must run for the NEWEST operator on the
+cluster only — CRDs belong to the newest operator, and an older release's
+bundle would roll them back. values-namespace-scope.yaml disables it.
+
+WHAT "VALID BUNDLE" MEANS: the ten CRDs this platform needs are present. Not
+an exact count — a bundle from another release may carry more (older ones
+did) or fewer (a future one might), and what matters is whether the CRs the
+charts render will have a definition, not how many definitions ship.
 */ -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -113,7 +122,20 @@ spec:
             - |
               set -e
               CRD_URL="{{ include "strimzi-operator.crdUrl" . }}"
-              EXPECTED_CRDS=10
+              # Every CRD a chart in this repository renders a CR for. The
+              # bundle is judged by whether these are present, not by how
+              # many definitions it happens to ship.
+              REQUIRED_CRDS="kafkas.kafka.strimzi.io
+                kafkaconnects.kafka.strimzi.io
+                kafkatopics.kafka.strimzi.io
+                kafkausers.kafka.strimzi.io
+                kafkanodepools.kafka.strimzi.io
+                kafkabridges.kafka.strimzi.io
+                kafkaconnectors.kafka.strimzi.io
+                kafkamirrormaker2s.kafka.strimzi.io
+                kafkarebalances.kafka.strimzi.io
+                strimzipodsets.core.strimzi.io"
+              REQUIRED_COUNT=$(echo "${REQUIRED_CRDS}" | wc -w | tr -d ' ')
 
               echo "Applying Strimzi CRDs (v{{ .Values.strimziVersion }})..."
               echo "Source: ${CRD_URL}"
@@ -150,14 +172,36 @@ spec:
               fi
 
               FOUND=$(grep -c '^kind: CustomResourceDefinition' /tmp/strimzi-crds.yaml || true)
-              if [ "${FOUND}" -ne "${EXPECTED_CRDS}" ]; then
-                echo "✗ Expected ${EXPECTED_CRDS} CustomResourceDefinitions, found ${FOUND}."
+              if [ "${FOUND}" -eq 0 ]; then
+                echo "✗ No CustomResourceDefinition in the downloaded file."
                 echo "  URL: ${CRD_URL}"
                 echo "  The response is probably not the CRD bundle (proxy interstitial?)."
                 head -5 /tmp/strimzi-crds.yaml
                 exit 1
               fi
-              echo "  Bundle contains ${FOUND} CRDs"
+              echo "  Bundle contains ${FOUND} CRDs; checking the ${REQUIRED_COUNT} this platform needs..."
+
+              # Each required CRD must be DEFINED in the bundle — a `name:`
+              # line under a CRD's metadata — before anything is applied.
+              # An older release's bundle carries extra CRDs and a future one
+              # may drop some; only the ones the charts render CRs for matter.
+              ABSENT=0
+              for crd in ${REQUIRED_CRDS}; do
+                crd_re=$(printf '%s' "${crd}" | sed 's/\./\\./g')
+                if grep -Eq "^[[:space:]]*name:[[:space:]]*${crd_re}[[:space:]]*$" /tmp/strimzi-crds.yaml; then
+                  echo "  ✓ ${crd} (in bundle)"
+                else
+                  echo "  ✗ ${crd} — NOT IN BUNDLE"
+                  ABSENT=$((ABSENT + 1))
+                fi
+              done
+              if [ "${ABSENT}" -gt 0 ]; then
+                echo "✗ ${ABSENT} required CRD(s) missing from the bundle — refusing to apply."
+                echo "  URL: ${CRD_URL}"
+                echo "  Either the file is not a Strimzi CRD bundle, or this Strimzi"
+                echo "  release no longer ships a CRD this platform renders."
+                exit 1
+              fi
 
               echo "Validating against the API server (dry-run)..."
               if ! kubectl apply --server-side --force-conflicts \
@@ -174,16 +218,7 @@ spec:
 
               echo "Verifying CRDs..."
               MISSING=0
-              for crd in kafkas.kafka.strimzi.io \
-                         kafkaconnects.kafka.strimzi.io \
-                         kafkatopics.kafka.strimzi.io \
-                         kafkausers.kafka.strimzi.io \
-                         kafkanodepools.kafka.strimzi.io \
-                         kafkabridges.kafka.strimzi.io \
-                         kafkaconnectors.kafka.strimzi.io \
-                         kafkamirrormaker2s.kafka.strimzi.io \
-                         kafkarebalances.kafka.strimzi.io \
-                         strimzipodsets.core.strimzi.io; do
+              for crd in ${REQUIRED_CRDS}; do
                 if kubectl get crd "${crd}" > /dev/null 2>&1; then
                   echo "  ✓ ${crd}"
                 else
@@ -195,7 +230,7 @@ spec:
                 echo "✗ ${MISSING} CRD(s) missing after apply."
                 exit 1
               fi
-              echo "All ${EXPECTED_CRDS} Strimzi CRDs applied successfully."
+              echo "All ${REQUIRED_COUNT} required Strimzi CRDs applied successfully."
           securityContext:
             {{- include "strimzi-operator.containerSecurityContext" . | nindent 12 }}
           resources:

@@ -52,6 +52,16 @@ CONNECT_CHART_DIR      := charts/connect-cluster
 CHAOS_CHART_DIR        := charts/kates-chaos
 STRIMZI_CHART_DIR      := charts/strimzi-operator
 PLATFORM_CHART_DIR     := charts/kates-platform
+MM2_CHART_DIR          := charts/mirror-maker2
+LEGACY_KAFKA_CHART_DIR := charts/legacy-kafka
+# The release name every MM2 document installs as. Override per invocation:
+#   make mm2-deploy MM2_RELEASE=mm2-dr
+MM2_RELEASE            ?= mm2
+MM2_NAMESPACE          ?= kafka
+# The TARGET cluster the mirror writes to (and the helpers below read from).
+KAFKA_NAMESPACE        ?= kafka
+KAFKA_CLUSTER          ?= krafter
+TOPIC                  ?= kates.orders
 
 chart_version           = $(shell grep '^version:' $(1)/Chart.yaml | awk '{print $$2}')
 CHART_VERSION          := $(call chart_version,charts/kates)
@@ -60,6 +70,7 @@ CONNECT_CHART_VERSION  := $(call chart_version,charts/connect-cluster)
 CHAOS_CHART_VERSION    := $(call chart_version,charts/kates-chaos)
 STRIMZI_CHART_VERSION  := $(call chart_version,charts/strimzi-operator)
 PLATFORM_CHART_VERSION := $(call chart_version,charts/kates-platform)
+MM2_CHART_VERSION      := $(call chart_version,charts/mirror-maker2)
 KATES_APP_VERSION      := $(shell grep '^appVersion:' $(CHART_DIR)/Chart.yaml | awk '{print $$2}' | tr -d '"')
 
 
@@ -367,15 +378,60 @@ cli-build:  ## Cross-compile CLI (macOS + Linux)
 	@echo "🔨 Cross-compiling Kates CLI for all platforms..."
 	cd cli && bash build.sh
 
-cli-install:  ## Build and install CLI on this machine
+# Where the binary goes. Override when another kates wins on PATH:
+#   make cli-install CLI_INSTALL_DIR=/opt/homebrew/bin
+CLI_INSTALL_DIR ?= /usr/local/bin
+CLI_INSTALL_PATH := $(CLI_INSTALL_DIR)/kates
+
+cli-install:  ## Build and install CLI on this machine (CLI_INSTALL_DIR to choose where)
 	@echo "🔨 Building Kates CLI from source..."
-	cd cli && go build -ldflags="-s -w" -o dist/kates .
-	@echo "📦 Installing to /usr/local/bin/kates..."
-	sudo cp cli/dist/kates /usr/local/bin/kates
-	sudo xattr -dr com.apple.provenance /usr/local/bin/kates 2>/dev/null || true
-	sudo xattr -dr com.apple.quarantine /usr/local/bin/kates 2>/dev/null || true
-	sudo codesign -f -s - /usr/local/bin/kates
-	@echo "✅ Installed: $$(kates version 2>/dev/null || echo '/usr/local/bin/kates')"
+	@# The version is stamped in, as build.sh and `kates upgrade` do it.
+	@# Without it every locally installed binary reports "dev/unknown" and a
+	@# stale copy shadowing it on PATH is impossible to tell apart.
+	cd cli && go build -ldflags="-s -w \
+	  -X github.com/bmscomp/kates/cli/cmd.Version=$$(git rev-parse --abbrev-ref HEAD)-$$(git rev-parse --short HEAD) \
+	  -X github.com/bmscomp/kates/cli/cmd.Commit=$$(git rev-parse --short HEAD) \
+	  -X github.com/bmscomp/kates/cli/cmd.BuildDate=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+	  -o dist/kates .
+	@echo "📦 Installing to $(CLI_INSTALL_PATH)..."
+	@# Refuse to write through a symlink that leaves this directory: Homebrew
+	@# links /opt/homebrew/bin/<x> into its Cellar, and cp would overwrite the
+	@# formula's own binary — undone by its next upgrade, and invisible until.
+	@if [ -L "$(CLI_INSTALL_PATH)" ]; then \
+	  target=$$(readlink -f "$(CLI_INSTALL_PATH)" 2>/dev/null || readlink "$(CLI_INSTALL_PATH)"); \
+	  if [ "$$(dirname "$$target")" != "$(CLI_INSTALL_DIR)" ]; then \
+	    echo "❌ $(CLI_INSTALL_PATH) is a symlink to $$target, owned by another package."; \
+	    echo "   Installing here would overwrite it. Choose a directory you own:"; \
+	    echo "     make cli-install CLI_INSTALL_DIR=\$$HOME/.local/bin"; \
+	    case "$$target" in *"/Cellar/"*) echo "   Or remove the formula first:  brew uninstall kates";; esac; \
+	    exit 1; \
+	  fi; \
+	fi
+	sudo cp cli/dist/kates $(CLI_INSTALL_PATH)
+	sudo xattr -dr com.apple.provenance $(CLI_INSTALL_PATH) 2>/dev/null || true
+	sudo xattr -dr com.apple.quarantine $(CLI_INSTALL_PATH) 2>/dev/null || true
+	sudo codesign -f -s - $(CLI_INSTALL_PATH)
+	@echo "✅ Installed:"
+	@# Run the file just written, by absolute path. Asking `kates` would
+	@# report whatever PATH resolves to, which is exactly the thing this
+	@# step has to verify rather than assume.
+	@$(CLI_INSTALL_PATH) version 2>/dev/null | sed 's/^/  /' || true
+	@# Does the shell agree? A kates earlier in PATH (Homebrew's bin comes
+	@# before /usr/local/bin on Apple Silicon; ~/go/bin and ~/.local/bin are
+	@# common too) keeps winning silently, and every new command looks missing.
+	@found=$$(command -v kates 2>/dev/null || true); \
+	if [ -z "$$found" ]; then \
+	  echo "⚠️  $(CLI_INSTALL_DIR) is not on your PATH — typing 'kates' will not find it."; \
+	  echo "    export PATH=\"$(CLI_INSTALL_DIR):\$$PATH\""; \
+	elif [ "$$(readlink -f "$$found" 2>/dev/null || echo "$$found")" != "$$(readlink -f $(CLI_INSTALL_PATH) 2>/dev/null || echo $(CLI_INSTALL_PATH))" ]; then \
+	  echo "⚠️  'kates' still runs $$found, not the binary just installed."; \
+	  echo "    It reports: $$($$found version 2>/dev/null | grep -i 'kates cli' | awk '{print $$NF}' || echo unknown)"; \
+	  echo "    Fix with one of:"; \
+	  echo "      make cli-install CLI_INSTALL_DIR=$$(dirname "$$found")"; \
+	  echo "      rm $$found"; \
+	  echo "      export PATH=\"$(CLI_INSTALL_DIR):\$$PATH\""; \
+	  echo "    then: hash -r"; \
+	fi
 
 cli-clean:  ## Remove CLI build artifacts
 	@echo "🧹 Removing CLI build artifacts..."
@@ -1001,6 +1057,187 @@ connect-undeploy:  ## Remove Kafka Connect Helm release
 	@echo "🗑️  Removing Kafka Connect cluster..."
 	helm uninstall connect-cluster -n kafka 2>/dev/null || true
 	@echo "✅ Kafka Connect removed"
+
+##@ MirrorMaker 2 & Cross-Version Migration
+mm2-chart-lint:  ## Lint the mirror-maker2 and legacy-kafka charts
+	@echo "🔍 Linting mirror-maker2 and legacy-kafka charts..."
+	helm lint $(MM2_CHART_DIR)
+	helm lint $(LEGACY_KAFKA_CHART_DIR)
+	@echo "✅ MirrorMaker 2 chart lint passed"
+
+mm2-chart-template:  ## Render mirror-maker2 templates for every overlay
+	@mkdir -p .build
+	@helm template mirror-maker2 $(MM2_CHART_DIR) --namespace kafka \
+		> .build/mm2-rendered.yaml
+	@# failback is rendered separately, with a source named on the command
+	@# line: it ships an EMPTY source so a bare render is refused rather than
+	@# silently mirroring the target into itself.
+	@for o in kind dev prod generic mtls migrate-2x migrate-3x migrate-4x \
+	          readonly-source fan-in failover scale; do \
+		echo "  values-$$o.yaml"; \
+		helm template mirror-maker2 $(MM2_CHART_DIR) --namespace kafka \
+			-f $(MM2_CHART_DIR)/values-$$o.yaml > /dev/null || exit 1; \
+	done
+	@# The overlays that are LAYERS, in the documented order. Helm merges maps
+	@# but REPLACES lists, so an overlay carrying `mirrors:` has to come last
+	@# or it is the one that gets discarded — which is why this renders the
+	@# pairs rather than trusting each file on its own.
+	@helm template mirror-maker2 $(MM2_CHART_DIR) --namespace kafka \
+		-f $(MM2_CHART_DIR)/values-failback.yaml \
+		--set mirrors[0].source.clusterName=failover-cluster > /dev/null
+	@for pair in "migrate-2x cutover" "kind readonly-source" "kind fan-in" \
+	             "prod failover" "prod scale"; do \
+		set -- $$pair; \
+		echo "  values-$$1.yaml + values-$$2.yaml"; \
+		helm template mirror-maker2 $(MM2_CHART_DIR) --namespace kafka \
+			-f $(MM2_CHART_DIR)/values-$$1.yaml \
+			-f $(MM2_CHART_DIR)/values-$$2.yaml > /dev/null || exit 1; \
+	done
+	@echo "Rendered $$(grep -c '^kind:' .build/mm2-rendered.yaml) resources → .build/mm2-rendered.yaml"
+
+# The safety rails ARE the feature of this chart. A guard that has never been
+# observed to reject anything is indistinguishable from no guard, so this
+# asserts each one fails on the input it exists to catch — and asserts the
+# MESSAGE, because a render that fails for some unrelated reason (a typo in the
+# fixture, a different guard firing first) looks exactly like a working rail if
+# all you check is the exit code. One case per row of §4 of
+# docs/mirror-maker2-chart-enhancement-plan.md; the same set CI runs.
+mm2-chart-guards:  ## Assert the mirror-maker2 safety rails reject bad input, for the right reason
+	@echo "🔒 Checking the mirror-maker2 safety rails..."
+	@mkdir -p .build
+	@rc=0; \
+	guard() { \
+		desc="$$1"; want="$$2"; shift 2; \
+		if out=$$(helm template mm2 $(MM2_CHART_DIR) -n kafka "$$@" 2>&1); then \
+			echo "  ❌ $$desc — ACCEPTED; the rail is not working"; return 1; \
+		fi; \
+		case "$$out" in \
+			*"$$want"*) echo "  ✅ rejected: $$desc"; return 0 ;; \
+		esac; \
+		echo "  ❌ $$desc — rejected, but not for its own reason"; \
+		echo "     wanted: $$want"; \
+		echo "$$out" | sed 's/^/     /'; \
+		return 1; \
+	}; \
+	printf 'mirrors:\n  - source: { alias: ancient, bootstrapServers: "old:9092", kafkaVersion: "2.0.1" }\n' > .build/mm2-guard-floor.yaml; \
+	printf 'target: { brokerCount: 1 }\nmirrors:\n  - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1" }\n    sourceConnector: { config: { replication.factor: 3 } }\n' > .build/mm2-guard-rf.yaml; \
+	printf 'mirrors:\n  - source: { alias: dup, bootstrapServers: "a:9092", kafkaVersion: "3.9.1" }\n  - source: { alias: dup, bootstrapServers: "b:9092", kafkaVersion: "3.9.1" }\n' > .build/mm2-guard-alias.yaml; \
+	printf 'replicationPolicy: { mode: identity }\nmirrors:\n  - source: { alias: east, bootstrapServers: "a:9092", kafkaVersion: "3.9.1" }\n    topicsPattern: "orders.*"\n  - source: { alias: west, bootstrapServers: "b:9092", kafkaVersion: "3.9.1" }\n    topicsPattern: "orders.*"\n' > .build/mm2-guard-overlap.yaml; \
+	printf 'replicationPolicy: { mode: identity }\nmirrors:\n  - source: { alias: east, bootstrapServers: "a:9092", kafkaVersion: "3.9.1" }\n    topicsPattern: ".*"\n  - source: { alias: west, bootstrapServers: "b:9092", kafkaVersion: "3.9.1" }\n    topicsPattern: "payments.*"\n' > .build/mm2-guard-catchall.yaml; \
+	printf 'autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 9 }\nmirrors:\n  - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1" }\n    sourceConnector: { tasksMax: 3 }\n    checkpointConnector: { tasksMax: 1 }\n' > .build/mm2-guard-tasks.yaml; \
+	printf 'mirrors:\n  - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1" }\n    readOnlySource: true\n    checkpointConnector: { config: { offset-syncs.topic.location: source } }\n' > .build/mm2-guard-offsync.yaml; \
+	printf 'target: { exactlyOnce: { enabled: true } }\nmirrors:\n  - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1", config: { consumer.isolation.level: read_uncommitted } }\n' > .build/mm2-guard-eos.yaml; \
+	printf 'networkPolicy: { kafka: { perSource: true } }\nmirrors:\n  - source: { alias: ext, clusterName: "", namespace: "", bootstrapServers: "kafka.example.com:9094", kafkaVersion: "3.9.1" }\n' > .build/mm2-guard-egress.yaml; \
+	printf 'replicationPolicy: { mode: identity }\n' > .build/mm2-guard-loopback.yaml; \
+	printf 'mirrors:\n  - source: { alias: nowhere, kafkaVersion: "3.9.1" }\n' > .build/mm2-guard-unset.yaml; \
+	guard "a source below the KIP-896 floor" \
+		"declares Kafka 2.0.1, below the 2.1.0 floor" -f .build/mm2-guard-floor.yaml || rc=1; \
+	guard "RF above the target's broker count" \
+		"is 3 but target.brokerCount is 1" -f .build/mm2-guard-rf.yaml || rc=1; \
+	guard "alerts without metrics" \
+		"alerts.enabled requires metrics.enabled=true" \
+		--set alerts.enabled=true --set metrics.enabled=false || rc=1; \
+	guard "podMonitors without metrics" \
+		"podMonitors.enabled requires metrics.enabled=true" \
+		--set podMonitors.enabled=true --set metrics.enabled=false || rc=1; \
+	guard "identity policy with underivable ACLs" \
+		"needs kafkaUser.topicGrants" \
+		--set kafkaUser.create=true --set replicationPolicy.mode=identity || rc=1; \
+	guard "two mirrors sharing a source alias" \
+		'two mirrors both use the source alias "dup"' -f .build/mm2-guard-alias.yaml || rc=1; \
+	guard "a loopback under an identity policy" \
+		"which is also the target" -f .build/mm2-guard-loopback.yaml || rc=1; \
+	guard "a source that names neither a cluster nor a bootstrap" \
+		"declares neither source.clusterName nor source.bootstrapServers" -f .build/mm2-guard-unset.yaml || rc=1; \
+	guard "identity policy + two sources selecting the same topics" \
+		"select the same topics (orders.*) under an identity policy" \
+		-f .build/mm2-guard-overlap.yaml || rc=1; \
+	guard "identity policy + a .* pattern with two sources" \
+		"matches every topic (topicsPattern .*) and the replication policy is identity" \
+		-f .build/mm2-guard-catchall.yaml || rc=1; \
+	guard "autoscaling.maxReplicas above sum(tasksMax)" \
+		"autoscaling.maxReplicas is 9 but this release has only 4 connector tasks" \
+		-f .build/mm2-guard-tasks.yaml || rc=1; \
+	guard "a hand-set offset-syncs location disagreeing with the mirror's" \
+		'but the mirror resolves to "target"' -f .build/mm2-guard-offsync.yaml || rc=1; \
+	guard "exactly-once with a contradicting isolation level" \
+		"Exactly-once requires the source consumer to read only committed records" \
+		-f .build/mm2-guard-eos.yaml || rc=1; \
+	guard "per-source egress with an external source and no egressCIDR" \
+		"is neither in-cluster (clusterName + namespace) nor given an egressCIDR" \
+		-f .build/mm2-guard-egress.yaml || rc=1; \
+	guard "alerts against the Strimzi Metrics Reporter's metric names" \
+		"The Strimzi Metrics Reporter publishes Kafka" \
+		--set metrics.enabled=true --set metrics.type=strimziMetricsReporter \
+		--set alerts.enabled=true || rc=1; \
+	if helm template mm2 $(MM2_CHART_DIR) -n kafka \
+		--set metrics.enabled=true --set metrics.type=strimziMetricsReporter \
+		--set alerts.enabled=true --set alerts.allowReporterMetrics=true >/dev/null 2>&1; then \
+		echo "  ✅ accepted: strimziMetricsReporter once allowReporterMetrics acknowledges it"; \
+	else \
+		echo "  ❌ the reporter escape hatch does not render"; rc=1; \
+	fi; \
+	rm -f .build/mm2-guard-*.yaml; \
+	[ $$rc -eq 0 ] && echo "✅ every guard bites"; exit $$rc
+
+mm2-chart-package:  ## Package the mirror-maker2 chart
+	@mkdir -p .build
+	helm package $(MM2_CHART_DIR) --destination .build/
+	@echo "✅ MM2 chart packaged: .build/mirror-maker2-$(MM2_CHART_VERSION).tgz"
+
+mm2-chart-all: mm2-chart-lint mm2-chart-template mm2-chart-guards mm2-chart-package  ## lint + template + guards + package
+	@echo "✅ All MirrorMaker 2 chart checks passed"
+
+# ── Migration targets ────────────────────────────────────────────────────────
+# Every target below is a one-line alias of `kates migrate …` for one release,
+# each printing the command it stands for; the CLI is the implementation
+# (cli/cmd/migrate*.go) and these are removed once the tutorials point at it.
+# mm2-chart-* above stay: they are chart CI, not migration tooling.
+mm2-deploy:  ## Deploy MirrorMaker 2 from a lab source (deprecated: kates migrate mirror deploy --from <source>)
+	@echo "⚠️  make mm2-deploy is deprecated — use: $(KATES_BIN) migrate mirror deploy --from <source> [--release $(MM2_RELEASE)] [--namespace $(MM2_NAMESPACE)]"
+	$(KATES_BIN) migrate mirror deploy --from $${MM2_SOURCE:?set MM2_SOURCE to the source's lab or release name} --release $(MM2_RELEASE) --namespace $(MM2_NAMESPACE) --yes
+
+mm2-test:  ## Run the mirror-maker2 Helm tests (MM2_RELEASE=mm2)
+	helm test $(MM2_RELEASE) --namespace $(MM2_NAMESPACE) --timeout $${TIMEOUT:-300s} --logs
+
+mm2-undeploy:  ## Remove MirrorMaker 2 including the kept CR (deprecated: kates migrate mirror remove)
+	@echo "⚠️  make mm2-undeploy is deprecated — use: $(KATES_BIN) migrate mirror remove --release $(MM2_RELEASE) --namespace $(MM2_NAMESPACE) --yes"
+	$(KATES_BIN) migrate mirror remove --release $(MM2_RELEASE) --namespace $(MM2_NAMESPACE) --yes
+
+# The Topic Operator is unidirectional: topics MirrorMaker creates directly in
+# Kafka never appear as KafkaTopic CRs, so `kubectl get kafkatopics` cannot show
+# a mirror's output. These ask the brokers, as the kates-mm2 user, from a pod
+# the broker NetworkPolicy admits, with the credential written into the pod.
+mm2-topics:  ## List topics on the target as the MM2 user (deprecated: kates migrate target topics)
+	@echo "⚠️  make mm2-topics is deprecated — use: $(KATES_BIN) migrate target topics --namespace $(KAFKA_NAMESPACE) --cluster $(KAFKA_CLUSTER)"
+	@$(KATES_BIN) migrate target topics --namespace $(KAFKA_NAMESPACE) --cluster $(KAFKA_CLUSTER)
+
+mm2-offsets:  ## Sum a topic's end offsets on the target (deprecated: kates migrate target offsets <topic>)
+	@echo "⚠️  make mm2-offsets is deprecated — use: $(KATES_BIN) migrate target offsets $(TOPIC) --namespace $(KAFKA_NAMESPACE) --cluster $(KAFKA_CLUSTER)"
+	@$(KATES_BIN) migrate target offsets $(TOPIC) --namespace $(KAFKA_NAMESPACE) --cluster $(KAFKA_CLUSTER)
+
+legacy-kafka-image:  ## Build the Kafka 2.8.2 source image and load it into kind (deprecated: kates migrate image build --load)
+	@echo "⚠️  make legacy-kafka-image is deprecated — use: $(KATES_BIN) migrate image build --version $${KAFKA_VERSION:-2.8.2} --load"
+	$(KATES_BIN) migrate image build --version $${KAFKA_VERSION:-2.8.2} --load
+
+legacy-kafka-deploy:  ## Deploy a legacy Kafka source (deprecated: kates migrate source deploy --version <v>)
+	@echo "⚠️  make legacy-kafka-deploy is deprecated — use: $(KATES_BIN) migrate source deploy --version $${SOURCE_VERSION:-3.9.1}"
+	$(KATES_BIN) migrate source deploy --version $${SOURCE_VERSION:-3.9.1} --yes
+
+# The one target that proves the whole thing: a real old broker, real records,
+# read back off the real 4.x cluster. Everything cheaper passes on a dead mirror.
+mm2-migration-test:  ## Run the 2.x→4.x and 3.x→4.x migration labs (deprecated: kates migrate run --from <v>)
+	@echo "⚠️  make mm2-migration-test is deprecated — use: $(KATES_BIN) migrate run --from 3.9.1 --yes; $(KATES_BIN) migrate run --from 2.8.2 --yes"
+	$(KATES_BIN) migrate run --from 3.9.1 --yes
+	$(KATES_BIN) migrate run --from 2.8.2 --yes
+
+mm2-migration-test-3x:  ## Run only the 3.x→4.x migration lab (deprecated: kates migrate run --from 3.9.1)
+	@echo "⚠️  make mm2-migration-test-3x is deprecated — use: $(KATES_BIN) migrate run --from 3.9.1 --yes"
+	$(KATES_BIN) migrate run --from 3.9.1 --yes
+
+mm2-migration-test-2x:  ## Run only the 2.x→4.x migration lab (deprecated: kates migrate run --from 2.8.2)
+	@echo "⚠️  make mm2-migration-test-2x is deprecated — use: $(KATES_BIN) migrate run --from 2.8.2 --yes"
+	$(KATES_BIN) migrate run --from 2.8.2 --yes
 
 ##@ Kafka Deployment
 kafka-deploy: kafka-chart-deps  ## Deploy Kafka via Helm (ENV=kind|dev|staging|prod)

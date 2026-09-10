@@ -1,0 +1,24 @@
+# kind overlay — smallest thing that still behaves like a broker.
+#
+# Combine with an era overlay, era first:
+#   -f values-kafka-2x.yaml -f values-kind.yaml
+kafka:
+  replicas: 1
+  replicationFactor: 1
+  heapOpts: "-Xms256m -Xmx384m"
+  resources:
+    requests: { memory: 640Mi, cpu: 150m }
+    limits: { memory: 1Gi, cpu: 1000m }
+
+zookeeper:
+  replicas: 1
+  heapOpts: "-Xms128m -Xmx192m"
+  resources:
+    requests: { memory: 256Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: 500m }
+
+persistence:
+  enabled: false
+
+networkPolicy:
+  enabled: true

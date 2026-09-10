@@ -1,0 +1,72 @@
+{{- $fullname := include "legacy-kafka.fullname" . }}
+{{- $saslOnly := and .Values.listeners.sasl.enabled (not .Values.listeners.plaintext.enabled) }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-test-broker
+  namespace: {{ include "legacy-kafka.namespace" . }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test
+      # The cluster's OWN image. A 4.x kafka-topics.sh cannot talk to a 2.0
+      # broker at all (KIP-896), and would report that as a generic timeout —
+      # so the test would be measuring the client, not the broker.
+      image: {{ .Values.testImage | default (include "legacy-kafka.image" .) | quote }}
+      securityContext:
+        {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      command: ["/bin/sh", "-c"]
+      env:
+        - name: LOG_DIR
+          value: /tmp
+      args:
+        - |
+          set -eu
+          BOOTSTRAP="{{ include "legacy-kafka.bootstrapAddress" . }}"
+          CC="{{ include "legacy-kafka.clientConfigArg" . }}"
+
+          echo "── API versions (proves the wire, not just the port) ──"
+          # shellcheck disable=SC2086
+          /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "$BOOTSTRAP" $CC \
+            | head -5
+
+          echo "── topics ──"
+          # shellcheck disable=SC2086
+          TOPICS=$(/opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" $CC --list)
+          echo "$TOPICS"
+
+          {{- range .Values.topics }}
+          echo "$TOPICS" | grep -Fqx {{ .name | quote }} || {
+            echo "❌ expected topic {{ .name }} is missing — did the topics Job run?"
+            exit 1
+          }
+          {{- end }}
+
+          echo "✅ legacy Kafka {{ .Values.kafka.version }} ({{ include "legacy-kafka.mode" . }}) is serving at ${BOOTSTRAP}"
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- if $saslOnly }}
+        - name: client-config
+          mountPath: /etc/kafka-client
+          readOnly: true
+        {{- end }}
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    {{- if $saslOnly }}
+    - name: client-config
+      secret:
+        secretName: {{ $fullname }}-jaas
+        items:
+          - key: client.properties
+            path: client.properties
+    {{- end }}

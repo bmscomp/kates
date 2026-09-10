@@ -33,7 +33,13 @@ Examples:
   kates deploy --topology isolated --kafka-ns kafka-system --app-ns kates-app --chaos-ns litmus-system
 
   # Deploy with Apicurio Schema Registry
-  kates deploy --with-schema-registry apicurio`,
+  kates deploy --with-schema-registry apicurio
+
+  # Choose the operator and Kafka versions (validated before anything is installed)
+  kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0
+
+  # One operator per Kafka namespace, so older lines can run beside the primary
+  kates deploy --operator-scope namespace`,
 	RunE: runDeploy,
 }
 
@@ -61,7 +67,16 @@ var (
 	deployPortForward        bool
 	deployDryRun             bool
 	deployWithKafkaUI        bool
+	deployWithMirrorMaker2   bool
+	deployMM2NS              string
 	deployYes                bool
+
+	// Versions and scope (multi-version plan §3.1–3.3).
+	deployOperatorScope  string
+	deployStrimziVersion string
+	deployStrimziChart   string
+	deployKafkaVersion   string
+	deployKafkaName      string
 )
 
 func init() {
@@ -86,11 +101,18 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
 	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
+	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
+	deployCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
 	deployCmd.Flags().BoolVarP(&deployYes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
+	deployCmd.Flags().StringVar(&deployOperatorScope, "operator-scope", "cluster", "Strimzi operator scope: 'cluster' (one operator watching every namespace) or 'namespace' (one per Kafka namespace)")
+	deployCmd.Flags().StringVar(&deployStrimziVersion, "strimzi-version", "", "Strimzi operator version to install (default: the repository pin; 'latest' for the newest published)")
+	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
+	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
+	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -159,6 +181,20 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// ── Versions and scope ───────────────────────────────────────────────
+	// Resolved before any Helm call: the operator version, its chart, the
+	// Kafka window it supports, the Kafka version (asked for or the newest),
+	// the metadata version, and what the installed operator allows. A
+	// refusal here costs seconds; the same refusal from Strimzi would come
+	// after a ten-minute Helm timeout.
+	PrintPhaseHeader(nextDeployPhase(), "Resolving Versions")
+	vp, err := resolveVersionPlanFn(context.Background(), defaultRunner, deployVersionOptions())
+	if err != nil {
+		return err
+	}
+	vp.describe(PrintPhaseItem)
+	primary := primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}
+
 	analyzer := detect.NewAnalyzer(executor)
 	analyzer.Analyze(report, detect.ParsedReqs{})
 
@@ -172,7 +208,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close()
 
-	detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
+	detect.RenderValuesWithReserve(report, primary.Name, 0.30, f)
 
 	// Detect cluster type once — used by every Helm call below to pick the
 	// right values overlay (values-kind.yaml vs values-generic.yaml).
@@ -202,6 +238,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// ── Dry-run: show preview and exit ──
 	if deployDryRun {
 		return runDeployDryRun(sharedEntries)
+	}
+
+	// An operator upgrade or a scope change rolls things; say so and ask.
+	if deployWithStrimzi {
+		if err := vp.confirmOperatorChange(); err != nil {
+			return err
+		}
 	}
 
 	// Record each component's outcome BEFORE the pipeline runs, from the same
@@ -258,6 +301,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		chartOverlay: chartOverlay,
 		fileExists:   fileExists,
 		advanceStep:  advanceStep,
+		versions:     vp,
+		primary:      primary,
 	}
 
 	var deployErr error
@@ -332,6 +377,9 @@ var (
 	runExecFn      = runExecDefault
 	runExecStdinFn = runExecStdinDefault
 	runHelmFn      = runHelmDefault
+	// resolveVersionPlanFn reads charts and the cluster to decide versions
+	// and scope (deploy_versions.go); tests hand deploy a canned plan.
+	resolveVersionPlanFn = resolveVersionPlan
 	// Reads a command's output. Every command that INSPECTS the cluster used to
 	// call exec.CommandContext directly, which meant the deploy tests really
 	// shelled out to kubectl: with no cluster they fell into the readiness wait

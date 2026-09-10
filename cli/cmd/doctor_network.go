@@ -51,6 +51,7 @@ Examples:
 
 func init() {
 	doctorNetworkCmd.Flags().StringVar(&doctorKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka and Schema Registry")
+	doctorNetworkCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 	doctorNetworkCmd.Flags().StringVar(&doctorConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect")
 	doctorNetworkCmd.Flags().StringVar(&doctorAppNS, "app-ns", "kates", "Namespace for Kates application")
 	doctorNetworkCmd.Flags().StringVar(&doctorDbNS, "db-ns", "database", "Namespace for PostgreSQL database")
@@ -87,7 +88,7 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 		ns   string
 	}{
 		{
-			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s", doctorKafkaNS, clusterDomain),
+			host: fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain),
 			desc: "Kafka Bootstrap",
 			ns:   doctorAppNS,
 		},
@@ -121,13 +122,13 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 		ns   string
 	}{
 		{
-			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s", doctorKafkaNS, clusterDomain),
+			host: fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain),
 			port: "9092",
 			desc: "Kafka Plain",
 			ns:   doctorAppNS,
 		},
 		{
-			host: fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s", doctorKafkaNS, clusterDomain),
+			host: fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain),
 			port: "9093",
 			desc: "Kafka TLS",
 			ns:   doctorAppNS,

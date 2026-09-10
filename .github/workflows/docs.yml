@@ -36,6 +36,21 @@ jobs:
       - name: Verify book style rules
         run: ./scripts/check-book-style.sh
 
+  mermaid:
+    name: Mermaid Diagrams Parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # A broken diagram used to surface only as a failed PDF render in the
+      # Book workflow, naming no file — and not at all for the diagrams in
+      # charts/, which never reach Quarto and simply render as an error box on
+      # GitHub. mermaid.parse() is the same validation the renderer runs first.
+      - name: Every mermaid diagram parses
+        run: ./scripts/check-mermaid.sh --quiet
+
   link-check:
     name: Markdown Link Check
     runs-on: ubuntu-latest
