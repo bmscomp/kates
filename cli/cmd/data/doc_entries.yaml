@@ -1518,3 +1518,979 @@
     - "kates plugin list"
   see_also:
     - init
+
+- name: migrate pairs
+  category: Migration
+  synopsis: "kates migrate pairs [--target-cluster krafter] [--target-namespace kafka]"
+  short: "Every old → new Kafka pair this cluster can stand up now"
+  description: |
+    Lists the source versions a migration lab can be built from, grouped by
+    the provider each would get — the legacy-kafka chart (ZooKeeper below
+    3.3.0, the built KRaft image below 3.7.0, the official image from there)
+    or Strimzi — and the targets the primary operator's window allows, with
+    the primary's own version in brackets. Read from the operator on the
+    cluster, or from the vendored chart when none is installed.
+  flags:
+    - name: "--target-cluster"
+      type: string
+      default: "krafter"
+      desc: "Name of the target Kafka (the platform's primary)"
+    - name: "--target-namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the target Kafka"
+  examples:
+    - "kates migrate pairs"
+    - "kates migrate pairs -o json"
+  see_also:
+    - migrate plan
+    - migrate up
+
+- name: migrate plan
+  category: Migration
+  synopsis: "kates migrate plan --from <version> [--from <version>…] [--to <version>] [flags]"
+  short: "What 'migrate up' would create for a pair of versions — nothing changes"
+  description: |
+    Resolves the pair against the cluster — the primary operator's window and
+    scope, the target Kafka, the provider each source gets — and prints the
+    lab up would create: namespaces, releases, provider, mode and image of
+    every source, the operator, the target, the mirror's policy,
+    minSourceVersion, preflight and topics, where the offset-syncs topic
+    lives and what the source principal therefore needs, the values files it
+    would write and the helm commands. -o json prints the same as a
+    document. Under cluster scope a version the cluster-wide operator has
+    dropped is planned as a legacy source, and the plan says why.
+
+    --from is repeatable: several sources are mirrored into the one target
+    by one MirrorMaker 2 release, each with its own alias (src282, src391),
+    namespace, release, credential, corpus topic and row. A combination the
+    chart would refuse at render time — two sources sharing an alias, or two
+    writing one topic name under the identity policy — is refused here
+    first, naming both --from values, without touching the cluster.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source Kafka version, x.y.z (required; repeat it to mirror several sources into one target)"
+    - name: "--to"
+      type: string
+      desc: "Target Kafka version (default: the primary as it runs)"
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: m<from>[-<from>…]-<to> with the dots removed)"
+    - name: "--source-provider"
+      type: string
+      default: "auto"
+      desc: "Who runs the source: auto, strimzi or legacy"
+    - name: "--source-strimzi-version"
+      type: string
+      desc: "Operator version of a Strimzi source in its own namespace (namespace scope)"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity (keep topic names) or default (<alias>.<topic>)"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Corpus topics to seed and mirror, comma-separated (with several --from the lab's own corpus is kates.orders.<alias> per source)"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--sasl"
+      type: bool
+      desc: "Put the legacy source behind its SASL/PLAIN listener"
+    - name: "--interactive"
+      short: "-i"
+      type: bool
+      desc: "Pick the pair, the policy and the corpus interactively"
+  examples:
+    - "kates migrate plan --from 2.8.2"
+    - "kates migrate plan --from 3.9.1 --policy default"
+    - "kates migrate plan --from 2.8.2 --from 3.9.1"
+    - "kates migrate plan --from 4.2.1 -o json"
+  see_also:
+    - migrate pairs
+    - migrate up
+
+- name: migrate up
+  category: Migration
+  synopsis: "kates migrate up --from <version> [--from <version>…] [--to <version>] [flags]"
+  short: "Create the migration lab: the old Kafka, the mirror, ready to verify"
+  description: |
+    Stands up the lab plan describes: the prerequisites (cluster reachable,
+    Strimzi CRDs, target Kafka Ready, target credentials), the built image
+    when a source needs one, each source's namespace and legacy-kafka
+    release, each source credential, the MirrorMaker 2 release with the era
+    preset and the generated values, then waits for the CR to be Ready and
+    every connector RUNNING. Every step is a row of the report; the exit code
+    is 1 on any failed row. Every release carries kates.io/lab=<name>, which
+    is how status, verify, cutover and down find the lab again.
+
+    --from is repeatable: several sources are mirrored into the one target by
+    one MirrorMaker 2 release. Each gets its own alias derived from its
+    version (src282, src391), its own namespace, release, credential and
+    corpus topic, its own entry in the mirror's values, and its own rows in
+    the report. The lab is named m282-391-430; a single source keeps the
+    names it has always had.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source Kafka version, x.y.z (required; repeat it to mirror several sources into one target)"
+    - name: "--to"
+      type: string
+      desc: "Target Kafka version (default: the primary as it runs)"
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: m<from>[-<from>…]-<to> with the dots removed)"
+    - name: "--source-provider"
+      type: string
+      default: "auto"
+      desc: "Who runs the source: auto, strimzi or legacy"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity or default"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Corpus topics to seed and mirror, comma-separated (with several --from the lab's own corpus is kates.orders.<alias> per source)"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only. For a --from-bootstrap cluster you do not own; the lab's own source does not need it"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--sasl"
+      type: bool
+      desc: "Put the legacy source behind its SASL/PLAIN listener"
+    - name: "--values-source"
+      type: string
+      desc: "Extra values file layered on the source's generated values"
+    - name: "--values-mirror"
+      type: string
+      desc: "Extra values file layered on the mirror's generated values"
+    - name: "--skip-build"
+      type: bool
+      desc: "Do not build/load the source image (assume it is present)"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Per-phase wait budget in seconds"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+    - name: "--interactive"
+      short: "-i"
+      type: bool
+      desc: "Pick the pair, the policy and the corpus interactively"
+  examples:
+    - "kates migrate up --from 2.8.2"
+    - "kates migrate up --from 3.9.1 --policy default --name m391-430-default --yes"
+    - "kates migrate up --from 2.8.2 --from 3.9.1 --yes"
+    - "kates migrate up --from 2.8.2 --sasl --topics kates.orders,kates.payments"
+  see_also:
+    - migrate plan
+    - migrate verify
+    - migrate down
+
+- name: migrate status
+  category: Migration
+  synopsis: "kates migrate status [--name <lab>] [--watch]"
+  short: "The lab as the cluster sees it: source, target, mirror CR, connectors, end offsets"
+  description: |
+    Finds the lab by its kates.io/lab label and prints its source, its
+    target, the KafkaMirrorMaker2 CR's readiness and every connector's state,
+    and — best effort, through a client pod on each side — the end offsets of
+    the mirrored topics on both ends. --watch repeats every 10 seconds.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--watch"
+      short: "-w"
+      type: bool
+      desc: "Repeat every 10 seconds"
+    - name: "--offsets"
+      type: bool
+      default: "true"
+      desc: "Read the end offsets on both ends through client pods"
+  examples:
+    - "kates migrate status"
+    - "kates migrate status --name m282-430 --watch"
+    - "kates migrate status -o json"
+  see_also:
+    - migrate verify
+    - migrate mirror status
+
+- name: migrate verify
+  category: Migration
+  synopsis: "kates migrate verify [--name <lab>] | --from-bootstrap host:9092 --source-version <v> [flags]"
+  short: "Seed the source, read the corpus back off the target, check the offset translation"
+  description: |
+    The migration scripts' phases 3–9 against a lab (found by label) or a
+    real source (--from-bootstrap): a known corpus is produced to the source
+    through a client pod running the source's own image, a consumer group
+    commits on it, the replicated topic is awaited on the target, the corpus
+    is read back as kates-mm2 and compared — every distinct record — and the
+    group's translated position is checked. Every assertion is a row; the
+    exit code is 1 on any failed row. The client pods are removed at the end
+    unless --keep.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--from-bootstrap"
+      type: string
+      desc: "Verify against a real source at this bootstrap address instead of a lab"
+    - name: "--source-version"
+      type: string
+      desc: "Kafka version of the --from-bootstrap source"
+    - name: "--source-secret"
+      type: string
+      desc: "Secret in the target namespace holding the source password under \"password\""
+    - name: "--source-user"
+      type: string
+      desc: "Username for the --from-bootstrap source"
+    - name: "--source-mechanism"
+      type: string
+      default: "plain"
+      desc: "SASL mechanism of the --from-bootstrap source"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--keep"
+      type: bool
+      desc: "Leave the client pods in place"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Per-phase wait budget in seconds"
+  examples:
+    - "kates migrate verify --name m282-430"
+    - "kates migrate verify --from-bootstrap old-kafka.example:9092 --source-version 2.8.2 --source-secret old-reader --source-user reader"
+    - "kates migrate verify -o json"
+  see_also:
+    - migrate up
+    - migrate cutover
+
+- name: migrate cutover
+  category: Migration
+  synopsis: "kates migrate cutover [--name <lab>] [--yes]"
+  short: "Stop the source connector, keep the checkpoints running, prove the target is frozen"
+  description: |
+    Applies charts/mirror-maker2/values-cutover.yaml on top of the mirror's
+    values: the source connector goes STOPPED (data replication ends), the
+    checkpoint connector stays RUNNING (offset translation continues for the
+    consumers that have not moved yet). Then it produces more records to the
+    source and proves the target's end offsets do not move. Needs --yes or a
+    confirmation.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Wait budget in seconds"
+  examples:
+    - "kates migrate cutover --name m282-430 --yes"
+  see_also:
+    - migrate rollback
+    - migrate mirror cutover
+
+- name: migrate rollback
+  category: Migration
+  synopsis: "kates migrate rollback [--name <lab>] [--yes]"
+  short: "Reverse a cutover: the source connector running again"
+  description: |
+    Removes the cutover overlay: stopped → running resumes from the committed
+    offsets, so nothing is re-read from the start — but anything produced to
+    the TARGET in the meantime is not replicated backwards. A rollback after
+    producers have moved is a data merge, not a switch. Needs --yes or a
+    confirmation.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate rollback --name m282-430 --yes"
+  see_also:
+    - migrate cutover
+
+- name: migrate down
+  category: Migration
+  synopsis: "kates migrate down [--name <lab>] [--yes]"
+  short: "Remove the lab: the mirror, the source, the lab's topics on the target — found by label"
+  description: |
+    Finds the lab by its kates.io/lab label and removes exactly what up
+    created: the mirror release and its kept CR, the source release, the
+    source namespace when the lab created it (it carries the label), the
+    lab's topics on the target (the mirrored topics and the mirror's own,
+    through KafkaTopic resources), the credential Secrets and the client
+    pods. Nothing without the label is touched. Needs --yes or a
+    confirmation.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate down --name m282-430 --yes"
+    - "kates migrate down"
+  see_also:
+    - migrate up
+    - migrate status
+
+- name: migrate run
+  category: Migration
+  synopsis: "kates migrate run --from <version> [--from <version>…] [--to <version>] [--keep] [--skip-build] [--timeout 600] [--yes] [-o json]"
+  short: "up → verify → cutover → down: one report, one exit code"
+  description: |
+    The CI leg: creates the lab, runs the verification, rehearses the cutover
+    and removes the lab, printing one report — the migration scripts'
+    eighteen rows (cluster reachable … cutover froze the target) under a
+    header that states the pair, the providers, the operator, the policy and
+    where the offset-syncs topic lives. With several --from values every
+    source is its own leg: the per-source rows are named by its alias
+    ("record count [src391]"), while the rows about the release itself stay
+    single. The exit code is 1 on any failed row. --keep leaves the lab in
+    place and prints how to inspect and remove it; --skip-build assumes the
+    source image is present; --source-version is accepted as an alias of
+    --from.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source Kafka version, x.y.z (required; repeatable; --source-version is an alias)"
+    - name: "--to"
+      type: string
+      desc: "Target Kafka version (default: the primary as it runs)"
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: m<from>[-<from>…]-<to> with the dots removed)"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity or default"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Corpus topics to seed and mirror, comma-separated (with several --from the lab's own corpus is kates.orders.<alias> per source)"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--keep"
+      type: bool
+      desc: "Leave the lab running for inspection"
+    - name: "--skip-build"
+      type: bool
+      desc: "Do not build/load the source image (assume it is present)"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Per-phase wait budget in seconds"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate run --from 2.8.2 --skip-build --timeout 600 --yes"
+    - "kates migrate run --from 3.9.1 --policy default --name m391-430-default --yes"
+    - "kates migrate run --from 2.8.2 --from 3.9.1 --skip-build --yes"
+    - "kates migrate run --from 3.9.1 --keep -o json"
+  see_also:
+    - migrate up
+    - migrate verify
+    - migrate down
+
+- name: migrate image build
+  category: Migration
+  synopsis: "kates migrate image build --version <kafka version> [--scala 2.13] [--jre 11] [--os-release jammy] [--platform p] [--load | --push] [--registry r]"
+  short: "Build the legacy Kafka image from Dockerfile.legacy-kafka, verify it, load it into kind"
+  description: |
+    Builds <registry>/kates-legacy-kafka:<version> from Dockerfile.legacy-kafka
+    (the Apache tarball, checksum-verified, on a pinned Temurin JRE — 11 for
+    2.x, 17 from 3.x), checks the image really contains that Kafka version,
+    and loads it into the kind cluster (--load) or pushes it (--push, buildx,
+    multi-platform capable). --load and --push are mutually exclusive: a
+    pushed manifest list is not in the local daemon for kind to load. The
+    official apache/kafka image starts at 3.7.0; every line below needs this.
+  flags:
+    - name: "--version"
+      type: string
+      default: "2.8.2"
+      desc: "Kafka version to package"
+    - name: "--scala"
+      type: string
+      default: "2.13"
+      desc: "Scala build of the tarball"
+    - name: "--jre"
+      type: string
+      desc: "Temurin JRE major version (default: 11 for 2.x, 17 for 3.x)"
+    - name: "--os-release"
+      type: string
+      default: "jammy"
+      desc: "Ubuntu release of the Temurin base image"
+    - name: "--platform"
+      type: string
+      desc: "Buildx platform(s), e.g. linux/arm64 or a comma list"
+    - name: "--registry"
+      type: string
+      default: "ghcr.io/bmscomp"
+      desc: "Image registry/namespace"
+    - name: "--load"
+      type: bool
+      desc: "Load the image into the kind cluster after building"
+    - name: "--push"
+      type: bool
+      desc: "Push the image to the registry (mutually exclusive with --load)"
+  examples:
+    - "kates migrate image build --version 2.8.2 --load"
+    - "kates migrate image build --version 2.8.2 --platform linux/amd64,linux/arm64 --push"
+  see_also:
+    - migrate source deploy
+    - migrate up
+
+- name: migrate source deploy
+  category: Migration
+  synopsis: "kates migrate source deploy --version <v> [--namespace ns] [--release r] [--image i] [--topic a,b] [--sasl] [--values f] [--yes]"
+  short: "Deploy a legacy Kafka source (charts/legacy-kafka) and wait for it to serve"
+  description: |
+    The source half of a lab on its own: the namespace (labelled
+    kates.io/lab), the generated values, the legacy-kafka release with the
+    era chosen from the version (ZooKeeper below 3.3.0, the built KRaft image
+    below 3.7.0, the official image from there), its Helm test, and — with
+    --sasl — the credential Secret the mirror will read. The image is built
+    and loaded first when the version needs one (--skip-build assumes it is
+    present).
+  flags:
+    - name: "--version"
+      type: string
+      desc: "Kafka version of the source, x.y.z, at least 2.1.0 (required)"
+    - name: "--provider"
+      type: string
+      default: "auto"
+      desc: "Who runs the source: auto, strimzi or legacy"
+    - name: "--namespace"
+      type: string
+      desc: "Namespace of the source (default: kafka-<lab>-src)"
+    - name: "--release"
+      type: string
+      desc: "Helm release of the source (default: <lab>-src)"
+    - name: "--image"
+      type: string
+      desc: "Broker image override"
+    - name: "--topic"
+      type: string
+      default: "kates.orders"
+      desc: "Topics to pre-create, comma-separated"
+    - name: "--sasl"
+      type: bool
+      desc: "Enable the SASL/PLAIN listener and write its credential for the mirror"
+    - name: "--values"
+      type: string
+      desc: "Extra values file layered on the generated values"
+    - name: "--skip-build"
+      type: bool
+      desc: "Do not build/load the source image"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate source deploy --version 2.8.2"
+    - "kates migrate source deploy --version 3.9.1 --namespace kafka-old --release old"
+  see_also:
+    - migrate mirror deploy
+    - migrate source status
+    - migrate source remove
+
+- name: migrate source status
+  category: Migration
+  synopsis: "kates migrate source status [--name <lab> | --namespace <ns>]"
+  short: "Broker (and ZooKeeper) readiness, version and bootstrap of a legacy source"
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single source on the cluster)"
+    - name: "--namespace"
+      type: string
+      desc: "Namespace of a source deployed without a lab name"
+  examples:
+    - "kates migrate source status --name m282-430"
+    - "kates migrate source status -o json"
+  see_also:
+    - migrate source deploy
+    - migrate status
+
+- name: migrate source remove
+  category: Migration
+  synopsis: "kates migrate source remove [--name <lab> | --namespace <ns>] [--yes]"
+  short: "Remove a legacy source: its release, its namespace when the lab created it, its credential"
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single source on the cluster)"
+    - name: "--namespace"
+      type: string
+      desc: "Namespace of a source deployed without a lab name"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate source remove --name m282-430 --yes"
+  see_also:
+    - migrate down
+
+- name: migrate mirror deploy
+  category: Migration
+  synopsis: "kates migrate mirror deploy --from <source name> | --from-bootstrap host:9092 --source-version <v> [--policy p] [--read-only-source] [--release r] [--namespace ns] [--values f] [--dry-run] [--yes]"
+  short: "Install MirrorMaker 2 from a source cluster to the target, with the era preset and generated values"
+  description: |
+    Installs charts/mirror-maker2 in the target's namespace for one source:
+    --from names a source by its lab or release (resolved through the
+    cluster), --from-bootstrap gives a raw address with --source-version and,
+    for an authenticated listener, --source-secret, --source-user and
+    --source-mechanism. The values are written from the pair (policy,
+    minSourceVersion, preflight, the topic list, replication factors from the
+    target's broker count) on top of the era preset, after values-kind.yaml
+    on kind; --read-only-source keeps every MirrorMaker write on the target,
+    which is what a source you may only read needs; --dry-run prints the helm
+    command and the values file and stops.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source cluster by lab or release name"
+    - name: "--from-bootstrap"
+      type: string
+      desc: "Source bootstrap address, host:port (with --source-version)"
+    - name: "--source-version"
+      type: string
+      desc: "Kafka version of the --from-bootstrap source"
+    - name: "--source-secret"
+      type: string
+      desc: "Secret in the mirror's namespace holding the source password under \"password\""
+    - name: "--source-user"
+      type: string
+      desc: "Username for the source listener"
+    - name: "--source-mechanism"
+      type: string
+      default: "plain"
+      desc: "SASL mechanism of the source: plain, scram-sha-256 or scram-sha-512"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity or default"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Topics to mirror, comma-separated"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only"
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror (the target's)"
+    - name: "--target-cluster"
+      type: string
+      default: "krafter"
+      desc: "Target Kafka cluster"
+    - name: "--values"
+      type: string
+      desc: "Extra values file layered on the generated values"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the helm command and the values file, install nothing"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror deploy --from m282-430-src"
+    - "kates migrate mirror deploy --from-bootstrap old.example:9092 --source-version 3.9.1 --policy default --dry-run"
+    - "kates migrate mirror deploy --from-bootstrap old.example:9092 --source-version 3.9.1 --read-only-source"
+  see_also:
+    - migrate source deploy
+    - migrate mirror status
+    - migrate up
+
+- name: migrate mirror status
+  category: Migration
+  synopsis: "kates migrate mirror status [--release <r>] [--namespace ns] [--wait]"
+  short: "CR readiness and every connector's state; --wait blocks until every connector runs"
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--wait"
+      type: bool
+      desc: "Block until the CR is Ready and every connector RUNNING"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Wait budget in seconds"
+  examples:
+    - "kates migrate mirror status --release mm2-m282-430 --wait"
+    - "kates migrate mirror status -o json"
+  see_also:
+    - migrate status
+
+- name: migrate mirror cutover
+  category: Migration
+  synopsis: "kates migrate mirror cutover [--release <r>] [--namespace ns] [--yes] [--dry-run]"
+  short: "Apply values-cutover.yaml: source connector stopped, checkpoints running"
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the helm command and stop"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror cutover --release mm2 --yes"
+  see_also:
+    - migrate cutover
+    - migrate mirror rollback
+
+- name: migrate mirror rollback
+  category: Migration
+  synopsis: "kates migrate mirror rollback [--release <r>] [--namespace ns] [--yes] [--dry-run]"
+  short: "Reverse a cutover: both connectors running again"
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the helm command and stop"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror rollback --release mm2 --yes"
+  see_also:
+    - migrate rollback
+    - migrate mirror cutover
+
+- name: migrate mirror remove
+  category: Migration
+  synopsis: "kates migrate mirror remove [--release <r>] [--namespace ns] [--yes]"
+  short: "helm uninstall the mirror and delete the kept CR"
+  description: |
+    keepOnDelete annotates the KafkaMirrorMaker2 with resource-policy: keep,
+    so helm uninstall alone leaves replication running — right in
+    production, wrong when tearing down. This removes both.
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror remove --release mm2 --yes"
+  see_also:
+    - migrate down
+
+- name: migrate target topics
+  category: Migration
+  synopsis: "kates migrate target topics [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "List the topics on the target, asked of the brokers as the MM2 user"
+  description: |
+    The Topic Operator is unidirectional: topics MirrorMaker creates never
+    become KafkaTopic resources, so only the brokers can say what a mirror
+    created. Runs kafka-topics.sh from a client pod the broker NetworkPolicy
+    admits, as the given user, with the credential written into the pod and
+    never on a command line.
+  flags:
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target topics"
+    - "kates migrate target topics -o json"
+  see_also:
+    - migrate target offsets
+    - migrate target groups
+
+- name: migrate target offsets
+  category: Migration
+  synopsis: "kates migrate target offsets <topic> [--partitions] [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "Sum a topic's end offsets on the target (--partitions for the per-partition lines)"
+  description: |
+    "Is the mirror replicating?" has one honest answer: the target's end
+    offsets, read twice, moving. Uses whichever offset tool the target's
+    Kafka line ships (kafka-get-offsets.sh from 3.0, GetOffsetShell before).
+  flags:
+    - name: "--partitions"
+      type: bool
+      desc: "Print the per-partition lines too"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target offsets kates.orders"
+    - "kates migrate target offsets kates.orders --partitions -o json"
+  see_also:
+    - migrate target topics
+
+- name: migrate target groups
+  category: Migration
+  synopsis: "kates migrate target groups [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "List the consumer groups on the target"
+  flags:
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target groups"
+  see_also:
+    - migrate target group
+
+- name: migrate target group
+  category: Migration
+  synopsis: "kates migrate target group <group> [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "Describe one consumer group on the target: its translated positions"
+  flags:
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target group kates-migration-m282-430"
+    - "kates migrate target group kates-migration-m282-430 -o json"
+  see_also:
+    - migrate target groups
+    - migrate verify
+
+- name: deploy
+  category: Versions
+  synopsis: "kates deploy [--operator-scope cluster|namespace] [--strimzi-version V] [--kafka-version V] [--kafka-name NAME]"
+  short: "Deploy the Kates stack, choosing the Strimzi operator scope and the operator and Kafka versions"
+  description: |
+    Deploys the platform. Before any Helm call, the versions are resolved:
+    the operator version, its chart (fetched and read, never guessed), the
+    Kafka versions that operator supports, the Kafka version for the primary
+    (--kafka-version, or the newest supported), the metadata version, and
+    what the operator already installed on the cluster allows (same,
+    upgrade, refused downgrade, scope change). A refusal happens in seconds
+    and names the window and the ways forward.
+
+    The operator version is the repository pin, except that a cluster
+    already running a NEWER operator keeps it: the pin is a default, and a
+    default must not propose a downgrade nobody asked for. The Kafka window
+    then comes from that operator, not from the pin. --strimzi-version is a
+    request rather than a default, so naming an older version reaches the
+    downgrade refusal (Strimzi has no operator downgrade; kates clean is
+    the way back).
+
+    On a kind cluster the backend runs the native image built from the
+    working tree (kates:native-local, pinned with pullPolicy: Never by
+    charts/kates/values-native-local.yaml) rather than the published one:
+    a local deploy should run your bytes, and the chart's appVersion can be
+    ahead of what is on the registry. deploy loads the image onto the node
+    when local Docker has it, and refuses before installing when it exists
+    nowhere — naming `make kates-image-native-local`, which builds it. Every
+    other cluster keeps ghcr.io/bmscomp/kates.
+
+    --operator-scope cluster (default) installs one operator watching every
+    namespace; only its Kafka versions can run under Strimzi. namespace
+    installs one operator per Kafka namespace, so older Kafka lines can run
+    beside the primary under their own operator (kates migrate up).
+
+    The wizard (kates deploy -i, or a bare kates deploy on a terminal) walks
+    four screens: what to deploy (topology, schema registry, sizing, the
+    components — including MirrorMaker 2 as a loopback mirror of the
+    primary); the versions (mono cluster or namespace-scoped operators, the
+    Strimzi version, then a Kafka version chosen from exactly that operator's
+    window); the namespaces; and a review of everything as it will resolve,
+    with one confirmation before the first Helm call.
+  examples:
+    - "kates deploy"
+    - "kates deploy -i"
+    - "kates deploy --with-mirror-maker2"
+    - "kates deploy --kafka-version 4.2.1"
+    - "kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0"
+    - "kates deploy --operator-scope namespace"
+    - "kates deploy --dry-run --strimzi-version latest"
+  see_also:
+    - versions
+    - operators list
+    - migrate up
+  flags:
+    - name: operator-scope
+      type: string
+      default: cluster
+      desc: "cluster: one operator watching every namespace; namespace: one per Kafka namespace"
+    - name: strimzi-version
+      type: string
+      default: "(the repository pin)"
+      desc: "Strimzi operator version to install; 'latest' for the newest published"
+    - name: strimzi-chart
+      type: string
+      desc: "Local strimzi-kafka-operator tarball (air-gapped mirrors)"
+    - name: kafka-version
+      type: string
+      default: "(newest the operator supports)"
+      desc: "Kafka version of the primary cluster; 'latest' spells the default"
+    - name: kafka-name
+      type: string
+      default: krafter
+      desc: "Name of the primary Kafka cluster"
+    - name: with-mirror-maker2
+      type: bool
+      default: "false"
+      desc: "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)"
+    - name: mm2-ns
+      type: string
+      default: kafka
+      desc: "Namespace for MirrorMaker 2 when topology is 'isolated'"
+
+- name: versions
+  category: Versions
+  synopsis: "kates versions [--offline]"
+  short: "Strimzi and Kafka versions this cluster can run, and how"
+  description: |
+    Every Strimzi operator installed on the current cluster (or, without a
+    cluster, the repository's pin), the Kafka versions each supports, and
+    the ranges the legacy-kafka chart runs without an operator. Nothing is
+    a table in the CLI: windows are read from the operator charts and the
+    live operator Deployments.
+  examples:
+    - "kates versions"
+    - "kates versions -o json"
+  see_also:
+    - versions strimzi
+    - versions kafka
+    - operators list
+
+- name: versions strimzi
+  category: Versions
+  synopsis: "kates versions strimzi [--all] [--refresh] [--resolve]"
+  short: "Published Strimzi operator versions and their status relative to the pin"
+  description: |
+    Reads the Strimzi Helm index (cached 24h) and lists the operator
+    versions: pinned, newer than pinned, supported, or below this platform's
+    floor (hidden unless --all). The Kafka window is shown for every chart
+    already cached; --resolve pulls the others.
+  examples:
+    - "kates versions strimzi"
+    - "kates versions strimzi --resolve"
+    - "kates versions strimzi --all -o json"
+  see_also:
+    - versions kafka
+    - deploy
+
+- name: versions kafka
+  category: Versions
+  synopsis: "kates versions kafka [--strimzi-version V]"
+  short: "The Kafka versions one Strimzi operator version supports"
+  description: |
+    Reads (pulling and caching if needed) the chart of one operator version
+    and prints its Kafka window, the newest entry, the CRD API it serves and
+    stores, and the metadata version the CLI derives for each entry.
+  examples:
+    - "kates versions kafka"
+    - "kates versions kafka --strimzi-version 1.0.1"
+  see_also:
+    - versions strimzi
+    - deploy
+
+- name: operators list
+  category: Versions
+  synopsis: "kates operators list [--kafka-ns NS]"
+  short: "Every Strimzi Cluster Operator on this cluster: version, scope, watched namespaces, window, role"
+  description: |
+    Discovers the operators from their Deployments (nothing is registered):
+    under cluster scope one line; under namespace scope the map of which
+    operator runs which namespaces, which one is the primary's (it owns the
+    CRDs and cluster RBAC), and whether each additional operator is adjacent
+    to it — the configuration Strimzi tests.
+  examples:
+    - "kates operators list"
+    - "kates operators list -o json"
+  see_also:
+    - versions
+    - deploy

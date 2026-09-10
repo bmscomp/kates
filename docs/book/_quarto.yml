@@ -58,6 +58,8 @@ book:
         - 18-upgrade-playbook.md
         - 21-kafka-connect.md
         - operating-kafka-connect.md
+        - 22-mirror-maker2-migration.md
+        - 23-legacy-source-migration.md
         - 14-recipes.md
 
     - part: "Part VI — Reference"

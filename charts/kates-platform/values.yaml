@@ -9,6 +9,16 @@ kates:
 apicurio-registry:
   enabled: false
 
+# MirrorMaker 2 (cross-cluster replication, DR, and 2.x/3.x → 4.x migration).
+# Disabled by default — its defaults mirror krafter onto itself, which is a
+# smoke test, not a topology. Enable with a real source:
+#   mirror-maker2:
+#     enabled: true
+#     mirrors:
+#       - source: { alias: dc-east, bootstrapServers: kafka-east.example.com:9092, kafkaVersion: "3.9.1" }
+mirror-maker2:
+  enabled: false
+
 # Image used by the helm test connectivity pod (needs `nc`)
 test:
   image: busybox:1.37

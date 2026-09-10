@@ -1,0 +1,63 @@
+# Strimzi Operator — Namespace-Scope Overlay (an ADDITIONAL, co-located operator)
+# Usage: helm dependency build charts/strimzi-operator && \
+#        helm upgrade --install strimzi-operator charts/strimzi-operator \
+#          -n <kafka-namespace> --create-namespace \
+#          -f charts/strimzi-operator/values-namespace-scope.yaml
+#
+# WHAT THIS IS. The shape of every Strimzi operator on this cluster EXCEPT the
+# primary's: one operator per Kafka namespace, installed IN that namespace
+# (release name `strimzi-operator`, like the primary), watching only it. The
+# primary's operator stays in `strimzi-operator` and — under namespace scope —
+# is switched to `watchAnyNamespace: false` with an explicit `watchNamespaces`
+# list by the CLI; it does NOT use this file.
+#
+# WHY THE SHARED THINGS ARE OFF. A Kubernetes cluster has exactly one set of
+# Strimzi CRDs and one set of the fixed-name cluster-scoped roles and bindings.
+# They belong to the NEWEST operator on the cluster, which is always the
+# primary's release (the CLI refuses an additional operator newer than the
+# primary's). CRDs are backwards compatible within an API generation, so an
+# older operator runs fine on the primary's newer CRDs — but an older release's
+# CRD hook would roll them BACK, and a second copy of `strimzi-cluster-operator-
+# global` would be a Helm ownership conflict. So, for every additional operator:
+#
+#   • crdUpgrade.enabled: false — CRDs belong to the newest operator; never let
+#     an older release's hook touch them.
+#   • createGlobalResources: false — reuse the primary's ClusterRoles and
+#     fixed-name bindings instead of fighting over them.
+#   • globalBindings.enabled: true — the three bindings createGlobalResources
+#     skips (to strimzi-cluster-operator-global, strimzi-kafka-broker and
+#     strimzi-kafka-client) are rendered under names unique to this namespace,
+#     so this operator keeps rack awareness and volume-expansion checks.
+#   • watchAnyNamespace: false, watchNamespaces: [] — the release namespace is
+#     upstream's default watch list, so an empty list means "only where I am".
+#     RoleBindings are namespaced and named per watched namespace, so two
+#     operators watching disjoint namespaces never collide.
+#
+# RULES THE CLI ENFORCES AND THIS FILE CANNOT: never beside a cluster-wide
+# operator (it would reconcile the same namespaces); same CRD generation as the
+# installed CRDs (v1-only, i.e. Strimzi >= 1.0.0); at most the primary's
+# version; adjacent releases are what Strimzi tests. See
+# docs/kafka-multi-version-deploy-plan.md §2.3 and §2.10.
+#
+# Resources are the kind-sized ones from values-kind.yaml: an additional
+# operator is one more 384Mi pod per additional cluster on a laptop.
+
+crdUpgrade:
+  enabled: false
+
+globalBindings:
+  enabled: true
+
+strimzi-kafka-operator:
+  watchAnyNamespace: false
+  # The release namespace is always watched; list others only if this operator
+  # must also reconcile CRs elsewhere (Connect/MM2 in a sibling namespace).
+  watchNamespaces: []
+  createGlobalResources: false
+  resources:
+    limits:
+      memory: 384Mi
+    requests:
+      memory: 384Mi
+  podDisruptionBudget:
+    enabled: false

@@ -1,0 +1,46 @@
+# Vulnerabilities accepted for a stated reason, with an expiry.
+#
+# Every entry here MUST carry a statement and an `expired_at`. When the date
+# passes Trivy stops honouring the entry and the build goes red again, which is
+# the point: a suppression that never expires is a decision nobody revisits.
+
+vulnerabilities:
+  - id: CVE-2026-75595
+    # io.netty:netty-handler 4.1.130.Final, brought in by the Quarkus 3.20.6
+    # platform BOM. Fixed upstream in 4.1.137.Final.
+    #
+    # Why this is not simply bumped: Netty is compiled against two optional
+    # companion libraries, and moving it alone breaks the NATIVE image build
+    # while leaving the JVM build perfectly green — a JVM resolves those call
+    # sites lazily and never reaches them; native-image resolves AND
+    # initialises everything at build time. Four attempts, each fixing the
+    # previous error and revealing the next:
+    #
+    #   1. netty-bom 4.1.137          -> unresolved DecoderJNI$Wrapper.pull(int)
+    #                                    and ReferenceCountedOpenSslClientContext
+    #   2. + brotli4j 1.23.0,         -> SSL.<clinit> UnsatisfiedLinkError:
+    #     netty-tcnative-classes         sslOpCipherServerPreference()
+    #   3. + --initialize-at-run-time -> OpenSslAsyncPrivateKeyMethod.<clinit>
+    #     =io.netty.internal.tcnative    UnsatisfiedLinkError: sslSignRsaPkcsSha1()
+    #   4. …the next OpenSsl* class, and so on.
+    #
+    # That is a whack-a-mole with no visible end, and it is the wrong shape for
+    # a change that has nothing to do with the branch carrying it. The real fix
+    # is a Quarkus platform upgrade that moves Netty, brotli4j and tcnative in
+    # step with native substitutions the Quarkus team has tested together — no
+    # 3.20.x patch does (3.20.6, .6.1 and .6.2 all pin netty-handler 4.1.130).
+    #
+    # EXPOSURE. Reachability was not established, so treat this as unassessed
+    # rather than harmless. The mitigating facts: the affected paths are
+    # Netty's OpenSSL/TLS handling; this service terminates TLS at the ingress
+    # and speaks plaintext HTTP inside the cluster, and its gRPC server runs
+    # without transport security. That is a reason to time-box, not to dismiss.
+    #
+    # TODO(bmscomp): open a tracking issue and link it here before this expires.
+    statement: >-
+      Fixed only in netty 4.1.137+, which the Quarkus 3.20.6 platform cannot
+      take without breaking the GraalVM native image (four documented layers of
+      unresolved/uninitialisable OpenSSL classes). Needs a coordinated Quarkus
+      platform upgrade, tracked separately. Time-boxed so it cannot be
+      forgotten.
+    expired_at: 2026-10-10

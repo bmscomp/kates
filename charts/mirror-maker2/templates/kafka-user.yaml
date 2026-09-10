@@ -43,27 +43,63 @@ spec:
       {{- if not .Values.kafkaUser.acls }}{{- fail "kafkaUser.authorization.mode=custom requires kafkaUser.acls" }}{{- end }}
       {{- toYaml .Values.kafkaUser.acls | nindent 6 }}
       {{- else }}
+      {{- /*
+        Auto mode derives the replicated-topic grants from the source aliases,
+        which only works under the DEFAULT policy — identity mode preserves the
+        source's topic names, and a regex topicsPattern cannot be turned into an
+        ACL prefix. Refusing is better than rendering a user that silently
+        cannot write: that shows up as a RUNNING connector replicating nothing.
+      */}}
+      {{- if and (include "mirror-maker2.isIdentityPolicy" .) (not .Values.kafkaUser.topicGrants) }}
+      {{- fail "kafkaUser.create with replicationPolicy.mode=identity needs kafkaUser.topicGrants: replicated topics keep their source names, so the chart cannot derive their ACLs from the source alias. Grant the prefixes your topicsPattern covers, e.g. topicGrants: [{ name: \"kates.\", patternType: prefix }]." }}
+      {{- end }}
       # ── MM2 Connect internal topics (<groupId>-configs/offsets/status) ──
       - resource: { type: topic, name: {{ $gid | quote }}, patternType: prefix }
         operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs"]
         host: "*"
       # ── Replicated data + checkpoints per source alias (<alias>.*) ──────
+      # AlterConfigs is not a typo for Alter: MirrorSourceConnector syncs topic
+      # configuration through incrementalAlterConfigs, which needs
+      # ALTER_CONFIGS. Alter alone covers createPartitions, and the missing
+      # grant surfaces as a TopicAuthorizationException on every refresh while
+      # the connector stays RUNNING.
       {{- range .Values.mirrors }}
-      - resource: { type: topic, name: {{ printf "%s." (.source.alias | default "source") | quote }}, patternType: prefix }
-        operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter"]
+      - resource: { type: topic, name: {{ printf "%s%s" (.source.alias | default "source") (($.Values.replicationPolicy).separator | default ".") | quote }}, patternType: prefix }
+        operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter", "AlterConfigs"]
         host: "*"
       {{- end }}
-      # ── Offset-sync + heartbeat internal topics ────────────────────────
+      # ── Offset-sync internal topic ─────────────────────────────────────
+      # ONLY when a mirror keeps it here. MirrorMaker writes
+      # mm2-offset-syncs.<target-alias>.internal to the SOURCE by default
+      # (offsetSyncs.location), and this grant would then name a topic that is
+      # not on this cluster — inert, and misleading to anyone auditing it. The
+      # SOURCE principal needs Create + Write + Describe on it instead; see
+      # the README's credential contract.
+      #
+      # No heartbeats grant: the Strimzi v1 API dropped heartbeatConnector, so
+      # nothing in this chart creates that topic.
+      {{- if include "mirror-maker2.anyOffsetSyncsOnTarget" $ }}
       - resource: { type: topic, name: "mm2-offset-syncs.", patternType: prefix }
         operations: ["Read", "Write", "Create", "Describe"]
         host: "*"
-      - resource: { type: topic, name: "heartbeats", patternType: literal }
-        operations: ["Read", "Write", "Create", "Describe"]
+      {{- end }}
+      {{- if (($.Values.target).exactlyOnce).enabled }}
+      # ── Exactly-once ───────────────────────────────────────────────────
+      # Connect's exactly-once source support fences zombie tasks with a
+      # transactional producer per connector, whose transactional.id is
+      # derived from the connector name; IdempotentWrite is what the producer
+      # itself needs.
+      - resource: { type: transactionalId, name: {{ printf "connect-cluster-%s" $gid | quote }}, patternType: prefix }
+        operations: ["Describe", "Write"]
         host: "*"
+      - resource: { type: cluster }
+        operations: ["IdempotentWrite"]
+        host: "*"
+      {{- end }}
       # ── Extra topic grants (e.g. IdentityReplicationPolicy) ────────────
       {{- range .Values.kafkaUser.topicGrants }}
       - resource: { type: topic, name: {{ .name | quote }}, patternType: {{ .patternType | default "prefix" }} }
-        operations: {{ .operations | default (list "Read" "Write" "Create" "Describe") | toJson }}
+        operations: {{ .operations | default (list "Read" "Write" "Create" "Describe" "DescribeConfigs" "Alter" "AlterConfigs") | toJson }}
         host: "*"
       {{- end }}
       # ── Connect worker groups ──────────────────────────────────────────
@@ -73,6 +109,24 @@ spec:
       - resource: { type: group, name: "connect-", patternType: prefix }
         operations: ["Read", "Describe"]
         host: "*"
+      {{- /*
+        Offset translation writes the committed offsets of EVERY mirrored
+        consumer group onto the target (alterConsumerGroupOffsets needs READ
+        on each group). Their names are whatever the source's consumers chose,
+        so a prefix cannot cover them; when any mirror translates offsets the
+        grant has to be the wildcard. Turn sync.group.offsets off, or set
+        kafkaUser.groupGrants and authorization.mode=custom, to narrow it.
+      */}}
+      {{- $syncsGroups := false }}
+      {{- range .Values.mirrors }}
+      {{- $cpCfg := ((.checkpointConnector).config | default dict) }}
+      {{- if eq (toString (index $cpCfg "sync.group.offsets.enabled" | default "false")) "true" }}{{ $syncsGroups = true }}{{ end }}
+      {{- end }}
+      {{- if $syncsGroups }}
+      - resource: { type: group, name: "*", patternType: literal }
+        operations: ["Read", "Describe"]
+        host: "*"
+      {{- end }}
       {{- range .Values.kafkaUser.groupGrants }}
       - resource: { type: group, name: {{ .name | quote }}, patternType: {{ .patternType | default "prefix" }} }
         operations: ["Read", "Describe"]

@@ -17,15 +17,16 @@ Every version the platform pins, in one place. This table is generated from the 
 | `apicurio-registry` chart | 0.4.0 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
 | `connect-cluster` chart | 1.3.1 (app 3.6.0) | `charts/connect-cluster/Chart.yaml` |
 | `headlamp` chart | 0.2.0 (app 0.40.1) | `charts/headlamp/Chart.yaml` |
-| `kafka-cluster` chart | 0.3.0 (app 4.3.0) | `charts/kafka-cluster/Chart.yaml` |
+| `kafka-cluster` chart | 0.4.0 (app 4.3.0) | `charts/kafka-cluster/Chart.yaml` |
 | `kafka-ui` chart | 0.3.0 (app v1.5.0) | `charts/kafka-ui/Chart.yaml` |
 | `kates-chaos` chart | 2.0.0 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
-| `kates-platform` chart | 0.5.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
+| `kates-platform` chart | 0.6.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
 | `kates` chart | 0.7.0 (app 1.22.0) | `charts/kates/Chart.yaml` |
+| `legacy-kafka` chart | 0.2.0 (app 3.9.1) | `charts/legacy-kafka/Chart.yaml` |
 | `minio` chart | 17.0.22 (app 2025.7.23) | `charts/minio/Chart.yaml` |
-| `mirror-maker2` chart | 0.1.0 (app 4.3.0) | `charts/mirror-maker2/Chart.yaml` |
+| `mirror-maker2` chart | 0.4.0 (app 4.3.0) | `charts/mirror-maker2/Chart.yaml` |
 | `monitoring` chart | 1.1.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
-| `strimzi-operator` chart | 0.1.0 (app 1.1.0) | `charts/strimzi-operator/Chart.yaml` |
+| `strimzi-operator` chart | 0.2.0 (app 1.1.0) | `charts/strimzi-operator/Chart.yaml` |
 | `velero` chart | 11.3.3 (app 1.17.1) | `charts/velero/Chart.yaml` |
 <!-- version-matrix:end -->
 

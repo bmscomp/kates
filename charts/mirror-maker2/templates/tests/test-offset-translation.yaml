@@ -1,0 +1,200 @@
+{{- if .Values.tests.offsetTranslation.enabled }}
+{{- if not .Values.tests.replication.enabled }}
+{{- fail "tests.offsetTranslation.enabled requires tests.replication.enabled — it consumes the corpus that test produces, and a group with no committed offset has nothing to translate." }}
+{{- end }}
+{{- $ot := .Values.tests.offsetTranslation }}
+{{- $t := .Values.tests.replication }}
+{{- $fullname := include "mirror-maker2.fullname" . }}
+{{- $target := .Values.target }}
+{{- $targetAlias := $target.alias | default "target" }}
+{{- /* Same three lines as test-replication.yaml: the named alias, else every mirror. */}}
+{{- $mirrors := .Values.mirrors }}
+{{- if $t.sourceAlias }}
+{{- $sel := list }}
+{{- range .Values.mirrors }}{{ if eq (.source.alias | default "source") $t.sourceAlias }}{{ $sel = append $sel . }}{{ end }}{{ end }}
+{{- if not $sel }}
+{{- fail (printf "tests.replication.sourceAlias is %q, which is not the alias of any mirror in this release." $t.sourceAlias) }}
+{{- end }}
+{{- $mirrors = $sel }}
+{{- end }}
+{{- range $mirrors }}
+{{- if include "mirror-maker2.testAuthUnsupported" (dict "c" .source) }}
+{{- fail (printf "tests.offsetTranslation.enabled: source %q uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." (.source.alias | default "source")) }}
+{{- end }}
+{{- end }}
+{{- if include "mirror-maker2.testAuthUnsupported" (dict "c" $target) }}
+{{- fail "tests.offsetTranslation.enabled: the target uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
+{{- end }}
+{{- $image := $t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
+{{- /*
+Offset translation is the half of a migration that people discover they skipped
+on the morning of the cutover: all the data is on the target, and no consumer
+knows where to resume, so every one of them replays from the beginning or skips
+to the end.
+
+For each mirror, this test commits a real consumer-group offset on that SOURCE,
+then waits for the MirrorCheckpointConnector to publish that group on the TARGET
+with a translated offset. It asserts on the group appearing with a committed
+position — not on the exact number, because translation is approximate by
+design: MirrorMaker maps positions through the offset-syncs topic at record
+granularity and lags behind the data.
+
+WHAT IT DELIBERATELY DOES NOT ASSERT: that resuming from that position yields
+the records the group had not consumed. "A committed position exists" and
+"resuming from it is correct" are different claims, and the second one is
+test-failover.yaml.
+
+Every leg runs and every leg is reported, under one failure counter, with the
+alias on every line — on a fan-in release the useful answer is WHICH leg has no
+translated offsets, not that one of them does not.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-test-offsets
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.componentLabels" (dict "component" "test" "ctx" .) | nindent 4 }}
+    # The selector the kafka-cluster broker NetworkPolicy admits. Without it
+    # this pod is denied at the network layer and reports a replication failure.
+    kates.io/test-pod: "true"
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "30"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ $image | quote }}
+      {{- include "mirror-maker2.imagePullPolicy" $ | nindent 6 }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      env:
+        - name: LOG_DIR
+          value: /tmp
+        {{- range $i, $m := $mirrors }}
+        {{- with $m.source.authentication }}
+        {{- if and .type (ne .type "tls") }}
+        - name: SOURCE_PW_{{ $i }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .secretName | default .username | quote }}
+              key: {{ .secretKey | default "password" }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- with $target.authentication }}
+        {{- if and .type (ne .type "tls") }}
+        - name: TARGET_PW
+          valueFrom:
+            secretKeyRef:
+              name: {{ .secretName | default .username | quote }}
+              key: {{ .secretKey | default "password" }}
+        {{- end }}
+        {{- end }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -u
+          TGT="{{ include "mirror-maker2.bootstrap" (dict "c" $target "ctx" $) }}"
+          LEGS={{ len $mirrors }}
+          FAILED=0
+          {{- include "mirror-maker2.testClientProps" (dict "c" $target "env" "TARGET_PW" "file" "/tmp/target.properties") | nindent 10 }}
+
+          {{- range $i, $m := $mirrors }}
+          {{- $alias := $m.source.alias | default "source" }}
+          {{- $topic := include "mirror-maker2.testTopic" (dict "m" $m "ctx" $) }}
+          {{- $replicated := include "mirror-maker2.replicatedTopic" (dict "topic" $topic "alias" $alias "ctx" $) }}
+          {{- $group := include "mirror-maker2.testGroup" (dict "base" $ot.group "m" $m "ctx" $) }}
+          {{- $loc := include "mirror-maker2.offsetSyncsLocation" (dict "m" $m "ctx" $) }}
+
+          # ── leg {{ $i }}: {{ $alias }} ────────────────────────────────────
+          leg_{{ $i }}() {
+            ALIAS="{{ $alias }}"
+            SRC="{{ include "mirror-maker2.bootstrap" (dict "c" $m.source "ctx" $) }}"
+            TOPIC="{{ $topic }}"
+            REPLICATED="{{ $replicated }}"
+            GROUP="{{ $group }}"
+            DEADLINE=$(( $(date +%s) + {{ $ot.timeoutSeconds }} ))
+            {{- include "mirror-maker2.testClientProps" (dict "c" $m.source "env" (printf "SOURCE_PW_%d" $i) "file" (printf "/tmp/source-%d.properties" $i)) | nindent 12 }}
+
+            echo "══ [$ALIAS] committing an offset for group $GROUP on the source"
+            # The group commit is the test's OWN data, written with the test's
+            # own credentials — it is not a MirrorMaker write, and it is not
+            # what offsetSyncs.location governs. Nothing below assumes
+            # MirrorMaker may write to the source.
+            /opt/kafka/bin/kafka-console-consumer.sh \
+              --bootstrap-server "$SRC" \
+              --consumer.config /tmp/source-{{ $i }}.properties \
+              --topic "$TOPIC" --group "$GROUP" \
+              --from-beginning --timeout-ms 30000 --max-messages 10 >/dev/null 2>&1 || true
+
+            SRC_OFFSETS=$(/opt/kafka/bin/kafka-consumer-groups.sh \
+              --bootstrap-server "$SRC" --command-config /tmp/source-{{ $i }}.properties \
+              --describe --group "$GROUP" 2>/dev/null | grep -c "$TOPIC" || true)
+            if [ "${SRC_OFFSETS:-0}" -eq 0 ]; then
+              echo "❌ [$ALIAS] no committed offset on the source — the consumer read nothing."
+              echo "   Run the replication test first; it produces the corpus into $TOPIC."
+              return 1
+            fi
+            echo "  ✅ [$ALIAS] source group has $SRC_OFFSETS committed partition(s)"
+
+            echo "══ [$ALIAS] waiting for the checkpoint connector to translate it onto the target"
+            while :; do
+              OUT=$(/opt/kafka/bin/kafka-consumer-groups.sh \
+                --bootstrap-server "$TGT" --command-config /tmp/target.properties \
+                --describe --group "$GROUP" 2>/dev/null || true)
+              if echo "$OUT" | grep -q "$REPLICATED"; then
+                echo "$OUT" | head -10
+                echo "✅ [$ALIAS] group $GROUP has translated offsets on the target for $REPLICATED"
+                return 0
+              fi
+              if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                echo "❌ [$ALIAS] group $GROUP never appeared on the target with an offset for $REPLICATED"
+                echo ""
+                echo "  Check, in this order:"
+                echo "   1. checkpointConnector config: sync.group.offsets.enabled must be \"true\""
+                echo "      (without it MM2 emits checkpoints but never writes __consumer_offsets)"
+                echo "   2. groupsPattern must match $GROUP"
+                echo "   3. the target user needs Read+Describe on the group"
+                # Where the offset-syncs topic lives is a per-mirror setting, and
+                # looking for it on the wrong cluster is how this gets misread as
+                # "translation is broken" when the mirror is simply read-only.
+                echo "   4. this mirror keeps offset-syncs on the {{ $loc | upper }}:"
+                echo "      mm2-offset-syncs.{{ $targetAlias }}.internal must exist on the {{ $loc }} cluster"
+                echo "      ({{ if eq $loc "target" }}{{ include "mirror-maker2.bootstrap" (dict "c" $target "ctx" $) }}{{ else }}{{ include "mirror-maker2.bootstrap" (dict "c" $m.source "ctx" $) }}{{ end }})"
+                echo "      and carry syncs — without it there is nothing to translate THROUGH."
+                echo "   5. offset translation lags the data — try a longer timeout"
+                return 1
+              fi
+              sleep 10
+            done
+          }
+          leg_{{ $i }} || FAILED=$(( FAILED + 1 ))
+          {{- end }}
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo ""
+            echo "❌ $FAILED of $LEGS offset-translation leg(s) failed — the ❌ lines above name which."
+            exit 1
+          fi
+          echo ""
+          echo "✅ every one of the $LEGS leg(s) has translated offsets on the target"
+      resources:
+        requests: { memory: 384Mi, cpu: 100m }
+        limits: { memory: 1Gi, cpu: 1000m }
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}

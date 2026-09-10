@@ -1,0 +1,92 @@
+{{- $fullname := include "legacy-kafka.fullname" . }}
+{{- $ns := include "legacy-kafka.namespace" . }}
+{{- $l := .Values.listeners }}
+# Headless — stable per-pod DNS. This is what advertised.listeners names, so a
+# client that bootstraps through the ClusterIP Service below is handed back an
+# address it can actually resolve.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "legacy-kafka.headlessService" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+spec:
+  clusterIP: None
+  # KRaft peers must find each other to elect a controller, which they cannot
+  # do while every pod is unready — a deadlock without this.
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "legacy-kafka.brokerSelectorLabels" . | nindent 4 }}
+  ports:
+    {{- if $l.plaintext.enabled }}
+    - name: plaintext
+      port: {{ $l.plaintext.port }}
+      targetPort: {{ $l.plaintext.port }}
+    {{- end }}
+    {{- if $l.sasl.enabled }}
+    - name: sasl
+      port: {{ $l.sasl.port }}
+      targetPort: {{ $l.sasl.port }}
+    {{- end }}
+    {{- if eq (include "legacy-kafka.mode" .) "kraft" }}
+    - name: controller
+      port: 9093
+      targetPort: 9093
+    {{- end }}
+---
+# Bootstrap — the address other charts use. Put THIS in the mirror-maker2
+# chart's mirrors[].source.bootstrapServers.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "legacy-kafka.bootstrapService" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: broker
+  annotations:
+    kates.io/bootstrap-address: {{ include "legacy-kafka.bootstrapAddress" . | quote }}
+    kates.io/kafka-version: {{ .Values.kafka.version | quote }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "legacy-kafka.brokerSelectorLabels" . | nindent 4 }}
+  ports:
+    {{- if $l.plaintext.enabled }}
+    - name: plaintext
+      port: {{ $l.plaintext.port }}
+      targetPort: {{ $l.plaintext.port }}
+    {{- end }}
+    {{- if $l.sasl.enabled }}
+    - name: sasl
+      port: {{ $l.sasl.port }}
+      targetPort: {{ $l.sasl.port }}
+    {{- end }}
+{{- if eq (include "legacy-kafka.mode" .) "zookeeper" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "legacy-kafka.zookeeperService" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "legacy-kafka.zookeeperSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
+    - name: peer
+      port: 2888
+      targetPort: 2888
+    - name: leader
+      port: 3888
+      targetPort: 3888
+{{- end }}

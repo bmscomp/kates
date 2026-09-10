@@ -24,3 +24,4 @@ values-kind.yaml
 values-dev.yaml
 values-generic.yaml
 values-prod.yaml
+values-namespace-scope.yaml

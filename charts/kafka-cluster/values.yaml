@@ -1,6 +1,11 @@
 # -- Kafka cluster name — becomes the Strimzi Kafka CR name and the strimzi.io/cluster label
 clusterName: krafter
-# -- Kafka broker/controller version deployed by Strimzi
+# -- Kafka broker/controller version deployed by Strimzi. The default is the
+# NEWEST version in the vendored operator's window (scripts/check-versions.sh
+# asserts that) and must stay at or above Chart.yaml's kates.io/kafka-floor.
+# Any x.y.z is accepted by the schema: whether the OPERATOR can run it is the
+# operator's and the CLI's check, not this chart's, so the chart stays usable
+# with a newer operator than the one pinned here.
 kafkaVersion: "4.3.0"
 # -- Strimzi operator version this chart is aligned with (CRD hook + version checks)
 strimziVersion: "1.1.0"
@@ -9,6 +14,10 @@ strimziVersion: "1.1.0"
 nameOverride: ""
 # -- Override the fully-qualified resource name
 fullnameOverride: ""
+# -- Extra labels merged into every resource this chart renders (the CLI stamps
+# kates.io/lab and kates.io/lab-role here so a migration lab's releases can be
+# found again). Never selector labels: nothing matches on them.
+extraLabels: {}
 
 # ── Global Image Configuration ───────────────────────────────────────────────
 # Override these to pull all images from a private or air-gapped registry.
@@ -37,7 +46,10 @@ kafka:
   # new version's default as soon as `kafkaVersion` changes, which forecloses
   # any rollback to the previous Kafka line. Raise to 4.3-IV0 in a follow-up
   # once 4.3.0 is proven. Must stay >= 4.2-IV0 or share groups will not
-  # bootstrap on new clusters.
+  # bootstrap on new clusters. Both forms are accepted: the short `4.2` (Kafka
+  # resolves it to the newest 4.2-IVn; what the CLI passes) and the explicit
+  # `4.2-IV1`. It can never be NEWER than kafkaVersion — the chart refuses to
+  # render that, since the brokers could not start.
   metadataVersion: 4.2-IV1
   listeners:
     - name: plain
@@ -83,6 +95,11 @@ kafka:
     quota.producer.default: 52428800
     quota.consumer.default: 104857600
     message.max.bytes: 10485760
+    # Share groups (KIP-932) need Kafka >= 4.2 and metadata >= 4.2 — they are
+    # what sets Chart.yaml's kates.io/kafka-floor. Every `group.share.*` and
+    # `share.*` key in this map is rendered ONLY when kafkaVersion >= 4.2.0, so
+    # an additional cluster on 4.1.x (its own older operator, or the legacy
+    # provider) starts instead of refusing an unknown feature.
     group.share.enable: true
     group.min.session.timeout.ms: 6000
     group.max.session.timeout.ms: 1800000
@@ -500,6 +517,18 @@ users:
     # topics + owns the MM2 Connect internal/offset-sync/checkpoint topics and
     # groups on this (target) cluster. The SOURCE-side user lives on the remote
     # cluster and is provisioned there.
+    #
+    # Two grants here are broader than they look, deliberately:
+    #   • topic AlterConfigs — MirrorSourceConnector syncs topic configuration
+    #     (retention, cleanup policy) with incrementalAlterConfigs, which needs
+    #     ALTER_CONFIGS; plain Alter only covers createPartitions. Without it
+    #     the connector logs TopicAuthorizationException on every refresh and
+    #     stays RUNNING.
+    #   • group "*" — MirrorCheckpointConnector translates the committed offsets
+    #     of EVERY mirrored consumer group onto this cluster, and it writes them
+    #     through alterConsumerGroupOffsets, which needs READ on the group. A
+    #     prefix grant can only cover groups you already know the names of; a
+    #     migration is precisely the case where you do not.
     - name: kates-mm2
       authentication:
         type: scram-sha-512
@@ -514,18 +543,12 @@ users:
               type: topic
               name: "*"
               patternType: literal
-            operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter"]
+            operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter", "AlterConfigs"]
             host: "*"
           - resource:
               type: group
-              name: "mirror-maker2"
-              patternType: prefix
-            operations: ["Read", "Describe"]
-            host: "*"
-          - resource:
-              type: group
-              name: "connect-"
-              patternType: prefix
+              name: "*"
+              patternType: literal
             operations: ["Read", "Describe"]
             host: "*"
           - resource:
@@ -545,21 +568,40 @@ networkPolicies:
   enabled: true
   # default-deny: blocks all traffic to/from pods matching selector
   defaultDeny: true
-  # Selector for default-deny policy. Use explicit labels to avoid Kyverno
-  # "empty podSelector" violations. Set to {} for standard k8s behavior.
-  defaultDenySelector:
-    app.kubernetes.io/part-of: strimzi-krafter
+  # Selector for the default-deny policy. Empty (the default) DERIVES
+  # `app.kubernetes.io/part-of: strimzi-<clusterName>` in the template — the
+  # label Strimzi puts on every pod of this cluster — so a cluster not named
+  # krafter is still selected. (It used to be a literal `strimzi-krafter`, and
+  # a second cluster got no default-deny and no DNS allowance at all.) An
+  # explicit map here still wins; there is no way to express "select every
+  # pod" — an empty podSelector is a Kyverno violation on hardened clusters.
+  defaultDenySelector: {}
   # allow-dns: permits DNS egress for pods matching selector
   allowDNS: true
-  # Selector for allow-dns policy
-  allowDNSSelector:
-    app.kubernetes.io/part-of: strimzi-krafter
+  # Selector for the allow-dns policy. Same derivation as defaultDenySelector.
+  allowDNSSelector: {}
+  # The Cluster Operator's own NetworkPolicy (`strimzi-operator`), written INTO
+  # operatorNamespace. Fine for a standalone install — one cluster, one
+  # operator — which is why it stays on by default. It is a fixed-name policy
+  # in ANOTHER release's namespace, so two clusters naming the same operator
+  # fight over it: the strimzi-operator wrapper chart owns it once per operator
+  # when `operatorPolicy.enabled` is set THERE, and every kafka-cluster release
+  # that names that operator must then turn this OFF (values-additional.yaml
+  # does; the CLI does for the primary too).
+  operatorPolicy:
+    enabled: true
   allowedClientNamespaces:
     - kates
     - litmus
   monitoringNamespace: kafka
   # Namespace where Kafka Connect is deployed (for cross-namespace ingress)
   connectNamespace: connect
+  # Namespace where MirrorMaker 2 is deployed (leave empty for Release.Namespace).
+  # MM2 workers are Connect workers but Strimzi labels them
+  # strimzi.io/kind: KafkaMirrorMaker2, so they need their own ingress rule —
+  # without it a mirror is denied at the network layer and reports itself
+  # perfectly healthy while replicating nothing.
+  mirrorMaker2Namespace: ""
   # Namespace where standalone Kafka UI is deployed
   kafkaUINamespace: kafka-ui
   # Namespace where the Strimzi Operator is deployed (leave empty for "strimzi-operator")

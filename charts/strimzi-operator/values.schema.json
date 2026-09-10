@@ -38,6 +38,22 @@
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 }
       }
     },
+    "globalBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Unique-name ClusterRoleBindings (strimzi-cluster-operator-<namespace>-*) to the primary's strimzi-cluster-operator-global, strimzi-kafka-broker and strimzi-kafka-client ClusterRoles, for an additional operator running with createGlobalResources: false.",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "operatorPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The kates-owned NetworkPolicy for the Cluster Operator (formerly written into the operator namespace by charts/kafka-cluster). Egress follows the watch scope.",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
     "strimzi-kafka-operator": {
       "type": "object",
       "description": "Upstream subchart values. additionalProperties stays TRUE here on purpose: upstream exposes ~40 keys that drift every release, and enumerating them would turn each Strimzi bump into a schema chore.",
@@ -45,7 +61,11 @@
       "properties": {
         "replicas": { "type": "integer", "minimum": 1 },
         "watchAnyNamespace": { "type": "boolean" },
-        "watchNamespaces": { "type": "array" },
+        "watchNamespaces": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Namespaces to watch when watchAnyNamespace is false. The release namespace is always watched (upstream appends it), so [] means 'only my own namespace' — the additional-operator shape."
+        },
         "kubernetesServiceDnsDomain": { "type": "string", "minLength": 1 },
         "operationTimeoutMs": { "type": "integer", "minimum": 1 },
         "fullReconciliationIntervalMs": { "type": "integer", "minimum": 1 },

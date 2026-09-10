@@ -1,11 +1,20 @@
 {{- $op := index .Values "strimzi-kafka-operator" -}}
-Strimzi Operator v{{ .Chart.Version }} (Strimzi {{ .Chart.AppVersion }})
+{{- $watched := list -}}
+{{- if not $op.watchAnyNamespace -}}
+{{- $watched = append ($op.watchNamespaces | default list) .Release.Namespace | uniq | sortAlpha -}}
+{{- end -}}
+Strimzi Operator chart v{{ .Chart.Version }} — Strimzi {{ .Values.strimziVersion }}
+{{- if ne (toString .Values.strimziVersion) (toString .Chart.AppVersion) }} (this repository's pin: {{ .Chart.AppVersion }}){{- end }}
 
 Release:   {{ .Release.Name }}
 Namespace: {{ .Release.Namespace }}
 
 Configuration:
-  Watch scope:      {{ if $op.watchAnyNamespace }}all namespaces (STRIMZI_NAMESPACE="*"){{ else }}{{ .Release.Namespace }} only{{ end }}
+  Operator version: {{ .Values.strimziVersion }}
+  Scope:            {{ if $op.watchAnyNamespace }}cluster-wide (STRIMZI_NAMESPACE="*"){{ else if eq (len $watched) 1 }}its own namespace ({{ .Release.Namespace }}){{ else }}namespaces {{ join ", " $watched }}{{ end }}
+  Global RBAC:      {{ if $op.createGlobalResources }}owned by this release (createGlobalResources=true){{ else }}reused from the primary's release (createGlobalResources=false){{ end }}
+  Global bindings:  {{ if .Values.globalBindings.enabled }}enabled (strimzi-cluster-operator-{{ .Release.Namespace }}-*){{ else }}disabled{{ end }}
+  Operator policy:  {{ if .Values.operatorPolicy.enabled }}enabled (NetworkPolicy {{ include "strimzi-operator.fullname" . }}){{ else }}disabled{{ end }}
   Replicas:         {{ $op.replicas }}
   Leader election:  {{ if $op.leaderElection.enable }}enabled{{ else }}disabled{{ end }}
   DNS domain:       {{ $op.kubernetesServiceDnsDomain }}
@@ -22,16 +31,35 @@ Configuration:
     which Helm only applies on install. This chart's crdUpgrade hook keeps them
     current — you have disabled it, so CRDs freeze at the version first
     installed and the API server will silently prune fields the frozen schema
-    does not know about. Re-enable with crdUpgrade.enabled=true unless another
-    applier owns them.
+    does not know about. That is CORRECT for an additional operator (CRDs
+    belong to the newest operator on the cluster — the primary's release);
+    for the primary, re-enable with crdUpgrade.enabled=true.
+{{- end }}
+
+{{- if and (not $op.createGlobalResources) (not .Values.globalBindings.enabled) }}
+
+  ⚠ createGlobalResources=false without globalBindings.enabled=true: this
+    operator's ServiceAccount is NOT bound to strimzi-cluster-operator-global,
+    strimzi-kafka-broker or strimzi-kafka-client — no rack awareness, no
+    volume-expansion checks, no delegation. Set globalBindings.enabled=true
+    (values-namespace-scope.yaml does).
+{{- end }}
+
+{{- if and $op.createGlobalResources .Values.globalBindings.enabled }}
+
+  ⚠ globalBindings.enabled=true while createGlobalResources=true: upstream
+    already renders the fixed-name bindings for this ServiceAccount, so the
+    unique-name copies are redundant. Harmless, but one of the two is not
+    what you meant.
 {{- end }}
 
 {{- if not $op.watchAnyNamespace }}
 
-  ⚠ The operator will only watch {{ .Release.Namespace }}. Existing Kafka
-    clusters in other namespaces will go UNMANAGED — their CRs stay in the
-    cluster but nothing reconciles them. Set
-    strimzi-kafka-operator.watchAnyNamespace=true to restore cluster-wide scope.
+  ⚠ The operator watches ONLY {{ join ", " $watched }}. Kafka clusters in any
+    other namespace go UNMANAGED — their CRs stay in the cluster but nothing
+    reconciles them — unless another operator watches that namespace. Set
+    strimzi-kafka-operator.watchAnyNamespace=true for cluster-wide scope, or
+    add the namespace to strimzi-kafka-operator.watchNamespaces.
 {{- end }}
 
   ⚠ Upgrading? Bare `helm upgrade` REUSES this release's stored values. Pass
@@ -44,9 +72,13 @@ Configuration:
   Verify
 ────────────────────────────────────────────
 
-Watch scope actually in effect (expect "*"):
+Watch scope actually in effect (expect {{ if $op.watchAnyNamespace }}"*"{{ else }}"{{ join "," $watched }}"{{ end }}):
   kubectl get deploy strimzi-cluster-operator -n {{ .Release.Namespace }} \
     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}'
+
+Operator version actually running:
+  kubectl get deploy strimzi-cluster-operator -n {{ .Release.Namespace }} \
+    -o jsonpath='{.spec.template.spec.containers[0].image}'
 
 CRDs installed:
   kubectl get crd -l strimzi.io/crd-install=true

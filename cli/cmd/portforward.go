@@ -39,8 +39,8 @@ var wellKnownPorts = []struct {
 }{
 	{"kates/kates", "Kates REST API", 8080, 8080, "http://localhost:8080/api/health"},
 	{"kates/kates", "Kates gRPC", 9000, 9000, ""},
-	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (plain)", 9092, 9092, ""},
-	{"kafka/krafter-kafka-bootstrap", "Kafka Bootstrap (TLS)", 9093, 9093, ""},
+	{"kafka/" + kafkaBootstrapPlaceholder, "Kafka Bootstrap (plain)", 9092, 9092, ""},
+	{"kafka/" + kafkaBootstrapPlaceholder, "Kafka Bootstrap (TLS)", 9093, 9093, ""},
 	{"kafka/apicurio", "Apicurio Schema Registry", 80, 8081, "http://localhost:8081/ui"},
 	{"kafka-ui/kafka-ui", "Kafka UI", 8080, 8085, "http://localhost:8085"},
 	{"monitoring/monitoring-grafana", "Grafana", 80, 3000, "http://localhost:3000"},
@@ -49,6 +49,10 @@ var wellKnownPorts = []struct {
 	{"jaeger/jaeger-query", "Jaeger UI", 16686, 16686, "http://localhost:16686"},
 	{"kates/kates-postgresql", "PostgreSQL", 5432, 5432, ""},
 }
+
+// kafkaBootstrapPlaceholder stands for "<primary name>-kafka-bootstrap" in
+// wellKnownPorts and is substituted at match time from --kafka-name.
+const kafkaBootstrapPlaceholder = "{kafka-bootstrap}"
 
 var (
 	portsKafkaNS      string
@@ -78,6 +82,7 @@ Examples:
 
 func init() {
 	portsCmd.Flags().StringVar(&portsKafkaNS, "kafka-ns", "kafka", "Kafka namespace")
+	portsCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 	portsCmd.Flags().StringVar(&portsAppNS, "app-ns", "kates", "Application namespace")
 	portsCmd.Flags().StringVar(&portsMonitoringNS, "monitoring-ns", "monitoring", "Monitoring namespace")
 	portsCmd.Flags().BoolVar(&portsAll, "all", true, "Include monitoring and tracing ports")
@@ -457,6 +462,9 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 	seen := make(map[string]bool) // dedup by label
 
 	for _, wk := range wellKnownPorts {
+		// The primary's bootstrap Service is named after the cluster, which
+		// is a flag (--kafka-name), not a constant.
+		wk.Match = strings.Replace(wk.Match, kafkaBootstrapPlaceholder, deployKafkaName+"-kafka-bootstrap", 1)
 		if seen[wk.Label] {
 			continue
 		}

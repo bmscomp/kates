@@ -1,0 +1,99 @@
+# Migration preset — Kafka 3.9.1 → 4.3.0.
+#
+# Pairs with charts/legacy-kafka -f values-kafka-3x.yaml.
+#
+# What differs from the 2.x preset is worth understanding, because it is the
+# whole reason the two paths are documented separately:
+#
+#   • No protocol risk. 3.9 is far above the KIP-896 floor, so the compatibility
+#     gate is a formality here rather than the thing standing between you and a
+#     silent failure. It is still declared, because a preset that only enforces
+#     when it is convenient teaches people to ignore it.
+#   • No ZooKeeper on either side. The source is already KRaft, so this is a
+#     pure data migration with no metadata-store change underneath it.
+#   • The source speaks the modern group protocol, so offset translation is
+#     better behaved and the checkpoint interval can be tighter.
+#   • Higher tasksMax: a 3.9 source will happily saturate more fetchers than a
+#     2.8 one, so the bottleneck moves to the target.
+
+replicas: 1
+
+replicationPolicy:
+  mode: identity
+  excludeInternalTopics: true
+
+compatibility:
+  enforce: true
+  minSourceVersion: "2.1.0"
+  requireDeclaredVersion: true
+
+preflight:
+  enabled: true
+  failOnError: true
+
+target:
+  alias: target
+  clusterName: "krafter"
+  namespace: "kafka"
+  brokerCount: 1
+  # Keeps the `mirror-maker2` prefix on purpose: it is the group prefix the
+  # kafka-cluster chart's kates-mm2 user is granted, so the workers can join
+  # their own Connect group on a target whose ACLs predate the wildcard grant.
+  groupId: "mirror-maker2-migrate-3x"
+  authentication:
+    type: scram-sha-512
+    username: "kates-mm2"
+    secretName: "kates-mm2"
+    secretKey: "password"
+  config:
+    config.storage.replication.factor: 1
+    offset.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+
+mirrors:
+  - source:
+      alias: legacy
+      bootstrapServers: "legacy-legacy-kafka-bootstrap.kafka-legacy-3x.svc.cluster.local:9092"
+      kafkaVersion: "3.9.1"
+      authentication:
+        type: ""
+    topicsPattern: "kates\\..*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 4
+      state: running
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        sync.topic.acls.enabled: "false"
+        sync.topic.configs.enabled: "true"
+        refresh.topics.interval.seconds: 30
+    checkpointConnector:
+      tasksMax: 1
+      state: running
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"
+        sync.group.offsets.interval.seconds: 10
+        emit.checkpoints.interval.seconds: 10
+        refresh.groups.interval.seconds: 30
+
+jvmOptions:
+  -Xms: 512m
+  -Xmx: 512m
+
+resources:
+  requests: { memory: 768Mi, cpu: 250m }
+  limits: { memory: 1536Mi, cpu: 1000m }
+
+podMonitors:
+  enabled: false
+metrics:
+  enabled: false
+alerts:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  kafka:
+    ports: [9092, 9093, 9094]

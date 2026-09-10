@@ -1,0 +1,349 @@
+{{- if .Values.tests.failover.enabled }}
+{{- if not .Values.tests.replication.enabled }}
+{{- fail "tests.failover.enabled requires tests.replication.enabled — the failover test reuses that test's topic, and it needs the corpus already sitting in front of its own as a prologue: a translated position that lands at offset 0 proves nothing about resuming." }}
+{{- end }}
+{{- $fo := .Values.tests.failover }}
+{{- $t := .Values.tests.replication }}
+{{- if ge (int $fo.commitAfter) (int $fo.messages) }}
+{{- fail (printf "tests.failover.commitAfter is %v and tests.failover.messages is %v. The group has to be committed PART-WAY through the corpus — committing at or past the end leaves no remainder to resume into, which is the only thing this test asserts." $fo.commitAfter $fo.messages) }}
+{{- end }}
+{{- $fullname := include "mirror-maker2.fullname" . }}
+{{- $target := .Values.target }}
+{{- $targetAlias := $target.alias | default "target" }}
+{{- /* Same three lines as test-replication.yaml: the named alias, else every mirror. */}}
+{{- $mirrors := .Values.mirrors }}
+{{- if $t.sourceAlias }}
+{{- $sel := list }}
+{{- range .Values.mirrors }}{{ if eq (.source.alias | default "source") $t.sourceAlias }}{{ $sel = append $sel . }}{{ end }}{{ end }}
+{{- if not $sel }}
+{{- fail (printf "tests.replication.sourceAlias is %q, which is not the alias of any mirror in this release." $t.sourceAlias) }}
+{{- end }}
+{{- $mirrors = $sel }}
+{{- end }}
+{{- range $mirrors }}
+{{- if include "mirror-maker2.testAuthUnsupported" (dict "c" .source) }}
+{{- fail (printf "tests.failover.enabled: source %q uses TLS/mTLS, which this test cannot configure (it would need a truststore, and for mTLS a keystore built from user.crt/user.key). Disable it or use scripts/test-mm2-migration.sh — a test that cannot connect is not a test that passed." (.source.alias | default "source")) }}
+{{- end }}
+{{- end }}
+{{- if include "mirror-maker2.testAuthUnsupported" (dict "c" $target) }}
+{{- fail "tests.failover.enabled: the target uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
+{{- end }}
+{{- $image := $t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
+{{- /*
+THE ASSERTION test-offset-translation.yaml STOPS SHORT OF.
+
+That test proves a committed position EXISTS on the target for a group that was
+committed on the source. This one proves the position is the RIGHT ONE — that a
+consumer resuming from it reads the records the group had not consumed, and
+only those. They are different claims, and the gap between them is where a
+failover goes wrong:
+
+  · a translated offset of 0 satisfies "a position exists" and replays the
+    entire topic on failover — the outage everyone remembers;
+  · a translated offset at the log end satisfies it too, and silently drops
+    every record the group had not reached.
+
+Both look identical in `kafka-consumer-groups --describe` unless you know what
+the number should be. So this test manufactures a known one:
+
+  1. park the group at the END of the source topic (the baseline);
+  2. produce a corpus of N records after it;
+  3. commit the group forward by commitAfter — PART-WAY, deliberately, because
+     the position is the whole point. Committed with --reset-offsets --shift-by
+     rather than by consuming: a console consumer's auto-commit commits its
+     FETCH position, which can be a whole batch past what it printed, so "read
+     100 of 200" can commit at 200 and the premise quietly evaporates;
+  4. wait for the checkpoint connector to translate that position onto the
+     target AND for the remainder to finish replicating;
+  5. resume a consumer in that same group ON THE TARGET — no --from-beginning,
+     no reset — and check what it gets.
+
+The verdict is arithmetic, so it holds for any partition count and does not
+depend on which records landed where:
+
+    POS  = the group's committed offset on the target   (summed over partitions)
+    END  = the replicated topic's log-end offset        (summed over partitions)
+    LAG_SRC = what the group had NOT consumed on the source
+    READ = distinct records the resumed consumer actually read
+
+    POS > 0            it did not resume from the beginning
+    END - POS >= LAG_SRC   the remainder is on the target and ahead of POS
+    READ >= LAG_SRC    resuming from POS yielded the un-consumed records
+    READ < END         it did not silently replay the whole topic
+
+Plus one content check — the LAST record of the corpus must be among what was
+read — because all four numbers can be satisfied by a consumer that stopped
+early, and "resumed and then stalled" is not a failover that worked.
+
+WHAT THIS IS NOT: it does not stop the source connector. values-failover.yaml
+does that, and under it nothing replicates, so this test cannot run there. The
+posture is the runbook's; the assertion is this pod's.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-test-failover
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.componentLabels" (dict "component" "test" "ctx" .) | nindent 4 }}
+    # The selector the kafka-cluster broker NetworkPolicy admits. Without it
+    # this pod is denied at the network layer and reports a replication failure.
+    kates.io/test-pod: "true"
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "40"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ $image | quote }}
+      {{- include "mirror-maker2.imagePullPolicy" $ | nindent 6 }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      env:
+        - name: LOG_DIR
+          value: /tmp
+        {{- range $i, $m := $mirrors }}
+        {{- with $m.source.authentication }}
+        {{- if and .type (ne .type "tls") }}
+        - name: SOURCE_PW_{{ $i }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .secretName | default .username | quote }}
+              key: {{ .secretKey | default "password" }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- with $target.authentication }}
+        {{- if and .type (ne .type "tls") }}
+        - name: TARGET_PW
+          valueFrom:
+            secretKeyRef:
+              name: {{ .secretName | default .username | quote }}
+              key: {{ .secretKey | default "password" }}
+        {{- end }}
+        {{- end }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -u
+          LC_ALL=C
+          export LC_ALL
+
+          TGT="{{ include "mirror-maker2.bootstrap" (dict "c" $target "ctx" $) }}"
+          N={{ $fo.messages }}
+          COMMIT_AFTER={{ $fo.commitAfter }}
+          LEGS={{ len $mirrors }}
+          FAILED=0
+          {{- include "mirror-maker2.testClientProps" (dict "c" $target "env" "TARGET_PW" "file" "/tmp/target.properties") | nindent 10 }}
+
+          # Sum a `kafka-consumer-groups --describe` column for one topic.
+          # $2 is TOPIC, $4 CURRENT-OFFSET, $5 LOG-END-OFFSET; both are "-" for a
+          # group with no commit, which the numeric guard drops rather than
+          # letting awk coerce it to 0 and read as "resumed from the beginning".
+          sum_col() {   # <file> <topic> <column>
+            awk -v t="$2" -v c="$3" '$2==t && $c ~ /^[0-9]+$/ {s+=$c; n++} END{if(n>0) print s; else print "-"}' "$1"
+          }
+
+          {{- range $i, $m := $mirrors }}
+          {{- $alias := $m.source.alias | default "source" }}
+          {{- $topic := include "mirror-maker2.testTopic" (dict "m" $m "ctx" $) }}
+          {{- $replicated := include "mirror-maker2.replicatedTopic" (dict "topic" $topic "alias" $alias "ctx" $) }}
+          {{- $group := include "mirror-maker2.testGroup" (dict "base" $fo.group "m" $m "ctx" $) }}
+          {{- $loc := include "mirror-maker2.offsetSyncsLocation" (dict "m" $m "ctx" $) }}
+
+          # ── leg {{ $i }}: {{ $alias }} ────────────────────────────────────
+          leg_{{ $i }}() {
+            ALIAS="{{ $alias }}"
+            SRC="{{ include "mirror-maker2.bootstrap" (dict "c" $m.source "ctx" $) }}"
+            TOPIC="{{ $topic }}"
+            REPLICATED="{{ $replicated }}"
+            GROUP="{{ $group }}"
+            SP=/tmp/source-{{ $i }}.properties
+            DEADLINE=$(( $(date +%s) + {{ $fo.timeoutSeconds }} ))
+            {{- include "mirror-maker2.testClientProps" (dict "c" $m.source "env" (printf "SOURCE_PW_%d" $i) "file" (printf "/tmp/source-%d.properties" $i)) | nindent 12 }}
+
+            # ── 1. park the group at the end of the source topic ────────────
+            # Everything this pod writes to the source is its own data: this
+            # group, and the corpus below. Nothing here assumes MirrorMaker may
+            # write to the source — under offsetSyncs.location=target it may
+            # not, and the offset-syncs topic this leg translates THROUGH lives
+            # on the {{ $loc }} cluster.
+            echo "══ [$ALIAS] parking group $GROUP at the end of $TOPIC on the source"
+            /opt/kafka/bin/kafka-console-consumer.sh \
+              --bootstrap-server "$SRC" --consumer.config "$SP" \
+              --topic "$TOPIC" --group "$GROUP" \
+              --timeout-ms 15000 --max-messages 1 >/dev/null 2>&1 || true
+            /opt/kafka/bin/kafka-consumer-groups.sh \
+              --bootstrap-server "$SRC" --command-config "$SP" \
+              --group "$GROUP" --topic "$TOPIC" \
+              --reset-offsets --to-latest --execute >/dev/null 2>/tmp/park-{{ $i }}.err || {
+                echo "⚠ [$ALIAS] could not reset $GROUP to latest:"
+                sed 's/^/    /' /tmp/park-{{ $i }}.err | head -5
+              }
+            /opt/kafka/bin/kafka-consumer-groups.sh \
+              --bootstrap-server "$SRC" --command-config "$SP" \
+              --describe --group "$GROUP" >/tmp/src-desc-{{ $i }} 2>/dev/null || true
+            BASELINE=$(sum_col /tmp/src-desc-{{ $i }} "$TOPIC" 4)
+            if [ "$BASELINE" = "-" ]; then
+              echo "❌ [$ALIAS] group $GROUP has no committed offset on the source after parking it."
+              echo "   Without a baseline there is no 'part-way' to commit to. The test user"
+              echo "   needs Read+Describe on the group and Read on $TOPIC."
+              return 1
+            fi
+            echo "  ✅ [$ALIAS] baseline at offset $BASELINE"
+
+            # ── 2. produce the corpus AFTER the baseline ────────────────────
+            echo "══ [$ALIAS] producing $N records to $TOPIC"
+            i=1
+            while [ "$i" -le "$N" ]; do
+              echo "kates-mm2-failover-$ALIAS-$i"
+              i=$((i + 1))
+            done > /tmp/fo-corpus-{{ $i }}
+            if ! /opt/kafka/bin/kafka-console-producer.sh \
+                   --bootstrap-server "$SRC" --producer.config "$SP" \
+                   --topic "$TOPIC" < /tmp/fo-corpus-{{ $i }} 2>/tmp/fo-produce-{{ $i }}.err; then
+              echo "❌ [$ALIAS] produce failed:"; sed 's/^/   /' /tmp/fo-produce-{{ $i }}.err | head -10
+              return 1
+            fi
+            LAST_RECORD="kates-mm2-failover-$ALIAS-$N"
+            echo "  ✅ [$ALIAS] produced (last record: $LAST_RECORD)"
+
+            # ── 3. commit PART-WAY, deterministically ──────────────────────
+            echo "══ [$ALIAS] committing $GROUP forward by $COMMIT_AFTER of $N"
+            /opt/kafka/bin/kafka-consumer-groups.sh \
+              --bootstrap-server "$SRC" --command-config "$SP" \
+              --group "$GROUP" --topic "$TOPIC" \
+              --reset-offsets --shift-by "$COMMIT_AFTER" --execute \
+              >/dev/null 2>/tmp/shift-{{ $i }}.err || {
+                echo "❌ [$ALIAS] could not shift $GROUP forward:"
+                sed 's/^/   /' /tmp/shift-{{ $i }}.err | head -5
+                return 1
+              }
+            /opt/kafka/bin/kafka-consumer-groups.sh \
+              --bootstrap-server "$SRC" --command-config "$SP" \
+              --describe --group "$GROUP" >/tmp/src-desc-{{ $i }} 2>/dev/null || true
+            SRC_POS=$(sum_col /tmp/src-desc-{{ $i }} "$TOPIC" 4)
+            SRC_END=$(sum_col /tmp/src-desc-{{ $i }} "$TOPIC" 5)
+            if [ "$SRC_POS" = "-" ] || [ "$SRC_END" = "-" ]; then
+              echo "❌ [$ALIAS] cannot read $GROUP's position on the source after the shift."
+              sed 's/^/   /' /tmp/src-desc-{{ $i }} | head -10
+              return 1
+            fi
+            LAG_SRC=$(( SRC_END - SRC_POS ))
+            echo "  [$ALIAS] source: committed $SRC_POS of $SRC_END — $LAG_SRC record(s) un-consumed"
+            if [ "$LAG_SRC" -le 0 ]; then
+              echo "❌ [$ALIAS] the group ended up committed AT the end of the source log, so there"
+              echo "   is no remainder to resume into — the premise of this test, not a"
+              echo "   replication failure. Raise tests.failover.messages or lower"
+              echo "   tests.failover.commitAfter (currently $N and $COMMIT_AFTER)."
+              return 1
+            fi
+
+            # ── 4. wait for translation AND for the remainder to replicate ──
+            echo "══ [$ALIAS] waiting for $GROUP to be translated onto the target for $REPLICATED"
+            POS="-"; END="-"
+            while :; do
+              /opt/kafka/bin/kafka-consumer-groups.sh \
+                --bootstrap-server "$TGT" --command-config /tmp/target.properties \
+                --describe --group "$GROUP" >/tmp/tgt-desc-{{ $i }} 2>/dev/null || true
+              POS=$(sum_col /tmp/tgt-desc-{{ $i }} "$REPLICATED" 4)
+              END=$(sum_col /tmp/tgt-desc-{{ $i }} "$REPLICATED" 5)
+              if [ "$POS" != "-" ] && [ "$END" != "-" ] && [ "$POS" -gt 0 ] \
+                 && [ $(( END - POS )) -ge "$LAG_SRC" ]; then
+                break
+              fi
+              if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+                echo "❌ [$ALIAS] no usable translated position for $GROUP on the target."
+                echo "   last seen: committed=$POS log-end=$END, needed committed>0 with at"
+                echo "   least $LAG_SRC record(s) ahead of it."
+                sed 's/^/   /' /tmp/tgt-desc-{{ $i }} | head -10
+                echo ""
+                echo "  Check, in this order:"
+                echo "   1. checkpointConnector: sync.group.offsets.enabled must be \"true\""
+                echo "   2. groupsPattern must match $GROUP"
+                echo "   3. this mirror keeps offset-syncs on the {{ $loc | upper }} —"
+                echo "      mm2-offset-syncs.{{ $targetAlias }}.internal must exist there and carry"
+                echo "      syncs, or there is nothing to translate THROUGH"
+                echo "   4. a committed=0 is the failure this test exists for: the group"
+                echo "      would replay the whole topic on failover"
+                return 1
+              fi
+              sleep 10
+            done
+            echo "  ✅ [$ALIAS] target: committed $POS, log-end $END"
+
+            # ── 5. resume in that group ON THE TARGET ──────────────────────
+            # No --from-beginning and no reset: the whole point is that the
+            # consumer starts wherever the checkpoint connector put the group.
+            echo "══ [$ALIAS] resuming $GROUP on the target ($TGT)"
+            REMAINING=$(( DEADLINE - $(date +%s) ))
+            [ "$REMAINING" -lt 60 ] && REMAINING=60
+            # 2× the remainder, for the same reason the replication test uses
+            # 2N: MirrorMaker 2 is at-least-once and a duplicate must not stop
+            # the consumer short of the corpus.
+            /opt/kafka/bin/kafka-console-consumer.sh \
+              --bootstrap-server "$TGT" --consumer.config /tmp/target.properties \
+              --topic "$REPLICATED" --group "$GROUP" \
+              --timeout-ms $(( REMAINING * 1000 )) \
+              --max-messages $(( (END - POS) * 2 )) 2>/tmp/fo-consume-{{ $i }}.err \
+              | sort -u > /tmp/fo-got-{{ $i }}
+            READ=$(wc -l < /tmp/fo-got-{{ $i }} | tr -dc '0-9')
+            READ=${READ:-0}
+            echo "  [$ALIAS] read $READ distinct record(s) from offset $POS of $END"
+
+            RC=0
+            if [ "$READ" -lt "$LAG_SRC" ]; then
+              echo "❌ [$ALIAS] resumed and read $READ record(s), fewer than the $LAG_SRC the group"
+              echo "   had not consumed. The position exists but resuming from it LOSES records."
+              if grep -qi 'authorization' /tmp/fo-consume-{{ $i }}.err; then
+                echo "   the consumer was DENIED — the target user needs Read+Describe on the"
+                echo "   group and Read on $REPLICATED."
+              fi
+              sed 's/^/   /' /tmp/fo-consume-{{ $i }}.err | grep -v '^   $' | head -5
+              RC=1
+            fi
+            if [ "$READ" -ge "$END" ]; then
+              echo "❌ [$ALIAS] read $READ of $END record(s) in the topic — that is a REPLAY from"
+              echo "   the beginning, not a resume. The translated offset is not being used."
+              RC=1
+            fi
+            if ! grep -Fqx "$LAST_RECORD" /tmp/fo-got-{{ $i }}; then
+              echo "❌ [$ALIAS] the last record of the corpus ($LAST_RECORD) never arrived — the"
+              echo "   consumer resumed and then stalled short of the tail."
+              RC=1
+            fi
+            if [ "$RC" -ne 0 ]; then
+              return 1
+            fi
+            echo "✅ [$ALIAS] resumed at $POS and read the $READ un-consumed record(s) through to the tail"
+            return 0
+          }
+          leg_{{ $i }} || FAILED=$(( FAILED + 1 ))
+          {{- end }}
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo ""
+            echo "❌ $FAILED of $LEGS failover leg(s) failed — the ❌ lines above name which."
+            exit 1
+          fi
+          echo ""
+          echo "✅ every one of the $LEGS leg(s) resumes on the target at the right position"
+      resources:
+        requests: { memory: 384Mi, cpu: 100m }
+        limits: { memory: 1Gi, cpu: 1000m }
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}

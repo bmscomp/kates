@@ -43,17 +43,23 @@ type DeploySummaryEntry struct {
 
 // RenderDeployDashboard renders the full deployment summary using lipgloss.
 func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, elapsed time.Duration) {
+	g := output.Glyphs()
+	stats := summarise(entries)
 	fmt.Println()
 
 	// ── Header ──
+	title := " Kates deployment summary "
+	if !output.ASCII() {
+		title = " ⎈ Kates deployment summary "
+	}
 	banner := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(theme.OnDark).
 		Background(clrAccent).
 		Padding(0, 1).
-		Render(" ⎈ Kates Deployment Summary ")
+		Render(title)
 	timer := lipgloss.NewStyle().Foreground(clrDim).Italic(true).
-		Render(fmt.Sprintf("  completed in %s", elapsed.Round(time.Second)))
+		Render(fmt.Sprintf("  %s wall clock", elapsed.Round(time.Second)))
 	fmt.Println(banner + timer)
 
 	// ── Grouped entries ──
@@ -62,90 +68,113 @@ func RenderDeployDashboard(ctx context.Context, entries []DeploySummaryEntry, el
 		groups[e.Group] = append(groups[e.Group], e)
 	}
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
-	// Width comes from the one shared helper; the -4 margin and 80 cap are
-	// this view's layout choices, not a third opinion on terminal size.
-	termW := output.TermWidth() - 4
-	if termW > 80 {
-		termW = 80
-	}
-	sepLine := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("─", termW))
+	sepLine := uiRule()
 
-	// One layout for every terminal: runewidth-measured padding. The TTY path
-	// used CHA cursor-column jumps — which broke the moment output was
-	// captured, and meant TTY and non-TTY rows could disagree about columns.
+	// One layout for every terminal: runewidth-measured padding, with the icon
+	// column normalised by iconCell. The TTY path used CHA cursor-column jumps
+	// — which broke the moment output was captured, and meant TTY and non-TTY
+	// rows could disagree about columns.
+	//
+	// The TIME column is new and is the point of the table: the wall clock
+	// tells you the deploy was slow, and only per-component times tell you
+	// which part of it was.
 	colHeaders := lipgloss.NewStyle().Bold(true).Foreground(clrDim).
-		Render("  " + padCell("COMPONENT", summaryNameWidth) + padCell("NAMESPACE", summaryNsWidth) + "STATUS")
+		Render("  " + padCell("COMPONENT", summaryNameWidth) + padCell("NAMESPACE", summaryNsWidth) +
+			padCell("STATUS", summaryStatusWidth) + "TIME")
 
-	for _, g := range []string{"A", "B", "C"} {
-		if len(groups[g]) == 0 {
+	for _, gr := range []string{"A", "B", "C"} {
+		if len(groups[gr]) == 0 {
 			continue
 		}
 		fmt.Println()
-		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, componentGroupNames[g])))
+		// The same wave header as the plan's grid: mark, name, purpose, in the
+		// wave's colour. Three screens speaking one vocabulary is the point —
+		// the row you saw in the plan is the row you find here.
+		fmt.Println(
+			lipgloss.NewStyle().Bold(true).Foreground(waveColor(gr)).
+				Render(fmt.Sprintf("  %s %s", waveMark(gr), componentGroupNames[gr])) +
+				lipgloss.NewStyle().Foreground(clrDim).Render("  "+waveTitles[gr]))
 		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
-		for _, e := range groups[g] {
+		for _, e := range groups[gr] {
 			// The status RECORDED during the deploy, not a fresh helm query.
 			// Re-querying ran `helm status` per row (up to 5s each) and could
 			// contradict what the deploy just reported — a component that
 			// failed mid-apply can still hold a "deployed" helm release.
-			printRow(e.Icon, e.Name, e.Namespace, e.Status)
+			printRow(e, stats.MaxDuration)
 		}
 	}
 
 	// ── Footer ──
 	fmt.Println()
 
-	var deployedCount, skippedCount, failedCount int
-	for _, e := range entries {
-		switch classifyStatus(e.Status) {
-		case "failed":
-			failedCount++
-		case "skipped":
-			skippedCount++
-		default:
-			deployedCount++
-		}
-	}
-
-	if failedCount > 0 {
+	switch {
+	case stats.Failed > 0:
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
-			Render(fmt.Sprintf("  %s %d deployed, %d failed", output.Glyphs().Warn, deployedCount, failedCount)))
+			Render(fmt.Sprintf("  %s %s deployed, %s failed",
+				g.Warn, plural(stats.Deployed, "component", "components"),
+				plural(stats.Failed, "component", "components"))))
 		for _, e := range entries {
-			if e.Status == "failed" && e.Error != "" {
-				fmt.Printf("     %s %s: %s\n",
-					lipgloss.NewStyle().Foreground(clrRed).Render("┖"),
-					e.Name,
-					lipgloss.NewStyle().Foreground(clrDim).Render(e.Error))
+			if classifyStatus(e.Status) != "failed" {
+				continue
 			}
+			fmt.Printf("     %s %s%s\n",
+				lipgloss.NewStyle().Foreground(clrRed).Render(g.Cross),
+				lipgloss.NewStyle().Bold(true).Render(e.Name),
+				lipgloss.NewStyle().Foreground(clrDim).Render(errSuffix(e.Error)))
+			// A failure the summary cannot explain still deserves the command
+			// that would explain it.
+			fmt.Printf("       %s\n",
+				lipgloss.NewStyle().Foreground(clrCyan).Render("$ "+failureHint(e)))
 		}
-	} else if deployedCount == 0 && skippedCount > 0 {
+	case stats.Deployed == 0 && stats.Skipped > 0:
 		// The state the old footer lied about: nothing was deployed because
 		// everything already was. "8 deployed successfully!" over a column of
 		// skips contradicted the table two lines above it.
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-			Render(fmt.Sprintf("  %s All %d components already deployed — nothing to do", output.Glyphs().Check, skippedCount)))
-	} else if skippedCount > 0 {
+			Render(fmt.Sprintf("  %s Everything was already deployed — %s unchanged",
+				g.Check, plural(stats.Skipped, "component", "components"))))
+	case stats.Skipped > 0:
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-			Render(fmt.Sprintf("  %s %d deployed, %d already present", output.Glyphs().Check, deployedCount, skippedCount)))
-	} else {
+			Render(fmt.Sprintf("  %s %s deployed, %d already present",
+				g.Check, plural(stats.Deployed, "component", "components"), stats.Skipped)))
+	default:
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-			Render(fmt.Sprintf("  %s %d components deployed successfully", output.Glyphs().Check, deployedCount)))
+			Render(fmt.Sprintf("  %s %s deployed",
+				g.Check, plural(stats.Deployed, "component", "components"))))
+	}
+
+	// Where the time went, when there is a meaningful answer. Below a few
+	// seconds nothing was slow and the line would be noise.
+	if stats.MaxDuration >= 5*time.Second && stats.Slowest.Name != "" {
+		fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
+			Render(fmt.Sprintf("    slowest: %s (%s of %s)",
+				stats.Slowest.Name, humanDuration(stats.MaxDuration), elapsed.Round(time.Second))))
 	}
 
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Italic(true).Render("  ⏭  Next steps:"))
+	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Italic(true).Render("  Next:"))
 	cmdStyle := lipgloss.NewStyle().Foreground(clrCyan)
-	for _, c := range []string{"kates status", "kates kafka connect test", "kates deploy -P"} {
+	for _, c := range nextSteps(entries) {
 		fmt.Println(cmdStyle.Render("    $ " + c))
 	}
 	fmt.Println()
 }
 
+// errSuffix renders an error tail only when there is one, so a failure with no
+// captured message does not print a bare colon.
+func errSuffix(err string) string {
+	if strings.TrimSpace(err) == "" {
+		return ""
+	}
+	return ": " + firstLine(err)
+}
+
 const (
-	summaryNameWidth = 28
-	summaryNsWidth   = 18
+	summaryNameWidth   = 30
+	summaryNsWidth     = 18
+	summaryStatusWidth = 18
+	summaryBarWidth    = 8
 )
 
 // markEntryStatuses records each component's outcome from the same predicate
@@ -190,37 +219,58 @@ func padCell(s string, w int) string {
 	return s + strings.Repeat(" ", gap)
 }
 
-// printRow renders one summary row from the status recorded during deploy.
-func printRow(icon, name, namespace, status string) {
+// printRow renders one summary row from the status recorded during deploy,
+// plus how long that component took and a bar of it relative to the slowest.
+func printRow(e DeploySummaryEntry, max time.Duration) {
 	g := output.Glyphs()
-	// Icons vary between 1 and 2 display cells (☸ vs 🔐), which used to shift
-	// every name's start column by the difference — the left edge of the
-	// component names zig-zagged. Pad the icon to a fixed 2-cell cell first.
-	iconPad := 2 - visualWidth(icon)
-	if iconPad < 0 {
-		iconPad = 0
-	}
-	cell := icon + strings.Repeat(" ", iconPad) + " " + name
-	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(padCell(cell, summaryNameWidth))
-	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(padCell(namespace, summaryNsWidth))
+	// The icon and the name are padded separately: iconCell owns the two-cell
+	// glyph plus its gap, padCell owns the text. Composing them first and
+	// measuring the result once works only if runewidth agrees with the
+	// terminal about the emoji, which is a bet deploy_ui.go declines to make.
+	cell := iconCell(e.Icon) + padCell(e.Name, summaryNameWidth-iconCellWidth())
+	nameCol := lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(cell)
+	nsCol := lipgloss.NewStyle().Foreground(clrDim).Render(padCell(e.Namespace, summaryNsWidth))
 
-	var statusStr string
-	switch classifyStatus(status) {
+	var status string
+	switch classifyStatus(e.Status) {
 	case "deployed":
-		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render(g.Check + " Deployed")
+		status = lipgloss.NewStyle().Bold(true).Foreground(clrGreen).Render(g.Check + " deployed")
 	case "failed":
-		statusStr = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render(g.Cross + " Failed")
+		status = lipgloss.NewStyle().Bold(true).Foreground(clrRed).Render(g.Cross + " failed")
 	case "skipped":
 		// Dim, not warning-orange: a component that was already running is a
 		// fine state, not a caution.
-		statusStr = lipgloss.NewStyle().Foreground(clrDim).Render(g.Ring + " Already present")
+		status = lipgloss.NewStyle().Foreground(clrDim).Render(g.Ring + " already present")
 	default:
 		// A status nothing recorded is a bug worth seeing, not disguising as
 		// either success or a skip.
-		statusStr = lipgloss.NewStyle().Foreground(clrOrange).Render(g.Warn + " Unknown")
+		status = lipgloss.NewStyle().Foreground(clrOrange).Render(g.Warn + " unknown")
 	}
+	// Pad the RAW status text, then style: ANSI is zero-width and must not
+	// enter the column arithmetic.
+	statusCol := padCell(stripStyle(status), summaryStatusWidth)
+	statusCol = strings.Replace(statusCol, stripStyle(status), status, 1)
 
-	fmt.Printf("  %s%s%s\n", nameCol, nsCol, statusStr)
+	timeCol := lipgloss.NewStyle().Foreground(clrDim).Render(padCell(humanDuration(e.Duration), 7))
+	fmt.Printf("  %s%s%s%s%s\n", nameCol, nsCol, statusCol, timeCol, durationBar(e.Duration, max, summaryBarWidth))
+}
+
+// stripStyle removes ANSI sequences so a styled cell can be measured and
+// padded by its visible text.
+func stripStyle(s string) string {
+	var b strings.Builder
+	inEscape := false
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+		case inEscape && (r == 'm' || r == 'K'):
+			inEscape = false
+		case !inEscape:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // visualWidth returns the true terminal display width of a string using
@@ -243,11 +293,28 @@ func resetDeployPhases() { deployPhase = 0 }
 // nextDeployPhase returns the next phase number.
 func nextDeployPhase() int { deployPhase++; return deployPhase }
 
-// PrintPhaseHeader prints a styled phase header.
+// deployPhaseCount is how many phases runDeploy prints. It is a constant
+// because the sequence is: cluster, pre-flight, versions, topology,
+// components, pipeline — the same six every run, whatever is selected. Saying
+// "3 of 6" instead of "3" is the difference between a list and progress.
+const deployPhaseCount = 6
+
+// PrintPhaseHeader prints a phase header with its place in the run, and a
+// rule that runs out to the layout width so every phase begins at the same
+// visual weight regardless of how long its title is.
 func PrintPhaseHeader(number int, title string) {
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrPink).
-		Render(fmt.Sprintf("[%d] %s", number, title)))
+	counter := fmt.Sprintf("%d/%d", number, deployPhaseCount)
+	// counter + two spaces + title + one space, then rule to the edge.
+	used := visualWidth(counter) + 2 + visualWidth(title) + 1
+	fill := uiWidth() - used
+	if fill < 3 {
+		fill = 3
+	}
+	fmt.Printf("%s  %s %s\n",
+		lipgloss.NewStyle().Foreground(clrDim).Render(counter),
+		lipgloss.NewStyle().Bold(true).Foreground(clrPink).Render(title),
+		lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat(output.Glyphs().Rule, fill)))
 }
 
 // PrintPhaseItem prints a styled sub-item within a phase.
@@ -265,13 +332,47 @@ func PrintPhaseWarn(text string) {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ " + text))
 }
 
-// PrintDeployBanner prints the initial deploy banner.
+// PrintDeployBanner prints the initial deploy banner: what is about to run,
+// which build of the CLI is running it, and where. The version and context
+// are there because "it did something different this time" is nearly always
+// one of those two having changed.
 func PrintDeployBanner() {
+	g := output.Glyphs()
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrAccent).
-		Render("⎈ Kates Unified Orchestrator"))
+	mark := "kates deploy"
+	if !output.ASCII() {
+		mark = "⎈ kates deploy"
+	}
+	line := lipgloss.NewStyle().Bold(true).Foreground(clrAccent).Render(mark)
+	if sub := bannerSubtitle(); sub != "" {
+		line += lipgloss.NewStyle().Foreground(clrDim).Render("   " + sub)
+	}
+	fmt.Println(line)
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
-		Render(strings.Repeat("─", 35)))
+		Render(strings.Repeat(g.HeavyRule, uiWidth())))
+}
+
+// bannerSubtitle is the one-line context: CLI version and target cluster,
+// each omitted when unknown rather than printed as "unknown".
+func bannerSubtitle() string {
+	parts := []string{}
+	if Version != "" && Version != "dev" {
+		parts = append(parts, Version)
+	}
+	if ctxName := currentContextName(); ctxName != "" {
+		parts = append(parts, ctxName)
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+// currentContextName returns the kubeconfig context this deploy will target,
+// best-effort: a banner is not worth an error path.
+func currentContextName() string {
+	out, err := runExecOutputFn(context.Background(), "kubectl", "config", "current-context")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ThemeKates returns a custom huh theme using the Kates blue palette,

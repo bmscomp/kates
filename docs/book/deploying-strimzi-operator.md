@@ -384,7 +384,9 @@ Retarget every remaining ad-hoc install in the same change: the deploy scripts, 
 
 ## Upgrading the Operator
 
-Once adopted, a version bump is a values change plus an upgrade. The pin lives in five places that must agree, which `scripts/check-versions.sh` enforces — it runs in CI on every chart change, and locally via `make check-versions`:
+The CLI is the front door: `kates deploy --strimzi-version <v>` fetches that version's chart, reads its Kafka window and CRD API, compares it with the installed operator (same → converge; older → upgrade after a confirmation listing the clusters that will roll; newer → refused), and installs through this wrapper — from the repository directory for the pin, from a generated per-version copy of it otherwise — so the CRD hook always applies the matching bundle. `--operator-scope namespace` installs the operator watching only the primary's namespaces instead of every namespace; `values-namespace-scope.yaml` is the shape of an *additional*, co-located operator that a future `kates clusters add` will install beside it (see [the multi-version plan](../kafka-multi-version-deploy-plan.md)).
+
+For the repository's own pin, a version bump is a values change plus an upgrade. The pin lives in five places that must agree, which `scripts/check-versions.sh` enforces — it runs in CI on every chart change, and locally via `make check-versions`:
 
 | Pin | Purpose |
 |-----|---------|

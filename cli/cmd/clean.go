@@ -37,6 +37,7 @@ var (
 	cleanKafkaNS      string
 	cleanConnectNS    string
 	cleanDbNS         string
+	cleanMM2NS        string
 	cleanAppNS        string
 	cleanChaosNS      string
 	cleanMonitoringNS string
@@ -47,9 +48,11 @@ func init() {
 	cleanCmd.Flags().BoolVarP(&cleanVerbose, "verbose", "v", false, "Show full command output during cleanup")
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
 	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
+	cleanCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster (its Helm release)")
 	cleanCmd.Flags().StringVar(&cleanKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
+	cleanCmd.Flags().StringVar(&cleanMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	cleanCmd.Flags().StringVar(&cleanMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
@@ -140,6 +143,8 @@ func runClean(cmd *cobra.Command, args []string) error {
 		"kafkatopics.kafka.strimzi.io",
 		"kafkausers.kafka.strimzi.io",
 		"kafkaconnects.kafka.strimzi.io",
+		"kafkaconnectors.kafka.strimzi.io",
+		"kafkamirrormaker2s.kafka.strimzi.io",
 		"kafkabridges.kafka.strimzi.io",
 		// Litmus Chaos
 		"chaosengines.litmuschaos.io",
@@ -217,10 +222,11 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"kates", cleanNamespace},
 			helmRelease{"apicurio", cleanNamespace},
 			helmRelease{"connect-cluster", cleanNamespace},
+			helmRelease{"mm2", cleanNamespace},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanNamespace},
-			helmRelease{"krafter", cleanNamespace},
+			helmRelease{deployKafkaName, cleanNamespace},
 			helmRelease{"monitoring", cleanNamespace},
 			helmRelease{"postgresql", cleanNamespace},
 		)
@@ -234,16 +240,20 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"kates", cleanAppNS},
 			helmRelease{"apicurio", cleanKafkaNS},
 			helmRelease{"connect-cluster", cleanConnectNS},
+			helmRelease{"mm2", cleanMM2NS},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanMonitoringNS},
-			helmRelease{"krafter", cleanKafkaNS},
+			helmRelease{deployKafkaName, cleanKafkaNS},
 			helmRelease{"monitoring", cleanMonitoringNS},
 			helmRelease{"postgresql", cleanDbNS},
 		)
 		managedNamespaces = append(managedNamespaces,
 			cleanKafkaNS, cleanConnectNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS, cleanDbNS,
 		)
+		if cleanMM2NS != "" && cleanMM2NS != cleanKafkaNS {
+			managedNamespaces = append(managedNamespaces, cleanMM2NS)
+		}
 		strimziNS = append(strimziNS, cleanKafkaNS)
 	}
 

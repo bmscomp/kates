@@ -2,8 +2,9 @@
 #
 # Deploys a Strimzi KafkaMirrorMaker2 cluster. MM2 runs on Kafka Connect, so the
 # worker surface (replicas, JVM, resources, metrics, NetworkPolicy) mirrors the
-# connect-cluster chart. The DIFFERENCE: MM2 spans TWO Kafka clusters — a source
-# and a target — declared under `clusters:` and wired by `mirrors:`.
+# connect-cluster chart. The DIFFERENCE: MM2 spans TWO Kafka clusters — the
+# `target:` its Connect runtime runs against, and one `source:` per entry in
+# `mirrors:`.
 
 # -- Override the chart name
 nameOverride: ""
@@ -24,10 +25,27 @@ testImages:
 
 # -- Number of MM2 (Connect) worker replicas
 replicas: 3
-# -- MM2 worker image (empty = Strimzi default for the Kafka version)
+# -- MM2 worker image. Empty = the Strimzi default for `version`, taken from
+# the operator's own image map, which is the only place that cannot drift from
+# the operator actually running. Set it to pin: prefer a `@sha256:` digest
+# over a tag, since a tag can be repointed under a running cluster and a
+# digest cannot. `:latest` is refused at render time — see values-prod.yaml.
 image: ""
+# -- Pull policy for the pods THIS CHART owns: the preflight Job, the
+# secret-sync Job and CronJob, and the Helm test pods. Empty leaves
+# Kubernetes' rule (IfNotPresent for a tag, Always for `:latest`).
+#
+# It does NOT reach the MM2 workers. Those pods are created by the Cluster
+# Operator from the KafkaMirrorMaker2 CR, whose spec carries `image` but no
+# pull policy: that is operator-wide (STRIMZI_IMAGE_PULL_POLICY). A value here
+# that quietly did nothing to the workers would be worse than no value.
+imagePullPolicy: ""
 # -- Kafka version the workers run
 version: "4.3.0"
+# -- Strimzi version, used only to build the client image tag for the preflight
+# and test pods (quay.io/strimzi/kafka:<strimziVersion>-kafka-<version>).
+# scripts/check-versions.sh asserts this against versions.env.
+strimziVersion: "1.1.0"
 # -- Kubernetes cluster domain (bootstrap FQDN computation)
 clusterDomain: cluster.local
 
@@ -52,6 +70,18 @@ target:
   configStorageTopic: ""
   offsetStorageTopic: ""
   statusStorageTopic: ""
+  # -- Exactly-once replication (Connect's exactly-once source support).
+  # MirrorSourceConnector implements the KIP-618 APIs, so this is reachable:
+  # it sets `exactly.once.source.support` on the worker AND
+  # `consumer.isolation.level=read_committed` on every source, and kafkaUser
+  # auto-mode adds the transactional-id and IdempotentWrite grants it needs.
+  #
+  # OFF by default, and the trade is real: throughput drops, the source must
+  # be a version that supports transactional reads, and a migration usually
+  # wants at-least-once with a dedupe-aware verification instead — which is
+  # what this chart's replication test asserts (DISTINCT records received).
+  exactlyOnce:
+    enabled: false
   tls:
     enabled: false
     trustedCertificateSecret: "krafter-cluster-ca-cert"
@@ -61,6 +91,12 @@ target:
     username: "kates-mm2"
     secretName: "kates-mm2"
     secretKey: "password"
+  # -- Broker count of the TARGET cluster. 0 = unknown (no check). When set,
+  # every `*.replication.factor` in this chart is validated against it at
+  # render time — RF3 against a single-broker kind cluster is the single most
+  # common way this chart is misconfigured, and it otherwise fails minutes
+  # after a successful install, inside connector topic creation.
+  brokerCount: 0
   # -- Connect internal-topic replication. RF3 for durability; overlays lower
   # it to 1 for single-broker (kind).
   config:
@@ -68,10 +104,119 @@ target:
     offset.storage.replication.factor: 3
     status.storage.replication.factor: 3
 
+# ── Replication policy ──────────────────────────────────────────────────────
+# THE most consequential choice in a migration.
+#
+#   default  — DefaultReplicationPolicy. `orders` on the source becomes
+#              `source.orders` on the target. Correct for DR and aggregation,
+#              where you need to know which cluster a record came from.
+#   identity — IdentityReplicationPolicy. `orders` stays `orders`. Correct for
+#              a MIGRATION, where the entire point is that consumers repoint at
+#              a new cluster and find the topics they already know.
+#
+# Either way the chart computes a `topicsExcludePattern` per mirror unless you
+# set one yourself. Two things it keeps out of the flow:
+#   • anything already carrying this source's prefix (`<alias>.*`) — on a
+#     loopback, where source and target are one cluster, the default policy
+#     would otherwise re-mirror `source.orders` as `source.source.orders` every
+#     refresh interval, without end;
+#   • the Connect internal topics (`<groupId>-*`), and under identity mode
+#     MM2's own `heartbeats`, `checkpoints` and offset-syncs topics, which with
+#     names preserved the mirror would happily consume back.
+# excludeInternalTopics: false drops all of that and leaves only MirrorMaker's
+# stock exclusions — use it only with your own per-mirror topicsExcludePattern.
+replicationPolicy:
+  # -- default | identity
+  mode: default
+  # -- Explicit class; wins over `mode`. Strimzi also ships
+  # io.strimzi.kafka.connect.mirror.IdentityReplicationPolicy, which predates
+  # the Apache one (KIP-690) and behaves the same for topic naming.
+  class: ""
+  # -- Separator for the default policy (ignored by identity)
+  separator: ""
+  # -- Compute the per-mirror topicsExcludePattern described above
+  excludeInternalTopics: true
+  # -- Allow several sources under an identity policy. Refused by default: with
+  # topic names preserved, two sources whose patterns overlap write the SAME
+  # target topics — interleaved records in one offset space, and no error
+  # anywhere. Set this only when the patterns are provably disjoint.
+  allowIdentityFanIn: false
+  # -- Allow a reverse mirror while a forward one is live under an identity
+  # policy. Refused by default: each direction re-reads the other's output
+  # under the same names, forever.
+  allowBidirectional: false
+
+# ── Cross-version compatibility ─────────────────────────────────────────────
+# Kafka 4.0 removed the pre-2.1 client protocol API versions (KIP-896). These
+# workers run `version:` above — a 4.x client — so a source broker older than
+# 2.1 answers UNSUPPORTED_VERSION and the MirrorSourceConnector cannot read it
+# at all. That failure is invisible from the CR: it stays Ready, and nothing
+# replicates.
+#
+# Declare each source's Kafka version under mirrors[].source.kafkaVersion and
+# this fails at `helm install` instead.
+compatibility:
+  enabled: true
+  enforce: true
+  # -- The KIP-896 floor. Do not lower it without reading that KIP.
+  minSourceVersion: "2.1.0"
+  # -- Refuse any source that has not declared its version at all
+  requireDeclaredVersion: false
+
+# ── Preflight ───────────────────────────────────────────────────────────────
+# A pre-install/pre-upgrade Job that probes every source with the SAME 4.x
+# client the workers will use, so a pass is evidence rather than an assumption.
+# It performs the ApiVersions handshake and classifies the outcome: name
+# resolution, TCP reachability, authentication, and the KIP-896 protocol floor
+# each fail differently and each gets its own line. For sources that are
+# unauthenticated, or SASL over plaintext, that is the whole check. For TLS
+# and mTLS sources the probe has no truststore or keystore, so it can prove
+# the broker is reachable and speaks TLS — and says, explicitly, that trust
+# and credentials were not verified rather than implying they were.
+preflight:
+  enabled: false
+  # -- Client image. Must be the Kafka line the workers run, or the check
+  # proves the wrong thing. Empty = the Strimzi image for `version`.
+  image: ""
+  timeoutSeconds: 180
+  backoffLimit: 0
+  # -- Fail the install when a probe fails (false = warn in the Job log only)
+  failOnError: true
+
+# ── Offset-syncs topic location ─────────────────────────────────────────────
+# MirrorMaker records the source→target offset mapping in
+# `mm2-offset-syncs.<target-alias>.internal`, and by default writes it to the
+# SOURCE cluster. That is fine when you own both ends and fatal when you do
+# not: mirroring a cluster you may only READ fails late, inside the connector,
+# as a TopicAuthorizationException that `kubectl get kafkamirrormaker2` never
+# shows. KIP-716 (Kafka 3.0) added the setting below for exactly that case.
+#
+#   source  Kafka's default. The SOURCE principal needs Create + Write +
+#           Describe on mm2-offset-syncs.* — more than the "READ + DESCRIBE"
+#           a read-only contract implies.
+#   target  Nothing is written to the source. The TARGET principal needs the
+#           topic instead, which kafkaUser auto-mode then grants.
+#
+# Per-mirror `offsetSyncs.location` overrides this, and `readOnlySource: true`
+# on a mirror is shorthand for `target`.
+#
+# Changing this on a RUNNING mirror restarts translation from scratch: the new
+# topic starts empty, so checkpoints regress until it catches up.
+offsetSyncs:
+  location: source
+
 # ── Mirror flows ────────────────────────────────────────────────────────────
 # One entry per source cluster → the target. Each has its OWN source bootstrap,
 # tls and auth. replication.factor and the offset-syncs/checkpoints topic
 # factors must match the TARGET's durability (RF3 in prod, RF1 on kind).
+#
+# Per-connector `state` (running | paused | stopped), `autoRestart`,
+# `listOffsets` and `alterOffsets` are all passed through to the CR — they are
+# the cutover primitives, see values-cutover.yaml.
+#
+# There is no heartbeatConnector: the Strimzi v1 API dropped it, so
+# `emit.heartbeats.enabled` on the source connector is a no-op here. Lag is
+# measured from the source connector's own replication-latency metric instead.
 mirrors:
   - source:
       alias: source
@@ -83,6 +228,9 @@ mirrors:
       namespace: "kafka"
       # -- Explicit bootstrap override (external/inter-cluster). Wins when set.
       bootstrapServers: ""
+      # -- The source's Kafka version. Checked against compatibility.minSourceVersion
+      # at render time. Leave empty only when you have verified the wire yourself.
+      kafkaVersion: ""
       tls:
         enabled: false
         trustedCertificateSecret: ""
@@ -90,16 +238,41 @@ mirrors:
       authentication:
         # -- scram-sha-512 | scram-sha-256 | tls | plain (empty = none)
         type: scram-sha-512
-        username: "kates-mm2-source"
+        # -- The loopback reads with the same in-repo user it writes with. A real
+        # source has its OWN principal on ITS cluster — see the README's
+        # credential contract — and that user is not something this chart can
+        # create.
+        username: "kates-mm2"
         # -- Secret holding the credential (defaults to username when empty)
-        secretName: ""
+        secretName: "kates-mm2"
         secretKey: "password"
       config: {}
-    # -- Topics to mirror (regex)
+    # -- The source is read-only: keep every MirrorMaker write on the target.
+    # Shorthand for offsetSyncs.location=target.
+    readOnlySource: false
+    # -- Per-mirror override of the chart-level offsetSyncs.location
+    offsetSyncs: {}
+    #   location: target
+    # -- Topics to mirror, as a list. Compiled to an escaped alternation, which
+    # is the point: hand-writing a Java regex inside YAML is where these
+    # releases go wrong. `topicsPattern` still wins when both are set.
+    topics: []
+    #   - orders
+    #   - payments
+    # -- Topics to mirror (regex). Wins over `topics`.
     topicsPattern: ".*"
-    # -- Consumer groups whose offsets to checkpoint (regex)
+    # -- Consumer groups whose offsets to checkpoint, as a list (see `topics`)
+    groups: []
+    # -- Consumer groups whose offsets to checkpoint (regex). Wins over `groups`.
     groupsPattern: ".*"
+    # -- Groups to exclude. Unlike topicsExcludePattern this is NOT computed:
+    # MirrorMaker's own group exclusions (console-consumer-*, connect-*) are
+    # sufficient in practice, and a checkpoint for a group nobody migrates is
+    # harmless. Set it to keep a noisy group out of the checkpoints topic.
+    groupsExcludePattern: ""
     sourceConnector:
+      # -- Connector plugin version (Strimzi 0.49+). Empty = the worker's own.
+      version: ""
       tasksMax: 3
       config:
         replication.factor: 3
@@ -108,6 +281,7 @@ mirrors:
         sync.topic.acls.enabled: "false"
         refresh.topics.interval.seconds: 60
     checkpointConnector:
+      version: ""
       tasksMax: 1
       config:
         checkpoints.topic.replication.factor: 3
@@ -121,16 +295,56 @@ jvmOptions:
   -Xmx: 1024m
   gcLoggingEnabled: true
 
-# -- Optional CR passthroughs (empty = Strimzi defaults). Shapes match the
-# KafkaMirrorMaker2 CRD verbatim.
+# -- Optional CR passthroughs (empty = Strimzi defaults). Probe and tracing
+# shapes match the KafkaMirrorMaker2 CRD verbatim.
 # livenessProbe:  { initialDelaySeconds: 60, timeoutSeconds: 5 }
 # readinessProbe: { initialDelaySeconds: 60, timeoutSeconds: 5 }
-# logging: { type: inline, loggers: { "log4j.logger.org.apache.kafka.connect.mirror": INFO } }
 # tracing: { type: opentelemetry }
 livenessProbe: {}
 readinessProbe: {}
-logging: {}
+# -- Authenticated JMX on the workers, e.g. { authentication: { type: password } }
+jmxOptions: {}
+# -- Env and securityContext for the worker container itself (proxy settings,
+# KAFKA_OPTS, a JVM agent). Strimzi owns the rest of the container.
+connectContainer: {}
+# -- Raw passthrough merged into spec.template for the sub-objects this chart
+# does not name individually (apiService, headlessService, podSet,
+# serviceAccount, clusterRoleBinding, jmxSecret, initContainer).
+templateExtra: {}
 tracing: {}
+
+# -- Worker logging. Two shapes:
+#   inline   — { type: inline, loggers: { connect.root.logger.level: INFO } }
+#              passed through to the CR as-is.
+#   external — { type: external, mirrorLevel: DEBUG }
+#              the chart renders a log4j2 ConfigMap with the MirrorMaker logger
+#              (org.apache.kafka.connect.mirror) broken out at `mirrorLevel`,
+#              and wires the CR to it. That logger at DEBUG is how you find out
+#              WHY a mirror is not replicating: it prints the topic refresh,
+#              what matched the pattern and what did not, and the offset-sync
+#              decisions. Also accepts rootLevel and extraLoggers (name → level),
+#              or your own valueFrom to bring a ConfigMap of your own.
+logging: {}
+
+# -- Default autoRestart for BOTH mirror connectors; a per-connector
+# `autoRestart` overrides it. A mirror that dies on a transient source blip and
+# stays dead is the most common cause of "replication silently stopped over the
+# weekend" — but an unbounded restart loop hides a real fault, hence a cap.
+autoRestart:
+  enabled: true
+  maxRestarts: 10
+
+# ── Cutover ─────────────────────────────────────────────────────────────────
+# A chart-level override for connector state across EVERY mirror, used by
+# values-cutover.yaml. It exists as a map rather than a per-mirror field
+# because Helm replaces lists wholesale on merge: an overlay reaching into
+# mirrors[0] would discard that mirror's bootstrap and credentials.
+# When enabled, these win over any per-connector `state`.
+cutover:
+  enabled: false
+  # -- running | paused | stopped
+  sourceConnectorState: stopped
+  checkpointConnectorState: running
 
 resources:
   requests:
@@ -154,6 +368,13 @@ podAntiAffinity:
 rack:
   enabled: false
   topologyKey: topology.kubernetes.io/zone
+  # -- Image for the init container that reads the node's topology label.
+  # Empty = the operator's default; name it on a mirrored/air-gapped registry.
+  clientRackInitImage: ""
+  # -- Fetch from the closest SOURCE replica rather than always the leader
+  # (consumer.client.rack). A real cost line on a cross-AZ or cross-region
+  # mirror; requires the source brokers to be rack-aware.
+  clientRack: ""
 
 podDisruptionBudget:
   # -- Only rendered when replicas > 1. maxUnavailable keeps the CR drain-safe
@@ -179,11 +400,20 @@ serviceAccount:
   name: ""
 
 # ── Autoscaling (HPA on the MM2 Connect Deployment) ─────────────────────────
+# Scaling MirrorMaker means scaling TASKS. Connect distributes at most
+# sum(tasksMax) tasks across the workers, so replicas beyond that idle — and
+# the CPU average that triggered the scale-up falls, which the autoscaler
+# reads as success. The chart refuses maxReplicas > sum(tasksMax); raise
+# tasksMax with it (its own ceiling is the source's partition count).
 autoscaling:
   enabled: false
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+  # -- Permit maxReplicas above sum(tasksMax) anyway (headroom before a
+  # tasksMax raise). The workers really will have nothing to do.
+  allowIdleWorkers: false
 
 # ── Managed target KafkaUser ────────────────────────────────────────────────
 # Provisions the TARGET-side KafkaUser + MM2 ACLs (write replicated topics,
@@ -227,16 +457,31 @@ kafkaUser:
 secretSync:
   enabled: false
   timeoutSeconds: 300
+  # -- Re-copy on a schedule as well as on install/upgrade, so a rotated
+  # credential reaches the workers without a `helm upgrade`. Opt-in on
+  # purpose: a CronJob that can read Secrets in another namespace is a real
+  # standing grant, and it should be a decision rather than a default.
+  # (kubernetes-reflector is the alternative if the cluster already runs one.)
+  watch: false
+  # -- Cron schedule for that re-copy
+  schedule: "*/15 * * * *"
   # -- Image for the sync Job (needs kubectl + jq + sh). Defaults to the tester
   # image; override with a dedicated runtime image if preferred.
   image: ""
-  # -- Secrets to copy into the release namespace. Each: name + fromNamespace.
-  # Entries whose fromNamespace equals the release namespace are skipped.
+  # -- Secrets to copy into the release namespace. Each: name + fromNamespace,
+  # plus an optional `as` — the name the copy is created under (defaults to
+  # name). `as` is what a migration between two Strimzi clusters needs: both
+  # ends have a kates-mm2 KafkaUser, so both credentials are Secrets called
+  # kates-mm2 in their own namespaces, and the source's copy must land here
+  # under another name, which mirrors[].source.authentication.secretName then
+  # references (see values-migrate-4x.yaml). Entries already here under the
+  # target name (fromNamespace == release namespace and no rename) are skipped.
   secrets: []
   #   - name: kates-mm2                 # target SCRAM credential
   #     fromNamespace: kafka
-  #   - name: kates-mm2-source          # source SCRAM credential
-  #     fromNamespace: kafka-dr
+  #   - name: kates-mm2                 # the SOURCE cluster's kates-mm2 ...
+  #     fromNamespace: kafka-legacy41
+  #     as: kates-mm2-legacy41          # ... renamed so it does not clash with the target's
   #   - name: krafter-cluster-ca-cert   # target CA cert (TLS)
   #     fromNamespace: kafka
 
@@ -246,6 +491,25 @@ podMonitors:
   # Operator CRDs; capability-guarded so a missing CRD never fails install)
   enabled: false
   labels: {}
+  # -- What to scrape, per metrics.type. The two metrics paths are different
+  # mechanisms: jmxPrometheusExporter runs the exporter agent beside the worker
+  # and Strimzi opens a container port named `tcp-prometheus`;
+  # strimziMetricsReporter is a Kafka MetricsReporter plugin inside the worker
+  # that serves Prometheus text on its own HTTP listener, which the operator
+  # opens under the same port name.
+  #
+  # These are values rather than constants because a PodMonitor pointing at a
+  # port name the pod does not have is the worst failure mode available here:
+  # it scrapes nothing, reports nothing, and every rule below evaluates to no
+  # data forever. If a future operator release renames the reporter's port,
+  # this is the one line to change.
+  scrape:
+    jmxPrometheusExporter:
+      port: tcp-prometheus
+      path: /metrics
+    strimziMetricsReporter:
+      port: tcp-prometheus
+      path: /metrics
 monitoring:
   interval: 30s
   scrapeTimeout: ""
@@ -253,13 +517,179 @@ monitoring:
 # -- Enable JMX Prometheus metrics on the workers (needed for podMonitors)
 metrics:
   enabled: false
+  # -- jmxPrometheusExporter (a sidecar scraping JMX, the ConfigMap below) or
+  # strimziMetricsReporter (the operator's native path: the reporter publishes
+  # Prometheus metrics directly, no sidecar and no JMX port).
+  type: jmxPrometheusExporter
+  # -- strimziMetricsReporter only: the metrics it publishes
+  allowList:
+    - "kafka_connect.*"
+    - "kafka_producer.*"
+    - "kafka_consumer.*"
+
+# ── Alerts ──────────────────────────────────────────────────────────────────
+# A PrometheusRule. Requires metrics.enabled and the Prometheus Operator CRDs
+# (capability-guarded, so a missing CRD never fails an install).
+#
+# Replication LAG is the number that decides whether a cutover is safe, and
+# until these rules existed the chart did not export it anywhere a human would
+# see it.
+#
+# Every rule that is ABOUT A MIRROR is rendered once per `mirrors[]` entry with
+# the source alias in its labels, because the alternative is an average: a
+# fan-in release with one stuck leg and three healthy ones reads as healthy
+# right up to the cutover. Rules about the WORKERS (heap, rebalances) stay
+# release-wide — there is one Connect cluster, and it is not per-source.
+alerts:
+  enabled: false
+  labels: {}
+  # -- Base URL for the runbook every rule links from its `runbook_url`
+  # annotation. A fork that vendors the runbook somewhere else repoints it here
+  # instead of patching twelve rules; the anchors are appended by the template.
+  runbookBaseUrl: "https://github.com/bmscomp/kates/blob/main/docs/mirror-maker2-runbook.md"
+  # -- The exprs below are written against the JMX EXPORTER's metric names
+  # (kafka_connect_*, from metrics-configmap.yml). The Strimzi Metrics Reporter
+  # publishes Kafka's own metric registry directly and names things
+  # differently, so with metrics.type=strimziMetricsReporter these rules would
+  # install and never fire. The chart refuses that combination; set this true
+  # once you have verified the names in YOUR Prometheus and want the rules
+  # anyway.
+  allowReporterMetrics: false
+  thresholds:
+    # -- MirrorSourceConnector replication latency (ms) sustained before alerting
+    replicationLatencyMs: 60000
+    # -- Minutes with zero records written before "the mirror has stalled"
+    noRecordsMinutes: 15
+    # -- Worker JVM heap usage (%)
+    heapUsagePercent: 85
+    # -- Connect task error rate (errors/sec)
+    errorRatePerSecond: 1
+    # -- Minutes the MirrorCheckpointConnector may emit NOTHING while the
+    # source connector is still writing. This is offset translation stopping
+    # outright.
+    checkpointStaleMinutes: 15
+    # -- Minutes the checkpoint latency may sit at exactly the same value while
+    # records ARE flowing. Checkpoints that exist but never advance are the
+    # expensive failure: the mirror looks healthy, and the failover resumes
+    # consumers at a position that stopped moving hours ago.
+    offsetSyncStaleMinutes: 30
+    # -- Completed Connect rebalances per second before it is a storm. Tasks do
+    # not replicate during a rebalance, so a storm reads as intermittent lag
+    # with no failed tasks.
+    rebalancesPerSecond: 0.1
+
+# ── Grafana dashboard ───────────────────────────────────────────────────────
+# Rendered as a ConfigMap the Grafana sidecar picks up (label selector below).
+#
+# The panel list is generated from `mirrors`, like the alerts: release-wide
+# rows first (is it replicating, task states, throughput, workers), then one
+# collapsible row per source alias. A fan-in release therefore shows each leg
+# separately rather than a sum that hides the dead one.
+dashboard:
+  enabled: false
+  # -- Label the Grafana sidecar watches for
+  label: grafana_dashboard
+  labelValue: "1"
+  # -- Folder annotation for the sidecar
+  folder: Kafka
+
+# ── Helm tests ──────────────────────────────────────────────────────────────
+# test-mm2 (CR Ready) and test-connectors (connectors RUNNING) always run.
+# The three below actually move data, so they need to know where and as whom.
+#
+# All three run ONE pod that loops over EVERY mirror, with one failure counter
+# and the source alias on every line. A pod per mirror would stop at the first
+# broken leg, and on a fan-in release "which leg" is the entire diagnosis.
+#
+# None of them can configure TLS or mTLS — the pods build a client.properties
+# from an env-supplied password, not a truststore — so a release whose source
+# or target uses either REFUSES TO RENDER them rather than shipping a test that
+# fails on its own configuration.
+tests:
+  # -- End-to-end round trip, once per mirror: produce a corpus to that source,
+  # consume it back from the target under the policy-correct replicated name,
+  # and diff the corpus against what arrived (a count would let a duplicated
+  # corpus with a hole in it pass).
+  replication:
+    enabled: false
+    # -- Topic on the SOURCE to produce into (must be one the mirror selects).
+    # Created by the test if absent — a real source usually has
+    # auto.create.topics.enable=false, and a producer failing on a missing topic
+    # would be reported as a replication failure. On a read-only source the
+    # create is denied, which is not a fault: the topic has to pre-exist.
+    #
+    # With more than one mirror this is SUFFIXED with each source's alias
+    # (kates.mm2-e2e.east, kates.mm2-e2e.west), because two sources producing
+    # into one topic name is the corruption the identity rail refuses. See
+    # topicByAlias for the exceptions.
+    topic: "kates.mm2-e2e"
+    # -- Per-source topic override, keyed by source alias:
+    #   topicByAlias: { east: kates.orders, west: kates.payments }
+    # Needed when a mirror names its topics as an exact LIST rather than a
+    # pattern — the suffixed default would be a name the mirror provably does
+    # not select, so the leg would time out on a values mismatch dressed up as
+    # a replication failure. In that case the test falls back to the mirror's
+    # FIRST declared topic on its own; set this to choose a different one.
+    topicByAlias: {}
+    partitions: 1
+    replicationFactor: 1
+    messages: 100
+    timeoutSeconds: 300
+    # -- Client image with the Kafka CLI. Empty = the Strimzi image for `version`.
+    image: ""
+    # -- Restrict the data tests to ONE mirror, by source alias. Empty = every
+    # mirror, which is what proves a fan-in release.
+    sourceAlias: ""
+    # -- Consumer group the test reads the target with. Named, not random:
+    # the default console-consumer-<n> group is one no ACL grant covers.
+    # Suffixed with the alias when the release has more than one mirror.
+    group: "kates-mm2-test"
+  # -- A consumer group committed on the source appears, translated, on the
+  # target. Asserts that a position EXISTS — not that it is the right one,
+  # which is tests.failover.
+  offsetTranslation:
+    enabled: false
+    group: "kates-mm2-e2e"
+    timeoutSeconds: 300
+  # -- The assertion offsetTranslation stops short of: a consumer RESUMES on
+  # the target at the right position. Parks a group at the end of the source
+  # topic, produces a corpus after it, commits the group part-way through,
+  # waits for translation, then resumes that group on the TARGET and checks it
+  # reads the un-consumed remainder — not the whole topic from the beginning,
+  # and not nothing.
+  #
+  # Needs tests.replication.enabled: it reuses that test's topic and wants its
+  # corpus sitting in front of its own, because a translated position of 0
+  # proves nothing about resuming.
+  failover:
+    enabled: false
+    # -- Consumer group to fail over. Suffixed with the alias on a multi-source
+    # release; must be matched by the mirror's groupsPattern, or the checkpoint
+    # connector will never translate it.
+    group: "kates-mm2-failover"
+    # -- Records produced after the group's parked position.
+    messages: 200
+    # -- How far through those the group is committed before the failover. Must
+    # be less than `messages` — committing at the end leaves no remainder to
+    # resume into, which is the whole assertion.
+    commitAfter: 100
+    # -- Longer than the others by default: this one waits for the checkpoint
+    # connector to translate AND for the remainder to finish replicating, and
+    # both refresh intervals default to 60s.
+    timeoutSeconds: 420
 
 # ── NetworkPolicy ───────────────────────────────────────────────────────────
-# Default-deny for the MM2 worker pods; every allowed flow is explicit.
+# One policy selecting the MM2 worker pods with both policyTypes, which IS a
+# default-deny for them: anything not listed below is dropped. There is no
+# separate "defaultDeny" knob because a second policy would add nothing — the
+# selection itself is the deny.
 networkPolicy:
   enabled: true
-  # -- Deny-all baseline for the MM2 pods
-  defaultDeny: true
+  # -- Namespace of the Strimzi Cluster Operator, which must reach the Connect
+  # REST API (8083) to create and poll the mirror connectors.
+  strimziOperatorNamespace: "strimzi-operator"
+  operator:
+    enabled: true
   # -- DNS egress (empty selectors = anywhere; pin to kube-dns on strict clusters)
   dns:
     namespaceSelector: {}
@@ -268,6 +698,12 @@ networkPolicy:
   # so egress is to any destination on these ports.
   kafka:
     ports: [9092, 9093]
+    # -- One egress rule per cluster (the target's namespace, then each
+    # source's) instead of 0.0.0.0/0. Off by default because the shipped
+    # default has to work for an external source whose address nobody has
+    # declared; on, every source must be in-cluster (clusterName + namespace)
+    # or carry a source.egressCIDR, and the render says which one is missing.
+    perSource: false
   # -- Worker-to-worker Connect REST (8083) for leader forwarding
   workerToWorker: true
   # -- Metrics scrape ingress

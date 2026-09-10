@@ -1,7 +1,12 @@
 apiVersion: v2
 name: strimzi-operator
-version: 0.1.0
-# Tracks the Strimzi operator version this chart deploys.
+# Minor bump: the chart now describes two operator shapes — the cluster-wide
+# primary and a namespace-scoped additional operator (values-namespace-scope.yaml,
+# globalBindings, operatorPolicy) — and the CRD hook judges a bundle by content.
+version: 0.2.0
+# Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
+# (and the dependency version) in a generated copy when another version is
+# selected; the repository copy is the pin.
 appVersion: "1.1.0"
 description: The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema
 kubeVersion: ">=1.27.0-0"
@@ -26,8 +31,12 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: added
-      description: Initial chart — extracts the Strimzi operator install from ad-hoc helm calls
+      description: values-namespace-scope.yaml — the shape of an additional, co-located operator (watches its own namespace, createGlobalResources off, no CRD hook, kind-sized)
     - kind: added
-      description: Owns Strimzi CRD upgrade via a pre-install/pre-upgrade hook
-    - kind: fixed
-      description: leaderElection.enable is now the honored key (the CLI previously set a misspelled leaderElection.enabled that was silently ignored)
+      description: globalBindings.enabled renders unique-name ClusterRoleBindings (strimzi-cluster-operator-<namespace>-*) so an additional operator keeps rack awareness and volume-expansion checks without upstream's fixed names
+    - kind: added
+      description: operatorPolicy.enabled renders the Cluster Operator's NetworkPolicy here, once per operator, with operand egress following the watch scope — it used to be written into the operator namespace by charts/kafka-cluster
+    - kind: changed
+      description: The CRD hook validates a bundle by the presence of the ten CRDs this platform renders CRs for, not by an exact count, so bundles of other Strimzi releases are judged by what matters
+    - kind: changed
+      description: NOTES print the operator version, the scope and watch list, and whether the CRD hook and the global bindings are on

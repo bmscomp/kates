@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Assert the version pins agree across every place that declares one.
 #
-# Two families are checked: the Strimzi pins (five sites, below) and the
-# local-cluster toolchain (kind, its node image, kubectl).
+# Three families are checked: the Strimzi pins (six sites, below), the Kafka
+# pins (five sites, plus what the vendored operator actually supports), and
+# the local-cluster toolchain (kind, its node image, kubectl).
 #
 # WHY THIS EXISTS: charts/strimzi-operator pins the Strimzi version in THREE
-# places, versions.env declares a fourth, and charts/kafka-cluster a fifth:
+# places, versions.env declares a fourth, charts/kafka-cluster a fifth, and
+# charts/mirror-maker2 a sixth:
 #
 #   1. Chart.yaml  dependencies[strimzi-kafka-operator].version  → which operator chart is pulled
 #   2. Chart.yaml  appVersion                                    → what the chart claims to deploy
 #   3. values.yaml strimziVersion                                → builds the CRD bundle URL
 #   4. versions.env STRIMZI_VERSION                              → the repo-wide pin
 #   5. charts/kafka-cluster/values.yaml strimziVersion           → the Helm-test Kafka client image
+#   6. charts/mirror-maker2/values.yaml strimziVersion           → the client image for its pre-flight probe and data tests
 #
 # (5) is easy to miss: kafka-cluster no longer installs the operator, but its
 # _helpers.tpl still builds `strimzi/kafka:<strimziVersion>-kafka-<kafkaVersion>`
@@ -21,6 +24,21 @@
 # never compares it to versions.env. If (3) drifts from (1), the pre-upgrade
 # hook applies CRDs for a DIFFERENT version than the operator being installed —
 # the worst failure this chart can produce, and it fails silently.
+#
+# The Kafka pins have a second authority besides each other: the operator.
+# Strimzi runs a small, explicit window of Kafka versions, and the vendored
+# operator chart (charts/strimzi-operator/charts/strimzi-kafka-operator-*.tgz)
+# carries that window verbatim in templates/_kafka_image_map.tpl. The default
+# kafkaVersion must be the NEWEST entry of that window — so the chart's pinned
+# default and the CLI's computed default ("newest the operator supports") are
+# one version, and a Strimzi bump that drops or adds a Kafka line fails here
+# instead of at install time. It must also be at or above the platform's own
+# floor, charts/kafka-cluster/Chart.yaml `kates.io/kafka-floor` (share groups
+# need Kafka >= 4.2). And the tarball itself must be the pinned release: the
+# filename and its Chart.yaml both say which. The tarball is gitignored and
+# fetched by `helm dependency build`; when it is absent this script fetches it
+# the same way (CI runs with helm on PATH and egress to quay.io) and fails
+# loudly when it cannot.
 #
 # The toolchain pins had the same problem in a different shape: the kind binary
 # was declared twice (two workflows, duplicated verbatim), the node image three
@@ -40,6 +58,7 @@ CHART_DIR="charts/strimzi-operator"
 CHART_YAML="${CHART_DIR}/Chart.yaml"
 VALUES_YAML="${CHART_DIR}/values.yaml"
 KAFKA_VALUES_YAML="charts/kafka-cluster/values.yaml"
+MM2_VALUES_YAML="charts/mirror-maker2/values.yaml"
 
 fail=0
 
@@ -66,12 +85,20 @@ env_strimzi_version=$(env_val STRIMZI_VERSION)
 # this pin to build the Helm-test Kafka client image.
 kafka_chart_strimzi_version=$(grep -E '^strimziVersion:' "$KAFKA_VALUES_YAML" | head -1 | sed -E 's/^strimziVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')
 
+# (6) mirror-maker2 builds the image tag for its pre-flight probe and its data
+# tests as strimzi/kafka:<strimziVersion>-kafka-<version>. If this drifts, the
+# probe runs a DIFFERENT client from the one the workers use — which is exactly
+# the mistake KIP-896 punishes, and the probe would then be proving nothing
+# about the deployment it gates.
+mm2_chart_strimzi_version=$(grep -E '^strimziVersion:' "$MM2_VALUES_YAML" | head -1 | sed -E 's/^strimziVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')
+
 echo "Strimzi version pins:"
 printf '  %-46s %s\n' "${CHART_YAML} appVersion:"              "${chart_app_version:-<unset>}"
 printf '  %-46s %s\n' "${CHART_YAML} dependency version:"      "${chart_dep_version:-<unset>}"
 printf '  %-46s %s\n' "${VALUES_YAML} strimziVersion:"         "${values_strimzi_version:-<unset>}"
 printf '  %-46s %s\n' "versions.env STRIMZI_VERSION:"          "${env_strimzi_version:-<unset>}"
 printf '  %-46s %s\n' "${KAFKA_VALUES_YAML} strimziVersion:"   "${kafka_chart_strimzi_version:-<unset>}"
+printf '  %-46s %s\n' "${MM2_VALUES_YAML} strimziVersion:"     "${mm2_chart_strimzi_version:-<unset>}"
 echo
 
 for pair in \
@@ -79,7 +106,8 @@ for pair in \
   "chart_dep_version:${CHART_YAML} dependency version" \
   "values_strimzi_version:${VALUES_YAML} strimziVersion" \
   "env_strimzi_version:versions.env STRIMZI_VERSION" \
-  "kafka_chart_strimzi_version:${KAFKA_VALUES_YAML} strimziVersion"; do
+  "kafka_chart_strimzi_version:${KAFKA_VALUES_YAML} strimziVersion" \
+  "mm2_chart_strimzi_version:${MM2_VALUES_YAML} strimziVersion"; do
   var="${pair%%:*}"
   label="${pair#*:}"
   if [[ -z "${!var}" ]]; then
@@ -92,8 +120,9 @@ if [[ "$fail" -eq 0 ]]; then
   if [[ "$chart_app_version" == "$chart_dep_version" && \
         "$chart_app_version" == "$values_strimzi_version" && \
         "$chart_app_version" == "$env_strimzi_version" && \
-        "$chart_app_version" == "$kafka_chart_strimzi_version" ]]; then
-    echo "OK: all five Strimzi pins agree (${chart_app_version})."
+        "$chart_app_version" == "$kafka_chart_strimzi_version" && \
+        "$chart_app_version" == "$mm2_chart_strimzi_version" ]]; then
+    echo "OK: all six Strimzi pins agree (${chart_app_version})."
   else
     echo "DRIFT: Strimzi version pins disagree." >&2
     echo >&2
@@ -102,9 +131,199 @@ if [[ "$fail" -eq 0 ]]; then
     echo "  dependency version. If those differ, the hook applies CRDs for a" >&2
     echo "  different operator than the one being installed." >&2
     echo >&2
-    echo "  Set all five to the same value, then re-run:" >&2
+    echo "  Set all six to the same value, then re-run:" >&2
     echo "    scripts/gen-version-matrix.sh --check" >&2
     fail=1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# The Kafka line, which is the OTHER half of every client image tag.
+#
+# strimzi/kafka:<strimziVersion>-kafka-<kafkaVersion> is built from two pins,
+# and the block above only checks the first. If mirror-maker2's `version`
+# (the line its workers run, and the image its pre-flight probe uses) drifts
+# from the cluster's kafkaVersion and from versions.env, the probe proves
+# something about a different client than the one the mirror will use —
+# which is precisely the mistake KIP-896 punishes.
+# ---------------------------------------------------------------------------
+
+env_kafka_version=$(env_val STRIMZI_KAFKA_VERSION)
+env_kafka_version=${env_kafka_version##*-kafka-}
+kafka_chart_kafka_version=$(grep -E '^kafkaVersion:' "$KAFKA_VALUES_YAML" | head -1 | sed -E 's/^kafkaVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+mm2_chart_kafka_version=$(grep -E '^version:' "$MM2_VALUES_YAML" | head -1 | sed -E 's/^version:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+mm2_chart_app_version=$(grep -E '^appVersion:' charts/mirror-maker2/Chart.yaml | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+# The fifth Kafka site: connect-cluster's `version` is the KafkaConnect CR's
+# spec.version, and its image is the same strimzi/kafka:<strimzi>-kafka-
+# <version> pair as everything above. Checked separately below (b).
+CONNECT_VALUES_YAML="charts/connect-cluster/values.yaml"
+connect_chart_kafka_version=$(grep -E '^version:' "$CONNECT_VALUES_YAML" | head -1 | sed -E 's/^version:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+
+echo
+echo "Kafka version pins:"
+printf '  %-46s %s\n' "versions.env STRIMZI_KAFKA_VERSION (kafka):"  "${env_kafka_version:-<unset>}"
+printf '  %-46s %s\n' "${KAFKA_VALUES_YAML} kafkaVersion:"           "${kafka_chart_kafka_version:-<unset>}"
+printf '  %-46s %s\n' "${MM2_VALUES_YAML} version:"                  "${mm2_chart_kafka_version:-<unset>}"
+printf '  %-46s %s\n' "charts/mirror-maker2/Chart.yaml appVersion:"  "${mm2_chart_app_version:-<unset>}"
+printf '  %-46s %s\n' "${CONNECT_VALUES_YAML} version:"              "${connect_chart_kafka_version:-<unset>}"
+
+if [[ -z "$env_kafka_version" || -z "$kafka_chart_kafka_version" || -z "$mm2_chart_kafka_version" || -z "$mm2_chart_app_version" ]]; then
+  echo "ERROR: could not read one of the Kafka version pins" >&2
+  fail=1
+elif [[ "$env_kafka_version" == "$kafka_chart_kafka_version" && \
+        "$env_kafka_version" == "$mm2_chart_kafka_version" && \
+        "$env_kafka_version" == "$mm2_chart_app_version" ]]; then
+  echo "OK: all four Kafka pins agree (${env_kafka_version})."
+else
+  echo "DRIFT: Kafka version pins disagree." >&2
+  echo "  mirror-maker2 probes and tests its sources with strimzi/kafka:<strimzi>-kafka-<version>;" >&2
+  echo "  that must be the same Kafka line the workers and the target cluster run." >&2
+  fail=1
+fi
+
+# (b) The fifth Kafka site — see the read above the table. A Connect version
+# outside the operator's window fails exactly like a Kafka one.
+if [[ -z "$connect_chart_kafka_version" ]]; then
+  echo "ERROR: could not read ${CONNECT_VALUES_YAML} version" >&2
+  fail=1
+elif [[ -n "$env_kafka_version" && "$connect_chart_kafka_version" == "$env_kafka_version" ]]; then
+  echo "OK: connect-cluster version agrees with the Kafka pin (${connect_chart_kafka_version})."
+elif [[ -n "$env_kafka_version" ]]; then
+  echo "DRIFT: ${CONNECT_VALUES_YAML} version is ${connect_chart_kafka_version}, the Kafka pin is ${env_kafka_version}." >&2
+  echo "  The KafkaConnect CR's spec.version runs on the same operator as the cluster;" >&2
+  echo "  a Connect version outside its window fails exactly like a Kafka one." >&2
+  fail=1
+fi
+
+# ---------------------------------------------------------------------------
+# What the vendored operator actually supports.
+#
+# The operator chart is the only authority on which Kafka versions it runs:
+# templates/_kafka_image_map.tpl renders STRIMZI_KAFKA_IMAGES with one
+# `X.Y.Z=<image>` line per supported version. Read it straight out of the
+# tarball — no render, no cluster.
+# ---------------------------------------------------------------------------
+
+STRIMZI_CHART_DIR="charts/strimzi-operator"
+KAFKA_CHART_YAML="charts/kafka-cluster/Chart.yaml"
+
+# The tarball is gitignored (charts/*/charts/) and produced by
+# `helm dependency build`. Fetch it the same way when it is absent, so this
+# check does not depend on which CI step ran first — and fail loudly when
+# that is impossible, because a silently skipped check is no check.
+shopt -s nullglob
+strimzi_tarballs=("${STRIMZI_CHART_DIR}"/charts/strimzi-kafka-operator-*.tgz)
+shopt -u nullglob
+if [[ "${#strimzi_tarballs[@]}" -eq 0 ]]; then
+  if command -v helm >/dev/null 2>&1; then
+    echo "note: no vendored operator tarball under ${STRIMZI_CHART_DIR}/charts/ — running helm dependency build"
+    if ! helm dependency build "${STRIMZI_CHART_DIR}" >/dev/null 2>&1; then
+      echo "ERROR: helm dependency build ${STRIMZI_CHART_DIR} failed (needs egress to quay.io)." >&2
+    fi
+    shopt -s nullglob
+    strimzi_tarballs=("${STRIMZI_CHART_DIR}"/charts/strimzi-kafka-operator-*.tgz)
+    shopt -u nullglob
+  else
+    echo "ERROR: helm is not on PATH, so the vendored operator tarball cannot be fetched." >&2
+  fi
+fi
+
+echo
+echo "Vendored operator window:"
+if [[ "${#strimzi_tarballs[@]}" -ne 1 ]]; then
+  if [[ "${#strimzi_tarballs[@]}" -eq 0 ]]; then
+    echo "ERROR: no strimzi-kafka-operator-*.tgz under ${STRIMZI_CHART_DIR}/charts/." >&2
+    echo "  Run: helm dependency build ${STRIMZI_CHART_DIR}" >&2
+  else
+    echo "DRIFT: more than one operator tarball under ${STRIMZI_CHART_DIR}/charts/: ${strimzi_tarballs[*]}" >&2
+    echo "  Delete the stale one; \`helm dependency build\` keeps exactly the pinned version." >&2
+  fi
+  fail=1
+else
+  strimzi_tarball="${strimzi_tarballs[0]}"
+
+  # (c) The tarball IS the pin: its filename and its own Chart.yaml both name
+  # the version, and both must equal the Strimzi pin. A stale tarball (the pin
+  # moved, the build did not) would make every window check below assert the
+  # wrong operator's window.
+  tarball_file_version=$(basename "$strimzi_tarball" | sed -E 's/^strimzi-kafka-operator-(.+)\.tgz$/\1/')
+  tarball_chart_version=$(tar -xzf "$strimzi_tarball" -O strimzi-kafka-operator/Chart.yaml 2>/dev/null \
+    | grep -E '^version:' | head -1 | sed -E 's/^version:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+
+  # (a) The window: every `X.Y.Z=` line inside the STRIMZI_KAFKA_IMAGES block
+  # of _kafka_image_map.tpl, newest last (sort -V orders versions, not strings).
+  mapfile -t operator_window < <(
+    tar -xzf "$strimzi_tarball" -O strimzi-kafka-operator/templates/_kafka_image_map.tpl 2>/dev/null \
+      | awk '
+          /name: STRIMZI_KAFKA_IMAGES/ { inblock = 1; next }
+          inblock && /name: /          { inblock = 0 }
+          inblock && match($0, /^[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+=/) {
+            v = $0; sub(/^[[:space:]]*/, "", v); sub(/=.*$/, "", v); print v
+          }
+        ' | sort -V
+  )
+  operator_newest="${operator_window[${#operator_window[@]}-1]:-}"
+
+  # (d) The platform's own floor, declared by the kafka-cluster chart.
+  kafka_floor=$(grep -E '^[[:space:]]*kates.io/kafka-floor:' "$KAFKA_CHART_YAML" | head -1 \
+    | sed -E 's/^[[:space:]]*kates.io\/kafka-floor:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+
+  printf '  %-46s %s\n' "tarball:"                                   "${strimzi_tarball}"
+  printf '  %-46s %s\n' "tarball filename version:"                  "${tarball_file_version:-<unset>}"
+  printf '  %-46s %s\n' "tarball Chart.yaml version:"                "${tarball_chart_version:-<unset>}"
+  printf '  %-46s %s\n' "STRIMZI_KAFKA_IMAGES window:"               "${operator_window[*]:-<none found>}"
+  printf '  %-46s %s\n' "${KAFKA_CHART_YAML} kates.io/kafka-floor:"  "${kafka_floor:-<unset>}"
+  echo
+
+  if [[ -z "$tarball_chart_version" ]]; then
+    echo "ERROR: could not read Chart.yaml version from ${strimzi_tarball}" >&2
+    fail=1
+  elif [[ -n "$chart_app_version" && "$tarball_file_version" == "$chart_app_version" && "$tarball_chart_version" == "$chart_app_version" ]]; then
+    echo "OK: vendored operator tarball is the pinned Strimzi ${chart_app_version} (filename and Chart.yaml agree)."
+  elif [[ -n "$chart_app_version" ]]; then
+    echo "DRIFT: vendored operator tarball is not the pinned Strimzi ${chart_app_version}." >&2
+    echo "  filename says ${tarball_file_version}, its Chart.yaml says ${tarball_chart_version}." >&2
+    echo "  Run: helm dependency build ${STRIMZI_CHART_DIR}  (and delete any stale tarball)" >&2
+    fail=1
+  fi
+
+  if [[ "${#operator_window[@]}" -eq 0 ]]; then
+    echo "ERROR: no X.Y.Z= entries found under STRIMZI_KAFKA_IMAGES in the tarball's _kafka_image_map.tpl" >&2
+    fail=1
+  elif [[ -z "$kafka_chart_kafka_version" ]]; then
+    echo "ERROR: could not read ${KAFKA_VALUES_YAML} kafkaVersion" >&2
+    fail=1
+  elif [[ "$kafka_chart_kafka_version" == "$operator_newest" ]]; then
+    echo "OK: default kafkaVersion ${kafka_chart_kafka_version} is the newest the vendored operator supports (window: ${operator_window[*]})."
+  else
+    in_window=0
+    for v in "${operator_window[@]}"; do [[ "$v" == "$kafka_chart_kafka_version" ]] && in_window=1; done
+    if [[ "$in_window" -eq 1 ]]; then
+      echo "DRIFT: default kafkaVersion ${kafka_chart_kafka_version} is inside the vendored operator's window but is not its newest entry (${operator_newest})." >&2
+      echo "  A flagless \`kates deploy\` picks the newest version the operator supports, and a" >&2
+      echo "  hand-run \`helm install\` picks the chart default; the two must be one version." >&2
+    else
+      echo "DRIFT: default kafkaVersion ${kafka_chart_kafka_version} is OUTSIDE the vendored operator's window (${operator_window[*]})." >&2
+      echo "  Strimzi ${chart_app_version:-?} cannot run it: the Kafka CR would go NotReady." >&2
+    fi
+    echo "  Move the Kafka pins (versions.env STRIMZI_KAFKA_VERSION, ${KAFKA_VALUES_YAML} kafkaVersion," >&2
+    echo "  ${MM2_VALUES_YAML} version + Chart.yaml appVersion, ${CONNECT_VALUES_YAML} version) to ${operator_newest}." >&2
+    fail=1
+  fi
+
+  if [[ -z "$kafka_floor" ]]; then
+    echo "ERROR: could not read the kates.io/kafka-floor annotation from ${KAFKA_CHART_YAML}" >&2
+    fail=1
+  elif [[ -n "$kafka_chart_kafka_version" ]]; then
+    # sort -V: the floor must sort first (or equal) against the default.
+    if [[ "$(printf '%s\n%s\n' "$kafka_chart_kafka_version" "$kafka_floor" | sort -V | head -1)" == "$kafka_floor" ]]; then
+      echo "OK: default kafkaVersion ${kafka_chart_kafka_version} is at or above the platform floor (${kafka_floor})."
+    else
+      echo "DRIFT: default kafkaVersion ${kafka_chart_kafka_version} is below ${KAFKA_CHART_YAML} kates.io/kafka-floor (${kafka_floor})." >&2
+      echo "  The primary's configuration needs the feature that set the floor (share groups);" >&2
+      echo "  either raise the Kafka pins or remove that feature and lower the floor." >&2
+      fail=1
+    fi
   fi
 fi
 

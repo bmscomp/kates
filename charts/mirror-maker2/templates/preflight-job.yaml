@@ -1,0 +1,276 @@
+{{- if .Values.preflight.enabled }}
+{{- $fullname := include "mirror-maker2.fullname" . }}
+{{- $ns := include "mirror-maker2.namespace" . }}
+{{- $pf := .Values.preflight }}
+{{- $image := $pf.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
+{{- /*
+Preflight: probe every source with the SAME client the workers will use.
+
+WHY THIS EXISTS: a KafkaMirrorMaker2 reports Ready as soon as its Connect
+workers are up — before a single record crosses, and it stays Ready while the
+MirrorSourceConnector cannot reach the source at all. Everything this probe
+can distinguish — an unresolvable name, an unreachable port, a TLS mismatch,
+rejected credentials, a broker below the protocol floor — fails that way at
+runtime: silently, and only visible in a connector log nobody is tailing an
+hour later.
+
+Running the check from the workers' own Kafka line matters. A probe with a
+different client version would prove something true about that client and
+nothing about this deployment — which is the exact mistake KIP-896 punishes.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-preflight
+  namespace: {{ $ns }}
+  labels:
+    {{- include "mirror-maker2.componentLabels" (dict "component" "preflight" "ctx" .) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    {{- /* NOT hook-succeeded: the log of a successful probe is the evidence,
+           and NOTES.txt tells you to read it. Deleting the Job on success
+           throws away the one artefact anyone wants. It is replaced on the
+           next install/upgrade instead. */}}
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ $pf.backoffLimit | default 0 }}
+  activeDeadlineSeconds: {{ $pf.timeoutSeconds | default 180 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mirror-maker2.componentLabels" (dict "component" "preflight" "ctx" .) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- /* Deliberately NOT the chart's ServiceAccount. That SA is an ordinary
+             resource, created in the main manifest phase — i.e. AFTER every
+             pre-install hook — so naming it here made the Job unschedulable on
+             a fresh install ("serviceaccounts not found"), failing the install
+             on the very check meant to protect it. This probe talks to Kafka,
+             never to the API server, so `default` with no token is correct. */}}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: preflight
+          image: {{ $image | quote }}
+          {{- include "mirror-maker2.imagePullPolicy" $ | nindent 10 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LOG_DIR
+              value: /tmp
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              FAILED=0
+              WORK=/tmp/preflight
+              mkdir -p "$WORK"
+
+              # One probe, four verdicts. There is deliberately no separate
+              # DNS step: `getent` is not in the ubi-minimal image these
+              # workers run on, and a probe that fails on its own tooling
+              # reports every source as unresolvable. The ApiVersions handshake
+              # already exercises name resolution, TCP, TLS, authentication and
+              # the protocol floor in that order, and each of those fails with
+              # a distinguishable exception — so the handshake is run once and
+              # its output classified.
+              #
+              # mode: plaintext | sasl | tls | sasl-tls
+              #   tls modes have no truststore to hand, so they use the JVM's
+              #   default trust. Against an internal CA that fails the TLS
+              #   handshake — which is still proof the broker is reachable and
+              #   speaking TLS, and is reported as exactly that, not as a pass.
+              probe() {   # alias, bootstrap, mode, mechanism, username, secret_dir
+                ALIAS="$1"; BOOTSTRAP="$2"; MODE="$3"; MECH="$4"; USER="$5"; SDIR="$6"
+                echo ""
+                echo "══ source: $ALIAS ── $BOOTSTRAP  [$MODE]"
+
+                CFG="$WORK/$ALIAS.properties"
+                : > "$CFG"
+                case "$MODE" in
+                  plaintext) echo "security.protocol=PLAINTEXT" >> "$CFG" ;;
+                  sasl)      echo "security.protocol=SASL_PLAINTEXT" >> "$CFG" ;;
+                  tls)       echo "security.protocol=SSL" >> "$CFG" ;;
+                  sasl-tls)  echo "security.protocol=SASL_SSL" >> "$CFG" ;;
+                esac
+                # A SASL source whose Secret is not here yet — secretSync copies
+                # it AFTER install, so on a first install this is the normal
+                # case, not a fault. The handshake still runs, without
+                # credentials: ApiVersions is answered before SASL begins, so
+                # name resolution, reachability and the protocol floor are all
+                # still verified. Only the credentials are not, and the verdict
+                # says so.
+                NOCRED=""
+                if [ -n "$MECH" ]; then
+                  if [ ! -s "$SDIR/password" ]; then
+                    NOCRED="yes"
+                    case "$MODE" in
+                      sasl)     MODE="plaintext" ;;
+                      sasl-tls) MODE="tls" ;;
+                    esac
+                    : > "$CFG"
+                    case "$MODE" in
+                      plaintext) echo "security.protocol=PLAINTEXT" >> "$CFG" ;;
+                      tls)       echo "security.protocol=SSL" >> "$CFG" ;;
+                    esac
+                    echo "  ⏭  CREDENTIAL not present yet (secretSync copies it after install) —"
+                    echo "               probing without it; the credentials are NOT verified this time"
+                  else
+                    PW=$(sed 's/[\\"]/\\&/g' "$SDIR/password")
+                    echo "sasl.mechanism=$MECH" >> "$CFG"
+                    if [ "$MECH" = "PLAIN" ]; then
+                      printf '%s\n' "sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"$USER\" password=\"$PW\";" >> "$CFG"
+                    else
+                      printf '%s\n' "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"$USER\" password=\"$PW\";" >> "$CFG"
+                    fi
+                  fi
+                fi
+                # Bounded: the default 60s request timeout multiplied by retries
+                # would outlast the Job's own deadline on an unreachable host.
+                echo "request.timeout.ms=15000" >> "$CFG"
+                echo "default.api.timeout.ms=20000" >> "$CFG"
+
+                OUT="$WORK/$ALIAS.out"
+                /opt/kafka/bin/kafka-broker-api-versions.sh \
+                  --bootstrap-server "$BOOTSTRAP" --command-config "$CFG" > "$OUT" 2>&1
+                RC=$?
+
+                if [ $RC -eq 0 ]; then
+                  echo "  ✅ HANDSHAKE broker answered ApiVersions to a {{ $.Values.version }} client"
+                  head -1 "$OUT" | sed 's/^/               /'
+                  return
+                fi
+
+                # Classify. ORDER MATTERS, and it is the order the exceptions
+                # nest in, not the order of likelihood: the generic NetworkClient
+                # line "Connection to node -1 ... failed authentication due to:
+                # SSL handshake failed" would match a naive NETWORK test, and
+                # its "failed authentication" would match a naive AUTH test, so
+                # the specific TLS wording is checked before either of those.
+                if grep -qi 'UNSUPPORTED_VERSION\|UnsupportedVersionException' "$OUT"; then
+                  echo "  ❌ PROTOCOL  UNSUPPORTED_VERSION — this broker predates the Kafka 2.1"
+                  echo "               floor that {{ $.Values.version }} clients enforce (KIP-896)."
+                  echo "               There is no flag for this. Migrate via an intermediate 3.x cluster."
+                  FAILED=$((FAILED + 1))
+                elif grep -qi 'UnknownHostException\|Failed to resolve\|No resolvable bootstrap' "$OUT"; then
+                  echo "  ❌ DNS       the bootstrap host does not resolve"
+                  echo "               check the namespace and cluster domain in bootstrapServers"
+                  FAILED=$((FAILED + 1))
+                elif grep -qi 'SSL handshake failed\|SSLHandshakeException\|PKIX\|valid certification path\|CertificateException\|SslAuthenticationException' "$OUT"; then
+                  case "$MODE" in
+                    tls)
+                      echo "  ⏭  TLS       reachable and speaking TLS, but the certificate is not"
+                      echo "               trusted by this probe (it has no truststore). Trust and"
+                      echo "               credentials were NOT verified — the workers will use"
+                      echo "               tls.trustedCertificateSecret, which this probe does not." ;;
+                    *)
+                      echo "  ❌ TLS       the broker answered with a TLS handshake on a listener"
+                      echo "               configured here as plaintext — set tls.enabled"
+                      FAILED=$((FAILED + 1)) ;;
+                  esac
+                elif grep -qi 'SaslAuthenticationException\|invalid credentials\|Authentication failed' "$OUT"; then
+                  echo "  ❌ AUTH      the broker rejected the credentials — the source-side user,"
+                  echo "               its password Secret, or the SASL mechanism"
+                  FAILED=$((FAILED + 1))
+                elif grep -qi 'terminated during authentication\|disconnected during authentication' "$OUT"; then
+                  if [ -n "$NOCRED" ]; then
+                    echo "  ⏭  AUTH      the listener requires authentication and the credentials"
+                    echo "               were not available to this probe. Name resolution,"
+                    echo "               reachability and the protocol floor are verified; the"
+                    echo "               credentials will be checked on the next upgrade."
+                  else
+                    echo "  ❌ LISTENER  the broker closed the connection during authentication:"
+                    echo "               this port expects TLS and/or a SASL mechanism that the"
+                    echo "               source's tls / authentication settings do not configure"
+                    FAILED=$((FAILED + 1))
+                  fi
+                elif grep -qi 'Timed out\|TimeoutException\|Connection refused\|Connection to node' "$OUT"; then
+                  echo "  ❌ NETWORK   resolvable, not reachable — NetworkPolicy, a wrong port,"
+                  echo "               or a listener that is not advertised on this network"
+                  FAILED=$((FAILED + 1))
+                else
+                  echo "  ❌ HANDSHAKE failed (exit $RC) for a reason this probe does not classify"
+                  FAILED=$((FAILED + 1))
+                fi
+                sed 's/^/               /' "$OUT" | grep -v '^ *$' | head -6
+              }
+
+              echo "MirrorMaker 2 preflight — client {{ $image }}"
+              {{- range .Values.mirrors }}
+              {{- $alias := .source.alias | default "source" }}
+              {{- $auth := .source.authentication | default dict }}
+              {{- $tlsOn := and .source.tls .source.tls.enabled }}
+              {{- $t := $auth.type | default "" }}
+              {{- $bs := include "mirror-maker2.bootstrap" (dict "c" .source "ctx" $) }}
+              {{- $sasl := or (eq $t "plain") (eq $t "scram-sha-512") (eq $t "scram-sha-256") }}
+              {{- $mech := ternary "PLAIN" (upper $t) (eq $t "plain") }}
+              {{- if and $tlsOn $sasl }}
+              probe {{ $alias | quote }} {{ $bs | quote }} "sasl-tls" {{ $mech | quote }} {{ $auth.username | quote }} {{ printf "/etc/mm2-preflight/%s" $alias | quote }}
+              {{- else if or $tlsOn (eq $t "tls") }}
+              probe {{ $alias | quote }} {{ $bs | quote }} "tls" "" "" ""
+              {{- else if $sasl }}
+              probe {{ $alias | quote }} {{ $bs | quote }} "sasl" {{ $mech | quote }} {{ $auth.username | quote }} {{ printf "/etc/mm2-preflight/%s" $alias | quote }}
+              {{- else }}
+              probe {{ $alias | quote }} {{ $bs | quote }} "plaintext" "" "" ""
+              {{- end }}
+              {{- end }}
+
+              echo ""
+              if [ "$FAILED" -gt 0 ]; then
+                echo "❌ preflight: $FAILED source(s) failed"
+                {{- if $pf.failOnError }}
+                exit 1
+                {{- else }}
+                echo "   preflight.failOnError is false — continuing anyway"
+                {{- end }}
+              else
+                echo "✅ preflight: every source is reachable by a {{ .Values.version }} client"
+              fi
+          resources:
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 768Mi, cpu: 1000m }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- range .Values.mirrors }}
+            {{- $alias := .source.alias | default "source" }}
+            {{- $auth := .source.authentication | default dict }}
+            {{- $t := $auth.type | default "" }}
+            {{- if or (eq $t "plain") (eq $t "scram-sha-512") (eq $t "scram-sha-256") }}
+            - name: {{ printf "cred-%s" $alias | trunc 63 | trimSuffix "-" }}
+              mountPath: {{ printf "/etc/mm2-preflight/%s" $alias | quote }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- range .Values.mirrors }}
+        {{- $alias := .source.alias | default "source" }}
+        {{- $auth := .source.authentication | default dict }}
+        {{- $t := $auth.type | default "" }}
+        {{- if or (eq $t "plain") (eq $t "scram-sha-512") (eq $t "scram-sha-256") }}
+        - name: {{ printf "cred-%s" $alias | trunc 63 | trimSuffix "-" }}
+          secret:
+            secretName: {{ $auth.secretName | default $auth.username | quote }}
+            # optional: a Secret that secretSync has not copied yet must not
+            # leave this pod in ContainerCreating until the Job deadline. The
+            # probe notices the missing file and says what it could not check.
+            optional: true
+            items:
+              - key: {{ $auth.secretKey | default "password" }}
+                path: password
+        {{- end }}
+        {{- end }}
+{{- end }}
