@@ -196,44 +196,59 @@ elif [[ -n "$env_kafka_version" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# The Connect image a kind deploy actually runs.
+# The Connect image every cluster runs, kind included.
 #
 # WHY THIS EXISTS: values.yaml names the PUBLISHED tag
-# ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka>, which exists only after the
-# publish workflow has run for those exact pins. Bump Debezium or Kafka locally
-# and a kind deploy asks the registry for an image nobody has built — and that
-# does not fail at deploy time with a readable error, it fails twenty minutes
-# later as ImagePullBackOff on every Connect pod. values-kind.yaml therefore
-# pins the locally built tag instead, and `make connect-build` builds and
-# kind-loads exactly that tag. Both read the Debezium version from
-# Dockerfile.connect, so this asserts the three agree.
+# ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka>, and kind runs that same
+# image. The kind overlay used to pin a locally built tag instead, which made a
+# Connect deploy on kind depend on `make connect-build` having run on that
+# machine — and fail as ImagePullBackOff twenty minutes in when it had not.
+#
+# Two things keep the registry pin honest. Its Debezium line must be the one
+# Dockerfile.connect builds, because publish-connect.yml tags the image from
+# that ARG: a pin that disagrees names an image no release produces. And its
+# Kafka line must be the repo's Kafka pin, for the same reason. The overlay
+# check is the guard against the old behaviour coming back quietly.
 # ---------------------------------------------------------------------------
 CONNECT_KIND_VALUES="charts/connect-cluster/values-kind.yaml"
 dockerfile_dbz=$(grep -E '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -1 | cut -d= -f2)
 dockerfile_tag=${dockerfile_dbz%.Final}
-kind_image=$(grep -E '^image:' "$CONNECT_KIND_VALUES" | head -1 | sed -E 's/^image:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')
-kind_image_tag=${kind_image##*:}
+connect_image=$(grep -E '^image:' "$CONNECT_VALUES_YAML" | head -1 | sed -E 's/^image:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')
+connect_image_tag=${connect_image##*:}
+connect_image_dbz=${connect_image_tag%%-kafka-*}
+connect_image_kafka=${connect_image_tag##*-kafka-}
+kind_override=$(grep -E '^image:' "$CONNECT_KIND_VALUES" | head -1 || true)
 
 echo ""
-echo "Connect image for kind:"
+echo "Connect image:"
 printf '  %-46s %s\n' "Dockerfile.connect DEBEZIUM_VERSION:"        "${dockerfile_dbz:-<unset>}"
-printf '  %-46s %s\n' "${CONNECT_KIND_VALUES} image:"               "${kind_image:-<unset>}"
+printf '  %-46s %s\n' "${CONNECT_VALUES_YAML} image:"              "${connect_image:-<unset>}"
+printf '  %-46s %s\n' "${CONNECT_KIND_VALUES} image override:"     "${kind_override:-<none>}"
 
-if [[ -z "$kind_image" ]]; then
-  echo "ERROR: could not read ${CONNECT_KIND_VALUES} image" >&2
+if [[ -z "$connect_image" ]]; then
+  echo "ERROR: could not read ${CONNECT_VALUES_YAML} image" >&2
   fail=1
-elif [[ "$kind_image" == ghcr.io/* ]]; then
-  echo "DRIFT: ${CONNECT_KIND_VALUES} points at the registry (${kind_image})." >&2
-  echo "  A kind deploy must run the locally built image: that tag is only published" >&2
-  echo "  after the workflow runs for these pins, so pulling it fails with ImagePullBackOff." >&2
+elif [[ "$connect_image" != ghcr.io/bmscomp/connect:*-kafka-* ]]; then
+  echo "DRIFT: ${CONNECT_VALUES_YAML} image is ${connect_image}; it must be the published" >&2
+  echo "  ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka> tag, the full build identity." >&2
   fail=1
-elif [[ "$kind_image_tag" != "$dockerfile_tag" ]]; then
-  echo "DRIFT: ${CONNECT_KIND_VALUES} runs connect:${kind_image_tag}, Dockerfile.connect builds ${dockerfile_tag}." >&2
-  echo "  make connect-build tags the image from the Dockerfile, so kind would run a stale image" >&2
-  echo "  or none at all. Move ${CONNECT_KIND_VALUES} image to connect:${dockerfile_tag}." >&2
+elif [[ "$connect_image_dbz" != "$dockerfile_tag" ]]; then
+  echo "DRIFT: ${CONNECT_VALUES_YAML} runs Debezium ${connect_image_dbz}, Dockerfile.connect builds ${dockerfile_tag}." >&2
+  echo "  publish-connect.yml tags the image from the Dockerfile, so that pin names an image no" >&2
+  echo "  release produces. Move it to ghcr.io/bmscomp/connect:${dockerfile_tag}-kafka-${env_kafka_version}." >&2
+  fail=1
+elif [[ "$connect_image_kafka" != "$env_kafka_version" ]]; then
+  echo "DRIFT: ${CONNECT_VALUES_YAML} image is built on Kafka ${connect_image_kafka}, the Kafka pin is ${env_kafka_version}." >&2
+  echo "  Move it to ghcr.io/bmscomp/connect:${dockerfile_tag}-kafka-${env_kafka_version}." >&2
+  fail=1
+elif [[ -n "$kind_override" ]]; then
+  echo "DRIFT: ${CONNECT_KIND_VALUES} overrides the image (${kind_override})." >&2
+  echo "  kind runs the published image like every other cluster. A bare tag there resolves only" >&2
+  echo "  after make connect-build on that machine and is ImagePullBackOff everywhere else;" >&2
+  echo "  pass --set image=... for a one-off local build instead." >&2
   fail=1
 else
-  echo "OK: kind runs the locally built connect:${dockerfile_tag} (make connect-build)."
+  echo "OK: every cluster, kind included, runs ${connect_image} (Debezium ${dockerfile_tag} per Dockerfile.connect)."
 fi
 
 # ---------------------------------------------------------------------------
