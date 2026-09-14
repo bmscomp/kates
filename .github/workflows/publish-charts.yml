@@ -6,9 +6,20 @@ name: Publish Helm Charts
 # Each pushed chart is signed with cosign (keyless, GitHub OIDC) — matching
 # the image publishing pipeline in publish-connect.yml.
 #
-# Trigger: push a tag like `charts-v2026.07.21`, or run manually via
-# workflow_dispatch. Re-publishing an unchanged chart version overwrites the
-# same OCI tag (idempotent).
+# Trigger: push a tag like `charts-v1.0.0`, or run manually via
+# workflow_dispatch.
+#
+# THE TAG IS A MARKER, NOT A VERSION. Nothing in this workflow reads it: every
+# chart is published at its OWN Chart.yaml version, which is what `helm pull`
+# asks for and what the README table and the book's matrix already track. The
+# tag exists so the commit a chart set went out from is findable in git, so it
+# is a plain incrementing number for the set — charts-v1.0.0, charts-v1.1.0 —
+# bumped by hand at each publish. Not a date: a date says when someone ran a
+# workflow, which git already records, and it sorts and diffs worse than a
+# version does.
+#
+# Re-publishing an unchanged chart version overwrites the same OCI tag
+# (idempotent).
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
