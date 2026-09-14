@@ -26,7 +26,7 @@ Each Strimzi release supports only a narrow window of Kafka versions, and that w
 | Component | Pinned version | Source |
 |-----------|----------------|--------|
 | Strimzi operator | 1.1.0 | `STRIMZI_VERSION` in `versions.env` |
-| Kafka image | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
+| Kafka image | `quay.io/strimzi/kafka:1.2.0-kafka-4.3.1` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
 | Chart default (`kafkaVersion`) | 4.3.0 | `charts/kafka-cluster/values.yaml` |
 
 ### Procedure

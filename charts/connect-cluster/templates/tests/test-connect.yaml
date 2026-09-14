@@ -160,8 +160,21 @@ spec:
             echo "$PLUGINS" | grep -o '"class":"[^"]*"' | sed 's/"class":"//;s/"//' | while read -r CLASS; do
               info "  $CLASS"
             done
+
+            # A count proves the worker answered, not that the image is the one
+            # this chart expects. A plugin whose jars cannot satisfy their own
+            # imports is dropped during the scan and the worker starts anyway,
+            # so the connector simply is not in this list — which is exactly how
+            # a broken image passes a health check. Name what has to be there.
+            for WANT in {{ range .Values.tests.expectedPlugins }}{{ . | quote }} {{ end }}; do
+              if echo "$PLUGINS" | grep -q "\"$WANT\""; then
+                ok "plugin offered: ${WANT##*.}"
+              else
+                fail "plugin MISSING from the running worker: $WANT"
+              fi
+            done
           else
-            warn "Could not list connector plugins"
+            fail "Could not list connector plugins — the worker is up but its REST API returned nothing"
           fi
 
           # ─── Tier 5: Connector Status ───────────────────────────────────────

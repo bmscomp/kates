@@ -238,7 +238,7 @@ Override these to pull all images from a private or air-gapped registry:
 |-----------|-------------|---------|
 | `global.imageRegistry` | Container image registry for all chart images | `quay.io` |
 | `global.imageRepository` | Container image repository (org/project) | `strimzi` |
-| `images.kafka` | Kafka client image (Helm test tier 2) | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` |
+| `images.kafka` | Kafka client image (Helm test tier 2) | `quay.io/strimzi/kafka:1.2.0-kafka-4.3.1` |
 | `images.kubectl` | kubectl image (Helm tests + CRD upgrade hook) | `bitnami/kubectl:1.33.0` |
 
 Example: redirect all images to a private registry:

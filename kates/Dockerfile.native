@@ -158,3 +158,21 @@ ENTRYPOINT ["./kates"]
 # docker run) replace them without rebuilding the image.
 CMD ["-XX:MaximumHeapSizePercent=75"]
 
+# Labels last: a LABEL change invalidates every following instruction in the
+# build cache, and descriptions get edited far more often than the app does.
+#
+# The description says "native" explicitly because this variant ships as the
+# -native TAG on the SAME repository as the JVM build. Anyone reading it has
+# already pulled one of the two and needs to know which.
+#
+# version/revision/created are deliberately NOT here — they change every commit
+# and would bust the cache. CI supplies them as index annotations at push time.
+LABEL org.opencontainers.image.title="kates (native)" \
+      org.opencontainers.image.description="Kates backend, GraalVM native build — a Kubernetes-native platform for performance testing, chaos engineering and operational resilience auditing of Apache Kafka clusters. Ahead-of-time compiled for fast start and low memory; bundles the kates CLI and the zstd/lz4/snappy JNI libraries. Runs as non-root, serves on port 8080, liveness at /q/health/live." \
+      org.opencontainers.image.source="https://github.com/bmscomp/kates" \
+      org.opencontainers.image.url="https://github.com/bmscomp/kates" \
+      org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/registry/kates.md" \
+      org.opencontainers.image.vendor="bmscomp" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/ubi-minimal:9.5"
+

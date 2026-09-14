@@ -489,7 +489,7 @@ kubectl run legacy-tools -n kafka-legacy-2x --restart=Never \
 
 # Current pod for the target
 kubectl run tools -n kafka --restart=Never \
-  --image=quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 -- sleep infinity
+  --image=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 -- sleep infinity
 ```
 
 One pod whose tools half-work against one of the two clusters is the worst

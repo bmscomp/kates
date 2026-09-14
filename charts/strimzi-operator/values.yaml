@@ -37,7 +37,7 @@ commonAnnotations: {}
 # MUST equal Chart.yaml's appVersion, the dependency version, and versions.env
 # STRIMZI_VERSION — otherwise the hook applies CRDs for a different operator
 # than the one being installed. Enforced by scripts/check-versions.sh.
-strimziVersion: "1.1.0"
+strimziVersion: "1.2.0"
 
 # ── Image sources ────────────────────────────────────────────────────────────
 # -- Images used by this chart's OWN resources (the CRD-upgrade hook and Helm

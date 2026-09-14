@@ -41,11 +41,11 @@ image: ""
 # that quietly did nothing to the workers would be worse than no value.
 imagePullPolicy: ""
 # -- Kafka version the workers run
-version: "4.3.0"
+version: "4.3.1"
 # -- Strimzi version, used only to build the client image tag for the preflight
 # and test pods (quay.io/strimzi/kafka:<strimziVersion>-kafka-<version>).
 # scripts/check-versions.sh asserts this against versions.env.
-strimziVersion: "1.1.0"
+strimziVersion: "1.2.0"
 # -- Kubernetes cluster domain (bootstrap FQDN computation)
 clusterDomain: cluster.local
 

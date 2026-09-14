@@ -6,7 +6,7 @@ name: Publish Kafka Connect Image
 #   - bmscomp/connect:<version>
 #
 # Tags follow the convention: <debezium-version> (e.g., 3.0.2)
-# The image includes: Debezium CDC, Apicurio converters, Aiven JDBC.
+# The image includes: Debezium CDC, Apicurio converters, Aiven JDBC and S3.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -176,9 +176,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        # Required by `docker buildx imagetools create` below.
+        uses: docker/setup-buildx-action@v3
+
       - name: Compute Docker metadata
         id: docker-meta
         uses: docker/metadata-action@v5
+        env:
+          # GHCR reads a multi-arch image's description from the INDEX's
+          # annotations. Dockerfile.connect already carries a complete LABEL
+          # block, but labels live in the per-platform image config and an
+          # index has no labels — nothing propagates, which is why this page
+          # has been blank despite the labels being correct all along.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: |
             ${{ env.DOCKERHUB_REPO }}
@@ -188,17 +199,32 @@ jobs:
             type=raw,value=${{ needs.meta.outputs.version }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=,format=short
-          labels: |
+          # `annotations`, not `labels`: this job merges manifests rather than
+          # building images, so a `labels:` block here was never consumed.
+          # Kept in sync with the LABEL block in Dockerfile.connect.
+          annotations: |
             org.opencontainers.image.title=connect
-            org.opencontainers.image.description=Enterprise Kafka Connect — Debezium CDC, Apicurio Registry, Aiven JDBC
+            org.opencontainers.image.description=Kafka Connect — fully open-source Debezium CDC for PostgreSQL, MySQL, MongoDB and SQL Server; Apicurio Registry converters for Avro, JSON Schema and Protobuf; Debezium JDBC sink, Aiven JDBC source/sink and Aiven S3 sink/source. Built on Strimzi Kafka 4.3.1.
             org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND LGPL-2.1-or-later AND CDDL-1.0 AND CDDL-1.1 AND EPL-2.0 AND (GPL-2.0-only WITH Universal-FOSS-exception-1.0)
             org.opencontainers.image.version=${{ needs.meta.outputs.version }}
             io.debezium.version=${{ needs.meta.outputs.debezium_version }}
 
       - name: Create and push multi-arch manifests
+        env:
+          ANNOTATIONS: ${{ steps.docker-meta.outputs.annotations }}
         run: |
+          set -euo pipefail
           PLATFORMS="${{ needs.meta.outputs.platforms }}"
           TAGS=$(echo '${{ steps.docker-meta.outputs.tags }}')
+
+          # metadata-action emits one "index:key=value" per line; imagetools
+          # wants each as its own --annotation flag.
+          ANNOTATION_ARGS=()
+          while IFS= read -r a; do
+            [ -n "${a}" ] && ANNOTATION_ARGS+=(--annotation "${a}")
+          done <<< "${ANNOTATIONS}"
+          echo "Applying ${#ANNOTATION_ARGS[@]} index annotations"
 
           IFS=',' read -ra PLATS <<< "${PLATFORMS}"
           for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
@@ -213,8 +239,12 @@ jobs:
             while IFS= read -r TAG; do
               if [[ "${TAG}" == "${REPO}:"* ]]; then
                 echo "Creating manifest: ${TAG}"
-                docker manifest create "${TAG}" ${SOURCES}
-                docker manifest push "${TAG}"
+                # `docker manifest create` cannot write annotations — only
+                # --amend and --insecure. imagetools can, and pushes in the
+                # same command.
+                docker buildx imagetools create \
+                  "${ANNOTATION_ARGS[@]}" \
+                  -t "${TAG}" ${SOURCES}
               fi
             done <<< "${TAGS}"
           done

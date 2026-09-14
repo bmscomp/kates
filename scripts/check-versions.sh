@@ -196,6 +196,47 @@ elif [[ -n "$env_kafka_version" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# The Connect image a kind deploy actually runs.
+#
+# WHY THIS EXISTS: values.yaml names the PUBLISHED tag
+# ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka>, which exists only after the
+# publish workflow has run for those exact pins. Bump Debezium or Kafka locally
+# and a kind deploy asks the registry for an image nobody has built — and that
+# does not fail at deploy time with a readable error, it fails twenty minutes
+# later as ImagePullBackOff on every Connect pod. values-kind.yaml therefore
+# pins the locally built tag instead, and `make connect-build` builds and
+# kind-loads exactly that tag. Both read the Debezium version from
+# Dockerfile.connect, so this asserts the three agree.
+# ---------------------------------------------------------------------------
+CONNECT_KIND_VALUES="charts/connect-cluster/values-kind.yaml"
+dockerfile_dbz=$(grep -E '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -1 | cut -d= -f2)
+dockerfile_tag=${dockerfile_dbz%.Final}
+kind_image=$(grep -E '^image:' "$CONNECT_KIND_VALUES" | head -1 | sed -E 's/^image:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')
+kind_image_tag=${kind_image##*:}
+
+echo ""
+echo "Connect image for kind:"
+printf '  %-46s %s\n' "Dockerfile.connect DEBEZIUM_VERSION:"        "${dockerfile_dbz:-<unset>}"
+printf '  %-46s %s\n' "${CONNECT_KIND_VALUES} image:"               "${kind_image:-<unset>}"
+
+if [[ -z "$kind_image" ]]; then
+  echo "ERROR: could not read ${CONNECT_KIND_VALUES} image" >&2
+  fail=1
+elif [[ "$kind_image" == ghcr.io/* ]]; then
+  echo "DRIFT: ${CONNECT_KIND_VALUES} points at the registry (${kind_image})." >&2
+  echo "  A kind deploy must run the locally built image: that tag is only published" >&2
+  echo "  after the workflow runs for these pins, so pulling it fails with ImagePullBackOff." >&2
+  fail=1
+elif [[ "$kind_image_tag" != "$dockerfile_tag" ]]; then
+  echo "DRIFT: ${CONNECT_KIND_VALUES} runs connect:${kind_image_tag}, Dockerfile.connect builds ${dockerfile_tag}." >&2
+  echo "  make connect-build tags the image from the Dockerfile, so kind would run a stale image" >&2
+  echo "  or none at all. Move ${CONNECT_KIND_VALUES} image to connect:${dockerfile_tag}." >&2
+  fail=1
+else
+  echo "OK: kind runs the locally built connect:${dockerfile_tag} (make connect-build)."
+fi
+
+# ---------------------------------------------------------------------------
 # What the vendored operator actually supports.
 #
 # The operator chart is the only authority on which Kafka versions it runs:
@@ -217,9 +258,23 @@ shopt -u nullglob
 if [[ "${#strimzi_tarballs[@]}" -eq 0 ]]; then
   if command -v helm >/dev/null 2>&1; then
     echo "note: no vendored operator tarball under ${STRIMZI_CHART_DIR}/charts/ — running helm dependency build"
-    if ! helm dependency build "${STRIMZI_CHART_DIR}" >/dev/null 2>&1; then
-      echo "ERROR: helm dependency build ${STRIMZI_CHART_DIR} failed (needs egress to quay.io)." >&2
-    fi
+    # Retried, with helm's own words kept. This fetch is the one part of this
+    # script that needs a registry to be reachable, and a 504 from quay.io turned
+    # the whole pin check red with nothing to read but "failed".
+    dep_err="$(mktemp)"
+    for attempt in 1 2 3; do
+      if helm dependency build "${STRIMZI_CHART_DIR}" >/dev/null 2>"${dep_err}"; then
+        break
+      fi
+      if [[ "${attempt}" -eq 3 ]]; then
+        echo "ERROR: helm dependency build ${STRIMZI_CHART_DIR} failed three times (needs egress to quay.io):" >&2
+        sed 's/^/  /' "${dep_err}" >&2
+      else
+        echo "  attempt ${attempt}/3 failed: $(tail -n 1 "${dep_err}") — retrying" >&2
+        sleep $((attempt * 5))
+      fi
+    done
+    rm -f "${dep_err}"
     shopt -s nullglob
     strimzi_tarballs=("${STRIMZI_CHART_DIR}"/charts/strimzi-kafka-operator-*.tgz)
     shopt -u nullglob
