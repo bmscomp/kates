@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -o /kates-cli .
 
 # Stage 2: Build the native executable (Mandrel)
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-21 AS builder
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25 AS builder
 USER root
 WORKDIR /build
 
