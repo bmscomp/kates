@@ -168,9 +168,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        # Required by `docker buildx imagetools create` below. buildx ships on
+        # ubuntu-latest, but this pins the version rather than inheriting
+        # whatever the runner image happens to carry this month.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Describe this variant
+        id: describe
+        run: |
+          # The two variants share one repository (the suffix is on the TAG),
+          # so whichever is pushed last owns the registry page description.
+          # Keep both truthful and near-identical; the variant difference is
+          # spelled out rather than left to the tag name.
+          if [ "${{ matrix.variant }}" = "native" ]; then
+            {
+              echo 'title=kates (native)'
+              echo 'description=Kates backend, GraalVM native build — a Kubernetes-native platform for performance testing, chaos engineering and operational resilience auditing of Apache Kafka clusters. Ahead-of-time compiled for fast start and low memory; bundles the kates CLI. Runs as non-root on port 8080.'
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo 'title=kates'
+              echo 'description=Kates backend — a Kubernetes-native platform for performance testing, chaos engineering and operational resilience auditing of Apache Kafka clusters. Bundles the Quarkus REST/gRPC API server and the kates CLI. Runs as non-root on port 8080.'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute Docker metadata
         id: docker-meta
         uses: docker/metadata-action@v5
+        env:
+          # GHCR reads a MULTI-ARCH image's description from the index's
+          # annotations, not from the per-platform config labels — labels live
+          # in the image config and an index has no labels at all, so nothing
+          # propagates. Without this the package page stays blank no matter how
+          # good the LABEL block in the Dockerfile is.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: |
             ${{ env.DOCKERHUB_REPO }}
@@ -183,10 +215,14 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=,format=short
             type=raw,value=latest,enable={{is_default_branch}}
-          labels: |
-            org.opencontainers.image.title=Kates Backend
-            org.opencontainers.image.description=Kafka Advanced Testing & Engineering Suite
+          # `annotations`, not `labels`: this job merges manifests, it does not
+          # build images, so a `labels:` block here was computed and never
+          # consumed by any step — dead config that read like working config.
+          annotations: |
+            org.opencontainers.image.title=${{ steps.describe.outputs.title }}
+            org.opencontainers.image.description=${{ steps.describe.outputs.description }}
             org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.version=${{ needs.meta.outputs.version }}
 
       - name: Collect per-platform image refs
@@ -208,9 +244,21 @@ jobs:
           echo "sources=${SOURCES}" >> "$GITHUB_OUTPUT"
 
       - name: Create and push multi-arch manifests
+        env:
+          ANNOTATIONS: ${{ steps.docker-meta.outputs.annotations }}
         run: |
+          set -euo pipefail
           PLATFORMS="${{ needs.meta.outputs.platforms }}"
           TAGS=$(echo '${{ steps.docker-meta.outputs.tags }}')
+
+          # metadata-action emits one "index:key=value" per line (the prefix
+          # comes from DOCKER_METADATA_ANNOTATIONS_LEVELS). imagetools wants
+          # each as its own --annotation flag.
+          ANNOTATION_ARGS=()
+          while IFS= read -r a; do
+            [ -n "${a}" ] && ANNOTATION_ARGS+=(--annotation "${a}")
+          done <<< "${ANNOTATIONS}"
+          echo "Applying ${#ANNOTATION_ARGS[@]} index annotations"
 
           # Build source image list per registry
           IFS=',' read -ra PLATS <<< "${PLATFORMS}"
@@ -227,8 +275,15 @@ jobs:
               # Only process tags for this registry
               if [[ "${TAG}" == "${REPO}:"* ]]; then
                 echo "Creating manifest: ${TAG}"
-                docker manifest create "${TAG}" ${SOURCES}
-                docker manifest push "${TAG}"
+                # `docker buildx imagetools create`, not `docker manifest
+                # create`: the latter cannot write annotations at all (its only
+                # flags are --amend and --insecure), which is why every index
+                # we have published so far carries "annotations": null and
+                # every registry page is blank. imagetools also pushes as part
+                # of the same command, so no separate push step is needed.
+                docker buildx imagetools create \
+                  "${ANNOTATION_ARGS[@]}" \
+                  -t "${TAG}" ${SOURCES}
               fi
             done <<< "${TAGS}"
           done

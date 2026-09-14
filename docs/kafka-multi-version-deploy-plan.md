@@ -61,7 +61,7 @@ The list is not something the CLI has to know. The vendored operator chart carri
 STRIMZI_KAFKA_IMAGES
   4.2.0=quay.io/strimzi/kafka:1.1.0-kafka-4.2.0
   4.2.1=quay.io/strimzi/kafka:1.1.0-kafka-4.2.1
-  4.3.0=quay.io/strimzi/kafka:1.1.0-kafka-4.3.0
+  4.3.0=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1
 ```
 
 into the Cluster Operator Deployment. So the supported set is available **offline** (`helm template charts/strimzi-operator`, parse the env) and **live** (`kubectl get deploy strimzi-cluster-operator -o jsonpath` on the running operator). Both are the operator's own statement; neither is a table in Go. When the operator pin moves, the window moves with it and nothing else needs editing.

@@ -190,7 +190,7 @@ jobs:
           # ...while a registry port, an explicit tag and a digest all render.
           for ref in \
             'registry.internal:5000/kafka:1.1.0-kafka-4.3.0' \
-            'quay.io/strimzi/kafka:1.1.0-kafka-4.3.0' \
+            'quay.io/strimzi/kafka:1.2.0-kafka-4.3.1' \
             'quay.io/strimzi/kafka@sha256:0000000000000000000000000000000000000000000000000000000000000000'
           do
             if helm template mm2 charts/mirror-maker2 -n kafka --set "image=$ref" >/dev/null 2>&1; then
@@ -670,14 +670,41 @@ jobs:
               return keep
 
 
+          # The versions the chart DECLARES about itself: its own version
+          # (helm.sh/chart) and the Kafka line it tracks, which appVersion
+          # stamps onto every resource as app.kubernetes.io/version and
+          # .Values.version renders into spec.version. Their VALUES move every
+          # time the chart is cut or the Kafka pin advances — 4.3.0 -> 4.3.1 is
+          # a release, not a dropped key, and dropped keys are what this job
+          # exists to catch. The KEY itself is still compared: blank the value
+          # and a label that disappeared still reads as REMOVED.
+          #
+          # Nothing else named "version" is blanked. A per-connector
+          # spec.mirrors[].sourceConnector.version is a user's pin, not the
+          # chart's, so it is compared as written.
+          DECLARED_VERSION_KEYS = {"helm.sh/chart": "CHART-VERSION",
+                                   "app.kubernetes.io/version": "KAFKA-VERSION"}
+
+
           def scrub(node):
-              """The chart-version label changes by definition; nothing else may."""
+              """Declared versions change by definition; nothing else may."""
               if isinstance(node, dict):
-                  return {k: ("CHART-VERSION" if k == "helm.sh/chart" else scrub(v))
+                  return {k: (DECLARED_VERSION_KEYS[k]
+                              if k in DECLARED_VERSION_KEYS else scrub(v))
                           for k, v in node.items()}
               if isinstance(node, list):
                   return [scrub(v) for v in node]
               return node
+
+
+          def normalise(doc):
+              """scrub(), plus the one declared version that is a spec field
+              rather than a label."""
+              doc = scrub(doc)
+              spec = doc.get("spec")
+              if isinstance(spec, dict) and "version" in spec:
+                  spec["version"] = "KAFKA-VERSION"
+              return doc
 
 
           def flatten(node, path, out):
@@ -745,7 +772,7 @@ jobs:
               for doc in docs:
                   if doc.get("kind") == "KafkaUser":
                       continue
-                  flatten(scrub(doc), ident(doc), out)
+                  flatten(normalise(doc), ident(doc), out)
               return sorted(out)
 
           for line in missing(lines(old), lines(new)):
@@ -782,7 +809,7 @@ jobs:
                       rc = 1
 
               def without_acls(d):
-                  d = scrub(json.loads(json.dumps(d)))
+                  d = normalise(json.loads(json.dumps(d)))
                   ((d.get("spec") or {}).get("authorization") or {}).pop("acls", None)
                   return d
 

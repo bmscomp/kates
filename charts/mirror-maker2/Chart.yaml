@@ -7,7 +7,7 @@ type: application
 # silently at runtime.
 version: 0.4.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
-appVersion: "4.3.0"
+appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
 sources:

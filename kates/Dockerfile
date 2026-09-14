@@ -54,3 +54,18 @@ HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
   CMD curl -f http://localhost:8080/q/health/live || exit 1
 
 ENTRYPOINT ["java", "-jar", "quarkus-run.jar"]
+
+# Labels last: a LABEL change invalidates every following instruction in the
+# build cache, and descriptions get edited far more often than the app does.
+#
+# version/revision/created are deliberately NOT here. They change on every
+# commit, so baking them in would bust the cache constantly; CI supplies them
+# as index annotations at push time instead.
+LABEL org.opencontainers.image.title="kates" \
+      org.opencontainers.image.description="Kates backend — a Kubernetes-native platform for performance testing, chaos engineering and operational resilience auditing of Apache Kafka clusters. Bundles the Quarkus REST/gRPC API server and the kates CLI on the PATH. Runs as non-root, serves on port 8080, liveness at /q/health/live." \
+      org.opencontainers.image.source="https://github.com/bmscomp/kates" \
+      org.opencontainers.image.url="https://github.com/bmscomp/kates" \
+      org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/registry/kates.md" \
+      org.opencontainers.image.vendor="bmscomp" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="docker.io/library/eclipse-temurin:21-jre"

@@ -345,7 +345,24 @@ func checkForeignSymlink(dst string, lstat func(string) (os.FileInfo, error), re
 		return nil
 	}
 	target, err := resolve(dst)
-	if err != nil || filepath.Dir(target) == filepath.Dir(dst) {
+	if err != nil {
+		return nil
+	}
+	// Compare the two directories RESOLVED, not as written.
+	//
+	// macOS reaches most paths through a symlinked ancestor — /var is a symlink
+	// to /private/var, /tmp to /private/tmp — so resolve() returns
+	// /private/var/…/bin/kates for a link whose own parent is spelled
+	// /var/…/bin. Comparing those strings said "different directory" for a
+	// symlink sitting right next to its target, and `kates upgrade` refused the
+	// install claiming another package owned the binary. Resolving both sides
+	// makes the comparison about the directory itself rather than the route
+	// taken to it.
+	dstDir := filepath.Dir(dst)
+	if resolved, rerr := resolve(dstDir); rerr == nil {
+		dstDir = resolved
+	}
+	if filepath.Dir(target) == dstDir {
 		return nil
 	}
 	fs := &foreignSymlink{Target: target}

@@ -14,7 +14,7 @@ replicas: 3
 # Pin by DIGEST in production, not by tag.
 #
 # A tag is a pointer someone can move. Re-point
-# quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 and the next rolling restart changes
+# quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 and the next rolling restart changes
 # the Kafka client version underneath a running mirror — which is the one
 # variable every compatibility rail in this chart exists to hold still. A
 # `@sha256:` digest is the content, so a restart cannot change it and the
@@ -23,7 +23,7 @@ replicas: 3
 # Left empty here because a digest is specific to the image you have verified;
 # a placeholder digest in a shared file is worse than none. Resolve and pin:
 #
-#   docker buildx imagetools inspect quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 \
+#   docker buildx imagetools inspect quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 \
 #     --format '{{ "{{" }}.Manifest.Digest{{ "}}" }}'
 #   # then, in your own values:
 #   image: "quay.io/strimzi/kafka@sha256:<digest>"

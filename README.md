@@ -15,7 +15,7 @@
     <a href="https://github.com/bmscomp/kates/releases/latest"><img src="https://img.shields.io/github/v/release/bmscomp/kates?label=release&logo=github" alt="Release" /></a>
     <img src="https://img.shields.io/badge/CLI-Go%201.25-00ADD8?logo=go&logoColor=white" alt="Go" />
     <img src="https://img.shields.io/badge/Backend-Quarkus%203.15-4695EB?logo=quarkus&logoColor=white" alt="Quarkus" />
-    <img src="https://img.shields.io/badge/Kafka-4.3.0%20KRaft-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
+    <img src="https://img.shields.io/badge/Kafka-4.3.1%20KRaft-231F20?logo=apachekafka&logoColor=white" alt="Kafka" />
     <img src="https://img.shields.io/badge/Charts-Helm-0F1689?logo=helm&logoColor=white" alt="Helm" />
   </p>
 </div>
@@ -161,18 +161,18 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.4.0 | 3.3.0 | Apicurio Registry (KafkaSQL) backed by the in-repo kafka-cluster chart |
-| [`connect-cluster`](charts/connect-cluster/) | 1.3.1 | 3.6.0 | A Helm chart for deploying Strimzi Kafka Connect clusters |
+| [`connect-cluster`](charts/connect-cluster/) | 1.3.2 | 3.6.2 | A Helm chart for deploying Strimzi Kafka Connect clusters |
 | [`headlamp`](charts/headlamp/) | 0.2.0 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
-| [`kafka-cluster`](charts/kafka-cluster/) | 0.4.0 | 4.3.0 | Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability |
+| [`kafka-cluster`](charts/kafka-cluster/) | 0.4.0 | 4.3.1 | Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability |
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
 | [`kates-chaos`](charts/kates-chaos/) | 2.0.0 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
 | [`kates-platform`](charts/kates-platform/) | 0.6.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
 | [`kates`](charts/kates/) | 0.7.0 | 1.22.0 | Kates — Kafka Advanced Testing & Engineering Suite |
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.0 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source Strimzi cannot deploy |
 | [`minio`](charts/minio/) | 17.0.22 | 2025.7.23 | MinIO(R) is an object storage server, compatible with Amazon S3 cloud |
-| [`mirror-maker2`](charts/mirror-maker2/) | 0.4.0 | 4.3.0 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
+| [`mirror-maker2`](charts/mirror-maker2/) | 0.4.0 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
 | [`monitoring`](charts/monitoring/) | 1.1.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
-| [`strimzi-operator`](charts/strimzi-operator/) | 0.2.0 | 1.1.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
+| [`strimzi-operator`](charts/strimzi-operator/) | 0.2.0 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
 | [`velero`](charts/velero/) | 11.3.3 | 1.17.1 | A Helm chart for velero |
 <!-- chart-table:end -->
 

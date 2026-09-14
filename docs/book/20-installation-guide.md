@@ -268,7 +268,7 @@ The chart ships with sensible defaults in `values.yaml`, but you should review k
 ```yaml
 clusterName: krafter       # Name of the Kafka cluster
 kafkaVersion: "4.3.0"      # Apache Kafka version
-strimziVersion: "1.1.0"   # Strimzi operator version
+strimziVersion: "1.2.0"   # Strimzi operator version
 ```
 
 **Broker pools — define one pool per availability zone:**

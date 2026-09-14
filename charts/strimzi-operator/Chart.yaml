@@ -7,7 +7,7 @@ version: 0.2.0
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
-appVersion: "1.1.0"
+appVersion: "1.2.0"
 description: The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
@@ -24,7 +24,7 @@ maintainers:
     url: https://github.com/bmscomp
 dependencies:
   - name: strimzi-kafka-operator
-    version: 1.1.0
+    version: 1.2.0
     repository: oci://quay.io/strimzi-helm
 annotations:
   artifacthub.io/category: streaming-messaging

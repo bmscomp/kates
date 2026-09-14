@@ -583,21 +583,34 @@ tester-build:  ## Build Kates Tester image and load into Kind
 	kind load docker-image kates-tester:latest --name $(CLUSTER_NAME) 2>/dev/null || true
 	@echo "✅ Kates Tester image built and available"
 
-connect-build:  ## Build the Kafka Connect image with enterprise plugins
-	@echo "🔌 Building Kafka Connect image with enterprise plugins..."
+connect-build:  ## Build the Kafka Connect image with its open-source connector plugins
+	@echo "🔌 Building Kafka Connect image with its open-source connector plugins..."
 	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -n1 | cut -d= -f2); \
 	TAG=$${DBZ_VERSION%.Final}; \
-	echo "  Debezium: $${DBZ_VERSION}  →  connect:$${TAG}"; \
+	KAFKA=$$(grep -E '^kafkaVersion:' charts/kafka-cluster/values.yaml | head -n1 | sed -E 's/.*"([^"]+)".*/\1/'); \
+	QUALIFIED=ghcr.io/bmscomp/connect:$${TAG}-kafka-$${KAFKA}; \
+	echo "  Debezium: $${DBZ_VERSION}  →  connect:$${TAG}  ($${QUALIFIED})"; \
 	docker build -t connect:$${TAG} -t connect:latest \
 		-t ghcr.io/bmscomp/connect:$${TAG} \
 		-t ghcr.io/bmscomp/connect:latest \
+		-t $${QUALIFIED} \
 		-f Dockerfile.connect . && \
 	if kind get clusters 2>/dev/null | grep -q "$(CLUSTER_NAME)"; then \
 		echo "Loading into Kind cluster ($(CLUSTER_NAME))..."; \
 		kind load docker-image connect:$${TAG} --name $(CLUSTER_NAME); \
+		kind load docker-image $${QUALIFIED} --name $(CLUSTER_NAME); \
 	fi && \
 	echo "✅ connect:$${TAG} built successfully" && \
-	echo "   Plugins: debezium-postgres, debezium-mysql, debezium-mongodb, debezium-sqlserver, debezium-oracle, debezium-db2, apicurio-converter, debezium-jdbc, debezium-scripting, aiven-jdbc"
+	echo "   Also tagged and loaded as $${QUALIFIED} — the tag charts/connect-cluster asks for." && \
+	echo "   Plugins: debezium-postgres, debezium-mysql, debezium-mongodb, debezium-sqlserver, apicurio-converter, debezium-jdbc, debezium-scripting, aiven-jdbc, aiven-s3-sink, aiven-s3-source"
+
+test-full:  ## Run every local check: guards, charts, unit tests, images, Connect and Kates smoke tests
+	scripts/full-local-test.sh $(PHASES)
+
+connect-smoke-test:  ## Boot the Connect image against throwaway Kafka + MinIO and verify it
+	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -n1 | cut -d= -f2); \
+	TAG=$${DBZ_VERSION%.Final}; \
+	scripts/connect-smoke-test.sh connect:$${TAG}
 
 connect-push:  ## Push the Kafka Connect image to $(REGISTRY)
 	@echo "🚀 Pushing Kafka Connect image to $(REGISTRY)..."

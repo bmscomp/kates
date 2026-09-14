@@ -11,6 +11,40 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
+// How many releases each version picker offers.
+//
+// The operator catalogue and a Kafka window are both open-ended lists; these
+// are the cut-offs that keep either select readable in a 24-line terminal.
+// Neither restricts what can be deployed — --strimzi-version and
+// --kafka-version still take any version the operator supports, and the
+// pickers say so in their descriptions.
+const (
+	operatorPickerLimit = 10
+	kafkaPickerLimit    = 5
+)
+
+// recentCatalogueEntries returns at most limit entries from the catalogue,
+// newest first, skipping versions already offered (the pin) and anything whose
+// version does not parse. FetchCatalogue sorts newest-first, so this only has
+// to skip and count. Skipping does not cost a slot: the list is still limit
+// long when the pin is somewhere inside it.
+func recentCatalogueEntries(entries []strimzi.CatalogueEntry, skip map[string]bool, limit int) []strimzi.CatalogueEntry {
+	out := make([]strimzi.CatalogueEntry, 0, limit)
+	for _, e := range entries {
+		if len(out) >= limit {
+			break
+		}
+		if skip[e.Version] {
+			continue
+		}
+		if _, err := kafkaversion.Parse(e.Version); err != nil {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // runVersionPickerForm is the interactive "Versions" group of kates deploy -i
 // (multi-version plan §3.4): scope, operator version, then a Kafka version
 // whose options are exactly the chosen operator's window.
@@ -26,21 +60,22 @@ func runVersionPickerForm() error {
 		deployKafkaVersion = "latest"
 	}
 
-	// Operator options: the pin first, then whatever the catalogue lists
+	// Operator options: the pin first, then the newest published releases
 	// (with a short deadline — a picker must not hang on the network).
+	//
+	// Bounded on purpose. The catalogue carries every chart Strimzi ever
+	// published, and a select that long buries the choice anyone actually
+	// wants below a scroll. operatorPickerLimit releases is about a year of
+	// Strimzi; older than that is a migration rather than a deploy, since it
+	// falls outside the Kafka window this platform's primary needs and would
+	// only be refused later in resolution.
 	opOptions := []huh.Option[string]{huh.NewOption(pin+"  (pinned — tested with this release)", pin)}
 	seen := map[string]bool{pin: true}
 	if cacheDir, cerr := strimzi.DefaultCacheDir(); cerr == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		if cat, ferr := strimzi.FetchCatalogue(ctx, defaultRunner, cacheDir, false); ferr == nil {
-			for _, e := range cat.Entries {
-				if seen[e.Version] {
-					continue
-				}
-				if _, perr := kafkaversion.Parse(e.Version); perr != nil {
-					continue
-				}
+			for _, e := range recentCatalogueEntries(cat.Entries, seen, operatorPickerLimit) {
 				label := e.Version
 				if cmp, _ := compareVersions(e.Version, pin); cmp > 0 {
 					label += "  (newer than pinned — untested)"
@@ -66,7 +101,7 @@ func runVersionPickerForm() error {
 		}
 		newest, _ := vp.chart.Window.Newest()
 		opts := []huh.Option[string]{huh.NewOption(fmt.Sprintf("%s  (newest supported by Strimzi %s)", newest, vp.StrimziVersion), "latest")}
-		for i := len(vp.chart.Window) - 2; i >= 0; i-- {
+		for i := len(vp.chart.Window) - 2; i >= 0 && len(opts) < kafkaPickerLimit; i-- {
 			v := vp.chart.Window[i]
 			label := v.String()
 			if fl, ferr := kafkaFloor("."); ferr == nil && fl != (kafkaversion.Version{}) && v.Less(fl) {
@@ -90,14 +125,14 @@ func runVersionPickerForm() error {
 
 			huh.NewSelect[string]().
 				Title("Strimzi operator version").
-				Description("The window of Kafka versions follows from this choice.").
+				Description(fmt.Sprintf("The %d newest published releases; the Kafka window follows from this choice. --strimzi-version takes any other.", operatorPickerLimit)).
 				Options(opOptions...).
 				Value(&deployStrimziVersion),
 
 			huh.NewSelect[string]().
 				Title("Kafka version for the primary cluster").
 				DescriptionFunc(func() string {
-					return "Versions Strimzi " + deployStrimziVersion + " can run. Others are additional clusters (kates migrate up --from …)."
+					return fmt.Sprintf("The %d newest Strimzi %s can run. Older ones are additional clusters (kates migrate up --from …), or --kafka-version.", kafkaPickerLimit, deployStrimziVersion)
 				}, &deployStrimziVersion).
 				OptionsFunc(kafkaOptions, &deployStrimziVersion).
 				Value(&deployKafkaVersion),
