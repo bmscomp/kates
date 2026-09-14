@@ -15,7 +15,7 @@ extraLabels: {}
 
 # -- Test images used in Helm test pods
 testImages:
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
 
 # -- Connector plugins the Helm test asserts the running worker offers.
 #
