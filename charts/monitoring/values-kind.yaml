@@ -70,10 +70,38 @@ kube-prometheus-stack:
       image:
         tag: v0.79.2
         pullPolicy: IfNotPresent
+    # Off for kind on purpose.
+    #
+    # These are pre-install/post-install Jobs that generate the webhook's TLS
+    # certificate, and Helm annotates them "before-hook-creation" — so every
+    # install issues a DELETE of the ServiceAccount before creating it. Since
+    # kubeadm 1.29 the admin kubeconfig no longer carries system:masters (it
+    # carries kubeadm:cluster-admins, which goes through RBAC like anyone
+    # else), so where that binding is missing the DELETE is refused and takes
+    # the whole deploy down with it:
+    #
+    #   Error: failed pre-install: serviceaccounts
+    #   "monitoring-kube-prometheus-admission" is forbidden: User
+    #   "kubernetes-admin" cannot delete resource "serviceaccounts"
+    #
+    # The webhook only validates PrometheusRule objects at admission time, and
+    # the rules this chart ships are already valid, so a local lab loses
+    # nothing. Real clusters keep it: values-generic.yaml inherits the enabled
+    # default from values.yaml.
     admissionWebhooks:
+      enabled: false
       patch:
+        enabled: false
         image:
           pullPolicy: IfNotPresent
+    # tls goes with it. The operator's HTTPS listener is served from the cert
+    # those hooks generate, and its Deployment mounts that Secret by name — so
+    # turning the hooks off while leaving tls on leaves the operator mounting a
+    # Secret nothing creates, and the pod never starts. Its ServiceMonitor
+    # reads the same Secret for the CA. Plain HTTP costs nothing here: the
+    # endpoint is the operator's own metrics, inside the cluster.
+    tls:
+      enabled: false
 
   kube-state-metrics:
     image:

@@ -2,13 +2,13 @@
 
 > For complete Kafka Connect architecture, CDC pipelines, connector lifecycle, and operational procedures, see [Kafka Connect & CDC Pipelines](book/21-kafka-connect.md).
 
-Production-ready Kafka Connect image with pre-installed CDC, Schema Registry, and JDBC connectors for enterprise data integration pipelines.
+Production-ready Kafka Connect image with pre-installed CDC, Schema Registry, JDBC and S3 connectors for data integration pipelines.
 
 ## Quick Start
 
 ```bash
 # Pull from GHCR
-docker pull ghcr.io/bmscomp/connect:3.6.0
+docker pull ghcr.io/bmscomp/connect:3.6.2
 
 # Or build locally
 make connect-build
@@ -18,7 +18,7 @@ make connect-build
 
 | Property | Value |
 |----------|-------|
-| **Base Image** | `quay.io/strimzi/kafka:1.1.0-kafka-4.3.0` |
+| **Base Image** | `quay.io/strimzi/kafka:1.2.0-kafka-4.3.1` |
 | **Kafka Version** | 4.3.0 |
 | **Strimzi Version** | 1.1.0 |
 | **Architecture** | `linux/amd64`, `linux/arm64` |
@@ -35,16 +35,21 @@ make connect-build
 
 | Plugin | Version | Purpose |
 |--------|---------|---------|
-| **Debezium PostgreSQL** | 3.6.0.Final | CDC from PostgreSQL (logical replication) |
-| **Debezium MySQL** | 3.6.0.Final | CDC from MySQL/MariaDB (binlog) |
-| **Debezium MongoDB** | 3.6.0.Final | CDC from MongoDB (change streams) |
-| **Debezium SQL Server** | 3.6.0.Final | CDC from SQL Server (CT tables) |
-| **Debezium Oracle** | 3.6.0.Final | CDC from Oracle (LogMiner/XStream) |
-| **Debezium Db2** | 3.6.0.Final | CDC from IBM Db2 (ASN capture) |
-| **Debezium Scripting** | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
+| **Debezium PostgreSQL** | 3.6.2.Final | CDC from PostgreSQL (logical replication) |
+| **Debezium MySQL** | 3.6.2.Final | CDC from MySQL/MariaDB (binlog) |
+| **Debezium MongoDB** | 3.6.2.Final | CDC from MongoDB (change streams) |
+| **Debezium SQL Server** | 3.6.2.Final | CDC from SQL Server (CT tables) |
+| **Debezium Scripting** | 3.6.2.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
 | **Apicurio Registry Converter** | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
-| **Debezium JDBC Sink** | 3.6.0.Final | Upsert sink for SQL databases |
+| **Debezium JDBC Sink** | 3.6.2.Final | Upsert sink for SQL databases |
 | **Aiven JDBC** | 6.10.0 | Generic JDBC source (table polling) and sink |
+| **Aiven S3 Sink** | 3.4.3 | Archive topics to Amazon S3 (JSON, Avro, Parquet, CSV) |
+| **Aiven S3 Source** | 3.4.3 | Replay S3 objects back into Kafka topics |
+
+> **JDBC drivers included:** PostgreSQL, MySQL, MariaDB, SQL Server, SQLite and
+> Snowflake. Oracle is not supported — its driver is closed source, so it is removed
+> from both JDBC plugins to keep the image fully open source. Layer `ojdbc11` into
+> `/opt/kafka/plugins/aiven-jdbc/` yourself if you need it.
 
 ## Building the Image
 

@@ -89,6 +89,36 @@ func TestCheckPathShadow(t *testing.T) {
 
 // Installing over a Homebrew symlink writes into the Cellar: the formula's
 // own binary is replaced, and its next upgrade silently undoes the install.
+// A symlink beside its target is fine even when the directory holding both is
+// reached through a symlinked ancestor. This is the ordinary case on macOS,
+// where /var -> /private/var and /tmp -> /private/tmp: every t.TempDir() path,
+// and many real install directories, are spelled one way and resolve another.
+// Comparing the two directory strings unresolved made checkForeignSymlink call
+// such a link foreign, so `kates upgrade` refused to install over a binary
+// nobody else owned — a failure that could only be seen on a Mac.
+func TestCheckForeignSymlinkThroughSymlinkedAncestor(t *testing.T) {
+	root := t.TempDir()
+	realBin := filepath.Join(root, "real", "bin")
+	if err := os.MkdirAll(realBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(realBin, "kates")
+	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(bin, filepath.Join(realBin, "kates-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+
+	via := filepath.Join(root, "alias", "bin", "kates-link")
+	if fs := checkForeignSymlink(via, os.Lstat, filepath.EvalSymlinks); fs != nil {
+		t.Fatalf("a sibling symlink reached through a symlinked ancestor was reported as foreign: %+v", fs)
+	}
+}
+
 func TestCheckForeignSymlink(t *testing.T) {
 	dir := t.TempDir()
 	cellar := filepath.Join(dir, "Cellar", "kates", "1.21.0", "bin")

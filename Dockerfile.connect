@@ -1,4 +1,4 @@
-FROM quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 AS base
+FROM quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 AS base
 # ─── Stage 1: Download connector plugins ─────────────────────────────────────
 #
 # This stage downloads all enterprise connector plugins from Maven Central
@@ -8,10 +8,11 @@ FROM quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 AS base
 #
 FROM eclipse-temurin:21-jre-alpine AS download
 
-ARG DEBEZIUM_VERSION=3.6.0.Final
+ARG DEBEZIUM_VERSION=3.6.2.Final
 ARG APICURIO_VERSION=3.3.0
 ARG GROOVY_VERSION=5.0.7
 ARG AIVEN_JDBC_VERSION=6.10.0
+ARG AIVEN_S3_VERSION=3.4.3
 
 RUN apk add --no-cache curl tar
 
@@ -41,61 +42,117 @@ RUN mkdir -p debezium-sqlserver && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-sqlserver/${DEBEZIUM_VERSION}/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz" \
     | tar -xz -C debezium-sqlserver --strip-components=1
 
-# Oracle — CDC via Oracle LogMiner or XStream
-# Note: The Oracle JDBC driver (ojdbc11.jar) is not included due to licensing.
-# Users must provide it separately or download it at runtime.
-RUN mkdir -p debezium-oracle && \
-    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-oracle/${DEBEZIUM_VERSION}/debezium-connector-oracle-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-    | tar -xz -C debezium-oracle --strip-components=1
-
-# Db2 — CDC via IBM Db2 ASN capture
-RUN mkdir -p debezium-db2 && \
-    curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-db2/${DEBEZIUM_VERSION}/debezium-connector-db2-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-    | tar -xz -C debezium-db2 --strip-components=1
-
 # JDBC Sink Connector — Write events to relational databases
+#
+# The plugin archive bundles ojdbc11 (Oracle's driver, binary-only under Oracle's
+# free-use terms — free to redistribute, but not open source). It is deleted so
+# this image stays entirely open source; see the matching note on aiven-jdbc.
+# Drivers for PostgreSQL, MySQL, MariaDB and SQL Server stay.
 RUN mkdir -p debezium-jdbc && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jdbc/${DEBEZIUM_VERSION}/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-    | tar -xz -C debezium-jdbc --strip-components=1
+    | tar -xz -C debezium-jdbc --strip-components=1 && \
+    rm -f debezium-jdbc/ojdbc*.jar
 
 # ── Aiven JDBC Source/Sink Connector ─────────────────────────────────────────
 # Generic JDBC source (io.aiven.connect.jdbc.JdbcSourceConnector) that polls
 # relational tables into Kafka topics, plus a matching sink. Not published to
 # Maven Central — Aiven attaches release archives to GitHub releases only
 # (plain .tar, not gzipped).
+#
+# The archive bundles ojdbc8 alongside the open-source drivers. Oracle's JDBC
+# driver ships as a binary under the Oracle Free Use Terms — free of charge and
+# free to redistribute, but with no source and no OSI licence, so it is the one
+# thing that would make this image not open source. It is removed here; Oracle
+# is not a supported target for this image. Anyone who needs it can layer the
+# driver back in:
+#
+#     FROM ghcr.io/bmscomp/connect:3.6.2
+#     ARG OJDBC=https://repo1.maven.org/maven2/com/oracle/database/jdbc/ojdbc11/23.26.1.0.0/ojdbc11-23.26.1.0.0.jar
+#     ADD --chown=1001:1001 ${OJDBC} /opt/kafka/plugins/aiven-jdbc/
+#
+# The connectors' own Oracle dialect classes are harmless without a driver: they
+# are selected from the JDBC URL, so an Oracle URL now fails at connection time
+# with "No suitable driver" instead of half-working.
 RUN mkdir -p aiven-jdbc && \
     curl -sfL "https://github.com/Aiven-Open/jdbc-connector-for-apache-kafka/releases/download/v${AIVEN_JDBC_VERSION}/jdbc-connector-for-apache-kafka-${AIVEN_JDBC_VERSION}.tar" \
-    | tar -x -C aiven-jdbc --strip-components=1
+    | tar -x -C aiven-jdbc --strip-components=1 && \
+    rm -f aiven-jdbc/ojdbc*.jar
+
+# ── Aiven S3 Sink / Source Connectors ────────────────────────────────────────
+# Archive Kafka topics to Amazon S3 and replay S3 objects back into Kafka.
+# Apache-2.0 throughout — the connectors themselves, the AWS SDK for Java v2
+# they bundle, and the rest of the archive. Confluent's kafka-connect-s3 is
+# source-available under the Confluent Community Licence instead: redistribution
+# is allowed, but it carries a competing-hosted-service restriction that this
+# image would pass on to everyone who pulls it. Same release-archive shape as
+# the JDBC connector above: plain .tar, one top-level directory.
+#
+# Sink and source ship as separate archives that each bundle their own copy of
+# the shared commons jars, so they get separate plugin directories. Putting
+# them in one directory would leave duplicate classes on the same plugin path.
+RUN mkdir -p aiven-s3-sink && \
+    curl -sfL "https://github.com/Aiven-Open/cloud-storage-connectors-for-apache-kafka/releases/download/v${AIVEN_S3_VERSION}/s3-sink-connector-for-apache-kafka-${AIVEN_S3_VERSION}.tar" \
+    | tar -x -C aiven-s3-sink --strip-components=1
+
+# The source release archive also ships its dependencies *exploded*: about 34k
+# loose .class files and resources sitting next to the jars. Every one of them
+# already exists inside a bundled jar — verified entry by entry against the
+# 3.4.3 archive, zero unique paths — so they are pure duplication. Dropping them
+# takes the plugin directory from ~300 MB to ~65 MB and keeps a second,
+# unversioned copy of Avro, Hadoop and the AWS SDK off the plugin classpath.
+# Licence and notice texts are kept.
+RUN mkdir -p aiven-s3-source && \
+    curl -sfL "https://github.com/Aiven-Open/cloud-storage-connectors-for-apache-kafka/releases/download/v${AIVEN_S3_VERSION}/s3-source-connector-for-apache-kafka-${AIVEN_S3_VERSION}.tar" \
+    | tar -x -C aiven-s3-source --strip-components=1 && \
+    cd aiven-s3-source && \
+    for entry in *; do \
+        case "$entry" in \
+            *.jar|LICENSE*|NOTICE*|licenses|notices) ;; \
+            *) rm -rf "$entry" ;; \
+        esac; \
+    done
 
 # ── Apicurio Schema Registry Integration ─────────────────────────────────────
 # Apicurio converters enable schema governance with Avro, JSON Schema, and
 # Protobuf serialization. Required when connecting to Apicurio Registry.
+#
+# Use Apicurio's Connect-converter distribution, not the bare serde jars: it
+# ships the converters together with every dependency they import (the Apicurio
+# Java SDK, Avro, Protobuf, Jackson, netty). Downloading the four serde jars on
+# their own left every import unresolved, so Connect logged a LinkageError per
+# converter during the plugin scan and started without any of them — a failure
+# invisible to the build. The archive is flat, so no --strip-components.
 RUN mkdir -p apicurio-converter && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-utils-converter/${APICURIO_VERSION}/apicurio-registry-utils-converter-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-utils-converter.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-avro-serde-kafka/${APICURIO_VERSION}/apicurio-registry-avro-serde-kafka-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-avro-serde-kafka.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-jsonschema-serde-kafka/${APICURIO_VERSION}/apicurio-registry-jsonschema-serde-kafka-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-jsonschema-serde-kafka.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-protobuf-serde-kafka/${APICURIO_VERSION}/apicurio-registry-protobuf-serde-kafka-${APICURIO_VERSION}.jar" \
-    -o apicurio-converter/apicurio-registry-protobuf-serde-kafka.jar
+    curl -sfL "https://repo1.maven.org/maven2/io/apicurio/apicurio-registry-distro-connect-converter/${APICURIO_VERSION}/apicurio-registry-distro-connect-converter-${APICURIO_VERSION}.tar.gz" \
+    | tar -xz -C apicurio-converter
 
 # Debezium Scripting SMT and Groovy JSR-223 Engine
+#
+# The scripting archive holds the SMT and nothing else. Alone on its own plugin
+# path it cannot resolve the Debezium runtime classes it compiles against
+# (io.debezium.config.EnumeratedValue, io.debezium.metadata.ConfigDescriptor,
+# ...), so Connect dropped both transformations during the plugin scan and
+# started without them. Debezium 3.6 splits that runtime across small modules —
+# there is no debezium-core artifact any more — so pull the same four a
+# connector plugin directory carries.
 RUN mkdir -p debezium-scripting && \
     curl -sfL "https://repo1.maven.org/maven2/io/debezium/debezium-scripting/${DEBEZIUM_VERSION}/debezium-scripting-${DEBEZIUM_VERSION}.tar.gz" \
     | tar -xz -C debezium-scripting --strip-components=1 && \
-    curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/groovy/${GROOVY_VERSION}/groovy-${GROOVY_VERSION}.jar" \
-    -o debezium-scripting/groovy-${GROOVY_VERSION}.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-jsr223/${GROOVY_VERSION}/groovy-jsr223-${GROOVY_VERSION}.jar" \
-    -o debezium-scripting/groovy-jsr223-${GROOVY_VERSION}.jar && \
-    curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-json/${GROOVY_VERSION}/groovy-json-${GROOVY_VERSION}.jar" \
-    -o debezium-scripting/groovy-json-${GROOVY_VERSION}.jar
+    for jar in groovy groovy-jsr223 groovy-json; do \
+        curl -sfL "https://repo1.maven.org/maven2/org/apache/groovy/${jar}/${GROOVY_VERSION}/${jar}-${GROOVY_VERSION}.jar" \
+        -o "debezium-scripting/${jar}-${GROOVY_VERSION}.jar"; \
+    done && \
+    for jar in debezium-api debezium-config debezium-util debezium-connector-common; do \
+        curl -sfL "https://repo1.maven.org/maven2/io/debezium/${jar}/${DEBEZIUM_VERSION}/${jar}-${DEBEZIUM_VERSION}.jar" \
+        -o "debezium-scripting/${jar}-${DEBEZIUM_VERSION}.jar"; \
+    done
 
 # ─── Stage 2: Final production image ─────────────────────────────────────────
 FROM base
 
-ARG DEBEZIUM_VERSION=3.6.0.Final
+ARG DEBEZIUM_VERSION=3.6.2.Final
 ARG AIVEN_JDBC_VERSION=6.10.0
+ARG AIVEN_S3_VERSION=3.4.3
 
 USER root:root
 COPY --from=download /plugins/ /opt/kafka/plugins/
@@ -103,12 +160,17 @@ USER 1001
 
 # ─── OCI Image Labels (https://github.com/opencontainers/image-spec) ─────────
 LABEL org.opencontainers.image.title="connect"
-LABEL org.opencontainers.image.description="Enterprise Kafka Connect image with Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server, Oracle, Db2), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), Debezium JDBC Sink, and Aiven JDBC source/sink. Built on Strimzi Kafka 4.3.0."
+LABEL org.opencontainers.image.description="Kafka Connect image with fully open-source Debezium CDC (PostgreSQL, MySQL, MongoDB, SQL Server), Apicurio Schema Registry (Avro, JSON Schema, Protobuf), Debezium JDBC Sink, Aiven JDBC source/sink, and Aiven S3 sink/source. Built on Strimzi Kafka 4.3.1."
 LABEL org.opencontainers.image.source="https://github.com/bmscomp/kates"
 LABEL org.opencontainers.image.url="https://github.com/bmscomp/kates/pkgs/container/connect"
 LABEL org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/kafka-connect.md"
 LABEL org.opencontainers.image.vendor="bmscomp"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.base.name="quay.io/strimzi/kafka:1.1.0-kafka-4.3.0"
+# Every bundled jar is open source, but not all of it is Apache-2.0: the JDBC
+# drivers and a few transitive dependencies bring MIT, BSD, LGPL, CDDL/EPL and
+# (for MySQL Connector/J) GPLv2-with-FOSS-exception terms. The OCI spec wants the
+# licences of the software actually contained in the image, so list them all.
+LABEL org.opencontainers.image.licenses="Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND LGPL-2.1-or-later AND CDDL-1.0 AND CDDL-1.1 AND EPL-2.0 AND (GPL-2.0-only WITH Universal-FOSS-exception-1.0)"
+LABEL org.opencontainers.image.base.name="quay.io/strimzi/kafka:1.2.0-kafka-4.3.1"
 LABEL io.debezium.version="${DEBEZIUM_VERSION}"
 LABEL io.aiven.jdbc.version="${AIVEN_JDBC_VERSION}"
+LABEL io.aiven.s3.version="${AIVEN_S3_VERSION}"

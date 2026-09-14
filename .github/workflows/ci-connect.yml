@@ -53,20 +53,28 @@ jobs:
           cache-from: type=gha,scope=connect-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=connect-${{ matrix.arch }}
 
-      - name: Verify plugins are present
+      # Counting jars proved nothing. A plugin directory can hold forty jars that
+      # cannot resolve their own imports: Connect logs a LinkageError during the
+      # scan, starts without the plugin, and this step still printed a green
+      # tick. Both the Apicurio converters and the Debezium scripting SMTs
+      # shipped broken that way. Boot the image instead and move a record
+      # through it.
+      - name: Integration test (boot the image and use it)
         if: matrix.arch == 'amd64'
         run: |
           docker buildx build --load \
             -t connect:verify \
             -f Dockerfile.connect .
-
-          echo "=== Connector Plugins ==="
-          docker run --rm --entrypoint sh connect:verify -c \
-            'for d in /opt/kafka/plugins/*/; do
-               echo "✅ $(basename $d) ($(ls $d/*.jar 2>/dev/null | wc -l) JARs)"
-             done'
-
-          echo ""
-          echo "=== Debezium Version Check ==="
-          docker run --rm --entrypoint sh connect:verify -c \
-            'ls /opt/kafka/plugins/debezium-postgres/debezium-connector-postgres-*.jar'
+          # Exit 75 is the suite saying it could not RUN — a fixture image that
+          # would not pull. That is a registry having a bad day (quay.io served
+          # 504s through one of these runs), not a defect in the image, so give
+          # it one more go before calling the build red. Every other non-zero
+          # exit is a finding and fails the job immediately.
+          rc=0
+          scripts/connect-smoke-test.sh connect:verify || rc=$?
+          if [ "$rc" -eq 75 ]; then
+            echo "::warning::fixture images were unavailable; retrying the smoke test once"
+            scripts/connect-smoke-test.sh connect:verify
+          else
+            exit "$rc"
+          fi

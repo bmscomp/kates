@@ -444,7 +444,7 @@ helm rollback connect-cluster -n kafka
 # Or pin to previous image
 helm upgrade connect-cluster charts/connect-cluster \
   --namespace kafka --reuse-values \
-  --set image=ghcr.io/bmscomp/connect:3.6.0
+  --set image=ghcr.io/bmscomp/connect:3.6.2
 ```
 
 ::: {.callout-warning}

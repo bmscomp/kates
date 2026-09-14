@@ -46,9 +46,20 @@ kube-prometheus-stack:
       image:
         tag: v0.79.2
         pullPolicy: IfNotPresent
+    # kube-prometheus-stack reads this under prometheusOperator, not at the top
+    # level of the subchart — a second copy used to sit beside kube-state-metrics
+    # where the chart never looked at it, so its enabled and tag settings did
+    # nothing at all.
     admissionWebhooks:
-      patch:
+      enabled: true
+      deployment:
         image:
+          tag: v0.79.2
+          pullPolicy: IfNotPresent
+      patch:
+        enabled: true
+        image:
+          tag: v1.6.5
           pullPolicy: IfNotPresent
 
   alertmanager:
@@ -66,18 +77,6 @@ kube-prometheus-stack:
     image:
       tag: v1.8.2
       pullPolicy: IfNotPresent
-
-  admissionWebhooks:
-    enabled: true
-    deployment:
-      image:
-        tag: v0.79.2
-        pullPolicy: IfNotPresent
-    patch:
-      enabled: true
-      image:
-        tag: v1.6.5
-        pullPolicy: IfNotPresent
 
   defaultRules:
     create: true

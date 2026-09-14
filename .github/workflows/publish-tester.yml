@@ -54,6 +54,12 @@ jobs:
       - name: Compute Docker metadata
         id: docker-meta
         uses: docker/metadata-action@v5
+        env:
+          # GHCR reads a multi-arch image's description from the INDEX's
+          # annotations, not from the per-platform config labels. This image
+          # already published correct labels and its package page was still
+          # blank — that is the proof there is no fallback between the two.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
         with:
           images: |
             ${{ env.DOCKERHUB_REPO }}
@@ -62,6 +68,23 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          # Without an explicit block, metadata-action derives title and
+          # description from the GITHUB REPOSITORY — so this image would
+          # describe itself as "kates". It is a different thing entirely.
+          #
+          # The two blocks below are deliberately duplicated rather than shared
+          # via a YAML anchor: GitHub Actions' workflow parser does not support
+          # anchors and aliases. Keep them in step when editing.
+          labels: |
+            org.opencontainers.image.title=kates-tester
+            org.opencontainers.image.description=Toolbox image for the Kates Helm charts — the container behind chart test hooks, CRD hook Jobs and in-cluster diagnostics. Ships kubectl, the Apache Kafka CLI scripts, kcat, jq, netcat and dig. It generates no load and runs no tests by itself.
+            org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0
+          annotations: |
+            org.opencontainers.image.title=kates-tester
+            org.opencontainers.image.description=Toolbox image for the Kates Helm charts — the container behind chart test hooks, CRD hook Jobs and in-cluster diagnostics. Ships kubectl, the Apache Kafka CLI scripts, kcat, jq, netcat and dig. It generates no load and runs no tests by itself.
+            org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -72,5 +95,7 @@ jobs:
           push: true
           tags: ${{ steps.docker-meta.outputs.tags }}
           labels: ${{ steps.docker-meta.outputs.labels }}
+          # This is the line that makes the description visible on GHCR.
+          annotations: ${{ steps.docker-meta.outputs.annotations }}
           cache-from: type=gha,scope=tester
           cache-to: type=gha,mode=max,scope=tester

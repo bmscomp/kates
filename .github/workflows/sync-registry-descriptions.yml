@@ -1,0 +1,119 @@
+name: Sync Registry Descriptions
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Publishes docs/registry/*.md as the Docker Hub "overview" for each image, and
+# the matching one-liner as the short description.
+#
+# Why this is a workflow of its own, rather than a job bolted onto the three
+# publish workflows:
+#
+#   * Docker Hub descriptions are CONTENT, not artefacts. Fixing a typo in an
+#     overview should not require cutting a release tag.
+#   * The three images are released on different triggers and cadences; their
+#     pages are not.
+#
+# Note the asymmetry with GHCR, which needs none of this: GHCR takes its
+# description from the image's index annotations (set at push time in the
+# publish workflows) and renders the linked REPOSITORY's README. It has no
+# per-package README and no API to set one. Docker Hub is the opposite — no
+# label mechanism at all, but 25,000 characters of per-image Markdown.
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/registry/*.md"
+      - ".github/workflows/sync-registry-descriptions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-registry-descriptions
+  cancel-in-progress: false
+
+jobs:
+  dockerhub:
+    name: Sync ${{ matrix.repo }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken README must not hide the state of the other two.
+      fail-fast: false
+      matrix:
+        include:
+          - repo: bmscomp/kates
+            readme: ./docs/registry/kates.md
+            short: "Kubernetes-native performance, chaos and resilience testing for Apache Kafka clusters"
+          - repo: bmscomp/connect
+            readme: ./docs/registry/connect.md
+            short: "Kafka Connect: Debezium CDC, Apicurio Registry, Aiven JDBC & S3, on Strimzi Kafka 4.3"
+          - repo: bmscomp/kates-tester
+            readme: ./docs/registry/kates-tester.md
+            short: "kubectl + Apache Kafka CLI toolbox behind the Kates Helm chart test hooks"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate description and overview
+        env:
+          SHORT: ${{ matrix.short }}
+          README: ${{ matrix.readme }}
+        run: |
+          set -euo pipefail
+
+          # Docker Hub's docs say the short description is limited to 100
+          # CHARACTERS; the sync action truncates at 100 BYTES and only warns
+          # in the run log. Those differ for any non-ASCII text — an em dash
+          # costs 3 bytes — so measure bytes and fail loudly rather than
+          # discovering a silently truncated sentence on the live page.
+          n=$(printf %s "${SHORT}" | wc -c)
+          echo "short description: ${n} bytes"
+          if [ "${n}" -gt 100 ]; then
+            echo "::error::short description is ${n} bytes, over Docker Hub's 100-byte limit"
+            exit 1
+          fi
+
+          test -f "${README}" || { echo "::error::${README} not found"; exit 1; }
+
+          # 25,000 is the documented maximum for full_description; the action
+          # truncates silently past it.
+          b=$(wc -c < "${README}")
+          echo "overview: ${b} bytes"
+          if [ "${b}" -gt 25000 ]; then
+            echo "::error::${README} is ${b} bytes, over Docker Hub's 25,000-byte limit"
+            exit 1
+          fi
+
+      - name: Sync description to Docker Hub
+        # Pinned by commit SHA, not tag. This action drives an UNDOCUMENTED
+        # endpoint (PATCH /v2/repositories/{ns}/{name}), on a legacy path
+        # family Docker is retiring — so an unreviewed tag moving under us is
+        # a real risk, not a theoretical one.
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          # A SEPARATE token from DOCKERHUB_TOKEN, which is used for image
+          # pushes. This endpoint needs read/write/delete scope; the push
+          # token should stay as narrow as possible.
+          password: ${{ secrets.DOCKERHUB_DESCRIPTION_TOKEN }}
+          repository: ${{ matrix.repo }}
+          short-description: ${{ matrix.short }}
+          readme-filepath: ${{ matrix.readme }}
+          # Rewrites relative links to absolute GitHub URLs. The pages use
+          # absolute URLs throughout anyway, because this also rewrites links
+          # inside fenced code blocks.
+          enable-url-completion: false
+
+      - name: Confirm the page is no longer empty
+        run: |
+          set -euo pipefail
+          # Public, unauthenticated read-back. Without this the job is green
+          # whenever the API accepts the call, whether or not anything landed.
+          json=$(curl -fsS "https://hub.docker.com/v2/repositories/${{ matrix.repo }}")
+          short=$(jq -r '.description // ""'      <<<"${json}")
+          full=$( jq -r '.full_description // ""' <<<"${json}")
+          echo "short: ${short}"
+          echo "overview: ${#full} chars"
+          [ -n "${short}" ] || { echo "::error::short description still empty"; exit 1; }
+          [ -n "${full}"  ] || { echo "::error::overview still empty";          exit 1; }

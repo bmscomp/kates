@@ -161,7 +161,7 @@ sequenceDiagram
 |---------|---------|---------|
 | `groupId` | `kates-connect-cluster` | All workers sharing this ID form a single cluster |
 | `replicas` | 3 (the CLI sets 1 with `--ha=false`; the dev overlay uses 1) | Number of worker pods |
-| `image` | `ghcr.io/bmscomp/connect:3.6.0` | Pre-built image with Debezium + Apicurio plugins |
+| `image` | `ghcr.io/bmscomp/connect:3.6.2` | Pre-built image with Debezium + Apicurio plugins |
 | `kafka.bootstrapServers` | `""` — computed as `<clusterName>-kafka-bootstrap.<ns>.svc:9092` (9093 when `kafka.tls.enabled`) | Connection to Kafka |
 | `version` | 4.3.0 | Kafka protocol version |
 
@@ -260,23 +260,24 @@ When a connector fails, Strimzi will restart it up to `maxRestarts` times with e
 
 ### The Connect Image
 
-The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.0`) bundles the following plugins:
+The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.2`) bundles the following plugins:
 
 | Plugin | Version | Use Case |
 |--------|---------|----------|
-| Debezium PostgreSQL | 3.6.0.Final | WAL-based CDC from PostgreSQL |
-| Debezium MySQL | 3.6.0.Final | Binlog-based CDC from MySQL |
-| Debezium MongoDB | 3.6.0.Final | Change stream CDC from MongoDB |
-| Debezium SQL Server | 3.6.0.Final | Change Tracking CDC from SQL Server |
-| Debezium Oracle | 3.6.0.Final | CDC from Oracle LogMiner/XStream |
-| Debezium Db2 | 3.6.0.Final | CDC from IBM Db2 ASN capture |
-| Debezium Scripting | 3.6.0.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
+| Debezium PostgreSQL | 3.6.2.Final | WAL-based CDC from PostgreSQL |
+| Debezium MySQL | 3.6.2.Final | Binlog-based CDC from MySQL |
+| Debezium MongoDB | 3.6.2.Final | Change stream CDC from MongoDB |
+| Debezium SQL Server | 3.6.2.Final | Change Tracking CDC from SQL Server |
+| Debezium Scripting | 3.6.2.Final | SMT for filtering and routing with Groovy 5 JSR-223 |
 | Apicurio Registry Converter | 3.3.0 | Schema Registry integration (Avro, JSON Schema, Protobuf) |
-| Debezium JDBC Sink | 3.6.0.Final | Upsert sink for SQL databases |
+| Debezium JDBC Sink | 3.6.2.Final | Upsert sink for SQL databases |
+| Aiven JDBC | 6.10.0 | Generic JDBC source (table polling) and sink |
+| Aiven S3 Sink | 3.4.3 | Archive topics to Amazon S3 (JSON, Avro, Parquet, CSV) |
+| Aiven S3 Source | 3.4.3 | Replay S3 objects back into Kafka topics |
 
 ### Extending the Image with Additional Plugins
 
-While the pre-built image contains the most common CDC connectors, you may need additional plugins (e.g., S3 Sink, Elasticsearch Sink). There are two ways to add plugins at runtime without rebuilding the Docker image:
+While the pre-built image contains the most common CDC connectors, you may need additional plugins (e.g., Elasticsearch Sink, Snowflake Sink). There are two ways to add plugins at runtime without rebuilding the Docker image:
 
 #### 1. Using Strimzi `spec.build` (Recommended)
 

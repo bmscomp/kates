@@ -163,7 +163,7 @@ Read it back:
 PW=$(kubectl -n "${KAFKA_NS}" get secret kates-mm2 -o jsonpath='{.data.password}' | base64 -d)
 
 kubectl -n "${KAFKA_NS}" run verify --rm -i --restart=Never \
-  --image=quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 \
+  --image=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 \
   --labels="kates.io/test-pod=true" --env=LOG_DIR=/tmp --command -- /bin/sh -c "
     echo security.protocol=SASL_PLAINTEXT > /tmp/c.properties
     echo sasl.mechanism=SCRAM-SHA-512 >> /tmp/c.properties

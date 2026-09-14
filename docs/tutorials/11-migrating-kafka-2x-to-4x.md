@@ -224,7 +224,7 @@ kubectl -n "${KAFKA_NS}" logs job/mm2-mirror-maker2-preflight
 ```
 
 ```text
-MirrorMaker 2 preflight — client quay.io/strimzi/kafka:1.1.0-kafka-4.3.0
+MirrorMaker 2 preflight — client quay.io/strimzi/kafka:1.2.0-kafka-4.3.1
 
 ══ source: legacy ── legacy-legacy-kafka-bootstrap.kafka-legacy-2x.svc.cluster.local:9092  [plaintext]
   ✅ HANDSHAKE broker answered ApiVersions to a 4.3.0 client
@@ -286,7 +286,7 @@ Read the records back off the 4.x cluster:
 PW=$(kubectl -n "${KAFKA_NS}" get secret kates-mm2 -o jsonpath='{.data.password}' | base64 -d)
 
 kubectl -n "${KAFKA_NS}" run verify --rm -i --restart=Never \
-  --image=quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 \
+  --image=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 \
   --labels="kates.io/test-pod=true" --env=LOG_DIR=/tmp --command -- /bin/sh -c "
     echo security.protocol=SASL_PLAINTEXT > /tmp/c.properties
     echo sasl.mechanism=SCRAM-SHA-512 >> /tmp/c.properties
@@ -310,7 +310,7 @@ one of them replays from the beginning or skips to the end.
 
 ```bash
 kubectl -n "${KAFKA_NS}" run offsets --rm -i --restart=Never \
-  --image=quay.io/strimzi/kafka:1.1.0-kafka-4.3.0 \
+  --image=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 \
   --labels="kates.io/test-pod=true" --env=LOG_DIR=/tmp --command -- /bin/sh -c "
     echo security.protocol=SASL_PLAINTEXT > /tmp/c.properties
     echo sasl.mechanism=SCRAM-SHA-512 >> /tmp/c.properties

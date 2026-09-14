@@ -17,12 +17,30 @@ extraLabels: {}
 testImages:
   kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
 
+# -- Connector plugins the Helm test asserts the running worker offers.
+#
+# A count is not enough. A plugin whose jars cannot resolve their own imports is
+# dropped during the worker's plugin scan and the worker starts regardless, so a
+# broken image passes every health check and simply does not offer the
+# connector. Naming them is what turns that into a test failure. Trim this list
+# in an overlay for a deployment that deliberately ships fewer plugins.
+tests:
+  expectedPlugins:
+    - io.debezium.connector.postgresql.PostgresConnector
+    - io.debezium.connector.mysql.MySqlConnector
+    - io.debezium.connector.mongodb.MongoDbConnector
+    - io.debezium.connector.sqlserver.SqlServerConnector
+    - io.debezium.connector.jdbc.JdbcSinkConnector
+    - io.aiven.connect.jdbc.JdbcSourceConnector
+    - io.aiven.kafka.connect.s3.AivenKafkaConnectS3SinkConnector
+    - io.aiven.kafka.connect.s3.source.S3SourceConnector
+
 # -- Number of Kafka Connect worker replicas
 replicas: 3
 # -- Kafka Connect image (leave empty to use Strimzi default)
-image: "ghcr.io/bmscomp/connect:3.6.0-kafka-4.3.0"
+image: "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1"
 # -- Kafka version
-version: "4.3.0"
+version: "4.3.1"
 # -- Group ID for the Connect cluster
 groupId: kates-connect-cluster
 
@@ -307,7 +325,7 @@ livenessProbe:
 build: {}
   # output:
   #   type: docker
-  #   image: "ghcr.io/bmscomp/connect:3.6.0-kafka-4.3.0"
+  #   image: "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1"
   #   pushSecret: my-registry-credentials
   # plugins:
   #   # --- Cloud Storage ---
@@ -355,7 +373,7 @@ build: {}
   #       - type: maven
   #         group: io.debezium
   #         artifact: debezium-connector-vitess
-  #         version: "3.6.0.Final"
+  #         version: "3.6.2.Final"
 
 # ── Metrics ─────────────────────────────────────────────────────────────────
 metricsConfig:

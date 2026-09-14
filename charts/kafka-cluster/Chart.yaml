@@ -7,7 +7,7 @@ type: application
 # operator policy handed to the strimzi-operator wrapper, share groups gated on
 # the Kafka version, extraLabels) and declares its Kafka floor.
 version: 0.4.0
-appVersion: "4.3.0"
+appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
 keywords:

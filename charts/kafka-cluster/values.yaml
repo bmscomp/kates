@@ -6,9 +6,9 @@ clusterName: krafter
 # Any x.y.z is accepted by the schema: whether the OPERATOR can run it is the
 # operator's and the CLI's check, not this chart's, so the chart stays usable
 # with a newer operator than the one pinned here.
-kafkaVersion: "4.3.0"
+kafkaVersion: "4.3.1"
 # -- Strimzi operator version this chart is aligned with (CRD hook + version checks)
-strimziVersion: "1.1.0"
+strimziVersion: "1.2.0"
 
 # -- Override the chart name used in labels and resource names
 nameOverride: ""
@@ -45,7 +45,7 @@ kafka:
   # Strimzi upgrade procedure: if left unset the operator auto-raises it to the
   # new version's default as soon as `kafkaVersion` changes, which forecloses
   # any rollback to the previous Kafka line. Raise to 4.3-IV0 in a follow-up
-  # once 4.3.0 is proven. Must stay >= 4.2-IV0 or share groups will not
+  # once the 4.3 line is proven. Must stay >= 4.2-IV0 or share groups will not
   # bootstrap on new clusters. Both forms are accepted: the short `4.2` (Kafka
   # resolves it to the newest 4.2-IVn; what the CLI passes) and the explicit
   # `4.2-IV1`. It can never be NEWER than kafkaVersion — the chart refuses to

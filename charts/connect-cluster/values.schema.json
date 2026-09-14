@@ -13,6 +13,17 @@
       "description": "Number of Kafka Connect worker replicas"
     },
     "image": { "type": "string" },
+    "tests": {
+      "type": "object",
+      "description": "Assertions the Helm test makes against the running Connect worker.",
+      "properties": {
+        "expectedPlugins": {
+          "type": "array",
+          "description": "Connector classes that must appear in GET /connector-plugins.",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "version": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
