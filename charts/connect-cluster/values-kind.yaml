@@ -1,23 +1,27 @@
 # Generic cluster overlay for connect-cluster
 # Disables components that require extra operators (like Prometheus CRDs)
 
-# Use the image built on this machine, not the registry.
+# The image is deliberately NOT overridden here. kind pulls the same published
+# image every other cluster runs — ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka>
+# from values.yaml. That tag is a release artefact, so it exists for the pins
+# this repo declares; check-versions.sh asserts the Debezium line in the pin is
+# the one Dockerfile.connect builds.
 #
-# charts/connect-cluster/values.yaml names the PUBLISHED tag
-# ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka>, and that tag exists only
-# once the publish workflow has run for those exact versions. Bump either pin
-# locally and a kind deploy asks the registry for something nobody has built
-# yet — which does not surface as a readable error but as ImagePullBackOff on
-# every Connect pod, twenty minutes in:
+# This overlay used to pin a locally built `connect:<debezium>` instead, which
+# made every Connect deploy on kind depend on `make connect-build` having run on
+# that machine. When it had not, kubelet read the bare tag as
+# docker.io/library/connect and the pods sat in ImagePullBackOff.
 #
-#   Failed to pull image "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1": not found
+# To run an image built from the working tree — a plugin change, a Debezium bump
+# not yet published — build it, then override the pin for that deploy:
 #
-# `make connect-build` builds this tag and kind-loads it, so the local image is
-# always the one matching the local pins. The tag carries no registry prefix and
-# is not :latest, so kubelet resolves it to the loaded image and never reaches
-# out. Build it before deploying Connect on kind; check-versions.sh asserts this
-# tag and Dockerfile.connect agree.
-image: "connect:3.6.2"
+#   make connect-build        # also loads the qualified tag into the kind cluster
+#   helm upgrade --install connect-cluster charts/connect-cluster -n connect \
+#     -f charts/connect-cluster/values-kind.yaml --set image=connect:<debezium>
+#
+# `make connect-build` also loads the image under the qualified tag values.yaml
+# names, so on kind a fresh local build shadows the registry copy without any
+# override at all (the pull policy is IfNotPresent).
 
 alerts:
   enabled: false
