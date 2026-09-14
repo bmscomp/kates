@@ -371,15 +371,24 @@ jobs:
         run: |
           # Remove leading 'v' if present
           CLEAN_VERSION=${VERSION#v}
-          
-          # Update kates chart
-          sed -i "s/appVersion: .*/appVersion: \"${CLEAN_VERSION}\"/" charts/kates/Chart.yaml
+
+          # charts/kates is the ONE chart whose appVersion is the Kates
+          # version: it deploys this image. Anchored to the top-level key,
+          # because an unanchored `s/appVersion: .*/` also rewrites the word
+          # wherever it appears in the artifacthub annotation block.
+          sed -i "s/^appVersion:.*/appVersion: \"${CLEAN_VERSION}\"/" charts/kates/Chart.yaml
           awk '/repository: ghcr.io\/bmscomp\/kates/ {print; getline; sub(/tag: .*/, "tag: \"'${CLEAN_VERSION}'\""); print; next} 1' charts/kates/values.yaml > tmp.yaml && mv tmp.yaml charts/kates/values.yaml
-          
-          # Update kates-chaos chart
-          sed -i "s/appVersion: .*/appVersion: \"${CLEAN_VERSION}\"/" charts/kates-chaos/Chart.yaml
+
+          # charts/kates-chaos is deliberately NOT bumped. Its appVersion
+          # tracks the LitmusChaos execution plane the chart deploys (3.28.0).
+          # Stamping the Kates version on it made the chart advertise a Litmus
+          # release that does not exist, and broke the README chart table that
+          # docs.yml gates — a release should not have to be followed by a
+          # repair commit.
           
       - name: Commit and Push
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
