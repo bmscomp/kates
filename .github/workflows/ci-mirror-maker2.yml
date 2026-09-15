@@ -12,6 +12,12 @@ name: CI — MirrorMaker 2
 # so it runs on demand and on the `test-migration` label rather than on every
 # push. The whole point of the chart is this job; the whole point of not running
 # it every time is that nobody waits ten minutes for a typo fix.
+#
+# `metrics-live` is the same tier and the same cluster shape, with a different
+# question: what does a worker actually expose? `chart` proves every series the
+# rules and the dashboard read is one the exporter rules can produce, against
+# a hand-written catalogue of MBeans; this job scrapes a real worker and diffs
+# the catalogue against it.
 
 on:
   push:
@@ -22,6 +28,8 @@ on:
       - "Dockerfile.legacy-kafka"
       - "scripts/test-mm2-migration.sh"
       - "scripts/build-legacy-kafka-image.sh"
+      - "scripts/check-metric-contract.sh"
+      - "scripts/metric-contract/**"
       - "cli/cmd/migrate*.go"
       - "cli/pkg/migrate/**"
       - "cli/internal/podrun/**"
@@ -42,6 +50,8 @@ on:
       - "Dockerfile.legacy-kafka"
       - "scripts/test-mm2-migration.sh"
       - "scripts/build-legacy-kafka-image.sh"
+      - "scripts/check-metric-contract.sh"
+      - "scripts/metric-contract/**"
       - "cli/cmd/migrate*.go"
       - "cli/pkg/migrate/**"
       - "cli/internal/podrun/**"
@@ -449,18 +459,37 @@ jobs:
               | python3 /tmp/dash.py
           done
 
-      # promtool is not installed on the runner by default and this job is the
-      # cheap one, so its absence is a notice rather than a failure — the step
-      # is here for the runners and forks that do have it. Prometheus itself is
-      # the only thing that can say an expr parses; a rule with a typo installs
-      # fine and simply never fires.
-      - name: Alert rules are valid PromQL (when promtool is available)
+      # The step above proves the dashboard parses and the one below proves
+      # the rules parse. Neither proves that the series they READ exist: an
+      # alert on a name no exporter rule produces installs fine and never
+      # fires, and a panel on one renders "No data" exactly as an idle cluster
+      # would. scripts/metric-contract/mirror-maker2.yaml catalogues the MBeans
+      # a worker registers; the check simulates the exporter over it and fails
+      # on any reference outside what comes out. Static, seconds, and it is
+      # the gate the Kafka chart's three dead alerts would have failed.
+      - name: Every series the rules and the dashboard read is one the exporter produces
+        run: scripts/check-metric-contract.sh mirror-maker2
+
+      # Prometheus itself is the only thing that can say an expr parses; a
+      # rule with a typo installs fine and simply never fires. This used to
+      # skip with a notice when promtool was absent, which on GitHub's runners
+      # is always — so the check had never run. promtool now comes from the
+      # Prometheus release the monitoring stack pins in images.env, so the
+      # parser here is the one the rules will meet.
+      - name: Install promtool (the pinned Prometheus release)
+        run: |
+          set -euo pipefail
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          [ -n "$PROM" ] || { echo "::error::no prometheus pin in images.env"; exit 1; }
+          curl -sSL -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
+          sudo mv /tmp/promtool /usr/local/bin/
+          promtool --version
+
+      - name: Alert and recording rules are valid PromQL
         run: |
           set -e
-          if ! command -v promtool > /dev/null 2>&1; then
-            echo "::notice::promtool not on this runner — skipping the rule check"
-            exit 0
-          fi
           cat > /tmp/rules.py <<'PY'
           import sys, yaml
           out = [d["spec"] for d in yaml.safe_load_all(sys.stdin)
@@ -480,6 +509,23 @@ jobs:
               | python3 /tmp/rules.py > /tmp/rules.yaml
             promtool check rules /tmp/rules.yaml
           done
+
+      # Parsing is not behaving. The SLI recording rules and the burn-rate
+      # alert are arithmetic over windows, and the cases that matter — a NaN
+      # partition beside a live one, a wholly idle mirror, the two windows
+      # crossing at different times — are promtool unit tests against the
+      # base render. rule_files in a test file resolve relative to the test
+      # file, hence the copy beside the render.
+      - name: SLI and SLO rules behave (promtool unit tests)
+        run: |
+          set -e
+          d=$(mktemp -d)
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            --set metrics.enabled=true --set alerts.enabled=true \
+            --api-versions monitoring.coreos.com/v1 \
+            | python3 /tmp/rules.py > "$d/rendered-rules.yaml"
+          cp scripts/metric-contract/tests/mirror-maker2.rules-test.yaml "$d/"
+          promtool test rules "$d/mirror-maker2.rules-test.yaml"
 
       # An alert whose runbook_url 404s is an alert that wakes someone at 3am
       # and then tells them nothing. The anchors are GitHub's heading slugs, so
@@ -508,6 +554,8 @@ jobs:
                   continue
               for group in doc["spec"]["groups"]:
                   for rule in group["rules"]:
+                      if "record" in rule:
+                          continue  # a recording rule wakes nobody
                       url = (rule.get("annotations") or {}).get("runbook_url")
                       if not url:
                           sys.exit("::error::rule %s carries no runbook_url" % rule["alert"])
@@ -993,5 +1041,146 @@ jobs:
         if: failure()
         with:
           name: migration-diagnostics-${{ matrix.source }}
+          path: /tmp/diag/
+          retention-days: 7
+
+  # The contract check above proves the rules and the dashboard read names the
+  # exporter rules can produce — from a catalogue of MBeans written by hand.
+  # This job is what keeps the catalogue honest: a real worker, a real mirror
+  # with records and translated offsets on it, one /metrics capture, and the
+  # same check run against the capture. Every referenced series has to be in
+  # it (that is the failure), and the catalogue is diffed against it in both
+  # directions (those are notes, and the artifact is how they get acted on).
+  # A Kafka upgrade that renames an attribute shows up here first.
+  #
+  # Same tier as migration-e2e: minutes and a kind cluster, so on demand or on
+  # the label rather than on every push.
+  metrics-live:
+    name: Metric contract (live scrape)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'test-migration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load toolchain pins from versions.env
+        run: |
+          set -euo pipefail
+          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
+            | tr -d '"' | tee -a "$GITHUB_ENV"
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+          cache-dependency-path: cli/go.sum
+
+      - name: Create kind cluster (3-zone topology)
+        uses: helm/kind-action@v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: panda
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Deploy Strimzi + Kafka (krafter)
+        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests -f charts/kafka-cluster/values-ci.yaml
+
+      # The 3.9.1 leg only: its image is the official one, so nothing to
+      # build, and one source is enough — the catalogue describes MBean
+      # SHAPES, and a second mirror adds instances of the same shapes.
+      # The values file turns the exporter on, which the kind overlay leaves
+      # off; it is layered last, so it wins.
+      - name: Stand up a 3.9.1 → 4.x mirror with the exporter on
+        run: |
+          build/kates migrate up \
+            --from 3.9.1 \
+            --skip-build \
+            --values-mirror scripts/metric-contract/live/mirror-maker2.yaml \
+            --timeout 600 \
+            --yes
+
+      # Seeds the corpus, commits a consumer group on the source, proves the
+      # records and the translated offsets arrived. Until this has run, the
+      # per-partition source series and the checkpoint series do not exist —
+      # a fresh mirror exposes only the worker-level beans.
+      - name: Prove records and offsets cross (populates every mirror series)
+        run: build/kates migrate verify --timeout 600 --yes
+
+      # One worker is enough: the exporter config is the same on every pod.
+      # The checkpoint series is the last to appear (checkpoints are emitted
+      # on an interval, after the first translation), so the capture is
+      # retried until it carries one.
+      - name: Capture /metrics from one worker
+        run: |
+          set -euo pipefail
+          pod=$(kubectl -n kafka get pods -l strimzi.io/kind=KafkaMirrorMaker2 \
+            -o jsonpath='{.items[0].metadata.name}')
+          [ -n "$pod" ] || { echo "::error::no MirrorMaker 2 worker pod in kafka"; exit 1; }
+          echo "scraping $pod"
+          kubectl -n kafka port-forward "pod/$pod" 9404:9404 > /tmp/port-forward.log 2>&1 &
+          sleep 3
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9404/metrics > /tmp/mm2-metrics.txt || true
+            if grep -q '^kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max' /tmp/mm2-metrics.txt; then
+              break
+            fi
+            sleep 10
+          done
+          echo "$(grep -c '^[a-z]' /tmp/mm2-metrics.txt) samples, $(grep -c '^# TYPE' /tmp/mm2-metrics.txt) families"
+
+      - name: Every referenced series is in the scrape; diff the catalogue against it
+        run: scripts/check-metric-contract.sh mirror-maker2 --scrape /tmp/mm2-metrics.txt
+
+      # The capture outlives the job so a NOTE about an uncatalogued series
+      # can be turned into a catalogue entry without re-running the cluster.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mm2-metrics-scrape
+          path: /tmp/mm2-metrics.txt
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p /tmp/diag
+          cat /tmp/port-forward.log > /tmp/diag/port-forward.log 2>&1 || true
+          kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
+          kubectl -n kafka get kafkamirrormaker2 -o yaml > /tmp/diag/mm2.yaml 2>&1 || true
+          kubectl -n kafka describe kafkamirrormaker2 > /tmp/diag/mm2-describe.txt 2>&1 || true
+          for ns in kafka strimzi-operator kafka-m391-430-src kafka-m391-431-src; do
+            kubectl get namespace "$ns" >/dev/null 2>&1 || continue
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp > "/tmp/diag/events-$ns.txt" 2>&1 || true
+            for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              kubectl -n "$ns" logs "$p" --all-containers --tail=300 \
+                > "/tmp/diag/$ns-$(basename "$p").log" 2>&1 || true
+            done
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: metrics-live-diagnostics
           path: /tmp/diag/
           retention-days: 7
