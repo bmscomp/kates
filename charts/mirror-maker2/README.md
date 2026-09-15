@@ -631,7 +631,8 @@ template` or a `--dry-run` finds no CRs and passes.
 | `metrics.type: strimziMetricsReporter` | the operator's native path instead: a Kafka `MetricsReporter` inside the worker publishes Prometheus text itself. No exporter sidecar, no JMX, no ConfigMap — `metrics.allowList` is the whole configuration |
 | `podMonitors.enabled` | PodMonitor (requires `metrics.enabled`), pointed at `podMonitors.scrape.<metrics.type>.{port,path}` |
 | `alerts.enabled` | PrometheusRule — failed tasks, nothing replicating (dropped while `cutover.enabled`, when that is the plan), replication lag, checkpoint stall, **offset-sync staleness**, error rate, heap, **rebalance storms** |
-| `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: release-wide rows, a task-state table, then one collapsed row per source |
+| `alerts.slo.enabled` | in the same PrometheusRule: four recorded SLIs per source (`mm2:replication_latency_ms:max`, `mm2:checkpoint_latency_ms:max`, `mm2:records_replicated:rate5m`, `mm2:tasks_running:ratio`), the replication error ratio over 5m and 1h windows, and `MirrorMaker2ReplicationSLOBurning` — a multi-window burn-rate alert over `thresholds.replicationLatencyMs` with `slo.target` and `slo.burnRate` |
+| `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: release-wide rows, a task-state table, a **Replication SLO** row when the recording rules are installed, then one collapsed row per source |
 | `logging.type: external` | a log4j2 ConfigMap with `org.apache.kafka.connect.mirror` broken out, wired into the CR automatically |
 
 Alerts and PodMonitors are capability-guarded (a missing Prometheus Operator CRD
@@ -660,6 +661,28 @@ knowing what they distinguish:
 Rules **about a mirror** are rendered once per `mirrors[]` entry and carry a
 `source` label; rules about the **workers** (heap, rebalances) stay release-wide,
 because there is one Connect cluster.
+
+The alerts ask "is something wrong now"; the recorded SLIs ask "how has it been
+doing". The SLO's objective is deliberately the lag alert's own threshold, so
+there is one number to argue about: `slo.target` is the fraction of time the
+mirror must stay under it (0.99 leaves about seven hours a month), and the burn
+alert fires when that budget is going `slo.burnRate` times faster than a
+mirror sitting exactly at the target would spend it — over the last hour *and*
+the last five minutes, so it has to be sustained and still happening.
+
+Every series the rules and the dashboard read is checked against the exporter
+rules that are meant to produce it. `scripts/check-metric-contract.sh
+mirror-maker2` simulates the JMX exporter over the MBean catalogue in
+`scripts/metric-contract/mirror-maker2.yaml` — the same first-match, `$N`,
+lowercase-and-underscore procedure the agent runs, including the 1.x line's
+rule that only a COUNTER keeps a `_total` suffix — and fails on any name no
+rule can emit or any label that would carry Kafka's ObjectName quotes;
+`ci-mirror-maker2.yml` runs it on every chart change, and its on-demand live
+job scrapes a real worker and diffs the catalogue against what the worker
+actually exposes. The first such scrape found that 0.4.0's alerts had never
+been able to fire: every `connector` label was quoted, and the two `_total`
+series they read were published without the suffix. A rule that installs and
+never fires is the failure this exists for.
 
 Replication lag is the number that decides whether a cutover is safe. When a
 mirror is not replicating and you cannot see why:
