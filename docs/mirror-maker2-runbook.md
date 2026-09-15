@@ -809,9 +809,12 @@ partition count justifies.
 ### Replication is slow but healthy
 
 Raise `sourceConnector.tasksMax` toward the source's partition count — a task
-maps to partitions, so more tasks than partitions buys nothing. Then check
-whether the bottleneck moved to the target's produce path (`kafka_producer_*`)
-or the worker heap.
+maps to partitions, so more tasks than partitions buys nothing. Then find out
+which end is slow: expand **The path a record takes** on the dashboard. Reading
+fast and writing slowly puts the bottleneck on the target — watch the producer
+buffer heading for zero and `Records in flight` climbing with it. Reading
+slowly with the target idle is the source, its quotas, or the network between
+them. If neither moves, look at the worker heap and GC under **Workers**.
 
 ### The replication SLO is burning
 
@@ -852,13 +855,20 @@ the objective, and has been for a while.
 | `kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max` | Are the translated consumer positions still **advancing**? | `MirrorMaker2OffsetSyncStale` |
 | `kafka_connect_worker_metrics_connector_failed_task_count` | Is something broken outright? | `MirrorMaker2TaskFailed` |
 | `kafka_connect_task_error_metrics_total_errors_logged` | Is it absorbing an error on every record? | `MirrorMaker2HighErrorRate` |
+| `kafka_connect_task_error_metrics_total_records_skipped` | Is it dropping records and staying RUNNING? | — (on the board, under Errors) |
+| `kafka_connect_source_task_metrics_source_record_active_count` | Is the target's produce path the bottleneck? | — (on the board, under Replication) |
 | `kafka_connect_worker_rebalance_metrics_completed_rebalances_total` | Is it stable? | `MirrorMaker2RebalanceStorm` |
 | `mm2:slo_replication_latency:error_ratio_rate1h` (recorded) | How much of the last hour was over the objective? | `MirrorMaker2ReplicationSLOBurning` |
 
 Enable them with `metrics.enabled=true`; `alerts.enabled=true` turns them into
 PrometheusRules — each carrying a `runbook_url` into the section of this file
 that resolves it — and `dashboard.enabled=true` renders a Grafana dashboard
-built around exactly these questions, with one collapsed row per source.
+built around exactly these questions, in the order this runbook asks them: a
+six-stat header (is it up, is it lagging, is it erroring), then task states,
+replication, offset translation, errors and dead letters, the SLO, workers,
+and — collapsed, because they answer *where* rather than *whether* — the
+client path and one row per source. The board links back here from its
+header.
 
 The same PrometheusRule records four series per source that answer the first
 four questions without the exporter's names — `mm2:replication_latency_ms:max`,

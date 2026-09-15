@@ -632,7 +632,7 @@ template` or a `--dry-run` finds no CRs and passes.
 | `podMonitors.enabled` | PodMonitor (requires `metrics.enabled`), pointed at `podMonitors.scrape.<metrics.type>.{port,path}` |
 | `alerts.enabled` | PrometheusRule — failed tasks, nothing replicating (dropped while `cutover.enabled`, when that is the plan), replication lag, checkpoint stall, **offset-sync staleness**, error rate, heap, **rebalance storms** |
 | `alerts.slo.enabled` | in the same PrometheusRule: four recorded SLIs per source (`mm2:replication_latency_ms:max`, `mm2:checkpoint_latency_ms:max`, `mm2:records_replicated:rate5m`, `mm2:tasks_running:ratio`), the replication error ratio over 5m and 1h windows, and `MirrorMaker2ReplicationSLOBurning` — a multi-window burn-rate alert over `thresholds.replicationLatencyMs` with `slo.target` and `slo.burnRate` |
-| `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: release-wide rows, a task-state table, a **Replication SLO** row when the recording rules are installed, then one collapsed row per source |
+| `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: one board, read top to bottom — a six-stat header, task states, replication, offset translation, errors, the **Replication SLO** row when the recording rules are installed, workers, then two collapsed sections (the client path, and one row per source) |
 | `logging.type: external` | a log4j2 ConfigMap with `org.apache.kafka.connect.mirror` broken out, wired into the CR automatically |
 
 Alerts and PodMonitors are capability-guarded (a missing Prometheus Operator CRD
@@ -661,6 +661,22 @@ knowing what they distinguish:
 Rules **about a mirror** are rendered once per `mirrors[]` entry and carry a
 `source` label; rules about the **workers** (heap, rebalances) stay release-wide,
 because there is one Connect cluster.
+
+The board is organised as the questions an operator asks in an incident, in
+order: is it up, is it lagging, is it erroring (six stats); which connector
+lost a task; is data moving and how far behind; will consumers have a position
+to resume from; what is being dropped, retried or dead-lettered; how much of
+the error budget today has cost; and what the JVM and the rebalances under all
+of it are doing. Two sections are collapsed because they answer a second
+question — *where* the mirror is slow: the client path (the replication
+consumer's fetch against the connector producers' send, latency and buffer)
+and one row per source.
+
+Grid positions are computed from a cursor rather than written down, so a
+section can be inserted without renumbering the ones below it, and CI proves
+the result: no two panels on the same cell, rows in order, and every panel
+carrying a description and a query. A board whose panels quietly overlap is
+one Grafana rearranges on its own.
 
 The alerts ask "is something wrong now"; the recorded SLIs ask "how has it been
 doing". The SLO's objective is deliberately the lag alert's own threshold, so
