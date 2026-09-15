@@ -2,10 +2,10 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor bump: read-only sources, fan-in, failover/failback, exactly-once,
-# and the rails that make each of them refuse the configurations that fail
-# silently at runtime.
-version: 0.4.0
+# Minor bump: the SLI recording rules and the replication SLO, and the metric
+# contract that proves every series the rules and the dashboard read is one
+# the exporter rules produce.
+version: 0.5.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -29,38 +29,14 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: added
-      description: imagePullPolicy for the pods this chart owns (pre-flight, secret-sync, tests) — not the workers, whose policy is operator-wide
+      description: SLI recording rules per source (mm2:replication_latency_ms:max, mm2:checkpoint_latency_ms:max, mm2:records_replicated:rate5m, mm2:tasks_running:ratio) and a replication SLO — alerts.slo.{target,burnRate} over thresholds.replicationLatencyMs — with the multi-window burn-rate alert MirrorMaker2ReplicationSLOBurning
     - kind: added
-      description: values-dev.yaml and values-prod.yaml carry image guidance — IfNotPresent and a local-worker path for kind, digest pinning and imagePullSecrets for production
+      description: A "Replication SLO" dashboard row reading the recorded series, rendered when the PrometheusRule that records them is installed
     - kind: added
-      description: A floating image tag (:latest, or no tag at all) is refused at render time for every image key, since it makes the Kafka client version depend on when a pod last restarted
-    - kind: added
-      description: offsetSyncs.location (KIP-716) and the readOnlySource shorthand — mirror a cluster you may only read
-    - kind: added
-      description: Fan-in — several sources per release, with per-source ACLs, egress, alerts and tests
-    - kind: added
-      description: values-failover.yaml and values-failback.yaml, and a rail that refuses a reverse mirror while the forward one is live under an identity policy
-    - kind: added
-      description: target.exactlyOnce — the worker property, the source isolation level and the ACLs from one flag
-    - kind: added
-      description: values-readonly-source.yaml, values-fan-in.yaml, values-scale.yaml
-    - kind: added
-      description: strimziMetricsReporter as an alternative to the JMX exporter; jmxOptions, connectContainer, templateExtra, clientRackInitImage, per-connector version, consumer.client.rack
-    - kind: added
-      description: topics/groups as lists, compiled to escaped patterns
-    - kind: added
-      description: secretSync.watch — an opt-in CronJob that re-copies rotated credentials
-    - kind: added
-      description: NetworkPolicy per-source egress (networkPolicy.kafka.perSource) instead of 0.0.0.0/0
+      description: scripts/metric-contract/mirror-maker2.yaml — the MBean catalogue the exporter rules are checked against, so CI proves every series the alerts, recording rules and dashboard read can actually be produced (and a live scrape job diffs the catalogue against a real worker)
     - kind: fixed
-      description: The mm2-offset-syncs ACL is granted only when a mirror keeps that topic on the target; with Kafka's default it named a topic that is not on this cluster
+      description: Every `connector` and `client_id` label carried literal double quotes (Kafka quotes an ObjectName value containing `>`, and the exporter copies the capture verbatim), so no alert selecting connector=~"<alias>->.*" could match — TaskFailed, NoRecordsReplicated, CheckpointStalled, OffsetSyncStale and HighErrorRate were dead on every release. The rules now capture inside the quotes
     - kind: fixed
-      description: Dropped the heartbeats ACL — the v1 API removed heartbeatConnector, so nothing here creates that topic
+      description: The exporter's 1.x line strips a trailing `_total` from anything not published as a COUNTER, so `source-record-write-total` and `completed-rebalances-total` were exposed without the suffix the alerts and panels read; the cumulative attributes now have COUNTER rules and keep it. NoRecordsReplicated, whose `or vector(0)` fallback read the missing series as "no records", had been firing permanently
     - kind: fixed
-      description: An autoscaler whose maxReplicas exceeds sum(tasksMax) is refused; Connect never runs more tasks than that, so the extra workers idle
-    - kind: fixed
-      description: Duplicate source aliases are refused — they silently interleave two sources into one set of target topics
-    - kind: added
-      description: secretSync.secrets[].as — the name a synced Secret is created under, so a source and a target that both call their credential kates-mm2 can coexist in the release namespace
-    - kind: added
-      description: values-migrate-4x.yaml — a migration preset for a Strimzi-operated 4.x source beside the target (SCRAM on its 9092 listener, the credential copied by secretSync under another name), for the dropped-line and in-window cases
+      description: The "Bytes replicated /s" panel took rate() of byte-rate, which is already a rate, and so plotted the rate of a rate; it reads the series as is now
