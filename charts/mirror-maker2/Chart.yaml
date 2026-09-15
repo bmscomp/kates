@@ -2,9 +2,10 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor bump: one canonical dashboard, rebuilt around the questions an
-# operator asks in an incident and gated for layout as well as for JSON.
-version: 0.6.0
+# Minor bump: a second board for the window a migration runs in, and the
+# gates that keep both of them honest — layout, PromQL, and the go/no-go
+# panel's own arithmetic.
+version: 0.7.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -27,6 +28,14 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: dashboard.migration.enabled — a second Grafana board for the hours a migration runs rather than the months a mirror runs: a go/no-go header, the drain with a catch-up ETA extrapolated from the record age, the consumer groups that have a translated position and how old it is, a per-topic punch list, and the cutover freeze (the source connector at zero while the checkpoint connector keeps going)
+    - kind: added
+      description: dashboard.migration.drainedBelowMs (5s) and translationFreshMs (60s) — a cutover wants lag near zero, not the lag alert's steady-state 60s
+    - kind: added
+      description: The "Safe to cut over?" panel carries a fourth factor whose only job is to read as No data rather than as drained when the release has stopped reporting, and a promtool test — over the query extracted from the rendered board, not a copy of it — holds it to all five cases
+    - kind: added
+      description: CI checks every dashboard query as PromQL (nothing did before), checks the layout of every board in a render rather than assuming one, and renders both boards across seven combinations including each one alone
     - kind: changed
       description: The Grafana dashboard is rebuilt as one canonical board — a six-stat header (is it up, is it lagging, is it erroring), then task states, replication, offset translation, errors and dead letters, the replication SLO, workers, and two collapsed sections (the client path, and one row per source)
     - kind: added
