@@ -311,10 +311,11 @@ data:
         {
           "type": "timeseries",
           "title": "Bytes replicated /s",
+          "description": "byte-rate is already a rate (bytes/s over Kafka's own window), so it is read as is; rate() over it would be the rate of a rate.",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
           "targets": [
             {
-              "expr": "sum by (topic) (rate(kafka_connect_mirror_source_connector_byte_rate{namespace=\"{{ $ns }}\"}[5m]))",
+              "expr": "sum by (topic) (kafka_connect_mirror_source_connector_byte_rate{namespace=\"{{ $ns }}\"})",
               "legendFormat": "{{ "{{" }}topic{{ "}}" }}"
             }
           ],
