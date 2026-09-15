@@ -3,6 +3,11 @@
 {{- $ns := include "mirror-maker2.namespace" . }}
 {{- $identity := include "mirror-maker2.isIdentityPolicy" . }}
 {{- $sep := (.Values.replicationPolicy).separator | default "." }}
+{{- /* The SLO row reads the recorded mm2:* series, which exist only when the
+       PrometheusRule that records them is installed. */}}
+{{- $slo := and .Values.alerts.enabled .Values.alerts.slo.enabled }}
+{{- $wy := 41 }}
+{{- if $slo }}{{- $wy = 50 }}{{- end }}
 {{- /*
 The panel list is GENERATED, like the alerts, so a fan-in release shows one row
 per source instead of a sum that hides the dead leg. The release-wide rows come
@@ -334,15 +339,61 @@ data:
           ],
           "fieldConfig": { "defaults": { "unit": "ms" } }
         },
+{{- if $slo }}
         {
           "type": "row",
-          "title": "Workers",
+          "title": "Replication SLO",
           "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 }
         },
         {
           "type": "timeseries",
-          "title": "JVM heap used",
+          "title": "Time over the latency objective (last hour)",
+          "description": "The recorded mm2:slo_replication_latency:error_ratio_rate1h: the fraction of the last hour replication latency spent above {{ .Values.alerts.thresholds.replicationLatencyMs }}ms, per source. The red line is where MirrorMaker2ReplicationSLOBurning fires (burnRate × (1 − target)); above it for long and the monthly budget is gone in days.",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+          "targets": [
+            {
+              "expr": "mm2:slo_replication_latency:error_ratio_rate1h{namespace=\"{{ $ns }}\",cluster=\"{{ $name }}\"}",
+              "legendFormat": "{{ "{{" }}source{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": {{ printf "%g" (mulf .Values.alerts.slo.burnRate (subf 1.0 .Values.alerts.slo.target)) }} }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Tasks running (ratio)",
+          "description": "The recorded mm2:tasks_running:ratio: running tasks over total tasks for each source's connectors. 1 is healthy; anything else for longer than a rebalance is MirrorMaker2TaskFailed territory.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+          "targets": [
+            {
+              "expr": "mm2:tasks_running:ratio{namespace=\"{{ $ns }}\",cluster=\"{{ $name }}\"}",
+              "legendFormat": "{{ "{{" }}source{{ "}}" }}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } }
+        },
+{{- end }}
+        {
+          "type": "row",
+          "title": "Workers",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": {{ $wy }} }
+        },
+        {
+          "type": "timeseries",
+          "title": "JVM heap used",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": {{ add $wy 1 }} },
           "targets": [
             {
               "expr": "sum by (pod) ((jvm_memory_used_bytes{area=\"heap\",namespace=\"{{ $ns }}\",pod=~\"{{ $name }}-mirrormaker2-.*\"} or jvm_memory_bytes_used{area=\"heap\",namespace=\"{{ $ns }}\",pod=~\"{{ $name }}-mirrormaker2-.*\"}))",
@@ -355,7 +406,7 @@ data:
           "type": "timeseries",
           "title": "Rebalances completed",
           "description": "Tasks do not replicate during a rebalance, so a storm reads as intermittent lag with no failed tasks.",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": {{ add $wy 1 }} },
           "targets": [
             {
               "expr": "sum(rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"{{ $ns }}\"}[5m]))",
@@ -369,10 +420,11 @@ closes correctly whether `mirrors` has one entry or ten. Rows start collapsed:
 on a fan-in release the release-wide view is what you open the dashboard for,
 and the per-source detail is what you expand once it looks wrong.
 
-Row y positions continue from 50 (the Workers row ends at 42 + 8), nine per
-source: one for the row header, eight for its panels.
+Row y positions continue from where the Workers row ends (its panels start
+one below the header and are eight high), nine per source: one for the row
+header, eight for its panels.
 */}}
-{{- $base := 50 }}
+{{- $base := add $wy 9 }}
 {{- range $i, $m := .Values.mirrors }}
 {{- $alias := $m.source.alias | default "source" }}
 {{- $y := add $base (mul $i 9) }}

@@ -1,0 +1,129 @@
+# promtool unit tests for the mirror-maker2 chart's SLI recording rules and
+# the replication SLO — the rules whose behaviour is arithmetic rather than a
+# threshold, and therefore the ones a render cannot vouch for.
+#
+# Run against the base render (default policy, one source aliased `source`,
+# release `mm2` in namespace `kafka`), copied next to this file as
+# rendered-rules.yaml:
+#
+#   helm template mm2 charts/mirror-maker2 -n kafka \
+#     --set metrics.enabled=true --set alerts.enabled=true \
+#     --api-versions monitoring.coreos.com/v1 \
+#     | python3 -c 'import sys,yaml; print(yaml.safe_dump([d for d in yaml.safe_load_all(sys.stdin) if d and d.get("kind")=="PrometheusRule"][0]["spec"]))' \
+#     > "$dir/rendered-rules.yaml"
+#   cp scripts/metric-contract/tests/mirror-maker2.rules-test.yaml "$dir/"
+#   promtool test rules "$dir/mirror-maker2.rules-test.yaml"
+#
+# which is what the Chart validation job in ci-mirror-maker2.yml does.
+#
+# The two cases that earned this file: a partition with nothing to replicate
+# reports NaN, and a whole idle mirror is NaN on every partition. Without the
+# `>= 0` in the SLI the second case recorded an error ratio of 1 and would
+# have paged for a mirror with nothing to do.
+
+rule_files:
+  - rendered-rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a NaN partition is ignored while another has a number
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: '1000x30'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="1"}'
+        values: 'NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN'
+    promql_expr_test:
+      - expr: mm2:replication_latency_ms:max
+        eval_time: 10m
+        exp_samples:
+          - labels: 'mm2:replication_latency_ms:max{cluster="mm2-mirror-maker2",namespace="kafka",source="source"}'
+            value: 1000
+      - expr: mm2:slo_replication_latency:error_ratio_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'mm2:slo_replication_latency:error_ratio_rate5m{cluster="mm2-mirror-maker2",namespace="kafka",source="source"}'
+            value: 0
+
+  - name: an idle mirror has no SLI rather than a failing one
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: 'NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN'
+    promql_expr_test:
+      - expr: mm2:replication_latency_ms:max
+        eval_time: 10m
+        exp_samples: []
+      - expr: mm2:slo_replication_latency:error_ratio_rate1h
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - alertname: MirrorMaker2ReplicationSLOBurning
+        eval_time: 30m
+        exp_alerts: []
+
+  # Latency at 1s for an hour, then 90s (objective: 60s). The five-minute
+  # window is over the line five minutes in; the hour window crosses
+  # 14.4% × 60 min ≈ 8.6 min later; `for: 2m` on top of that. So: quiet at
+  # 65m, firing at 72m, and the value carried is the hour's ratio.
+  - name: the burn-rate alert needs both windows, then fires with the hour's ratio
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: '1000x60 90000x30'
+    promql_expr_test:
+      - expr: mm2:slo_replication_latency:error_ratio_rate5m
+        eval_time: 66m
+        exp_samples:
+          - labels: 'mm2:slo_replication_latency:error_ratio_rate5m{cluster="mm2-mirror-maker2",namespace="kafka",source="source"}'
+            value: 1
+      - expr: mm2:slo_replication_latency:error_ratio_rate1h
+        eval_time: 90m
+        exp_samples:
+          - labels: 'mm2:slo_replication_latency:error_ratio_rate1h{cluster="mm2-mirror-maker2",namespace="kafka",source="source"}'
+            value: 0.5
+    alert_rule_test:
+      - alertname: MirrorMaker2ReplicationSLOBurning
+        eval_time: 65m
+        exp_alerts: []
+      - alertname: MirrorMaker2ReplicationSLOBurning
+        eval_time: 72m
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              cluster: mm2-mirror-maker2
+              namespace: kafka
+              source: source
+            exp_annotations:
+              summary: "MirrorMaker 2 is burning its replication error budget"
+              # 12 of the last 60 minutes over the objective: the templated
+              # value is the hour's ratio, and the source clause renders
+              # because the series carries the label.
+              description: "Over the last hour 20% of the time replication latency from source was above 60000ms, and it still is. At this rate the 1% budget for a 30-day window is gone in about two days. DO NOT CUT OVER: the target is behind by more than the objective, sustained."
+              runbook_url: "https://github.com/bmscomp/kates/blob/main/docs/mirror-maker2-runbook.md#the-replication-slo-is-burning"
+
+  - name: task availability and throughput are recorded per source
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_worker_metrics_connector_running_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+        values: '3x10'
+      - series: 'kafka_connect_worker_metrics_connector_total_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+        values: '4x10'
+      - series: 'kafka_connect_worker_metrics_connector_running_task_count{namespace="kafka",connector="source->target.MirrorCheckpointConnector"}'
+        values: '1x10'
+      - series: 'kafka_connect_worker_metrics_connector_total_task_count{namespace="kafka",connector="source->target.MirrorCheckpointConnector"}'
+        values: '1x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_write_total{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+        values: '0+600x10'
+    promql_expr_test:
+      - expr: mm2:tasks_running:ratio
+        eval_time: 5m
+        exp_samples:
+          - labels: 'mm2:tasks_running:ratio{cluster="mm2-mirror-maker2",namespace="kafka",source="source"}'
+            value: 0.8
+      - expr: mm2:records_replicated:rate5m
+        eval_time: 8m
+        exp_samples:
+          - labels: 'mm2:records_replicated:rate5m{cluster="mm2-mirror-maker2",namespace="kafka",source="source"}'
+            value: 10
