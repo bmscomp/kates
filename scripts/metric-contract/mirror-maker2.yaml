@@ -43,6 +43,9 @@ set:
   - metrics.enabled=true
   - alerts.enabled=true
   - dashboard.enabled=true
+  # The migration board is a second ConfigMap and its queries are gated the
+  # same way: every render below carries both.
+  - dashboard.migration.enabled=true
 
 # Every render is checked. The default render exercises the per-source rules;
 # the identity-policy preset renders the release-wide replication-lag rule

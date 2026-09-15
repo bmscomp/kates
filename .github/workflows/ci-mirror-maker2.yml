@@ -519,23 +519,29 @@ jobs:
                   for t, y in rows:
                       print("      y=%-3d %s" % (y, t))
                   found += 1
-          if found != 1:
-              sys.exit("::error::expected exactly one dashboard ConfigMap, found %d" % found)
+          if not found:
+              sys.exit("::error::no dashboard ConfigMap in this render")
           sys.exit(rc[0])
           PY
+          # --set dashboard.enabled=true comes FIRST so a case can turn it
+          # off again afterwards: helm takes the last --set for a key.
           run() {   # <label> <helm args...>
             local label="$1"; shift
             echo "==> ${label}"
-            helm template mm2 charts/mirror-maker2 -n kafka "$@" \
+            helm template mm2 charts/mirror-maker2 -n kafka \
               --set metrics.enabled=true --set dashboard.enabled=true \
-              --api-versions monitoring.coreos.com/v1 \
+              "$@" --api-versions monitoring.coreos.com/v1 \
               | python3 /tmp/dash.py
           }
-          run "base"          --set alerts.enabled=true
-          run "fan-in"        --set alerts.enabled=true -f charts/mirror-maker2/values-fan-in.yaml
-          run "identity"      --set alerts.enabled=true -f charts/mirror-maker2/values-migrate-2x.yaml
+          run "base"             --set alerts.enabled=true
+          run "fan-in"           --set alerts.enabled=true -f charts/mirror-maker2/values-fan-in.yaml
+          run "identity"         --set alerts.enabled=true -f charts/mirror-maker2/values-migrate-2x.yaml
           run "alerts off"
-          run "slo off"       --set alerts.enabled=true --set alerts.slo.enabled=false
+          run "slo off"          --set alerts.enabled=true --set alerts.slo.enabled=false
+          run "both boards"      --set alerts.enabled=true --set dashboard.migration.enabled=true
+          run "migration only"   --set dashboard.enabled=false --set dashboard.migration.enabled=true
+          run "migration, identity" --set dashboard.enabled=false --set dashboard.migration.enabled=true \
+                                    -f charts/mirror-maker2/values-migrate-2x.yaml
 
       # The step above proves the dashboard parses and the one below proves
       # the rules parse. Neither proves that the series they READ exist: an
@@ -604,6 +610,95 @@ jobs:
             | python3 /tmp/rules.py > "$d/rendered-rules.yaml"
           cp scripts/metric-contract/tests/mirror-maker2.rules-test.yaml "$d/"
           promtool test rules "$d/mirror-maker2.rules-test.yaml"
+
+      # promtool checks the ALERTS. Nothing checked the dashboards, and a
+      # panel's PromQL is no less able to be wrong — a stray bracket or a
+      # `bool` in the wrong place renders as an empty panel, which is what an
+      # idle cluster renders as too. Every query from every board is wrapped as
+      # a recording rule and handed to the same parser the alerts get.
+      - name: Every dashboard query is valid PromQL
+        run: |
+          set -e
+          cat > /tmp/dashql.py <<'PY'
+          import json, sys, yaml
+
+          def panels(ps):
+              for p in ps:
+                  yield p
+                  for q in panels(p.get("panels") or []):
+                      yield q
+
+          rules, n = [], 0
+          for doc in yaml.safe_load_all(sys.stdin):
+              if not doc or doc.get("kind") != "ConfigMap":
+                  continue
+              for name, body in (doc.get("data") or {}).items():
+                  if not name.endswith(".json"):
+                      continue
+                  for p in panels(json.loads(body).get("panels") or []):
+                      for t in p.get("targets") or []:
+                          expr = (t.get("expr") or "").strip()
+                          if not expr:
+                              continue
+                          n += 1
+                          rules.append({"record": "dashboard:q%d" % n, "expr": expr,
+                                        "labels": {"panel": p.get("title", "?"), "board": name}})
+          if not rules:
+              sys.exit("::error::no dashboard queries found to check")
+          yaml.safe_dump({"groups": [{"name": "dashboard-queries", "rules": rules}]},
+                         sys.stdout, default_flow_style=False)
+          print("  %d queries" % n, file=sys.stderr)
+          PY
+          for overlay in "" fan-in migrate-2x; do
+            args=""
+            [ -n "$overlay" ] && args="-f charts/mirror-maker2/values-${overlay}.yaml"
+            echo "==> ${overlay:-base}"
+            # shellcheck disable=SC2086
+            helm template mm2 charts/mirror-maker2 -n kafka $args \
+              --set metrics.enabled=true --set alerts.enabled=true \
+              --set dashboard.enabled=true --set dashboard.migration.enabled=true \
+              --api-versions monitoring.coreos.com/v1 \
+              | python3 /tmp/dashql.py > /tmp/dashql.yaml
+            promtool check rules /tmp/dashql.yaml
+          done
+
+      # The one panel on either board that a person ACTS on, and the action it
+      # invites is the least reversible step of a migration. Its query is four
+      # `bool` factors multiplied together — the kind of expression that looks
+      # right and is not — so it is extracted from the rendered board and put
+      # through promtool with real series: drained, still behind, still in
+      # flight, a failed task, and a release reporting nothing at all.
+      - name: The migration board's go/no-go panel behaves
+        run: |
+          set -e
+          d=$(mktemp -d)
+          cat > /tmp/gate.py <<'PY'
+          import json, sys, yaml
+
+          WANT = "Safe to cut over?"
+          for doc in yaml.safe_load_all(sys.stdin):
+              if not doc or doc.get("kind") != "ConfigMap":
+                  continue
+              for name, body in (doc.get("data") or {}).items():
+                  if not name.endswith(".json"):
+                      continue
+                  for p in json.loads(body).get("panels") or []:
+                      if p.get("title") != WANT:
+                          continue
+                      expr = p["targets"][0]["expr"]
+                      yaml.safe_dump({"groups": [{"name": "cutover-gate", "rules": [
+                          {"record": "dashboard:safe_to_cut_over", "expr": expr}]}]},
+                          sys.stdout, default_flow_style=False)
+                      print("  extracted from %s" % name, file=sys.stderr)
+                      sys.exit(0)
+          sys.exit("::error::no panel titled %r on any board — the test below "
+                   "would silently check nothing" % WANT)
+          PY
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            --set metrics.enabled=true --set dashboard.migration.enabled=true \
+            | python3 /tmp/gate.py > "$d/cutover-gate.yaml"
+          cp scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml "$d/"
+          promtool test rules "$d/mirror-maker2.cutover-gate-test.yaml"
 
       # An alert whose runbook_url 404s is an alert that wakes someone at 3am
       # and then tells them nothing. The anchors are GitHub's heading slugs, so
