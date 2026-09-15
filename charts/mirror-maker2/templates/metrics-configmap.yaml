@@ -80,32 +80,68 @@ data:
         type: GAUGE
 
       # ── Connect worker ──────────────────────────────────────────────────
+      # TWO THINGS THE EXPORTER DOES THAT THE RULES HAVE TO KNOW ABOUT, both
+      # found by scraping a real worker (the live job in ci-mirror-maker2.yml)
+      # rather than by reading the rules:
+      #
+      # 1. Kafka QUOTES an ObjectName value that carries characters outside
+      #    [A-Za-z0-9._%-], and `>` is one of them — so every connector name
+      #    (`source->target.MirrorSourceConnector`) and the client ids derived
+      #    from it arrive as `connector="source->target.MirrorSourceConnector"`,
+      #    quotes included, and the exporter copies whatever the capture group
+      #    matched into the label. A rule written `connector=([^,]+)` labels
+      #    the series `connector="\"source->…\""`, and every alert selecting
+      #    `connector=~"source->.*"` matches nothing. The `\"?([^,\"]+)\"?`
+      #    form matches the value with or without its quotes and captures only
+      #    what is inside them.
+      #
+      # 2. The exporter's 1.x line drops a trailing `_total` from any series it
+      #    does not publish as a COUNTER, because that suffix is reserved for
+      #    counters in the exposition format. Under a GAUGE rule
+      #    `source-record-write-total` came out as
+      #    `kafka_connect_source_task_metrics_source_record_write`, and the
+      #    alerts reading `…_write_total` read nothing. The cumulative
+      #    attributes therefore get their own COUNTER rule ahead of the gauge
+      #    rule for the same bean, which keeps the suffix — and is the honest
+      #    type for a monotonic count in any case.
+      - pattern: "kafka.connect<type=connect-worker-metrics><>([a-z0-9-]+-total)"
+        name: kafka_connect_worker_metrics_$1
+        type: COUNTER
       - pattern: "kafka.connect<type=connect-worker-metrics><>([a-z0-9-]+)"
         name: kafka_connect_worker_metrics_$1
         type: GAUGE
-      - pattern: "kafka.connect<type=connect-worker-metrics, connector=([^,]+)><>([a-z0-9-]+)"
+      - pattern: "kafka.connect<type=connect-worker-metrics, connector=\"?([^,\"]+)\"?><>([a-z0-9-]+)"
         name: kafka_connect_worker_metrics_$2
         labels:
           connector: "$1"
         type: GAUGE
+      - pattern: "kafka.connect<type=connect-worker-rebalance-metrics><>([a-z0-9-]+-total)"
+        name: kafka_connect_worker_rebalance_metrics_$1
+        type: COUNTER
       - pattern: "kafka.connect<type=connect-worker-rebalance-metrics><>([a-z0-9-]+)"
         name: kafka_connect_worker_rebalance_metrics_$1
         type: GAUGE
 
       # ── Source task + error metrics (the "is anything moving" numbers) ───
-      - pattern: "kafka.connect<type=source-task-metrics, connector=([^,]+), task=([0-9]+)><>([a-z0-9-]+)"
+      - pattern: "kafka.connect<type=source-task-metrics, connector=\"?([^,\"]+)\"?, task=([0-9]+)><>([a-z0-9-]+-total)"
+        name: kafka_connect_source_task_metrics_$3
+        labels:
+          connector: "$1"
+          task: "$2"
+        type: COUNTER
+      - pattern: "kafka.connect<type=source-task-metrics, connector=\"?([^,\"]+)\"?, task=([0-9]+)><>([a-z0-9-]+)"
         name: kafka_connect_source_task_metrics_$3
         labels:
           connector: "$1"
           task: "$2"
         type: GAUGE
-      - pattern: "kafka.connect<type=task-error-metrics, connector=([^,]+), task=([0-9]+)><>([a-z0-9-]+)"
+      - pattern: "kafka.connect<type=task-error-metrics, connector=\"?([^,\"]+)\"?, task=([0-9]+)><>([a-z0-9-]+)"
         name: kafka_connect_task_error_metrics_$3
         labels:
           connector: "$1"
           task: "$2"
         type: GAUGE
-      - pattern: "kafka.connect<type=connector-task-metrics, connector=([^,]+), task=([0-9]+)><>([a-z0-9-]+)"
+      - pattern: "kafka.connect<type=connector-task-metrics, connector=\"?([^,\"]+)\"?, task=([0-9]+)><>([a-z0-9-]+)"
         name: kafka_connect_connector_task_metrics_$3
         labels:
           connector: "$1"
@@ -113,13 +149,16 @@ data:
         type: GAUGE
 
       # ── Underlying clients ──────────────────────────────────────────────
-      - pattern: "kafka.consumer<type=consumer-fetch-manager-metrics, client-id=([^,]+), topic=([^,]+)><>([a-z0-9-]+)"
+      # The client ids are derived from the connector name, so they are
+      # quoted too (`connector-consumer-source->target.MirrorSourceConnector-0`);
+      # the worker's own clients (`mm2-worker-configs`) are not. Same form.
+      - pattern: "kafka.consumer<type=consumer-fetch-manager-metrics, client-id=\"?([^,\"]+)\"?, topic=([^,]+)><>([a-z0-9-]+)"
         name: kafka_consumer_fetch_manager_$3
         labels:
           client_id: "$1"
           topic: "$2"
         type: GAUGE
-      - pattern: "kafka.producer<type=producer-metrics, client-id=([^,]+)><>([a-z0-9-]+)"
+      - pattern: "kafka.producer<type=producer-metrics, client-id=\"?([^,\"]+)\"?><>([a-z0-9-]+)"
         name: kafka_producer_$2
         labels:
           client_id: "$1"
@@ -133,7 +172,7 @@ data:
       # area="HeapMemoryUsage" and produced duplicate families.
 
       # ── Catch-all, LAST ─────────────────────────────────────────────────
-      - pattern: "kafka.connect<type=(.+), client-id=(.+)><>(.+): (.+)"
+      - pattern: "kafka.connect<type=(.+), client-id=\"?([^\"]+)\"?><>(.+): (.+)"
         name: kafka_connect_$1_$3
         labels:
           client: "$2"
