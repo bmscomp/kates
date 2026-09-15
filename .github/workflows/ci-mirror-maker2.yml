@@ -421,15 +421,69 @@ jobs:
 
       # A Grafana dashboard is shipped as a JSON string inside a ConfigMap, so
       # nothing upstream of Grafana parses it: a stray comma makes the panel
-      # list vanish at load time, in a UI nobody opens until an incident. Both
-      # renders, because the per-source rows are generated per `mirrors[]`
-      # entry and the fan-in overlay is the one with more than one.
-      - name: Dashboard JSON parses
+      # list vanish at load time, in a UI nobody opens until an incident.
+      #
+      # Layout is checked for the same reason. The panels' grid positions are
+      # computed from a cursor rather than written down, so that a section can
+      # be inserted without renumbering the ones below it — and the failure
+      # that arithmetic can produce is two panels on the same cell, which
+      # Grafana resolves by shoving one somewhere arbitrary rather than by
+      # complaining. Every panel is also required to carry a description and a
+      # query: a panel with neither is a panel nobody can read during an
+      # incident, and one whose query was lost in an edit renders "No data"
+      # exactly as an idle cluster does.
+      #
+      # Five renders: the base, fan-in (more than one `mirrors[]` entry, so the
+      # per-source rows repeat), the identity policy (different selectors), and
+      # both ways the SLO section can be absent — which is the case that moves
+      # every row below it.
+      - name: Dashboard JSON parses, and its layout holds
         run: |
           set -e
           cat > /tmp/dash.py <<'PY'
           import json, sys, yaml
-          found = 0
+
+
+          def rects(panels):
+              out = []
+              for p in panels:
+                  g = p.get("gridPos") or {}
+                  out.append((p.get("title", "?"), g.get("x"), g.get("y"), g.get("w"), g.get("h"), p))
+              return out
+
+
+          def overlaps(a, b):
+              _, ax, ay, aw, ah, _ = a
+              _, bx, by, bw, bh, _ = b
+              return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+
+          def check_container(panels, where, rc):
+              rs = rects(panels)
+              for t, x, y, w, h, p in rs:
+                  if None in (x, y, w, h):
+                      print("::error::%s: panel %r has an incomplete gridPos" % (where, t)); rc[0] = 1
+                  elif x + w > 24:
+                      print("::error::%s: panel %r runs past column 24 (x=%d w=%d)" % (where, t, x, w)); rc[0] = 1
+              for i in range(len(rs)):
+                  for j in range(i + 1, len(rs)):
+                      if overlaps(rs[i], rs[j]):
+                          print("::error::%s: %r and %r overlap (%s vs %s)"
+                                % (where, rs[i][0], rs[j][0], rs[i][1:5], rs[j][1:5])); rc[0] = 1
+              for t, x, y, w, h, p in rs:
+                  if p.get("type") == "row":
+                      continue
+                  if not p.get("description"):
+                      print("::error::%s: panel %r has no description" % (where, t)); rc[0] = 1
+                  targets = p.get("targets") or []
+                  if not targets:
+                      print("::error::%s: panel %r has no query" % (where, t)); rc[0] = 1
+                  for q in targets:
+                      if not (q.get("expr") or "").strip():
+                          print("::error::%s: panel %r has a target with no expr" % (where, t)); rc[0] = 1
+
+
+          rc, found = [0], 0
           for doc in yaml.safe_load_all(sys.stdin):
               if not doc or doc.get("kind") != "ConfigMap":
                   continue
@@ -443,21 +497,45 @@ jobs:
                   panels = dash.get("panels") or []
                   if not panels:
                       sys.exit("::error::%s parsed but has no panels" % name)
-                  rows = [p["title"] for p in panels if p.get("type") == "row"]
-                  print("  %s: %d panels, rows: %s" % (name, len(panels), ", ".join(rows)))
+                  check_container(panels, name, rc)
+                  rows, nested, last_y = [], 0, -1
+                  for p in panels:
+                      if p.get("type") != "row":
+                          continue
+                      g = p["gridPos"]
+                      rows.append((p["title"], g["y"]))
+                      if g["y"] <= last_y:
+                          print("::error::%s: row %r at y=%d is not below the row before it"
+                                % (name, p["title"], g["y"])); rc[0] = 1
+                      last_y = g["y"]
+                      if (g.get("h"), g.get("w"), g.get("x")) != (1, 24, 0):
+                          print("::error::%s: row %r is not a full-width 1-high header"
+                                % (name, p["title"])); rc[0] = 1
+                      if p.get("panels"):
+                          nested += len(p["panels"])
+                          check_container(p["panels"], "%s row %r" % (name, p["title"]), rc)
+                  print("  %s: %d panels (%d nested), %d rows"
+                        % (name, len(panels) + nested, nested, len(rows)))
+                  for t, y in rows:
+                      print("      y=%-3d %s" % (y, t))
                   found += 1
           if found != 1:
               sys.exit("::error::expected exactly one dashboard ConfigMap, found %d" % found)
+          sys.exit(rc[0])
           PY
-          for overlay in "" fan-in; do
-            args=""
-            [ -n "$overlay" ] && args="-f charts/mirror-maker2/values-${overlay}.yaml"
-            echo "==> ${overlay:-base}"
-            # shellcheck disable=SC2086
-            helm template mm2 charts/mirror-maker2 -n kafka $args \
+          run() {   # <label> <helm args...>
+            local label="$1"; shift
+            echo "==> ${label}"
+            helm template mm2 charts/mirror-maker2 -n kafka "$@" \
               --set metrics.enabled=true --set dashboard.enabled=true \
+              --api-versions monitoring.coreos.com/v1 \
               | python3 /tmp/dash.py
-          done
+          }
+          run "base"          --set alerts.enabled=true
+          run "fan-in"        --set alerts.enabled=true -f charts/mirror-maker2/values-fan-in.yaml
+          run "identity"      --set alerts.enabled=true -f charts/mirror-maker2/values-migrate-2x.yaml
+          run "alerts off"
+          run "slo off"       --set alerts.enabled=true --set alerts.slo.enabled=false
 
       # The step above proves the dashboard parses and the one below proves
       # the rules parse. Neither proves that the series they READ exist: an
