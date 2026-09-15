@@ -1,0 +1,234 @@
+# Metric contract for charts/mirror-maker2.
+#
+# Read by scripts/check-metric-contract.sh. It answers one question the chart
+# templates cannot answer on their own: is every series the alerts, the
+# recording rules and the dashboard read one the JMX exporter rules can
+# actually PRODUCE? A rule's `name:` template says what family a match would
+# be published under; whether anything matches depends on the MBeans the
+# worker registers and the attributes they carry — which is what `mbeans`
+# below declares. The check simulates the exporter (first matching rule wins,
+# `$N` substitution, `lowercaseOutputName`, the unsafe-character rewrite)
+# against that catalogue and compares the result with every reference it
+# finds in the rendered chart.
+#
+# The catalogue is the contract. It is deliberately hand-written from the
+# Kafka documentation rather than harvested from a scrape, so that a reference
+# can be checked without a cluster; the live job in ci-mirror-maker2.yml then
+# diffs it against a real /metrics capture (`--scrape`) and reports what the
+# catalogue does not know about. When a Kafka upgrade renames an attribute,
+# that job is where it shows up first.
+#
+# One entry per MBean SHAPE, written exactly as the exporter sees it — the
+# domain, then the key properties in the order Kafka registers them (the
+# exporter matches the property list as a string, so order is part of the
+# contract), with representative values. Kafka quotes a value that carries a
+# character outside [A-Za-z0-9._%-], which every connector name does (`>`),
+# and the quotes are part of what the rules match — so they are written here
+# too. Attributes are the names Kafka gives them; string-valued attributes go
+# under `strings` because the exporter only publishes those through a rule
+# that sets `value:`, and attributes a worker registers only in some
+# configurations go under `optional` — producible, but not expected in every
+# scrape.
+#
+# The exporter in the Strimzi image is the 1.x line, which strips a trailing
+# `_total` from anything it does not publish as a COUNTER; the check applies
+# the same naming, so `source-record-write-total` under a GAUGE rule reads as
+# `..._source_record_write` here exactly as it does on a worker.
+
+chart: charts/mirror-maker2
+
+# Applied to every render: the three switches that make the chart emit the
+# exporter ConfigMap, the PrometheusRule and the dashboard ConfigMap.
+set:
+  - metrics.enabled=true
+  - alerts.enabled=true
+  - dashboard.enabled=true
+
+# Every render is checked. The default render exercises the per-source rules;
+# the identity-policy preset renders the release-wide replication-lag rule
+# instead; fan-in renders every per-source rule several times over.
+renders:
+  - name: base
+  - name: migrate-2x (identity policy)
+    values: [values-migrate-2x.yaml]
+  - name: fan-in
+    values: [values-fan-in.yaml]
+
+# Series that exist without any rule: the exporter agent's own JVM and process
+# collectors, its self-metrics, and what Prometheus stamps on every target.
+# The last two never appear in a worker's own /metrics, so `--scrape` does not
+# look for them there.
+builtin:
+  - "^jvm_"
+  - "^process_"
+  - "^jmx_"
+  - "^up$"
+  - "^scrape_"
+
+# References that are alternatives of one another: the exporter agent renamed
+# its JVM series between its 0.x and 1.x lines, and the rules select both
+# spellings with `or`. A live scrape carries exactly one of each pair.
+alternatives:
+  - [jvm_memory_used_bytes, jvm_memory_bytes_used]
+  - [jvm_memory_max_bytes, jvm_memory_bytes_max]
+
+# The MBeans a MirrorMaker 2 worker registers, per Kafka's documented metric
+# groups (kafka.apache.org/documentation/#connect_monitoring and
+# #georeplication-monitoring), in the tag order Kafka's KafkaMetrics reporter
+# emits them.
+mbeans:
+  # ── MirrorSourceConnector, per replicated topic-partition ─────────────────
+  # `source` is present only with add.source.alias.to.metrics=true (KIP-1006);
+  # both shapes are catalogued because the rules handle both.
+  - bean: "kafka.connect.mirror<type=MirrorSourceConnector, target=target, topic=source.orders, partition=0>"
+    attributes:
+      - record-count
+      - record-age-ms
+      - record-age-ms-min
+      - record-age-ms-max
+      - record-age-ms-avg
+      - replication-latency-ms
+      - replication-latency-ms-min
+      - replication-latency-ms-max
+      - replication-latency-ms-avg
+      - byte-rate
+      - byte-count
+      - record-rate
+  - bean: "kafka.connect.mirror<type=MirrorSourceConnector, source=source, target=target, topic=source.orders, partition=0>"
+    attributes:
+      - record-count
+      - record-age-ms
+      - record-age-ms-min
+      - record-age-ms-max
+      - record-age-ms-avg
+      - replication-latency-ms
+      - replication-latency-ms-min
+      - replication-latency-ms-max
+      - replication-latency-ms-avg
+      - byte-rate
+      - byte-count
+      - record-rate
+
+  # ── MirrorCheckpointConnector, per (group, topic, partition) ──────────────
+  - bean: "kafka.connect.mirror<type=MirrorCheckpointConnector, source=source, target=target, group=orders-consumer, topic=source.orders, partition=0>"
+    attributes:
+      - checkpoint-latency-ms
+      - checkpoint-latency-ms-min
+      - checkpoint-latency-ms-max
+      - checkpoint-latency-ms-avg
+
+  # ── Connect worker ────────────────────────────────────────────────────────
+  - bean: "kafka.connect<type=connect-worker-metrics>"
+    attributes:
+      - connector-count
+      - connector-startup-attempts-total
+      - connector-startup-failure-percentage
+      - connector-startup-failure-total
+      - connector-startup-success-percentage
+      - connector-startup-success-total
+      - task-count
+      - task-startup-attempts-total
+      - task-startup-failure-percentage
+      - task-startup-failure-total
+      - task-startup-success-percentage
+      - task-startup-success-total
+  - bean: "kafka.connect<type=connect-worker-metrics, connector=\"source->target.MirrorSourceConnector\">"
+    attributes:
+      - connector-destroyed-task-count
+      - connector-failed-task-count
+      - connector-paused-task-count
+      - connector-restarting-task-count
+      - connector-running-task-count
+      - connector-total-task-count
+      - connector-unassigned-task-count
+  - bean: "kafka.connect<type=connect-worker-rebalance-metrics>"
+    attributes:
+      - completed-rebalances-total
+      - epoch
+      - rebalance-avg-time-ms
+      - rebalance-max-time-ms
+      - rebalancing
+      - time-since-last-rebalance-ms
+    strings:
+      - connect-protocol
+      - leader-name
+
+  # ── Connector and task level ──────────────────────────────────────────────
+  - bean: "kafka.connect<type=connector-metrics, connector=\"source->target.MirrorSourceConnector\">"
+    strings:
+      - connector-class
+      - connector-type
+      - connector-version
+      - status
+  - bean: "kafka.connect<type=connector-task-metrics, connector=\"source->target.MirrorSourceConnector\", task=0>"
+    attributes:
+      - batch-size-avg
+      - batch-size-max
+      - offset-commit-avg-time-ms
+      - offset-commit-max-time-ms
+      - offset-commit-failure-percentage
+      - offset-commit-success-percentage
+      - pause-ratio
+      - running-ratio
+    strings:
+      - status
+  - bean: "kafka.connect<type=source-task-metrics, connector=\"source->target.MirrorSourceConnector\", task=0>"
+    attributes:
+      - poll-batch-avg-time-ms
+      - poll-batch-max-time-ms
+      - source-record-active-count
+      - source-record-active-count-avg
+      - source-record-active-count-max
+      - source-record-poll-rate
+      - source-record-poll-total
+      - source-record-write-rate
+      - source-record-write-total
+    # Registered only when the worker runs with exactly-once support; a
+    # reference to them is valid, their absence from a scrape is not news.
+    optional:
+      - transaction-size-avg
+      - transaction-size-max
+      - transaction-size-min
+  - bean: "kafka.connect<type=task-error-metrics, connector=\"source->target.MirrorSourceConnector\", task=0>"
+    attributes:
+      - deadletterqueue-produce-failures
+      - deadletterqueue-produce-requests
+      - last-error-timestamp
+      - total-errors-logged
+      - total-record-errors
+      - total-record-failures
+      - total-records-skipped
+      - total-retries
+
+  # ── The clients under the tasks ───────────────────────────────────────────
+  # Only the shapes the rules name. The consumer's per-topic fetch bean and
+  # the producer's top-level bean; the full client metric set is large and
+  # nothing in the chart reads it.
+  - bean: "kafka.consumer<type=consumer-fetch-manager-metrics, client-id=\"connector-consumer-source->target.MirrorSourceConnector-0\", topic=orders>"
+    attributes:
+      - bytes-consumed-rate
+      - bytes-consumed-total
+      - fetch-size-avg
+      - fetch-size-max
+      - records-consumed-rate
+      - records-consumed-total
+      - records-per-request-avg
+  - bean: "kafka.producer<type=producer-metrics, client-id=\"connector-producer-source->target.MirrorSourceConnector-0\">"
+    attributes:
+      - batch-size-avg
+      - batch-size-max
+      - buffer-available-bytes
+      - buffer-total-bytes
+      - compression-rate-avg
+      - record-error-rate
+      - record-error-total
+      - record-queue-time-avg
+      - record-queue-time-max
+      - record-retry-rate
+      - record-retry-total
+      - record-send-rate
+      - record-send-total
+      - request-latency-avg
+      - request-latency-max
+      - requests-in-flight
+      - waiting-threads
