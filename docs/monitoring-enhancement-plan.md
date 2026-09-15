@@ -18,12 +18,15 @@ scrape is the only way to be sure are marked **verify**.
 | Dashboards | 3 in the chart + 9 `kafka-*` in `charts/monitoring` | 1 (9 panels) | 1 (22 panels, per-source rows) |
 | Scrape | PodMonitor for the operator and every Strimzi pod | PodMonitor | PodMonitor |
 | Runbooks | none | none | every alert, anchors gated in CI |
-| CI gates on rules / dashboards | none | none | promtool, JSON parse, runbook anchors |
+| CI gates on rules / dashboards | none | none | JSON parse, runbook anchors; promtool only "when available", which on GitHub's runners is never |
 | Alert routing | Alertmanager deployed, **no routes or receivers** | | |
 
-MirrorMaker 2 is the model: its rules name the MBeans they mean, its alerts
-carry runbooks, and CI proves the PromQL parses and the runbook anchors
-resolve. Kafka and Connect predate that discipline, and it shows.
+MirrorMaker 2 has the discipline in form: its rules name the MBeans they
+mean, its alerts carry runbooks, and CI proves the runbook anchors resolve.
+Kafka and Connect predate that, and it shows. It did not save MirrorMaker 2
+from the same class of defect — finding 7 — because the defect lives in what
+the exporter does with a name, which no amount of care in the templates can
+see. Only a scrape can.
 
 ## Findings
 
@@ -114,17 +117,43 @@ Nine `kafka-*` dashboards in `charts/monitoring/dashboards/` (`dashboard`,
 kafka-cluster chart overlap heavily. A reader cannot tell which is canonical,
 and several of them share the empty panels from findings 1 and 3.
 
-### 7. MirrorMaker 2 defines one alert name twice
+### 7. MirrorMaker 2's connector alerts cannot match, and two of its series do not exist
 
-`MirrorMaker2ReplicationLagHigh` is emitted once per source (inside the
-`mirrors[]` loop) and once as an aggregate. Both are valid, but a silence or a
-route on the name catches both, and a notification cannot say which one it was.
+Found by running the chart's exporter rules on a real worker (the Strimzi
+`kafka:1.2.0-kafka-4.3.1` image, JMX exporter 1.6.0) — the first time anyone
+had. Two behaviours of the exporter that the templates cannot show:
+
+Kafka quotes an ObjectName value that carries a character outside
+`[A-Za-z0-9._%-]`, and every connector name does (`source->target.…`). The
+exporter copies whatever a capture group matched into the label, so a rule
+written `connector=([^,]+)` labels every series
+`connector="\"source->target.MirrorSourceConnector\""`, quotes included, and
+no alert selecting `connector=~"<alias>->.*"` can match. `TaskFailed`,
+`NoRecordsReplicated`, `CheckpointStalled`, `OffsetSyncStale` and
+`HighErrorRate` were dead on every release.
+
+The exporter's 1.x line reserves `_total` for counters and strips it from
+anything else. Under a GAUGE rule, `source-record-write-total` is published
+as `kafka_connect_source_task_metrics_source_record_write`, so the three
+alerts and four panels reading `…_write_total`, and `RebalanceStorm` reading
+`…_completed_rebalances_total`, read nothing. `NoRecordsReplicated` has an
+`or vector(0)` fallback that reads a missing series as "no records", so it
+did not go quiet — it fired permanently.
+
+Neither is visible from the rules, and both survive `promtool check rules`.
+An earlier draft of this document listed, as finding 7, a duplicated alert
+name in the MM2 chart; that was a misreading (the two rules sit in mutually
+exclusive branches on the replication policy), and this is what was there
+instead.
 
 ### 8. The class of defect is structural
 
-Findings 1–4 shipped because nothing checks that the series an alert or a
-dashboard reads is one the rules can produce. MirrorMaker 2 avoided them not by
-a gate but by care. The plan therefore starts with the gate.
+Findings 1–4 and 7 shipped because nothing checks that the series an alert
+or a dashboard reads is one the rules can produce — and 7 shows that reading
+the rules is not enough either, because the exporter has opinions about names
+that only a scrape reveals. The plan therefore starts with a gate that does
+both: a static check against a catalogue of the MBeans, and a live scrape
+that keeps the catalogue honest.
 
 ## Plan
 
@@ -179,8 +208,10 @@ add sink lag from `kafka_consumergroup_lag{consumergroup=~"connect-.*"}`, which
 Kafka Exporter already produces; add a DLQ-rate warning from
 `task-error-metrics`.
 
-**MM2.** Rename the per-source alert (`MirrorMaker2SourceReplicationLagHigh`)
-so the two are distinguishable.
+**MM2.** Capture inside Kafka's quotes (`connector=\"?([^,\"]+)\"?`) on every
+rule with a connector or client-id label, and give the `-total` attributes a
+COUNTER rule ahead of the gauge rule so the suffix survives. Shipped with the
+Phase 1 gate, since the gate is what found it.
 
 **Dashboards.** Retire the `kafka-*` boards whose panels duplicate another
 board's; keep one Kafka board in `charts/monitoring` and fix its queries. This
@@ -194,18 +225,28 @@ dashboards is present. That script is the seed of Phase 1's gate.
 
 What MM2 has by hand, every chart gets by machine.
 
-- `scripts/check-metric-contract.sh <chart>`: parse the chart's JMX rules into
-  the series names they can produce (from each rule's `name:` template),
-  collect every series name referenced in its PrometheusRule and dashboard
-  JSON, and fail on any reference no rule produces. Static, no cluster, runs in
-  seconds. It would have caught findings 1–3.
+- `scripts/check-metric-contract.sh <chart>`: simulate the JMX exporter over
+  a hand-written catalogue of the MBeans the workload registers
+  (`scripts/metric-contract/<chart>.yaml`) — first matching rule wins, `$N`
+  substitution, the unsafe-character rewrite, `lowercaseOutputName`, and the
+  1.x rule that only a COUNTER keeps `_total` — collect every series name
+  referenced in the PrometheusRule and dashboard JSON, and fail on any
+  reference outside what comes out, or any label that would carry Kafka's
+  quotes. Static, no cluster, seconds. Run against the Kafka rules it reports
+  findings 1–3; run against MM2's 0.4.0 rules it reports both halves of 7.
+  MirrorMaker 2 is the first chart with a contract; Kafka and Connect need
+  their catalogues written.
 - Extend the MM2 gates — promtool on the rendered rules, dashboard JSON parses,
   runbook anchors resolve — to the Kafka and Connect charts, in `ci.yml`'s Helm
   Lint job.
-- A golden scrape: the integration workflow already boots a cluster; have it
-  capture `/metrics` from one broker, one Connect worker and one MM2 worker
-  into an artifact and diff series names against the contract. That catches
-  what static analysis cannot — a Kafka upgrade renaming an MBean.
+- A golden scrape: capture `/metrics` from one broker, one Connect worker
+  and one MM2 worker into an artifact and run the same check in `--scrape`
+  mode against it — every reference must be observed, and the catalogue is
+  diffed against reality both ways. That catches what static analysis cannot:
+  a Kafka upgrade renaming an attribute, or an exporter behaviour nobody
+  modelled (finding 7 was found exactly this way). MM2 has it as an on-demand
+  job beside the migration e2e; the broker and Connect captures can ride the
+  existing integration workflow.
 
 ### Phase 2 — Runbooks and routing
 
@@ -261,9 +302,12 @@ Only after the above holds:
 ## Order of work and size
 
 Phase 0 is the priority and is one PR per chart: Kafka (rules, alerts, board
-fixes — the largest), Connect (alerts), MM2 (rename). Phase 1 is one PR and
-should land before Phase 3, so the new boards are born gated. Phases 2 and 3
-are independent of each other. Phase 4 is a backlog, not a commitment.
+fixes — the largest), Connect (alerts), MM2 (the exporter fixes, shipped
+together with the Phase 1 gate and its own Phase 4 SLO because the gate is
+what found them). Phase 1's remaining work — catalogues for Kafka and
+Connect, the check in `ci.yml`'s Helm Lint job — should land before Phase 3,
+so the new boards are born gated. Phases 2 and 3 are independent of each
+other. Phase 4 is a backlog, not a commitment.
 
 ## Open questions
 
