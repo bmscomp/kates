@@ -2,10 +2,9 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor bump: the SLI recording rules and the replication SLO, and the metric
-# contract that proves every series the rules and the dashboard read is one
-# the exporter rules produce.
-version: 0.5.0
+# Minor bump: one canonical dashboard, rebuilt around the questions an
+# operator asks in an incident and gated for layout as well as for JSON.
+version: 0.6.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -28,6 +27,16 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: The Grafana dashboard is rebuilt as one canonical board — a six-stat header (is it up, is it lagging, is it erroring), then task states, replication, offset translation, errors and dead letters, the replication SLO, workers, and two collapsed sections (the client path, and one row per source)
+    - kind: added
+      description: Panels for what the chart already alerted on and never showed — errors logged per connector, records errored/failed/skipped, retries and dead-letter writes, last error per connector, checkpoint emission rate, offset commit success, polled vs written, records in flight, GC time, time since last rebalance, connector/task assignment and startup failures
+    - kind: added
+      description: A collapsed "path a record takes" section reading the underlying clients — the replication consumer's fetch rate and the connector producers' send, error, retry, latency and buffer — which is what says whether a slow mirror is slow at the source or at the target
+    - kind: added
+      description: Every panel's grid position is computed from a cursor rather than written down, and CI now proves the layout — no overlapping panels, rows in order, every panel with a description and a query whose expr is not empty — across five renders including both ways the SLO section can be absent
+    - kind: added
+      description: A dashboard-level link to the runbook, and threshold lines drawn from alerts.thresholds on the lag, error-rate and rebalance panels
     - kind: added
       description: SLI recording rules per source (mm2:replication_latency_ms:max, mm2:checkpoint_latency_ms:max, mm2:records_replicated:rate5m, mm2:tasks_running:ratio) and a replication SLO — alerts.slo.{target,burnRate} over thresholds.replicationLatencyMs — with the multi-window burn-rate alert MirrorMaker2ReplicationSLOBurning
     - kind: added
