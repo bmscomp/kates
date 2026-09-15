@@ -633,6 +633,7 @@ template` or a `--dry-run` finds no CRs and passes.
 | `alerts.enabled` | PrometheusRule — failed tasks, nothing replicating (dropped while `cutover.enabled`, when that is the plan), replication lag, checkpoint stall, **offset-sync staleness**, error rate, heap, **rebalance storms** |
 | `alerts.slo.enabled` | in the same PrometheusRule: four recorded SLIs per source (`mm2:replication_latency_ms:max`, `mm2:checkpoint_latency_ms:max`, `mm2:records_replicated:rate5m`, `mm2:tasks_running:ratio`), the replication error ratio over 5m and 1h windows, and `MirrorMaker2ReplicationSLOBurning` — a multi-window burn-rate alert over `thresholds.replicationLatencyMs` with `slo.target` and `slo.burnRate` |
 | `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: one board, read top to bottom — a six-stat header, task states, replication, offset translation, errors, the **Replication SLO** row when the recording rules are installed, workers, then two collapsed sections (the client path, and one row per source) |
+| `dashboard.migration.enabled` | A **second** board for the hours a migration runs: go/no-go, the drain with a catch-up ETA, which consumer groups have a translated position, the per-topic punch list, and the cutover freeze. Independent of `dashboard.enabled` |
 | `logging.type: external` | a log4j2 ConfigMap with `org.apache.kafka.connect.mirror` broken out, wired into the CR automatically |
 
 Alerts and PodMonitors are capability-guarded (a missing Prometheus Operator CRD
@@ -677,6 +678,37 @@ section can be inserted without renumbering the ones below it, and CI proves
 the result: no two panels on the same cell, rows in order, and every panel
 carrying a description and a query. A board whose panels quietly overlap is
 one Grafana rearranges on its own.
+
+### The migration board
+
+`dashboard.migration.enabled` renders a second board, because a migration asks
+different questions than a mirror that runs. Not "is this healthy" but "can I
+cut over yet, and if not, what is left": replication lag against
+`migration.drainedBelowMs` rather than the alert's steady-state 60s, records
+still in flight, a catch-up ETA extrapolated from the record age, every
+consumer group that has a translated position and how old it is, a per-topic
+punch list, and — after the cutover overlay goes on — the freeze itself, the
+source connector's line at zero while the checkpoint connector's keeps going.
+
+During a migration the presets keep metrics off (a lab on a laptop has no
+Prometheus to scrape them), so turn the board on with them:
+
+```bash
+helm upgrade mm2 charts/mirror-maker2 -n kafka \
+  -f charts/mirror-maker2/values-migrate-3x.yaml \
+  --set metrics.enabled=true --set podMonitors.enabled=true \
+  --set dashboard.migration.enabled=true
+```
+
+One panel deserves reading before it is trusted. **Safe to cut over?** turns
+green for the three conditions this chart can see — lag under the objective,
+nothing in flight, no failed tasks — and its query carries a fourth factor
+whose only job is to make a release that has stopped reporting read as *No
+data* rather than as drained. It cannot see whether producers have stopped
+writing to the source: no MirrorMaker metric says that, and confirming the
+source's end offsets are static is still step 1 of the runbook's checklist.
+`scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml` holds that
+query — extracted from the rendered board, not copied — to all five cases.
 
 The alerts ask "is something wrong now"; the recorded SLIs ask "how has it been
 doing". The SLO's objective is deliberately the lag alert's own threshold, so

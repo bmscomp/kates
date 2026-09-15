@@ -611,6 +611,20 @@ dashboard:
   labelValue: "1"
   # -- Folder annotation for the sidecar
   folder: Kafka
+  # -- A SECOND board, for the hours a migration runs rather than the months a
+  # mirror runs: go/no-go, the drain, which consumer groups have a translated
+  # position, and the cutover freeze. Independent of `enabled` — during a
+  # migration this is often the only board wanted. It shares `label`,
+  # `labelValue` and `folder` with the board above.
+  migration:
+    enabled: false
+    # -- Replication lag under which the mirror counts as drained, for the
+    # go/no-go panel and the threshold lines. The lag alert's 60s is a
+    # steady-state number; a cutover wants close to zero.
+    drainedBelowMs: 5000
+    # -- Translation age above which a consumer group's position is shown as
+    # stale — old enough that moving that consumer would replay from it.
+    translationFreshMs: 60000
 
 # ── Helm tests ──────────────────────────────────────────────────────────────
 # test-mm2 (CR Ready) and test-connectors (connectors RUNNING) always run.

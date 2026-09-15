@@ -70,6 +70,11 @@ verification between them.
 - [ ] You know which consumers move when, and who owns each one.
 - [ ] You have read the rollback section below **before** you need it.
 
+The migration board (`dashboard.migration.enabled`) is built around this
+checklist: its go/no-go panel is the first three boxes, its per-topic table is
+the second, and its consumer-group table is the third. It cannot see the
+producers — that box stays yours.
+
 ### 1. Stop the producers
 
 Stop writing to the source. Then confirm it, do not assume it:

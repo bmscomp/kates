@@ -176,7 +176,7 @@ you cannot change once the mirror is running.
 
 | | Detail |
 |---|---|
-| Metrics, alerts, dashboards | On before the first record, so lag has history rather than a spot reading |
+| Metrics, alerts, dashboards | On before the first record, so lag has history rather than a spot reading. `dashboard.migration.enabled` is the board for the window itself: go/no-go, the drain and its ETA, translated consumer positions, the cutover freeze |
 | An owner per consumer group | Phase 5 moves them one at a time; each needs someone who can restart it and confirm it resumed |
 | A rollback decision-maker | Named, available during the cutover window |
 | A change record | `kates migrate plan -o json` is a good attachment: it is the specifics, machine-checked |

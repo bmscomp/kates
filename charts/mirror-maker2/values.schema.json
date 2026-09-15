@@ -243,6 +243,23 @@
         },
         "folder": {
           "type": "string"
+        },
+        "migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "drainedBelowMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "translationFreshMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },
