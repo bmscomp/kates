@@ -625,13 +625,19 @@ template` or a `--dry-run` finds no CRs and passes.
 
 ## Observability
 
+The panel-by-panel tour of both boards, how to read them through a cutover, and
+what they cannot tell you, is in [docs/dashboards.md](docs/dashboards.md). This
+section is the values behind them.
+
 | Value | Renders |
 |---|---|
 | `metrics.enabled` | `metricsConfig` on the CR. `metrics.type: jmxPrometheusExporter` (default) also renders the exporter ConfigMap with MM2-specific rules (`record-age-ms`, `replication-latency-ms`, `byte-rate`, per topic, per group, per source alias) |
 | `metrics.type: strimziMetricsReporter` | the operator's native path instead: a Kafka `MetricsReporter` inside the worker publishes Prometheus text itself. No exporter sidecar, no JMX, no ConfigMap — `metrics.allowList` is the whole configuration |
 | `podMonitors.enabled` | PodMonitor (requires `metrics.enabled`), pointed at `podMonitors.scrape.<metrics.type>.{port,path}` |
 | `alerts.enabled` | PrometheusRule — failed tasks, nothing replicating (dropped while `cutover.enabled`, when that is the plan), replication lag, checkpoint stall, **offset-sync staleness**, error rate, heap, **rebalance storms** |
-| `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: release-wide rows, a task-state table, then one collapsed row per source |
+| `alerts.slo.enabled` | in the same PrometheusRule: four recorded SLIs per source (`mm2:replication_latency_ms:max`, `mm2:checkpoint_latency_ms:max`, `mm2:records_replicated:rate5m`, `mm2:tasks_running:ratio`), the replication error ratio over 5m and 1h windows, and `MirrorMaker2ReplicationSLOBurning` — a multi-window burn-rate alert over `thresholds.replicationLatencyMs` with `slo.target` and `slo.burnRate` |
+| `dashboard.enabled` | Grafana dashboard ConfigMap for the sidecar: one board, read top to bottom — a six-stat header, task states, replication, offset translation, errors, the **Replication SLO** row when the recording rules are installed, workers, then two collapsed sections (the client path, and one row per source) |
+| `dashboard.migration.enabled` | A **second** board for the hours a migration runs: go/no-go, the drain with a catch-up ETA, which consumer groups have a translated position, the per-topic punch list, and the cutover freeze. Independent of `dashboard.enabled` |
 | `logging.type: external` | a log4j2 ConfigMap with `org.apache.kafka.connect.mirror` broken out, wired into the CR automatically |
 
 Alerts and PodMonitors are capability-guarded (a missing Prometheus Operator CRD
@@ -660,6 +666,75 @@ knowing what they distinguish:
 Rules **about a mirror** are rendered once per `mirrors[]` entry and carry a
 `source` label; rules about the **workers** (heap, rebalances) stay release-wide,
 because there is one Connect cluster.
+
+The board is organised as the questions an operator asks in an incident, in
+order: is it up, is it lagging, is it erroring (six stats); which connector
+lost a task; is data moving and how far behind; will consumers have a position
+to resume from; what is being dropped, retried or dead-lettered; how much of
+the error budget today has cost; and what the JVM and the rebalances under all
+of it are doing. Two sections are collapsed because they answer a second
+question — *where* the mirror is slow: the client path (the replication
+consumer's fetch against the connector producers' send, latency and buffer)
+and one row per source.
+
+Grid positions are computed from a cursor rather than written down, so a
+section can be inserted without renumbering the ones below it, and CI proves
+the result: no two panels on the same cell, rows in order, and every panel
+carrying a description and a query. A board whose panels quietly overlap is
+one Grafana rearranges on its own.
+
+### The migration board
+
+`dashboard.migration.enabled` renders a second board, because a migration asks
+different questions than a mirror that runs. Not "is this healthy" but "can I
+cut over yet, and if not, what is left": replication lag against
+`migration.drainedBelowMs` rather than the alert's steady-state 60s, records
+still in flight, a catch-up ETA extrapolated from the record age, every
+consumer group that has a translated position and how old it is, a per-topic
+punch list, and — after the cutover overlay goes on — the freeze itself, the
+source connector's line at zero while the checkpoint connector's keeps going.
+
+During a migration the presets keep metrics off (a lab on a laptop has no
+Prometheus to scrape them), so turn the board on with them:
+
+```bash
+helm upgrade mm2 charts/mirror-maker2 -n kafka \
+  -f charts/mirror-maker2/values-migrate-3x.yaml \
+  --set metrics.enabled=true --set podMonitors.enabled=true \
+  --set dashboard.migration.enabled=true
+```
+
+One panel deserves reading before it is trusted. **Safe to cut over?** turns
+green for the three conditions this chart can see — lag under the objective,
+nothing in flight, no failed tasks — and its query carries a fourth factor
+whose only job is to make a release that has stopped reporting read as *No
+data* rather than as drained. It cannot see whether producers have stopped
+writing to the source: no MirrorMaker metric says that, and confirming the
+source's end offsets are static is still step 1 of the runbook's checklist.
+`scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml` holds that
+query — extracted from the rendered board, not copied — to all five cases.
+
+The alerts ask "is something wrong now"; the recorded SLIs ask "how has it been
+doing". The SLO's objective is deliberately the lag alert's own threshold, so
+there is one number to argue about: `slo.target` is the fraction of time the
+mirror must stay under it (0.99 leaves about seven hours a month), and the burn
+alert fires when that budget is going `slo.burnRate` times faster than a
+mirror sitting exactly at the target would spend it — over the last hour *and*
+the last five minutes, so it has to be sustained and still happening.
+
+Every series the rules and the dashboard read is checked against the exporter
+rules that are meant to produce it. `scripts/check-metric-contract.sh
+mirror-maker2` simulates the JMX exporter over the MBean catalogue in
+`scripts/metric-contract/mirror-maker2.yaml` — the same first-match, `$N`,
+lowercase-and-underscore procedure the agent runs, including the 1.x line's
+rule that only a COUNTER keeps a `_total` suffix — and fails on any name no
+rule can emit or any label that would carry Kafka's ObjectName quotes;
+`ci-mirror-maker2.yml` runs it on every chart change, and its on-demand live
+job scrapes a real worker and diffs the catalogue against what the worker
+actually exposes. The first such scrape found that 0.4.0's alerts had never
+been able to fire: every `connector` label was quoted, and the two `_total`
+series they read were published without the suffix. A rule that installs and
+never fires is the failure this exists for.
 
 Replication lag is the number that decides whether a cutover is safe. When a
 mirror is not replicating and you cannot see why:

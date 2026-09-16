@@ -146,6 +146,13 @@ check-cli-compat: ## Verify CLI output degrades correctly across terminals
 check-chart-tests: ## Fail if a chart test calls an endpoint that does not exist
 	@./scripts/check-chart-test-paths.sh
 
+# Every series a chart's alerts, recording rules and dashboard read must be
+# one its JMX exporter rules can produce — simulated over the MBean catalogue
+# in scripts/metric-contract/<chart>.yaml. An alert on a name no rule emits
+# installs fine and never fires. Also run in CI (ci-mirror-maker2.yml).
+check-metric-contract: ## Verify the alerts and dashboards read series the exporter rules produce
+	@for c in $$(./scripts/check-metric-contract.sh --list); do ./scripts/check-metric-contract.sh "$$c" --quiet || exit 1; done
+
 check-help: ## Fail if any target is missing its help description
 	@undocumented=$$(awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ && $$0 !~ /##/ {print "  " $$1}' $(MAKEFILE_LIST)); \
 	if [ -n "$$undocumented" ]; then \

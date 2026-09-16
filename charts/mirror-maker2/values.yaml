@@ -577,6 +577,25 @@ alerts:
     # not replicate during a rebalance, so a storm reads as intermittent lag
     # with no failed tasks.
     rebalancesPerSecond: 0.1
+  # -- SLIs and the replication SLO, rendered into the same PrometheusRule.
+  # Four recorded series per source — `mm2:replication_latency_ms:max`,
+  # `mm2:checkpoint_latency_ms:max`, `mm2:records_replicated:rate5m`,
+  # `mm2:tasks_running:ratio` — carrying `cluster` and `source` labels, so a
+  # status page or Kates' trend dashboard can read a mirror without knowing
+  # the exporter's names. The objective is `thresholds.replicationLatencyMs`;
+  # `target` is the fraction of time the mirror must stay under it, and
+  # `MirrorMaker2ReplicationSLOBurning` fires when the error budget that
+  # leaves is being spent `burnRate` times faster than it would be if the
+  # mirror sat exactly at the target.
+  slo:
+    enabled: true
+    # -- 0.99 leaves a 1% budget: about seven hours over the objective in a
+    # 30-day window.
+    target: 0.99
+    # -- 14.4 burns a 30-day budget in about two days (the classic paging
+    # tier); evaluated over a 1h and a 5m window, both of which must exceed
+    # it, so the problem has to be sustained AND current.
+    burnRate: 14.4
 
 # ── Grafana dashboard ───────────────────────────────────────────────────────
 # Rendered as a ConfigMap the Grafana sidecar picks up (label selector below).
@@ -592,6 +611,20 @@ dashboard:
   labelValue: "1"
   # -- Folder annotation for the sidecar
   folder: Kafka
+  # -- A SECOND board, for the hours a migration runs rather than the months a
+  # mirror runs: go/no-go, the drain, which consumer groups have a translated
+  # position, and the cutover freeze. Independent of `enabled` — during a
+  # migration this is often the only board wanted. It shares `label`,
+  # `labelValue` and `folder` with the board above.
+  migration:
+    enabled: false
+    # -- Replication lag under which the mirror counts as drained, for the
+    # go/no-go panel and the threshold lines. The lag alert's 60s is a
+    # steady-state number; a cutover wants close to zero.
+    drainedBelowMs: 5000
+    # -- Translation age above which a consumer group's position is shown as
+    # stale — old enough that moving that consumer would replay from it.
+    translationFreshMs: 60000
 
 # ── Helm tests ──────────────────────────────────────────────────────────────
 # test-mm2 (CR Ready) and test-connectors (connectors RUNNING) always run.

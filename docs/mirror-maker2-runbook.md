@@ -70,6 +70,13 @@ verification between them.
 - [ ] You know which consumers move when, and who owns each one.
 - [ ] You have read the rollback section below **before** you need it.
 
+The migration board (`dashboard.migration.enabled`) is built around this
+checklist: its go/no-go panel is the first three boxes, its per-topic table is
+the second, and its consumer-group table is the third. It cannot see the
+producers — that box stays yours.
+[Dashboards](../charts/mirror-maker2/docs/dashboards.md#reading-the-board-through-a-cutover)
+maps each step below to what to watch while you run it.
+
 ### 1. Stop the producers
 
 Stop writing to the source. Then confirm it, do not assume it:
@@ -809,9 +816,39 @@ partition count justifies.
 ### Replication is slow but healthy
 
 Raise `sourceConnector.tasksMax` toward the source's partition count — a task
-maps to partitions, so more tasks than partitions buys nothing. Then check
-whether the bottleneck moved to the target's produce path (`kafka_producer_*`)
-or the worker heap.
+maps to partitions, so more tasks than partitions buys nothing. Then find out
+which end is slow: expand **The path a record takes** on the dashboard. Reading
+fast and writing slowly puts the bottleneck on the target — watch the producer
+buffer heading for zero and `Records in flight` climbing with it. Reading
+slowly with the target idle is the source, its quotas, or the network between
+them. If neither moves, look at the worker heap and GC under **Workers**.
+
+### The replication SLO is burning
+
+`MirrorMaker2ReplicationSLOBurning` fires. It is the section above with a
+clock on it. The chart records how much of the time replication latency sits
+above `alerts.thresholds.replicationLatencyMs` (the same number
+`MirrorMaker2ReplicationLagHigh` uses) and promises, through
+`alerts.slo.target`, that it will be under it a set fraction of the time —
+99% by default, which leaves about seven hours a month over the line. The
+alert fires when that budget is being spent `alerts.slo.burnRate` times
+faster than a mirror sitting exactly at the target would spend it: at the
+default 14.4, more than 14.4% of the last hour was over the objective, and so
+were the last five minutes, and the month's budget is gone in about two days.
+
+Two things follow from the two windows. It is not a spike — a single slow
+minute cannot trip the hour — and it is not history: a bad hour that ended
+ten minutes ago no longer trips the five-minute window. Whatever it is, it is
+still happening.
+
+The value in the alert is the hour's ratio, so `0.35` reads "over the
+objective 35% of the last hour". Look at the `Replication SLO` row of the
+dashboard for which source, then work the section above. If the lag is
+expected — a backfill, a source under a load test, a migration whose
+throughput you accepted — widen the objective or lower the target in values
+rather than silencing the alert, so the promise on record matches the one you
+are keeping. Do not cut over while it fires: the target is behind by more than
+the objective, and has been for a while.
 
 ---
 
@@ -825,12 +862,35 @@ or the worker heap.
 | `kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max` | Are the translated consumer positions still **advancing**? | `MirrorMaker2OffsetSyncStale` |
 | `kafka_connect_worker_metrics_connector_failed_task_count` | Is something broken outright? | `MirrorMaker2TaskFailed` |
 | `kafka_connect_task_error_metrics_total_errors_logged` | Is it absorbing an error on every record? | `MirrorMaker2HighErrorRate` |
+| `kafka_connect_task_error_metrics_total_records_skipped` | Is it dropping records and staying RUNNING? | — (on the board, under Errors) |
+| `kafka_connect_source_task_metrics_source_record_active_count` | Is the target's produce path the bottleneck? | — (on the board, under Replication) |
 | `kafka_connect_worker_rebalance_metrics_completed_rebalances_total` | Is it stable? | `MirrorMaker2RebalanceStorm` |
+| `mm2:slo_replication_latency:error_ratio_rate1h` (recorded) | How much of the last hour was over the objective? | `MirrorMaker2ReplicationSLOBurning` |
 
 Enable them with `metrics.enabled=true`; `alerts.enabled=true` turns them into
 PrometheusRules — each carrying a `runbook_url` into the section of this file
 that resolves it — and `dashboard.enabled=true` renders a Grafana dashboard
-built around exactly these questions, with one collapsed row per source.
+built around exactly these questions, in the order this runbook asks them: a
+six-stat header (is it up, is it lagging, is it erroring), then task states,
+replication, offset translation, errors and dead letters, the SLO, workers,
+and — collapsed, because they answer *where* rather than *whether* — the
+client path and one row per source. The board links back here from its
+header.
+
+The same PrometheusRule records four series per source that answer the first
+four questions without the exporter's names — `mm2:replication_latency_ms:max`,
+`mm2:checkpoint_latency_ms:max`, `mm2:records_replicated:rate5m` and
+`mm2:tasks_running:ratio`, each labelled `cluster` and `source` — which is what
+a status page or Kates' own trend dashboard should read rather than the raw
+series. `alerts.slo.enabled=false` drops them and the burn-rate alert.
+
+Every name in this table is checked in CI against the exporter rules that are
+supposed to produce it: `scripts/check-metric-contract.sh mirror-maker2`
+simulates the JMX exporter over the MBean catalogue in
+`scripts/metric-contract/mirror-maker2.yaml` and fails on any series an alert
+or a panel reads that no rule can emit. An alert on a name that does not exist
+installs fine and never fires, which is worse than no alert, and the gate is
+what stops one shipping.
 
 Two caveats on the selectors. Rules about a mirror are rendered **once per
 source** and carry a `source` label, so a fan-in release names the stuck leg

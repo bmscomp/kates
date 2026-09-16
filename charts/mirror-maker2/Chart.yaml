@@ -2,10 +2,9 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor bump: read-only sources, fan-in, failover/failback, exactly-once,
-# and the rails that make each of them refuse the configurations that fail
-# silently at runtime.
-version: 0.4.0
+# Patch: the packaged chart gains docs/dashboards.md. No rendered resource
+# changes — but docs/ ships inside the chart, so the version moves with it.
+version: 0.7.1
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -29,38 +28,34 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: added
-      description: imagePullPolicy for the pods this chart owns (pre-flight, secret-sync, tests) — not the workers, whose policy is operator-wide
+      description: docs/dashboards.md — both boards panel by panel, which one to open when, the go/no-go panel's exact meaning and its three blind spots, the cutover checklist mapped to what to watch at each step, and the conventions a new panel has to follow
     - kind: added
-      description: values-dev.yaml and values-prod.yaml carry image guidance — IfNotPresent and a local-worker path for kind, digest pinning and imagePullSecrets for production
+      description: dashboard.migration.enabled — a second Grafana board for the hours a migration runs rather than the months a mirror runs: a go/no-go header, the drain with a catch-up ETA extrapolated from the record age, the consumer groups that have a translated position and how old it is, a per-topic punch list, and the cutover freeze (the source connector at zero while the checkpoint connector keeps going)
     - kind: added
-      description: A floating image tag (:latest, or no tag at all) is refused at render time for every image key, since it makes the Kafka client version depend on when a pod last restarted
+      description: dashboard.migration.drainedBelowMs (5s) and translationFreshMs (60s) — a cutover wants lag near zero, not the lag alert's steady-state 60s
     - kind: added
-      description: offsetSyncs.location (KIP-716) and the readOnlySource shorthand — mirror a cluster you may only read
+      description: The "Safe to cut over?" panel carries a fourth factor whose only job is to read as No data rather than as drained when the release has stopped reporting, and a promtool test — over the query extracted from the rendered board, not a copy of it — holds it to all five cases
     - kind: added
-      description: Fan-in — several sources per release, with per-source ACLs, egress, alerts and tests
+      description: CI checks every dashboard query as PromQL (nothing did before), checks the layout of every board in a render rather than assuming one, and renders both boards across seven combinations including each one alone
+    - kind: changed
+      description: The Grafana dashboard is rebuilt as one canonical board — a six-stat header (is it up, is it lagging, is it erroring), then task states, replication, offset translation, errors and dead letters, the replication SLO, workers, and two collapsed sections (the client path, and one row per source)
     - kind: added
-      description: values-failover.yaml and values-failback.yaml, and a rail that refuses a reverse mirror while the forward one is live under an identity policy
+      description: Panels for what the chart already alerted on and never showed — errors logged per connector, records errored/failed/skipped, retries and dead-letter writes, last error per connector, checkpoint emission rate, offset commit success, polled vs written, records in flight, GC time, time since last rebalance, connector/task assignment and startup failures
     - kind: added
-      description: target.exactlyOnce — the worker property, the source isolation level and the ACLs from one flag
+      description: A collapsed "path a record takes" section reading the underlying clients — the replication consumer's fetch rate and the connector producers' send, error, retry, latency and buffer — which is what says whether a slow mirror is slow at the source or at the target
     - kind: added
-      description: values-readonly-source.yaml, values-fan-in.yaml, values-scale.yaml
+      description: Every panel's grid position is computed from a cursor rather than written down, and CI now proves the layout — no overlapping panels, rows in order, every panel with a description and a query whose expr is not empty — across five renders including both ways the SLO section can be absent
     - kind: added
-      description: strimziMetricsReporter as an alternative to the JMX exporter; jmxOptions, connectContainer, templateExtra, clientRackInitImage, per-connector version, consumer.client.rack
+      description: A dashboard-level link to the runbook, and threshold lines drawn from alerts.thresholds on the lag, error-rate and rebalance panels
     - kind: added
-      description: topics/groups as lists, compiled to escaped patterns
+      description: SLI recording rules per source (mm2:replication_latency_ms:max, mm2:checkpoint_latency_ms:max, mm2:records_replicated:rate5m, mm2:tasks_running:ratio) and a replication SLO — alerts.slo.{target,burnRate} over thresholds.replicationLatencyMs — with the multi-window burn-rate alert MirrorMaker2ReplicationSLOBurning
     - kind: added
-      description: secretSync.watch — an opt-in CronJob that re-copies rotated credentials
+      description: A "Replication SLO" dashboard row reading the recorded series, rendered when the PrometheusRule that records them is installed
     - kind: added
-      description: NetworkPolicy per-source egress (networkPolicy.kafka.perSource) instead of 0.0.0.0/0
+      description: scripts/metric-contract/mirror-maker2.yaml — the MBean catalogue the exporter rules are checked against, so CI proves every series the alerts, recording rules and dashboard read can actually be produced (and a live scrape job diffs the catalogue against a real worker)
     - kind: fixed
-      description: The mm2-offset-syncs ACL is granted only when a mirror keeps that topic on the target; with Kafka's default it named a topic that is not on this cluster
+      description: Every `connector` and `client_id` label carried literal double quotes (Kafka quotes an ObjectName value containing `>`, and the exporter copies the capture verbatim), so no alert selecting connector=~"<alias>->.*" could match — TaskFailed, NoRecordsReplicated, CheckpointStalled, OffsetSyncStale and HighErrorRate were dead on every release. The rules now capture inside the quotes
     - kind: fixed
-      description: Dropped the heartbeats ACL — the v1 API removed heartbeatConnector, so nothing here creates that topic
+      description: The exporter's 1.x line strips a trailing `_total` from anything not published as a COUNTER, so `source-record-write-total` and `completed-rebalances-total` were exposed without the suffix the alerts and panels read; the cumulative attributes now have COUNTER rules and keep it. NoRecordsReplicated, whose `or vector(0)` fallback read the missing series as "no records", had been firing permanently
     - kind: fixed
-      description: An autoscaler whose maxReplicas exceeds sum(tasksMax) is refused; Connect never runs more tasks than that, so the extra workers idle
-    - kind: fixed
-      description: Duplicate source aliases are refused — they silently interleave two sources into one set of target topics
-    - kind: added
-      description: secretSync.secrets[].as — the name a synced Secret is created under, so a source and a target that both call their credential kates-mm2 can coexist in the release namespace
-    - kind: added
-      description: values-migrate-4x.yaml — a migration preset for a Strimzi-operated 4.x source beside the target (SCRAM on its 9092 listener, the credential copied by secretSync under another name), for the dropped-line and in-window cases
+      description: The "Bytes replicated /s" panel took rate() of byte-rate, which is already a rate, and so plotted the rate of a rate; it reads the series as is now
