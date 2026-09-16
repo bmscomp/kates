@@ -207,6 +207,24 @@
               "minimum": 0
             }
           }
+        },
+        "slo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "target": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "burnRate": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
         }
       }
     },
@@ -225,6 +243,23 @@
         },
         "folder": {
           "type": "string"
+        },
+        "migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "drainedBelowMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "translationFreshMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },

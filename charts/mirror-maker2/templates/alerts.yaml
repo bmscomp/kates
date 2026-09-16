@@ -238,4 +238,110 @@ spec:
             summary: "MirrorMaker 2 workers are rebalancing repeatedly"
             description: "Rebalances at {{ "{{" }} $value {{ "}}" }}/s, above {{ $th.rebalancesPerSecond }}/s. Tasks spend the rebalance not replicating, so a storm looks like intermittent lag with no failed tasks. Every mirror in this release is affected, not one."
             runbook_url: "{{ $rb }}#workers-restart-repeatedly--rebalance-storms"
+
+{{- if .Values.alerts.slo.enabled }}
+{{- $slo := .Values.alerts.slo }}
+{{- /*
+SLIs AND THE REPLICATION SLO. The alerts above ask "is something wrong right
+now". These four recorded series ask "how has the mirror been doing", in the
+shape an operator, a status page and Kates' trend dashboard can read without
+knowing the exporter's names: latency, translation age, throughput and task
+availability, one series per source (or per release, where the identity policy
+leaves no per-source dimension — the same fallback as the lag alert).
+
+The objective is the lag alert's own threshold, so there is one number to
+argue about, not two. `target` is the fraction of time the mirror must stay
+under it; the burn-rate alert fires when the error budget that leaves is being
+spent fast enough to be gone in days. Two windows (an hour and five minutes)
+so it needs the problem to be both sustained and current: a bad hour that
+ended ten minutes ago does not page, and neither does a single slow minute.
+
+`max by (namespace)` rather than `max`: the recorded series keeps the
+namespace so two releases with the same name in different namespaces do not
+collapse into one SLI. The rule labels add `cluster` (and `source`).
+
+`>= 0` is not decoration. A partition with nothing to replicate reports its
+latency as NaN, and `max` ignores NaN only while some partition has a number;
+an idle mirror is NaN on every partition, the SLI would be NaN, `<= bool`
+reads NaN as "over the objective", and the error ratio would sit at 1 — the
+burn-rate alert paging for a mirror with nothing to do. The comparison drops
+the NaN samples, so an idle mirror has no SLI rather than a failing one, and
+"is it replicating at all" stays the job of MirrorMaker2NoRecordsReplicated.
+scripts/metric-contract/tests/mirror-maker2.rules-test.yaml holds that case.
+*/}}
+{{- $objective := $th.replicationLatencyMs }}
+{{- $budget := printf "%g" (mulf $slo.burnRate (subf 1.0 $slo.target)) }}
+    - name: kafka-mirror-maker2.sli
+      rules:
+        {{- range $m := .Values.mirrors }}
+        {{- $alias := $m.source.alias | default "source" }}
+        {{- $conn := printf "%s->.*" $alias }}
+        {{- $src := printf "%s->.*MirrorSourceConnector" $alias }}
+        {{- if not $identity }}
+        - record: mm2:replication_latency_ms:max
+          labels:
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          expr: |
+            max by (namespace) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="{{ $ns }}",topic=~"{{ $alias }}[{{ $sep }}].*"} >= 0)
+        {{- end }}
+        - record: mm2:checkpoint_latency_ms:max
+          labels:
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          expr: |
+            max by (namespace) (kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max{namespace="{{ $ns }}",source="{{ $alias }}"})
+        - record: mm2:records_replicated:rate5m
+          labels:
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          expr: |
+            sum by (namespace) (rate(kafka_connect_source_task_metrics_source_record_write_total{namespace="{{ $ns }}",connector=~"{{ $src }}"}[5m]))
+        - record: mm2:tasks_running:ratio
+          labels:
+            cluster: {{ $name }}
+            source: {{ $alias | quote }}
+          expr: |
+            sum by (namespace) (kafka_connect_worker_metrics_connector_running_task_count{namespace="{{ $ns }}",connector=~"{{ $conn }}"})
+            / sum by (namespace) (kafka_connect_worker_metrics_connector_total_task_count{namespace="{{ $ns }}",connector=~"{{ $conn }}"})
+        {{- end }}
+        {{- if $identity }}
+        - record: mm2:replication_latency_ms:max
+          labels:
+            cluster: {{ $name }}
+          expr: |
+            max by (namespace) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="{{ $ns }}"} >= 0)
+        {{- end }}
+
+    - name: kafka-mirror-maker2.slo
+      rules:
+        # The fraction of the window the mirror spent OVER the objective. A
+        # subquery over the recorded SLI, so the resolution is whatever the
+        # rule group evaluates at; `<= bool` turns each sample into 1 (within
+        # objective) or 0, and one minus the mean of those is the error ratio.
+        - record: mm2:slo_replication_latency:error_ratio_rate5m
+          expr: |
+            1 - avg_over_time((mm2:replication_latency_ms:max{namespace="{{ $ns }}",cluster="{{ $name }}"} <= bool {{ $objective }})[5m:])
+        - record: mm2:slo_replication_latency:error_ratio_rate1h
+          expr: |
+            1 - avg_over_time((mm2:replication_latency_ms:max{namespace="{{ $ns }}",cluster="{{ $name }}"} <= bool {{ $objective }})[1h:])
+
+        - alert: MirrorMaker2ReplicationSLOBurning
+          # burnRate × (1 − target): with the defaults, 14.4 × 0.01 = 0.144 —
+          # the mirror was over its objective for more than 14.4% of the last
+          # hour AND of the last five minutes, which spends a 30-day budget in
+          # about two days.
+          expr: |
+            mm2:slo_replication_latency:error_ratio_rate1h{namespace="{{ $ns }}",cluster="{{ $name }}"} > {{ $budget }}
+            and
+            mm2:slo_replication_latency:error_ratio_rate5m{namespace="{{ $ns }}",cluster="{{ $name }}"} > {{ $budget }}
+          for: 2m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+          annotations:
+            summary: "MirrorMaker 2 is burning its replication error budget"
+            description: "Over the last hour {{ "{{" }} $value | humanizePercentage {{ "}}" }} of the time replication latency{{ "{{" }} if $labels.source {{ "}}" }} from {{ "{{" }} $labels.source {{ "}}" }}{{ "{{" }} end {{ "}}" }} was above {{ $objective }}ms, and it still is. At this rate the {{ printf "%g" (mulf (subf 1.0 $slo.target) 100.0) }}% budget for a 30-day window is gone in about two days. DO NOT CUT OVER: the target is behind by more than the objective, sustained."
+            runbook_url: "{{ $rb }}#the-replication-slo-is-burning"
+{{- end }}
 {{- end }}

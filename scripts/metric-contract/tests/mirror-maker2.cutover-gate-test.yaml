@@ -1,0 +1,112 @@
+# promtool unit tests for the migration board's go/no-go panel.
+#
+# "Safe to cut over?" is the one panel on either board that a person acts on
+# directly, and the action it invites — applying values-cutover.yaml — is the
+# moment a migration stops being cheaply reversible. Its query is four factors
+# multiplied together with `bool` comparisons and `or vector(0)` fallbacks,
+# which is precisely the kind of expression that looks right and is not.
+#
+# The rule under test is EXTRACTED FROM THE BOARD at check time, not copied
+# here, so this cannot pass against an expression the chart no longer renders.
+# The Chart validation job in ci-mirror-maker2.yml pulls the panel's expr out
+# of the rendered ConfigMap, writes it as `dashboard:safe_to_cut_over` into
+# cutover-gate.yaml beside this file, and runs promtool over the pair.
+#
+# Case 5 is why the query has a fourth factor. Every other factor defaults to
+# its healthy value when its series is absent (`or vector(0)`), so a release
+# whose scrape has stopped — the exact situation in which nobody should be
+# cutting over — would otherwise satisfy all three conditions and show DRAINED.
+# The worker task count carries no fallback, so the product is empty and the
+# panel reads No data instead.
+#
+# Thresholds are the chart defaults: dashboard.migration.drainedBelowMs 5000.
+
+rule_files:
+  - cutover-gate.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: drained — lag under the objective, nothing in flight, nothing failed
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+        values: '2x10'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: '900x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+        values: '0x10'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+        values: '0x10'
+    promql_expr_test:
+      - expr: dashboard:safe_to_cut_over
+        eval_time: 5m
+        exp_samples:
+          - labels: 'dashboard:safe_to_cut_over'
+            value: 1
+
+  - name: not yet — the mirror is still behind
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+        values: '2x10'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: '42000x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+        values: '0x10'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+        values: '0x10'
+    promql_expr_test:
+      - expr: dashboard:safe_to_cut_over
+        eval_time: 5m
+        exp_samples:
+          - labels: 'dashboard:safe_to_cut_over'
+            value: 0
+
+  - name: not yet — lag is fine but records are still in flight
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+        values: '2x10'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: '900x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+        values: '37x10'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+        values: '0x10'
+    promql_expr_test:
+      - expr: dashboard:safe_to_cut_over
+        eval_time: 5m
+        exp_samples:
+          - labels: 'dashboard:safe_to_cut_over'
+            value: 0
+
+  - name: not yet — a failed task means some partitions are behind by an unknown amount
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+        values: '2x10'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+        values: '900x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+        values: '0x10'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+        values: '1x10'
+    promql_expr_test:
+      - expr: dashboard:safe_to_cut_over
+        eval_time: 5m
+        exp_samples:
+          - labels: 'dashboard:safe_to_cut_over'
+            value: 0
+
+  # The case the fourth factor exists for: nothing is reporting. Every other
+  # factor would read as healthy from its fallback.
+  - name: no data — a release that is not reporting is not drained
+    interval: 1m
+    input_series:
+      - series: 'up{job="something-else"}'
+        values: '1x10'
+    promql_expr_test:
+      - expr: dashboard:safe_to_cut_over
+        eval_time: 5m
+        exp_samples: []

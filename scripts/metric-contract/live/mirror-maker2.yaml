@@ -1,0 +1,17 @@
+# Layered LAST on the migration lab's mirror by the live metric-contract job
+# in ci-mirror-maker2.yml (`kates migrate up --values-mirror <this file>`).
+#
+# The kind overlay turns metrics off, because a lab on a laptop has no
+# Prometheus to scrape them. The live job exists precisely to scrape them: it
+# needs the exporter agent on the worker and its port open, and nothing else —
+# no PodMonitor (no operator CRDs on the CI cluster), no rules, no dashboard.
+# The contract check reads those from a render; this job supplies the one
+# thing a render cannot, which is what the worker actually exposes.
+metrics:
+  enabled: true
+podMonitors:
+  enabled: false
+alerts:
+  enabled: false
+dashboard:
+  enabled: false
