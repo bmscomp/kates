@@ -255,3 +255,6 @@ charts/*/*.lock
 
 # helm dependency update scratch dirs (left behind when a run is interrupted)
 charts/*/tmpcharts-*/
+
+# scratch the desktop app drops into a connected folder
+Claude outputs/

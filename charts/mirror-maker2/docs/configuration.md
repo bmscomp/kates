@@ -227,6 +227,14 @@ offset-sync staleness — both are about translation falling behind, which is th
 failure that lets a cutover look fine and resume consumers in the wrong place.
 Thresholds are under `alerts.thresholds.*`.
 
+For a mirror that stays (DR, fan-in), the recorded SLIs are the better
+long-term read: `mm2:replication_latency_ms:max`, `mm2:checkpoint_latency_ms:max`,
+`mm2:records_replicated:rate5m` and `mm2:tasks_running:ratio`, one series per
+source, and `MirrorMaker2ReplicationSLOBurning` when the mirror spends more of
+its time over `thresholds.replicationLatencyMs` than `alerts.slo.target`
+allows. Set the target to the promise you are actually making; the default
+99% is a starting point, not a recommendation.
+
 ## What the Chart Refuses
 
 Render-time rails, each for a failure that would otherwise appear minutes later

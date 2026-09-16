@@ -9,6 +9,8 @@ Chart documentation, organised by what you are trying to do.
 | Work through the operations without forgetting one | [Every Operation, In Order](migration-plan.md#every-operation-in-order) |
 | Install the chart and know it worked | [Installation](installation.md) |
 | Understand a value before I set it | [Configuration](configuration.md) |
+| Watch what the mirror is doing | [Dashboards](dashboards.md) |
+| Decide when it is safe to **cut over** | [Dashboards — the migration board](dashboards.md#the-migration-board) |
 | Move a **Kafka 2.8** cluster onto 4.x | [Migrating from Kafka 2.8](migration-2.8-to-4.x.md) |
 | Move a **Kafka 3.x** cluster onto 4.x | [Migrating from Kafka 3.x](migration-3.x-to-4.x.md) |
 | Rehearse a migration on a laptop first | [Tutorial 11](../../../docs/tutorials/11-migrating-kafka-2x-to-4x.md) (2.x) · [Tutorial 12](../../../docs/tutorials/12-migrating-kafka-3x-to-4x.md) (3.x) |
@@ -29,7 +31,9 @@ somewhere you do not control, the credentials are somebody else's to grant, the
 replication factors are real, and a mistake has consequences. They cover the
 decisions and the checks; the tutorials cover the mechanics.
 
-The runbook is what you keep open **during** the cutover.
+The runbook is what you keep open **during** the cutover, beside the migration
+board — [Dashboards](dashboards.md) explains which of the two boards answers
+which question, and what neither of them can see.
 
 ```mermaid
 flowchart LR
