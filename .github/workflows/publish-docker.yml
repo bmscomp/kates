@@ -93,7 +93,7 @@ jobs:
 
       - name: Set up QEMU (cross-arch)
         if: false  # Not needed — arm64 builds run on native ARM runners
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/arm64
 
