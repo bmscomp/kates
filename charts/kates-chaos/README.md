@@ -152,9 +152,14 @@ Each key under `engines:` renders a `ChaosEngine`. Probes and pod `components` a
 | `monitoring.serviceMonitor.relabelings` / `metricRelabelings` | Relabel rules | `[]` |
 | `monitoring.grafanaDashboard.enabled` | Ship the dashboard ConfigMap | `false` |
 | `monitoring.grafanaDashboard.namespace` | Namespace used in dashboard PromQL | release ns |
+| `monitoring.grafanaDashboard.operatorDeployment` | Litmus operator Deployment name for the availability tile | litmus-core's fullname (`litmus`) |
 | `monitoring.grafanaDashboard.folder` | `grafana_folder` annotation | `""` |
 
 > The `litmus-core` subchart can ship its own exporter ServiceMonitor — leave `monitoring.serviceMonitor.enabled=false` to avoid duplicate scrapes, and enable it only if you manage scraping here.
+
+> **The board lives in [`dashboards/kates-chaos-infra/`](../../dashboards/kates-chaos-infra/README.md)**, not in this chart's templates. It is built from `board.py` by `scripts/gen-dashboards.py`, which also writes the copy in `files/dashboards/` that this chart loads with `.Files.Get`; `gen-dashboards.py --check` fails when the two drift. Chart 2.1.0 moved it there and corrected four series or labels LitmusChaos does not publish — that README has the table. The ConfigMap name, namespace, labels, folder annotation, data key and the board's `uid` are unchanged, so an existing install keeps the same object and existing Grafana links keep resolving; the board's **title** changed to *Kates — Chaos infrastructure*.
+>
+> Every `litmuschaos_*` panel on it needs the chaos-exporter, which `litmus-core.exporter.enabled` leaves **off by default**. The two kube-state-metrics panels fill regardless, which is what makes them the ones to read first.
 
 ### Kyverno, PDB & GameDay
 

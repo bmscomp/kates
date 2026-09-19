@@ -36,14 +36,6 @@
                 "labels": { "type": "object" }
             }
         },
-        "legacyKafkaDashboards": {
-            "type": "object",
-            "deprecated": true,
-            "description": "DEPRECATED: the legacy Kafka and Strimzi dashboards (removed in 2.0)",
-            "properties": {
-                "enabled": { "type": "boolean" }
-            }
-        },
         "test": {
             "type": "object",
             "properties": {

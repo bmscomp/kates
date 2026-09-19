@@ -87,6 +87,7 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "namespace": { "type": "string" },
+            "operatorDeployment": { "type": "string", "description": "Litmus chaos operator Deployment name for the availability tile; empty = litmus-core's own fullname" },
             "folder": { "type": "string" },
             "labels": { "type": "object" }
           }

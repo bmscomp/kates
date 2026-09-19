@@ -1,0 +1,28 @@
+# KATES — Overview. Delivered by charts/kates, the application chart itself.
+#
+# Unlike connect-cluster's and mirror-maker2's boards, neither the uid nor the
+# title is rewritten per release: every expression is scoped by the `$job`
+# template variable, which is the ServiceMonitor's job label and therefore the
+# release's Service name. One copy in a Grafana serves every Kates release it
+# can see, and the dropdown separates them — so there is no uid to collide.
+#
+# The uid is carried over from charts/kates/templates/grafana-dashboard.yaml,
+# which this replaces, so existing links keep resolving.
+uid: kates-overview
+title: KATES — Overview
+description: >-
+  What one Kates release knows about itself: uptime, active runs, the API's
+  traffic and latency, the JVM, and the Agroal connection pool. Reads only
+  series the application publishes, so it works with nothing installed beside
+  it but a Grafana.
+tags:
+  - kates
+  - kafka
+  - benchmarking
+  - chaos
+refresh: 30s
+time_from: now-1h
+
+targets:
+  - chart: charts/kates
+    file: files/dashboards/kates-overview.json

@@ -106,10 +106,18 @@ monitoring:
     metricRelabelings: []
     labels: {}
   grafanaDashboard:
+    # -- Ship the "Kates — Chaos infrastructure" board. The board itself lives
+    # in dashboards/kates-chaos-infra/; this chart delivers the generated copy
+    # in files/dashboards/. See that directory's README.md.
     enabled: false
     # -- Namespace used in dashboard PromQL queries (defaults to the release
-    # namespace where the chaos infra runs)
+    # namespace where the chaos infra runs). NOT the namespace the experiments
+    # target, which does not appear on this board at all.
     namespace: ""
+    # -- Name of the Litmus chaos operator Deployment, for the availability
+    # tile. Empty = litmus-core's own fullname, which its packaged values pin
+    # to `litmus`. Set this when you bring your own Litmus under another name.
+    operatorDeployment: ""
     # -- Grafana folder annotation (empty = General)
     folder: ""
     labels:

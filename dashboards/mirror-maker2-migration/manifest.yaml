@@ -1,0 +1,32 @@
+# The migration board — the hours between installing the mirror and cutting
+# over. Faster refresh and a shorter window than the mirror board, because it
+# is watched rather than consulted.
+#
+# `uid` and `title` are the BASE; charts/mirror-maker2 rewrites both per
+# release as it loads the file. See README.md.
+uid: kates-mm2-mig
+title: Kafka MirrorMaker 2 — migration
+tags: [kafka, mirrormaker2, migration, cutover, kates]
+refresh: 10s
+time_from: now-1h
+links:
+  - title: Cutover checklist (runbook)
+    type: link
+    icon: doc
+    url: https://github.com/bmscomp/kates/blob/main/docs/mirror-maker2-runbook.md#cutover-checklist
+    targetBlank: true
+
+# One conditional shape: under an identity replication policy the replicated
+# topics keep their source names, which changes what the Topics section's row
+# title and table description can honestly claim. Nothing else on this board
+# depends on the policy.
+variants:
+  - identity
+
+targets:
+  - chart: charts/mirror-maker2
+    file: files/dashboards/mirror-maker2-migration.json
+    variant: default
+  - chart: charts/mirror-maker2
+    file: files/dashboards/mirror-maker2-migration-identity.json
+    variant: identity

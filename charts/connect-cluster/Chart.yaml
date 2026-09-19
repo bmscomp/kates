@@ -56,6 +56,6 @@ annotations:
     - kind: changed
       description: Alerts gained KafkaConnectConnectorFailed, KafkaConnectDeadLetterWrites/Failures, KafkaConnectOffsetCommitFailures and KafkaConnectSinkLag, recording rules, and runbook links; KafkaConnectTaskCountMismatch is KafkaConnectTasksNotRunning, KafkaConnectHighErrorRate is KafkaConnectErrorsLogged, KafkaConnectSourceLag is KafkaConnectSourceIdle (opt-in)
     - kind: changed
-      description: The dashboard is rebuilt on the library's grid layout; podMonitors, metricsConfig and monitoring.* moved to monitoring.podMonitor and metrics (1.x keys still read, listed in NOTES)
+      description: "The dashboard moves to dashboards/kafka-connect, is built from board.py by scripts/gen-dashboards.py and loaded from files/dashboards/ with .Files.Get. Every panel gained a description (it had none), the scope moved from a per-release pod regex to $namespace and $cluster on strimzi_io_cluster, and four panels were added: task running and paused ratio, sink partitions assigned, rebalance in progress, and time since last rebalance. The uid is still per release. podMonitors, metricsConfig and monitoring.* moved to monitoring.podMonitor and metrics (1.x keys still read, listed in NOTES)"
     - kind: changed
       description: priorityClassName defaults to "" and appVersion is the Kafka version

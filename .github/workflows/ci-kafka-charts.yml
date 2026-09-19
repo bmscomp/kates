@@ -32,12 +32,21 @@ on:
       - "charts/mirror-maker2/**"
       - "charts/kafka-common/**"
       - "charts/strimzi-operator/**"
+      # Delivers the Kafka and Kates boards; the dashboards job renders it.
+      - "charts/monitoring/**"
+      # Delivers kates-overview and kyverno-security; likewise.
+      - "charts/kates/**"
+      # Delivers kates-chaos-infra; likewise.
+      - "charts/kates-chaos/**"
       - "scripts/check-strimzi-crs.py"
       - "scripts/check-strimzi-metrics.sh"
       - "scripts/check-chart-matrix.py"
       - "scripts/chart-matrix/**"
       - "scripts/check-metric-contract.sh"
       - "scripts/metric-contract/**"
+      - "dashboards/**"
+      - "scripts/gen-dashboards.py"
+      - "scripts/check-dashboards.py"
       - "images.env"
       - "versions.env"
       - ".github/workflows/ci-kafka-charts.yml"
@@ -49,12 +58,21 @@ on:
       - "charts/mirror-maker2/**"
       - "charts/kafka-common/**"
       - "charts/strimzi-operator/**"
+      # Delivers the Kafka and Kates boards; the dashboards job renders it.
+      - "charts/monitoring/**"
+      # Delivers kates-overview and kyverno-security; likewise.
+      - "charts/kates/**"
+      # Delivers kates-chaos-infra; likewise.
+      - "charts/kates-chaos/**"
       - "scripts/check-strimzi-crs.py"
       - "scripts/check-strimzi-metrics.sh"
       - "scripts/check-chart-matrix.py"
       - "scripts/chart-matrix/**"
       - "scripts/check-metric-contract.sh"
       - "scripts/metric-contract/**"
+      - "dashboards/**"
+      - "scripts/gen-dashboards.py"
+      - "scripts/check-dashboards.py"
       - "images.env"
       - "versions.env"
       - ".github/workflows/ci-kafka-charts.yml"
@@ -71,6 +89,177 @@ env:
   KUBECONFORM_VERSION: v0.6.7
 
 jobs:
+  # Every board in dashboards/ is generated, and every chart copy of one is
+  # generated from the same source. This job proves both, holds every board to
+  # the layout and documentation rules, and puts every query on every board
+  # through promtool. ci-mirror-maker2.yml keeps its own PromQL gate as well:
+  # that one runs over the RENDERED MirrorMaker 2 boards across all three
+  # overlays, so it covers the identity and no-SLO variants that never appear
+  # as a dashboards/ copy.
+  dashboards:
+    name: Dashboards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # Prometheus itself is the only thing that can say an expr parses, and
+      # the parser here has to be the one the queries will meet: promtool from
+      # the Prometheus release the monitoring stack pins in images.env. Same
+      # install as the `matrix` job's.
+      - name: Install promtool (the pinned Prometheus release)
+        run: |
+          set -euo pipefail
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          [ -n "$PROM" ] || { echo "::error::no prometheus pin in images.env"; exit 1; }
+          curl -sSL -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
+          sudo mv /tmp/promtool /usr/local/bin/
+          promtool --version
+
+      # dashboards/<board>/dashboard.json and every chart copy are generated
+      # from that board's board.py. A board edited without regenerating, or a
+      # chart copy edited by hand, fails here rather than shipping a board that
+      # disagrees with its source.
+      - name: Every board and chart copy is in sync
+        run: ./scripts/gen-dashboards.py --check
+
+      # The mirror-maker2 layout gate, generalised. It rejects overlapping
+      # panels, a panel with no description, a lost query, a datasource named
+      # by string, and two boards sharing a uid — the failures the boards this
+      # directory replaced all had.
+      - name: Layout, documentation and uids hold
+        run: ./scripts/check-dashboards.py
+
+      # ci-mirror-maker2.yml has run this over the rendered MirrorMaker 2
+      # boards since that chart's refactor; nine of the twelve boards had
+      # nothing like it. A panel's PromQL is no less able to be wrong than an
+      # alert's — a stray bracket or a `bool` in the wrong place renders as an
+      # empty panel, which is exactly what an idle cluster renders as, so the
+      # mistake is invisible until someone needs the number. Every query from
+      # every board is wrapped as a recording rule and handed to the same
+      # parser the alerts get.
+      #
+      # Grafana variables are the wrinkle. `namespace="$namespace"` is a
+      # string literal to PromQL and parses with or without substitution; a
+      # `$` ANYWHERE ELSE does not parse at all. So the extractor substitutes
+      # a placeholder for declared variables inside label values only, and
+      # then FAILS on any `$` that survives — which is what catches a future
+      # panel that puts a variable in a duration, a range or an operand
+      # instead of quietly skipping that query and reporting success.
+      - name: Every dashboard query is valid PromQL
+        run: |
+          set -euo pipefail
+          cat > /tmp/dashql.py <<'PY'
+          import json, re, sys, yaml
+          from pathlib import Path
+
+          # A value that parses wherever a Grafana variable legally sits
+          # inside a label matcher, and that nothing downstream can mistake
+          # for a metric name.
+          PLACEHOLDER = "grafana_template_variable"
+          STRING = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+          VARIABLE = re.compile(r"\$\{(\w+)(?::[^}]*)?\}|\$(\w+)")
+
+
+          def panels(ps):
+              for p in ps:
+                  yield p
+                  for q in panels(p.get("panels") or []):
+                      yield q
+
+
+          def substitute(expr, declared):
+              """Replace declared variables that sit INSIDE a label value."""
+              def one(m):
+                  def repl(v):
+                      name = v.group(1) or v.group(2)
+                      return PLACEHOLDER if name in declared else v.group(0)
+                  return VARIABLE.sub(repl, m.group(0))
+              return STRING.sub(one, expr)
+
+
+          rules, n, boards = [], 0, 0
+          for path in sorted(Path("dashboards").glob("*/dashboard.json")):
+              board = json.loads(path.read_text())
+              declared = {v["name"]
+                          for v in (board.get("templating") or {}).get("list") or []}
+              boards += 1
+              for p in panels(board.get("panels") or []):
+                  for t in p.get("targets") or []:
+                      expr = (t.get("expr") or "").strip()
+                      if not expr:
+                          continue
+                      n += 1
+                      parsed = substitute(expr, declared)
+                      if "$" in parsed:
+                          sys.exit(
+                              "::error::%s, panel %r: a template variable survives "
+                              "substitution, so this query is not PromQL anywhere "
+                              "but inside Grafana. A variable parses inside a label "
+                              "value and nowhere else — not in a duration, a range "
+                              "or an operand. Expression: %s"
+                              % (path, p.get("title", "?"), expr))
+                      rules.append({"record": "dashboard:q%d" % n, "expr": parsed,
+                                    "labels": {"panel": p.get("title", "?"),
+                                               "board": path.parent.name}})
+          if not rules:
+              sys.exit("::error::no dashboard queries found to check — "
+                       "dashboards/*/dashboard.json matched nothing")
+          yaml.safe_dump({"groups": [{"name": "dashboard-queries", "rules": rules}]},
+                         sys.stdout, default_flow_style=False)
+          print("  %d queries from %d boards" % (n, boards), file=sys.stderr)
+          PY
+          python3 /tmp/dashql.py > /tmp/dashql.yaml
+          promtool check rules /tmp/dashql.yaml
+
+      - name: The charts still render their boards
+        run: |
+          set -euo pipefail
+          for c in connect-cluster mirror-maker2; do
+            helm dependency build "charts/$c" >/dev/null
+          done
+          helm template cc charts/connect-cluster -n connect \
+            | ./scripts/check-dashboards.py --render
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            --set metrics.enabled=true --set dashboard.enabled=true \
+            --set dashboard.migration.enabled=true \
+            | ./scripts/check-dashboards.py --render
+          # charts/kates delivers kates-overview and kyverno-security. Both
+          # ConfigMaps are off by default, and the Kyverno one also needs the
+          # kyverno.io/v1 API to exist, so all three switches are set here —
+          # the point of the job is to render the boards, not the defaults.
+          # No `helm dependency build`: this chart has no subcharts.
+          helm template kates charts/kates -n kafka \
+            --set metrics.grafanaDashboard.enabled=true \
+            --set kyvernoPolicy.enabled=true \
+            --set kyvernoPolicy.grafanaDashboard=true \
+            --api-versions kyverno.io/v1 \
+            | ./scripts/check-dashboards.py --render
+          # charts/kates-chaos delivers kates-chaos-infra. Off by default, and
+          # the chart injects two hidden constants into the generated file, so
+          # this render is also what proves the injection still finds them.
+          helm dependency build charts/kates-chaos >/dev/null
+          helm template chaos charts/kates-chaos -n litmus \
+            --set monitoring.grafanaDashboard.enabled=true \
+            | ./scripts/check-dashboards.py --render
+          # charts/monitoring delivers the Kafka and Kates boards. --show-only
+          # is load-bearing: a full render of this chart also carries
+          # kube-prometheus-stack's own three dozen bundled dashboards, which
+          # name their datasources by string and will never pass this gate.
+          # Only the ConfigMap this chart builds is ours to hold to it.
+          helm dependency build charts/monitoring >/dev/null
+          helm template mon charts/monitoring -n monitoring \
+            --show-only templates/grafana-dashboards.yaml \
+            | ./scripts/check-dashboards.py --render
+
   # The kafka-common library cannot be rendered on its own. Its harness chart
   # (charts/kafka-common/tests/harness) calls every template, and helm-unittest
   # asserts on the output — including the refusals.

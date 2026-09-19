@@ -2,11 +2,12 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor: the chart is built on the kafka-common library (one implementation of
-# the Connect worker spec, client auth, secret sync and the monitoring and
-# NetworkPolicy fragments it shares with connect-cluster), and gains custom
-# authentication. docs/kafka-charts-refactor-plan.md, phase 2.
-version: 0.8.0
+# Minor: both dashboards move to dashboards/ and are loaded with .Files.Get
+# instead of being written inline, the uid scheme changes (so an upgrade
+# leaves the old board behind in Grafana), and two values that used to move
+# the migration board are now frozen at generation time.
+# docs/grafana-dashboards-refactor-plan.md, phase 3.
+version: 0.9.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -33,6 +34,14 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Both boards move to dashboards/mirror-maker2 and dashboards/mirror-maker2-migration, are built from board.py by scripts/gen-dashboards.py, and are loaded from files/dashboards/ with .Files.Get instead of being written inline in the template. Same 37 and 19 panels, same expressions, same descriptions; each board now has a README.md beside it and every series it reads is listed in dashboards/METRICS.md"
+    - kind: changed
+      description: "ACTION REQUIRED — the dashboard uid changed. It is now kates-mm2-<release truncated to 21>-<8 characters of sha256 over the whole release name> (and kates-mm2-mig-<17>-<8> for the migration board), replacing a plain truncation to 30 and 26 characters that let two releases sharing that prefix silently overwrite each other's board. An upgrade therefore installs a NEW board and leaves the old one behind in Grafana: delete the old uid, and repoint any link, playlist or annotation that names it"
+    - kind: changed
+      description: "dashboard.migration.drainedBelowMs and .translationFreshMs are frozen into the generated board and no longer move it from values. drainedBelowMs is not only a threshold colour — it sits inside the go/no-go panel's `< bool` comparison, where a Grafana variable does not parse as PromQL. To change either, edit dashboards/mirror-maker2-migration/board.py and run scripts/gen-dashboards.py"
+    - kind: changed
+      description: "The per-mirror rows are a Grafana `repeat` over a $source variable the chart fills in, in place of the `range .Values.mirrors` the template ran at render time; $namespace, $cluster and $pods are hidden constant variables, so the board file itself names no namespace, release or pod regex"
     - kind: changed
       description: Built on the kafka-common library chart (run `helm dependency build charts/mirror-maker2` before rendering from a checkout). Every overlay renders the same objects as 0.7.2 apart from the entries below
     - kind: added

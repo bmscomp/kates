@@ -130,9 +130,19 @@ dashboard:
 `alerts.thresholds.replicationLatencyMs` is 60s, and that is right for a mirror
 that runs: it is the point at which lag is worth waking someone. A cutover wants
 lag near zero, so the migration board judges against `drainedBelowMs` instead.
-Lower it if your window is tight; raising it above the alert's threshold means
-the board can say DRAINED while the alert says the lag is high, which is a
-contradiction worth avoiding.
+A tight cutover window wants a lower number; a number above the alert's
+threshold means the board can say DRAINED while the alert says the lag is high,
+which is a contradiction worth avoiding.
+
+**Both numbers are now frozen into the generated board**, not read from the
+release. `drainedBelowMs` is a threshold colour, which Grafana cannot template,
+*and* the `< bool 5000` inside the go/no-go query, where a `$variable` does not
+parse as PromQL — the "every dashboard query is valid PromQL" gate would reject
+it. To move either line, edit
+[`dashboards/mirror-maker2-migration/board.py`](../../../dashboards/mirror-maker2-migration/README.md)
+and run `scripts/gen-dashboards.py`. The same applies to the mirror board's
+`alerts.thresholds.*` lines and its SLO error budget: the alerts still honour
+`values.yaml`, the panel lines are the chart defaults.
 
 ### Safe to cut over?
 
@@ -234,16 +244,26 @@ are, in `.github/workflows/ci-mirror-maker2.yml`:
 
 ## Adding a panel
 
-Both templates follow the same three conventions, and the gates enforce them:
+**Neither board is written in this chart any more.** They live in
+[`dashboards/mirror-maker2/`](../../../dashboards/mirror-maker2/README.md) and
+[`dashboards/mirror-maker2-migration/`](../../../dashboards/mirror-maker2-migration/README.md)
+as Python that `scripts/gen-dashboards.py` turns into JSON; the templates here
+load the generated file with `.Files.Get` and inject the four things a release
+knows (uid, title, runbook link, and the hidden `$namespace`, `$cluster`,
+`$pods` and `$source` variables). The hand-rolled `$y` cursor and the leading
+commas are gone with them — positions and ids come from the packer now.
 
-1. **Every panel after the first emits its own leading comma.** A section that
-   renders conditionally can then be added or dropped without moving a comma
-   anywhere else — and invalid JSON means the dashboard silently never appears.
-2. **Grid positions come from the `$y` cursor**, never written down. Each
-   section places its header at `$y`, its panels at `$y + 1` (and `$y + 9` for a
-   second band), then advances past itself.
-3. **A description and a query are required.** A panel with neither is a panel
-   nobody can read during an incident.
+So: edit `board.py`, run `scripts/gen-dashboards.py`, and run
+`python3 scripts/check-dashboards.py`. Never edit the copies under
+`charts/mirror-maker2/files/dashboards/`; `gen-dashboards.py --check` fails on
+a hand-edited one. Each board's README says which chart values are frozen
+into its JSON — the alert thresholds, the SLO budget and the migration board's
+`drainedBelowMs` among them, because a Grafana threshold is not templatable
+and one of those numbers sits inside a PromQL comparison.
+
+A description and a query are still required on every panel; `panels.py` will
+not build a panel without a description, and the layout gate rejects one that
+has none.
 
 New series need a catalogue entry in
 `scripts/metric-contract/mirror-maker2.yaml` — if the MBean and attribute are
