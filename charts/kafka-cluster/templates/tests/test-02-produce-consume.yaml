@@ -1,0 +1,174 @@
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $testUser := include "kafka-cluster.testUser" . -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-produce-consume"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "2"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: produce-consume
+      image: {{ include "kafka-cluster.kafkaImage" $ }}
+      {{- include "kafka-common.imagePullPolicy" .Values.testImages.pullPolicy | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+          TOPIC="helm-test-$(date +%s)"
+          MSG="helm-test-roundtrip-$(date +%s)"
+          {{- $clusterIsr := int (get (.Values.kafka.config | default dict) "min.insync.replicas" | default 1) }}
+          {{- $rf := max 1 (min $r.brokers 3) }}
+          TOPIC_RF={{ $rf }}
+          TOPIC_ISR={{ max 1 (min $clusterIsr $rf) }}
+
+          echo "=== Tier 2: Produce/Consume Round-Trip ==="
+
+          # ─── Step 1: Discover the best listener + protocol ───────────────
+          # Priority: plain (SASL_PLAINTEXT) → tls (SASL_SSL) → first available
+          BOOTSTRAP=""
+          SECURITY_PROTOCOL=""
+
+          SASL_USER="{{ $testUser }}"
+
+          # Try listeners in order of preference for produce/consume tests
+          {{- range $r.listeners }}
+          {{- if and (eq .type "internal") (not (empty .authentication)) }}
+          if [ -z "$BOOTSTRAP" ]; then
+            DISCOVERED=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+              -o jsonpath='{.status.listeners[?(@.name=="{{ .name }}")].bootstrapServers}' 2>/dev/null || true)
+            if [ -n "$DISCOVERED" ]; then
+              # Verify TCP reachability before committing
+              DISCOVERED=$(echo "$DISCOVERED" | cut -d, -f1)
+              D_HOST=$(echo "$DISCOVERED" | cut -d: -f1)
+              D_PORT=$(echo "$DISCOVERED" | cut -d: -f2)
+              if echo "$D_HOST" | grep -q "\.svc$"; then
+                D_HOST="${D_HOST}.{{ include "kafka-cluster.clusterDomain" $ }}"
+              fi
+              if nc -zv -w 5 "$D_HOST" "$D_PORT" 2>/dev/null; then
+                BOOTSTRAP="$DISCOVERED"
+                {{- if .tls }}
+                SECURITY_PROTOCOL="SASL_SSL"
+                {{- else }}
+                SECURITY_PROTOCOL="SASL_PLAINTEXT"
+                {{- end }}
+                echo "  ℹ Using listener '{{ .name }}' → $BOOTSTRAP ($SECURITY_PROTOCOL)"
+              fi
+            fi
+          fi
+          {{- end }}
+          {{- end }}
+
+          # Final fallback to chart-configured bootstrap
+          if [ -z "$BOOTSTRAP" ]; then
+            BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
+            SECURITY_PROTOCOL="SASL_PLAINTEXT"
+            echo "  ℹ Fallback to chart-configured bootstrap: $BOOTSTRAP ($SECURITY_PROTOCOL)"
+          fi
+
+          # ─── Step 2: Build client.properties ─────────────────────────────
+          PASSWORD=$(cat /opt/kafka/connect-password/password 2>/dev/null || echo 'test')
+
+          echo "security.protocol=${SECURITY_PROTOCOL}" > /tmp/client.properties
+          echo "sasl.mechanism=SCRAM-SHA-512" >> /tmp/client.properties
+          echo "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"${SASL_USER}\" password=\"${PASSWORD}\";" >> /tmp/client.properties
+
+          {{/* If TLS, add truststore config */}}
+          if [ "$SECURITY_PROTOCOL" = "SASL_SSL" ]; then
+            # Check for cluster CA cert and build a JKS truststore
+            if kubectl get secret ${CLUSTER}-cluster-ca-cert -n $NAMESPACE -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d > /tmp/ca.crt 2>/dev/null; then
+              echo "  ℹ Building TLS truststore from cluster CA certificate..."
+              keytool -import -trustcacerts -alias kafka-ca -file /tmp/ca.crt -keystore /tmp/truststore.jks -storepass changeit -noprompt 2>/dev/null || true
+              echo "ssl.truststore.location=/tmp/truststore.jks" >> /tmp/client.properties
+              echo "ssl.truststore.password=changeit" >> /tmp/client.properties
+              echo "  ℹ TLS truststore configured"
+            else
+              echo "  ⚠ Cluster CA secret not found — TLS may fail with self-signed certs"
+            fi
+          fi
+
+          echo "  ℹ Protocol: $SECURITY_PROTOCOL | User: $SASL_USER | Bootstrap: $BOOTSTRAP"
+
+          # ─── Step 3: Create ephemeral test topic via CRD ─────────────────
+          # The topic takes the cluster's own replication factor and
+          # min.insync.replicas: kafka-console-producer sends with acks=all,
+          # so a one-replica topic on a cluster whose min.insync.replicas is 2
+          # is refused on every send — the round trip would fail on the test's
+          # own topic rather than on anything the cluster did.
+          echo "Creating test topic via CRD: ${TOPIC} (replicas ${TOPIC_RF}, min.insync ${TOPIC_ISR})..."
+          printf "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: %s\n  namespace: %s\n  labels:\n    strimzi.io/cluster: %s\nspec:\n  partitions: 1\n  replicas: %s\n  config:\n    retention.ms: 60000\n    min.insync.replicas: \"%s\"\n" "${TOPIC}" "$NAMESPACE" "$CLUSTER" "${TOPIC_RF}" "${TOPIC_ISR}" | kubectl apply -f -
+
+          echo "Waiting for topic to be ready..."
+          kubectl wait kafkatopic/${TOPIC} --for=condition=Ready --timeout=60s -n $NAMESPACE
+
+          # ─── Step 4: Produce ─────────────────────────────────────────────
+          # The producer is asynchronous and logs a rejected send through its
+          # error callback, so its stderr is kept and inspected: with it
+          # discarded, NOT_ENOUGH_REPLICAS looked exactly like a successful
+          # round trip that timed out on the consume side.
+          echo "Producing test record..."
+          if ! echo "${MSG}" | kafka-console-producer.sh \
+            --broker-list ${BOOTSTRAP} \
+            --topic ${TOPIC} \
+            --producer.config /tmp/client.properties > /tmp/produce.log 2>&1; then
+            echo "✗ Producer exited non-zero:"; sed 's/^/    /' /tmp/produce.log | tail -10; exit 1
+          fi
+          if grep -qi 'ERROR\|Exception' /tmp/produce.log; then
+            echo "✗ The record was not written:"; sed 's/^/    /' /tmp/produce.log | tail -10; exit 1
+          fi
+
+          # ─── Step 5: Consume ─────────────────────────────────────────────
+          echo "Consuming test record..."
+          RECEIVED=$(timeout 20 kafka-console-consumer.sh \
+            --bootstrap-server ${BOOTSTRAP} \
+            --topic ${TOPIC} \
+            --from-beginning \
+            --group "helm-test-consumer-$(date +%s)" \
+            --max-messages 1 \
+            --consumer.config /tmp/client.properties 2>/dev/null || true)
+
+          if echo "${RECEIVED}" | grep -q "${MSG}"; then
+            echo "✓ Round-trip OK: produced and consumed '${MSG}'"
+          else
+            echo "✗ Round-trip failed: the record was written but did not come back"
+            kubectl delete kafkatopic ${TOPIC} -n $NAMESPACE --ignore-not-found
+            exit 1
+          fi
+
+          # ─── Step 6: Cleanup ─────────────────────────────────────────────
+          echo "Cleaning up test topic..."
+          kubectl delete kafkatopic ${TOPIC} -n $NAMESPACE --ignore-not-found
+          echo "✓ Tier 2 complete"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        {{- if $testUser }}
+        - name: connect-password
+          mountPath: /opt/kafka/connect-password
+          readOnly: true
+        {{- end }}
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    {{- if $testUser }}
+    - name: connect-password
+      secret:
+        secretName: {{ $testUser }}
+    {{- end }}

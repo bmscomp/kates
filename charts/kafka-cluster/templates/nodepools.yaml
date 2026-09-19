@@ -1,0 +1,109 @@
+{{- /*
+Every KafkaNodePool, from the resolved pools (kafka-cluster.resolve). The pool
+template is built as one map and the pool's own `template` is deep-merged over
+it last.
+
+Strimzi takes each pod-template section (pod, kafkaContainer,
+persistentVolumeClaim) from the node pool when the pool sets it, and ignores
+the Kafka CR's for that section; that is why everything a pod needs is
+rendered here and not on the Kafka CR.
+*/ -}}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $cluster := include "kafka-cluster.clusterName" . -}}
+{{- $v := .Values -}}
+{{- $ts := $v.tieredStorage -}}
+{{- $tsSecret := (($ts.credentials).existingSecret) | default (ternary (include "kafka-cluster.objectStoreSecret" .) "" (and $r.tiered $v.seaweedfs.enabled)) -}}
+{{- range $p := $r.pools }}
+{{- $sch := $p.scheduling | default dict -}}
+{{- $brokerOnly := and (has "broker" $p.roles) (not (has "controller" $p.roles)) -}}
+
+{{- $pod := dict -}}
+{{- $podMeta := dict -}}
+{{- with $p.zone }}{{- $_ := set $podMeta "labels" (dict "zone" .) }}{{- end -}}
+{{- /*
+  With tiered storage active, a broker-only pool's log segments live in
+  object storage, so a file-level backup of its volumes is redundant.
+  Controller volumes (the metadata log) are always backed up.
+*/ -}}
+{{- if and $r.tiered $brokerOnly $v.backup.enabled (eq $r.backupVolumes "fs-backup") -}}
+{{- $names := list -}}
+{{- range $p.storage.volumes }}{{- $names = append $names (printf "data-%v" .id) }}{{- end -}}
+{{- $_ := set $podMeta "annotations" (dict "backup.velero.io/backup-volumes-excludes" (join "," $names)) -}}
+{{- end -}}
+{{- if $podMeta }}{{- $_ := set $pod "metadata" $podMeta }}{{- end -}}
+
+{{- $psc := include "kafka-cluster.podSecurityContext" $ | fromYaml -}}
+{{- include "kafka-cluster.merge" (dict "dst" $psc "src" ($p.podSecurityContext | default dict)) -}}
+{{- with $p.sysctls }}{{- $_ := set $psc "sysctls" . }}{{- end -}}
+{{- $_ := set $pod "securityContext" $psc -}}
+
+{{- $spread := $sch.spread | default dict -}}
+{{- if include "kafka-common.enabled" (list $spread.enabled true) -}}
+{{- $_ := set $pod "topologySpreadConstraints" (list (dict
+      "maxSkew" (int ($spread.maxSkew | default 1))
+      "topologyKey" ($spread.topologyKey | default $sch.zoneKey | default "topology.kubernetes.io/zone")
+      "whenUnsatisfiable" ($spread.whenUnsatisfiable | default "ScheduleAnyway")
+      "labelSelector" (dict "matchLabels" (dict "strimzi.io/pool-name" $p.name)))) -}}
+{{- end -}}
+
+{{- $aff := dict -}}
+{{- with $p.zone -}}
+{{- $_ := set $aff "nodeAffinity" (dict "requiredDuringSchedulingIgnoredDuringExecution" (dict "nodeSelectorTerms" (list (dict "matchExpressions" (list (dict "key" $sch.zoneKey "operator" "In" "values" (list .))))))) -}}
+{{- end -}}
+{{- $anti := $sch.antiAffinity | default dict -}}
+{{- if include "kafka-common.enabled" (list $anti.enabled true) -}}
+{{- $sel := dict "strimzi.io/pool-name" $p.name -}}
+{{- if and (has "controller" $p.roles) (not (has "broker" $p.roles)) -}}
+{{- /* Controllers of one quorum should not share a node, whatever their pool. */ -}}
+{{- $sel = dict "strimzi.io/cluster" $cluster "strimzi.io/controller-role" "true" -}}
+{{- end -}}
+{{- $_ := set $aff "podAntiAffinity" (dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "podAffinityTerm" (dict "labelSelector" (dict "matchLabels" $sel) "topologyKey" ($anti.topologyKey | default "kubernetes.io/hostname"))))) -}}
+{{- end -}}
+{{- if $aff }}{{- $_ := set $pod "affinity" $aff }}{{- end -}}
+{{- with $sch.tolerations }}{{- $_ := set $pod "tolerations" . }}{{- end -}}
+{{- with $sch.priorityClassName }}{{- $_ := set $pod "priorityClassName" . }}{{- end -}}
+{{- if not (kindIs "invalid" $sch.terminationGracePeriodSeconds) }}{{- $_ := set $pod "terminationGracePeriodSeconds" (int $sch.terminationGracePeriodSeconds) }}{{- end -}}
+
+{{- $csc := include "kafka-cluster.containerSecurityContext" $ | fromYaml -}}
+{{- include "kafka-cluster.merge" (dict "dst" $csc "src" ($p.containerSecurityContext | default dict)) -}}
+{{- $container := dict "securityContext" $csc -}}
+{{- if and $r.tiered $tsSecret -}}
+{{- $_ := set $container "env" (list
+      (dict "name" "AWS_ACCESS_KEY_ID" "valueFrom" (dict "secretKeyRef" (dict "name" $tsSecret "key" (($ts.credentials).accessKeyIdKey | default "AWS_ACCESS_KEY_ID"))))
+      (dict "name" "AWS_SECRET_ACCESS_KEY" "valueFrom" (dict "secretKeyRef" (dict "name" $tsSecret "key" (($ts.credentials).secretAccessKeyKey | default "AWS_SECRET_ACCESS_KEY"))))) -}}
+{{- end -}}
+
+{{- $tpl := dict "pod" $pod "kafkaContainer" $container -}}
+{{- if and $r.tiered $brokerOnly $v.backup.enabled -}}
+{{- $_ := set $tpl "persistentVolumeClaim" (dict "metadata" (dict "labels" (dict "velero.io/exclude-from-backup" "true"))) -}}
+{{- end -}}
+{{- include "kafka-cluster.merge" (dict "dst" $tpl "src" ($p.template | default dict)) }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ include "kafka-cluster.namespace" $ }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+  annotations:
+    # Deleting a node pool deletes its brokers and, with deleteClaim, their data.
+    helm.sh/resource-policy: keep
+spec:
+  replicas: {{ $p.replicas }}
+  roles:
+    {{- toYaml $p.roles | nindent 4 }}
+  storage:
+    {{- toYaml $p.storage | nindent 4 }}
+  {{- with $p.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $p.jvmOptions }}
+  jvmOptions:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    {{- toYaml $tpl | nindent 4 }}
+{{- end }}

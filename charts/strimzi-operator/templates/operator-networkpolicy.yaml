@@ -1,4 +1,5 @@
-{{- if .Values.operatorPolicy.enabled }}
+{{- $npOwner := include "strimzi-operator.ownedElsewhere" (dict "ctx" . "apiVersion" "networking.k8s.io/v1" "kind" "NetworkPolicy" "namespace" .Release.Namespace "name" (include "strimzi-operator.fullname" .)) -}}
+{{- if and .Values.operatorPolicy.enabled (not $npOwner) }}
 {{- $op := index .Values "strimzi-kafka-operator" -}}
 {{- /*
 The Cluster Operator's NetworkPolicy. Moved here from charts/kafka-cluster,
@@ -9,15 +10,15 @@ namespace fought over a single policy, and the second one lost.
 One policy per operator, owned by the operator's own release. Ingress and the
 API-server/DNS egress are what the original allowed. Operand egress goes to
 every pod labelled strimzi.io/kind (Kafka, Connect, MirrorMaker 2, ... — the
-operator reaches brokers on 9090-9093/2181 and Connect workers on 8083) in the
+operator reaches brokers on 9090-9093/8443 and Connect workers on 8083) in the
 namespaces this operator watches: every namespace when watchAnyNamespace is
 set, otherwise watchNamespaces plus the release namespace, which upstream
 always watches.
 
-Same name as the policy kafka-cluster used to write, on purpose: if a
-kafka-cluster release still has networkPolicies.operatorPolicy.enabled=true
-for this namespace, Helm refuses the second owner instead of leaving two
-overlapping policies behind. Turn it off there first.
+Same name as the policy kafka-cluster 0.4 wrote. While a kafka-cluster 0.4
+release still owns that object, this template skips it (NOTES say so);
+kafka-cluster 1.0 no longer renders it, and the next upgrade of this chart
+creates it here. On by default since 0.3.
 */ -}}
 {{- $watched := list }}
 {{- if not $op.watchAnyNamespace }}
@@ -64,9 +65,11 @@ spec:
         - port: 6443
           protocol: TCP
     # Strimzi operands in the watched namespaces: brokers and controllers
-    # (9090 control plane, 9091 replication, 9092/9093 clients, 2181 ZooKeeper
-    # on releases that still have it) and Connect / MirrorMaker 2 workers (8083
-    # REST, through which connectors are created and polled).
+    # (9090 control plane and Cruise Control's REST API, 9091 replication,
+    # 9092/9093 clients, 8443 the Kafka agent the operator asks for broker
+    # state during rolls) and Connect / MirrorMaker 2 workers (8083 REST,
+    # through which connectors are created and polled). Strimzi 1.x has no
+    # ZooKeeper, so 2181 is gone.
     - to:
         {{- if $op.watchAnyNamespace }}
         - namespaceSelector: {}
@@ -94,7 +97,7 @@ spec:
           protocol: TCP
         - port: 9093
           protocol: TCP
-        - port: 2181
+        - port: 8443
           protocol: TCP
         - port: 8083
           protocol: TCP

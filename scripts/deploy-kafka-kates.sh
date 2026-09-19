@@ -45,20 +45,18 @@ done
 # 4. Create tolerations overlay for control-plane nodes
 TOLERATIONS_OVERLAY="${ROOT_DIR}/.build/tolerations.yaml"
 cat <<EOF > "${TOLERATIONS_OVERLAY}"
-controllerDefaults:
-  tolerations:
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
-brokerDefaults:
-  tolerations:
-    - key: "node-role.kubernetes.io/control-plane"
-      operator: "Exists"
-      effect: "NoSchedule"
+nodePools:
+  defaults:
+    scheduling:
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
 EOF
 
-# 5. Deploy using Helm, overriding strimziOperator.enabled=false since operator is already on cluster
-# And explicitly disable monitoring components
+# 5. Deploy with the platform profile (values-platform.yaml: the kates topics,
+# users and client grants), monitoring components off. The operator is the
+# strimzi-operator chart's.
 info "Installing/upgrading Kafka cluster with Helm..."
 info "  Release:    ${RELEASE_NAME}"
 info "  Namespace:  ${NAMESPACE}"
@@ -67,11 +65,10 @@ info "  Values:     ${DETECTED_VALUES}"
 helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     -f "${DETECTED_VALUES}" \
+    -f "${CHART_DIR}/values-platform.yaml" \
     -f "${TOLERATIONS_OVERLAY}" \
-    --set strimziOperator.enabled=false \
     --set alerts.enabled=false \
-    --set podMonitors.enabled=false \
-    --set dashboards.enabled=false \
+    --set monitoring.podMonitor.enabled=false \
     --timeout 10m
 
 # 6. Wait for cluster

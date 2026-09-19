@@ -53,6 +53,7 @@ CHAOS_CHART_DIR        := charts/kates-chaos
 STRIMZI_CHART_DIR      := charts/strimzi-operator
 PLATFORM_CHART_DIR     := charts/kates-platform
 MM2_CHART_DIR          := charts/mirror-maker2
+KAFKA_COMMON_DIR       := charts/kafka-common
 LEGACY_KAFKA_CHART_DIR := charts/legacy-kafka
 # The release name every MM2 document installs as. Override per invocation:
 #   make mm2-deploy MM2_RELEASE=mm2-dr
@@ -150,8 +151,21 @@ check-chart-tests: ## Fail if a chart test calls an endpoint that does not exist
 # one its JMX exporter rules can produce — simulated over the MBean catalogue
 # in scripts/metric-contract/<chart>.yaml. An alert on a name no rule emits
 # installs fine and never fires. Also run in CI (ci-mirror-maker2.yml).
-check-metric-contract: ## Verify the alerts and dashboards read series the exporter rules produce
+check-metric-contract: kafka-chart-deps connect-chart-deps mm2-chart-deps ## Verify the alerts and dashboards read series the exporter rules produce
 	@for c in $$(./scripts/check-metric-contract.sh --list); do ./scripts/check-metric-contract.sh "$$c" --quiet || exit 1; done
+
+# Render each Strimzi chart across every overlay and toggle in
+# scripts/chart-matrix/<chart>.yaml and check the output against the pinned
+# Strimzi CRDs (pruned fields, missing required fields, enums, duplicate keys),
+# the render's assertions, and the rails. Needs `helm dependency build
+# charts/strimzi-operator` once. Also run in CI (ci-kafka-charts.yml).
+check-chart-matrix: mm2-chart-deps kafka-chart-deps ## Render the Strimzi charts across their overlays and check every render
+	@for c in strimzi-operator kafka-cluster connect-cluster mirror-maker2; do ./scripts/check-chart-matrix.py "$$c" --offline || exit 1; done
+
+# kafka-cluster ships Strimzi's own JMX exporter rules unchanged; this compares
+# them with upstream for STRIMZI_VERSION (needs network).
+check-strimzi-metrics: ## Verify the vendored Strimzi metrics rules match upstream
+	@./scripts/check-strimzi-metrics.sh
 
 check-help: ## Fail if any target is missing its help description
 	@undocumented=$$(awk -F: '/^[a-zA-Z0-9_-]+:([^=]|$$)/ && $$0 !~ /##/ {print "  " $$1}' $(MAKEFILE_LIST)); \
@@ -754,8 +768,10 @@ chart-push: chart-package  ## Push the chart to OCI registry
 	helm push .build/kates-$(CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Chart pushed: $(CHART_REGISTRY)/kates:$(CHART_VERSION)"
 
+# `update`, not `build`: a Chart.lock left by kafka-cluster 0.4 (seaweedfs
+# only) makes `build` refuse the kafka-common dependency 1.0 added.
 kafka-chart-deps:  ## Fetch kafka-cluster chart dependencies
-	helm dependency build $(KAFKA_CHART_DIR)
+	@helm dependency build $(KAFKA_CHART_DIR) > /dev/null 2>&1 || helm dependency update $(KAFKA_CHART_DIR)
 
 kafka-chart-lint: kafka-chart-deps  ## Lint the kafka-cluster chart (all environments)
 	@echo "🔍 Linting kafka-cluster chart (all environments)..."
@@ -763,14 +779,20 @@ kafka-chart-lint: kafka-chart-deps  ## Lint the kafka-cluster chart (all environ
 	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-dev.yaml
 	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-staging.yaml
 	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-prod.yaml
+	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-platform.yaml -f $(KAFKA_CHART_DIR)/values-prod.yaml
+	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-dev.yaml -f $(KAFKA_CHART_DIR)/values-kind.yaml
+	helm lint $(KAFKA_CHART_DIR) -f $(KAFKA_CHART_DIR)/values-ci.yaml -f $(KAFKA_CHART_DIR)/values-additional.yaml
 	@echo "✅ Kafka chart lint passed"
+
+kafka-chart-unittest: kafka-chart-deps  ## Run the kafka-cluster helm-unittest suites
+	@helm plugin list | grep -q unittest || { echo "❌ helm-unittest is not installed: helm plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION)"; exit 1; }
+	helm unittest $(KAFKA_CHART_DIR)
 
 kafka-chart-template: kafka-chart-deps  ## Render kafka-cluster templates into .build/
 	@mkdir -p .build
 	helm template kafka-cluster $(KAFKA_CHART_DIR) \
 		--namespace kafka \
-		--set strimziOperator.enabled=false \
-		--set crdUpgrade.enabled=false \
+		-f $(KAFKA_CHART_DIR)/values-platform.yaml \
 		> .build/kafka-rendered.yaml
 	@echo "Rendered $$(grep -c '^kind:' .build/kafka-rendered.yaml) resources → .build/kafka-rendered.yaml"
 
@@ -977,23 +999,33 @@ helm-test-all:  ## Run all Helm tests across all components with summary
 	echo ""; \
 	[ $$FAILED -eq 0 ]
 
-kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-template kafka-chart-package  ## Lint, template, test and package the kafka-cluster chart
+kafka-chart-all: kafka-chart-deps kafka-chart-lint kafka-chart-unittest kafka-chart-template kafka-chart-package  ## Lint, template, test and package the kafka-cluster chart
 	@echo "✅ All kafka chart checks passed: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
 
 ##@ Connect, Chaos, Strimzi & Platform Charts
-connect-chart-lint:  ## Lint the connect-cluster chart
+connect-chart-deps:  ## Build the connect-cluster chart's kafka-common dependency
+	@# update when build refuses: a Chart.lock from 1.x lists no dependency.
+	@helm dependency build $(CONNECT_CHART_DIR) > /dev/null 2>&1 || helm dependency update $(CONNECT_CHART_DIR) > /dev/null
+
+connect-chart-lint: connect-chart-deps  ## Lint the connect-cluster chart
 	@echo "🔍 Linting connect-cluster chart..."
 	helm lint $(CONNECT_CHART_DIR)
+	helm lint $(CONNECT_CHART_DIR) -f $(CONNECT_CHART_DIR)/values-prod.yaml
+	helm lint $(CONNECT_CHART_DIR) -f $(CONNECT_CHART_DIR)/values-kind.yaml
 	@echo "✅ Connect chart lint passed"
 
-connect-chart-template:  ## Render connect-cluster templates
+connect-chart-unittest: connect-chart-deps  ## Run the connect-cluster helm-unittest suites
+	@helm plugin list | grep -q unittest || { echo "❌ helm-unittest is not installed: helm plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION)"; exit 1; }
+	helm unittest $(CONNECT_CHART_DIR)
+
+connect-chart-template: connect-chart-deps  ## Render connect-cluster templates
 	@mkdir -p .build
 	helm template connect-cluster $(CONNECT_CHART_DIR) \
 		--namespace kafka \
 		> .build/connect-rendered.yaml
 	@echo "Rendered $$(grep -c '^kind:' .build/connect-rendered.yaml) resources → .build/connect-rendered.yaml"
 
-connect-chart-package:  ## Package the connect-cluster chart
+connect-chart-package: connect-chart-deps  ## Package the connect-cluster chart
 	@mkdir -p .build
 	helm package $(CONNECT_CHART_DIR) --destination .build/
 	@echo "✅ Connect chart packaged: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
@@ -1020,8 +1052,13 @@ strimzi-chart-push: strimzi-chart-package  ## Push the packaged strimzi-operator
 	helm push .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Strimzi operator chart pushed: $(CHART_REGISTRY)/strimzi-operator:$(STRIMZI_CHART_VERSION)"
 
-platform-chart-deps:  ## Fetch kates-platform chart dependencies
-	helm dependency build $(PLATFORM_CHART_DIR)
+platform-chart-deps: kafka-chart-deps connect-chart-deps  ## Fetch kates-platform chart dependencies
+	@# The umbrella packages its file:// subcharts as they are on disk, so their
+	@# own dependencies (kafka-common, seaweedfs) have to be built first.
+	helm dependency build $(MM2_CHART_DIR)
+	@# update, not build: every dependency is file://, and a Chart.lock left
+	@# from an earlier subchart version makes build refuse the new one.
+	helm dependency update $(PLATFORM_CHART_DIR)
 
 platform-chart-lint: platform-chart-deps  ## Lint the kates-platform umbrella chart
 	helm lint $(PLATFORM_CHART_DIR)
@@ -1058,10 +1095,10 @@ connect-chart-test:  ## Run Helm tests for connect-cluster
 	fi; \
 	exit $$EXIT
 
-connect-chart-all: connect-chart-lint connect-chart-template connect-chart-package  ## lint + template + package
+connect-chart-all: connect-chart-lint connect-chart-unittest connect-chart-template connect-chart-package  ## lint + unit tests + template + package
 	@echo "✅ All connect chart checks passed: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
 
-connect-deploy:  ## Deploy Kafka Connect via Helm (ENV=kind|dev|staging|prod)
+connect-deploy: connect-chart-deps  ## Deploy Kafka Connect via Helm (ENV=kind|dev|staging|prod)
 	@echo "🔌 Deploying Kafka Connect cluster (ENV=$(ENV))..."
 	@OVERLAY=""; \
 	if [ -f "$(CONNECT_CHART_DIR)/values-$(ENV).yaml" ]; then \
@@ -1079,13 +1116,26 @@ connect-undeploy:  ## Remove Kafka Connect Helm release
 	@echo "✅ Kafka Connect removed"
 
 ##@ MirrorMaker 2 & Cross-Version Migration
-mm2-chart-lint:  ## Lint the mirror-maker2 and legacy-kafka charts
+# mirror-maker2 (like connect-cluster) is built on the kafka-common library,
+# a file:// dependency a checkout does not carry built.
+mm2-chart-deps:  ## Build the mirror-maker2 chart's kafka-common dependency
+	@helm dependency build $(MM2_CHART_DIR) > /dev/null
+
+# The library cannot be rendered on its own; its harness chart calls every
+# template and helm-unittest asserts on the output.
+kafka-common-test:  ## Lint the kafka-common library and run its helm-unittest suites
+	helm lint $(KAFKA_COMMON_DIR)
+	@helm dependency build $(KAFKA_COMMON_DIR)/tests/harness > /dev/null
+	@helm plugin list | grep -q unittest || { echo "❌ helm-unittest is not installed: helm plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION)"; exit 1; }
+	helm unittest $(KAFKA_COMMON_DIR)/tests/harness
+
+mm2-chart-lint: mm2-chart-deps  ## Lint the mirror-maker2 and legacy-kafka charts
 	@echo "🔍 Linting mirror-maker2 and legacy-kafka charts..."
 	helm lint $(MM2_CHART_DIR)
 	helm lint $(LEGACY_KAFKA_CHART_DIR)
 	@echo "✅ MirrorMaker 2 chart lint passed"
 
-mm2-chart-template:  ## Render mirror-maker2 templates for every overlay
+mm2-chart-template: mm2-chart-deps  ## Render mirror-maker2 templates for every overlay
 	@mkdir -p .build
 	@helm template mirror-maker2 $(MM2_CHART_DIR) --namespace kafka \
 		> .build/mm2-rendered.yaml
@@ -1122,7 +1172,7 @@ mm2-chart-template:  ## Render mirror-maker2 templates for every overlay
 # fixture, a different guard firing first) looks exactly like a working rail if
 # all you check is the exit code. One case per row of §4 of
 # docs/mirror-maker2-chart-enhancement-plan.md; the same set CI runs.
-mm2-chart-guards:  ## Assert the mirror-maker2 safety rails reject bad input, for the right reason
+mm2-chart-guards: mm2-chart-deps  ## Assert the mirror-maker2 safety rails reject bad input, for the right reason
 	@echo "🔒 Checking the mirror-maker2 safety rails..."
 	@mkdir -p .build
 	@rc=0; \
@@ -1200,7 +1250,7 @@ mm2-chart-guards:  ## Assert the mirror-maker2 safety rails reject bad input, fo
 	rm -f .build/mm2-guard-*.yaml; \
 	[ $$rc -eq 0 ] && echo "✅ every guard bites"; exit $$rc
 
-mm2-chart-package:  ## Package the mirror-maker2 chart
+mm2-chart-package: mm2-chart-deps  ## Package the mirror-maker2 chart
 	@mkdir -p .build
 	helm package $(MM2_CHART_DIR) --destination .build/
 	@echo "✅ MM2 chart packaged: .build/mirror-maker2-$(MM2_CHART_VERSION).tgz"

@@ -349,8 +349,8 @@ sequenceDiagram
 | CLI | Go | 1.25+ | Cross-platform binary |
 | CLI Framework | Cobra | Latest | Command parsing, help generation |
 | Cluster | Kind | Latest | Local Kubernetes simulation |
-| Kafka | Apache Kafka | 4.3.0 | KRaft mode, Share Groups |
-| Operator | Strimzi | 1.1.0 | Kafka lifecycle management |
+| Kafka | Apache Kafka | 4.3.1 | KRaft mode, Share Groups |
+| Operator | Strimzi | 1.2.0 | Kafka lifecycle management |
 | Chaos | LitmusChaos | Latest | Advanced chaos experiments |
 | Monitoring | Prometheus + Grafana | Latest | Metrics collection and visualization |
 | Tracing | Jaeger (OTLP) | 2.15.0 | Distributed trace collection |
@@ -358,6 +358,8 @@ sequenceDiagram
 | Database | PostgreSQL | Latest | Test results and schedule persistence |
 | Backup | Velero + MinIO | Latest | Cluster backup and restore |
 | Policy Engine | Kyverno | Latest | Admission control, PSS enforcement, NetworkPolicy generation |
+
+The pinned versions above are a snapshot for orientation; the [Version & Compatibility Matrix](appendix-d-versions.md) is generated from `versions.env` and the charts, and it wins when the two disagree.
 
 ## Data Model
 

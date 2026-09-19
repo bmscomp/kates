@@ -15,9 +15,13 @@ difference: MM2 spans **two Kafka clusters**.
 | Consolidate several sources | `-f charts/mirror-maker2/values-fan-in.yaml` |
 | Cut over | add `-f charts/mirror-maker2/values-cutover.yaml` |
 | Fail over (the source is gone) | add `-f charts/mirror-maker2/values-failover.yaml` |
-| Prove it end to end | `make mm2-migration-test` |
-| See what it replicated | `make mm2-topics` |
-| Remove it (including the kept CR) | `make mm2-undeploy` |
+| Prove it end to end | `kates migrate run --from 3.9.1` |
+| See what it replicated | `kates migrate target topics` |
+| Remove it (including the kept CR) | `kates migrate mirror remove --release mm2 --namespace kafka --yes` |
+
+**From a checkout**, build the chart's one dependency first — the
+[`kafka-common`](../kafka-common/) library it shares with `connect-cluster`:
+`helm dependency build charts/mirror-maker2`. A packaged chart carries it.
 
 **New here?** [`docs/`](docs/) is the task-organised entry point — the
 [Migration Plan](docs/migration-plan.md) for moving a cluster onto the 4.x
@@ -105,7 +109,7 @@ nothing else in the deployment will warn you about.
 ### 1. There is a protocol floor, and it is a cliff
 
 [KIP-896](https://cwiki.apache.org/confluence/x/K5sODg) removed the pre-2.1
-client protocol API versions in Kafka 4.0. These workers run `version: 4.3.0`,
+client protocol API versions in Kafka 4.0. These workers run `version: 4.3.1`,
 so they *are* a 4.x client: they can read brokers **2.1 and newer, and nothing
 older**. Below that the broker answers `UNSUPPORTED_VERSION`, the
 `MirrorSourceConnector` fails, and the CR keeps saying `Ready`.
@@ -182,7 +186,7 @@ workers will use**, so a pass is evidence rather than an assumption. It runs the
 
 | Verdict | Means | Fails the install? |
 |---|---|---|
-| `✅ HANDSHAKE` | The broker answered a 4.3.0 client — protocol, network and credentials all fine | no |
+| `✅ HANDSHAKE` | The broker answered a 4.3.1 client — protocol, network and credentials all fine | no |
 | `❌ PROTOCOL` | `UNSUPPORTED_VERSION` — below the KIP-896 floor | yes |
 | `❌ DNS` | the bootstrap host does not resolve — namespace or cluster domain | yes |
 | `❌ NETWORK` | resolvable but unreachable — NetworkPolicy, port, or an unadvertised listener | yes |
@@ -210,7 +214,7 @@ task count and checkpoint intervals — a 3.9 source feeds fetchers faster and
 speaks the modern group protocol, so both can be tighter. Adjust
 `mirrors[0].source.bootstrapServers` and the replication factors for a real
 target. Pair them with [`charts/legacy-kafka`](../legacy-kafka/), which deploys
-the 2.x or 3.x source that Strimzi 1.1.0 cannot.
+the 2.x or 3.x source that Strimzi 1.2.0 cannot.
 
 Full walkthroughs: [2.x → 4.x](../../docs/tutorials/11-migrating-kafka-2x-to-4x.md),
 [3.x → 4.x](../../docs/tutorials/12-migrating-kafka-3x-to-4x.md).
@@ -386,10 +390,12 @@ namespace**. When a source or target Kafka cluster is elsewhere, do all of:
    narrowed to the actual clusters? `networkPolicy.kafka.perSource: true`, plus
    a `source.egressCIDR` on any source that is not in-cluster.
 4. **NetworkPolicy *ingress* on the target.** The `kafka-cluster` chart's
-   broker policy admits MM2 via `networkPolicies.mirrorMaker2Namespace`
-   (defaults to the Kafka release namespace). MM2 in a different namespace must
-   be named there, or the mirror is denied at the network layer while reporting
-   itself perfectly healthy.
+   broker policy admits MM2 through the `mirror-maker2` entry of
+   `networkPolicy.clients` (the platform profile's; it defaults to the Kafka
+   release namespace, and the 0.4 key `networkPolicies.mirrorMaker2Namespace`
+   still sets it). MM2 in a different namespace must be named there, or the
+   mirror is denied at the network layer while reporting itself perfectly
+   healthy.
 5. **The operator can reach the workers.** `networkPolicy.strimziOperatorNamespace`
    must name the namespace the Cluster Operator runs in (`strimzi-operator` by
    default). It creates the connectors over the Connect REST API; locked out,
@@ -840,11 +846,13 @@ The blocks this chart adds on top of the `connect-cluster` worker surface:
 | `networkPolicy` | Default-deny for the workers with explicit flows | `kafka.ports`, **`kafka.perSource`**, `strimziOperatorNamespace`, `operator.enabled`, `dns` |
 | `metrics` / `podMonitors` / `alerts` / `dashboard` | Observability | **`metrics.type`**, **`metrics.allowList`**, **`podMonitors.scrape.<type>.{port,path}`**, `alerts.thresholds.*` (incl. **`checkpointStaleMinutes`**, **`offsetSyncStaleMinutes`**, **`rebalancesPerSecond`**), **`alerts.runbookBaseUrl`**, **`alerts.allowReporterMetrics`** |
 | `rack` | Zone awareness | `enabled`, `topologyKey`, **`clientRackInitImage`**, **`clientRack`** |
-| `jmxOptions` / `connectContainer` / `templateExtra` | The rest of the v1 surface | authenticated JMX; env + securityContext on the worker container; a raw passthrough merged into `spec.template` for the sub-objects this chart does not name |
+| `jmxOptions` / `connectContainer` / `templateExtra` | The rest of the v1 surface | authenticated JMX; env + securityContext on the worker container (merged over a hardened default: no privilege escalation, read-only root filesystem, all capabilities dropped); a raw passthrough **deep-merged** into `spec.template` — `templateExtra.pod.hostUsers` adds one field to the chart's pod template rather than replacing it |
+| Scheduling | Where the workers run | `nodeSelector` (rendered as required node affinity — Strimzi's pod template has no nodeSelector), `nodeAffinity`, `tolerations`, `podAntiAffinity`, `topologySpreadConstraints`, `priorityClassName` (empty by default; prod sets it), `terminationGracePeriodSeconds` |
+| `*.authentication` | Target and per-source credentials | `type: scram-sha-512\|scram-sha-256\|plain\|tls\|custom`. **`custom`** is the Strimzi v1 form of OAuth and other SASL mechanisms: `custom.sasl: true` plus `custom.config` (`sasl.mechanism`, `sasl.jaas.config`, … — or `ssl.keystore.*` for a client certificate). The preflight probe and the Helm tests report a custom-authenticated cluster as not verifiable |
 | `logging` | Worker log levels | `type: inline\|external`, `mirrorLevel`, `rootLevel`, `extraLoggers` |
 | `tests` | The data-moving Helm tests | `replication.topic`, **`replication.topicByAlias`**, `replication.group`, `replication.sourceAlias`, `offsetTranslation.group`, **`failover.{group,messages,commitAfter}`** |
 
-**Bold** keys are new in 0.4.0.
+**Bold** keys are new in 0.4.0; the scheduling row and `custom` authentication in 0.8.0.
 
 Two notes on the last few rows. `rack.clientRack` sets `consumer.client.rack` on
 every mirror's source consumer so the workers fetch from the closest **source**

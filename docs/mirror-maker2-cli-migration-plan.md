@@ -4,6 +4,8 @@ Branch: `feat/mirror-maker2-cli` (from `feat/mirror-maker2-cross-version` once t
 
 > **Status: PLAN.** Nothing below is implemented. It follows a study of the CLI as it exists on this branch (§2), which is what the design decisions in §4–§6 rest on.
 
+> **Status note — 2026-09-19.** That status line is out of date: most of this plan has since shipped. `kates migrate` exists as a Go command family (`pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run`, plus `migrate target|source|image` and `migrate mirror deploy|status|cutover|rollback|remove`) in `cli/cmd/migrate*.go`, and `make mm2-migration-test` now drives `kates migrate run` and prints a deprecation notice. Two things this plan called for have **not** happened: `mirror preflight` is not implemented, and the three shell scripts are still in `scripts/` — retired from the Makefile, not deleted. The version pairs quoted below (`--to 4.3.0`) predate the Strimzi 1.2.0 pin, whose newest Kafka is 4.3.1. Current reference: [docs/mirror-maker2-runbook.md](mirror-maker2-runbook.md) and [charts/mirror-maker2/README.md](../charts/mirror-maker2/README.md).
+
 ---
 
 ## 1. Why move at all

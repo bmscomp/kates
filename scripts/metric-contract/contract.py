@@ -18,9 +18,13 @@ same procedure over the MBean catalogue in the contract file, which is how it
 can say that `kafka_server_brokertopicmetrics_bytesinpersec` is a name no rule
 produces — the family exists, but a rule matching `<>Value` never sees a Meter.
 
-With `--scrape FILE`, a real /metrics capture is compared too: every reference
-must be in it, and the catalogue is diffed against it in both directions so
-that what the catalogue does not know about is reported rather than assumed.
+With `--scrape FILE` (repeatable: one capture per exporter, when a chart's pods
+serve several), real /metrics captures are compared too: every reference must
+be in one of them, and the catalogue is diffed against them in both directions
+so that what the catalogue does not know about is reported rather than
+assumed. Another exporter's series (`external`) and the contract's
+`live.absentOk` patterns — references that exist only under a feature the live
+cluster does not run — are not expected in the captures.
 
 Exit status: 0 when every reference is producible (and, with --scrape,
 observed); 1 otherwise. Diagnostics go to stdout in the repo's OK:/STALE: house
@@ -74,9 +78,9 @@ def metric_names(expr):
 # ── The rendered chart ─────────────────────────────────────────────────────
 
 def load_render(path):
-    """Split one rendered manifest into exporter rules, PromQL references and
-    recording-rule names."""
-    rules, refs, records = None, {}, set()
+    """Split one rendered manifest into exporter configs (by ConfigMap name),
+    PromQL references and recording-rule names."""
+    rules, refs, records = {}, {}, set()
     with open(path) as fh:
         docs = [d for d in yaml.safe_load_all(fh) if d]
     for doc in docs:
@@ -87,11 +91,10 @@ def load_render(path):
                 if name.endswith((".yml", ".yaml")) and "pattern:" in body:
                     cfg = yaml.safe_load(body) or {}
                     if isinstance(cfg.get("rules"), list):
-                        if rules is not None:
-                            sys.exit("::error::%s: more than one exporter config in the render" % path)
-                        rules = {"lowercase": bool(cfg.get("lowercaseOutputName")),
-                                 "snake": bool(cfg.get("attrNameSnakeCase")),
-                                 "rules": cfg["rules"], "source": "%s/%s" % (meta.get("name"), name)}
+                        rules[meta.get("name")] = {
+                            "lowercase": bool(cfg.get("lowercaseOutputName")),
+                            "snake": bool(cfg.get("attrNameSnakeCase")),
+                            "rules": cfg["rules"], "source": "%s/%s" % (meta.get("name"), name)}
                 elif name.endswith(".json"):
                     dash = json.loads(body)
                     for panel in _panels(dash.get("panels") or []):
@@ -112,10 +115,83 @@ def load_render(path):
                         where = "alert %s" % rule.get("alert", "?")
                     for n in metric_names(str(rule.get("expr", ""))):
                         refs.setdefault(n, set()).add(where)
-    if rules is None:
+    if not rules:
         sys.exit("::error::%s: no JMX exporter rules ConfigMap in the render "
                  "(is metrics.enabled set for this render?)" % path)
     return rules, refs, records
+
+
+def load_external_dashboards(contract, contract_path):
+    """PromQL references from dashboards the chart does not render but its
+    exporter rules must serve: `external_dashboards: [{archive: <glob, from the
+    repository root>, files: [<regex of member names>]}]`. kafka-cluster uses
+    it for the Strimzi operator's own dashboards, shipped inside the operator
+    chart's tarball, because those are the Kafka dashboards it relies on."""
+    import glob
+    import os
+    import tarfile
+    refs = {}
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(contract_path))))
+    for spec in contract.get("external_dashboards") or []:
+        archives = sorted(glob.glob(os.path.join(root, spec["archive"])))
+        if not archives:
+            sys.exit("::error::external_dashboards: nothing matches %s (run helm dependency build?)" % spec["archive"])
+        seen = 0
+        with tarfile.open(archives[-1]) as tf:
+            for member in tf.getmembers():
+                base = os.path.basename(member.name)
+                if not any(re.fullmatch(rx, base) for rx in spec["files"]):
+                    continue
+                seen += 1
+                dash = json.load(tf.extractfile(member))
+                exprs = []
+                for panel in _panels(dash.get("panels") or []):
+                    for target in panel.get("targets") or []:
+                        if target.get("expr"):
+                            exprs.append(("panel %r" % panel.get("title", "?"), target["expr"]))
+                for var in (dash.get("templating") or {}).get("list") or []:
+                    q = var.get("query")
+                    if isinstance(q, dict):
+                        q = q.get("query")
+                    if var.get("type") == "query" and q:
+                        q = str(q).strip()
+                        # label_values(<selector>, <label>): the label is not a series
+                        m = re.fullmatch(r"label_values\((.*),\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", q)
+                        if m:
+                            q = m.group(1)
+                        elif re.fullmatch(r"label_values\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", q):
+                            continue
+                        exprs.append(("variable %r" % var.get("name"), q))
+                for where, expr in exprs:
+                    for n in metric_names(expr):
+                        refs.setdefault(n, set()).add("%s %s" % (base, where))
+        if seen != len(spec["files"]):
+            sys.exit("::error::external_dashboards: %d of %d files found in %s"
+                     % (seen, len(spec["files"]), archives[-1]))
+    return refs
+
+
+def pick_exporters(contract, rules, path):
+    """Map each exporter the contract declares to the rendered config it names.
+
+    A chart with one exporter config needs no declaration. A chart with several
+    (Kafka brokers and Cruise Control read different rule sets) declares
+    `exporters: {<id>: <ConfigMap name regex>}`, and each catalogued bean says
+    which exporter scrapes it (`exporter: <id>`, default: the first declared)."""
+    declared = contract.get("exporters")
+    if not declared:
+        if len(rules) != 1:
+            sys.exit("::error::%s: %d exporter configs in the render (%s) — declare `exporters` in the contract"
+                     % (path, len(rules), ", ".join(sorted(rules))))
+        return {None: next(iter(rules.values()))}
+    out = {}
+    for ident, pattern in declared.items():
+        hits = [n for n in rules if re.fullmatch(pattern, n)]
+        if len(hits) != 1:
+            sys.exit("::error::%s: exporter %r (%s) matched %d ConfigMaps: %s"
+                     % (path, ident, pattern, len(hits), ", ".join(sorted(rules))))
+        out[ident] = rules[hits[0]]
+    return out
 
 
 def _panels(panels):
@@ -232,13 +308,15 @@ class Exporter:
         return out
 
 
-def producible(exporter, mbeans):
+def producible(exporter, mbeans, ident=None, default=None):
     """name -> list of (bean, attribute, rule index). Names that come only
     from `optional` attributes are also returned in the second set: valid to
     reference, not expected in every scrape (transactional metrics exist only
     under exactly-once, for instance)."""
     out, optional = {}, set()
     for entry in mbeans:
+        if ident is not None and entry.get("exporter", default) != ident:
+            continue
         bean = entry["bean"]
         for attr in entry.get("attributes") or []:
             name, why = exporter.publish(bean, attr, 1.0)
@@ -301,14 +379,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("contract")
     ap.add_argument("renders", nargs="+", help="name=path of each rendered manifest")
-    ap.add_argument("--scrape", help="a /metrics capture to compare against")
+    ap.add_argument("--scrape", action="append", default=[],
+                    help="a /metrics capture to compare against (repeatable)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
     with open(args.contract) as fh:
         contract = yaml.safe_load(fh)
     builtin = [re.compile(p) for p in contract.get("builtin") or []]
+    # Series another exporter publishes (kafka-exporter, kubelet, the Cluster
+    # Operator): not this chart's rules to prove, but named so a typo against
+    # them is still visible in review.
+    builtin += [re.compile(e["pattern"] if isinstance(e, dict) else e) for e in contract.get("external") or []]
+    # Known-dead references, each tied to the plan finding that removes it.
+    # A listed name that becomes producible fails the run (remove it).
+    known = dict(contract.get("known_missing") or {})
+    # Known label defects, keyed by label name, for the same reason.
+    known_labels = dict(contract.get("known_label_defects") or {})
+    label_xfail = set()
     scrape_exempt = [re.compile(p) for p in ("^up$", "^scrape_")]
+    # Not expected in a live capture: another exporter's series, and
+    # references to features the live cluster does not run (each with why).
+    scrape_exempt += [re.compile(e["pattern"] if isinstance(e, dict) else e) for e in contract.get("external") or []]
+    absent_ok = [re.compile(e["pattern"] if isinstance(e, dict) else e)
+                 for e in ((contract.get("live") or {}).get("absentOk") or [])]
     alternatives = [set(a) for a in contract.get("alternatives") or []]
     mbeans = contract.get("mbeans") or []
 
@@ -316,11 +410,27 @@ def main():
     all_refs, all_records, all_names, all_optional = {}, set(), {}, set()
     quoted_reported = set()
     exporter = None
+    declared = list((contract.get("exporters") or {}).keys())
+    default_ident = declared[0] if declared else None
+    xpass = set()
+    external_refs = load_external_dashboards(contract, args.contract)
     for spec in args.renders:
         label, path = spec.split("=", 1)
-        cfg, refs, records = load_render(path)
-        exporter = Exporter(cfg)
-        names, optional = producible(exporter, mbeans)
+        cfgs, refs, records = load_render(path)
+        for n, where in external_refs.items():
+            refs.setdefault(n, set()).update(where)
+        picked = pick_exporters(contract, cfgs, path)
+        names, optional = {}, set()
+        exporters = []
+        for ident, cfg in picked.items():
+            ex = Exporter(cfg)
+            exporters.append((ident, ex, cfg))
+            n, o = producible(ex, mbeans, ident if declared else None, default_ident)
+            for k, v in n.items():
+                names.setdefault(k, []).extend(v)
+            optional |= o
+        exporter = exporters[0][1]
+        cfg = {"rules": [r for _, _, c in exporters for r in c["rules"]]}
         all_names.update(names)
         all_optional |= optional
         all_records |= records
@@ -331,20 +441,43 @@ def main():
         # leaking through a `([^,]+)` capture. Nothing selecting on that
         # label (`connector=~"east->.*"`) can match it, so it is an error
         # even though every NAME checks out.
-        for entry in mbeans:
-            for attr in (entry.get("attributes") or [])[:1] + (entry.get("strings") or [])[:1]:
-                i, labels = exporter.labels(entry["bean"], attr, 1.0)
-                for k, v in labels.items():
-                    if (v.startswith('"') or v.endswith('"')) and (i, k) not in quoted_reported:
-                        quoted_reported.add((i, k))
-                        rc = 1
-                        print("QUOTED LABEL: rule %d writes %s=%s — Kafka's quotes are inside the capture; "
-                              "match them outside it (\\\"?([^,\\\"]+)\\\"?) or no selector on %s will match"
-                              % (i, k, v, k))
+        for ident, ex, _ in exporters:
+            for entry in mbeans:
+                if declared and entry.get("exporter", default_ident) != ident:
+                    continue
+                for attr in (entry.get("attributes") or [])[:1] + (entry.get("strings") or [])[:1]:
+                    i, labels = ex.labels(entry["bean"], attr, 1.0)
+                    for k, v in labels.items():
+                        bad = (v.startswith('"') or v.endswith('"')) or "><" in v
+                        if bad and k in known_labels:
+                            label_xfail.add(k)
+                            if (ident, i, k, "xfail") not in quoted_reported and not args.quiet:
+                                print("XFAIL: rule %d writes %s=%s (known %s)" % (i, k, v, known_labels[k]))
+                            quoted_reported.add((ident, i, k, "xfail"))
+                            continue
+                        if (v.startswith('"') or v.endswith('"')) and (ident, i, k) not in quoted_reported:
+                            quoted_reported.add((ident, i, k))
+                            rc = 1
+                            print("QUOTED LABEL: rule %d writes %s=%s — Kafka's quotes are inside the capture; "
+                                  "match them outside it (\\\"?([^,\\\"]+)\\\"?) or no selector on %s will match"
+                                  % (i, k, v, k))
+                        # A greedy `(.+)>` runs past the end of the ObjectName
+                        # into the `<>` that separates it from the attribute.
+                        if "><" in v and (ident, i, k, "run") not in quoted_reported:
+                            quoted_reported.add((ident, i, k, "run"))
+                            rc = 1
+                            print("RUN-ON LABEL: rule %d writes %s=%s — the capture runs past the bean's "
+                                  "closing '>'; use a non-greedy or [^,>]+ capture" % (i, k, v))
 
         missing = []
         for n in sorted(refs):
             if n in names or n in records or any(b.match(n) for b in builtin):
+                if n in known:
+                    xpass.add(n)
+                continue
+            if n in known:
+                if not args.quiet:
+                    print("XFAIL: %s (known %s)" % (n, known[n]))
                 continue
             missing.append(n)
         if not args.quiet or missing:
@@ -369,16 +502,32 @@ def main():
                 for v in verdicts:
                     print("        %s" % v)
 
+    for n in sorted(xpass):
+        rc = 1
+        print("XPASS: %s is listed in known_missing (%s) but is now producible — remove it" % (n, known[n]))
+    for k in sorted(set(known_labels) - label_xfail):
+        rc = 1
+        print("XPASS: label %s is listed in known_label_defects (%s) but every rule writes it cleanly — remove it"
+              % (k, known_labels[k]))
+    stale = sorted(n for n in known if n not in all_refs)
+    for n in stale:
+        rc = 1
+        print("STALE: %s is listed in known_missing (%s) but nothing reads it any more — remove it" % (n, known[n]))
+
     if rc == 0:
-        print("OK: every series the %s alerts, recording rules and dashboard read is one the rules produce (%d references)"
-              % (contract.get("chart", "chart"), len(all_refs)))
+        print("OK: every series the %s alerts, recording rules and dashboard read is one the rules produce (%d references%s)"
+              % (contract.get("chart", "chart"), len(all_refs),
+                 ", %d known-dead tracked" % len(known) if known else ""))
 
     if not args.scrape:
         return rc
 
     # ── Against a live capture ──────────────────────────────────────────────
-    observed = load_scrape(args.scrape)
-    print("==> scrape %s: %d series" % (args.scrape, len(observed)))
+    observed = set()
+    for path in args.scrape:
+        got = load_scrape(path)
+        print("==> scrape %s: %d series" % (path, len(got)))
+        observed |= got
 
     satisfied = set()
     for alt in alternatives:
@@ -389,6 +538,10 @@ def main():
         if n in observed or n in satisfied or n in all_records:
             continue
         if any(e.match(n) for e in scrape_exempt):
+            continue
+        if any(e.match(n) for e in absent_ok):
+            if not args.quiet:
+                print("ABSENT OK: %s (live.absentOk)" % n)
             continue
         unseen.append(n)
     for n in unseen:

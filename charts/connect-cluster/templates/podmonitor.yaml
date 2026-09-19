@@ -1,0 +1,17 @@
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $pm := $r.podMonitor }}
+{{- if and $pm.enabled $r.metrics.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- include "kafka-common.podMonitor" (dict
+      "name" (include "connect-cluster.fullname" .)
+      "namespace" (include "connect-cluster.namespace" .)
+      "labels" (include "kafka-common.labels" (dict "ctx" . "component" "connect" "partOf" "kates" "extra" ($pm.labels | default dict)))
+      "selector" (include "connect-cluster.podSelectorLabels" . | fromYaml)
+      "endpoint" (dict
+          "port" "tcp-prometheus"
+          "path" "/metrics"
+          "interval" $pm.interval
+          "scrapeTimeout" $pm.scrapeTimeout
+          "honorLabels" $pm.honorLabels
+          "relabelings" (include "kafka-common.strimziRelabelings" . | fromYamlArray)
+          "metricRelabelings" $pm.metricRelabelings)) }}
+{{- end }}

@@ -1,606 +1,166 @@
-{{- if .Values.networkPolicies.enabled }}
-{{- $clusterName := include "kafka-cluster.clusterName" . -}}
-{{- $namespace := include "kafka-cluster.namespace" . -}}
-{{- $monitoringNs := .Values.networkPolicies.monitoringNamespace -}}
-{{- $operatorNamespace := .Values.networkPolicies.operatorNamespace | default "strimzi-operator" -}}
-{{- $kafkaUINamespace := .Values.networkPolicies.kafkaUINamespace | default "kafka-ui" -}}
 {{- /*
-  The default-deny and allow-dns selectors default to the label Strimzi puts on
-  every pod of THIS cluster, app.kubernetes.io/part-of: strimzi-<clusterName>.
-  They used to be a values literal naming krafter, so a second cluster's pods
-  were never selected. An explicit (non-empty) value still wins.
-*/ -}}
-{{- $partOfSelector := dict "app.kubernetes.io/part-of" (printf "strimzi-%s" $clusterName) -}}
-{{- $defaultDenySelector := .Values.networkPolicies.defaultDenySelector | default $partOfSelector -}}
-{{- $allowDNSSelector := .Values.networkPolicies.allowDNSSelector | default $partOfSelector -}}
-{{- if .Values.networkPolicies.defaultDeny }}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      {{- $defaultDenySelector | toYaml | nindent 6 }}
-  policyTypes:
-    - Ingress
-    - Egress
----
-{{- end }}
-{{- if .Values.networkPolicies.allowDNS }}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-dns
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      {{- $allowDNSSelector | toYaml | nindent 6 }}
-  policyTypes:
-    - Egress
-  egress:
-    - to: []
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
----
-{{- end }}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kafka-brokers
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: Kafka
-      strimzi.io/cluster: {{ $clusterName }}
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-      ports:
-        - port: 9091
-          protocol: TCP
-        - port: 9092
-          protocol: TCP
-        - port: 9093
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kates
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kates
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: litmus
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: litmus
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kates
-          podSelector:
-            matchLabels:
-              app: kafka-ui
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $kafkaUINamespace }}
-          podSelector:
-            matchLabels:
-              app: kafka-ui
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicies.apicurioNamespace | default .Release.Namespace }}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: apicurio-registry
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicies.connectNamespace | default "connect" }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: KafkaConnect
-        {{- /*
-          MirrorMaker 2. Its workers ARE Kafka Connect workers, but Strimzi
-          labels them strimzi.io/kind: KafkaMirrorMaker2, so the KafkaConnect
-          rule above does not match them and every mirror against this cluster
-          was denied at the network layer — silently, as a connector that stays
-          RUNNING and replicates nothing. See charts/mirror-maker2.
-        */}}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicies.mirrorMaker2Namespace | default .Release.Namespace }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: KafkaMirrorMaker2
-        {{- /*
-          Helm-test and CLI pods in this namespace. Same convention as
-          connect-cluster's test pods: without it, every `kubectl run` client
-          used to verify the cluster times out against its own brokers.
-        */}}
-        - podSelector:
-            matchLabels:
-              kates.io/test-pod: "true"
-      ports:
-        - port: 9092
-          protocol: TCP
-        - port: 9093
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kates
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kates
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: litmus
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: litmus
-      ports:
-        - port: 9093
-          protocol: TCP
-    - from: []
-      ports:
-        - port: 9094
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 9404
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $operatorNamespace }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: cluster-operator
-      ports:
-        - port: 9090
-          protocol: TCP
-        - port: 9091
-          protocol: TCP
-        - port: 9092
-          protocol: TCP
-        - port: 9093
-          protocol: TCP
-        - port: 2181
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-      ports:
-        - port: 9090
-          protocol: TCP
-        - port: 9091
-          protocol: TCP
-        - port: 9092
-          protocol: TCP
-        - port: 9093
-          protocol: TCP
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kafka-controllers
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/controller-role: "true"
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $operatorNamespace }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: cluster-operator
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-      ports:
-        - port: 9090
-          protocol: TCP
-        - port: 9091
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
----
-{{- if .Values.networkPolicies.operatorPolicy.enabled }}
-{{- /*
-  The Cluster Operator's own policy, written into ANOTHER namespace under a
-  fixed name — a standalone-install convenience. Two clusters naming the same
-  operator fight over it, so the strimzi-operator wrapper chart owns it once
-  per operator (its operatorPolicy.enabled); turn this off on every release
-  that names an operator whose wrapper renders it (values-additional.yaml does).
-*/}}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: strimzi-operator
-  namespace: {{ $operatorNamespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: cluster-operator
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Keep open for kubelet probes and metrics scraping.
-    # Kubelet probes originate from node network, not pod namespaces.
-    - ports:
-        - port: 8080
-          protocol: TCP
-  egress:
-    # Allow DNS resolution
-    - to: []
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    # Allow API Server egress
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
-    # Allow egress to the target Kafka application namespace pods
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $namespace }}
-          podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-      ports:
-        - port: 9090
-          protocol: TCP
-        - port: 9091
-          protocol: TCP
-        - port: 9092
-          protocol: TCP
-        - port: 9093
-          protocol: TCP
-        - port: 2181
-          protocol: TCP
-    # Allow egress to Kafka Connect pods across all namespaces
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicies.connectNamespace | default "connect" }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: KafkaConnect
-      ports:
-        - port: 8083
-          protocol: TCP
-    # Allow egress to its own namespace pods
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $operatorNamespace }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: cluster-operator
----
-{{- end }}
-{{- if .Values.networkPolicies.kafkaUI }}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kafka-ui
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      app: kafka-ui
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from: []
-      ports:
-        - port: 8080
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/kind: Kafka
-      ports:
-        - port: 9092
-          protocol: TCP
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-{{- end }}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: cruise-control
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: Kafka
-      strimzi.io/name: {{ $clusterName }}-cruise-control
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              strimzi.io/kind: cluster-operator
-      ports:
-        - port: 9090
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 9404
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: strimzi-drain-cleaner
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      app: strimzi-drain-cleaner
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from: []
-      ports:
-        - port: 8443
-          protocol: TCP
-  egress:
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kafka-mirror-maker
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: KafkaMirrorMaker2
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 9404
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/kind: Kafka
-      ports:
-        - port: 9092
-          protocol: TCP
-    - to: []
-      ports:
-        - port: 9092
-          protocol: TCP
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: entity-operator
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: Kafka
-      strimzi.io/name: {{ $clusterName }}-entity-operator
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 8080
-          protocol: TCP
-        - port: 8081
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-      ports:
-        - port: 9091
-          protocol: TCP
-        - port: 9092
-          protocol: TCP
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kafka-exporter
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: Kafka
-      strimzi.io/name: {{ $clusterName }}-kafka-exporter
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 9404
-          protocol: TCP
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/cluster: {{ $clusterName }}
-      ports:
-        - port: 9092
-          protocol: TCP
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kafka-connect
-  namespace: {{ $namespace }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      strimzi.io/kind: KafkaConnect
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Prometheus metrics scraping
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 9404
-          protocol: TCP
-    # Connect REST API (status & management from kates backend)
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kates
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kates
-      ports:
-        - port: 8083
-          protocol: TCP
-  egress:
-    # To Kafka brokers (SCRAM plain listener)
-    - to:
-        - podSelector:
-            matchLabels:
-              strimzi.io/kind: Kafka
-      ports:
-        - port: 9092
-          protocol: TCP
-    # To Kubernetes API
-    - to: []
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
+NetworkPolicies for THIS cluster's pods.
 
+  <cluster>-default-deny      everything the rules below do not allow
+  <cluster>-allow-dns         DNS egress
+  <cluster>-kafka             brokers and controllers: the quorum, the
+                              operator, the declared clients, external
+                              listeners, metrics
+  <cluster>-cruise-control    <cluster>-entity-operator    <cluster>-kafka-exporter
+
+Broker ports come from kafka.listeners, by listener name, so a custom listener
+is reachable by the clients that name it. Policies are additive: Strimzi's own
+generated policies (STRIMZI_NETWORK_POLICY_GENERATION) still apply beside
+these. The Connect, MirrorMaker 2, Kafka UI and operator pods are selected by
+their own charts' policies, not here.
+*/ -}}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $np := $r.netpol -}}
+{{- if $np.enabled }}
+{{- $cluster := include "kafka-cluster.clusterName" . -}}
+{{- $ns := include "kafka-cluster.namespace" . -}}
+{{- $monNs := ($np.monitoring).namespace | default "monitoring" -}}
+{{- $opNs := $np.operatorNamespace | default "strimzi-operator" -}}
+{{- $partOf := dict "app.kubernetes.io/part-of" (printf "strimzi-%s" $cluster) -}}
+{{- $clusterPods := dict "podSelector" (dict "matchLabels" (dict "strimzi.io/cluster" $cluster)) -}}
+{{- $operator := dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $opNs)) "podSelector" (dict "matchLabels" (dict "strimzi.io/kind" "cluster-operator")) -}}
+{{- $monitoring := dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $monNs)) -}}
+{{- $apiServer := include "kafka-common.netpol.apiServerEgress" (dict "ports" (($np.apiServer).ports) "ipBlock" (($np.apiServer).ipBlock)) | fromYamlArray -}}
+{{- $listenerPorts := list -}}
+{{- range $r.listeners }}{{- $listenerPorts = append $listenerPorts (int .port) }}{{- end -}}
+{{- if $np.defaultDenyEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kafka-cluster.resourceName" (list . "default-deny" "default-deny") }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml ((($np.defaultDeny).selector) | default $partOf) | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}
+{{- if $np.dnsEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kafka-cluster.resourceName" (list . "allow-dns" "allow-dns") }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml ((($np.dns).selector) | default $partOf) | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "kafka-common.netpol.dnsEgress" (dict "namespaceSelector" ((($np.dns).to).namespaceSelector) "podSelector" ((($np.dns).to).podSelector)) | nindent 4 }}
+{{- end }}
+---
+{{- /* Brokers and controllers */}}
+{{- $ingress := list -}}
+{{- /* The quorum, replication and the cluster's own operands (entity operator, Cruise Control, exporter use 9091). */ -}}
+{{- $ingress = append $ingress (dict "from" (list $clusterPods) "ports" (include "kafka-cluster.tcpPorts" (concat (list 9090 9091) $listenerPorts) | fromYamlArray)) -}}
+{{- /* The Cluster Operator: control plane, replication (admin client), the Kafka agent, and every listener. */ -}}
+{{- $ingress = append $ingress (dict "from" (list $operator) "ports" (include "kafka-cluster.tcpPorts" (concat (list 9090 9091 8443) $listenerPorts) | fromYamlArray)) -}}
+{{- /* Declared clients */ -}}
+{{- range $np.resolvedClients -}}
+{{- if .ports -}}
+{{- $peer := dict "podSelector" (dict "matchLabels" .podSelector) -}}
+{{- if ne .namespace $ns -}}
+{{- $_ := set $peer "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" .namespace)) -}}
+{{- end -}}
+{{- $ingress = append $ingress (dict "from" (list $peer) "ports" (include "kafka-cluster.tcpPorts" .ports | fromYamlArray)) -}}
+{{- end -}}
+{{- end -}}
+{{- /* Helm-test and CLI pods in this namespace (kates.io/test-pod=true). */ -}}
+{{- if $np.internalPorts -}}
+{{- $ingress = append $ingress (dict "from" (list (dict "podSelector" (dict "matchLabels" (dict "kates.io/test-pod" "true")))) "ports" (include "kafka-cluster.tcpPorts" $np.internalPorts | fromYamlArray)) -}}
+{{- end -}}
+{{- /* External listeners: from anywhere, or from their allowed CIDRs. */ -}}
+{{- $cidrs := (.Values.kafka.externalAccess).allowedCidrs | default list -}}
+{{- $eaName := (.Values.kafka.externalAccess).name | default "external" -}}
+{{- range $np.externalListeners -}}
+{{- $rule := dict "ports" (include "kafka-cluster.tcpPorts" (list .port) | fromYamlArray) -}}
+{{- if and $cidrs (eq .name $eaName) -}}
+{{- $from := list -}}
+{{- range $cidrs }}{{- $from = append $from (dict "ipBlock" (dict "cidr" .)) }}{{- end -}}
+{{- $_ := set $rule "from" $from -}}
+{{- end -}}
+{{- $ingress = append $ingress $rule -}}
+{{- end -}}
+{{- $ingress = append $ingress (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)) -}}
+{{- $ingress = concat $ingress ($np.extraIngress | default list) -}}
+{{- $egress := list (dict "to" (list $clusterPods)) -}}
+{{- $egress = concat $egress $apiServer -}}
+{{- if $r.tiered -}}
+{{- $tse := .Values.tieredStorage.egress | default dict -}}
+{{- $rule := dict "ports" (include "kafka-cluster.tcpPorts" ($tse.ports | default (list 443)) | fromYamlArray) -}}
+{{- with $tse.to }}{{- $_ := set $rule "to" . }}{{- end -}}
+{{- $egress = append $egress $rule -}}
+{{- end -}}
+{{- $egress = concat $egress ($np.extraEgress | default list) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kafka-cluster.resourceName" (list . "kafka" "kafka-brokers") }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: {{ $cluster }}
+      strimzi.io/name: {{ $cluster }}-kafka
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- toYaml $ingress | nindent 4 }}
+  egress:
+    {{- toYaml $egress | nindent 4 }}
+{{- /* Operands */}}
+{{- $operands := list -}}
+{{- if include "kafka-common.enabled" (list .Values.cruiseControl.enabled true) -}}
+{{- /* The operator drives Cruise Control over its REST API (9090). */ -}}
+{{- $operands = append $operands (dict "name" "cruise-control" "legacy" "cruise-control" "ingress" (list (dict "from" (list $operator) "ports" (include "kafka-cluster.tcpPorts" (list 9090) | fromYamlArray)) (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
+{{- end -}}
+{{- $operands = append $operands (dict "name" "entity-operator" "legacy" "entity-operator" "ingress" (list (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 8080 8081) | fromYamlArray)))) -}}
+{{- if include "kafka-common.enabled" (list .Values.kafkaExporter.enabled true) -}}
+{{- $operands = append $operands (dict "name" "kafka-exporter" "legacy" "kafka-exporter" "ingress" (list (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
+{{- end -}}
+{{- range $operands }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kafka-cluster.resourceName" (list $ .name .legacy) }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: {{ $cluster }}
+      strimzi.io/name: {{ $cluster }}-{{ .name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- toYaml .ingress | nindent 4 }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ $cluster }}
+    {{- toYaml $apiServer | nindent 4 }}
+{{- end }}
 {{- end }}

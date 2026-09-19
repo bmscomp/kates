@@ -2,9 +2,11 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Patch: the packaged chart gains docs/dashboards.md. No rendered resource
-# changes — but docs/ ships inside the chart, so the version moves with it.
-version: 0.7.1
+# Minor: the chart is built on the kafka-common library (one implementation of
+# the Connect worker spec, client auth, secret sync and the monitoring and
+# NetworkPolicy fragments it shares with connect-cluster), and gains custom
+# authentication. docs/kafka-charts-refactor-plan.md, phase 2.
+version: 0.8.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -23,39 +25,25 @@ keywords:
   - migration
   - strimzi
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+dependencies:
+  - name: kafka-common
+    version: 0.1.0
+    repository: file://../kafka-common
 annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: added
-      description: docs/dashboards.md — both boards panel by panel, which one to open when, the go/no-go panel's exact meaning and its three blind spots, the cutover checklist mapped to what to watch at each step, and the conventions a new panel has to follow
-    - kind: added
-      description: dashboard.migration.enabled — a second Grafana board for the hours a migration runs rather than the months a mirror runs: a go/no-go header, the drain with a catch-up ETA extrapolated from the record age, the consumer groups that have a translated position and how old it is, a per-topic punch list, and the cutover freeze (the source connector at zero while the checkpoint connector keeps going)
-    - kind: added
-      description: dashboard.migration.drainedBelowMs (5s) and translationFreshMs (60s) — a cutover wants lag near zero, not the lag alert's steady-state 60s
-    - kind: added
-      description: The "Safe to cut over?" panel carries a fourth factor whose only job is to read as No data rather than as drained when the release has stopped reporting, and a promtool test — over the query extracted from the rendered board, not a copy of it — holds it to all five cases
-    - kind: added
-      description: CI checks every dashboard query as PromQL (nothing did before), checks the layout of every board in a render rather than assuming one, and renders both boards across seven combinations including each one alone
     - kind: changed
-      description: The Grafana dashboard is rebuilt as one canonical board — a six-stat header (is it up, is it lagging, is it erroring), then task states, replication, offset translation, errors and dead letters, the replication SLO, workers, and two collapsed sections (the client path, and one row per source)
+      description: Built on the kafka-common library chart (run `helm dependency build charts/mirror-maker2` before rendering from a checkout). Every overlay renders the same objects as 0.7.2 apart from the entries below
     - kind: added
-      description: Panels for what the chart already alerted on and never showed — errors logged per connector, records errored/failed/skipped, retries and dead-letter writes, last error per connector, checkpoint emission rate, offset commit success, polled vs written, records in flight, GC time, time since last rebalance, connector/task assignment and startup failures
+      description: authentication.type custom for the target and every source — Strimzi's sasl + config form, which is how the v1 API expresses OAuth and other SASL mechanisms. Test and preflight pods report such a cluster as not verifiable rather than failing
     - kind: added
-      description: A collapsed "path a record takes" section reading the underlying clients — the replication consumer's fetch rate and the connector producers' send, error, retry, latency and buffer — which is what says whether a slow mirror is slow at the source or at the target
-    - kind: added
-      description: Every panel's grid position is computed from a cursor rather than written down, and CI now proves the layout — no overlapping panels, rows in order, every panel with a description and a query whose expr is not empty — across five renders including both ways the SLO section can be absent
-    - kind: added
-      description: A dashboard-level link to the runbook, and threshold lines drawn from alerts.thresholds on the lag, error-rate and rebalance panels
-    - kind: added
-      description: SLI recording rules per source (mm2:replication_latency_ms:max, mm2:checkpoint_latency_ms:max, mm2:records_replicated:rate5m, mm2:tasks_running:ratio) and a replication SLO — alerts.slo.{target,burnRate} over thresholds.replicationLatencyMs — with the multi-window burn-rate alert MirrorMaker2ReplicationSLOBurning
-    - kind: added
-      description: A "Replication SLO" dashboard row reading the recorded series, rendered when the PrometheusRule that records them is installed
-    - kind: added
-      description: scripts/metric-contract/mirror-maker2.yaml — the MBean catalogue the exporter rules are checked against, so CI proves every series the alerts, recording rules and dashboard read can actually be produced (and a live scrape job diffs the catalogue against a real worker)
+      description: terminationGracePeriodSeconds (default 30, which was hardcoded) and nodeAffinity (merged with nodeSelector)
+    - kind: changed
+      description: The worker container runs with the hardened security context connect-cluster already uses (no privilege escalation, read-only root filesystem, all capabilities dropped); connectContainer.securityContext overrides it field by field
+    - kind: changed
+      description: priorityClassName defaults to empty. system-cluster-critical is for components the cluster itself cannot run without; values-prod.yaml keeps it explicitly
+    - kind: changed
+      description: testImages.kubectl moves to kates-tester 1.22.0, the pin connect-cluster's tests run on
     - kind: fixed
-      description: Every `connector` and `client_id` label carried literal double quotes (Kafka quotes an ObjectName value containing `>`, and the exporter copies the capture verbatim), so no alert selecting connector=~"<alias>->.*" could match — TaskFailed, NoRecordsReplicated, CheckpointStalled, OffsetSyncStale and HighErrorRate were dead on every release. The rules now capture inside the quotes
-    - kind: fixed
-      description: The exporter's 1.x line strips a trailing `_total` from anything not published as a COUNTER, so `source-record-write-total` and `completed-rebalances-total` were exposed without the suffix the alerts and panels read; the cumulative attributes now have COUNTER rules and keep it. NoRecordsReplicated, whose `or vector(0)` fallback read the missing series as "no records", had been firing permanently
-    - kind: fixed
-      description: The "Bytes replicated /s" panel took rate() of byte-rate, which is already a rate, and so plotted the rate of a rate; it reads the series as is now
+      description: networkPolicy.operator.enabled=false and kafkaUser.authorization.enabled=false were ignored (`false | default true` is true in Helm)

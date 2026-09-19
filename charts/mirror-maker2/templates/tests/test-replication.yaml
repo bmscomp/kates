@@ -93,11 +93,11 @@ tells you nothing about replication.
 */}}
 {{- range $mirrors }}
 {{- if include "mirror-maker2.testAuthUnsupported" (dict "c" .source) }}
-{{- fail (printf "tests.replication.enabled: source %q uses TLS/mTLS, which this test cannot configure (it would need a truststore, and for mTLS a keystore built from user.crt/user.key). Run scripts/test-mm2-migration.sh instead, or disable this test — a test that cannot connect is not a test that passed." (.source.alias | default "source")) }}
+{{- fail (printf "tests.replication.enabled: source %q uses TLS, mTLS or custom authentication, which this test cannot configure (it would need a truststore, for mTLS a keystore built from user.crt/user.key, and for custom the provider's own client configuration). Run scripts/test-mm2-migration.sh instead, or disable this test — a test that cannot connect is not a test that passed." (.source.alias | default "source")) }}
 {{- end }}
 {{- end }}
 {{- if include "mirror-maker2.testAuthUnsupported" (dict "c" $target) }}
-{{- fail "tests.replication.enabled: the target uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
+{{- fail "tests.replication.enabled: the target uses TLS, mTLS or custom authentication, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
 {{- end }}
 {{- $image := $t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
 {{- /*

@@ -235,6 +235,25 @@ spec:
 
 The `patternType: prefix` is key — it means the service can access any topic or group starting with `my-service` (e.g., `my-service-events`, `my-service-results`). This is more maintainable than listing individual topics, especially as your service evolves.
 
+An ACL is only half the grant. With `networkPolicy.defaultDeny` on, the new service still cannot open a socket to the brokers until it appears in `networkPolicy.clients`, which is what turns a pod selector into an ingress rule on the listener ports:
+
+```yaml
+networkPolicy:
+  clients:
+    - name: my-service
+      namespace: apps
+      podSelector: { app.kubernetes.io/name: my-service }
+      listeners: [plain, tls]
+```
+
+`listeners` holds listener *names* from `kafka.listeners`, not ports — the chart derives the ports. An empty `namespace` means the release namespace.
+
+::: {.callout-note}
+There is no namespace-level shortcut. `networkPolicies.allowedClientNamespaces` was the 0.4 spelling, it never generated a rule, and `kafka-cluster` 1.0 emits a deprecation notice for it instead of honouring it. Grant per client.
+:::
+
+A user the chart should own goes in `users.items` alongside the grant, so one `helm upgrade` carries both; a user for a service outside this release can stay a hand-applied `KafkaUser` as above.
+
 ### Granting Full Cluster Rights (Super-User)
 
 If you need to create a service account (like an administrator or automated testing tool) that has **full rights** across the entire Kafka cluster, you must explicitly grant it `All` operations on the `cluster`, `topic`, and `group` resources.
@@ -359,47 +378,59 @@ Network policies are your last line of defense. Even if an attacker compromises 
 
 ```mermaid
 graph TD
-    subgraph Default["default-deny (Strimzi pods)"]
-        DNS["allow-dns<br/>UDP/TCP 53"]
+    subgraph Default["krafter-default-deny (Strimzi pods)"]
+        DNS["krafter-allow-dns<br/>UDP/TCP 53"]
     end
 
-    subgraph Broker Rules
-        B1["kates namespace → 9092, 9093"]
-        B2["litmus namespace → 9092, 9093"]
-        B3["kafka-ui pod → 9092, 9093"]
-        B4["apicurio pod → 9092, 9093"]
-        B5["connect namespace → 9092, 9093"]
-        B6["monitoring namespace → 9404"]
-        B7["any → 9094 (NodePort external)"]
+    subgraph Kafka["krafter-kafka (brokers + controllers)"]
+        B0["krafter pods ↔ 9090, 9091, 9092, 9093"]
+        B1["operator → 9090, 9091, 8443, 9092, 9093"]
+        B2["kates namespace → 9092, 9093"]
+        B3["litmus namespace → 9092, 9093"]
+        B4["kafka-ui pod → 9092, 9093"]
+        B5["apicurio pod → 9092, 9093"]
+        B6["connect + MirrorMaker 2 → 9092, 9093"]
+        B7["kates.io/test-pod → 9092, 9093"]
+        B8["monitoring namespace → 9404"]
     end
 
-    subgraph Controller Rules
-        C1["krafter pods ↔ 9090, 9091"]
+    subgraph Operands
+        O1["krafter-cruise-control: operator 9090, monitoring 9404"]
+        O2["krafter-entity-operator: monitoring 8080, 8081"]
+        O3["krafter-kafka-exporter: monitoring 9404"]
     end
 
-    subgraph Operator Rules
-        O1["any → 8080 (kubelet probes, metrics)"]
-        O2["operator → krafter pods"]
-        O3["operator → K8s API (443, 6443)"]
+    subgraph Egress
+        E1["every policy: krafter pods + K8s API (443, 6443)"]
     end
 ```
 
 ### Policy Summary
 
+Every policy is named for its cluster, so two clusters can share a namespace. These are what `kafka-cluster` renders with the platform profile and the base listeners:
+
 | Policy | Target | Ingress From | Ports |
 |--------|--------|-------------|-------|
-| `default-deny` | Strimzi cluster pods | None | None |
-| `allow-dns` | Strimzi cluster pods | — (egress only) | 53 UDP/TCP |
-| `kafka-brokers` | Broker pods | kates, litmus, kafka-ui, apicurio, connect, monitoring, operator | 9091–9094, 9404 |
-| `kafka-controllers` | Controller pods | krafter cluster pods, operator | 9090, 9091 |
-| `strimzi-operator` | Operator pod | Any (kubelet probes, metrics) | 8080 |
-| `kafka-ui` | Kafka UI pod | Any | 8080 |
-| `cruise-control` | CC pod | Operator, monitoring | 9090, 9404 |
-| `strimzi-drain-cleaner` | Drain Cleaner | Any (webhook) | 8443 |
-| `kafka-connect` | Connect pods | monitoring, kates | 8083, 9404 |
-| `kafka-mirror-maker` | MirrorMaker 2 pods | monitoring | 9404 |
-| `entity-operator` | Entity Operator pod | monitoring | 8080, 8081 |
-| `kafka-exporter` | Kafka Exporter pod | monitoring | 9404 |
+| `krafter-default-deny` | Strimzi cluster pods (`app.kubernetes.io/part-of: strimzi-krafter`) | None | None |
+| `krafter-allow-dns` | Strimzi cluster pods | — (egress only) | 53 UDP/TCP |
+| `krafter-kafka` | Broker **and** controller pods | krafter pods, operator, and every `networkPolicy.clients` entry; monitoring for metrics | 9090, 9091, 8443, 9092, 9093, 9404 |
+| `krafter-cruise-control` | Cruise Control pod | Operator, monitoring | 9090, 9404 |
+| `krafter-entity-operator` | Entity Operator pod | monitoring | 8080, 8081 |
+| `krafter-kafka-exporter` | Kafka Exporter pod | monitoring | 9404 |
+
+A seventh, `krafter-test-egress`, gives pods labelled `kates.io/test-pod=true` egress to the listeners, the Kafka agent, DNS and the API server. It carries `helm.sh/resource-policy: keep` so a `helm test` against a reinstalled release still works.
+
+Client ports come from `kafka.listeners`, so turning on `kafka.externalAccess` adds its port (9094 by default, restricted by `externalAccess.allowedCidrs`) to the rules that need it. The chart no longer renders policies that select another release's pods — the operator's own policy belongs to the `strimzi-operator` release (`operatorPolicy`, on by default), and Kafka UI, Connect and MirrorMaker 2 each carry their own.
+
+Re-derive the list rather than trusting this table, since it follows the values chain you deploy with:
+
+```bash
+helm dependency build charts/kafka-cluster
+
+helm template krafter charts/kafka-cluster -n kafka \
+  -f charts/kafka-cluster/values-platform.yaml \
+  | grep -A2 'kind: NetworkPolicy' | grep 'name:'
+```
 
 ### Testing Network Policies
 

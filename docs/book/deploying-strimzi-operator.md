@@ -13,7 +13,7 @@ After this chapter, you can:
 
 ## What the Chart Deploys
 
-`charts/strimzi-operator` is a thin wrapper. It declares the upstream `strimzi-kafka-operator` chart as a subchart dependency, vendors none of its templates, and adds three things the upstream chart does not provide: a CRD-upgrade hook, a strict values schema, and Helm tests. It also pins the kates defaults that were previously scattered across `--set` flags at each call site.
+`charts/strimzi-operator` is a thin wrapper. It declares the upstream `strimzi-kafka-operator` chart as a subchart dependency, vendors none of its templates, and adds what the upstream chart does not provide: a CRD-upgrade hook, a strict values schema, Helm tests, and — since 0.3 — the operator-wide pieces that `kafka-cluster` 0.4 carried per Kafka cluster: the operator's NetworkPolicy, its PodMonitor and alerts (operator down, failing reconciliations, certificate expiry), and the Strimzi Drain Cleaner. It also turns on the operator's own Grafana dashboards, which replace the Kafka chart's. It also pins the kates defaults that were previously scattered across `--set` flags at each call site.
 
 The release is small, and its shape is the single most important thing to understand about it:
 
@@ -21,8 +21,9 @@ The release is small, and its shape is the single most important thing to unders
 |-------|-----------|
 | Cluster-scoped | `ClusterRole`: `strimzi-cluster-operator-namespaced`, `-global`, `-leader-election`, `-watched`, `strimzi-kafka-broker`, `strimzi-entity-operator`, `strimzi-kafka-client` · `ClusterRoleBinding`: `strimzi-cluster-operator-namespaced`, `strimzi-cluster-operator`, `-watched`, `-kafka-broker-delegation`, `-entity-operator-delegation`, `-kafka-client-delegation` |
 | Namespaced | `ServiceAccount`, `ConfigMap`, and `Deployment` named `strimzi-cluster-operator`, plus the `RoleBinding` `strimzi-cluster-operator-leader-election` |
+| Namespaced, added by this chart | `NetworkPolicy` `strimzi-operator`, the nine dashboard `ConfigMap`s (`strimzi-kafka`, `strimzi-kraft`, `strimzi-cruise-control`, `strimzi-kafka-exporter`, `strimzi-kafka-connect`, `strimzi-kafka-mirror-maker-2`, `strimzi-kafka-bridge`, `strimzi-kafka-oauth`, `strimzi-operators`), and — where the `monitoring.coreos.com/v1` API exists — the `PodMonitor` and `PrometheusRule`. The drain cleaner adds its own set when enabled. |
 
-Thirteen of those seventeen resources are cluster-scoped, and every name in the table is hardcoded upstream — none of them derive from the Helm release name. That makes this chart a **cluster singleton**: two releases cannot coexist, cannot be distinguished, and cannot arbitrate between themselves. There is no parallel install-then-cutover, and no blue-green. Every procedure in this chapter follows from that constraint.
+Thirteen of the operator's own seventeen resources are cluster-scoped, and every name in the first two rows is hardcoded upstream — none of them derive from the Helm release name. The dashboard ConfigMap names are fixed too. That makes this chart a **cluster singleton**: two releases cannot coexist, cannot be distinguished, and cannot arbitrate between themselves. There is no parallel install-then-cutover, and no blue-green. Every procedure in this chapter follows from that constraint. The one exception is the deliberately reduced shape in `values-namespace-scope.yaml`, which claims none of the fixed names — see [Environment Overlays](#environment-overlays).
 
 ## Why a Separate Release
 
@@ -101,7 +102,7 @@ Skip it and every command fails before it ever contacts the cluster:
 Output:
 
 ```text
-Error: an error occurred while checking for chart dependencies. You may need to run 'helm dependency build' to fetch missing dependencies: found in Chart.yaml, but missing in charts/ directory: strimzi-kafka-operator
+Error: An error occurred while checking for chart dependencies. You may need to run `helm dependency build` to fetch missing dependencies: found in Chart.yaml, but missing in charts/ directory: strimzi-kafka-operator
 ```
 
 ::: {.callout-warning}
@@ -120,18 +121,25 @@ helm upgrade --install strimzi-operator charts/strimzi-operator \
   --timeout 5m --wait
 ```
 
-That is the whole install. No `--version` flag and no `--set` flags: the version is pinned in `Chart.yaml`, and the defaults already reproduce what runs in production.
+That is the whole install. No `--version` flag and no `--set` flags: the version is pinned in `Chart.yaml`, and the defaults already reproduce what runs in production. `scripts/deploy-kafka.sh` runs the same two commands before it touches `kafka-cluster`, with `--reset-values` and a 10m timeout; `scripts/deploy-kafka-generic.sh` adds the detected DNS domain. Both reconcile the operator unconditionally, because the CRD hook is a `pre-upgrade` gate and skipping the upgrade when the operator already exists is what freezes the CRDs.
 
 ### Environment Overlays
 
-Four overlays ship with the chart. All of them are overrides only — they layer on top of the defaults rather than restating them.
+Five overlays ship with the chart. All of them are overrides only — they layer on top of the defaults rather than restating them, and one of them overrides nothing at all.
 
 | Overlay | What it changes | When to use it |
 |---------|-----------------|----------------|
-| `values-kind.yaml` | Lowers operator memory to fit a laptop; PDB off | Local `panda` Kind cluster |
+| `values-kind.yaml` | Lowers operator memory to 384Mi to fit a laptop; PDB off | Local `panda` Kind cluster |
 | `values-dev.yaml` | `logLevel: DEBUG`, lower memory request | Debugging operand reconciliation |
-| `values-prod.yaml` | Hardening, PDB, NetworkPolicy, tighter reconciliation loop | Production — **read the header first** |
-| `values-generic.yaml` | Dashboards off; documents DNS-domain injection | Clusters whose topology is not known ahead of time (EKS/GKE/AKS/on-prem) |
+| `values-prod.yaml` | Hardening, PDB, upstream's operator NetworkPolicy, tighter reconciliation loop, `productionMode`, and the drain cleaner on two replicas with a cert-manager certificate | Production — **read the header first** |
+| `values-generic.yaml` | Nothing. It sets no keys — it carries the two facts a generic cluster gets wrong, both of which the caller must act on | Clusters whose topology is not known ahead of time (EKS/GKE/AKS/on-prem) |
+| `values-namespace-scope.yaml` | The shape of an *additional* operator: `watchAnyNamespace: false` with an empty `watchNamespaces`, `createGlobalResources: false`, `globalBindings.enabled: true`, `crdUpgrade.enabled: false`, dashboards and drain cleaner off, kind-sized resources | A second operator co-located with the Kafka namespace it watches — never the primary |
+
+::: {.callout-note}
+`values-generic.yaml` is the odd one out: it declares no values, so rendering with `-f charts/strimzi-operator/values-generic.yaml` produces byte-identical output to rendering without it. It exists as documentation of two settings that fail silently. The DNS domain must be injected by the caller — upstream emits `KUBERNETES_SERVICE_DNS_DOMAIN` only when the value differs from `cluster.local`, and hardcoding it in an overlay would defeat the detection `scripts/deploy-kafka-generic.sh` does, so that script passes `--set strimzi-kafka-operator.kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}"` instead. And registry redirection is `defaultImageRegistry`, not `global.imageRegistry`.
+
+It no longer turns the operator's dashboards off. They are ConfigMaps, inert without a Grafana sidecar to pick them up, and since `kafka-cluster` 1.0 ships no dashboards of its own there is nothing left for them to collide with.
+:::
 
 ```bash
 helm upgrade --install strimzi-operator charts/strimzi-operator \
@@ -141,7 +149,7 @@ helm upgrade --install strimzi-operator charts/strimzi-operator \
 ```
 
 ::: {.callout-warning}
-`values-prod.yaml` is an **uplift, not a description of current behavior**. Its settings were stranded in `config/kafka/strimzi-values.yaml`, whose header claimed a deploy script passed it with `-f` — it never did. Applying it is a real behavior change: it adds a NetworkPolicy and a PodDisruptionBudget, tightens the reconciliation interval, and flips the operator to a read-only root filesystem. Roll it out deliberately, in a window, not as a default.
+`values-prod.yaml` is an **uplift, not a description of current behavior**. Its settings were stranded in `config/kafka/strimzi-values.yaml`, whose header claimed a deploy script passed it with `-f` — it never did. Applying it is a real behavior change: it adds upstream's operator NetworkPolicy and a PodDisruptionBudget, brings up the drain cleaner with its cert-manager Issuer and Certificate, tightens the reconciliation interval, and flips the operator to a read-only root filesystem. Roll it out deliberately, in a window, not as a default.
 :::
 
 ### The Values That Matter
@@ -161,6 +169,10 @@ strimzi-operator:
 - at '': additional properties 'watchAnyNamespace' not allowed
 ```
 
+::: {.callout-note}
+The schema errors quoted in this chapter are Helm 4's wording. Helm 3 uses a different JSON Schema library and reports the same rejection as `(root): Additional property watchAnyNamespace is not allowed`. The rejection itself is identical either way — only the phrasing moves, so match on the property name rather than the sentence.
+:::
+
 The handful of keys worth knowing:
 
 | Key | Default | Why it matters |
@@ -172,6 +184,12 @@ The handful of keys worth knowing:
 | `strimzi-kafka-operator.defaultImageRegistry` | unset | Registry redirection. **Not** `global.imageRegistry` — upstream contains zero `.Values.global` references and ignores it entirely, so this chart does not declare `global` at all and `--set global.*` fails loudly. |
 | `crdUpgrade.enabled` | `true` | Disable it and your CRDs freeze. Only do this if another applier demonstrably owns them. |
 | `crdUpgrade.url` | derived | Override for airgapped mirrors. |
+| `operatorPolicy.enabled` | `true` | The operator's NetworkPolicy. While a `kafka-cluster` 0.4 release still owns the object, it is skipped and NOTES name the owner. |
+| `drainCleaner.enabled` | `false` | The Drain Cleaner webhook, once per Kubernetes cluster. It needs a certificate the API server trusts (`drainCleaner.tls.certManager.enabled`, or `tls.secretName` plus `tls.caBundle`); the render fails otherwise, because an uncallable webhook with `failurePolicy: Ignore` protects nothing. `values-prod.yaml` runs two replicas. |
+| `productionMode` | `false` | Refuses settings that are unsafe in production — today, a single drain-cleaner replica, because an eviction arriving while the one webhook pod restarts bypasses drain protection entirely. `values-prod.yaml` sets it. |
+| `globalBindings.enabled` | `false` | Renders the three ClusterRoleBindings that `createGlobalResources: false` skips, under names unique to the release namespace. Off for the primary, which gets upstream's; on for every additional operator, which would otherwise lose rack awareness and volume-expansion checks. |
+| `monitoring.podMonitor.enabled`, `alerts.enabled` | `true` | Rendered where the `monitoring.coreos.com/v1` API exists. |
+| `strimzi-kafka-operator.dashboards.enabled` | `true` | Fixed ConfigMap names: enable on one operator release (the namespace-scope overlay turns them off). |
 
 ## Migrating from the Ad-Hoc Install
 
@@ -386,7 +404,7 @@ Retarget every remaining ad-hoc install in the same change: the deploy scripts, 
 
 The CLI is the front door: `kates deploy --strimzi-version <v>` fetches that version's chart, reads its Kafka window and CRD API, compares it with the installed operator (same → converge; older → upgrade after a confirmation listing the clusters that will roll; newer → refused), and installs through this wrapper — from the repository directory for the pin, from a generated per-version copy of it otherwise — so the CRD hook always applies the matching bundle. `--operator-scope namespace` installs the operator watching only the primary's namespaces instead of every namespace; `values-namespace-scope.yaml` is the shape of an *additional*, co-located operator that a future `kates clusters add` will install beside it (see [the multi-version plan](../kafka-multi-version-deploy-plan.md)).
 
-For the repository's own pin, a version bump is a values change plus an upgrade. The pin lives in five places that must agree, which `scripts/check-versions.sh` enforces — it runs in CI on every chart change, and locally via `make check-versions`:
+For the repository's own pin, a version bump is a values change plus an upgrade. The pin lives in six places that must agree, which `scripts/check-versions.sh` enforces — it runs in CI on every chart change, and locally via `make check-versions`:
 
 | Pin | Purpose |
 |-----|---------|
@@ -395,8 +413,9 @@ For the repository's own pin, a version bump is a values change plus an upgrade.
 | `values.yaml` `strimziVersion` | Builds the CRD bundle URL |
 | `versions.env` `STRIMZI_VERSION` | The repo-wide pin |
 | `charts/kafka-cluster/values.yaml` `strimziVersion` | The Helm-test Kafka client image |
+| `charts/mirror-maker2/values.yaml` `strimziVersion` | The client image its pre-flight probe and data tests run |
 
-The last one is easy to overlook: `kafka-cluster` no longer installs the operator, but it still builds a `strimzi/kafka:<strimziVersion>-kafka-<kafkaVersion>` image for its Helm tests, so the pin stays load-bearing there.
+The last two are easy to overlook: neither chart installs the operator any more, but both still build a `strimzi/kafka:<strimziVersion>-kafka-<kafkaVersion>` image for their Helm tests, so the pin stays load-bearing in each. The script checks the vendored operator tarball too — that it is the pinned version, and that the default `kafkaVersion` sits inside the `STRIMZI_KAFKA_IMAGES` window that tarball declares.
 
 The pairing that matters most is the CRD bundle URL against the dependency version. If those two drift, the hook applies the CRDs of one operator version while installing another — and nothing else in the repo would notice.
 
@@ -555,7 +574,7 @@ For the symptom-by-symptom index across the whole book, see the [Troubleshooting
 
 ## Versions
 
-The Strimzi operator version, the chart version, and the Kafka versions each operator release supports are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md), generated from `versions.env`. Two notes specific to this chapter: the operator version and the operand image tag are coupled (the image tag embeds the operator version, which is why an operator bump rolls the data plane), and this chart pins that version in five places which `scripts/check-versions.sh` asserts agree, in CI and via `make check-versions`.
+The Strimzi operator version, the chart version, and the Kafka versions each operator release supports are tracked centrally in the [Version & Compatibility Matrix](appendix-d-versions.md), generated from `versions.env`. Two notes specific to this chapter: the operator version and the operand image tag are coupled (the image tag embeds the operator version, which is why an operator bump rolls the data plane), and that version is pinned in six places which `scripts/check-versions.sh` asserts agree, in CI and via `make check-versions`.
 
 ## Summary
 

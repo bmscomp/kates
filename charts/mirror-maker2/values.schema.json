@@ -387,6 +387,13 @@
     "nodeSelector": {
       "type": "object"
     },
+    "nodeAffinity": {
+      "type": "object"
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
     "tolerations": {
       "type": "array"
     },
@@ -926,8 +933,25 @@
             "scram-sha-256",
             "tls",
             "plain",
+            "custom",
             ""
           ]
+        },
+        "custom": {
+          "type": "object",
+          "description": "type: custom — Strimzi's KafkaClientAuthenticationCustom, the v1 form of OAuth and other SASL mechanisms: sasl (bool) plus config (sasl.* or ssl.keystore.* properties).",
+          "additionalProperties": false,
+          "properties": {
+            "sasl": {
+              "type": "boolean"
+            },
+            "config": {
+              "type": "object"
+            }
+          }
+        },
+        "certificateSecret": {
+          "type": "string"
         },
         "username": {
           "type": "string"

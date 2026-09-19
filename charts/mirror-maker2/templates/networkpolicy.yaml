@@ -15,71 +15,26 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- $selector := include "mirror-maker2.podSelectorLabels" . | fromYaml }}
     {{- if $np.workerToWorker }}
     # Worker-to-worker Connect REST (leader forwarding) on 8083
-    - from:
-        - podSelector:
-            matchLabels:
-              {{- include "mirror-maker2.podSelectorLabels" . | nindent 14 }}
-      ports:
-        - port: 8083
-          protocol: TCP
+    {{- include "kafka-common.netpol.workers" (dict "direction" "from" "selector" $selector) | nindent 4 }}
     {{- end }}
-    {{- if ($np.operator).enabled | default true }}
+    {{- if include "kafka-common.enabled" (list ($np.operator | default dict).enabled true) }}
     # The Strimzi Cluster Operator creates, polls and restarts the mirror
-    # connectors over the Connect REST API — this port, from that namespace.
-    # Strimzi usually generates an equivalent policy of its own, and ingress
-    # rules are a union, so this is redundant on a default operator. It is
-    # NOT redundant with STRIMZI_NETWORK_POLICY_GENERATION=false, which is
-    # common in exactly the clusters that turn networkPolicy.enabled on: the
-    # operator is then locked out, no connector is ever created, and
-    # .status.connectors stays empty while the CR reports Ready.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $np.strimziOperatorNamespace | default "strimzi-operator" }}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: cluster-operator
-      ports:
-        - port: 8083
-          protocol: TCP
+    # connectors over the Connect REST API.
+    {{- include "kafka-common.netpol.operatorIngress" (dict "namespace" ($np.strimziOperatorNamespace | default "strimzi-operator")) | nindent 4 }}
     {{- end }}
     {{- if $np.monitoring }}
     # Metrics scrape
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ $np.monitoring.namespace }}
-      ports:
-        - port: {{ $np.monitoring.port }}
-          protocol: TCP
+    {{- include "kafka-common.netpol.monitoringIngress" (dict "namespace" $np.monitoring.namespace "port" $np.monitoring.port) | nindent 4 }}
     {{- end }}
     {{- with $np.extraIngress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   egress:
     # DNS
-    - to:
-        {{- if or $np.dns.namespaceSelector $np.dns.podSelector }}
-        - {{- if $np.dns.namespaceSelector }}
-          namespaceSelector:
-            matchLabels:
-              {{- toYaml $np.dns.namespaceSelector | nindent 14 }}
-          {{- end }}
-          {{- if $np.dns.podSelector }}
-          podSelector:
-            matchLabels:
-              {{- toYaml $np.dns.podSelector | nindent 14 }}
-          {{- end }}
-        {{- else }}
-        - namespaceSelector: {}
-        {{- end }}
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    {{- include "kafka-common.netpol.dnsEgress" $np.dns | nindent 4 }}
     {{- if $np.kafka.perSource }}
     {{- /* One rule per destination instead of 0.0.0.0/0. An in-cluster source
            or target is reachable by its namespace, so the policy names the
@@ -130,13 +85,7 @@ spec:
     {{- end }}
     {{- if $np.workerToWorker }}
     # Worker-to-worker egress (8083)
-    - to:
-        - podSelector:
-            matchLabels:
-              {{- include "mirror-maker2.podSelectorLabels" . | nindent 14 }}
-      ports:
-        - port: 8083
-          protocol: TCP
+    {{- include "kafka-common.netpol.workers" (dict "direction" "to" "selector" $selector) | nindent 4 }}
     {{- end }}
     {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}

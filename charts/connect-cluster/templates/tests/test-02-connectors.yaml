@@ -1,0 +1,22 @@
+{{- /* The test connectors (values templates, rendered by the resolver). */}}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $fullname := include "connect-cluster.fullname" . }}
+{{- range $c := $r.testConnectors }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnector
+metadata:
+  name: {{ $c.name | quote }}
+  namespace: {{ include "connect-cluster.namespace" $ }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" $ "component" "test-connector" "extra" (merge (dict "kates.io/connector-name" $c.name "strimzi.io/cluster" $fullname) $c.labels)) | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- range $k, $v := $c.annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  {{- include "connect-cluster.connectorSpec" $c | nindent 2 }}
+{{- end }}

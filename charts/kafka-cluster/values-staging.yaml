@@ -1,50 +1,48 @@
-# Staging overrides — production-like topology, moderate resources
+# Staging — production-like topology with moderate resources: three
+# controllers and one broker in each of three zones.
 clusterName: krafter
 
-# Controller pools — override with kates detect --generate-values for zone-specific config
-controllerPools:
-  - name: controllers
-    zone: ""
-    replicas: 3
-    storageSize: 10Gi
-    storageClass: ""
+# Clears the 0.4-shaped pools a lower layer (kates detect) may carry.
+controllerPools: []
+brokerPools: []
 
-brokerPools:
-  - name: brokers-az1
-    zone: ""
-    replicas: 1
-    storageSize: 100Gi
-    storageClass: ""
-  - name: brokers-az2
-    zone: ""
-    replicas: 1
-    storageSize: 100Gi
-    storageClass: ""
-  - name: brokers-az3
-    zone: ""
-    replicas: 1
-    storageSize: 100Gi
-    storageClass: ""
+nodePools:
+  roleDefaults:
+    controller:
+      storage:
+        volumes:
+          - id: 0
+            size: 10Gi
+    broker:
+      replicas: 1
+      storage:
+        volumes:
+          - id: 0
+            size: 100Gi
+      jvmOptions:
+        -Xms: 2048m
+        -Xmx: 2048m
+      resources:
+        requests: { memory: 4Gi, cpu: 1000m }
+        limits: { memory: 4Gi, cpu: 2000m }
+  # Zone pins come from `kates detect`; these pools spread by topology only.
+  pools:
+    - name: controllers
+      roles: [controller]
+    - name: brokers-az1
+      roles: [broker]
+    - name: brokers-az2
+      roles: [broker]
+    - name: brokers-az3
+      roles: [broker]
 
-brokerDefaults:
-  jvmOptions:
-    -Xms: 2048m
-    -Xmx: 2048m
-  resources:
-    requests:
-      memory: 4Gi
-      cpu: 1000m
-    limits:
-      memory: 4Gi
-      cpu: 2000m
-
-networkPolicies:
+networkPolicy:
   enabled: true
 
 alerts:
   enabled: true
 
-podSecurityPolicy:
+kyvernoPolicy:
   enabled: true
   action: Enforce
 
@@ -52,68 +50,8 @@ backup:
   enabled: true
   schedule: "0 2 * * *"
   ttl: 168h0m0s
+  volumes: fs-backup
   persistence:
     enabled: true
     size: 50Gi
     storageClass: ""
-
-lifecycle:
-  preStopSleepSeconds: 15
-
-rbac:
-  create: true
-
-dashboards:
-  enabled: true
-  brokerDashboard: true
-  kraftDashboard: true
-  cruiseControlDashboard: true
-  connectDashboard: true
-
-kafkaConnect:
-  enabled: true
-  replicas: 2
-  config:
-    keyConverter: io.apicurio.registry.utils.converter.AvroConverter
-    valueConverter: io.apicurio.registry.utils.converter.AvroConverter
-    keyConverterSchemasEnable: false
-    valueConverterSchemasEnable: false
-  schemaRegistry:
-    enabled: true
-  databaseEgress:
-    - namespace: database
-      port: 5432
-      podSelector:
-        app.kubernetes.io/name: postgresql
-  externalConfiguration:
-    volumes:
-      - name: pg-credentials
-        secretName: connect-pg-credentials
-  build:
-    output:
-      type: docker
-      image: ghcr.io/bmscomp/connect:3.0.2
-      pushSecret: ghcr-credentials
-    plugins:
-      - name: debezium-postgres
-        artifacts:
-          - type: maven
-            group: io.debezium
-            artifact: debezium-connector-postgres
-            version: 2.7.3.Final
-  connectors:
-    - name: cdc-orders
-      class: io.debezium.connector.postgresql.PostgresConnector
-      tasksMax: 1
-      config:
-        database.hostname: postgresql.database.svc
-        database.port: "5432"
-        database.user: debezium
-        database.password: "${file:/opt/kafka/external-configuration/pg-credentials/password}"
-        database.dbname: orders
-        topic.prefix: cdc.orders
-        schema.include.list: public
-        plugin.name: pgoutput
-        slot.name: debezium_orders
-        heartbeat.interval.ms: "10000"
-        snapshot.mode: initial

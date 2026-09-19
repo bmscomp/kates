@@ -1,0 +1,766 @@
+# Render matrix for charts/kafka-cluster — read by scripts/check-chart-matrix.py.
+#
+# Every overlay, the combinations the deploy scripts and the CLI layer, and
+# every toggle whose output the defaults never render. `rails` are renders the
+# chart must refuse, with the message asserted.
+chart: charts/kafka-cluster
+namespace: kafka
+apiVersions: [monitoring.coreos.com/v1]
+
+# A Kafka needs a controller-role and a broker-role pool (K3).
+_pools: &pools
+  - why: "a Kafka without node pools can never become Ready (K3)"
+    kind: KafkaNodePool
+    countMin: 2
+
+# Every alert links a runbook section that exists.
+checks: [runbook-anchors]
+
+renders:
+  - name: base
+    assert:
+      - why: "working defaults: three controllers and three brokers (K3)"
+        kind: KafkaNodePool
+        count: 2
+      - kind: KafkaNodePool
+        name: controllers
+        path: spec/replicas
+        equals: 3
+      - kind: KafkaNodePool
+        name: brokers
+        path: spec/replicas
+        equals: 3
+      - why: "no NodePort listener unless asked for (K14)"
+        kind: Kafka
+        path: spec/kafka/listeners/*/type
+        notEquals: nodeport
+      - why: "no node-pools/kraft annotations in the v1 API"
+        kind: Kafka
+        path: metadata/annotations/strimzi.io~1kraft
+        exists: false
+      - why: "the generic chart grants no super user"
+        kind: Kafka
+        path: spec/kafka/authorization/superUsers
+        exists: false
+      - why: "no platform topics without the profile"
+        kind: KafkaTopic
+        count: 0
+      - why: "only the Helm-test user without the profile"
+        kind: KafkaUser
+        count: 1
+      - why: "names carry the cluster (K9)"
+        kind: ConfigMap
+        name: krafter-kafka-metrics
+        count: 1
+      - why: "Cruise Control reads its own rule set"
+        kind: Kafka
+        path: spec/cruiseControl/metricsConfig/valueFrom/configMapKeyRef/name
+        equals: krafter-cruise-control-metrics
+      - why: "auto-rebalance references the chart's templates (K10)"
+        kind: Kafka
+        path: spec/cruiseControl/autoRebalance/0/template/name
+        equals: krafter-add-brokers-template
+      - why: "rebalance templates are templates, and no standing invalid KafkaRebalance exists (K10)"
+        kind: KafkaRebalance
+        path: metadata/annotations/strimzi.io~1rebalance-template
+        equals: "true"
+      - kind: KafkaRebalance
+        count: 2
+      - why: "one PodMonitor per component, none for the operator or Connect (K5)"
+        kind: PodMonitor
+        count: 4
+      - kind: PodMonitor
+        path: spec/selector/matchLabels/strimzi.io~1cluster
+        equals: krafter
+      - why: "Strimzi's relabelings on every endpoint"
+        kind: PodMonitor
+        path: spec/podMetricsEndpoints/*/relabelings/0/regex
+        equals: __meta_kubernetes_pod_label_(strimzi_io_.+)
+      - why: "every alert is scoped to the cluster (K4)"
+        kind: PrometheusRule
+        path: spec/groups/*/rules/*/expr
+        notMatches: '^(?!.*(strimzi_io_cluster|persistentvolumeclaim=~"data)).*$'
+      - why: "every alert links its runbook"
+        kind: PrometheusRule
+        path: spec/groups/*/rules/*/annotations/runbook_url
+        matches: kafka-cluster-runbook\.md#[a-z]+
+      - why: "the controller count sums over the quorum (K4)"
+        kind: PrometheusRule
+        path: spec/groups/0/rules/1/expr
+        matches: ^sum by
+      - why: "no dashboards: the operator's are used (K16)"
+        kind: ConfigMap
+        name: ".*dashboard.*"
+        count: 0
+      - why: "no Connect / MirrorMaker 2 / operator / drain-cleaner policies here (K11)"
+        kind: NetworkPolicy
+        name: "(kafka-connect|kafka-mirror-maker|strimzi-operator|strimzi-drain-cleaner|kafka-ui)"
+        count: 0
+      - why: "the broker policy admits the operator's Kafka agent port"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/1/ports/*/port
+        equals: 8443
+      - why: "no ZooKeeper port (K15)"
+        kind: NetworkPolicy
+        path: spec/ingress/*/ports/*/port
+        notEquals: 2181
+      - why: "no CRD hook here (K7)"
+        kind: Job
+        count: 0
+      - why: "no drain cleaner here (K8)"
+        kind: ValidatingWebhookConfiguration
+        count: 0
+  - name: dev
+    values: [values-dev.yaml]
+    assert:
+      - kind: KafkaNodePool
+        name: brokers-dev
+        path: spec/replicas
+        equals: 1
+      - why: "anti-affinity off in dev"
+        kind: KafkaNodePool
+        path: spec/template/pod/affinity
+        exists: false
+      - why: "deleteClaim from nodePools.defaults.volume"
+        kind: KafkaNodePool
+        path: spec/storage/volumes/0/deleteClaim
+        equals: true
+  - name: dev+kind (deploy-kafka.sh)
+    values: [values-dev.yaml, values-kind.yaml, values-platform.yaml]
+    assert:
+      - why: "platform topics fit one broker (RF derived from the broker count)"
+        kind: KafkaTopic
+        path: spec/replicas
+        equals: 1
+      - kind: KafkaTopic
+        path: spec/config/min.insync.replicas
+        equals: "1"
+      - kind: NetworkPolicy
+        count: 0
+  - name: kind alone
+    values: [values-kind.yaml]
+    assert: *pools
+  - name: ci
+    values: [values-ci.yaml]
+    assert: *pools
+  - name: staging
+    values: [values-staging.yaml]
+    assert:
+      - kind: KafkaNodePool
+        count: 4
+      - kind: KafkaNodePool
+        name: brokers-az2
+        path: spec/replicas
+        equals: 1
+  - name: prod
+    values: [values-prod.yaml]
+    assert:
+      - kind: KafkaNodePool
+        count: 4
+      - why: "tiered storage stays off until an image with a plugin exists"
+        kind: Kafka
+        path: spec/kafka/tieredStorage
+        exists: false
+      - why: "so the backup covers broker volumes (K1)"
+        kind: Schedule
+        path: spec/template/defaultVolumesToFsBackup
+        equals: true
+      - why: "producers stop before a disk fills"
+        kind: Kafka
+        path: spec/kafka/quotas/minAvailableRatioPerVolume
+        equals: 0.1
+      - why: "the external listener is TLS"
+        kind: Kafka
+        path: spec/kafka/listeners/2/tls
+        equals: true
+      - why: "no drain cleaner here: strimzi-operator's values-prod.yaml runs it"
+        kind: Deployment
+        count: 0
+  - name: prod + platform
+    values: [values-prod.yaml, values-platform.yaml]
+    assert:
+      - kind: KafkaTopic
+        count: 8
+      - kind: KafkaUser
+        count: 7
+      - kind: Kafka
+        path: spec/kafka/authorization/superUsers/0
+        equals: kates-backend
+      - why: "MirrorMaker 2 workers are admitted (plain + tls)"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/*/from/0/podSelector/matchLabels/strimzi.io~1kind
+        equals: KafkaMirrorMaker2
+  - name: additional
+    values: [values-ci.yaml, values-additional.yaml]
+    assert:
+      - kind: KafkaTopic
+        count: 0
+      - why: "the platform users, kates-mm2 included, exist on an additional cluster"
+        kind: KafkaUser
+        name: kates-mm2
+        count: 1
+  - name: kates deploy (detected values, kind, platform, CLI flags)
+    values: [../../scripts/chart-matrix/fixtures/kafka-cluster-detected.yaml, values-kind.yaml, values-platform.yaml]
+    set: &cli
+      - global.clusterDomain=cluster.local
+      - networkPolicies.connectNamespace=connect
+      - kafka.replicas=3
+      - kafka.config.default\.replication\.factor=3
+      - kafka.config.min\.insync\.replicas=2
+      - zookeeper.replicas=3
+      - clusterName=krafter
+      - kafkaVersion=4.3.1
+      - kafka.metadataVersion=4.2
+      - strimziVersion=1.2.0
+    assert:
+      - why: "the 0.4 pool keys translate, names kept"
+        kind: KafkaNodePool
+        count: 6
+      - kind: KafkaNodePool
+        name: brokers-alpha
+        path: spec/template/pod/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/0/values/0
+        equals: alpha
+      - kind: KafkaNodePool
+        name: brokers-alpha
+        path: spec/storage/volumes/0/class
+        equals: std-alpha
+      - why: "detected resources win over the role defaults"
+        kind: KafkaNodePool
+        name: brokers-alpha
+        path: spec/resources/requests/memory
+        equals: 2Gi
+      - why: "the kind overlay's networkPolicy.enabled=false beats the detected networkPolicies.enabled=true"
+        kind: NetworkPolicy
+        count: 0
+      - why: "the kind overlay replaces the detected NodePort listener"
+        kind: Kafka
+        path: spec/kafka/listeners/*/type
+        notEquals: nodeport
+      - kind: KafkaTopic
+        count: 8
+  - name: kates deploy on a generic cluster
+    values: [../../scripts/chart-matrix/fixtures/kafka-cluster-detected.yaml, values-platform.yaml]
+    set: *cli
+    assert:
+      - why: "networkPolicies.connectNamespace reaches the connect client rule"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/*/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        equals: connect
+      - why: "the detected default-deny selector is kept"
+        kind: NetworkPolicy
+        name: krafter-default-deny
+        path: spec/podSelector/matchLabels/app.kubernetes.io~1part-of
+        equals: strimzi-krafter
+      - why: "the detected NodePort listener is admitted from anywhere"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/*/ports/*/port
+        equals: 9094
+  - name: 0.4 names (compatibility.legacyResourceNames)
+    values: [values-dev.yaml]
+    set: [compatibility.legacyResourceNames=true, networkPolicy.enabled=true, alerts.enabled=true, monitoring.podMonitor.enabled=true]
+    assert:
+      - kind: Kafka
+        path: spec/kafka/metricsConfig/valueFrom/configMapKeyRef/name
+        equals: kafka-metrics
+      - kind: NetworkPolicy
+        name: (default-deny|allow-dns|kafka-brokers)
+        count: 3
+      - kind: PrometheusRule
+        name: kafka-cluster-alerts
+        count: 1
+  - name: two clusters in one namespace do not collide
+    values: [values-dev.yaml]
+    set: [clusterName=second, networkPolicy.enabled=true, alerts.enabled=true, monitoring.podMonitor.enabled=true]
+    assert:
+      - kind: NetworkPolicy
+        path: metadata/name
+        matches: ^second-
+      - kind: PodMonitor
+        path: metadata/name
+        matches: ^second-
+      - kind: PrometheusRule
+        path: metadata/name
+        matches: ^second-
+      - kind: ConfigMap
+        path: metadata/name
+        matches: ^second-
+  - name: dual-role pool with sysctls, zones and a template
+    inline: |
+      nodePools:
+        defaults:
+          sysctls:
+            - { name: net.core.somaxconn, value: "4096" }
+          scheduling:
+            terminationGracePeriodSeconds: 120
+        pools:
+          - name: combined
+            roles: [controller, broker]
+            replicas: 3
+            zone: az1
+            storage:
+              volumes:
+                - { id: 0, size: 50Gi, kraftMetadata: shared }
+                - { id: 1, size: 50Gi, class: fast }
+            template:
+              pod:
+                metadata:
+                  annotations: { example.com/team: kafka }
+    assert:
+      - kind: KafkaNodePool
+        count: 1
+      - kind: KafkaNodePool
+        path: spec/template/pod/securityContext/sysctls/0/name
+        equals: net.core.somaxconn
+      - kind: KafkaNodePool
+        path: spec/template/pod/terminationGracePeriodSeconds
+        equals: 120
+      - why: "each JBOD volume gets the volume defaults"
+        kind: KafkaNodePool
+        path: spec/storage/volumes/1/type
+        equals: persistent-claim
+      - kind: KafkaNodePool
+        path: spec/storage/volumes/0/kraftMetadata
+        equals: shared
+      - why: "the pool template is deep-merged, not replacing the chart's pod template"
+        kind: KafkaNodePool
+        path: spec/template/pod/metadata/labels/zone
+        equals: az1
+      - kind: KafkaNodePool
+        path: spec/template/pod/metadata/annotations/example.com~1team
+        equals: kafka
+  - name: "false overrides a default (no mergeOverwrite trap)"
+    set: [nodePools.defaults.scheduling.spread.enabled=false, nodePools.defaults.scheduling.antiAffinity.enabled=false]
+    assert:
+      - kind: KafkaNodePool
+        path: spec/template/pod/topologySpreadConstraints
+        exists: false
+  - name: topics and users as maps, with the profile merged by name
+    values: [values-platform.yaml]
+    inline: |
+      topics:
+        items:
+          kates-events: { partitions: 24 }
+          orders: { partitions: 3, replicas: 2, config: { cleanup.policy: compact } }
+          kates-dlq: { enabled: false }
+      users:
+        items:
+          kafka-ui: { enabled: false }
+          orders-app:
+            authorization:
+              type: simple
+              acls:
+                - resource: { type: topic, name: orders, patternType: literal }
+                  operations: [Read]
+                  host: "*"
+    assert:
+      - kind: KafkaTopic
+        name: kates-events
+        path: spec/partitions
+        equals: 24
+      - why: "a per-item change keeps the profile's other fields"
+        kind: KafkaTopic
+        name: kates-events
+        path: spec/config/retention.ms
+        equals: "172800000"
+      - kind: KafkaTopic
+        name: orders
+        path: spec/config/min.insync.replicas
+        equals: "1"
+      - kind: KafkaTopic
+        name: kates-dlq
+        count: 0
+      - kind: KafkaUser
+        name: kafka-ui
+        count: 0
+      - kind: KafkaUser
+        name: orders-app
+        path: spec/authentication/type
+        equals: scram-sha-512
+  - name: topics and users as 0.4 lists
+    inline: |
+      topics:
+        items:
+          - { name: legacy, partitions: 2, replicas: 3, config: { min.insync.replicas: "2" } }
+      users:
+        items:
+          - { name: legacy-user, authentication: { type: tls } }
+      kafkaUI:
+        managedUser: false
+    assert:
+      - kind: KafkaTopic
+        name: legacy
+        path: spec/partitions
+        equals: 2
+      - kind: KafkaUser
+        name: legacy-user
+        path: spec/authentication/type
+        equals: tls
+  - name: tiered storage with SeaweedFS
+    values: [values-dev.yaml]
+    set:
+      - tieredStorage.enabled=true
+      - tieredStorage.image=registry.example.com/kafka-tiered:1.2.0-kafka-4.3.1
+      - tieredStorage.remoteStorageManager.className=io.aiven.kafka.tieredstorage.RemoteStorageManager
+      - tieredStorage.remoteStorageManager.classPath=/opt/kafka/plugins/tiered-storage/*
+      - tieredStorage.remoteStorageManager.config.storage\.backend\.class=io.aiven.kafka.tieredstorage.storage.s3.S3Storage
+      - seaweedfs.enabled=true
+      - backup.enabled=true
+      - networkPolicy.enabled=true
+      - alerts.enabled=true
+      - monitoring.podMonitor.enabled=true
+      - topics.items.t1.partitions=1
+    assert:
+      - why: "tieredStorage reaches the Kafka CR (K1)"
+        kind: Kafka
+        path: spec/kafka/tieredStorage/type
+        equals: custom
+      - kind: Kafka
+        path: spec/kafka/image
+        equals: registry.example.com/kafka-tiered:1.2.0-kafka-4.3.1
+      - why: "the endpoint follows the subchart's Service naming (K1)"
+        kind: Kafka
+        path: spec/kafka/tieredStorage/remoteStorageManager/config/storage.s3.endpoint.url
+        equals: http://seaweedfs-filer.kafka.svc.cluster.local:8333
+      - kind: Kafka
+        path: spec/kafka/config/rlmm.config.remote.log.metadata.topic.replication.factor
+        equals: 3
+      - why: "credentials reach the broker pods, where Strimzi reads the container template"
+        kind: KafkaNodePool
+        name: brokers-dev
+        path: spec/template/kafkaContainer/env/0/valueFrom/secretKeyRef/name
+        equals: krafter-seaweedfs-credentials
+      - why: "broker-only volumes leave the backup only while tiered storage is active"
+        kind: KafkaNodePool
+        name: brokers-dev
+        path: spec/template/persistentVolumeClaim/metadata/labels/velero.io~1exclude-from-backup
+        equals: "true"
+      - kind: KafkaNodePool
+        name: controllers-dev
+        path: spec/template/persistentVolumeClaim
+        exists: false
+      - kind: KafkaTopic
+        path: spec/config/remote.storage.enable
+        equals: "true"
+      - why: "brokers may reach the object store"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/egress/*/ports/*/port
+        equals: 8333
+      - kind: ConfigMap
+        name: krafter-object-store
+        path: data/endpoint
+        equals: http://seaweedfs-filer.kafka.svc.cluster.local:8333
+      - why: "the tiered-storage Helm test exists"
+        kind: Pod
+        name: krafter-test-tiered-storage
+        count: 1
+      - kind: PrometheusRule
+        path: spec/groups/*/rules/*/alert
+        equals: KafkaTieredStorageCopyErrors
+  - name: tiered storage, 0.4 keys
+    values: [values-dev.yaml]
+    set:
+      - tieredStorage.enabled=true
+      - tieredStorage.image=registry.example.com/kafka-tiered:1.2.0-kafka-4.3.1
+      - tieredStorage.remoteStorageManager.className=x.Y
+      - tieredStorage.remoteStorageManager.classPath=/opt/p/*
+      - tieredStorage.credentials.existingSecret=creds
+      - tieredStorage.s3.bucketName=b
+      - tieredStorage.s3.endpointUrl=http://s3.example.com
+      - tieredStorage.retention.localRetentionMs=3600000
+    assert:
+      - kind: Kafka
+        path: spec/kafka/tieredStorage/remoteStorageManager/config/storage.s3.endpoint.url
+        equals: http://s3.example.com
+      - kind: Kafka
+        path: spec/kafka/config/log.local.retention.ms
+        equals: 3600000
+  - name: rebalance templates and a full rebalance
+    set: [rebalance.full.enabled=true, rebalance.full.autoApprove=true, rebalance.replicationThrottle=10485760, "rebalance.templates.remove-brokers.skipHardGoalCheck=true"]
+    assert:
+      - kind: KafkaRebalance
+        name: krafter-full-rebalance
+        path: spec/mode
+        equals: full
+      - kind: KafkaRebalance
+        name: krafter-full-rebalance
+        path: metadata/annotations/strimzi.io~1rebalance-auto-approval
+        equals: "true"
+      - kind: KafkaRebalance
+        name: krafter-remove-brokers-template
+        path: spec/skipHardGoalCheck
+        equals: true
+      - kind: KafkaRebalance
+        name: krafter-add-brokers-template
+        path: spec/replicationThrottle
+        equals: 10485760
+  - name: rebalance without Cruise Control renders nothing
+    set: [cruiseControl.enabled=false]
+    assert:
+      - kind: KafkaRebalance
+        count: 0
+      - kind: Kafka
+        path: spec/cruiseControl
+        exists: false
+  - name: external access and client rules
+    set: [kafka.externalAccess.type=loadbalancer, "kafka.externalAccess.allowedCidrs={10.0.0.0/8}", "networkPolicy.clients[0].name=app", "networkPolicy.clients[0].namespace=apps", "networkPolicy.clients[0].podSelector.app=x", "networkPolicy.clients[0].listeners={tls}"]
+    assert:
+      - kind: Kafka
+        path: spec/kafka/listeners/2/type
+        equals: loadbalancer
+      - kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/*/from/0/ipBlock/cidr
+        equals: 10.0.0.0/8
+      - why: "a client naming only tls gets only 9093"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/2/ports/*/port
+        notEquals: 9092
+  - name: custom listener port reaches the policy (K15)
+    inline: |
+      kafka:
+        listeners:
+          - { name: plain, port: 9092, type: internal, tls: false }
+          - { name: extra, port: 9095, type: cluster-ip, tls: true, authentication: { type: tls } }
+    assert:
+      - kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/0/ports/*/port
+        equals: 9095
+  - name: strimzi metrics reporter without alerts
+    set: [metrics.type=strimziMetricsReporter, "metrics.allowList={kafka_server.*}", alerts.enabled=false]
+    assert:
+      - kind: Kafka
+        path: spec/kafka/metricsConfig/type
+        equals: strimziMetricsReporter
+      - why: "Cruise Control keeps the exporter"
+        kind: Kafka
+        path: spec/cruiseControl/metricsConfig/type
+        equals: jmxPrometheusExporter
+      - kind: ConfigMap
+        name: krafter-kafka-metrics
+        count: 0
+  - name: SLO rules
+    set: [alerts.slo.enabled=true]
+    assert:
+      - kind: PrometheusRule
+        path: spec/groups/*/rules/*/alert
+        equals: KafkaAvailabilitySLOBurning
+  - name: monitoring API absent
+    matrixApiVersions: false
+    assert:
+      - why: "a plain helm install on a cluster without prometheus-operator must not fail"
+        kind: PodMonitor
+        count: 0
+      - kind: PrometheusRule
+        count: 0
+  - name: backup, snapshot mode with 0.4 keys
+    values: [values-dev.yaml]
+    set: [backup.enabled=true, backup.snapshotVolumes=true]
+    assert:
+      - kind: Schedule
+        path: spec/template/snapshotVolumes
+        equals: true
+      - kind: Backup
+        path: metadata/annotations/helm.sh~1hook
+        equals: pre-upgrade
+      - why: "Velero applies labelSelector to every resource, so it must not require the controller role (K1)"
+        kind: Schedule
+        path: spec/template/labelSelector/matchExpressions/*/key
+        notEquals: strimzi.io/controller-role
+  - name: kyverno policy (0.4 key)
+    values: [values-dev.yaml]
+    set: [podSecurityPolicy.enabled=true, podSecurityPolicy.action=Enforce]
+    apiVersions: [kyverno.io/v1, kyverno.io/v2]
+    assert:
+      - kind: ClusterPolicy
+        path: metadata/name
+        equals: kafka-pod-security-kafka-krafter
+      - kind: ClusterPolicy
+        path: spec/validationFailureAction
+        equals: Enforce
+  - name: kyverno policy with exceptions
+    values: [values-dev.yaml]
+    set: [kyvernoPolicy.enabled=true, kyvernoPolicy.policyExceptions.enabled=true, "kyvernoPolicy.policyExceptions.namespaces={kafka-dev}", "kyvernoPolicy.policyExceptions.exemptRules={require-seccomp}"]
+    apiVersions: [kyverno.io/v1, kyverno.io/v2]
+    assert:
+      - kind: PolicyException
+        path: spec/exceptions/0/policyName
+        equals: kafka-pod-security-kafka-krafter
+  - name: external secrets
+    values: [values-dev.yaml]
+    set: [externalSecrets.enabled=true]
+  - name: kafka 4.1 additional cluster
+    values: [values-ci.yaml, values-additional.yaml]
+    set: [kafkaVersion=4.1.1, kafka.metadataVersion=4.1]
+    assert:
+      - why: "share-group keys must not render below Kafka 4.2"
+        kind: Kafka
+        path: spec/kafka/config/group.share.enable
+        exists: false
+  - name: the whole 0.4 values file
+    values: [../../scripts/chart-matrix/fixtures/kafka-cluster-0.4-values.yaml]
+    # 0.4's base values carried the platform's topics, users and clients, so
+    # the upgrade that keeps them is the platform profile (the upgrade guide
+    # and the rail both say so).
+    set: [profile=platform]
+    assert:
+      - kind: KafkaUser
+        count: 7
+      - kind: KafkaTopic
+        count: 8
+      - why: "0.4 base values had no pools: the 1.0 defaults apply"
+        kind: KafkaNodePool
+        count: 2
+      - why: "the 0.4 namespace keys still place their clients"
+        kind: NetworkPolicy
+        name: krafter-kafka
+        path: spec/ingress/*/from/*/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        equals: connect
+  - name: a 0.4 values file under the prod overlay
+    values:
+      - ../../scripts/chart-matrix/fixtures/kafka-cluster-0.4-values.yaml
+      - values-prod.yaml
+      - values-platform.yaml
+    assert:
+      - why: "0.4's own `external` listener is the one externalAccess describes, not a second"
+        kind: Kafka
+        path: spec/kafka/listeners/*/name
+        equals: external
+      - why: "and prod's own backup.volumes wins over 0.4's snapshotVolumes/defaultVolumesToFsBackup"
+        kind: Schedule
+        path: metadata/annotations/kates.io~1volume-data
+        equals: fs-backup
+
+rails:
+  - name: a 0.4 client namespace with no client to place
+    want: "no networkPolicy.clients entry is called \"connect\""
+    set: [networkPolicies.connectNamespace=connect]
+  - name: persistent-claim storage with no size
+    want: "uses persistent-claim storage with no size"
+    inline: |
+      nodePools:
+        pools:
+          - {name: controllers, roles: [controller]}
+          - {name: brokers, roles: [broker], storage: {type: persistent-claim}}
+  - name: productionMode with deleteClaim on a single-volume pool
+    want: "productionMode with deleteClaim: true on node pool \"brokers\""
+    inline: |
+      productionMode: true
+      backup: {enabled: true, volumes: fs-backup}
+      nodePools:
+        pools:
+          - {name: controllers, roles: [controller]}
+          - {name: brokers, roles: [broker], storage: {type: persistent-claim, size: 10Gi, deleteClaim: true}}
+  - name: sysctl tuning (pruned init container, K2)
+    want: "sysctl.enabled is no longer supported"
+    values: [../../scripts/chart-matrix/fixtures/kafka-cluster-detected.yaml]
+    set: [brokerDefaults.sysctl.enabled=true]
+  - name: a node-level sysctl
+    want: "is not namespaced"
+    inline: |
+      nodePools:
+        defaults:
+          sysctls:
+            - { name: vm.max_map_count, value: "262144" }
+  - name: drain cleaner moved (K8)
+    want: "drainCleaner moved to the strimzi-operator chart"
+    set: [drainCleaner.enabled=true]
+  - name: both pool shapes
+    want: "both nodePools.pools and the 0.4 controllerPools/brokerPools are set"
+    values: [../../scripts/chart-matrix/fixtures/kafka-cluster-detected.yaml]
+    set: ["nodePools.pools[0].name=x", "nodePools.pools[0].roles={controller,broker}"]
+  - name: no broker pool
+    want: "no node pool runs a broker"
+    set: ["nodePools.pools[0].name=c", "nodePools.pools[0].roles={controller}"]
+  - name: no controller pool
+    want: "no node pool runs a controller"
+    set: ["nodePools.pools[0].name=b", "nodePools.pools[0].roles={broker}"]
+  - name: only broker pool scaled to zero
+    want: "no node pool runs a broker"
+    set: [nodePools.roleDefaults.broker.replicas=0]
+  - name: duplicate pool names
+    want: "two node pools are named"
+    set: ["nodePools.pools[0].name=p", "nodePools.pools[0].roles={controller}", "nodePools.pools[1].name=p", "nodePools.pools[1].roles={broker}"]
+  - name: zone without a zone key
+    want: "zoneKey is empty"
+    set: [nodePools.defaults.scheduling.zoneKey=, "nodePools.pools[0].name=c", "nodePools.pools[0].roles={controller,broker}", "nodePools.pools[0].zone=a"]
+  - name: topic replicas above the broker count
+    want: "asks for 4 replicas, but the node pools render 3"
+    set: [topics.items.t.replicas=4]
+  - name: internal replication above the broker count
+    want: "offsets.topic.replication.factor is 3, but the node pools render 1"
+    set: [nodePools.roleDefaults.broker.replicas=1, kafka.config.default\.replication\.factor=1, kafka.config.min\.insync\.replicas=1, kafka.config.transaction\.state\.log\.replication\.factor=1, kafka.config.transaction\.state\.log\.min\.isr=1]
+  - name: min.insync.replicas equal to the replication factor
+    want: "every rolling restart stops writes"
+    set: [kafka.config.min\.insync\.replicas=3]
+  - name: tiered storage without an image
+    want: "needs tieredStorage.image"
+    set: [tieredStorage.enabled=true]
+  - name: tiered storage with the stock image
+    want: "Strimzi's stock Kafka image"
+    set: [tieredStorage.enabled=true, "tieredStorage.image=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1"]
+  - name: tiered storage without a plugin class
+    want: "needs remoteStorageManager.className"
+    set: [tieredStorage.enabled=true, tieredStorage.image=r.example.com/k:1]
+  - name: tiered storage without credentials
+    want: "needs credentials"
+    set: [tieredStorage.enabled=true, tieredStorage.image=r.example.com/k:1, tieredStorage.remoteStorageManager.className=a.B, tieredStorage.remoteStorageManager.classPath=/x]
+  - name: a client naming an unknown listener
+    want: "names listener \"nope\""
+    set: ["networkPolicy.clients[0].name=c", "networkPolicy.clients[0].podSelector.a=b", "networkPolicy.clients[0].listeners={nope}"]
+  - name: a client without a pod selector
+    want: "needs a podSelector"
+    set: ["networkPolicy.clients[0].name=c"]
+  - name: a listener on a reserved port
+    want: "Strimzi reserves"
+    inline: |
+      kafka:
+        listeners:
+          - { name: plain, port: 9404, type: internal, tls: false }
+  - name: ingress without TLS
+    want: "needs tls=true"
+    set: [kafka.externalAccess.type=ingress, kafka.externalAccess.tls=false]
+  - name: full rebalance without Cruise Control
+    want: "rebalance.full.enabled needs cruiseControl.enabled"
+    set: [cruiseControl.enabled=false, rebalance.full.enabled=true]
+  - name: metadata version newer than Kafka
+    want: "is newer than kafkaVersion"
+    set: [kafkaVersion=4.1.1, kafka.metadataVersion=4.2-IV1]
+  - name: placeholder S3 secret with auth enforced
+    want: "is the placeholder"
+    set: [seaweedfs.enabled=true, seaweedfs.filer.s3.enableAuth=true]
+  - name: placeholder S3 secret in production
+    want: "productionMode with seaweedfs enabled and the placeholder"
+    set: [productionMode=true, seaweedfs.enabled=true]
+  - name: production backup without broker data
+    want: "nothing protects broker data"
+    set: [productionMode=true, backup.enabled=true, backup.volumes=none]
+  - name: production with deleteClaim
+    want: "deleteClaim: true"
+    set: [productionMode=true, nodePools.defaults.volume.deleteClaim=true]
+  - name: production NodePort without TLS
+    want: "a NodePort without TLS"
+    set: [productionMode=true, kafka.externalAccess.type=nodeport, kafka.externalAccess.tls=false]
+  - name: alerts on the metrics reporter
+    want: "alerts.enabled with metrics.type=strimziMetricsReporter"
+    set: [metrics.type=strimziMetricsReporter]
+  - name: a floating Kafka image
+    want: "resolves to a floating tag"
+    set: [kafka.image=quay.io/strimzi/kafka:latest]
+  - name: an unknown profile
+    want: "profile must be one of the following"
+    set: [profile=nope]
+  - name: a misspelled key
+    want: "Additional property replica is not allowed"
+    set: [nodePools.roleDefaults.broker.replica=1]
+
+# The render `--promtool` checks: every rule this chart can emit.
+rules:
+  values: [values-dev.yaml]
+  set: [alerts.enabled=true, alerts.slo.enabled=true, cruiseControl.enabled=true, kafkaExporter.enabled=true, monitoring.podMonitor.enabled=true, tieredStorage.enabled=true, tieredStorage.image=r.example.com/k:1, tieredStorage.remoteStorageManager.className=a.B, tieredStorage.remoteStorageManager.classPath=/x, tieredStorage.credentials.existingSecret=s]

@@ -22,27 +22,18 @@ naming a port the pod does not have scrapes nothing and reports nothing, and
 that failure is invisible until an alert that should have fired did not.
 */}}
 {{- $ep := (index (.Values.podMonitors.scrape | default dict) $type) | default dict }}
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: {{ include "mirror-maker2.fullname" . }}
-  namespace: {{ include "mirror-maker2.namespace" . }}
-  labels:
-    {{- include "mirror-maker2.labels" . | nindent 4 }}
-    {{- with .Values.podMonitors.labels }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-spec:
-  selector:
-    matchLabels:
-      {{- include "mirror-maker2.podSelectorLabels" . | nindent 6 }}
-  podMetricsEndpoints:
-    - port: {{ $ep.port | default "tcp-prometheus" }}
-      path: {{ $ep.path | default "/metrics" }}
-      {{- with .Values.monitoring.interval }}
-      interval: {{ . }}
-      {{- end }}
-      {{- with .Values.monitoring.scrapeTimeout }}
-      scrapeTimeout: {{ . }}
-      {{- end }}
+{{- $labels := include "mirror-maker2.labels" . }}
+{{- with .Values.podMonitors.labels }}
+{{- $labels = printf "%s\n%s" $labels (toYaml .) }}
+{{- end }}
+{{- include "kafka-common.podMonitor" (dict
+      "name" (include "mirror-maker2.fullname" .)
+      "namespace" (include "mirror-maker2.namespace" .)
+      "labels" $labels
+      "selector" (include "mirror-maker2.podSelectorLabels" . | fromYaml)
+      "endpoint" (dict
+          "port" ($ep.port | default "tcp-prometheus")
+          "path" ($ep.path | default "/metrics")
+          "interval" .Values.monitoring.interval
+          "scrapeTimeout" .Values.monitoring.scrapeTimeout)) }}
 {{- end }}

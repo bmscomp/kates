@@ -10,8 +10,13 @@ chart deploys the registry backend only — there is **no bundled Kafka broker**
 |---|---|---|
 | Bootstrap service | `kafka-cluster` (Strimzi) | `krafter-kafka-bootstrap.kafka.svc:9092` |
 | Client credentials | `KafkaUser apicurio-registry` (SCRAM-SHA-512) → Secret with `sasl.jaas.config` | Secret `apicurio-registry` |
-| Topic ACLs | `kafka-cluster` values (`users.items`): `kafkasql-`/`__apicurio` prefixes | enabled |
+| Topic ACLs | `kafka-cluster`'s **platform profile** (`users.items` in `profiles/platform.yaml`): `kafkasql-`, `__apicurio` and `registry-` prefixes, group prefix `apicurio` | enabled |
 | Journal topics | this chart (`kafkaTopics.create`): `kafkasql-journal`, `kafkasql-snapshots` as `KafkaTopic` CRs | created in ns `kafka` |
+
+Since kafka-cluster 1.0 the `apicurio-registry` KafkaUser is part of the
+`platform` profile rather than the base values, so the Kafka release must be
+installed with `-f charts/kafka-cluster/values-platform.yaml` (or
+`profile: platform`) — a base install provisions no platform users at all.
 
 The registry **refuses to start** if the journal/snapshots topics do not use
 `cleanup.policy=delete` with infinite retention. The chart provisions them

@@ -1,30 +1,59 @@
-{{- if .Values.rebalance.enabled }}
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaRebalance
-metadata:
-  name: full-rebalance
-  namespace: {{ include "kafka-cluster.namespace" . }}
-  labels:
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/resource-policy: keep
-spec:
-  mode: full
-  goals:
-    {{- toYaml .Values.rebalance.goals | nindent 4 }}
-  skipHardGoalCheck: false
-  rebalanceDisk: true
+{{- /*
+KafkaRebalance TEMPLATES for Cruise Control's automatic rebalancing
+(cruiseControl.autoRebalance references them by name), and an optional full
+rebalance.
+
+A template carries strimzi.io/rebalance-template and no mode: the operator
+never runs it, it copies its settings into the rebalance it creates when
+brokers are added or removed. 0.4 rendered a standing `add-brokers`
+KafkaRebalance with an empty broker list instead, which Cruise Control
+rejects, so it sat NotReady and nothing used its goals.
+*/ -}}
+{{- $v := .Values -}}
+{{- $cc := include "kafka-common.enabled" (list $v.cruiseControl.enabled true) -}}
+{{- if and $cc (include "kafka-common.enabled" (list $v.rebalance.enabled true)) }}
+{{- $rb := $v.rebalance -}}
+{{- $base := dict -}}
+{{- with $rb.goals }}{{- $_ := set $base "goals" . }}{{- end -}}
+{{- $_ := set $base "skipHardGoalCheck" (include "kafka-common.enabled" (list $rb.skipHardGoalCheck false) | eq "true") -}}
+{{- with $rb.excludedTopics }}{{- $_ := set $base "excludedTopics" . }}{{- end -}}
+{{- range $key := (list "replicationThrottle" "concurrentPartitionMovementsPerBroker" "concurrentLeaderMovements") }}
+{{- with (index $rb $key) }}{{- $_ := set $base $key (int64 .) }}{{- end -}}
+{{- end -}}
+{{- range $mode := (list "add-brokers" "remove-brokers") }}
+{{- $spec := deepCopy $base -}}
+{{- include "kafka-cluster.merge" (dict "dst" $spec "src" (index ($rb.templates | default dict) $mode)) }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaRebalance
 metadata:
-  name: add-broker-rebalance
+  name: {{ include "kafka-cluster.resourceName" (list $ (printf "%s-template" $mode) "") }}
+  namespace: {{ include "kafka-cluster.namespace" $ }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+  annotations:
+    strimzi.io/rebalance-template: "true"
+spec:
+  {{- toYaml $spec | nindent 2 }}
+{{- end }}
+{{- if include "kafka-common.enabled" (list (($rb.full).enabled) false) }}
+{{- $full := deepCopy $base -}}
+{{- $_ := set $full "mode" "full" -}}
+{{- $_ := set $full "rebalanceDisk" (include "kafka-common.enabled" (list $rb.full.rebalanceDisk true) | eq "true") }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaRebalance
+metadata:
+  name: {{ include "kafka-cluster.resourceName" (list . "full-rebalance" "full-rebalance") }}
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
   annotations:
     helm.sh/resource-policy: keep
+    {{- if include "kafka-common.enabled" (list $rb.full.autoApprove false) }}
+    strimzi.io/rebalance-auto-approval: "true"
+    {{- end }}
 spec:
-  mode: add-brokers
-  brokers: []
+  {{- toYaml $full | nindent 2 }}
+{{- end }}
 {{- end }}

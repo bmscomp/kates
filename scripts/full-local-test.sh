@@ -30,10 +30,31 @@ phase_guards() {
 phase_charts() {
     step "\n== charts =="
     command -v helm >/dev/null || { skip "helm not installed"; return; }
+    # Dependencies first, the umbrella last: kates-platform packages its
+    # file:// subcharts as they are on disk, including their own built
+    # dependencies (mirror-maker2 on the kafka-common library).
+    for dir in "${ROOT}"/charts/*/; do
+        [ "$(basename "$dir")" = kates-platform ] && continue
+        if grep -q '^dependencies:' "$dir/Chart.yaml" 2>/dev/null; then
+            # `update` when a stale Chart.lock makes `build` refuse
+            helm dependency build "$dir" >/dev/null 2>&1 || helm dependency update "$dir" >/dev/null 2>&1
+        fi
+    done
+    helm dependency update "${ROOT}/charts/kates-platform" >/dev/null 2>&1
     for dir in "${ROOT}"/charts/*/; do
         c="$(basename "$dir")"
-        grep -q '^dependencies:' "$dir/Chart.yaml" 2>/dev/null && helm dependency build "$dir" >/dev/null 2>&1
         if ! helm lint "$dir" >/dev/null 2>&1; then fail "chart $c: helm lint"; continue; fi
+        # A library chart renders nothing on its own; its harness does.
+        if grep -q '^type: library' "$dir/Chart.yaml"; then
+            if helm plugin list 2>/dev/null | grep -q unittest && [ -d "$dir/tests/harness" ]; then
+                helm dependency build "$dir/tests/harness" >/dev/null 2>&1
+                if helm unittest "$dir/tests/harness" >/dev/null 2>&1; then pass "library $c: unit tests"
+                else fail "library $c: helm unittest"; fi
+            else
+                skip "library $c: helm-unittest not installed"
+            fi
+            continue
+        fi
         objs="$(helm template test "$dir" 2>/dev/null | grep -c '^kind:')"
         if [ "${objs:-0}" -gt 0 ]; then pass "chart $c renders $objs objects"
         else fail "chart $c: helm template produced no objects"; fi

@@ -384,6 +384,9 @@ func runMigrateMirrorCutover(ctx context.Context, f *migrateMirrorFlags, rollbac
 	if err := migrateConfirm(f.Yes, question); err != nil {
 		return err
 	}
+	if err := ensureMirrorChartDeps(ctx); err != nil {
+		return err
+	}
 	if _, err := defaultRunner.Run(ctx, "helm", argv...); err != nil {
 		return fmt.Errorf("helm upgrade: %w", err)
 	}

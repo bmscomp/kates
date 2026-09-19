@@ -7,6 +7,13 @@ step-by-step walkthroughs see the
 [3.x → 4.x](tutorials/12-migrating-kafka-3x-to-4x.md) tutorials; for the chart
 itself see [charts/mirror-maker2](../charts/mirror-maker2/README.md).
 
+> **Every `helm` command below runs the chart from a checkout**, and since 0.8.0
+> the chart depends on the [`kafka-common`](../charts/kafka-common/README.md)
+> library. `charts/mirror-maker2/charts/` is generated and gitignored, so run
+> `helm dependency build charts/mirror-maker2` once first or Helm refuses to
+> render — `helm upgrade`, `helm install` and `helm template` alike. A packaged
+> chart carries the library inside it, and `kates` builds it itself.
+
 ---
 
 ## The one thing to internalise
@@ -735,11 +742,14 @@ them `strimzi.io/kind: KafkaMirrorMaker2`, so a policy written for
 `KafkaConnect` does not match them.
 
 ```bash
-kubectl -n kafka get networkpolicy kafka-brokers -o yaml | grep -A3 KafkaMirrorMaker2
+kubectl -n kafka get networkpolicy krafter-kafka -o yaml | grep -B3 -A3 KafkaMirrorMaker2
 ```
 
-If that returns nothing, set `networkPolicies.mirrorMaker2Namespace` on the
-`kafka-cluster` chart to the namespace MM2 runs in.
+(`kafka-brokers` on a kafka-cluster 0.4 release, or with
+`compatibility.legacyResourceNames`.) If that returns nothing, or names another
+namespace, set the namespace of the `mirror-maker2` entry in the
+`kafka-cluster` chart's `networkPolicy.clients` (the platform profile has it;
+the 0.4 key `networkPolicies.mirrorMaker2Namespace` still works).
 
 ### The mirror is replicating its own output
 

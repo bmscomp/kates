@@ -17,3 +17,19 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: kates-monitoring
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
+
+{{/*
+The deprecated Kafka and Strimzi boards (see grafana-dashboards.yaml). Removed
+in kates-monitoring 2.0.
+*/}}
+{{- define "kates-monitoring.legacyKafkaDashboards" -}}
+- kafka-all-metrics-dashboard.json
+- kafka-comprehensive-dashboard.json
+- kafka-dashboard.json
+- kafka-jvm-dashboard.json
+- kafka-perf-global-dashboard.json
+- kafka-perf-test-dashboard.json
+- kafka-performance-dashboard.json
+- kafka-working-dashboard.json
+- strimzi-operator-dashboard.json
+{{- end }}

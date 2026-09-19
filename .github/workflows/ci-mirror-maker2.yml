@@ -24,6 +24,7 @@ on:
     branches: [main]
     paths:
       - "charts/mirror-maker2/**"
+      - "charts/kafka-common/**"
       - "charts/legacy-kafka/**"
       - "Dockerfile.legacy-kafka"
       - "scripts/test-mm2-migration.sh"
@@ -45,6 +46,7 @@ on:
     types: [opened, synchronize, reopened, labeled]
     paths:
       - "charts/mirror-maker2/**"
+      - "charts/kafka-common/**"
       - "charts/legacy-kafka/**"
       - "charts/kafka-cluster/**"
       - "Dockerfile.legacy-kafka"
@@ -59,6 +61,9 @@ on:
       # is a heading in this file, so a heading rename has to run the job.
       - "docs/mirror-maker2-runbook.md"
       - ".github/workflows/ci-mirror-maker2.yml"
+  # metrics-live: weekly, and on demand (migration-e2e stays on the label).
+  schedule:
+    - cron: "30 5 * * 1"
   workflow_dispatch:
     inputs:
       source_version:
@@ -88,6 +93,10 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
+
+      # mirror-maker2 is built on the kafka-common library (file://).
+      - name: Build the chart's kafka-common dependency
+        run: helm dependency build charts/mirror-maker2/
 
       - name: Lint
         run: |
@@ -876,6 +885,14 @@ jobs:
               # The old generic patterns are gone by design — a dashboard built
               # on them needs re-pointing, which the chart README says.
               "ConfigMap/mm2-mirror-maker2-metrics.data.metrics-config.yml",
+              # 0.8.0 stops defaulting the workers to system-cluster-critical,
+              # a class meant for components the cluster itself cannot run
+              # without (docs/kafka-charts-refactor-plan.md, C9).
+              # values-prod.yaml keeps it explicitly, and renders additively.
+              "spec.template.pod.priorityClassName = system-cluster-critical",
+              # 0.8.0 moves every helper pod to the kates-tester pin the
+              # connect-cluster tests already run on (plan, M4).
+              "image = ghcr.io/bmscomp/kates-tester:1.21.0",
           )
 
 
@@ -1136,6 +1153,10 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
+      # mirror-maker2 is built on the kafka-common library (file://).
+      - name: Build the chart's kafka-common dependency
+        run: helm dependency build charts/mirror-maker2/
+
       - uses: actions/setup-go@v7
         with:
           go-version: "1.25"
@@ -1244,6 +1265,7 @@ jobs:
     name: Metric contract (live scrape)
     if: >
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       contains(github.event.pull_request.labels.*.name, 'test-migration')
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -1259,6 +1281,10 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
+
+      # mirror-maker2 is built on the kafka-common library (file://).
+      - name: Build the chart's kafka-common dependency
+        run: helm dependency build charts/mirror-maker2/
 
       - uses: actions/setup-go@v7
         with:

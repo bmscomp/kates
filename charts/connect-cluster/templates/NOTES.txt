@@ -1,82 +1,56 @@
-┌──────────────────────────────────────────────────────────────────┐
-│  Kafka Connect cluster "{{ include "connect-cluster.fullname" . }}" deployed to namespace {{ include "connect-cluster.namespace" . }}
-└──────────────────────────────────────────────────────────────────┘
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $name := include "connect-cluster.fullname" . }}
+{{- $ns := include "connect-cluster.namespace" . }}
+{{- $k := include "connect-cluster.kafka" . | fromYaml }}
+Kafka Connect {{ $name }} in {{ $ns }} (connect-cluster {{ .Chart.Version }})
 
-  Version:        Kafka {{ .Values.version }}
-  Workers:        {{ .Values.replicas }} replica(s)
-  Group ID:       {{ .Values.groupId }}
-  Bootstrap:      {{ .Values.kafka.bootstrapServers }}
-{{- if gt (len (default (list) .Values.connectors)) 0 }}
-  Connectors:     {{ len .Values.connectors }} declared
+  Kafka {{ .Values.version }}, {{ if include "kafka-common.enabled" (list (.Values.autoscaling).enabled false) }}{{ .Values.autoscaling.minReplicas }}–{{ .Values.autoscaling.maxReplicas }} workers (HPA){{ else }}{{ .Values.replicas }} worker(s){{ end }}, group {{ .Values.groupId }}
+  Bootstrap       {{ $r.bootstrap }}{{ if ($k.tls).enabled }} (TLS){{ end }}
+  Authentication  {{ ($k.authentication).type | default "none" }}{{ with ($k.authentication).username }} as {{ . }}{{ end }}
+  Exactly-once    {{ ternary "enabled" "disabled" (eq (include "kafka-common.enabled" (list .Values.exactlyOnce.enabled true)) "true") }}
+  Connectors      {{ len $r.connectors }}{{ range $r.connectors }} {{ .name }}{{ if .deadLetterQueue }}(dlq){{ end }}{{ end }}
+  Plugins         {{ if .Values.plugins }}{{ len .Values.plugins }} image volume(s){{ else if (.Values.build).output }}operator build{{ else }}from the image{{ end }}
+  Secret access   {{ if (.Values.rbac).allSecrets }}every Secret (rbac.allSecrets){{ else if $r.secretRefs }}{{ range $sns, $names := $r.secretRefs }}{{ $sns }}: {{ join ", " $names }}; {{ end }}{{ else }}none referenced{{ end }}
+  Managed user    {{ if .Values.kafkaUser.create }}{{ include "connect-cluster.kafkaUsername" . }} in {{ include "connect-cluster.kafkaNamespace" . }}{{ if $r.secretSync.resolvedSecrets }}, copied here by the secret-sync Job{{ else if $r.secretSync.reflector }}, reflected here{{ end }}{{ else }}no — Secret {{ ($k.authentication).secretName | default "(none)" }} must exist in {{ $ns }}{{ end }}
+  NetworkPolicy   {{ if .Values.networkPolicy.enabled }}on (Kafka ports {{ join ", " $r.kafkaPorts }}){{ else }}off{{ end }}
+  Monitoring      metrics {{ ternary $r.metrics.type "off" $r.metrics.enabled }}, PodMonitor {{ ternary "on" "off" $r.podMonitor.enabled }}, alerts {{ ternary "on" "off" .Values.alerts.enabled }}, dashboard {{ ternary "on" "off" .Values.dashboards.enabled }}
+{{- if and (or .Values.alerts.enabled $r.podMonitor.enabled) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1")) }}
+                  (the monitoring.coreos.com/v1 API is absent: no PodMonitor or alerts rendered)
+{{- end }}
+{{- with $r.deprecations }}
+
+DEPRECATED — these 1.x keys still work in 2.x and go in 3.0:
+{{- range . }}
+  - {{ . }}
+{{- end }}
+  See docs/connect-cluster-2.0-upgrade.md.
+{{- end }}
+{{- if .Values.kafkaUser.create }}
+{{- $user := include "connect-cluster.kafkaUsername" . }}
+{{- $kns := include "connect-cluster.kafkaNamespace" . }}
+{{- $live := lookup "kafka.strimzi.io/v1" "KafkaUser" $kns $user }}
+{{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-name" "" ($live | default dict) }}
+{{- if and $live (ne $owner .Release.Name) }}
+
+KafkaUser {{ $kns }}/{{ $user }} belongs to {{ $owner | default "no Helm release" }}. Adopt it rather than
+recreating it — a new KafkaUser gets a new password:
+
+  kubectl -n {{ $kns }} annotate kafkauser {{ $user }} --overwrite \
+    meta.helm.sh/release-name={{ .Release.Name }} meta.helm.sh/release-namespace={{ .Release.Namespace }}
+  kubectl -n {{ $kns }} label kafkauser {{ $user }} --overwrite app.kubernetes.io/managed-by=Helm
+{{- if $owner }}
+  # and stop {{ $owner }} from rendering it, e.g. for kafka-cluster:
+  #   --set users.items.{{ $user }}.enabled=false
+{{- end }}
+{{- end }}
 {{- end }}
 
-Components:
-  TLS:                {{ if .Values.kafka.tls.enabled }}enabled{{ else }}disabled{{ end }}
-  Tracing:            {{ if .Values.tracing.enabled }}{{ .Values.tracing.type }}{{ else }}disabled{{ end }}
-  Schema Registry:    {{ if .Values.schemaRegistry.enabled }}{{ .Values.schemaRegistry.serviceName }}{{ else }}disabled{{ end }}
-  REST API Service:   {{ if .Values.restApi.service.enabled }}enabled (port {{ .Values.restApi.service.port | default 8083 }}){{ else }}disabled{{ end }}
-  Alerts:             {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
-  Dashboards:         {{ if .Values.dashboards.enabled }}enabled{{ else }}disabled{{ end }}
-  Managed KafkaUser:  {{ if (.Values.kafkaUser).create }}enabled ({{ .Values.kafkaUser.name | default .Values.kafka.authentication.username }}, secretSync: {{ ((.Values.kafkaUser).secretSync).method | default "job" }}){{ else }}disabled — secret "{{ .Values.kafka.authentication.secretName | default .Values.kafka.authentication.username }}" must exist{{ end }}
-  NetworkPolicy:      {{ if .Values.networkPolicy.enabled }}{{ if ((.Values.networkPolicy.defaultDeny).enabled | default true) }}default-deny + explicit allows{{ else }}allow rules only (no default-deny){{ end }}{{ else }}disabled{{ end }}
-{{- if or .Values.networkPolicy.kafkaPorts .Values.networkPolicy.monitoringNamespace .Values.networkPolicy.restApiClients }}
-
-  ⚠ DEPRECATED networkPolicy keys in use — migrate:
-{{- if .Values.networkPolicy.kafkaPorts }}
-    kafkaPorts          → networkPolicy.kafka.ports
+Next:
+  kubectl -n {{ $ns }} wait kafkaconnect/{{ $name }} --for=condition=Ready --timeout=300s
+  kubectl -n {{ $ns }} get kafkaconnectors -l strimzi.io/cluster={{ $name }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if (.Values.preflight).enabled }}
+  kubectl -n {{ $ns }} logs job/{{ $name }}-preflight      # the preflight verdicts
 {{- end }}
-{{- if .Values.networkPolicy.monitoringNamespace }}
-    monitoringNamespace → networkPolicy.monitoring.namespace
-{{- end }}
-{{- if .Values.networkPolicy.restApiClients }}
-    restApiClients      → networkPolicy.restApi.clients
-{{- end }}
-{{- end }}
-{{- if and .Values.networkPolicy.enabled ((.Values.networkPolicy.defaultDeny).enabled | default true) }}
-
-  ⚠ Default-deny is ACTIVE: traffic not covered by the configured allow rules
-    (DNS, API server, Kafka, workers, monitoring, REST clients, registry,
-    tracing, databaseEgress, extra*) is blocked. Declare connector endpoints
-    via databaseEgress or networkPolicy.extraEgress.
-{{- end }}
-
-────────────────────────────────────────────
-  Getting Started
-────────────────────────────────────────────
-
-1. Wait for KafkaConnect to become ready:
-
-  kubectl wait kafkaconnect/{{ include "connect-cluster.fullname" . }} \
-    --for=condition=Ready -n {{ include "connect-cluster.namespace" . }} --timeout=300s
-
-2. Check worker pods:
-
-  kubectl get pods -n {{ include "connect-cluster.namespace" . }} \
-    -l strimzi.io/name={{ include "connect-cluster.fullname" . }}-connect \
-    -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,NODE:.spec.nodeName
-
-3. Run Helm tests:
-
-  helm test {{ .Release.Name }} -n {{ include "connect-cluster.namespace" . }}
-
-────────────────────────────────────────────
-  REST API
-────────────────────────────────────────────
-{{- if .Values.restApi.service.enabled }}
-
-  # List connectors
-  kubectl run -n {{ include "connect-cluster.namespace" . }} curl-test --rm -it --image=curlimages/curl -- \
-    curl -s http://{{ include "connect-cluster.fullname" . }}-rest-api:{{ .Values.restApi.service.port | default 8083 }}/connectors
-
-  # List installed plugins
-  kubectl run -n {{ include "connect-cluster.namespace" . }} curl-test --rm -it --image=curlimages/curl -- \
-    curl -s http://{{ include "connect-cluster.fullname" . }}-rest-api:{{ .Values.restApi.service.port | default 8083 }}/connector-plugins
-{{- end }}
-
-────────────────────────────────────────────
-  Useful Commands
-────────────────────────────────────────────
-
-  kubectl get kafkaconnect,kafkaconnector -n {{ include "connect-cluster.namespace" . }}
-  kubectl logs -n {{ include "connect-cluster.namespace" . }} \
-    -l strimzi.io/name={{ include "connect-cluster.fullname" . }}-connect --tail=50
+  # the REST API, from inside a worker:
+  kubectl -n {{ $ns }} exec {{ $name }}-connect-0 -- curl -s http://localhost:8083/connectors?expand=status

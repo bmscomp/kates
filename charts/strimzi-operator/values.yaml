@@ -44,7 +44,7 @@ strimziVersion: "1.2.0"
 # tests). The operator's own image comes from the subchart.
 testImages:
   # -- kubectl image used by the CRD-upgrade hook Job and the Helm tests
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
 
 # ── CRD lifecycle ────────────────────────────────────────────────────────────
 # Closes the gap Helm leaves: crds/ is applied on install and never on upgrade.
@@ -84,21 +84,96 @@ globalBindings:
   enabled: false
 
 # ── Operator NetworkPolicy (kates-owned) ─────────────────────────────────────
-# The policy that used to be written into the operator's namespace by
-# charts/kafka-cluster (`networkPolicies.operatorPolicy`). Two clusters
-# pointing at one operator namespace fought over that single fixed-name
-# policy, so it now lives with the operator: one policy per operator, egress
-# to every namespace it watches. When you enable it here, set
-# `networkPolicies.operatorPolicy.enabled=false` on every kafka-cluster
-# release that names this operator namespace — the two render the same
-# NetworkPolicy name, and Helm refuses to let two releases own it.
+# The policy kafka-cluster 0.4 wrote into the operator's namespace
+# (`networkPolicies.operatorPolicy`), now owned here: one policy per operator,
+# egress to every namespace it watches. On since 0.3. While a kafka-cluster
+# 0.4 release still owns the object, it is skipped and NOTES say so;
+# kafka-cluster 1.0 no longer renders it.
 #
 # Not to be confused with `strimzi-kafka-operator.operatorNetworkPolicy`,
 # upstream's shell that renders whatever ingress/egress you hand it and
 # nothing else.
 operatorPolicy:
   # -- Render the operator's NetworkPolicy in the release namespace
+  enabled: true
+
+# -- Refuse settings that are unsafe in production (a single drain-cleaner
+# replica)
+productionMode: false
+
+# ── Drain Cleaner ────────────────────────────────────────────────────────────
+# A validating webhook that turns node-drain evictions of Kafka pods into
+# operator-driven rolling restarts. One per Kubernetes cluster: enable it on
+# the primary operator's release only. Needs a serving certificate the API
+# server trusts — cert-manager (tls.certManager) or your own (tls.secretName
+# plus tls.caBundle); without one the render fails, because the webhook would
+# be uncallable and `failurePolicy: Ignore` would let every eviction through.
+drainCleaner:
   enabled: false
+  image: quay.io/strimzi/drain-cleaner:1.6.1
+  imagePullPolicy: ""
+  # -- Run 2 or more in production (refused below 2 with productionMode)
+  replicas: 1
+  # -- Deny the eviction and have the operator roll the pod (Strimzi's
+  # recommended mode); false lets the eviction through after annotating
+  denyEviction: true
+  # -- Namespaces whose evictions are intercepted. Empty: the operator's
+  # watch scope.
+  namespaces: []
+  # -- Rendered by default when replicas > 1
+  podDisruptionBudget:
+    minAvailable: 1
+  networkPolicy:
+    enabled: true
+  tls:
+    # -- Issue the serving certificate with cert-manager and inject its CA
+    # (issuerRef empty: a self-signed Issuer)
+    certManager:
+      enabled: false
+      issuerRef: {}
+      duration: 8760h
+      renewBefore: 720h
+    # -- An existing kubernetes.io/tls Secret, mounted at
+    # /etc/webhook-certificates
+    secretName: ""
+    # -- Base64 CA bundle for the webhook
+    caBundle: ""
+  webhookAnnotations: {}
+  env: []
+  priorityClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  # -- Empty: preferred anti-affinity between the webhook pods
+  affinity: {}
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 100m
+
+# ── Operator monitoring ──────────────────────────────────────────────────────
+# A PodMonitor for the operator and the alerts only the operator can raise:
+# operator down, reconciliations failing, and certificate expiry for every
+# cluster it manages. Rendered only where the monitoring.coreos.com API
+# exists.
+monitoring:
+  podMonitor:
+    enabled: true
+    labels:
+      release: kafka
+    interval: ""
+
+alerts:
+  enabled: true
+  labels:
+    release: kafka
+    prometheus: kube-prometheus
+  runbookBaseUrl: "https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md"
+  thresholds:
+    certificateWarningDays: 30
+    certificateCriticalDays: 7
 
 # ── Upstream Strimzi operator (subchart) ─────────────────────────────────────
 # The ONLY place operator settings take effect. Full key reference:
@@ -175,11 +250,19 @@ strimzi-kafka-operator:
   # generated policies for Kafka operands)
   operatorNetworkPolicy:
     enabled: false
-  # -- Grafana dashboard ConfigMaps. Upstream names these independently of the
-  # release, so they collide with kafka-cluster's dashboards block. Resolve
-  # ownership before enabling.
+  # -- The operator's nine Grafana dashboards (Kafka, KRaft, Cruise Control,
+  # Kafka Exporter, Connect, MirrorMaker 2, Kafka Bridge, Kafka OAuth,
+  # operators), as ConfigMaps a Grafana
+  # sidecar picks up by label. They read exactly the series the exporter rules
+  # vendored in kafka-cluster produce; kafka-cluster 1.0 ships no dashboards of
+  # its own. Names are fixed, so enable them on ONE operator release (the
+  # namespace-scope overlay turns them off).
   dashboards:
-    enabled: false
+    enabled: true
+    # -- Namespace of the ConfigMaps (empty: the release namespace)
+    namespace: ""
+    label: grafana_dashboard
+    labelValue: "1"
 
   # -- Pod-level security context for the operator. Empty = live behavior;
   # hardening is an opt-in uplift in values-prod.yaml.

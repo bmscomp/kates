@@ -481,6 +481,10 @@ func (r *labRun) phaseMirror(ctx context.Context, s *migrate.State) error {
 		rep.Fail(migrate.RowMirrorInstalled, err.Error())
 		return err
 	}
+	if err := ensureMirrorChartDeps(ctx); err != nil {
+		rep.Fail(migrate.RowMirrorInstalled, err.Error())
+		return err
+	}
 	if _, err := defaultRunner.Run(ctx, "helm", helmMirrorArgs(l, r.env.IsKind, path, r.valuesMirror)...); err != nil {
 		rep.Fail(migrate.RowMirrorInstalled, "helm install failed (preflight, or the CR itself)")
 		if logs, lerr := defaultRunner.Run(ctx, "kubectl", "-n", l.MirrorNamespace, "logs", "job/"+l.MirrorCR+"-preflight", "--tail=80"); lerr == nil && logs != "" {

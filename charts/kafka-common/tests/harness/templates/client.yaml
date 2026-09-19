@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: client
+data:
+  bootstrap: {{ include "kafka-common.bootstrap" (dict "c" .Values.cluster "ctx" . "defaultCluster" "krafter" "defaultNamespace" "kafka") | quote }}
+  tlsAuth: |
+    {{- include "kafka-common.clientTlsAuth" (dict "c" .Values.cluster "chart" "harness" "field" .Values.chartField "defaultUser" "harness-user") | nindent 4 }}

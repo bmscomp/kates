@@ -1,0 +1,242 @@
+# The kates platform profile (`profile: platform`).
+#
+# Merged UNDER the release's values: an item in topics.items, users.items or
+# networkPolicy.clients with the same name as one below is merged over it
+# (so `topics.items.kates-events.partitions=12` changes one field, and
+# `users.items.kafka-ui.enabled=false` drops that user), and
+# kafka.authorization.superUsers is the union of both lists. Only these keys
+# are read from this file.
+#
+# These are the topics, users and client grants kafka-cluster 0.4 rendered on
+# every install. `kates deploy`, scripts/deploy-kafka*.sh and kates-platform
+# select the profile; a cluster that does not host the platform does not.
+
+kafka:
+  authorization:
+    # The backend runs chaos and admin operations across every topic. Kept a
+    # super user until its ACL set is audited (refactor plan §11).
+    superUsers:
+      - kates-backend
+
+topics:
+  items:
+    kates-events:
+      partitions: 6
+      config:
+        retention.ms: "172800000"
+        cleanup.policy: delete
+        segment.bytes: "1073741824"
+    kates-results:
+      partitions: 12
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete
+        segment.bytes: "1073741824"
+        compression.type: lz4
+    kates-metrics:
+      partitions: 6
+      config:
+        retention.ms: "86400000"
+        cleanup.policy: delete
+        compression.type: lz4
+    kates-audit:
+      partitions: 3
+      config:
+        retention.ms: "2592000000"
+        cleanup.policy: delete
+    kates-dlq:
+      partitions: 3
+      config:
+        retention.ms: "-1"
+        cleanup.policy: compact
+    # Debezium CDC internal topics
+    cdc-schema-history:
+      partitions: 1
+      config:
+        cleanup.policy: compact
+        retention.ms: "-1"
+    cdc-heartbeat:
+      partitions: 1
+      config:
+        cleanup.policy: delete
+        retention.ms: "86400000"
+    # The Kafka Connect sink connector's validation topic
+    test-sink-topic:
+      partitions: 3
+      config:
+        retention.ms: "86400000"
+        cleanup.policy: delete
+
+users:
+  items:
+    kates-backend:
+      authentication:
+        type: scram-sha-512
+
+    # Moves to the kafka-ui chart (its kafkaUser block) once the CLI adopts
+    # the object (refactor plan §10). Disable here with
+    # users.items.kafka-ui.enabled=false when that chart owns it.
+    kafka-ui:
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 1048576
+        consumerByteRate: 52428800
+        requestPercentage: 10
+      authorization:
+        type: simple
+        acls:
+          - resource: { type: topic, name: "*", patternType: literal }
+            operations: ["Describe", "Read"]
+            host: "*"
+          - resource: { type: group, name: "*", patternType: literal }
+            operations: ["Describe", "Read"]
+            host: "*"
+          - resource: { type: cluster }
+            operations: ["Describe"]
+            host: "*"
+
+    apicurio-registry:
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 10485760
+        consumerByteRate: 20971520
+        requestPercentage: 15
+      authorization:
+        type: simple
+        acls:
+          - resource: { type: topic, name: "__apicurio", patternType: prefix }
+            operations: ["All"]
+            host: "*"
+          - resource: { type: topic, name: "kafkasql-", patternType: prefix }
+            operations: ["All"]
+            host: "*"
+          - resource: { type: topic, name: "registry-", patternType: prefix }
+            operations: ["All"]
+            host: "*"
+          - resource: { type: group, name: "apicurio", patternType: prefix }
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource: { type: cluster }
+            operations: ["Create", "Describe", "IdempotentWrite", "AlterConfigs", "DescribeConfigs"]
+            host: "*"
+          - resource: { type: transactionalId, name: "apicurio", patternType: prefix }
+            operations: ["Write", "Describe"]
+            host: "*"
+
+    litmus-chaos:
+      authentication:
+        type: scram-sha-512
+      authorization:
+        type: simple
+        acls:
+          - resource: { type: topic, name: "*", patternType: literal }
+            operations: ["Read", "Write", "Create", "Delete", "Describe", "Alter"]
+            host: "*"
+          - resource: { type: group, name: "litmus", patternType: prefix }
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource: { type: cluster }
+            operations: ["Describe"]
+            host: "*"
+
+    # Kafka Connect's principal. connect-cluster can own it
+    # (kafkaUser.create); disable it here first
+    # (users.items.kates-connect.enabled=false) and adopt the object, or Helm
+    # refuses the second owner (refactor plan §10).
+    kates-connect:
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 52428800
+        consumerByteRate: 52428800
+        requestPercentage: 25
+      authorization:
+        type: simple
+        acls:
+          - resource: { type: topic, name: "kates-connect-", patternType: prefix }
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource: { type: topic, name: "kates-", patternType: prefix }
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource: { type: transactionalId, name: "*", patternType: literal }
+            operations: ["Write", "Describe"]
+            host: "*"
+          - resource: { type: topic, name: "cdc", patternType: prefix }
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource: { type: group, name: "kates-connect", patternType: prefix }
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource: { type: group, name: "connect-", patternType: prefix }
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource: { type: cluster }
+            operations: ["Describe"]
+            host: "*"
+
+    # MirrorMaker 2's TARGET-side principal (the migration lab relies on it).
+    # mirror-maker2 can own it (kafkaUser.create) under the same hand-over
+    # rule as kates-connect.
+    #
+    # Two grants are broader than they look, deliberately:
+    #   topic AlterConfigs  MirrorSourceConnector syncs topic configuration
+    #                       with incrementalAlterConfigs; Alter alone covers
+    #                       only createPartitions.
+    #   group "*"           MirrorCheckpointConnector writes the translated
+    #                       offsets of EVERY mirrored group, whose names are
+    #                       not known in advance.
+    kates-mm2:
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 52428800
+        consumerByteRate: 52428800
+        requestPercentage: 25
+      authorization:
+        type: simple
+        acls:
+          - resource: { type: topic, name: "*", patternType: literal }
+            operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter", "AlterConfigs"]
+            host: "*"
+          - resource: { type: group, name: "*", patternType: literal }
+            operations: ["Read", "Describe"]
+            host: "*"
+          - resource: { type: cluster }
+            operations: ["Describe", "DescribeConfigs", "Create"]
+            host: "*"
+
+networkPolicy:
+  clients:
+    - name: kates
+      namespace: kates
+      podSelector: { app.kubernetes.io/name: kates }
+      listeners: [plain, tls]
+    - name: litmus
+      namespace: litmus
+      podSelector: { app.kubernetes.io/name: litmus }
+      listeners: [plain, tls]
+    - name: kafka-ui-in-kates
+      namespace: kates
+      podSelector: { app: kafka-ui }
+      listeners: [plain, tls]
+    - name: kafka-ui
+      namespace: kafka-ui
+      podSelector: { app: kafka-ui }
+      listeners: [plain, tls]
+    - name: apicurio-registry
+      namespace: ""
+      podSelector: { app.kubernetes.io/name: apicurio-registry }
+      listeners: [plain, tls]
+    - name: connect
+      namespace: connect
+      podSelector: { strimzi.io/kind: KafkaConnect }
+      listeners: [plain, tls]
+    # MM2 workers are Connect workers, but Strimzi labels them
+    # KafkaMirrorMaker2, so the rule above does not match them.
+    - name: mirror-maker2
+      namespace: ""
+      podSelector: { strimzi.io/kind: KafkaMirrorMaker2 }
+      listeners: [plain, tls]

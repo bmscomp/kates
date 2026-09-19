@@ -1,0 +1,11 @@
+{{- $rows := list
+      (dict "title" "" "panels" (list (dict "title" "a" "w" 6 "h" 4) (dict "title" "b" "w" 6 "h" 4) (dict "title" "c" "w" 12 "h" 6) (dict "title" "d" "w" 8)))
+      (dict "title" "Open" "panels" (list (dict "title" "e" "w" 24 "h" 3)))
+      (dict "title" "Folded" "collapsed" true "panels" (list (dict "title" "f") (dict "title" "g")))
+      (dict "title" "After" "panels" (list (dict "title" "h"))) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: layout
+data:
+  panels: {{ include "kafka-common.grafana.layout" (dict "rows" $rows) | quote }}

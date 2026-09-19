@@ -1,4 +1,13 @@
+{{- /*
+The Kates dashboards (application, benchmark, trend, chaos) always, and the
+legacy Kafka boards only while legacyKafkaDashboards.enabled. Those read
+hand-written series names that the Strimzi exporter rules kafka-cluster 1.0
+ships do not produce; the maintained boards are the Strimzi operator's
+(charts/strimzi-operator), connect-cluster's and mirror-maker2's own.
+*/}}
 {{- if .Values.dashboards.enabled }}
+{{- $legacy := include "kates-monitoring.legacyKafkaDashboards" . | fromYamlArray }}
+{{- $keepLegacy := ne (toString (.Values.legacyKafkaDashboards).enabled) "false" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,7 +21,9 @@ metadata:
 data:
   {{- $files := .Files }}
   {{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+  {{- if or $keepLegacy (not (has (base $path) $legacy)) }}
   {{ base $path }}: |-
 {{ $files.Get $path | indent 4 }}
+  {{- end }}
   {{- end }}
 {{- end }}

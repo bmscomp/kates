@@ -1,0 +1,82 @@
+suite: secret access for connector configs
+templates:
+  - rbac-secrets.yaml
+release:
+  name: cc
+  namespace: connect
+set:
+  testConnectors: []
+tests:
+  - it: grants nothing when nothing is referenced
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: grants get on exactly the referenced Secrets, one Role per namespace
+    set:
+      connectors:
+        a:
+          class: com.example.X
+          config:
+            user: "${secrets:connect/pg:username}"
+            pass: "${secrets:connect/pg:password}"
+            other: "prefix-${secrets:vault/api-token:token}-suffix"
+        b:
+          class: com.example.Y
+          config: { key: "${secrets:connect/aws:key}" }
+    asserts:
+      - hasDocuments: { count: 4 }
+      - documentIndex: 0
+        equal: { path: metadata.name, value: cc-connect-cluster-secret-reader }
+      - documentIndex: 0
+        equal: { path: 'rules[0].resourceNames', value: [aws, pg] }
+      - documentIndex: 0
+        equal: { path: 'rules[0].verbs', value: [get] }
+      - documentIndex: 1
+        equal: { path: 'subjects[0].name', value: cc-connect-cluster-connect }
+      - documentIndex: 2
+        equal: { path: metadata.namespace, value: vault }
+      - documentIndex: 2
+        equal: { path: metadata.name, value: cc-connect-cluster-secret-reader-vault }
+      - documentIndex: 2
+        equal: { path: 'rules[0].resourceNames', value: [api-token] }
+      - documentIndex: 3
+        equal: { path: 'subjects[0].namespace', value: connect }
+
+  - it: binds the worker account even without the chart's ServiceAccount (C6)
+    set:
+      serviceAccount: { create: false }
+      rbac: { secretNames: [creds] }
+    asserts:
+      - documentIndex: 1
+        equal: { path: 'subjects[0].name', value: cc-connect-cluster-connect }
+
+  - it: reads rbac.secretNames in this namespace or a named one
+    set:
+      rbac: { secretNames: [creds, other/token] }
+    asserts:
+      - hasDocuments: { count: 4 }
+      - documentIndex: 0
+        equal: { path: 'rules[0].resourceNames', value: [creds] }
+      - documentIndex: 2
+        equal: { path: metadata.namespace, value: other }
+
+  - it: restores the 1.x breadth only on request
+    set:
+      rbac: { allSecrets: true }
+      kafka: { namespace: kafka }
+    asserts:
+      - hasDocuments: { count: 4 }
+      - documentIndex: 0
+        notExists: { path: 'rules[0].resourceNames' }
+      - documentIndex: 0
+        equal: { path: 'rules[0].verbs', value: [get, list, watch] }
+
+  - it: includes the test connectors' references (rendered from templates)
+    set:
+      testConnectors:
+        - name: t
+          class: com.example.X
+          config: { p: "${secrets:{{ .Release.Namespace }}/test-creds:password}" }
+    asserts:
+      - documentIndex: 0
+        equal: { path: 'rules[0].resourceNames', value: [test-creds] }

@@ -1,0 +1,123 @@
+{{- if (.Values.preflight).enabled }}
+{{- $fullname := include "connect-cluster.fullname" . }}
+{{- $pf := .Values.preflight }}
+{{- $image := $pf.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" .Values.strimziVersion .Values.version) }}
+{{- $k := include "connect-cluster.kafka" . | fromYaml }}
+{{- $auth := $k.authentication | default dict }}
+{{- $t := $auth.type | default "" }}
+{{- $tlsOn := eq (include "kafka-common.enabled" (list ($k.tls | default dict).enabled false)) "true" }}
+{{- $sasl := has $t (list "plain" "scram-sha-512" "scram-sha-256") }}
+{{- $mech := ternary "PLAIN" (upper $t) (eq $t "plain") }}
+{{- $bs := include "connect-cluster.bootstrap" . }}
+{{- /*
+Preflight: dial the Kafka cluster with the workers' own Kafka client line
+before the KafkaConnect exists. A KafkaConnect reports Ready once its workers
+start, and stays Ready while they cannot reach Kafka; this names the reason
+(PROTOCOL, DNS, TLS, AUTH, LISTENER, NETWORK) at install time instead. The
+probe is kafka-common's, shared with mirror-maker2.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-preflight
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "preflight") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    # Kept after success: its log is the evidence. Replaced on the next run.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ $pf.backoffLimit | default 0 }}
+  activeDeadlineSeconds: {{ $pf.timeoutSeconds | default 180 }}
+  template:
+    metadata:
+      labels:
+        {{- /* Deliberately NOT kates.io/test-pod: that label selects the Helm
+               tests' egress policy, whose rules are DNS, the API server and
+               the workers' REST port — none of them Kafka, which is the one
+               thing this Job dials. */}}
+        {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "preflight") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # Not the chart's ServiceAccount: it does not exist yet when a
+      # pre-install hook runs, and the probe never calls the API server.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: preflight
+          image: {{ $image | quote }}
+          {{- include "connect-cluster.imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "connect-cluster.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: LOG_DIR
+              value: /tmp
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              FAILED=0
+              WORK=/tmp/preflight
+              mkdir -p "$WORK"
+
+              {{ include "kafka-common.preflight.probe" (dict "noun" "kafka" "version" .Values.version) | nindent 14 | trim }}
+
+              echo "Kafka Connect preflight — client {{ $image }}"
+              {{- if eq $t "custom" }}
+              probe "kafka" {{ $bs | quote }} {{ ternary "custom-tls" "custom" $tlsOn | quote }} "" "" ""
+              {{- else if and $tlsOn $sasl }}
+              probe "kafka" {{ $bs | quote }} "sasl-tls" {{ $mech | quote }} {{ $auth.username | quote }} "/etc/connect-preflight"
+              {{- else if or $tlsOn (eq $t "tls") }}
+              probe "kafka" {{ $bs | quote }} "tls" "" "" ""
+              {{- else if $sasl }}
+              probe "kafka" {{ $bs | quote }} "sasl" {{ $mech | quote }} {{ $auth.username | quote }} "/etc/connect-preflight"
+              {{- else }}
+              probe "kafka" {{ $bs | quote }} "plaintext" "" "" ""
+              {{- end }}
+
+              echo ""
+              if [ "$FAILED" -gt 0 ]; then
+                echo "❌ preflight: the Kafka cluster is not reachable as configured"
+                {{- if include "kafka-common.enabled" (list $pf.failOnError true) }}
+                exit 1
+                {{- else }}
+                echo "   preflight.failOnError is false — continuing anyway"
+                {{- end }}
+              else
+                echo "✅ preflight: the Kafka cluster answers a {{ .Values.version }} client"
+              fi
+          resources:
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 768Mi, cpu: 1000m }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $sasl }}
+            - name: credentials
+              mountPath: /etc/connect-preflight
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $sasl }}
+        - name: credentials
+          secret:
+            secretName: {{ $auth.secretName | quote }}
+            # A Secret secretSync has not copied yet (a first install) must not
+            # hold the pod in ContainerCreating; the probe says what it skipped.
+            optional: true
+            items:
+              - key: {{ $auth.secretKey | default "password" }}
+                path: password
+        {{- end }}
+{{- end }}

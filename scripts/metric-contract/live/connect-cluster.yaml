@@ -1,0 +1,76 @@
+# Layered LAST on the CI cluster by the `metrics-live` job in
+# ci-kafka-charts.yml.
+#
+# What the live job needs from the chart: the exporter agent on the workers,
+# and connectors that actually register the MBean shapes the catalogue
+# describes. Two connectors from Kafka's own distribution do that without any
+# external system — a heartbeat emitter and a mirror of one topic back into
+# the same cluster, which between them exercise the worker, connector, task,
+# source-task, task-error and embedded producer/consumer beans.
+#
+# No sink connector runs here: every sink in the image needs a database or an
+# object store. The sink-task series are listed in the contract's
+# live.absentOk with that reason.
+replicas: 1
+metrics:
+  enabled: true
+monitoring:
+  podMonitor:
+    enabled: false
+alerts:
+  enabled: false
+dashboards:
+  enabled: false
+# The CI cluster has one broker.
+config:
+  replicationFactor: 1
+# Its own principal, so the platform profile's kates-connect is left alone.
+kafka:
+  clusterName: krafter
+  authentication:
+    username: live-connect
+kafkaUser:
+  create: true
+  topicGrants:
+    - name: "*"
+      patternType: literal
+      operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter", "AlterConfigs"]
+  groupGrants:
+    - name: "*"
+      patternType: literal
+jvmOptions:
+  -Xms: 512m
+  -Xmx: 512m
+resources:
+  requests: { memory: 1Gi, cpu: 250m }
+  limits: { memory: 2Gi, cpu: 1000m }
+testConnectors: []
+testTopics: []
+connectorDefaults:
+  config:
+    replication.factor: "1"
+connectors:
+  live-heartbeat:
+    class: org.apache.kafka.connect.mirror.MirrorHeartbeatConnector
+    tasksMax: 1
+    config:
+      source.cluster.alias: live
+      target.cluster.alias: live
+      emit.heartbeats.interval.seconds: "5"
+      heartbeats.topic.replication.factor: "1"
+  # A mirror of one topic back into the same cluster: a source connector with
+  # a real consumer and producer under it, and no second cluster to stand up.
+  live-source:
+    class: org.apache.kafka.connect.mirror.MirrorSourceConnector
+    tasksMax: 1
+    config:
+      source.cluster.alias: src
+      target.cluster.alias: live
+      topics: live-in
+      source.cluster.bootstrap.servers: krafter-kafka-bootstrap.kafka.svc.cluster.local:9092
+      source.cluster.security.protocol: SASL_PLAINTEXT
+      source.cluster.sasl.mechanism: SCRAM-SHA-512
+      source.cluster.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"live-connect\" password=\"${secrets:kafka/live-connect:password}\";"
+      offset-syncs.topic.replication.factor: "1"
+      sync.topic.acls.enabled: "false"
+      refresh.topics.interval.seconds: "10"

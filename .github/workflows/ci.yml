@@ -202,7 +202,9 @@ jobs:
           helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-          for chart in kafka-cluster kates-chaos monitoring kates-platform; do
+          # mirror-maker2 and connect-cluster come before kates-platform: the
+          # umbrella packages its file:// subcharts as they are on disk.
+          for chart in kafka-cluster kates-chaos monitoring mirror-maker2 connect-cluster kates-platform; do
             echo "==> helm dependency build charts/${chart}/"
             helm dependency build "charts/${chart}/"
           done
@@ -214,6 +216,9 @@ jobs:
             name=$(basename "${chart}")
             echo "==> ${name}"
             helm lint "${chart}" || rc=1
+            # A library chart (kafka-common) is not installable; its harness
+            # is rendered by ci-kafka-charts.yml instead.
+            grep -q '^type: library' "${chart}/Chart.yaml" && continue
             helm template "${name}" "${chart}" > /dev/null || rc=1
           done
           exit ${rc}
@@ -234,6 +239,7 @@ jobs:
           rc=0
           for chart in charts/*/; do
             name=$(basename "${chart}")
+            grep -q '^type: library' "${chart}/Chart.yaml" && continue
             echo "==> ${name}"
             helm template "${name}" "${chart}" \
               | kubeconform -strict -summary -ignore-missing-schemas \
@@ -298,12 +304,12 @@ jobs:
 
       - name: Validate kafka policies
         run: |
-          helm dependency build charts/kafka-cluster/ 2>/dev/null || true
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm dependency build charts/kafka-cluster/
           helm template kafka charts/kafka-cluster/ \
-            --set podSecurityPolicy.enabled=true \
-            --set strimziOperator.enabled=false \
+            --set kyvernoPolicy.enabled=true \
             --api-versions kyverno.io/v1 \
-            --show-only templates/pod-security-policy.yaml \
+            --show-only templates/kyverno-policy.yaml \
             > /tmp/kafka-policies.yaml
           echo "✅ Kafka policies render successfully"
 

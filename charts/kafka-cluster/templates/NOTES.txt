@@ -1,99 +1,63 @@
-┌──────────────────────────────────────────────────────────────────┐
-│  Kafka cluster "{{ include "kafka-cluster.clusterName" . }}" deployed to namespace {{ .Release.Namespace }}
-└──────────────────────────────────────────────────────────────────┘
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $cluster := include "kafka-cluster.clusterName" . -}}
+{{- $ns := include "kafka-cluster.namespace" . -}}
+{{- $v := .Values -}}
+Kafka cluster "{{ $cluster }}" — kafka-cluster {{ .Chart.Version }}, namespace {{ $ns }}
 
-  Version:     Kafka {{ .Values.kafkaVersion }} / Strimzi {{ .Values.strimziVersion }}
-  Metadata:    {{ if .Values.kafka.metadataVersion }}{{ .Values.kafka.metadataVersion }}{{ else }}operator default for Kafka {{ .Values.kafkaVersion }} (forecloses a rollback){{ end }}
-  Operator:    Cluster Operator in namespace {{ .Values.networkPolicies.operatorNamespace | default "strimzi-operator" }} (must watch {{ .Release.Namespace }} and support Kafka {{ .Values.kafkaVersion }})
-  Mode:        KRaft (node pools enabled)
-{{- if semverCompare "<4.2.0" (include "kafka-cluster.semver" .Values.kafkaVersion) }}
-  Share groups: not rendered — kafka.config's group.share.*/share.* keys need Kafka >= 4.2.0 (Chart.yaml kates.io/kafka-floor)
+  Version:      Kafka {{ $v.kafkaVersion }} (metadata {{ $v.kafka.metadataVersion | default "left to the operator, which forecloses a rollback" }}), Strimzi {{ $v.strimziVersion }}
+  Operator:     the Cluster Operator in {{ $r.netpol.operatorNamespace | default "strimzi-operator" }} must watch {{ $ns }} and support Kafka {{ $v.kafkaVersion }}
+{{- if semverCompare "<4.2.0" (include "kafka-cluster.semver" $v.kafkaVersion) }}
+  Share groups: not rendered — they need Kafka >= 4.2.0
 {{- end }}
-  Brokers:     {{ len .Values.brokerPools }} zone-aware pool(s)
-  Controllers: {{ len .Values.controllerPools }} zone-aware pool(s)
-{{- if .Values.topics.enabled }}
-  Topics:      {{ len .Values.topics.items }} managed topic(s)
-{{- end }}
-{{- if .Values.users.enabled }}
-  Users:       {{ len .Values.users.items }} managed user(s)
-{{- end }}
+  Profile:      {{ $v.profile | default "none" }}
+  Node pools:   {{ range $i, $p := $r.pools }}{{ if $i }}, {{ end }}{{ $p.name }} ({{ join "+" $p.roles }} ×{{ $p.replicas }}{{ with $p.zone }}, zone {{ . }}{{ end }}){{ end }}
+                {{ $r.controllers }} controller(s), {{ $r.brokers }} broker(s)
+  Topics:       {{ len $r.topics }} managed
+  Users:        {{ len $r.users }} managed{{ if include "kafka-common.enabled" (list $v.tests.user.create true) }} (+ {{ include "kafka-cluster.testUser" . }} for helm test){{ end }}
 
 Listeners:
-{{- range .Values.kafka.listeners }}
-  • {{ .name }} — port {{ .port }} ({{ .type }}{{ if .tls }}, TLS{{ end }}{{ if .authentication }}, {{ .authentication.type }}{{ end }})
+{{- range $r.listeners }}
+  • {{ .name }} — port {{ .port }} ({{ .type }}{{ if .tls }}, TLS{{ end }}{{ with .authentication }}, {{ .type }}{{ end }})
 {{- end }}
 
 Components:
-  Kafka Exporter:   {{ if .Values.kafkaExporter.enabled }}enabled{{ else }}disabled{{ end }}
-  Cruise Control:   {{ if .Values.cruiseControl.enabled }}enabled{{ else }}disabled{{ end }}
-  Drain Cleaner:    {{ if .Values.drainCleaner.enabled }}enabled{{ else }}disabled{{ end }}
-  Network Policies: {{ if .Values.networkPolicies.enabled }}enabled{{ else }}disabled{{ end }}
-  Alerts:           {{ if .Values.alerts.enabled }}enabled{{ else }}disabled{{ end }}
-  Tiered Storage:   {{ if .Values.tieredStorage.enabled }}enabled{{ else }}disabled{{ end }}
-  Backup:           {{ if .Values.backup.enabled }}enabled{{ else }}disabled{{ end }}
-
-────────────────────────────────────────────
-  Getting Started
-────────────────────────────────────────────
-
-1. Wait for the cluster to become ready:
-
-  kubectl wait kafka/{{ include "kafka-cluster.clusterName" . }} \
-    --for=condition=Ready -n {{ .Release.Namespace }} --timeout=300s
-
-2. Check pods and node distribution:
-
-  kubectl get pods -n {{ .Release.Namespace }} \
-    -l strimzi.io/cluster={{ include "kafka-cluster.clusterName" . }} \
-    -o custom-columns=NAME:.metadata.name,READY:.status.containerStatuses[0].ready,NODE:.spec.nodeName
-
-3. Run the Helm test suite (9 tiers):
-
-  helm test {{ .Release.Name }} -n {{ .Release.Namespace }} --timeout 5m
-
-{{- if .Values.users.enabled }}
-
-────────────────────────────────────────────
-  Connecting to Kafka
-────────────────────────────────────────────
-
-Internal SCRAM (port 9092):
-
-  bootstrap.servers={{ include "kafka-cluster.clusterName" . }}-kafka-bootstrap.{{ .Release.Namespace }}.svc:9092
-  security.protocol=SASL_PLAINTEXT
-  sasl.mechanism=SCRAM-SHA-512
-
-Retrieve a user password:
-
-  kubectl get secret {{ (index .Values.users.items 0).name }} -n {{ .Release.Namespace }} \
-    -o jsonpath='{.data.password}' | base64 -d
-
-{{- range .Values.kafka.listeners }}
-{{- if and (eq .type "internal") .tls }}
-
-Internal TLS (port {{ .port }}):
-
-  kubectl get secret {{ include "kafka-cluster.clusterName" $ }}-cluster-ca-cert \
-    -n {{ $.Release.Namespace }} -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+  Cruise Control:   {{ ternary "enabled" "disabled" (eq (include "kafka-common.enabled" (list $v.cruiseControl.enabled true)) "true") }}{{ if and (include "kafka-common.enabled" (list $v.cruiseControl.enabled true)) (include "kafka-common.enabled" (list $v.rebalance.enabled true)) }} (auto-rebalance templates {{ $cluster }}-add-brokers-template, {{ $cluster }}-remove-brokers-template){{ end }}
+  Kafka Exporter:   {{ ternary "enabled" "disabled" (eq (include "kafka-common.enabled" (list $v.kafkaExporter.enabled true)) "true") }}
+  Metrics:          {{ if $r.metrics.enabled }}{{ $r.metrics.type }}{{ else }}disabled{{ end }}
+  PodMonitors:      {{ if and $r.podMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}enabled{{ else if $r.podMonitor.enabled }}skipped (no monitoring.coreos.com/v1 API){{ else }}disabled{{ end }}
+  Alerts:           {{ if and (include "kafka-common.enabled" (list $v.alerts.enabled true)) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}enabled (runbook: {{ $v.alerts.runbookBaseUrl }}){{ else if include "kafka-common.enabled" (list $v.alerts.enabled true) }}skipped (no monitoring.coreos.com/v1 API){{ else }}disabled{{ end }}
+  Dashboards:       the operator's own — strimzi-kafka-operator.dashboards.enabled on the strimzi-operator chart
+  NetworkPolicies:  {{ if $r.netpol.enabled }}enabled ({{ len $r.netpol.resolvedClients }} client rule(s)){{ else }}disabled{{ end }}
+  Tiered storage:   {{ if $r.tiered }}ACTIVE — segments offload through {{ $v.tieredStorage.remoteStorageManager.className }}{{ else }}disabled{{ end }}
+  Backup:           {{ if $v.backup.enabled }}Velero, daily; volume data: {{ $r.backupVolumes }}{{ if $r.tiered }} (broker-only pools excluded: their data is in object storage){{ end }}{{ else }}disabled{{ end }}
+{{- if and (not $v.backup.enabled) (not $r.tiered) }}
+                    broker data is protected by replication only
 {{- end }}
-{{- if eq .type "nodeport" }}
+  Kyverno policy:   {{ if and $r.kyverno.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}{{ include "kafka-cluster.kyvernoPolicyName" . }} ({{ $r.kyverno.action | default "Audit" }}){{ else if $r.kyverno.enabled }}not rendered (the kyverno.io/v1 API is absent){{ else }}disabled{{ end }}
+{{- if $r.deprecations }}
 
-External NodePort (port {{ .port }}):
-
-  NODE_PORT=$(kubectl get svc {{ include "kafka-cluster.clusterName" $ }}-kafka-external-bootstrap \
-    -n {{ $.Release.Namespace }} -o jsonpath='{.spec.ports[0].nodePort}')
-  NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-  echo "Bootstrap: $NODE_IP:$NODE_PORT"
+DEPRECATED — these 0.4 settings still work in 1.x; move them before 2.0
+(docs/kafka-cluster-1.0-upgrade.md):
+{{- range $r.deprecations }}
+  • {{ . }}
 {{- end }}
 {{- end }}
+{{- if include "kafka-common.enabled" (list $v.compatibility.legacyResourceNames false) }}
+
+compatibility.legacyResourceNames is on: kafka-metrics, default-deny and the
+other 0.4 names are kept. Clear it in a maintenance window — the metrics
+ConfigMap rename rolls every broker.
 {{- end }}
 
-────────────────────────────────────────────
-  Useful Commands
-────────────────────────────────────────────
+Next steps
 
-  kubectl get kafka,kafkanodepools,kafkatopics,kafkausers -n {{ .Release.Namespace }}
-  kubectl logs -n {{ .Release.Namespace }} -l strimzi.io/name={{ include "kafka-cluster.clusterName" . }}-kafka --tail=50
-{{- if .Values.cruiseControl.enabled }}
-  kubectl get kafkarebalance -n {{ .Release.Namespace }}
+  kubectl wait kafka/{{ $cluster }} -n {{ $ns }} --for=condition=Ready --timeout=600s
+  kubectl get kafka,kafkanodepools,kafkatopics,kafkausers -n {{ $ns }} -l strimzi.io/cluster={{ $cluster }}
+  helm test {{ .Release.Name }} -n {{ $ns }} --timeout {{ if $r.tiered }}15m{{ else }}5m{{ end }}
+
+Connecting (internal):
+  bootstrap.servers={{ include "kafka-cluster.bootstrapServers" . }}
+{{- with $r.users }}
+  kubectl get secret {{ (index . 0).name }} -n {{ $ns }} -o jsonpath='{.data.password}' | base64 -d
 {{- end }}

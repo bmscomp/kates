@@ -252,6 +252,9 @@ bower_components
 .metals
 charts/*/charts/
 charts/*/*.lock
+# the kafka-common test harness builds the library into itself
+charts/kafka-common/tests/harness/charts/
+charts/kafka-common/tests/harness/Chart.lock
 
 # helm dependency update scratch dirs (left behind when a run is interrupted)
 charts/*/tmpcharts-*/

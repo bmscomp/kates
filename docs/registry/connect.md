@@ -106,7 +106,7 @@ metadata:
   annotations:
     strimzi.io/use-connector-resources: "true"
 spec:
-  version: 4.3.0
+  version: 4.3.1
   image: ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1
   replicas: 3
   bootstrapServers: krafter-kafka-bootstrap.kafka.svc:9092
@@ -120,19 +120,24 @@ spec:
 ### With the chart
 
 The `connect-cluster` chart wires the image, KafkaUser provisioning with ACLs, TLS,
-NetworkPolicies, the REST service, HPA, PDB and connector CRs:
+NetworkPolicies, the REST service, HPA, PDB and connector CRs. It pins this image by its
+fully qualified tag (also recorded in its `kates.io/connect-image` annotation); its
+`appVersion` is the Kafka version the workers run (4.3.1):
 
 ```
 helm install connect oci://ghcr.io/bmscomp/charts/connect-cluster \
-  --version 1.3.1 \
+  --version 2.0.0 \
   --namespace kafka \
   --set kafka.clusterName=krafter
 ```
 
 ### Verifying the plugins are loaded
 
+The chart names the `KafkaConnect` after the release and the chart
+(`connect-connect-cluster` here), and Strimzi names the worker pods after it:
+
 ```
-kubectl exec -n kafka deploy/connect-connect -- \
+kubectl exec -n kafka connect-connect-cluster-connect-0 -- \
   curl -s localhost:8083/connector-plugins | jq -r '.[].class'
 ```
 
@@ -152,7 +157,7 @@ The settings the chart applies by default, worth knowing because they are opinio
 |---|---|---|
 | `producer.acks` | `all` | CDC pipelines should not lose writes |
 | `producer.enable.idempotence` | `true` | No duplicates on retry |
-| `exactly.once.source.support` | `enabled` | EOS for source connectors |
+| `exactly.once.source.support` | `enabled` (chart key `exactlyOnce.enabled`) | EOS for source connectors |
 | `consumer.auto.offset.reset` | `earliest` | Sinks replay rather than skip |
 | `key`/`value.converter` | `JsonConverter` (schemas on) | Swap for the Apicurio converters when using a registry |
 

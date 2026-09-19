@@ -91,7 +91,7 @@ flowchart LR
         CC["MirrorCheckpointConnector"]
     end
 
-    subgraph TGT["Target — krafter, Kafka 4.3.0"]
+    subgraph TGT["Target — krafter, Kafka 4.3.1"]
         TDATA["orders, payments<br/>same names, identity policy"]
         OST["mm2-offset-syncs<br/>readOnlySource: true"]
         CHK["checkpoints"]
@@ -139,6 +139,7 @@ and replicates nothing.
 Start from the preset and change what is specific to you:
 
 ```bash
+helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
 helm install mm2 charts/mirror-maker2 -n kafka \
   -f charts/mirror-maker2/values-migrate-2x.yaml \
   -f my-migration.yaml
@@ -253,7 +254,7 @@ sequenceDiagram
     participant P as Producers
     participant S as Source 2.8
     participant M as MirrorMaker 2
-    participant T as Target 4.3.0
+    participant T as Target 4.3.1
     participant C as Consumers
 
     Note over P,S: 1. Stop writing, and prove it

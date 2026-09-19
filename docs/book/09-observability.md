@@ -93,6 +93,10 @@ Get in the habit of following this sequence — cluster health → performance �
 
 The monitoring chart ships a set of Kafka- and Strimzi-focused Grafana dashboards alongside the Kates-specific ones covered in the next section — every JSON file in [`charts/monitoring/dashboards/`](https://github.com/bmscomp/kates/tree/main/charts/monitoring/dashboards) is deployed. This section is organized by monitoring dimension rather than by file; each subsection notes which dashboard file its panels live on.
 
+::: {.callout-warning}
+These Kafka and Strimzi boards are deprecated (`legacyKafkaDashboards.enabled`, on by default in kates-monitoring 1.2, off in 1.3, removed in 2.0). They read hand-written series names that the Strimzi exporter rules kafka-cluster 1.0 ships do not produce, so many panels stay empty on a 1.0 cluster. The maintained boards are the Strimzi operator's (Kafka, KRaft, Cruise Control, Kafka Exporter; `strimzi-kafka-operator.dashboards.enabled` on the strimzi-operator chart) and the connect-cluster and mirror-maker2 charts' own. The Kates boards in the next section are not affected.
+:::
+
 ### Kafka Cluster Health
 
 This is the primary ops dashboard — your first stop after any test or chaos experiment. It answers the most fundamental question: "Is my cluster healthy right now?" If anything here is red, stop investigating performance and fix the cluster first.
@@ -182,6 +186,10 @@ The **Strimzi Operator & Kafka Connect** dashboard (`strimzi-operator-dashboard.
 | Connect error rate | `kafka_connect_task_error_total_errors_logged` | > 5 in 10m = warning |
 
 **Reconciliation P99** matters because Strimzi applies your desired state (topics, users, broker config) through a reconciliation loop. If reconciliations are slow, your configuration changes take longer to apply. **Queue depth** above 20 means the operator is overwhelmed — usually because too many resources changed simultaneously.
+
+::: {.callout-note}
+The Connect records and error-rate panels on this board read the metric names of Strimzi's upstream example rules (`kafka_connect_sink_task_sink_record_send_total`, `kafka_connect_task_error_total_errors_logged`). The `connect-cluster` chart's exporter rules publish the same attributes as `kafka_connect_sink_task_metrics_*` and `kafka_connect_task_error_metrics_*`, so those panels stay empty for a chart-deployed Connect cluster. The chart ships its own board instead — "Kafka Connect — `<release>`" in the `Kafka` folder (`dashboards.enabled`), covering connectors and tasks, throughput and sink lag, errors and the dead letter queue, offset commits, workers, and the client path. [Operating Kafka Connect](operating-kafka-connect.md#grafana-dashboard) describes it.
+:::
 
 ---
 
@@ -575,14 +583,16 @@ Kates ships PrometheusRule alerts alongside its charts. These alerts fire automa
 | File | Groups | What They Cover |
 |------|--------|-----------------|
 | `charts/kafka-cluster/templates/prometheusrule.yaml` | `kafka.cluster`, `kafka.consumer`, `kafka.kraft`, `kafka.network`, `strimzi.operator`, `kafka.replication`, `kafka.performance`, `kafka.cruisecontrol`, `kafka.certificates` | Offline/under-replicated partitions, controller health, disk usage, consumer lag, KRaft election rate, request latency, operator liveness, ISR shrink, log-flush latency, handler saturation, Cruise Control anomalies, certificate expiry |
-| `charts/connect-cluster/templates/alerts-connect.yaml` | `kafka-connect` | Worker down, failed tasks, task-count mismatch, rebalance storms, error rate, source lag, worker heap |
+| `charts/connect-cluster/templates/alerts.yaml` | `<release>.workers`, `<release>.connectors`, `<release>.records`, `<release>.slo` | Worker down, rebalance storms and stuck rebalances, worker heap, failed connectors and tasks, tasks not running, logged record errors, dead letter queue writes and failures, offset commit failures, sink lag, idle sources (opt-in), task-availability SLO burn (opt-in), and the recording rules they share |
 | `charts/monitoring/templates/prometheus-chaos-rules.yaml` | `kafka-chaos-expected`, `kafka-chaos-unexpected`, `kafka-chaos-results`, `kafka-gameday`, `kafka-chaos-rto-rpo` | Chaos experiment status, unexpected broker restarts during chaos, gameday workflows, RTO/RPO SLA breaches and data loss |
 
 ### Alert Configuration
 
 The alert rules are deployed as Kubernetes `PrometheusRule` resources, which the Prometheus operator discovers automatically. Each chart has its own toggle: `alerts.enabled` in `charts/kafka-cluster/values.yaml` and `charts/connect-cluster/values.yaml` (with extra labels via `alerts.labels`), and `chaosAlerts.enabled` in `charts/monitoring/values.yaml` (off by default).
 
-Thresholds and `for:` durations live in the rule templates themselves — to change one, edit the template or deploy your own `PrometheusRule` alongside. Here are three of the kafka-cluster rules as the chart renders them:
+The connect-cluster rules render only where the `monitoring.coreos.com/v1` API exists, are scoped to the release's own workers, take their thresholds from `alerts.thresholds` (opt-in rules under `alerts.sourceIdle` and `alerts.slo`), and link each alert to its section of [the Connect runbook](../connect-cluster-runbook.md) through `runbook_url`. Chart 2.0 renamed `KafkaConnectTaskCountMismatch`, `KafkaConnectHighErrorRate` and `KafkaConnectSourceLag` to `KafkaConnectTasksNotRunning`, `KafkaConnectErrorsLogged` and `KafkaConnectSourceIdle` — update Alertmanager routes that match on them.
+
+For the other charts, thresholds and `for:` durations live in the rule templates themselves — to change one, edit the template or deploy your own `PrometheusRule` alongside. Here are three of the kafka-cluster rules as the chart renders them:
 
 #### Consumer Group Lag
 
@@ -661,26 +671,48 @@ The monitoring stack is installed via a **local wrapper chart** in `charts/monit
 
 | Component | Version | Source |
 |---|---|---|
-| Monitoring Chart | 1.0.0 | Local wrapper (`charts/monitoring`) |
+| Monitoring Chart (`kates-monitoring`) | 1.2.0 | Local wrapper (`charts/monitoring`) |
 | Prometheus | v3.9.1 | Pinned in `charts/monitoring/values.yaml` |
 | Grafana | 12.3.1 | Pinned in `charts/monitoring/values.yaml` |
-| kube-prometheus-stack | `82.4.3` | Upstream dependency in `Chart.yaml` |
+| kube-prometheus-stack | `82.4.3` | Upstream dependency in `Chart.yaml`; also `versions.env` `PROMETHEUS_STACK_VERSION` |
 
 ### Deploying
 
 ```bash
-# Kind overlay (NodePort 30080)
+# Detects the provider and picks the matching overlay —
+# Kind gets values-kind.yaml (NodePort 30080)
 make monitoring
 
-# Generic Kubernetes (ClusterIP)
+# Generic Kubernetes (ClusterIP), no detection
 make monitoring-generic
 ```
 
 These commands will:
 
 1. Build chart dependencies (`helm dependency build charts/monitoring`)
-2. Install the local wrapper chart
-3. Automatically deploy every dashboard in `charts/monitoring/dashboards/` (templated as ConfigMaps)
+2. Install the local wrapper chart as the release `monitoring` in the `kafka` namespace, alongside the Kafka cluster
+3. Deploy the dashboards in `charts/monitoring/dashboards/` as a ConfigMap — the four Kates boards always, and the nine deprecated Kafka and Strimzi boards while `legacyKafkaDashboards.enabled` is `true`
+
+To render the same thing by hand — which is what you do when you need a values chain the targets do not offer:
+
+```bash
+helm dependency build charts/monitoring
+
+helm upgrade --install monitoring charts/monitoring \
+  --namespace kafka --create-namespace \
+  -f charts/monitoring/values-kind.yaml \
+  --timeout 10m --wait
+```
+
+Once the Kafka boards on the operator, `connect-cluster` and `mirror-maker2` charts cover what you look at, drop the deprecated nine:
+
+```bash
+helm upgrade --install monitoring charts/monitoring \
+  --namespace kafka \
+  -f charts/monitoring/values-kind.yaml \
+  --set legacyKafkaDashboards.enabled=false \
+  --timeout 10m --wait
+```
 
 ### Access
 
@@ -693,11 +725,10 @@ Default Grafana credentials: `admin` / `admin`.
 
 ### Upgrading
 
-To upgrade the monitoring stack, update the dependency version in `charts/monitoring/Chart.yaml` and re-run:
+To upgrade the monitoring stack, update the dependency version in `charts/monitoring/Chart.yaml` and `PROMETHEUS_STACK_VERSION` in `versions.env` — the latter is what `scripts/gen-version-matrix.sh` publishes to the [Version & Compatibility Matrix](appendix-d-versions.md), so leaving it behind makes the matrix lie. Then re-run:
 
 ```bash
-cd charts/monitoring
-helm dependency update
+helm dependency update charts/monitoring
 ```
 
 To check available versions:

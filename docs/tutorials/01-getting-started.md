@@ -12,6 +12,8 @@ make all
 
 This creates the Kind cluster, pulls all container images, and deploys Kafka, monitoring, and LitmusChaos. This is a one-time setup step — it takes 5–10 minutes on a fresh machine.
 
+`make all` prompts for a topology before it does anything. Choose **2, isolated namespaces** — the rest of this tutorial uses the namespaces that choice creates (`kafka`, `kates`, `monitoring`, `litmus`). Option 1 puts the whole stack in a single `kates-stack` namespace instead, which is fine for a scratch cluster but means every `-n <namespace>` below needs changing.
+
 > [!TIP]
 > If `make all` fails with image pull errors, check your internet connection and Docker disk space (`docker system df`). Kind needs at least 20GB of free disk space.
 
@@ -147,16 +149,21 @@ The report includes:
 
 ## Step 8: Export the Data
 
-```bash
-# JSON (programmatic consumption)
-kates report export <id> --format json -o report.json
+`export` writes to stdout, so redirect it to a file. The formats are `csv`,
+`junit`, `heatmap`, `heatmap-csv`, `md` and `html`:
 
-# CSV (spreadsheet analysis)
-kates report export <id> --format csv -o report.csv
+```bash
+# CSV (spreadsheet analysis) — the default format
+kates report export <id> --format csv > report.csv
 
 # Heatmap (Grafana visualization)
-kates report export <id> --format heatmap -o heatmap.json
+kates report export <id> --format heatmap > heatmap.json
+
+# JUnit (CI test reporting)
+kates report export <id> --format junit > report.xml
 ```
+
+For the report as JSON, ask `show` for it instead: `kates report show <id> -o json`.
 
 ## Step 9: Run a Test with Consumers
 

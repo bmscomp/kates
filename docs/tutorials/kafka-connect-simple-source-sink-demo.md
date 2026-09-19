@@ -1,4 +1,4 @@
-# Tutorial 10: Kafka Connect Source/Sink Quick Runbook
+# Kafka Connect Source/Sink Quick Runbook
 
 A minimal end-to-end runbook: insert a row in PostgreSQL, verify Debezium publishes it to Kafka, and confirm the JDBC sink writes it to a replica table.
 
@@ -37,9 +37,17 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
 ## 3. Apply Demo Resources
 
 ```bash
-# Deploy CDC topic and connectors via helm test
-helm test connect-cluster -n connect
+# helm test creates the demo resources, checks them, and deletes them when it
+# passes, so render the same manifests and apply them to keep them running.
+# kafka-common must be built once (kates deploy does it).
+helm dependency build charts/connect-cluster
+helm template connect-cluster charts/connect-cluster -n connect \
+  --set kafka.namespace=kafka \
+  -s templates/tests/test-02-topics.yaml \
+  -s templates/tests/test-02-connectors.yaml | kubectl apply -f -
 ```
+
+This creates the CDC topic in the `kafka` namespace and the four working-example connectors in `connect`; the steps below use two of them. `kafka.namespace` defaults to the release namespace, so name the Kafka namespace explicitly.
 
 ## 4. Wait for Connectors to be Ready
 
@@ -85,7 +93,8 @@ Expected:
 ## 8. Optional Cleanup
 
 ```bash
-kubectl delete kafkaconnector -n connect debezium-postgres-source-working-example jdbc-sink-from-cdc-working-example
+kubectl delete kafkaconnector -n connect debezium-postgres-source-working-example jdbc-sink-from-cdc-working-example \
+  jdbc-sink-working-example jdbc-source-working-example --ignore-not-found
 kubectl delete kafkatopic -n kafka cdc-public-demo-orders
 kubectl exec -n database postgresql-0 -- /bin/bash -lc \
   "PGPASSWORD=postgres /opt/bitnami/postgresql/bin/psql -h 127.0.0.1 -U postgres -d orders -c \

@@ -165,7 +165,7 @@ The worker image is best left empty: Strimzi derives it from its own map for
 actually reconciling the resource.
 
 ```yaml
-version: "4.3.0"       # the Kafka line the workers run
+version: "4.3.1"       # the Kafka line the workers run
 image: ""              # Strimzi's image for that version
 imagePullPolicy: ""    # for THIS chart's pods, not the workers
 ```

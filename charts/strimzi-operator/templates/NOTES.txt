@@ -19,10 +19,28 @@ Configuration:
   Leader election:  {{ if $op.leaderElection.enable }}enabled{{ else }}disabled{{ end }}
   DNS domain:       {{ $op.kubernetesServiceDnsDomain }}
   CRD upgrade hook: {{ if .Values.crdUpgrade.enabled }}enabled{{ else }}DISABLED{{ end }}
+  Drain cleaner:    {{ if (.Values.drainCleaner).enabled }}enabled ({{ .Values.drainCleaner.replicas }} replica(s), evictions in {{ include "strimzi-operator.watchScope" . }}){{ else }}disabled{{ end }}
+  Dashboards:       {{ if $op.dashboards.enabled }}enabled (ConfigMaps labelled {{ $op.dashboards.label | default "grafana_dashboard" }}){{ else }}disabled{{ end }}
+  Monitoring:       {{ if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}{{ if ne (toString .Values.monitoring.podMonitor.enabled) "false" }}PodMonitor{{ if ne (toString .Values.alerts.enabled) "false" }} + alerts{{ end }}{{ else }}disabled{{ end }}{{ else }}skipped (no monitoring.coreos.com/v1 API){{ end }}
 
 {{- if .Values.crdUpgrade.enabled }}
 
   ✓ CRDs applied from {{ include "strimzi-operator.crdUrl" . }}
+{{- end }}
+{{- $npOwner := include "strimzi-operator.ownedElsewhere" (dict "ctx" . "apiVersion" "networking.k8s.io/v1" "kind" "NetworkPolicy" "namespace" .Release.Namespace "name" (include "strimzi-operator.fullname" .)) }}
+{{- if and .Values.operatorPolicy.enabled $npOwner }}
+
+  ⚠ The operator's NetworkPolicy {{ include "strimzi-operator.fullname" . }} is still owned by the
+    release {{ $npOwner }} (kafka-cluster 0.4), so this release did not render it.
+    Upgrade that release to kafka-cluster 1.0 (which drops it), then upgrade
+    this one again.
+{{- end }}
+{{- $dcOwner := include "strimzi-operator.ownedElsewhere" (dict "ctx" . "apiVersion" "admissionregistration.k8s.io/v1" "kind" "ValidatingWebhookConfiguration" "name" "strimzi-drain-cleaner") }}
+{{- if and (.Values.drainCleaner).enabled $dcOwner }}
+
+  ⚠ The drain cleaner is still owned by the release {{ $dcOwner }}, so this
+    release did not render it. Upgrade that release with drainCleaner.enabled=false
+    (kafka-cluster 1.0 refuses it anyway), then upgrade this one again.
 {{- end }}
 
 {{- if not .Values.crdUpgrade.enabled }}

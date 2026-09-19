@@ -107,6 +107,14 @@ dashboards:
   labels:
     grafana_dashboard: "1"
 
+# DEPRECATED: the eight hand-written Kafka boards and the Strimzi operator &
+# Connect board. They read series names that kafka-cluster 1.0's exporter rules
+# (Strimzi's own) do not produce. The maintained boards are the Strimzi
+# operator's (charts/strimzi-operator) and connect-cluster's and
+# mirror-maker2's own. Default false in 1.3; removed in 2.0.
+legacyKafkaDashboards:
+  enabled: true
+
 # Image used by the helm test connectivity pod
 test:
   image: curlimages/curl:8.7.1

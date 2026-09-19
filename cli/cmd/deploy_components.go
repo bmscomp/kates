@@ -466,10 +466,17 @@ metadata:
 			clusterDomain := dc.resolveClusterDomain()
 			kafkaArgs := []string{"upgrade", "--install", dc.primary.Name, "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
 
+			// values-platform.yaml selects the chart's platform profile: the
+			// kates topics, users (kates-backend, kafka-ui, kates-connect,
+			// kates-mm2, …) and client NetworkPolicy grants the rest of this
+			// deploy relies on. kafka-cluster 1.0 no longer carries them in its
+			// defaults.
 			kafkaArgs = append(kafkaArgs,
 				"-f", dc.valuesFile,
+				"-f", "charts/kafka-cluster/values-platform.yaml",
 				"--set", "global.clusterDomain="+clusterDomain,
-				"--set", "networkPolicies.connectNamespace="+connectNS,
+				"--set", "networkPolicy.clients[0].name=connect",
+				"--set", "networkPolicy.clients[0].namespace="+connectNS,
 				"--timeout", "10m",
 			)
 			if dc.isKind {
@@ -612,30 +619,12 @@ metadata:
 	connectDomain := dc.resolveClusterDomain()
 	bootstrap := dc.primary.Bootstrap(connectDomain)
 
-	// Copy kates-connect secret and kafka-metrics ConfigMap from kafka namespace to connect namespace (cross-namespace)
+	// Copy the kates-connect credentials from the kafka namespace to the connect
+	// namespace (cross-namespace). The worker's exporter rules used to be copied
+	// here too, from kafka-cluster's metrics ConfigMap; connect-cluster 2.0 renders
+	// its own in its own namespace and points metricsConfig at that, so there is
+	// nothing left to copy.
 	if connectNS != kafkaNS {
-		// Copy kafka-metrics ConfigMap (required by KafkaConnect metricsConfig)
-		dl.Println("    - Copying kafka-metrics ConfigMap to connect namespace...")
-		metricsData, metricsErr := runExecOutputFn(ctx, "kubectl", "get", "configmap", "kafka-metrics",
-			"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}")
-		if metricsErr == nil && len(metricsData) > 0 {
-			// Build a clean ConfigMap without Helm ownership annotations
-			// to avoid field-manager conflicts on kubectl apply.
-			var indented strings.Builder
-			for _, line := range strings.Split(string(metricsData), "\n") {
-				indented.WriteString("    " + line + "\n")
-			}
-			metricsYaml := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kafka-metrics\n  namespace: %s\ndata:\n  kafka-metrics-config.yml: |\n%s", connectNS, indented.String())
-			if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, metricsYaml); err != nil {
-				// Fallback: force ownership with server-side apply (handles leftover
-				// field-manager conflicts from prior broken deploys)
-				dl.Println("    - Retrying with server-side apply (--force-conflicts)...")
-				runExecStdinFn(ctx, "kubectl", []string{"apply", "--server-side", "--force-conflicts", "-f", "-"}, metricsYaml)
-			}
-		} else {
-			dl.Printf("    ⚠  ConfigMap 'kafka-metrics' not found in namespace %s\n", kafkaNS)
-		}
-
 		dl.Println("    - Copying kates-connect credentials to connect namespace...")
 		var pwBytes []byte
 		var jaasBytes []byte
@@ -711,6 +700,13 @@ stringData:
 	if !connectDeployed {
 		dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", connectNS)
 
+		// connect-cluster 2.0 is built on the kafka-common library, a file://
+		// dependency Helm refuses to render until it is built.
+		if err := runHelmFn(ctx, "dependency", "build", "charts/connect-cluster"); err != nil {
+			dl.Printf("    ✗ helm dependency build charts/connect-cluster: %v\n", err)
+			return err
+		}
+
 		registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
 			kafkaNS, connectDomain)
 
@@ -725,9 +721,9 @@ stringData:
 			"--set", "kafka.bootstrapServers=" + bootstrap,
 			"--set", "schemaRegistry.enabled=true",
 			"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
-			"--set", "databaseEgress[0].namespace=" + deployDbNS,
-			"--set", "databaseEgress[0].port=5432",
-			"--set", "databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
+			"--set", "networkPolicy.egress.databases[0].namespace=" + deployDbNS,
+			"--set", "networkPolicy.egress.databases[0].port=5432",
+			"--set", "networkPolicy.egress.databases[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
 			"--timeout", "10m",
 		}
 		// Connect's spec.version must be inside the operator's window, so it
@@ -771,7 +767,7 @@ stringData:
 		if !monitoringEnabled {
 			connectArgs = append(connectArgs,
 				"--set", "alerts.enabled=false",
-				"--set", "podMonitors.enabled=false",
+				"--set", "monitoring.podMonitor.enabled=false",
 				"--set", "dashboards.enabled=false",
 			)
 		}
@@ -1110,6 +1106,13 @@ data:
 				}
 			}
 
+			// The chart depends on the kafka-common library (file://), which a
+			// checkout does not carry built.
+			if err := runHelmFn(ctx, "dependency", "build", "charts/mirror-maker2"); err != nil {
+				dl.Printf("    ✗ helm dependency build charts/mirror-maker2: %v\n", err)
+				dl.FinishComponent("mirror-maker2", false)
+				return err
+			}
 			helmArgs := []string{
 				"upgrade", "--install", "mm2", "charts/mirror-maker2",
 				"-n", mm2NS, "--create-namespace",

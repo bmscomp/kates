@@ -1,0 +1,10 @@
+apiVersion: v2
+name: kafka-common-harness
+description: Test harness for the kafka-common library — an application chart that calls every library template so `helm unittest` can assert on the output. Not published.
+type: application
+version: 0.0.0
+appVersion: "0.0.0"
+dependencies:
+  - name: kafka-common
+    version: 0.1.0
+    repository: file://../..

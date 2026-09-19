@@ -1,56 +1,95 @@
-# -- Kafka cluster name — becomes the Strimzi Kafka CR name and the strimzi.io/cluster label
+# kafka-cluster 1.0 — default values.
+#
+# The defaults render a generic, working cluster: three KRaft controllers and
+# three brokers on the default StorageClass, internal listeners only, no
+# platform topics or users. The kates platform's topics, users and client
+# NetworkPolicy grants are a profile (`profile: platform`, what
+# values-platform.yaml sets). Upgrading from 0.4? Read
+# docs/kafka-cluster-1.0-upgrade.md: the 0.4 keys still work in 1.x and NOTES
+# name their replacements.
+
+# -- Kafka cluster name: the Strimzi Kafka CR name, the strimzi.io/cluster
+# label, and the prefix of every namespaced resource this chart creates.
 clusterName: krafter
-# -- Kafka broker/controller version deployed by Strimzi. The default is the
-# NEWEST version in the vendored operator's window (scripts/check-versions.sh
-# asserts that) and must stay at or above Chart.yaml's kates.io/kafka-floor.
-# Any x.y.z is accepted by the schema: whether the OPERATOR can run it is the
-# operator's and the CLI's check, not this chart's, so the chart stays usable
-# with a newer operator than the one pinned here.
+# -- Kafka broker/controller version. The default is the newest in the
+# vendored operator's window (scripts/check-versions.sh asserts that) and must
+# stay at or above Chart.yaml's kates.io/kafka-floor. Any x.y.z is accepted:
+# whether the operator can run it is the operator's and the CLI's check.
 kafkaVersion: "4.3.1"
-# -- Strimzi operator version this chart is aligned with (CRD hook + version checks)
+# -- Strimzi version the chart is aligned with (the Helm-test client image tag
+# and scripts/check-versions.sh)
 strimziVersion: "1.2.0"
 
-# -- Override the chart name used in labels and resource names
+# -- Override the chart name used in labels
 nameOverride: ""
-# -- Override the fully-qualified resource name
+# -- Override the fully-qualified name (not used in resource names: those
+# carry clusterName)
 fullnameOverride: ""
-# -- Extra labels merged into every resource this chart renders (the CLI stamps
-# kates.io/lab and kates.io/lab-role here so a migration lab's releases can be
-# found again). Never selector labels: nothing matches on them.
+# -- Extra labels merged into every resource (the CLI stamps kates.io/lab
+# here). Never selector labels.
 extraLabels: {}
 
-# ── Global Image Configuration ───────────────────────────────────────────────
-# Override these to pull all images from a private or air-gapped registry.
-# Example: global.imageRegistry: "my-registry.example.com"
-# -- Global settings shared with subcharts (registry, pull secrets, cluster domain)
+# -- A named set of defaults merged under these values. `platform` adds the
+# kates platform's topics, users, super user and client grants
+# (profiles/platform.yaml); values-platform.yaml sets it. Items you set in
+# `topics.items`, `users.items` and `networkPolicy.clients` win over the
+# profile's by name.
+profile: ""
+
+# -- Refuse settings that are unsafe in production: the placeholder S3
+# secret, a NodePort listener without TLS, `deleteClaim: true`, a backup that
+# protects no broker data, and more (README "Rails").
+productionMode: false
+
+# -- Keep KafkaTopics and KafkaUsers when the release is uninstalled. The
+# Kafka CR and its node pools are always kept: deleting them deletes data.
+keepOnDelete: true
+
+compatibility:
+  # -- Keep the 0.4 names of the resources that existed then (kafka-metrics,
+  # default-deny, allow-dns, kafka-brokers, the SeaweedFS Secret and
+  # ConfigMap, the Kyverno ClusterPolicy, the PrometheusRule). Renaming the
+  # metrics ConfigMap changes the Kafka CR, which rolls every broker; set this
+  # on an upgrade and clear it in a maintenance window. New resources are
+  # always prefixed with clusterName.
+  legacyResourceNames: false
+
+# -- Settings shared with subcharts
 global:
+  # -- Registry of the Helm-test Kafka client image when testImages.kafka is empty
   imageRegistry: "quay.io"
+  # -- Repository of that image
   imageRepository: "strimzi"
-  # -- Kubernetes cluster DNS domain (extracted dynamically by deploy scripts)
+  # -- Pull secrets for the pods this chart owns (tests)
+  imagePullSecrets: []
+  # -- Kubernetes DNS domain
   clusterDomain: "cluster.local"
-  # -- Default storage class to use for PVCs (extracted dynamically by deploy scripts)
+  # -- Accepted for `kates detect` output. Volumes take their class from
+  # nodePools (a class change on an existing volume is refused by Strimzi).
   storageClass: ""
 
-# ── Image Overrides ──────────────────────────────────────────────────────────
-# Per-component image references for test pods and utilities.
-# -- Test images
+# -- Images of the Helm-test pods. Pinned: scripts/check-versions.sh keeps
+# them aligned with the other charts.
 testImages:
-  kafka: "ghcr.io/bmscomp/kates-tester:1.21.0"
-  bash: "bash:5.2"
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
+  kafka: "ghcr.io/bmscomp/kates-tester:1.22.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
+  # -- Pull policy for test pods (empty: Kubernetes' default)
+  pullPolicy: IfNotPresent
 
-# -- Core Kafka CR configuration: listeners, config overrides, authorization, resources
+# ── Kafka ────────────────────────────────────────────────────────────────────
 kafka:
-  # KRaft metadata version, pinned one step behind the Kafka version per the
-  # Strimzi upgrade procedure: if left unset the operator auto-raises it to the
-  # new version's default as soon as `kafkaVersion` changes, which forecloses
-  # any rollback to the previous Kafka line. Raise to 4.3-IV0 in a follow-up
-  # once the 4.3 line is proven. Must stay >= 4.2-IV0 or share groups will not
-  # bootstrap on new clusters. Both forms are accepted: the short `4.2` (Kafka
-  # resolves it to the newest 4.2-IVn; what the CLI passes) and the explicit
-  # `4.2-IV1`. It can never be NEWER than kafkaVersion — the chart refuses to
-  # render that, since the brokers could not start.
+  # -- Kafka image. Empty: the operator's image for kafkaVersion.
+  # tieredStorage.image replaces it when tiered storage is enabled.
+  image: ""
+  # -- KRaft metadata version, pinned one step behind kafkaVersion so a
+  # rollback stays possible (left unset, the operator raises it as soon as
+  # kafkaVersion changes). `4.2` and `4.2-IV1` are both accepted; it can never
+  # be newer than kafkaVersion. Keep it at 4.2 or newer: share groups need it.
   metadataVersion: 4.2-IV1
+
+  # -- Listeners. Internal only by default; externalAccess adds one for
+  # clients outside the Kubernetes cluster. NetworkPolicy ports are derived
+  # from this list.
   listeners:
     - name: plain
       port: 9092
@@ -64,19 +103,32 @@ kafka:
       tls: true
       authentication:
         type: tls
-    - name: external
-      port: 9094
-      type: nodeport
-      tls: true
-      authentication:
-        type: scram-sha-512
-      configuration: {}
+
+  # -- An external listener preset, appended to `listeners`. Off by default:
+  # 0.4 exposed a NodePort on every install.
+  externalAccess:
+    # -- none | nodeport | loadbalancer | ingress
+    type: none
+    name: external
+    port: 9094
+    tls: true
+    authentication:
+      type: scram-sha-512
+    # -- Passed to the listener's `configuration` (ingress needs
+    # bootstrap.host, brokers[].host and class)
+    configuration: {}
+    # -- Source ranges for the NetworkPolicy rule of this listener (empty:
+    # from anywhere, which is what an external listener is for)
+    allowedCidrs: []
 
   authorization:
     type: simple
-    superUsers:
-      - kates-backend
+    # -- Principals that bypass ACLs. The platform profile adds kates-backend.
+    superUsers: []
 
+  # -- Broker configuration. Share-group keys (group.share.*, share.*) are
+  # rendered only for kafkaVersion >= 4.2.0. Replication factors above the
+  # rendered broker count are refused.
   config:
     offsets.topic.replication.factor: 3
     transaction.state.log.replication.factor: 3
@@ -95,11 +147,6 @@ kafka:
     quota.producer.default: 52428800
     quota.consumer.default: 104857600
     message.max.bytes: 10485760
-    # Share groups (KIP-932) need Kafka >= 4.2 and metadata >= 4.2 — they are
-    # what sets Chart.yaml's kates.io/kafka-floor. Every `group.share.*` and
-    # `share.*` key in this map is rendered ONLY when kafkaVersion >= 4.2.0, so
-    # an additional cluster on 4.1.x (its own older operator, or the legacy
-    # provider) starts instead of refusing an unknown feature.
     group.share.enable: true
     group.min.session.timeout.ms: 6000
     group.max.session.timeout.ms: 1800000
@@ -108,129 +155,142 @@ kafka:
     controller.quorum.fetch.timeout.ms: 10000
     controller.quorum.election.backoff.max.ms: 5000
 
+  # -- Cluster-wide quotas (spec.kafka.quotas). `type: strimzi` with
+  # minAvailableRatioPerVolume stops producers before a disk fills; the prod
+  # overlay sets 0.1. Empty: Kafka's own per-client defaults only.
+  quotas: {}
+
   rack:
     topologyKey: topology.kubernetes.io/zone
 
+  # -- spec.kafka.logging (inline loggers or an external ConfigMap)
+  logging: {}
+  # -- spec.kafka.jmxOptions
+  jmxOptions: {}
+  livenessProbe: {}
+  readinessProbe: {}
+
+  # -- spec.kafka.template, deep-merged over the chart's (PDB and a hardened
+  # kafkaContainer security context). Node pools render their own pod,
+  # kafkaContainer and persistentVolumeClaim templates, which Strimzi uses
+  # instead of these: set per-pool pod settings under nodePools.
   template:
     podDisruptionBudget:
       maxUnavailable: 1
-
-  metricsConfig:
-    type: jmxPrometheusExporter
 
   clusterCa:
     generateCertificateAuthority: true
     validityDays: 1825
     renewalDays: 180
     certificateExpirationPolicy: replace-key
-
   clientsCa:
     generateCertificateAuthority: true
     validityDays: 1825
     renewalDays: 180
     certificateExpirationPolicy: replace-key
 
-# Controller pools — auto-generated by: kates detect --generate-values
-# Each pool maps to an availability zone with its zone-specific storage class.
-# Do NOT hardcode zone names or storage classes here.
-# -- Explicit KRaft controller KafkaNodePool definitions (overrides controllerDefaults)
-controllerPools: []
-  # Example (generated by kates detect):
-  # - name: controllers-ext
-  #   zone: "ext"
-  #   replicas: 1
-  #   storageSize: 10Gi
-  #   storageClass: "std-room-ext"
+# -- Cron expressions for certificate renewal and other disruptive operator
+# work (spec.maintenanceTimeWindows)
+maintenanceTimeWindows: []
 
-# -- Default sizing/scheduling for the generated KRaft controller node pool
-controllerDefaults:
-  deleteClaim: false
-  jvmOptions:
-    -Xms: 512m
-    -Xmx: 512m
-    gcLoggingEnabled: true
-  resources:
-    requests:
-      memory: 1Gi
-      cpu: 500m
-    limits:
-      memory: 1Gi
-      cpu: 1000m
-  topologySpreadConstraints:
-    enabled: true
-    maxSkew: 1
-    topologyKey: topology.kubernetes.io/zone
-    whenUnsatisfiable: ScheduleAnyway
-  podAntiAffinity:
-    enabled: true
-    topologyKey: kubernetes.io/hostname
-  tolerations: []
-  priorityClassName: ""
-  sysctl:
-    enabled: false
-    image: busybox:1.37
-    params:
-      vm.max_map_count: "262144"
-      net.core.somaxconn: "16384"
-      vm.swappiness: "1"
+# ── Node pools ───────────────────────────────────────────────────────────────
+# Every pool is rendered from `pools`, with precedence
+#   pool  >  roleDefaults[role]  >  defaults
+# (maps merged, lists replaced). `kates detect --generate-values` writes its
+# own pools, and Helm replaces the list. A pool's name is its identity:
+# renaming one creates a new pool and removes the old one with its data.
+# The 0.4 keys (controllerPools, brokerPools, controllerDefaults,
+# brokerDefaults) still work in 1.x and are translated to this model.
+nodePools:
+  defaults:
+    # -- Storage of every pool. `volumes` entries are merged over `volume`.
+    storage:
+      type: jbod
+      volumes:
+        - id: 0
+          size: 100Gi
+    # -- Defaults for each JBOD volume
+    volume:
+      type: persistent-claim
+      deleteClaim: false
+    scheduling:
+      # -- Node label a pool's `zone` pins to
+      zoneKey: topology.kubernetes.io/zone
+      # -- Topology spread of a pool's pods (topologyKey empty: zoneKey)
+      spread:
+        enabled: true
+        maxSkew: 1
+        topologyKey: ""
+        whenUnsatisfiable: ScheduleAnyway
+      # -- Preferred anti-affinity between pods of a pool (controller-only
+      # pools: between all controllers of the cluster)
+      antiAffinity:
+        enabled: true
+        topologyKey: kubernetes.io/hostname
+      tolerations: []
+      priorityClassName: ""
+      # -- Pod grace period. Empty: Strimzi's default (30s).
+      terminationGracePeriodSeconds: null
+    # -- Merged over the hardened pod security context
+    podSecurityContext: {}
+    # -- Merged over the hardened Kafka container security context
+    containerSecurityContext: {}
+    # -- Namespaced sysctls only (net.*, kernel.shm*, kernel.msg*,
+    # kernel.sem, fs.mqueue.*), rendered into the pod security context.
+    # vm.max_map_count and other node-level keys are refused: tune nodes
+    # with a DaemonSet or the node image.
+    sysctls: []
+    # -- Raw KafkaNodePool.spec.template, deep-merged last
+    template: {}
+  roleDefaults:
+    controller:
+      replicas: 3
+      storage:
+        volumes:
+          - id: 0
+            size: 10Gi
+      jvmOptions:
+        -Xms: 512m
+        -Xmx: 512m
+        gcLoggingEnabled: true
+      resources:
+        requests:
+          memory: 1Gi
+          cpu: 500m
+        limits:
+          memory: 1Gi
+          cpu: 1000m
+    broker:
+      replicas: 3
+      jvmOptions:
+        -Xms: 2048m
+        -Xmx: 2048m
+        gcLoggingEnabled: true
+      resources:
+        requests:
+          memory: 4Gi
+          cpu: 1000m
+        limits:
+          memory: 4Gi
+          cpu: 2000m
+  # -- The pools. Each needs a unique name and roles; anything from
+  # `defaults`/`roleDefaults` can be overridden per pool, and `zone` pins a
+  # pool to one zone. Two clusters sharing a namespace need distinct pool
+  # names (KafkaNodePool names are namespaced, not per cluster).
+  pools:
+    - name: controllers
+      roles: [controller]
+    - name: brokers
+      roles: [broker]
+    # - name: brokers-az1
+    #   roles: [broker]
+    #   zone: az1
+    #   replicas: 1
+    #   storage:
+    #     volumes:
+    #       - { id: 0, size: 200Gi, class: gp3-az1 }
 
-# Broker pools — auto-generated by: kates detect --generate-values
-# Each pool maps to an availability zone with its zone-specific storage class.
-# Do NOT hardcode zone names or storage classes here.
-# -- Explicit broker KafkaNodePool definitions (overrides brokerDefaults)
-brokerPools: []
-  # Example (generated by kates detect):
-  # - name: brokers-ext
-  #   zone: "ext"
-  #   replicas: 1
-  #   storageSize: 100Gi
-  #   storageClass: "std-room-ext"
-  #   # Optional per-pool overrides (fallback to brokerDefaults when omitted)
-  #   resources:
-  #     requests:
-  #       cpu: 1500m
-  #       memory: 8Gi
-  #     limits:
-  #       cpu: 1500m
-  #       memory: 8Gi
-  #   jvmOptions:
-  #     -Xms: 2048m
-  #     -Xmx: 2048m
-  #     gcLoggingEnabled: true
-
-# -- Default sizing/scheduling for the generated broker node pool
-brokerDefaults:
-  deleteClaim: false
-  jvmOptions:
-    -Xms: 2048m
-    -Xmx: 2048m
-    gcLoggingEnabled: true
-  resources:
-    requests:
-      memory: 4Gi
-      cpu: 1000m
-    limits:
-      memory: 4Gi
-      cpu: 2000m
-  tolerations: []
-  priorityClassName: ""
-  sysctl:
-    enabled: false
-    image: busybox:1.37
-    params:
-      vm.max_map_count: "262144"
-      net.core.somaxconn: "16384"
-      vm.swappiness: "1"
-  topologySpreadConstraints:
-    enabled: true
-    maxSkew: 1
-    topologyKey: topology.kubernetes.io/zone
-    whenUnsatisfiable: ScheduleAnyway
-  podAntiAffinity:
-    enabled: true
-    topologyKey: kubernetes.io/hostname
-
-# -- Strimzi entity operator (topic + user operators) resources
+# ── Operands ─────────────────────────────────────────────────────────────────
 entityOperator:
   topicOperator:
     resources:
@@ -255,12 +315,16 @@ entityOperator:
     jvmOptions:
       -Xms: 128m
       -Xmx: 256m
+  # -- spec.entityOperator.template
+  template: {}
 
-# -- Kafka exporter for consumer-lag metrics
+# -- Kafka Exporter (consumer lag and topic/partition metrics)
 kafkaExporter:
   enabled: true
   topicRegex: ".*"
   groupRegex: ".*"
+  topicExcludeRegex: ""
+  groupExcludeRegex: ""
   resources:
     requests:
       memory: 128Mi
@@ -268,14 +332,17 @@ kafkaExporter:
     limits:
       memory: 256Mi
       cpu: 200m
+  template: {}
 
-# -- Cruise Control auto-rebalancing configuration
+# -- Cruise Control
 cruiseControl:
   enabled: true
   brokerCapacity:
     cpu: "2000m"
     inboundNetwork: 50MiB/s
     outboundNetwork: 50MiB/s
+  # -- Automatic rebalancing on scale-up and scale-down. An entry without a
+  # template uses the chart's rebalance template for its mode.
   autoRebalance:
     - mode: add-brokers
     - mode: remove-brokers
@@ -287,405 +354,16 @@ cruiseControl:
     limits:
       memory: 512Mi
       cpu: 500m
+  # -- spec.cruiseControl.apiUsers (hashLoginService Secret)
+  apiUsers: {}
+  # -- spec.cruiseControl.template
+  template: {}
 
-# -- KafkaTopic CRs to create with the cluster
-topics:
-  # -- Enable managed topic provisioning
-  enabled: true
-  # -- Topic definitions
-  items:
-    - name: kates-events
-      partitions: 6
-      replicas: 3
-      config:
-        retention.ms: "172800000"
-        min.insync.replicas: "2"
-        cleanup.policy: delete
-        segment.bytes: "1073741824"
-    - name: kates-results
-      partitions: 12
-      replicas: 3
-      config:
-        retention.ms: "604800000"
-        min.insync.replicas: "2"
-        cleanup.policy: delete
-        segment.bytes: "1073741824"
-        compression.type: lz4
-    - name: kates-metrics
-      partitions: 6
-      replicas: 3
-      config:
-        retention.ms: "86400000"
-        min.insync.replicas: "2"
-        cleanup.policy: delete
-        compression.type: lz4
-    - name: kates-audit
-      partitions: 3
-      replicas: 3
-      config:
-        retention.ms: "2592000000"
-        min.insync.replicas: "2"
-        cleanup.policy: delete
-    - name: kates-dlq
-      partitions: 3
-      replicas: 3
-      config:
-        retention.ms: "-1"
-        min.insync.replicas: "2"
-        cleanup.policy: compact
-    # CDC Debezium internal topics
-    - name: cdc-schema-history
-      partitions: 1
-      replicas: 3
-      config:
-        cleanup.policy: compact
-        retention.ms: "-1"
-        min.insync.replicas: "2"
-    - name: cdc-heartbeat
-      partitions: 1
-      replicas: 3
-      config:
-        cleanup.policy: delete
-        retention.ms: "86400000"
-        min.insync.replicas: "2"
-    # Test sink topic for Kafka Connect sink connector validation
-    - name: test-sink-topic
-      partitions: 3
-      replicas: 3
-      config:
-        retention.ms: "86400000"
-        min.insync.replicas: "2"
-        cleanup.policy: delete
-
-# -- Kafka UI managed resources (set to false when using the standalone kafka-ui chart)
-kafkaUI:
-  # -- Manage the kafka-ui KafkaUser from this chart
-  managedUser: true
-
-# -- KafkaUser CRs (authentication + ACLs) to create with the cluster
-users:
-  # -- Enable managed user provisioning
-  enabled: true
-  # -- User definitions
-  items:
-    - name: kates-backend
-      authentication:
-        type: scram-sha-512
-    - name: kafka-ui
-      authentication:
-        type: scram-sha-512
-      quotas:
-        producerByteRate: 1048576
-        consumerByteRate: 52428800
-        requestPercentage: 10
-      authorization:
-        type: simple
-        acls:
-          - resource:
-              type: topic
-              name: "*"
-              patternType: literal
-            operations: ["Describe", "Read"]
-            host: "*"
-          - resource:
-              type: group
-              name: "*"
-              patternType: literal
-            operations: ["Describe", "Read"]
-            host: "*"
-          - resource:
-              type: cluster
-            operations: ["Describe"]
-            host: "*"
-    - name: apicurio-registry
-      authentication:
-        type: scram-sha-512
-      quotas:
-        producerByteRate: 10485760
-        consumerByteRate: 20971520
-        requestPercentage: 15
-      authorization:
-        type: simple
-        acls:
-          - resource:
-              type: topic
-              name: "__apicurio"
-              patternType: prefix
-            operations: ["All"]
-            host: "*"
-          - resource:
-              type: topic
-              name: "kafkasql-"
-              patternType: prefix
-            operations: ["All"]
-            host: "*"
-          - resource:
-              type: topic
-              name: "registry-"
-              patternType: prefix
-            operations: ["All"]
-            host: "*"
-          - resource:
-              type: group
-              name: "apicurio"
-              patternType: prefix
-            operations: ["Read", "Describe"]
-            host: "*"
-          - resource:
-              type: cluster
-            operations: ["Create", "Describe", "IdempotentWrite", "AlterConfigs", "DescribeConfigs"]
-            host: "*"
-          - resource:
-              type: transactionalId
-              name: "apicurio"
-              patternType: prefix
-            operations: ["Write", "Describe"]
-            host: "*"
-    - name: litmus-chaos
-      authentication:
-        type: scram-sha-512
-      authorization:
-        type: simple
-        acls:
-          - resource:
-              type: topic
-              name: "*"
-              patternType: literal
-            operations: ["Read", "Write", "Create", "Delete", "Describe", "Alter"]
-            host: "*"
-          - resource:
-              type: group
-              name: "litmus"
-              patternType: prefix
-            operations: ["Read", "Describe"]
-            host: "*"
-          - resource:
-              type: cluster
-            operations: ["Describe"]
-            host: "*"
-    - name: kates-connect
-      authentication:
-        type: scram-sha-512
-      quotas:
-        producerByteRate: 52428800
-        consumerByteRate: 52428800
-        requestPercentage: 25
-      authorization:
-        type: simple
-        acls:
-          - resource:
-              type: topic
-              name: "kates-connect-"
-              patternType: prefix
-            operations: ["Read", "Write", "Create", "Describe"]
-            host: "*"
-          - resource:
-              type: topic
-              name: "kates-"
-              patternType: prefix
-            operations: ["Read", "Write", "Create", "Describe"]
-            host: "*"
-          - resource:
-              type: transactionalId
-              name: "*"
-              patternType: literal
-            operations: ["Write", "Describe"]
-            host: "*"
-          - resource:
-              type: topic
-              name: "cdc"
-              patternType: prefix
-            operations: ["Read", "Write", "Create", "Describe"]
-            host: "*"
-          - resource:
-              type: group
-              name: "kates-connect"
-              patternType: prefix
-            operations: ["Read", "Describe"]
-            host: "*"
-          - resource:
-              type: group
-              name: "connect-"
-              patternType: prefix
-            operations: ["Read", "Describe"]
-            host: "*"
-          - resource:
-              type: cluster
-            operations: ["Describe"]
-            host: "*"
-    # MirrorMaker 2 TARGET-side user (mirror-maker2 chart). Writes replicated
-    # topics + owns the MM2 Connect internal/offset-sync/checkpoint topics and
-    # groups on this (target) cluster. The SOURCE-side user lives on the remote
-    # cluster and is provisioned there.
-    #
-    # Two grants here are broader than they look, deliberately:
-    #   • topic AlterConfigs — MirrorSourceConnector syncs topic configuration
-    #     (retention, cleanup policy) with incrementalAlterConfigs, which needs
-    #     ALTER_CONFIGS; plain Alter only covers createPartitions. Without it
-    #     the connector logs TopicAuthorizationException on every refresh and
-    #     stays RUNNING.
-    #   • group "*" — MirrorCheckpointConnector translates the committed offsets
-    #     of EVERY mirrored consumer group onto this cluster, and it writes them
-    #     through alterConsumerGroupOffsets, which needs READ on the group. A
-    #     prefix grant can only cover groups you already know the names of; a
-    #     migration is precisely the case where you do not.
-    - name: kates-mm2
-      authentication:
-        type: scram-sha-512
-      quotas:
-        producerByteRate: 52428800
-        consumerByteRate: 52428800
-        requestPercentage: 25
-      authorization:
-        type: simple
-        acls:
-          - resource:
-              type: topic
-              name: "*"
-              patternType: literal
-            operations: ["Read", "Write", "Create", "Describe", "DescribeConfigs", "Alter", "AlterConfigs"]
-            host: "*"
-          - resource:
-              type: group
-              name: "*"
-              patternType: literal
-            operations: ["Read", "Describe"]
-            host: "*"
-          - resource:
-              type: cluster
-            operations: ["Describe", "DescribeConfigs", "Create"]
-            host: "*"
-
-# -- PrometheusRule alerting configuration
-alerts:
-  enabled: true
-  labels:
-    release: kafka
-    prometheus: kube-prometheus
-
-# -- NetworkPolicy set isolating Kafka, operators, and clients
-networkPolicies:
-  enabled: true
-  # default-deny: blocks all traffic to/from pods matching selector
-  defaultDeny: true
-  # Selector for the default-deny policy. Empty (the default) DERIVES
-  # `app.kubernetes.io/part-of: strimzi-<clusterName>` in the template — the
-  # label Strimzi puts on every pod of this cluster — so a cluster not named
-  # krafter is still selected. (It used to be a literal `strimzi-krafter`, and
-  # a second cluster got no default-deny and no DNS allowance at all.) An
-  # explicit map here still wins; there is no way to express "select every
-  # pod" — an empty podSelector is a Kyverno violation on hardened clusters.
-  defaultDenySelector: {}
-  # allow-dns: permits DNS egress for pods matching selector
-  allowDNS: true
-  # Selector for the allow-dns policy. Same derivation as defaultDenySelector.
-  allowDNSSelector: {}
-  # The Cluster Operator's own NetworkPolicy (`strimzi-operator`), written INTO
-  # operatorNamespace. Fine for a standalone install — one cluster, one
-  # operator — which is why it stays on by default. It is a fixed-name policy
-  # in ANOTHER release's namespace, so two clusters naming the same operator
-  # fight over it: the strimzi-operator wrapper chart owns it once per operator
-  # when `operatorPolicy.enabled` is set THERE, and every kafka-cluster release
-  # that names that operator must then turn this OFF (values-additional.yaml
-  # does; the CLI does for the primary too).
-  operatorPolicy:
-    enabled: true
-  allowedClientNamespaces:
-    - kates
-    - litmus
-  monitoringNamespace: kafka
-  # Namespace where Kafka Connect is deployed (for cross-namespace ingress)
-  connectNamespace: connect
-  # Namespace where MirrorMaker 2 is deployed (leave empty for Release.Namespace).
-  # MM2 workers are Connect workers but Strimzi labels them
-  # strimzi.io/kind: KafkaMirrorMaker2, so they need their own ingress rule —
-  # without it a mirror is denied at the network layer and reports itself
-  # perfectly healthy while replicating nothing.
-  mirrorMaker2Namespace: ""
-  # Namespace where standalone Kafka UI is deployed
-  kafkaUINamespace: kafka-ui
-  # Namespace where the Strimzi Operator is deployed (leave empty for "strimzi-operator")
-  operatorNamespace: ""
-  # Namespace where Apicurio Registry is deployed (leave empty for Release.Namespace)
-  apicurioNamespace: ""
-  # -- Manage kafka-ui NetworkPolicy from this chart (set false when using standalone kafka-ui chart)
-  kafkaUI: true
-
-# -- Kafka tiered storage (Remote Log Storage) configuration
-tieredStorage:
-  enabled: false
-  credentials:
-    # When seaweedfs.enabled=true the chart creates 'kafka-seaweedfs-credentials'.
-    # Set existingSecret to that name so the RSM plugin picks up the right creds.
-    existingSecret: "kafka-seaweedfs-credentials"
-    accessKeyId: ""
-    secretAccessKey: ""
-    accessKeyIdKey: AWS_ACCESS_KEY_ID
-    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
-  s3:
-    bucketName: kafka-tiered-storage
-    region: us-east-1
-    # Default endpoint auto-resolves to SeaweedFS filer using global.clusterDomain.
-    # Override with a full URL to point at an external S3-compatible store.
-    endpointUrl: ""
-    pathStyleAccessEnabled: true
-  metadata:
-    replicationFactor: 3
-    partitions: 50
-  retention:
-    taskIntervalMs: 30000
-    localRetentionMs: 86400000   # 1 day on local disk; rest lives in SeaweedFS
-
-# -- Pre-install/upgrade hook that applies Strimzi CRDs
-crdUpgrade:
-  enabled: true
-  image: "bitnami/kubectl:latest"
-
-# -- Grafana dashboard ConfigMaps
-dashboards:
-  enabled: true
-  namespace: kafka
-  label: grafana_dashboard
-  labelValue: "1"
-  brokerDashboard: true
-  kraftDashboard: true
-  cruiseControlDashboard: true
-  connectDashboard: true
-
-# -- Kyverno pod security ClusterPolicy (audit/enforce)
-podSecurityPolicy:
-  enabled: false
-  action: Audit
-  mutate: false
-  excludeStrimziPods: true
-
-# -- Velero backup schedule and pre-upgrade backup for cluster topology
-backup:
-  enabled: false
-  schedule: "0 2 * * *"
-  ttl: 168h0m0s
-  # Namespace where Velero is installed — Velero Schedule/Backup CRs must be
-  # created there, not in the Kafka namespace.
-  veleroNamespace: velero
-  # ── IMPORTANT ─────────────────────────────────────────────────────────────
-  # snapshotVolumes MUST be false when tieredStorage is enabled.
-  # Broker PVC snapshots are crash-consistent and redundant once log segments
-  # are continuously offloaded to SeaweedFS via the Remote Log Storage API.
-  # Only KRaft controller PVCs (1 Gi each) are in scope — see backup.yaml.
-  # See README "Why NetBackup is Incompatible with Kafka" for full rationale.
-  snapshotVolumes: false
-  defaultVolumesToFsBackup: false   # controller PVCs are tiny; fs-backup via Velero
-  storageLocation: default          # Velero BackupStorageLocation name (→ SeaweedFS)
-  volumeSnapshotLocations: []
-  persistence:
-    enabled: false
-    size: 20Gi
-    storageClass: ""
-    existingClaim: ""
-
-# -- KafkaRebalance CR templates (full + add-brokers)
+# -- KafkaRebalance templates used by cruiseControl.autoRebalance, and an
+# optional full rebalance. Rendered only with cruiseControl.enabled.
 rebalance:
   enabled: true
+  # -- Shared settings of every template (a KafkaRebalance spec without mode)
   goals:
     - com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareGoal
     - com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal
@@ -695,209 +373,143 @@ rebalance:
     - com.linkedin.kafka.cruisecontrol.analyzer.goals.CpuCapacityGoal
     - com.linkedin.kafka.cruisecontrol.analyzer.goals.TopicReplicaDistributionGoal
     - com.linkedin.kafka.cruisecontrol.analyzer.goals.LeaderBytesInDistributionGoal
-
-# -- Strimzi Drain Cleaner webhook deployment for safe node drains
-drainCleaner:
-  enabled: false
-  image: quay.io/strimzi/drain-cleaner:1.6.1
-  # -- Webhook replicas. Run 2+ in production: with one replica, evictions
-  # during webhook downtime bypass drain protection (failurePolicy: Ignore).
-  replicas: 1
-  # -- PodDisruptionBudget for the webhook (enable alongside replicas >= 2)
-  podDisruptionBudget:
+  skipHardGoalCheck: false
+  # -- Regex of topics never moved
+  excludedTopics: ""
+  # -- Bytes/s cap on replica movement (0: none)
+  replicationThrottle: 0
+  concurrentPartitionMovementsPerBroker: 0
+  concurrentLeaderMovements: 0
+  # -- Per-mode overrides of the settings above
+  templates:
+    add-brokers: {}
+    remove-brokers: {}
+  # -- A standing full rebalance proposal. Cruise Control computes it once;
+  # approve it with `kubectl annotate kafkarebalance <name>
+  # strimzi.io/rebalance=approve`.
+  full:
     enabled: false
-    minAvailable: 1
-  # -- Scheduling passthrough for the webhook pod
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  # -- Webhook TLS: secretName mounts an existing TLS Secret at
-  # /etc/webhook-certificates (upstream layout); caBundle is the base64 CA
-  # for the ValidatingWebhookConfiguration. Alternatively set
-  # webhookAnnotations (e.g. cert-manager.io/inject-ca-from) and leave
-  # caBundle empty.
-  tls:
-    secretName: ""
-    caBundle: ""
-  # -- Extra annotations for the ValidatingWebhookConfiguration
-  webhookAnnotations: {}
-  resources:
-    requests:
-      memory: 64Mi
-      cpu: 50m
-    limits:
-      memory: 128Mi
-      cpu: 100m
+    rebalanceDisk: true
+    # -- Approve every proposal automatically
+    autoApprove: false
 
-# -- PodMonitor resources for Prometheus scraping
-podMonitors:
+# ── Topics and users ─────────────────────────────────────────────────────────
+topics:
   enabled: true
-  labels:
-    release: kafka
+  # -- Applied to every topic
+  defaults:
+    partitions: 3
+    # -- Empty: the rendered broker count, capped at 3
+    replicas: null
+    # -- Added to each topic's config unless set there. min.insync.replicas
+    # empty: replicas - 1, at least 1 and at most 2.
+    config: {}
+  # Topics by name: {partitions, replicas, config, topicName, enabled}. A
+  # list of {name: …} entries is still accepted in 1.x. (No default here, so
+  # either form merges without a Helm warning.)
+  # items:
+  #   orders:
+  #     partitions: 12
+  #     config:
+  #       retention.ms: "604800000"
 
-# -- Whether the Strimzi operator subchart is managed by this release
-strimziOperator:
+users:
   enabled: true
+  # Users by name: {authentication, authorization, quotas, template,
+  # enabled}. A list of {name: …} entries is still accepted in 1.x.
+  # items:
+  #   orders-app:
+  #     authentication: { type: scram-sha-512 }
+  #     authorization:
+  #       type: simple
+  #       acls:
+  #         - resource: { type: topic, name: orders, patternType: literal }
+  #           operations: ["Read", "Write", "Describe"]
 
-# -- Pass-through values for the strimzi-kafka-operator subchart
-strimzi-kafka-operator:
-  replicas: 1
-  watchAnyNamespace: true
-  defaultImageTag: 1.1.0
-  # Cluster DNS domain — must match global.clusterDomain for correct FQDN resolution
-  kubernetesServiceDnsDomain: cluster.local
-  # When global.imageRegistry is set, pass it to the Strimzi subchart
-  # defaultImageRegistry: quay.io
-  # defaultImageRepository: strimzi
-  fullReconciliationIntervalMs: 60000
-  podSecurityContext:
-    runAsNonRoot: true
-    fsGroup: 1001
-    seccompProfile:
-      type: RuntimeDefault
-  securityContext:
-    allowPrivilegeEscalation: false
-    readOnlyRootFilesystem: true
-    capabilities:
-      drop: ["ALL"]
-  resources:
-    requests:
-      memory: 512Mi
-      cpu: 250m
-    limits:
-      memory: 512Mi
-      cpu: 1000m
-  operatorNetworkPolicy:
-    enabled: true
-  podDisruptionBudget:
-    enabled: true
-    minAvailable: 1
-    unhealthyPodEvictionPolicy: IfHealthyBudget
-  livenessProbe:
-    initialDelaySeconds: 15
-    periodSeconds: 30
-  readinessProbe:
-    initialDelaySeconds: 10
-    periodSeconds: 30
-  dashboards:
-    enabled: true
-    namespace: kafka
-    label: grafana_dashboard
-    labelValue: "1"
-  generateNetworkPolicy: false
-  generatePodDisruptionBudget: true
-
-# -- Pod lifecycle hooks (e.g. preStop) for brokers
-lifecycle:
-  preStopSleepSeconds: 15
-
-# -- Role/RoleBinding for operational access to the Kafka namespace
-rbac:
-  create: true
-  extraRules: []
-
-# -- ServiceAccount used by chart-managed workloads
-serviceAccount:
-  annotations: {}
-
-# -- external-secrets SecretStore/Push/ExternalSecret wiring
-externalSecrets:
+# ── Tiered storage and backup ────────────────────────────────────────────────
+# Tiered storage offloads closed log segments to object storage through a
+# remote storage manager (RSM) plugin. The stock Strimzi image has none, so
+# `image` must name one that carries it.
+tieredStorage:
   enabled: false
-  secretStore:
-    create: false
-    provider: {}
-    # Example: Kubernetes provider (read secrets from another namespace)
-    # provider:
-    #   kubernetes:
-    #     remoteNamespace: kafka
-    #     server:
-    #       caProvider:
-    #         type: ConfigMap
-    #         name: kube-root-ca.crt
-    #         key: ca.crt
-    #     auth:
-    #       serviceAccount:
-    #         name: krafter-admin
-    # Example: HashiCorp Vault
-    # provider:
-    #   vault:
-    #     server: "https://vault.example.com"
-    #     path: "secret"
-    #     auth:
-    #       kubernetes:
-    #         mountPath: "kubernetes"
-    #         role: "kafka"
-  push: []
-  # Push Strimzi user secrets to an external vault:
-  # push:
-  #   - sourceSecret: kates-backend
-  #     refreshInterval: 1h
-  #     data:
-  #       - secretKey: password
-  #         remoteKey: kafka/kates-backend
-  #         property: password
-  #       - secretKey: sasl.jaas.config
-  #         remoteKey: kafka/kates-backend
-  #         property: jaas
-  pull: []
-  # Pull credentials from vault into kafka namespace:
-  # pull:
-  #   - targetSecret: kafka-tiered-storage-credentials
-  #     refreshInterval: 1h
-  #     data:
-  #       - secretKey: AWS_ACCESS_KEY_ID
-  #         remoteKey: cloud/aws
-  #         property: access_key
-  #       - secretKey: AWS_SECRET_ACCESS_KEY
-  #         remoteKey: cloud/aws
-  #         property: secret_key
-  sync: []
-  # Sync Strimzi user secrets to other namespaces:
-  # sync:
-  #   - name: kates-backend-to-kates
-  #     sourceSecret: kates-backend
-  #     targetNamespace: kates
-  #     refreshInterval: 30s
-  #     secretStoreKind: ClusterSecretStore
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SeaweedFS — S3-compatible object store (replaces deprecated MinIO)
-# Shared backend for:
-#   - Kafka Tiered Storage / Remote Log Storage API  (Layer 1, continuous)
-#   - Velero BackupStorageLocation                   (Layer 2, daily CRD backup)
-# ─────────────────────────────────────────────────────────────────────────────
-# -- SeaweedFS object store (tiered storage + Velero backend) and its S3 credentials
-seaweedfs:
-  enabled: false   # set true in staging/prod overlays
-
-  # S3 credentials — shared by tiered storage RSM plugin and Velero.
-  # Written to the 'kafka-seaweedfs-credentials' Secret (see seaweedfs.yaml).
-  s3:
-    # -- Name of a pre-existing Secret carrying AWS_ACCESS_KEY_ID and
-    # AWS_SECRET_ACCESS_KEY. When set, the chart does not render its own
-    # credentials Secret (recommended for prod, e.g. via external-secrets).
+  # -- REQUIRED when enabled: a Kafka image with the RSM plugin
+  image: ""
+  remoteStorageManager:
+    # -- e.g. io.aiven.kafka.tieredstorage.RemoteStorageManager
+    className: ""
+    # -- e.g. /opt/kafka/plugins/tiered-storage/*
+    classPath: ""
+    # -- RSM settings; Strimzi prefixes them with rsm.config. The chart adds
+    # the SeaweedFS endpoint and region when those are empty and
+    # seaweedfs.enabled.
+    config: {}
+  credentials:
+    # -- Secret with the object-store credentials, exposed to the brokers as
+    # environment variables. Empty with seaweedfs.enabled: the SeaweedFS
+    # credentials Secret.
     existingSecret: ""
-    accessKeyId:     "kates-kafka"
-    # Placeholder only. Rendering fails if this placeholder is still set
-    # while filer.s3.enableAuth is true and no existingSecret is given.
-    secretAccessKey: "change-me-in-prod"
-    region:          "us-east-1"
+    accessKeyIdKey: AWS_ACCESS_KEY_ID
+    secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+  metadata:
+    replicationFactor: 3
+  # -- Add remote.storage.enable=true to every chart-managed topic
+  topicDefault: true
+  # -- How long offloaded segments also stay on local disk
+  localRetentionMs: 86400000
+  # -- Egress from the brokers to the object store (NetworkPolicy). Empty
+  # `to`: any destination on these ports.
+  egress:
+    to: []
+    ports: [80, 443, 8333]
 
-  # Bucket names — pre-created by the SeaweedFS filer S3 gateway on first use.
+# -- Velero Schedule and pre-upgrade Backup of this cluster's objects and,
+# depending on `volumes`, its volume data.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  ttl: 168h0m0s
+  # -- Namespace where Velero runs (its CRs must live there)
+  veleroNamespace: velero
+  storageLocation: default
+  volumeSnapshotLocations: []
+  # -- How volume data is protected: `fs-backup` (file-by-file, every
+  # volume), `snapshot` (CSI snapshots; crash-consistent), or `none`
+  # (objects only). With tiered storage active, broker volumes are excluded
+  # either way: their data lives in object storage.
+  #
+  # Empty means fs-backup, unless a 0.4 release's snapshotVolumes /
+  # defaultVolumesToFsBackup say otherwise — so a value set here always wins
+  # over the translated ones.
+  volumes: ""
+  # -- Also render the pre-upgrade one-shot Backup
+  preUpgrade: true
+  persistence:
+    enabled: false
+    size: 20Gi
+    storageClass: ""
+
+# -- SeaweedFS: an S3-compatible object store for tiered storage and Velero
+seaweedfs:
+  enabled: false
+  s3:
+    # -- Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. Recommended;
+    # without it the chart renders one from the two keys below.
+    existingSecret: ""
+    accessKeyId: "kates-kafka"
+    # -- Placeholder: refused with filer.s3.enableAuth or productionMode
+    secretAccessKey: "change-me-in-prod"
+    region: "us-east-1"
   buckets:
     tieredStorage: "kafka-tiered-storage"
-    velero:        "velero-backups"
-
-  # Pass-through to the seaweedfs subchart.
-  # Full schema: https://github.com/seaweedfs/seaweedfs/tree/master/k8s/charts/seaweedfs
+    velero: "velero-backups"
+  # Pass-through to the seaweedfs subchart. Its Service names come from
+  # `nameOverride` (default seaweedfs), not from this release, so only one
+  # release per namespace can enable it.
   master:
-    replicas: 1          # 3 for production HA
-
+    replicas: 1
   volume:
-    replicas: 1          # 3 for production HA
-    storage: 100Gi       # increase to 500Gi+ in prod
-
-  # Filer S3 gateway (published in the kafka-seaweedfs-config ConfigMap).
+    replicas: 1
+    storage: 100Gi
   filer:
     replicas: 1
     s3:
@@ -905,4 +517,152 @@ seaweedfs:
       port: 8333
       httpsPort: 0
       allowEmptyFolder: false
-      enableAuth: false    # enable in prod with TLS + external cert
+      enableAuth: false
+
+# ── Network ──────────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+  # -- Deny everything the policies below do not allow, for this cluster's
+  # pods. An empty selector derives app.kubernetes.io/part-of:
+  # strimzi-<clusterName>.
+  defaultDeny:
+    enabled: true
+    selector: {}
+  # -- DNS egress for this cluster's pods (same selector derivation). `to`
+  # pins the resolver: {namespaceSelector: {…}, podSelector: {…}}.
+  dns:
+    enabled: true
+    selector: {}
+    to: {}
+  # -- Kubernetes API egress (the rack-awareness init container and the
+  # entity operator need it)
+  apiServer:
+    ports: [443, 6443]
+    ipBlock: {}
+  monitoring:
+    # -- Namespace Prometheus scrapes from
+    namespace: monitoring
+  # -- Namespace of the Cluster Operator reconciling this cluster
+  operatorNamespace: strimzi-operator
+  # -- Who may reach the brokers. `listeners` are listener NAMES from
+  # kafka.listeners, and their ports are derived. An empty namespace means the
+  # release namespace. Pods labelled kates.io/test-pod=true in the release
+  # namespace (Helm tests, CLI clients) are always allowed.
+  clients: []
+  # - name: my-app
+  #   namespace: apps
+  #   podSelector: { app.kubernetes.io/name: my-app }
+  #   listeners: [tls]
+  # -- Extra rules for the broker policy
+  extraIngress: []
+  extraEgress: []
+
+# ── Observability ────────────────────────────────────────────────────────────
+metrics:
+  # -- Expose Kafka metrics (spec.kafka.metricsConfig)
+  enabled: true
+  # -- jmxPrometheusExporter (Strimzi's upstream rule set, vendored in
+  # files/metrics) or strimziMetricsReporter. Cruise Control always uses the
+  # exporter. Empty means jmxPrometheusExporter, unless a 0.4 release's
+  # kafka.metricsConfig.type says otherwise.
+  type: ""
+  # -- strimziMetricsReporter only: regexes of the metrics to expose
+  allowList: []
+
+monitoring:
+  podMonitor:
+    # -- PodMonitors for the brokers/controllers, Cruise Control, the
+    # Kafka Exporter and the entity operator
+    enabled: true
+    labels:
+      release: kafka
+    interval: ""
+    scrapeTimeout: ""
+
+alerts:
+  enabled: true
+  labels:
+    release: kafka
+    prometheus: kube-prometheus
+  # -- The rules read the JMX exporter's series names; with
+  # metrics.type=strimziMetricsReporter they would never fire, so the chart
+  # refuses that pairing unless this is set (after porting the rules).
+  allowReporterMetrics: false
+  # -- Base of every rule's runbook_url; the alert name is the anchor
+  runbookBaseUrl: "https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md"
+  thresholds:
+    # -- Consumer-group lag (messages) per group
+    consumerLagWarning: 1000000
+    consumerLagCritical: 10000000
+    # -- p99 request time (ms)
+    requestLatencyP99Ms: 1000
+    # -- Fraction of request-handler time idle
+    handlerIdleRatio: 0.3
+    # -- p99 log flush time (ms)
+    logFlushP99Ms: 500
+    # -- Fraction of volume capacity free
+    diskFreeWarning: 0.2
+    diskFreeCritical: 0.1
+    # -- KRaft leader elections (epoch changes) in 15 minutes
+    raftElectionsPer15m: 3
+    # -- Requests waiting in a broker's request queue
+    requestQueueSize: 100
+    # -- Milliseconds a broker's metadata may trail the controller
+    metadataLagMs: 60000
+  # -- An availability SLO over produce and fetch requests: recording rules
+  # for the error ratio and a multi-window burn-rate alert.
+  slo:
+    enabled: false
+    # -- Ratio of requests that must succeed over 30 days
+    target: 0.999
+    # -- Burn rate that pages (14.4 spends 2% of a 30-day budget in an hour)
+    burnRate: 14.4
+
+# -- Kafka dashboards come from the strimzi-operator chart (the operator's
+# own boards, which read the series files/metrics produces). Setting
+# enabled here prints where to turn them on.
+dashboards:
+  enabled: false
+
+# ── Policy and access ────────────────────────────────────────────────────────
+# -- Kyverno ClusterPolicy restricting pods in this namespace (needs Kyverno)
+kyvernoPolicy:
+  enabled: false
+  # -- Audit or Enforce
+  action: Audit
+  mutate: false
+  # -- Leave Strimzi-managed pods out of mutation and capability checks
+  excludeStrimziPods: true
+  policyExceptions:
+    enabled: false
+    namespaces: []
+    exemptRules: []
+
+# -- A read-only Role for this cluster's resources and a ServiceAccount bound
+# to it (the Helm tests use it)
+rbac:
+  create: true
+  extraRules: []
+
+serviceAccount:
+  annotations: {}
+
+# -- Helm tests (`helm test`)
+tests:
+  # -- A KafkaUser the produce/consume tests authenticate as, limited to
+  # helm-test-* topics and groups. Off: the tests use the first managed user.
+  user:
+    create: true
+
+# -- external-secrets SecretStore/PushSecret/ExternalSecret wiring
+externalSecrets:
+  enabled: false
+  secretStore:
+    create: false
+    provider: {}
+  # -- PushSecrets: [{sourceSecret, refreshInterval, data: [{secretKey, remoteKey, property}]}]
+  push: []
+  # -- ExternalSecrets: [{targetSecret, refreshInterval, data: [...]}]
+  pull: []
+  # -- Cross-namespace copies: [{name, sourceSecret, targetNamespace, refreshInterval, secretStoreKind}]
+  sync: []

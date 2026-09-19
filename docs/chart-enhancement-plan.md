@@ -2,6 +2,8 @@
 
 Audit date: 2026-07-21. Scope: all first-party charts under `charts/` (vendored `apicurio-registry` tree excluded).
 
+> **Status note — 2026-09-19.** This is the July audit, and the chart refactor has since overtaken the versions it records. The charts now read: kates 0.7.0, kafka-cluster **1.0.0**, connect-cluster **2.0.0**, mirror-maker2 **0.8.0**, strimzi-operator **0.3.0**, kates-monitoring 1.2.0, kates-platform 0.7.0, kates-chaos 2.0.0 — plus a new library chart, **kafka-common 0.1.0**, that kafka-cluster, connect-cluster and mirror-maker2 all depend on, so each of those three needs `helm dependency build` before it renders from a checkout. Read the "Current state" table and the Week 1/3 version list below as a July snapshot, not as today's. Current reference: the charts' own READMEs, [docs/kafka-cluster-1.0-upgrade.md](kafka-cluster-1.0-upgrade.md) and [docs/connect-cluster-2.0-upgrade.md](connect-cluster-2.0-upgrade.md).
+
 The five core charts (`kates`, `kafka-cluster`, `connect-cluster`, `kates-chaos`, `strimzi-operator`) are mature — full label helpers, probes, securityContexts, PDBs, NetworkPolicies, schemas, tests, READMEs. The real gaps are **release engineering (CI gating + publishing)**, a handful of **concrete bugs**, and **inconsistent hygiene in the second-tier charts**.
 
 ## Current state

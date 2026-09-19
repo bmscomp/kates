@@ -8,3 +8,5 @@
 .idea/
 *.tmproj
 .vscode/
+# The chart's unit tests (helm-unittest); templates/tests stays in the package.
+/tests/

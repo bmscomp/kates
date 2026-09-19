@@ -1,0 +1,116 @@
+# Metric contract for charts/connect-cluster.
+#
+# Read by scripts/check-metric-contract.sh; the format is described in
+# mirror-maker2.yaml. The catalogue is a Kafka Connect worker per Kafka's
+# documented metric groups (kafka.apache.org/documentation/#connect_monitoring)
+# running one source and one sink connector. A connector name made only of
+# [A-Za-z0-9._%-] is NOT quoted in its ObjectName (`orders-cdc` is written
+# bare); one with any other character is (`"a->b"`), so both shapes are here.
+
+chart: charts/connect-cluster
+
+set:
+  - alerts.enabled=true
+  - alerts.sourceIdle.enabled=true
+  - alerts.slo.enabled=true
+  - dashboards.enabled=true
+  - monitoring.podMonitor.enabled=true
+
+# The sink lag alert renders only for sink connectors the release declares.
+renders:
+  - name: base
+    set:
+      - connectors.s.class=com.example.SomeSinkConnector
+      - connectors.s.config.topics=t
+  - name: prod
+    values: [values-prod.yaml]
+
+builtin:
+  - "^jvm_"
+  - "^process_"
+  - "^jmx_"
+  - "^up$"
+  - "^scrape_"
+
+external:
+  - pattern: "^kafka_consumergroup_"          # kafka-exporter on the Kafka cluster
+  - pattern: "^kube_"                         # kube-state-metrics
+  - pattern: "^container_"                    # cAdvisor
+
+alternatives:
+  - [jvm_memory_used_bytes, jvm_memory_bytes_used]
+  - [jvm_memory_max_bytes, jvm_memory_bytes_max]
+
+# No known-dead references: the C5 fixes (COUNTER rules for `*-total`,
+# captures that stop at the bean's end) landed in connect-cluster 1.3.4.
+known_missing: {}
+
+# Not expected in the live capture the metrics-live job in ci-kafka-charts.yml
+# takes (the references are still checked against the rules, as everything
+# else is). Every sink connector in the Connect image needs a database or an
+# object store, so the live cluster runs source connectors only.
+live:
+  absentOk:
+    - pattern: "^kafka_connect_sink_task_metrics_"
+
+mbeans:
+  # ── Worker ────────────────────────────────────────────────────────────────
+  - bean: "kafka.connect<type=connect-worker-metrics>"
+    attributes: [connector-count, connector-startup-attempts-total, connector-startup-failure-percentage,
+                 connector-startup-failure-total, connector-startup-success-percentage,
+                 connector-startup-success-total, task-count, task-startup-attempts-total,
+                 task-startup-failure-percentage, task-startup-failure-total,
+                 task-startup-success-percentage, task-startup-success-total]
+  - bean: "kafka.connect<type=connect-worker-metrics, connector=orders-cdc>"
+    attributes: &workerConnector
+      [connector-destroyed-task-count, connector-failed-task-count, connector-paused-task-count,
+       connector-restarting-task-count, connector-running-task-count, connector-total-task-count,
+       connector-unassigned-task-count]
+  - bean: "kafka.connect<type=connect-worker-metrics, connector=\"east->west\">"
+    attributes: *workerConnector
+  - bean: "kafka.connect<type=connect-worker-rebalance-metrics>"
+    attributes: [completed-rebalances-total, epoch, rebalance-avg-time-ms, rebalance-max-time-ms,
+                 rebalancing, time-since-last-rebalance-ms]
+    strings: [connect-protocol, leader-name]
+  - bean: "kafka.connect<type=connect-coordinator-metrics, client-id=connect-1>"
+    attributes: [assigned-connectors, assigned-tasks, heartbeat-rate, join-rate, sync-rate]
+  - bean: "kafka.connect<type=connect-metrics, client-id=connect-1>"
+    attributes: [connection-count, connection-creation-rate, connection-creation-total, incoming-byte-rate,
+                 incoming-byte-total, outgoing-byte-rate, outgoing-byte-total, request-rate, request-total,
+                 response-rate, response-total]
+
+  # ── Connector and task ────────────────────────────────────────────────────
+  - bean: "kafka.connect<type=connector-metrics, connector=orders-cdc>"
+    strings: [connector-class, connector-type, connector-version, status]
+  - bean: "kafka.connect<type=connector-task-metrics, connector=orders-cdc, task=0>"
+    attributes: [batch-size-avg, batch-size-max, offset-commit-avg-time-ms, offset-commit-max-time-ms,
+                 offset-commit-failure-percentage, offset-commit-success-percentage, pause-ratio, running-ratio]
+    strings: [status]
+  - bean: "kafka.connect<type=source-task-metrics, connector=orders-cdc, task=0>"
+    attributes: [poll-batch-avg-time-ms, poll-batch-max-time-ms, source-record-active-count,
+                 source-record-active-count-avg, source-record-active-count-max, source-record-poll-rate,
+                 source-record-poll-total, source-record-write-rate, source-record-write-total]
+    optional: [transaction-size-avg, transaction-size-max, transaction-size-min]
+  - bean: "kafka.connect<type=sink-task-metrics, connector=orders-sink, task=0>"
+    attributes: [offset-commit-completion-rate, offset-commit-completion-total, offset-commit-seq-no,
+                 offset-commit-skip-rate, offset-commit-skip-total, partition-count, put-batch-avg-time-ms,
+                 put-batch-max-time-ms, sink-record-active-count, sink-record-active-count-avg,
+                 sink-record-active-count-max, sink-record-lag-max, sink-record-read-rate,
+                 sink-record-read-total, sink-record-send-rate, sink-record-send-total]
+  - bean: "kafka.connect<type=task-error-metrics, connector=orders-sink, task=0>"
+    attributes: [deadletterqueue-produce-failures, deadletterqueue-produce-requests, last-error-timestamp,
+                 total-errors-logged, total-record-errors, total-record-failures, total-records-skipped,
+                 total-retries]
+
+  # ── Clients under the tasks ───────────────────────────────────────────────
+  - bean: "kafka.producer<type=producer-metrics, client-id=connector-producer-orders-cdc-0>"
+    attributes: [record-error-rate, record-error-total, record-retry-rate, record-retry-total, record-send-rate,
+                 record-send-total, request-latency-avg, request-latency-max, outgoing-byte-rate,
+                 outgoing-byte-total, connection-count, buffer-available-bytes, buffer-total-bytes]
+  - bean: "kafka.consumer<type=consumer-metrics, client-id=connector-consumer-orders-sink-0>"
+    attributes: [connection-count, incoming-byte-rate, incoming-byte-total, request-rate, request-total]
+  - bean: "kafka.consumer<type=consumer-fetch-manager-metrics, client-id=connector-consumer-orders-sink-0>"
+    attributes: [bytes-consumed-rate, bytes-consumed-total, fetch-rate, fetch-total, records-consumed-rate,
+                 records-consumed-total, records-lag-max]
+  - bean: "kafka.consumer<type=consumer-coordinator-metrics, client-id=connector-consumer-orders-sink-0>"
+    attributes: [commit-rate, commit-total, commit-latency-avg, rebalance-total, failed-rebalance-total]

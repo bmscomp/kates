@@ -1,12 +1,12 @@
-# Kind cluster overlay — layers on top of values-detected.yaml
-# Usage: helm upgrade --install ... -f .build/values-detected.yaml -f values-kind.yaml
+# Kind overlay — layered over the detected values (.build/values-detected.yaml
+# from `kates detect`) or values-dev.yaml.
 #
-# This file contains ONLY environment-specific feature flags.
-# Pool definitions, storage classes, and resource sizes are generated
-# by `kates detect` and written to .build/values-detected.yaml — no
-# hardcoding needed here.
+# Environment flags only: node pools, storage classes and sizes come from the
+# layer below. The Strimzi CRDs, the drain cleaner and the dashboards are the
+# strimzi-operator chart's.
 
-# Simplify Kafka listeners for local access — no external nodeport
+# Internal listeners only: no NodePort on a laptop, whatever the layer below
+# declares.
 kafka:
   metadataVersion: 4.2-IV1
   listeners:
@@ -22,15 +22,16 @@ kafka:
       tls: true
       authentication:
         type: tls
+  externalAccess:
+    type: none
 
-# Disable production features not needed locally
 kafkaExporter:
   enabled: false
 
 cruiseControl:
   enabled: false
 
-networkPolicies:
+networkPolicy:
   enabled: false
 
 tieredStorage:
@@ -39,33 +40,23 @@ tieredStorage:
 backup:
   enabled: false
 
-drainCleaner:
-  enabled: false
-
 alerts:
   enabled: false
 
-podMonitors:
-  enabled: false
-
-dashboards:
-  enabled: false
+monitoring:
+  podMonitor:
+    enabled: false
 
 rebalance:
   enabled: false
 
-podSecurityPolicy:
-  enabled: false
-
-# Disable CRD upgrade hook — Strimzi operator chart handles this
-crdUpgrade:
+kyvernoPolicy:
   enabled: false
 
 # ── Entity Operator — Kind tuning ────────────────────────────────────────────
-# On Kind all Kafka pods compete for the same node resources.
-# Smaller requests get the EO scheduled faster; 10s reconciliation interval
-# means KafkaTopic/KafkaUser resources are acted on almost immediately
-# instead of waiting up to 60 s (production default).
+# All Kafka pods compete for the same nodes: smaller requests schedule the
+# entity operator sooner, and a 10 s reconciliation acts on KafkaTopic and
+# KafkaUser changes almost at once (the production default is 60 s).
 entityOperator:
   topicOperator:
     reconciliationIntervalMs: 10000

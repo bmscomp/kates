@@ -1,75 +1,89 @@
-# Production overrides — full HA, tiered storage, backup, multi-replica pools
-brokerPools:
-  - name: brokers-az1
-    zone: ""
-    replicas: 3
-    storageSize: 200Gi
-    storageClass: ""
-  - name: brokers-az2
-    zone: ""
-    replicas: 3
-    storageSize: 200Gi
-    storageClass: ""
-  - name: brokers-az3
-    zone: ""
-    replicas: 3
-    storageSize: 200Gi
-    storageClass: ""
+# Production — full HA: three controllers, three zones of three brokers,
+# production rails, Velero backup of every volume, SeaweedFS as its object
+# store, a TLS external listener.
+#
+# TIERED STORAGE IS OFF until an image with a remote storage manager plugin
+# exists (this repository does not build one yet, and Strimzi's image has
+# none). Until then the backup protects broker volumes too (backup.volumes:
+# fs-backup). To turn it on:
+#
+#   tieredStorage:
+#     enabled: true
+#     image: <registry>/kafka-tiered:<strimzi>-kafka-<version>
+#     remoteStorageManager:
+#       className: io.aiven.kafka.tieredstorage.RemoteStorageManager
+#       classPath: /opt/kafka/plugins/tiered-storage/*
+#       config:
+#         storage.backend.class: io.aiven.kafka.tieredstorage.storage.s3.S3Storage
+#         chunk.size: "4194304"
+#
+# The SeaweedFS endpoint, bucket, region and credentials are filled in by the
+# chart; broker-only pools then drop out of the volume backup.
 
-brokerDefaults:
-  jvmOptions:
-    -Xms: 4096m
-    -Xmx: 4096m
-  resources:
-    requests:
-      memory: 8Gi
-      cpu: 2000m
-    limits:
-      memory: 8Gi
-      cpu: 4000m
+productionMode: true
 
-# Controller pools — override with kates detect --generate-values for zone-specific config
-controllerPools:
-  - name: controllers
-    zone: ""
-    replicas: 3
-    storageSize: 20Gi
-    storageClass: ""
+# Clears the 0.4-shaped pools a lower layer (kates detect) may carry.
+controllerPools: []
+brokerPools: []
 
-controllerDefaults:
-  resources:
-    requests:
-      memory: 2Gi
-      cpu: 1000m
-    limits:
-      memory: 2Gi
-      cpu: 2000m
+nodePools:
+  roleDefaults:
+    controller:
+      storage:
+        volumes:
+          - id: 0
+            size: 20Gi
+      resources:
+        requests: { memory: 2Gi, cpu: 1000m }
+        limits: { memory: 2Gi, cpu: 2000m }
+    broker:
+      storage:
+        volumes:
+          - id: 0
+            size: 200Gi
+      jvmOptions:
+        -Xms: 4096m
+        -Xmx: 4096m
+      resources:
+        requests: { memory: 8Gi, cpu: 2000m }
+        limits: { memory: 8Gi, cpu: 4000m }
+  # `kates detect --generate-values` writes zone-pinned pools for the real
+  # topology; these spread by topology only.
+  pools:
+    - name: controllers
+      roles: [controller]
+    - name: brokers-az1
+      roles: [broker]
+    - name: brokers-az2
+      roles: [broker]
+    - name: brokers-az3
+      roles: [broker]
+
+kafka:
+  # Producers stop before a volume is full: a full log directory goes offline.
+  quotas:
+    type: strimzi
+    minAvailableRatioPerVolume: 0.1
+  externalAccess:
+    type: nodeport
+    tls: true
 
 tieredStorage:
-  enabled: true
-  credentials:
-    existingSecret: "kafka-seaweedfs-credentials"
-  s3:
-    endpointUrl: "http://kafka-cluster-seaweedfs-filer.kafka.svc:8333"
+  enabled: false
 
 backup:
   enabled: true
   schedule: "0 2 * * *"
   ttl: 336h0m0s          # 14 days
-  snapshotVolumes: false  # broker data lives in SeaweedFS via tiered storage
-  defaultVolumesToFsBackup: false
-  storageLocation: seaweedfs  # Velero BackupStorageLocation pointing to SeaweedFS
+  volumes: fs-backup     # broker volumes included while tiered storage is off
+  storageLocation: seaweedfs
 
 seaweedfs:
   enabled: true
   s3:
-    # Credentials come from a pre-provisioned Secret (e.g. synced by
-    # external-secrets — see externalSecrets below). The chart renders no
-    # credentials Secret of its own when existingSecret is set.
+    # Provisioned outside the chart (e.g. by external-secrets); the chart
+    # renders no credentials Secret of its own.
     existingSecret: "kafka-seaweedfs-credentials"
-  buckets:
-    tieredStorage: "kafka-tiered-storage"
-    velero:        "velero-backups"
   master:
     replicas: 3
   volume:
@@ -79,46 +93,11 @@ seaweedfs:
     replicas: 2
     s3:
       enabled: true
-      enableAuth: true   # enforce auth in production
+      enableAuth: true
 
-drainCleaner:
+networkPolicy:
   enabled: true
 
-networkPolicies:
-  enabled: true
-
-podSecurityPolicy:
+kyvernoPolicy:
   enabled: true
   action: Enforce
-
-kafkaConnect:
-  enabled: true
-  replicas: 3
-  resources:
-    requests:
-      memory: 1Gi
-      cpu: 500m
-    limits:
-      memory: 2Gi
-      cpu: 2000m
-  podDisruptionBudget:
-    maxUnavailable: 1
-  topologySpreadConstraints:
-    enabled: true
-    maxSkew: 1
-    topologyKey: topology.kubernetes.io/zone
-    whenUnsatisfiable: DoNotSchedule
-  podAntiAffinity:
-    enabled: true
-    topologyKey: kubernetes.io/hostname
-  schemaRegistry:
-    enabled: true
-  databaseEgress:
-    - namespace: database
-      port: 5432
-      podSelector:
-        app.kubernetes.io/name: postgresql
-  externalConfiguration:
-    volumes:
-      - name: pg-credentials
-        secretName: connect-pg-credentials

@@ -133,7 +133,9 @@ fi
 # ── Step 3: Dependencies ─────────────────────────────────────────────────────
 echo ""
 info "Step 3/6: Building Helm chart dependencies..."
-helm dependency build "${CHART_DIR}" 2>/dev/null || true
+# `update` when `build` refuses: a Chart.lock from kafka-cluster 0.4 does not
+# list the kafka-common library 1.0 depends on.
+helm dependency build "${CHART_DIR}" >/dev/null 2>&1 || helm dependency update "${CHART_DIR}"
 
 # Extract cluster domain from the Kubernetes environment
 CLUSTER_DOMAIN=$(get_cluster_domain "$AUTO_APPROVE")
@@ -189,8 +191,10 @@ for kind in kafkatopics kafkausers; do
     done
 done
 
-# Build values chain
-VALUES_ARGS=(-f "${DETECTED_VALUES}")
+# Build values chain. values-platform.yaml selects the kates platform profile
+# (its topics, users and client NetworkPolicy grants); it goes right after the
+# detected values so the overlays can still change any of it.
+VALUES_ARGS=(-f "${DETECTED_VALUES}" -f "${CHART_DIR}/values-platform.yaml")
 [ -n "${AUTO_OVERLAY}" ] && VALUES_ARGS+=(-f "${AUTO_OVERLAY}")
 [ -n "${EXTRA_VALUES}" ] && VALUES_ARGS+=(-f "${EXTRA_VALUES}")
 

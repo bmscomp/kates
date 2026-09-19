@@ -1,0 +1,338 @@
+{{- /*
+Strimzi Drain Cleaner: a validating webhook on pod evictions. When a node is
+drained, it denies the eviction of a Kafka pod and annotates the pod instead,
+and the Cluster Operator rolls it the safe way (one at a time, in-sync
+replicas kept). One webhook serves every cluster the operator manages, which
+is why it lives in this chart since 0.3 (kafka-cluster 0.4 rendered it per
+Kafka cluster, with fixed cluster-scoped names).
+
+The API server calls it over HTTPS and must trust its certificate. Without a
+certificate and a CA, every call fails and `failurePolicy: Ignore` lets every
+eviction through: drain protection off, silently. So one of these is required:
+  drainCleaner.tls.certManager.enabled   cert-manager issues and injects it
+  drainCleaner.tls.secretName + caBundle  bring your own
+*/ -}}
+{{- $dc := .Values.drainCleaner | default dict -}}
+{{- if $dc.enabled }}
+{{- $ns := .Release.Namespace -}}
+{{- $name := "strimzi-drain-cleaner" -}}
+{{- $owner := include "strimzi-operator.ownedElsewhere" (dict "ctx" . "apiVersion" "admissionregistration.k8s.io/v1" "kind" "ValidatingWebhookConfiguration" "name" $name) -}}
+{{- if not $owner }}
+{{- $tls := $dc.tls | default dict -}}
+{{- $cm := $tls.certManager | default dict -}}
+{{- $secretName := $tls.secretName | default (ternary (printf "%s-tls" $name) "" (and $cm.enabled true)) -}}
+{{- $injects := hasKey ($dc.webhookAnnotations | default dict) "cert-manager.io/inject-ca-from" -}}
+{{- if not $secretName -}}
+{{- fail "strimzi-operator: drainCleaner.enabled needs a serving certificate — set drainCleaner.tls.certManager.enabled=true (cert-manager issues and injects it), or drainCleaner.tls.secretName plus drainCleaner.tls.caBundle. Without one the webhook cannot be called and, with failurePolicy Ignore, every eviction goes through unprotected." -}}
+{{- end -}}
+{{- if and (not $cm.enabled) (not $tls.caBundle) (not $injects) -}}
+{{- fail "strimzi-operator: drainCleaner.tls.secretName is set but the API server has no CA to verify it with — set drainCleaner.tls.caBundle, a cert-manager.io/inject-ca-from entry in drainCleaner.webhookAnnotations, or drainCleaner.tls.certManager.enabled=true." -}}
+{{- end -}}
+{{- if lt (int ($dc.replicas | default 1)) 2 -}}
+{{- if .Values.productionMode -}}
+{{- fail "strimzi-operator: drainCleaner.replicas must be 2 or more in production: while a single webhook pod restarts, failurePolicy Ignore lets every eviction through." -}}
+{{- end -}}
+{{- end -}}
+{{- if or (hasSuffix ":latest" ($dc.image | default "")) (not (contains ":" (($dc.image | default "") | splitList "/" | last))) -}}
+{{- fail (printf "strimzi-operator: drainCleaner.image is %q, a floating tag. Pin a version (or a digest)." ($dc.image | default "")) -}}
+{{- end -}}
+{{- $labels := include "strimzi-operator.componentLabels" (dict "ctx" . "component" "drain-cleaner") | fromYaml -}}
+{{- $_ := set $labels "app" $name -}}
+{{- $scope := include "strimzi-operator.watchScope" . -}}
+{{- if $cm.enabled }}
+{{- if not $cm.issuerRef }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $name }}-selfsigned
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  secretName: {{ $secretName }}
+  commonName: {{ $name }}
+  dnsNames:
+    - {{ $name }}
+    - {{ $name }}.{{ $ns }}
+    - {{ $name }}.{{ $ns }}.svc
+    - {{ $name }}.{{ $ns }}.svc.{{ (index .Values "strimzi-kafka-operator").kubernetesServiceDnsDomain | default "cluster.local" }}
+  duration: {{ $cm.duration | default "8760h" }}
+  renewBefore: {{ $cm.renewBefore | default "720h" }}
+  issuerRef:
+    {{- if $cm.issuerRef }}
+    {{- toYaml $cm.issuerRef | nindent 4 }}
+    {{- else }}
+    name: {{ $name }}-selfsigned
+    kind: Issuer
+    {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+rules:
+  # Reads the pod an eviction is for, and annotates it
+  # (strimzi.io/manual-rolling-update) for the operator to roll.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $ns }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  replicas: {{ int ($dc.replicas | default 1) }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with $dc.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with $dc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $dc.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        {{- if $dc.affinity }}
+        {{- toYaml $dc.affinity | nindent 8 }}
+        {{- else }}
+        # Two webhook pods on one node would be drained together.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: {{ $name }}
+                topologyKey: kubernetes.io/hostname
+        {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: drain-cleaner
+          image: {{ $dc.image }}
+          {{- with $dc.imagePullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: STRIMZI_DRAIN_KAFKA
+              value: "true"
+            # Deny the eviction and let the operator roll the pod, rather
+            # than let the eviction proceed.
+            - name: STRIMZI_DENY_EVICTION
+              value: {{ ne (toString $dc.denyEviction) "false" | toString | quote }}
+            {{- with $dc.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml ($dc.resources | default dict) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: webhook-certificates
+              mountPath: /etc/webhook-certificates
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: webhook-certificates
+          secret:
+            secretName: {{ $secretName }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  ports:
+    - port: 443
+      targetPort: 8443
+      protocol: TCP
+      name: https
+  selector:
+    app: {{ $name }}
+{{- $pdb := ($dc.podDisruptionBudget).enabled -}}
+{{- if or (eq (toString $pdb) "true") (and (kindIs "invalid" $pdb) (gt (int ($dc.replicas | default 1)) 1)) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  minAvailable: {{ (($dc.podDisruptionBudget).minAvailable) | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+{{- end }}
+{{- if ne (toString (($dc.networkPolicy).enabled)) "false" }}
+---
+{{- /* The API server calls in on 8443; the webhook calls the API server. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8443
+          protocol: TCP
+    - ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  {{- $ann := deepCopy ($dc.webhookAnnotations | default dict) }}
+  {{- if $cm.enabled }}
+  {{- $_ := set $ann "cert-manager.io/inject-ca-from" (printf "%s/%s" $ns $name) }}
+  {{- end }}
+  {{- with $ann }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+webhooks:
+  - name: strimzi-drain-cleaner.strimzi.io
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods/eviction"]
+        scope: Namespaced
+    clientConfig:
+      {{- with $tls.caBundle }}
+      caBundle: {{ . }}
+      {{- end }}
+      service:
+        name: {{ $name }}
+        namespace: {{ $ns }}
+        path: /drainer
+        port: 443
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 5
+    failurePolicy: Ignore
+    {{- /*
+      The namespaces whose evictions are intercepted: the operator's watch
+      scope, unless drainCleaner.namespaces narrows it. The webhook lets
+      evictions of pods Strimzi does not manage through; the selector only
+      saves calls.
+    */}}
+    {{- $nsList := $dc.namespaces | default (ternary list (splitList "," $scope) (eq $scope "*")) }}
+    {{- if $nsList }}
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            {{- toYaml $nsList | nindent 12 }}
+    {{- end }}
+{{- end }}
+{{- end }}

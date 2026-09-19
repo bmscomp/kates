@@ -1,4 +1,27 @@
-{{- include "kafka-cluster.validateVersions" . -}}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $v := .Values -}}
+{{- $ts := $v.tieredStorage -}}
+{{- $cc := include "kafka-common.enabled" (list $v.cruiseControl.enabled true) -}}
+{{- $rebalance := and $cc (include "kafka-common.enabled" (list $v.rebalance.enabled true)) -}}
+
+{{- /* spec.kafka.template: the chart's defaults, then kafka.template. */ -}}
+{{- $ktpl := dict "kafkaContainer" (dict "securityContext" (include "kafka-cluster.containerSecurityContext" . | fromYaml)) -}}
+{{- include "kafka-cluster.merge" (dict "dst" $ktpl "src" ($v.kafka.template | default dict)) -}}
+
+{{- /* Tiered storage: the RSM config, with the SeaweedFS endpoint filled in. */ -}}
+{{- $rsmConfig := dict -}}
+{{- if $r.tiered -}}
+{{- if $v.seaweedfs.enabled -}}
+{{- $rsmConfig = dict
+      "storage.s3.endpoint.url" (include "kafka-cluster.objectStoreEndpoint" .)
+      "storage.s3.bucket.name" ($v.seaweedfs.buckets.tieredStorage | default "kafka-tiered-storage")
+      "storage.s3.region" ($v.seaweedfs.s3.region | default "us-east-1")
+      "storage.s3.path.style.access.enabled" "true" -}}
+{{- end -}}
+{{- include "kafka-cluster.merge" (dict "dst" $rsmConfig "src" $r.legacyRsmConfig) -}}
+{{- include "kafka-cluster.merge" (dict "dst" $rsmConfig "src" ((($ts.remoteStorageManager).config) | default dict)) -}}
+{{- end -}}
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
@@ -7,74 +30,138 @@ metadata:
   labels:
     {{- include "kafka-cluster.labels" . | nindent 4 }}
   annotations:
-    strimzi.io/node-pools: enabled
-    strimzi.io/kraft: enabled
+    # Deleting the Kafka CR deletes the cluster.
     helm.sh/resource-policy: keep
 spec:
   kafka:
-    version: {{ .Values.kafkaVersion | quote }}
-    {{- if .Values.kafka.metadataVersion }}
-    metadataVersion: {{ .Values.kafka.metadataVersion | quote }}
+    version: {{ $v.kafkaVersion | quote }}
+    {{- with $v.kafka.metadataVersion }}
+    metadataVersion: {{ . | quote }}
+    {{- end }}
+    {{- if $r.tiered }}
+    image: {{ $ts.image }}
+    {{- else if $v.kafka.image }}
+    image: {{ $v.kafka.image }}
     {{- end }}
     listeners:
-      {{- toYaml .Values.kafka.listeners | nindent 6 }}
+      {{- toYaml $r.listeners | nindent 6 }}
+    {{- with $v.kafka.authorization }}
     authorization:
-      {{- toYaml .Values.kafka.authorization | nindent 6 }}
-    {{- /*
-      kafka.config, minus the share-group keys below Kafka 4.2.0 — see
-      kafka-cluster.kafkaConfig in _helpers.tpl and Chart.yaml's kafka-floor.
-    */}}
+      {{- $authz := omit . "superUsers" }}
+      {{- if $r.superUsers }}{{- $_ := set $authz "superUsers" $r.superUsers }}{{- end }}
+      {{- toYaml $authz | nindent 6 }}
+    {{- end }}
     config:
-      {{- include "kafka-cluster.kafkaConfig" . | trim | nindent 6 }}
+      {{- include "kafka-cluster.kafkaConfig" (dict "ctx" . "r" $r) | trim | nindent 6 }}
+    {{- with $v.kafka.quotas }}
+    quotas:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if $r.tiered }}
+    tieredStorage:
+      type: custom
+      remoteStorageManager:
+        className: {{ $ts.remoteStorageManager.className }}
+        classPath: {{ $ts.remoteStorageManager.classPath | quote }}
+        {{- with $rsmConfig }}
+        config:
+          {{- range $k, $val := . }}
+          {{ $k }}: {{ include "kafka-cluster.scalar" $val | quote }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+    {{- if $r.metrics.enabled }}
     metricsConfig:
-      type: {{ .Values.kafka.metricsConfig.type }}
+      {{- if eq $r.metrics.type "strimziMetricsReporter" }}
+      type: strimziMetricsReporter
+      {{- with $r.metrics.allowList }}
+      values:
+        allowList:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- else }}
+      type: jmxPrometheusExporter
       valueFrom:
         configMapKeyRef:
-          name: kafka-metrics
+          name: {{ include "kafka-cluster.metricsConfigMap" . }}
           key: kafka-metrics-config.yml
-    {{- with .Values.kafka.rack }}
+      {{- end }}
+    {{- end }}
+    {{- with $v.kafka.rack }}
     rack:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- range $key := (list "logging" "jmxOptions" "livenessProbe" "readinessProbe") }}
+    {{- with (index $v.kafka $key) }}
+    {{ $key }}:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- end }}
     template:
-      podDisruptionBudget:
-        {{- toYaml .Values.kafka.template.podDisruptionBudget | nindent 8 }}
-      {{- if .Values.lifecycle }}
-      pod:
-        terminationGracePeriodSeconds: {{ add (default 15 .Values.lifecycle.preStopSleepSeconds) 30 }}
-      {{- end }}
-      kafkaContainer:
-        securityContext:
-          {{- include "kafka-cluster.containerSecurityContext" . | nindent 10 }}
+      {{- toYaml $ktpl | nindent 6 }}
+  {{- with $v.kafka.clusterCa }}
   clusterCa:
-    {{- toYaml .Values.kafka.clusterCa | nindent 4 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $v.kafka.clientsCa }}
   clientsCa:
-    {{- toYaml .Values.kafka.clientsCa | nindent 4 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $v.maintenanceTimeWindows }}
+  maintenanceTimeWindows:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   entityOperator:
     topicOperator:
-      {{- toYaml .Values.entityOperator.topicOperator | nindent 6 }}
+      {{- toYaml ($v.entityOperator.topicOperator | default dict) | nindent 6 }}
     userOperator:
-      {{- toYaml .Values.entityOperator.userOperator | nindent 6 }}
-  {{- if .Values.kafkaExporter.enabled }}
+      {{- toYaml ($v.entityOperator.userOperator | default dict) | nindent 6 }}
+    {{- with $v.entityOperator.template }}
+    template:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- if include "kafka-common.enabled" (list $v.kafkaExporter.enabled true) }}
   kafkaExporter:
-    topicRegex: {{ .Values.kafkaExporter.topicRegex | quote }}
-    groupRegex: {{ .Values.kafkaExporter.groupRegex | quote }}
-    resources:
-      {{- toYaml .Values.kafkaExporter.resources | nindent 6 }}
+    {{- $ke := omit $v.kafkaExporter "enabled" }}
+    {{- range $k, $val := $ke }}{{- if not $val }}{{- $_ := unset $ke $k }}{{- end }}{{- end }}
+    {{- toYaml $ke | nindent 4 }}
   {{- end }}
-  {{- if .Values.cruiseControl.enabled }}
+  {{- if $cc }}
   cruiseControl:
+    {{- with $v.cruiseControl.brokerCapacity }}
     brokerCapacity:
-      {{- toYaml .Values.cruiseControl.brokerCapacity | nindent 6 }}
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $v.cruiseControl.autoRebalance }}
     autoRebalance:
-      {{- toYaml .Values.cruiseControl.autoRebalance | nindent 6 }}
-    config: {{ .Values.cruiseControl.config | toYaml | nindent 6 }}
-    resources:
-      {{- toYaml .Values.cruiseControl.resources | nindent 6 }}
+      {{- range . }}
+      - mode: {{ .mode }}
+        {{- if (.template).name }}
+        template:
+          name: {{ .template.name }}
+        {{- else if $rebalance }}
+        template:
+          name: {{ include "kafka-cluster.resourceName" (list $ (printf "%s-template" .mode) "") }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- with $v.cruiseControl.config }}
+    config:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- range $key := (list "resources" "apiUsers" "template" "image" "jvmOptions" "logging" "livenessProbe" "readinessProbe") }}
+    {{- with (index $v.cruiseControl $key) }}
+    {{ $key }}:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- end }}
+    {{- if $r.metrics.enabled }}
+    {{- /* Cruise Control keeps the JMX exporter and its own rule set. */}}
     metricsConfig:
-      type: {{ .Values.kafka.metricsConfig.type }}
+      type: jmxPrometheusExporter
       valueFrom:
         configMapKeyRef:
-          name: kafka-metrics
-          key: kafka-metrics-config.yml
+          name: {{ include "kafka-cluster.ccMetricsConfigMap" . }}
+          key: metrics-config.yml
+    {{- end }}
   {{- end }}

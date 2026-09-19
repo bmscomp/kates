@@ -10,7 +10,7 @@ is to be the cluster a MirrorMaker 2 migration replicates *from*.
 
 ## Why it exists
 
-Strimzi 1.1.0 runs Kafka 4.x and validates `spec.version` against its supported
+Strimzi 1.2.0 runs Kafka 4.x and validates `spec.version` against its supported
 set. A Kafka 2.x or 3.x cluster therefore **cannot** be expressed as a `Kafka`
 CR in this repo at all — which means the source side of a cross-version
 migration test has nowhere to come from. This chart is that missing half.

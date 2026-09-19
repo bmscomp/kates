@@ -2,9 +2,11 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Minor bump: adds mirror-maker2 as an optional (off by default) dependency and
-# picks up kafka-cluster 0.3.1, whose broker NetworkPolicy now admits MM2 workers.
-version: 0.6.0
+# Minor bump: kafka-cluster 1.x (the platform's topics, users and client grants
+# are its `platform` profile, which the umbrella selects), mirror-maker2 0.8 and
+# connect-cluster 2.x (both built on the kafka-common library; Connect is new
+# here, off by default). The ranges are tightened to those lines.
+version: 0.7.0
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -15,7 +17,7 @@ maintainers:
   - name: Platform Team
 dependencies:
   - name: kafka-cluster
-    version: ">=0.2.0 <1.0.0"
+    version: ">=1.0.0 <2.0.0"
     repository: "file://../kafka-cluster"
     condition: kafka-cluster.enabled
   - name: kates
@@ -30,6 +32,12 @@ dependencies:
   # chart's own defaults are a loopback on krafter for smoke-testing. Enable it
   # with a real mirrors[].source — see charts/mirror-maker2/README.md.
   - name: mirror-maker2
-    version: ">=0.2.0 <1.0.0"
+    version: ">=0.8.0 <1.0.0"
     repository: "file://../mirror-maker2"
     condition: mirror-maker2.enabled
+  # Off by default: `kates deploy` installs Connect as its own release, in its
+  # own namespace, and the platform runs without it.
+  - name: connect-cluster
+    version: ">=2.0.0 <3.0.0"
+    repository: "file://../connect-cluster"
+    condition: connect-cluster.enabled

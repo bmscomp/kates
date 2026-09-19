@@ -18,6 +18,8 @@ Branch: `feat/kafka-multi-version` (from `main` after the MirrorMaker 2 branch m
 >
 > One correction to the study: the operator tarball under `charts/strimzi-operator/charts/` and `Chart.lock` are **gitignored build artifacts**, fetched by `helm dependency build` from the OCI registry, not files committed to the repository. "Pinned" therefore means an exact version fetched once and read from disk afterwards, not a chart that installs with no network on a fresh clone; the CLI runs `helm dependency build` when the tarball is absent, and `check-versions.sh` does the same.
 
+> **Status note — 2026-09-19.** The chart refactor on `feat/kafka-charts-refactor` has moved two premises §2 rests on. **The pin is Strimzi 1.2.0, not 1.1.0**: its window is 4.2.0, 4.2.1, 4.3.0 and **4.3.1**, and 4.3.1 is the newest entry and the chart's default `kafkaVersion` — so every "1.1.0 / 4.3.0" pair below reads as a snapshot of the older pin, not as the current one. And **the operator-wide pieces no longer live in `kafka-cluster`**: the CRD hook, the drain cleaner, the operator NetworkPolicy, the operator's scrape and alerts and its Grafana dashboards are `charts/strimzi-operator` 0.3's, and `kafka-cluster` 1.0 renders none of them — §2.7's reading of the install path is likewise a snapshot. The machinery this plan designs is unaffected; the numbers it quotes are not. Current reference: [charts/strimzi-operator/README.md](../charts/strimzi-operator/README.md), [charts/kafka-cluster/README.md](../charts/kafka-cluster/README.md) and [docs/kafka-cluster-1.0-upgrade.md](kafka-cluster-1.0-upgrade.md).
+
 ---
 
 ## 1. Why, and what "multiple versions" can mean
@@ -61,7 +63,7 @@ The list is not something the CLI has to know. The vendored operator chart carri
 STRIMZI_KAFKA_IMAGES
   4.2.0=quay.io/strimzi/kafka:1.1.0-kafka-4.2.0
   4.2.1=quay.io/strimzi/kafka:1.1.0-kafka-4.2.1
-  4.3.0=quay.io/strimzi/kafka:1.2.0-kafka-4.3.1
+  4.3.0=quay.io/strimzi/kafka:1.1.0-kafka-4.3.0
 ```
 
 into the Cluster Operator Deployment. So the supported set is available **offline** (`helm template charts/strimzi-operator`, parse the env) and **live** (`kubectl get deploy strimzi-cluster-operator -o jsonpath` on the running operator). Both are the operator's own statement; neither is a table in Go. When the operator pin moves, the window moves with it and nothing else needs editing.
