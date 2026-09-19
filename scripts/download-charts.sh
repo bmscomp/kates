@@ -18,7 +18,8 @@ rm -rf "${CHARTS_DIR}/litmus" "${CHARTS_DIR}/litmus-core"
 helm pull litmuschaos/litmus-core --version "${LITMUS_CHART_VERSION}" --untar --untardir "${CHARTS_DIR}"
 
 step "Building kafka-cluster chart dependencies (Strimzi v${STRIMZI_VERSION})..."
-helm dependency build "${CHARTS_DIR}/kafka-cluster"
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm 2>/dev/null || true
+helm dependency build "${CHARTS_DIR}/kafka-cluster" >/dev/null 2>&1 || helm dependency update "${CHARTS_DIR}/kafka-cluster"
 
 echo ""
 info "Downloaded charts:"

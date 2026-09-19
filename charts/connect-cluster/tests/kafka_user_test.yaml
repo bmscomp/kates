@@ -1,0 +1,53 @@
+suite: managed KafkaUser
+templates:
+  - kafka-user.yaml
+release:
+  name: cc
+  namespace: connect
+set:
+  kafkaUser: { create: true }
+tests:
+  - it: grants the exactly-once transactional IDs, including the leader's (KIP-618)
+    asserts:
+      - contains:
+          path: spec.authorization.acls
+          content:
+            resource: { type: transactionalId, name: connect-cluster-kates-connect-cluster, patternType: literal }
+            operations: [Write, Describe]
+            host: "*"
+      - contains:
+          path: spec.authorization.acls
+          content:
+            resource: { type: transactionalId, name: kates-connect-cluster-, patternType: prefix }
+            operations: [Write, Describe]
+            host: "*"
+
+  - it: grants the internal topics by their resolved names
+    set:
+      internalTopics: { prefix: team-a }
+    asserts:
+      - contains:
+          path: spec.authorization.acls
+          content:
+            resource: { type: topic, name: team-a-status, patternType: literal }
+            operations: [Read, Write, Create, Describe, DescribeConfigs]
+            host: "*"
+
+  - it: annotates the Secret for kubernetes-reflector across namespaces
+    set:
+      kafka: { namespace: kafka }
+      secretSync: { method: reflector }
+    asserts:
+      - equal: { path: metadata.namespace, value: kafka }
+      - equal:
+          path: 'spec.template.secret.metadata.annotations["reflector.v1.k8s.emberstack.com/reflection-auto-namespaces"]'
+          value: connect
+
+  - it: takes custom ACLs verbatim
+    set:
+      kafkaUser:
+        create: true
+        authorization: { mode: custom }
+        acls: [{ resource: { type: cluster }, operations: [Describe] }]
+    asserts:
+      - lengthEqual: { path: spec.authorization.acls, count: 1 }

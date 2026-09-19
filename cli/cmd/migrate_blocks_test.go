@@ -207,6 +207,7 @@ func TestMigrateMirrorCutoverAndRollbackByRelease(t *testing.T) {
 	migrateTestRepo(t)
 	f := newFakeProc(t)
 	state := "RUNNING"
+	f.on("helm dependency build charts/mirror-maker2", "")
 	f.handle("helm upgrade mm2 charts/mirror-maker2 -n kafka --reuse-values -f charts/mirror-maker2/values-cutover.yaml --timeout 600s", func([]string, string) (string, error) { state = "STOPPED"; return "", nil })
 	f.handle("helm upgrade mm2 charts/mirror-maker2 -n kafka --reuse-values -f .build/migrate/mm2/rollback-values.yaml --timeout 600s", func([]string, string) (string, error) { state = "RUNNING"; return "", nil })
 	f.handle("kubectl -n kafka get kafkamirrormaker2 mm2-mirror-maker2 -o json", func([]string, string) (string, error) {

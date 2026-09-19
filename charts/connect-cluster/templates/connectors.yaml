@@ -1,45 +1,76 @@
-{{- if gt (len (default (list) .Values.connectors)) 0 }}
-{{- $globalAutoRestart := .Values.autoRestart }}
-{{- range .Values.connectors }}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $fullname := include "connect-cluster.fullname" . }}
+{{- $keep := include "kafka-common.enabled" (list .Values.keepOnDelete true) }}
+{{- range $c := $r.connectors }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnector
 metadata:
-  name: {{ .name }}
+  name: {{ $c.name | quote }}
   namespace: {{ include "connect-cluster.namespace" $ }}
   labels:
-    {{- /* merge to avoid duplicate app.kubernetes.io/component key; per-connector labels win */}}
-    {{- $labels := mergeOverwrite
-          (include "connect-cluster.labels" $ | fromYaml)
-          (dict "app.kubernetes.io/component" "connector"
-                "kates.io/connector-name" .name
-                "strimzi.io/cluster" (include "connect-cluster.fullname" $))
-          (default (dict) .labels) }}
-    {{- toYaml $labels | nindent 4 }}
+    {{- include "connect-cluster.componentLabels" (dict "ctx" $ "component" "connector" "extra" (merge (dict "kates.io/connector-name" $c.name "strimzi.io/cluster" $fullname) $c.labels)) | nindent 4 }}
+  {{- if or $keep $c.annotations }}
   annotations:
-    {{- if not (eq (toString $.Values.keepOnDelete) "false") }}
+    {{- if $keep }}
     helm.sh/resource-policy: keep
     {{- end }}
-    {{- range $k, $v := (default (dict) .annotations) }}
+    {{- range $k, $v := $c.annotations }}
     {{ $k }}: {{ $v | quote }}
     {{- end }}
+  {{- end }}
 spec:
-  class: {{ .class }}
-  tasksMax: {{ .tasksMax | default 1 }}
-  {{- if .state }}
-  state: {{ .state }}
+  {{- include "connect-cluster.connectorSpec" $c | nindent 2 }}
+{{- /* A dead letter queue is a topic like any other: the Topic Operator
+       creates it with the replication factor the connector asks for, instead
+       of the broker default the connector's admin client would otherwise get
+       (or be refused, without topic Create). */}}
+{{- with $c.deadLetterQueue }}
+{{- if .createTopic }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ .topic | lower | replace "_" "-" | trunc 63 | trimSuffix "-" | trimSuffix "." | quote }}
+  namespace: {{ include "connect-cluster.kafkaNamespace" $ }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" $ "component" "dead-letter-queue" "extra" (dict "kates.io/connector-name" $c.name "strimzi.io/cluster" ($.Values.kafka.clusterName | default "krafter"))) | nindent 4 }}
+  {{- if $keep }}
+  annotations:
+    helm.sh/resource-policy: keep
   {{- end }}
-  autoRestart:
-    {{- if .autoRestart }}
-    enabled: {{ .autoRestart.enabled | default true }}
-    maxRestarts: {{ .autoRestart.maxRestarts | default ($globalAutoRestart.maxRestarts | default 10) }}
-    {{- else }}
-    enabled: {{ $globalAutoRestart.enabled | default true }}
-    maxRestarts: {{ $globalAutoRestart.maxRestarts | default 10 }}
-    {{- end }}
-  {{- with .config }}
-  config:
-    {{- toYaml . | nindent 4 }}
+spec:
+  topicName: {{ .topic | quote }}
+  partitions: {{ .partitions }}
+  replicas: {{ .replicationFactor }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "connect-cluster.connectorSpec" -}}
+class: {{ .class }}
+tasksMax: {{ .tasksMax }}
+{{- with .version }}
+version: {{ . | quote }}
+{{- end }}
+{{- with .state }}
+state: {{ . }}
+{{- end }}
+autoRestart:
+  enabled: {{ .autoRestart.enabled }}
+  {{- if .autoRestart.enabled }}
+  maxRestarts: {{ .autoRestart.maxRestarts }}
   {{- end }}
+{{- with .listOffsets }}
+listOffsets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .alterOffsets }}
+alterOffsets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .config }}
+config:
+  {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}

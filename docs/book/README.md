@@ -43,6 +43,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 
 | Title | Description |
 |-------|-------------|
+| [Deploying the Strimzi Operator](deploying-strimzi-operator.md) | The operator as its own release: the `strimzi-operator` wrapper chart, its CRD-upgrade hook, and namespace scope |
 | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites and verification |
 | [Kafka Deployment Engineering](15-kafka-deployment.md) | The engineering rationale: Strimzi, KRaft, broker tuning, and operations |
 | [Deployment Guide](12-deployment.md) | Deploying the Kates stack: topology decisions, sizing, and cloud guidance |
@@ -51,6 +52,8 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |
 | [Kafka Connect & CDC Pipelines](21-kafka-connect.md) | Connect concepts: architecture, Debezium CDC, transforms, and delivery semantics |
 | [Operating Kafka Connect](operating-kafka-connect.md) | Day-2 operations: scaling, tuning, security rotation, upgrades, and DR |
+| [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md) | MirrorMaker 2 topologies for disaster recovery and cluster migration |
+| [Migrating a Legacy Kafka Source](23-legacy-source-migration.md) | Moving off a 2.x/3.x cluster onto the current Kafka line |
 | [Recipes & Patterns](14-recipes.md) | Ready-to-use workflows for upgrades, nightly regressions, and tuning |
 
 **Part VI — Reference**

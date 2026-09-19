@@ -4,6 +4,8 @@ Branch: `feat/mirror-maker2-cross-version` (from `main`). Goal: take `charts/mir
 
 > **Status: IMPLEMENTED.** Everything below is built and verified through `helm lint` / `helm template` (all overlays) / `kubeconform` against the real Strimzi `KafkaMirrorMaker2` **v1** schema. The live kind runs are driven by `scripts/test-mm2-migration.sh` and `.github/workflows/ci-mirror-maker2.yml`; see [Verification](#9-verification-what-was-actually-run) for exactly what was executed where, and [What the review found](#8-what-the-review-found) for the defects the gates could not see.
 
+> **Status note — 2026-09-19.** Two version premises below have moved. The pin is **Strimzi 1.2.0**, whose window is 4.2.0, 4.2.1, 4.3.0 and **4.3.1** — so §1's "Strimzi 1.1.0 runs Kafka 4.3.0 and nothing else" understates it — and the MM2 workers run `spec.version: 4.3.1`. The KIP-896 argument that follows from it is unchanged: the workers are still a 4.x client and the 2.1 protocol floor still applies. The chart itself is now **0.8.0**, built on the `kafka-common` library, so a render from a checkout needs `helm dependency build charts/mirror-maker2` first. Current reference: [charts/mirror-maker2/README.md](../charts/mirror-maker2/README.md) and [docs/mirror-maker2-runbook.md](mirror-maker2-runbook.md).
+
 ---
 
 ## 1. The problem, stated precisely

@@ -1,0 +1,576 @@
+# Render matrix for charts/connect-cluster — read by scripts/check-chart-matrix.py.
+# `known: <ID>` marks a defect from docs/kafka-charts-refactor-plan.md §2.3.
+chart: charts/connect-cluster
+namespace: connect
+release: connect-cluster
+apiVersions: [monitoring.coreos.com/v1]
+checks: [kafka-egress-covers-bootstrap, runbook-anchors]
+
+renders:
+  - name: base
+    assert:
+      - why: "exactly-once is a group-wide switch now, not an extraConfig line"
+        kind: KafkaConnect
+        path: spec/config/exactly.once.source.support
+        equals: enabled
+      - why: "Kafka egress follows the bootstrap (9092)"
+        kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/ports/*/port
+        notEquals: 9093
+      - why: "the operator runs in strimzi-operator, not the Kafka namespace"
+        kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/ingress/*/from/*/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        equals: strimzi-operator
+      - why: "secret access is limited to what the test connectors reference (C6)"
+        kind: Role
+        name: connect-cluster-secret-reader
+        path: rules/0/resourceNames
+        equals: [connect-pg-credentials, kates-connect]
+      - kind: Role
+        name: connect-cluster-secret-reader
+        path: rules/0/verbs
+        equals: [get]
+      - why: "bound to the operator-made worker account"
+        kind: RoleBinding
+        name: connect-cluster-secret-reader
+        path: subjects/0/name
+        equals: connect-cluster-connect
+      - why: "no hook Pod validates connectors any more (C8)"
+        kind: Pod
+        name: .*validate.*
+        count: 0
+      - why: "no system-cluster-critical by default (C9)"
+        kind: KafkaConnect
+        path: spec/template/pod/priorityClassName
+        exists: false
+      - why: "the dashboard's panels are laid out by the library"
+        kind: ConfigMap
+        name: connect-cluster-dashboard
+        path: data/kafka-connect.json
+        matches: '"gridPos"'
+      - why: "test topics belong to the Kafka cluster"
+        kind: KafkaTopic
+        path: metadata/labels/strimzi.io~1cluster
+        equals: krafter
+  - name: dev
+    values: [values-dev.yaml]
+    assert:
+      - why: "one worker gets no PDB"
+        kind: KafkaConnect
+        path: spec/template/podDisruptionBudget
+        exists: false
+  - name: kind (kates deploy)
+    values: [values-kind.yaml]
+    set:
+      - kafka.namespace=kafka
+      - kafka.bootstrapServers=krafter-kafka-bootstrap.kafka.svc.cluster.local:9092
+      - schemaRegistry.enabled=true
+      - databaseEgress[0].namespace=database
+      - databaseEgress[0].port=5432
+      - databaseEgress[0].podSelector.app\.kubernetes\.io/name=postgresql
+      - dnsConfig.searches[0]=kafka.svc.cluster.local
+      - replicas=1
+    setString: [version=4.3.1]
+    assert:
+      - why: "the CLI's 1.x databaseEgress wins over the overlay's database"
+        kind: NetworkPolicy
+        name: allow-connect-cluster-ingress-5432
+        path: metadata/namespace
+        equals: database
+      - why: "and replaces the overlay's, rather than adding a policy in kates"
+        kind: NetworkPolicy
+        name: allow-.*
+        path: metadata/namespace
+        notEquals: kates
+      - why: "the CLI's own connectors read these Secrets"
+        kind: Role
+        name: connect-cluster-secret-reader
+        path: rules/0/resourceNames/*
+        equals: connect-pg-credentials
+      - why: "an in-cluster explicit bootstrap keeps the namespace-scoped egress"
+        kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/to/*/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        equals: kafka
+      - why: "dnsConfig reaches the pod template"
+        kind: KafkaConnect
+        path: spec/template/pod/dnsConfig/searches/0
+        equals: kafka.svc.cluster.local
+  - name: generic (kates deploy, no monitoring)
+    values: [values-generic.yaml]
+    set: [alerts.enabled=false, podMonitors.enabled=false, dashboards.enabled=false, networkPolicy.enabled=true]
+    assert:
+      - why: "1.x podMonitors.enabled=false still turns the PodMonitor off"
+        kind: PodMonitor
+        count: 0
+      - kind: PrometheusRule
+        count: 0
+      - kind: ConfigMap
+        name: .*dashboard
+        count: 0
+  - name: prod
+    values: [values-prod.yaml]
+    assert:
+      - why: "prod dials the TLS listener, which authenticates by certificate (C4)"
+        kind: KafkaConnect
+        path: spec/bootstrapServers
+        equals: krafter-kafka-bootstrap.kafka.svc.cluster.local:9093
+      - kind: KafkaConnect
+        path: spec/authentication/type
+        equals: tls
+      - kind: KafkaConnect
+        path: spec/authentication/certificateAndKey/secretName
+        equals: kates-connect
+      - kind: KafkaUser
+        path: spec/authentication/type
+        equals: tls
+      - why: "the certificate and the cluster CA are copied from the Kafka namespace"
+        kind: Role
+        name: connect-cluster-secret-sync-read
+        path: rules/0/resourceNames
+        equals: [kates-connect, krafter-cluster-ca-cert]
+      - kind: CronJob
+        name: connect-cluster-secret-sync
+        count: 1
+      - kind: PriorityClass
+        name: kates-streaming
+        count: 1
+      - kind: KafkaConnect
+        path: spec/template/pod/priorityClassName
+        equals: kates-streaming
+      - why: "no connector references a Secret, so nothing is granted"
+        kind: Role
+        name: connect-cluster-secret-reader
+        count: 0
+      - kind: PrometheusRule
+        path: spec/groups/*/rules/*/alert
+        equals: KafkaConnectTaskAvailabilitySLOBurning
+  - name: legacy 1.x values
+    inline: |
+      podMonitors: { enabled: false, labels: { team: x } }
+      monitoring: { enabled: true, interval: 15s }
+      metricsConfig: { create: false, configMapName: kafka-metrics, configMapKey: kafka-metrics-config.yml }
+      autoRestart: { enabled: true, maxRestarts: 5 }
+      template: { pod: { metadata: { labels: { team: x } } } }
+      podSecurityContext: { fsGroup: 1001, runAsNonRoot: true, seccompProfile: RuntimeDefault }
+      databaseEgress: [{ namespace: db, port: 5432 }]
+      networkPolicy: { kafkaPorts: [9092, 9093], monitoringNamespace: mon }
+      kafkaUser: { create: true, secretSync: { method: reflector } }
+      kafka: { namespace: kafka }
+      alerts: { thresholds: { sourceLagMinutes: 30 } }
+      connectors:
+        - name: listed
+          class: org.apache.kafka.connect.mirror.MirrorHeartbeatConnector
+          config: { source.cluster.alias: a, target.cluster.alias: b }
+    assert:
+      - kind: PodMonitor
+        count: 0
+      - why: "an existing metrics ConfigMap is referenced, not rendered"
+        kind: KafkaConnect
+        path: spec/metricsConfig/valueFrom/configMapKeyRef/name
+        equals: kafka-metrics
+      - kind: ConfigMap
+        name: .*-metrics
+        count: 0
+      - why: "1.x template is merged into spec.template"
+        kind: KafkaConnect
+        path: spec/template/pod/metadata/labels/team
+        equals: x
+      - kind: KafkaConnect
+        path: spec/template/pod/securityContext/seccompProfile/type
+        equals: RuntimeDefault
+      - kind: KafkaConnector
+        name: listed
+        path: spec/autoRestart/maxRestarts
+        equals: 5
+      - kind: NetworkPolicy
+        name: allow-connect-cluster-ingress-5432
+        path: metadata/namespace
+        equals: db
+      - kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/ports/*/port
+        equals: 9093
+      - kind: KafkaUser
+        path: spec/template/secret/metadata/annotations/reflector.v1.k8s.emberstack.com~1reflection-allowed-namespaces
+        equals: connect
+      - why: "reflector replaces the sync Job"
+        kind: Job
+        count: 0
+  - name: autoscaling
+    set: [autoscaling.enabled=true]
+    assert:
+      - why: "v1 requires spec.replicas; under the HPA it is seeded from minReplicas (C1)"
+        kind: KafkaConnect
+        path: spec/replicas
+        equals: 3
+      - kind: HorizontalPodAutoscaler
+        path: spec/scaleTargetRef/kind
+        equals: KafkaConnect
+  - name: nodeSelector
+    set: [nodeSelector.pool=connect]
+    assert:
+      - why: "nodeSelector must become a required node-affinity term (C2)"
+        kind: KafkaConnect
+        path: spec/template/pod/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/0/key
+        equals: pool
+  - name: nodeAffinity passthrough
+    inline: |
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 10
+            preference:
+              matchExpressions: [{key: disk, operator: In, values: [ssd]}]
+    assert:
+      - kind: KafkaConnect
+        path: spec/template/pod/affinity/nodeAffinity/preferredDuringSchedulingIgnoredDuringExecution/0/weight
+        equals: 10
+  - name: templateExtra and connectContainer
+    inline: |
+      templateExtra:
+        pod: { hostUsers: false, metadata: { annotations: { team: x } } }
+        apiService: { metadata: { labels: { exposed: "no" } } }
+      connectContainer:
+        volumeMounts: [{ name: extra, mountPath: /opt/extra }]
+      env: [{ name: A, value: b }]
+    assert:
+      - why: "templateExtra.pod is merged, not written beside the chart's pod (M2 class)"
+        kind: KafkaConnect
+        path: spec/template/pod/hostUsers
+        equals: false
+      - kind: KafkaConnect
+        path: spec/template/pod/securityContext/fsGroup
+        equals: 1001
+      - kind: KafkaConnect
+        path: spec/template/pod/metadata/annotations/checksum~1logging
+        exists: true
+      - kind: KafkaConnect
+        path: spec/template/connectContainer/volumeMounts/0/name
+        equals: extra
+      - kind: KafkaConnect
+        path: spec/template/connectContainer/securityContext/readOnlyRootFilesystem
+        equals: true
+  - name: plain authentication
+    set: [kafka.authentication.type=plain, kafka.authentication.username=connect]
+    assert:
+      - kind: KafkaConnect
+        path: spec/authentication/username
+        equals: connect
+      - kind: KafkaConnect
+        path: spec/authentication/passwordSecret/secretName
+        equals: connect
+  - name: custom authentication (OAuth)
+    set: [kafka.authentication.type=custom, kafka.authentication.custom.sasl=true, "kafka.authentication.custom.config.sasl\\.mechanism=OAUTHBEARER"]
+    assert:
+      - kind: KafkaConnect
+        path: spec/authentication/sasl
+        equals: true
+  - name: no authentication
+    set: [kafka.authentication.type=]
+    assert:
+      - kind: KafkaConnect
+        path: spec/authentication
+        exists: false
+  - name: tls authentication, custom listener port
+    set: [kafka.authentication.type=scram-sha-512, kafka.tls.enabled=true, kafka.listenerPort=9095]
+    assert:
+      - kind: KafkaConnect
+        path: spec/bootstrapServers
+        equals: krafter-kafka-bootstrap.connect.svc.cluster.local:9095
+      - kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/ports/*/port
+        equals: 9095
+  - name: default-deny can be turned off
+    set: [networkPolicy.defaultDeny.enabled=false]
+    assert:
+      - kind: NetworkPolicy
+        name: .*default-deny.*
+        count: 0
+  - name: converter schemas off, exactly-once off
+    set: [config.keyConverterSchemasEnable=false, config.valueConverterSchemasEnable=false, exactlyOnce.enabled=false, kafkaUser.create=true]
+    assert:
+      - kind: KafkaConnect
+        path: spec/config/key.converter.schemas.enable
+        equals: false
+      - kind: KafkaConnect
+        path: spec/config/exactly.once.source.support
+        equals: disabled
+      - kind: KafkaUser
+        path: spec/authorization/acls/*/resource/type
+        notEquals: transactionalId
+  - name: managed user, same namespace
+    set: [kafkaUser.create=true]
+    assert:
+      - why: "the leader's transactional ID under exactly-once (KIP-618, C12)"
+        kind: KafkaUser
+        path: spec/authorization/acls/*/resource/name
+        equals: connect-cluster-kates-connect-cluster
+      - why: "nothing to copy within one namespace"
+        kind: Job
+        count: 0
+  - name: external bootstrap
+    set: [kafka.bootstrapServers=kafka.example.com:9094]
+    assert:
+      - why: "an address outside the cluster can be anywhere"
+        kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/ports/*/port
+        equals: 9094
+  - name: schema registry + tracing endpoint
+    set: [schemaRegistry.enabled=true, "tracing.endpoint=http://otel.observability.svc:4318"]
+    assert:
+      - kind: KafkaConnect
+        path: spec/template/connectContainer/env/*/name
+        equals: OTEL_EXPORTER_OTLP_ENDPOINT
+      - kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/ports/*/port
+        equals: 4318
+  - name: rest api ingress
+    set: [restApi.ingress.enabled=true, "restApi.ingress.hosts[0].host=connect.example.com", "restApi.ingress.hosts[0].paths[0].path=/", "restApi.ingress.hosts[0].paths[0].pathType=Prefix"]
+  - name: connectors map, dead letter queue, secrets in two namespaces
+    set: [kafka.namespace=kafka, kafkaUser.create=true, autoscaling.enabled=true, autoscaling.maxReplicas=3, "testConnectors=null"]
+    inline: |
+      connectorDefaults:
+        config: { errors.log.include.messages: "true" }
+      connectors:
+        orders-cdc:
+          class: io.debezium.connector.postgresql.PostgresConnector
+          tasksMax: 1
+          state: paused
+          version: "[3.6,4)"
+          listOffsets: { toConfigMap: { name: orders-cdc-offsets } }
+          config:
+            database.hostname: pg
+            database.dbname: orders
+            topic.prefix: cdc
+            database.password: "${secrets:database/pg:password}"
+        orders-sink:
+          class: io.debezium.connector.jdbc.JdbcSinkConnector
+          tasksMax: 2
+          deadLetterQueue: { enabled: true }
+          config:
+            topics: cdc.public.orders
+            connection.url: jdbc:postgresql://pg:5432/orders
+            connection.password: "${secrets:connect/pg-sink:password}"
+        dropped:
+          enabled: false
+          class: x
+    assert:
+      - kind: KafkaConnector
+        count: 2
+      - kind: KafkaConnector
+        name: orders-cdc
+        path: spec/state
+        equals: paused
+      - kind: KafkaConnector
+        name: orders-cdc
+        path: spec/config/errors.log.include.messages
+        equals: "true"
+      - kind: KafkaConnector
+        name: orders-sink
+        path: spec/config/errors.deadletterqueue.topic.name
+        equals: kates-connect-cluster-dlq-orders-sink
+      - kind: KafkaConnector
+        name: orders-sink
+        path: spec/config/errors.tolerance
+        equals: all
+      - why: "the DLQ is a KafkaTopic in the Kafka namespace"
+        kind: KafkaTopic
+        name: kates-connect-cluster-dlq-orders-sink
+        path: metadata/namespace
+        equals: kafka
+      - kind: KafkaUser
+        path: spec/authorization/acls/*/resource/name
+        equals: kates-connect-cluster-dlq-orders-sink
+      - why: "one Role per referenced namespace, get on the named Secret only"
+        kind: Role
+        name: connect-cluster-secret-reader-database
+        path: rules/0/resourceNames
+        equals: [pg]
+      - kind: Role
+        name: connect-cluster-secret-reader
+        path: rules/0/resourceNames
+        equals: [pg-sink]
+      - kind: RoleBinding
+        name: connect-cluster-secret-reader-database
+        path: subjects/0/namespace
+        equals: connect
+      - why: "the sink lag alert watches the declared sinks' groups"
+        kind: PrometheusRule
+        path: spec/groups/*/rules/*/expr
+        matches: 'consumergroup=~"connect-orders-sink"'
+  - name: a connectors list (1.x shape)
+    inline: |
+      connectors:
+        - name: file-sink
+          class: org.apache.kafka.connect.file.FileStreamSinkConnector
+          config: { file: /tmp/out, topics: kates-file }
+    assert:
+      - kind: KafkaConnector
+        name: file-sink
+        path: spec/tasksMax
+        equals: 1
+  - name: plugins (image volumes)
+    kubeVersion: "1.33.0"
+    set: [imageVolumes.acknowledged=true]
+    inline: |
+      plugins:
+        - name: debezium-postgres
+          artifacts:
+            - type: image
+              reference: ghcr.io/example/debezium-postgres:3.6.2
+          expect: [io.example.Extra]
+    assert:
+      - kind: KafkaConnect
+        path: spec/plugins/0/artifacts/0/reference
+        equals: ghcr.io/example/debezium-postgres:3.6.2
+      - kind: Pod
+        name: connect-cluster-test-connect
+        path: spec/containers/0/args/0
+        matches: io.example.Extra
+  - name: strimzi metrics reporter
+    set: [metrics.type=strimziMetricsReporter, alerts.allowReporterMetrics=true]
+    assert:
+      - kind: KafkaConnect
+        path: spec/metricsConfig/type
+        equals: strimziMetricsReporter
+      - kind: ConfigMap
+        name: .*-metrics
+        count: 0
+  - name: preflight, cross-namespace SCRAM
+    set: [preflight.enabled=true, kafka.namespace=kafka]
+    assert:
+      - kind: Job
+        name: connect-cluster-preflight
+        path: spec/template/spec/containers/0/args/0
+        matches: 'probe "kafka" "krafter-kafka-bootstrap.kafka.svc.cluster.local:9092" "sasl" "SCRAM-SHA-512"'
+  - name: rbac.allSecrets
+    set: [rbac.allSecrets=true, kafka.namespace=kafka]
+    assert:
+      - kind: Role
+        name: connect-cluster-secret-reader-kafka
+        path: rules/0/verbs
+        equals: [get, list, watch]
+  - name: monitoring API absent
+    matrixApiVersions: false
+    assert:
+      - kind: PodMonitor
+        count: 0
+      - kind: PrometheusRule
+        count: 0
+
+rails:
+  - name: tracing jaeger (removed from the v1 API, C3)
+    want: "tracing.type must be one of the following"
+    set: [tracing.type=jaeger]
+  - name: oauth authentication (removed from the v1 API, C3)
+    want: "kafka.authentication.type must be one of the following"
+    set: [kafka.authentication.type=oauth]
+  - name: custom authentication without config
+    want: "needs kafka.authentication.custom"
+    set: [kafka.authentication.type=custom]
+  - name: bootstrap port outside the Kafka egress ports (C4)
+    want: "dials port 9092, but networkPolicy.kafka.ports allows only 9093"
+    set: ["networkPolicy.kafka.ports={9093}"]
+  - name: tls authentication without TLS
+    want: "needs kafka.tls.enabled=true"
+    set: [kafka.authentication.type=tls]
+  - name: SCRAM on the mutual-TLS listener
+    want: "which kafka-cluster serves with mutual-TLS authentication"
+    set: [kafka.tls.enabled=true]
+  - name: productionMode without TLS
+    want: "productionMode refuses an unencrypted Kafka connection"
+    set: [productionMode=true]
+  - name: managed user with plain authentication
+    want: "is not one a Strimzi KafkaUser can have"
+    set: [kafkaUser.create=true, kafka.authentication.type=plain]
+  - name: custom ACL mode without ACLs
+    want: "requires kafkaUser.acls"
+    set: [kafkaUser.create=true, kafkaUser.authorization.mode=custom]
+  - name: exactly-once in extraConfig
+    want: "It is exactlyOnce.enabled now"
+    set: ["extraConfig.exactly\\.once\\.source\\.support=enabled"]
+  - name: colliding internal topics
+    want: "the internal topics must be three different topics"
+    set: [internalTopics.statusName=x, internalTopics.configsName=x]
+  - name: replication factor above the broker count
+    want: "config.replicationFactor is 3 but kafka.brokerCount is 1"
+    set: [kafka.brokerCount=1]
+  - name: a connector without a class
+    want: "connectors.a has no class"
+    inline: "connectors: { a: { tasksMax: 1 } }"
+  - name: a connector name that is not DNS-1123
+    want: "must be a DNS-1123 subdomain"
+    inline: "connectors: { Orders_CDC: { class: x } }"
+  - name: an invalid connector state
+    want: "connectors.a.state must be one of the following"
+    inline: "connectors: { a: { class: x, state: halted } }"
+  - name: zero tasks
+    want: "a connector needs at least one task"
+    inline: "connectors: { a: { class: x, tasksMax: 0 } }"
+  - name: a known class missing a required key
+    want: "needs config.topic.prefix"
+    inline: "connectors: { a: { class: io.debezium.connector.postgresql.PostgresConnector, config: { database.hostname: h, database.dbname: d } } }"
+  - name: a sink without topics
+    want: "is a sink connector and needs config.topics"
+    inline: "connectors: { a: { class: com.example.SomeSinkConnector } }"
+  - name: a dead letter queue on a source
+    want: "deadLetterQueue is for sink connectors"
+    inline: "connectors: { a: { class: com.example.SomeSourceConnector, deadLetterQueue: { enabled: true } } }"
+  - name: a plaintext password in production
+    want: "is a plaintext password, which productionMode refuses"
+    values: [values-prod.yaml]
+    inline: "connectors: { a: { class: com.example.SomeSourceConnector, config: { database.password: hunter2 } } }"
+  - name: a secret reference without a namespace
+    want: "needs ${secrets:<namespace>/<secret>:<key>}"
+    inline: "connectors: { a: { class: com.example.X, config: { p: '${secrets:pg:password}' } } }"
+  - name: a plugin version on an old Kafka line
+    want: "Kafka Connect supports from 4.1"
+    set: [version=4.0.0]
+    inline: "connectors: { a: { class: com.example.X, version: '1.0' } }"
+  - name: idle workers under the HPA
+    want: "run at most 1 task(s) in total"
+    set: [autoscaling.enabled=true]
+    inline: "connectors: { a: { class: com.example.X } }"
+  - name: two database entries for one namespace and port
+    want: "networkPolicy.egress.databases lists db/5432 twice"
+    inline: "networkPolicy: { egress: { databases: [{ namespace: db }, { namespace: db, port: 5432 }] } }"
+  - name: all secrets in production
+    want: "productionMode refuses rbac.allSecrets"
+    values: [values-prod.yaml]
+    set: [rbac.allSecrets=true]
+  - name: plugins without the acknowledgement
+    want: "set imageVolumes.acknowledged=true"
+    inline: "plugins: [{ name: pl, artifacts: [{ type: image, reference: 'r.io/p:1.0' }] }]"
+  - name: plugins on an old Kubernetes
+    want: "which Kubernetes has from 1.31"
+    kubeVersion: "1.30.0"
+    set: [imageVolumes.acknowledged=true]
+    inline: "plugins: [{ name: pl, artifacts: [{ type: image, reference: 'r.io/p:1.0' }] }]"
+  - name: a floating plugin image
+    want: "resolves to a floating tag"
+    set: [imageVolumes.acknowledged=true]
+    kubeVersion: "1.33.0"
+    inline: "plugins: [{ name: pl, artifacts: [{ type: image, reference: 'r.io/p:latest' }] }]"
+  - name: a floating worker image
+    want: "resolves to a floating tag"
+    set: [image=ghcr.io/bmscomp/connect:latest]
+  - name: alerts without metrics
+    want: "alerts.enabled needs metrics.enabled"
+    set: [metrics.enabled=false]
+  - name: alerts on the metrics reporter
+    want: "which metrics.type=strimziMetricsReporter does not publish"
+    set: [metrics.type=strimziMetricsReporter]
+  - name: a misspelled key
+    want: "Additional property replica is not allowed"
+    set: [replica=2]
+
+rules:
+  set: [alerts.enabled=true, alerts.sourceIdle.enabled=true, alerts.slo.enabled=true]
+  inline: |
+    connectors:
+      s: { class: com.example.SomeSinkConnector, config: { topics: t } }

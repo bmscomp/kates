@@ -1,5 +1,7 @@
-{{- if .Values.topics.enabled }}
-{{- range .Values.topics.items }}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $keep := include "kafka-common.enabled" (list .Values.keepOnDelete true) -}}
+{{- range $r.topics }}
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -8,14 +10,18 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" $ }}
   labels:
     {{- include "kafka-cluster.labels" $ | nindent 4 }}
+  {{- if $keep }}
   annotations:
     helm.sh/resource-policy: keep
+  {{- end }}
 spec:
-  partitions: {{ .partitions }}
-  replicas: {{ .replicas }}
-  {{- with .config }}
+  {{- with .spec.topicName }}
+  topicName: {{ . }}
+  {{- end }}
+  partitions: {{ .spec.partitions }}
+  replicas: {{ .spec.replicas }}
+  {{- with .spec.config }}
   config:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-{{- end }}
 {{- end }}

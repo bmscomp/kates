@@ -14,7 +14,7 @@ The LOAD test establishes your cluster's steady-state performance at a controlle
 **When to use:** Before any other test. This provides the baseline you'll compare everything else against.
 
 ```bash
-# Generate a scaffold to see all options
+# List the built-in LOAD templates (quick-load, production-load, ci-gate)
 kates test scaffold --type LOAD
 
 # Run a basic load test
@@ -41,8 +41,8 @@ The STRESS test ramps load until the cluster can no longer keep up.
 **When to use:** Capacity planning. You need to know how much headroom exists.
 
 ```bash
-# Generate scaffold
-kates test scaffold --type STRESS -o stress.yaml
+# Export the built-in STRESS template
+kates test scaffold export stress-test -o stress.yaml
 
 # Quick stress test with 4 producers ramping up
 kates test create --type STRESS \
@@ -71,20 +71,21 @@ The SPIKE test hits the cluster with a sudden burst of traffic, then drops back 
 **When to use:** Preparing for events with sudden traffic increases (marketing campaigns, product launches).
 
 ```bash
-# Generate scaffold
-kates test scaffold --type SPIKE -o spike.yaml
+# Export the built-in SPIKE template
+kates test scaffold export spike-test -o spike.yaml
 
-# View the generated YAML to understand the phases
+# View the exported YAML
 cat spike.yaml
 
-# Apply the scaffold
+# Apply it
 kates test apply -f spike.yaml --wait
 ```
 
-The scaffold creates a 3-phase test:
-1. **Baseline** — normal rate for 30 seconds
-2. **Spike** — 10x rate for 15 seconds
-3. **Recovery** — back to normal rate for 60 seconds
+The `spike-test` template is a single burst: 500,000 records through 32 parallel
+producers over 60 seconds, `acks: "1"` and `lingerMs: 0` so the load arrives as
+fast as the client can push it. Its gate allows a P99 of 500 ms and an error
+rate of 1% — deliberately looser than a LOAD test, because absorbing a burst is
+the thing being measured, not steady-state latency.
 
 **Key question:** How long does P99 take to return to baseline after the spike?
 
@@ -95,8 +96,8 @@ The ENDURANCE test runs at moderate load for an extended period to detect slow r
 **When to use:** Before major releases. Run overnight to catch memory leaks, thread leaks, and log accumulation.
 
 ```bash
-# Generate scaffold
-kates test scaffold --type ENDURANCE -o endurance.yaml
+# Export the built-in ENDURANCE template (a 1-hour soak at 5k msg/s)
+kates test scaffold export endurance-soak -o endurance.yaml
 
 # Start a 30-minute endurance test
 kates test create --type ENDURANCE \
@@ -126,9 +127,7 @@ The VOLUME test focuses on large messages and data volumes to stress storage and
 **When to use:** When your production workload includes large messages (images, documents, large events).
 
 ```bash
-# Generate scaffold
-kates test scaffold --type VOLUME -o volume.yaml
-
+# The scenario library ships no VOLUME template — drive this one from flags
 # Run with large messages
 kates test create --type VOLUME \
   --records 10000 \
@@ -148,9 +147,7 @@ The CAPACITY test removes all rate limiting and finds the absolute ceiling.
 **When to use:** When you need hard numbers for capacity planning documents.
 
 ```bash
-# Generate scaffold
-kates test scaffold --type CAPACITY -o capacity.yaml
-
+# The scenario library ships no CAPACITY template — drive this one from flags
 # Run with unlimited throughput
 kates test create --type CAPACITY \
   --records 1000000 \
@@ -178,8 +175,8 @@ The ROUND_TRIP test measures the complete journey from producer to consumer.
 **When to use:** When you need to SLA on consumer-side delivery latency, not just producer acknowledgment.
 
 ```bash
-# Generate scaffold
-kates test scaffold --type ROUND_TRIP -o roundtrip.yaml
+# Export the built-in ROUND_TRIP template (exactly-once, CRC-verified)
+kates test scaffold export exactly-once -o roundtrip.yaml
 
 # Run with 1 producer and 1 consumer
 kates test create --type ROUND_TRIP \
@@ -198,8 +195,8 @@ The INTEGRITY test verifies that every message is persisted and deliverable.
 **When to use:** Whenever you change Kafka configuration, upgrade brokers, or validate a new cluster.
 
 ```bash
-# Generate scaffold
-kates test scaffold --type INTEGRITY -o integrity.yaml
+# Export the built-in INTEGRITY template (transactional, zstd, CRC)
+kates test scaffold export integrity-tx -o integrity.yaml
 
 # Run data integrity verification
 kates test create --type INTEGRITY \
@@ -224,18 +221,31 @@ kates test create --type INTEGRITY \
 
 ### Integrity + Chaos (Advanced)
 
-For the ultimate validation — verify integrity while killing a broker:
+For the ultimate validation — verify integrity while killing a broker. No
+scenario template carries chaos: a scaffold describes a test, and pairing one
+with a fault is what `kates resilience run` is for. It takes a config with a
+`testRequest` and a `chaosSpec` side by side:
 
 ```bash
-# Generate a chaos-aware integrity test
-kates test scaffold --type INTEGRITY -o integrity-chaos.yaml
+cat > integrity-chaos.json <<'EOF'
+{
+  "testRequest": {
+    "testType": "INTEGRITY",
+    "spec": { "records": 100000, "acks": "all", "consumers": 1 }
+  },
+  "chaosSpec": {
+    "experimentName": "kafka-pod-kill",
+    "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka"
+  },
+  "steadyStateSec": 30
+}
+EOF
 
-# Review the YAML — it includes chaos injection mid-test
-cat integrity-chaos.yaml
-
-# Run it
-kates test apply -f integrity-chaos.yaml --wait
+kates resilience run -f integrity-chaos.json
 ```
+
+[Tutorial 4](04-integrity-under-fire.md) works through this in full.
 
 ## Quick Reference: Choosing the Right Test
 
@@ -251,7 +261,7 @@ graph TD
     Q1 -->|"Maximum throughput"| CAPACITY[Run CAPACITY test]
     Q1 -->|"Consumer delivery time"| RT[Run ROUND_TRIP test]
     Q1 -->|"Data safety"| INT[Run INTEGRITY test]
-    Q1 -->|"Data safety under failure"| INTC[Run INTEGRITY scaffold with chaos]
+    Q1 -->|"Data safety under failure"| INTC[Run INTEGRITY via kates resilience run]
 ```
 
 ## Comparing All Results
@@ -264,7 +274,7 @@ kates test list
 
 # View trends
 kates trend --type LOAD --metric p99LatencyMs --days 1
-kates trend --type LOAD --metric throughputRecordsPerSec --days 1
+kates trend --type LOAD --metric avgThroughputRecPerSec --days 1
 ```
 
 ## What's Next?

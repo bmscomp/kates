@@ -41,7 +41,9 @@ kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=6
 
 # Build Helm dependencies (SeaweedFS subchart)
 info "Building Helm chart dependencies..."
-helm dependency build "${CHART_DIR}" 2>/dev/null || true
+# `update` when `build` refuses: a Chart.lock from kafka-cluster 0.4 does not
+# list the kafka-common library 1.0 depends on.
+helm dependency build "${CHART_DIR}" >/dev/null 2>&1 || helm dependency update "${CHART_DIR}"
 
 # Kind-specific prerequisites: storage classes for zone-aware pools
 if [ "${ENV}" = "kind" ]; then
@@ -49,8 +51,10 @@ if [ "${ENV}" = "kind" ]; then
     kubectl apply -f "${ROOT_DIR}/config/storage/storage-classes.yaml"
 fi
 
-# Build the values file chain based on environment
-VALUES_ARGS=()
+# Build the values file chain based on environment. The platform profile
+# (values-platform.yaml: the kates topics, users and client grants) comes
+# first, so the environment overlay can change any of it.
+VALUES_ARGS=(-f "${CHART_DIR}/values-platform.yaml")
 case "${ENV}" in
     kind)
         VALUES_ARGS+=(-f "${CHART_DIR}/values-dev.yaml" -f "${CHART_DIR}/values-kind.yaml")

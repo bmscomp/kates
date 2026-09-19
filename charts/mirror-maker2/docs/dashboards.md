@@ -34,6 +34,7 @@ scrape anything. Turn both on together when you want the board during a real
 migration:
 
 ```bash
+helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
 helm upgrade mm2 charts/mirror-maker2 -n kafka \
   -f charts/mirror-maker2/values-migrate-3x.yaml \
   --set metrics.enabled=true --set podMonitors.enabled=true \
@@ -208,7 +209,8 @@ Worth stating plainly, because a dashboard implies completeness:
   broker's metrics.
 - **End-offset parity between source and target.** The boards use replication
   lag and record age as proxies for "caught up"; comparing actual end offsets is
-  `kates migrate target offsets` or `kafka-get-offsets.sh` on both sides.
+  `kates migrate target offsets <topic>` or `kafka-get-offsets.sh` on both
+  sides.
 - **Whether a consumer actually resumed** after moving. Translation age says a
   position exists on the target, not that anything used it.
 - **Anything at all, under `metrics.type: strimziMetricsReporter`** — different

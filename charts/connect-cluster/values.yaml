@@ -1,158 +1,216 @@
 # connect-cluster values.yaml
+#
+# A Strimzi KafkaConnect worker group and its KafkaConnectors. The worker spec
+# (replicas, JVM, probes, logging, metrics, tracing, rack, spec.template) is
+# kafka-common's, shared with mirror-maker2.
+#
+# 1.x keys that moved are still read in 2.x and listed as DEPRECATED in the
+# release notes: podMonitors → monitoring.podMonitor, metricsConfig → metrics,
+# databaseEgress → networkPolicy.egress.databases, autoRestart →
+# connectorDefaults.autoRestart, kafkaUser.secretSync → secretSync,
+# template → templateExtra, a `connectors` list → a map. See
+# docs/connect-cluster-2.0-upgrade.md.
 
 # -- Override the chart name
 nameOverride: ""
-# -- Override the full release name
+# -- Override the full release name (the KafkaConnect's name)
 fullnameOverride: ""
 # -- Override the release namespace
 namespaceOverride: ""
 
-# -- Keep CRDs on helm uninstall (safety measure)
+# -- Keep the KafkaConnect and KafkaConnectors on `helm uninstall`
 keepOnDelete: true
 
-# -- Extra labels to add to all resources
+# -- Production rails: refuse plaintext passwords in connector configs,
+# namespace-wide Secret access, and an unencrypted or unauthenticated Kafka
+# connection.
+productionMode: false
+
+# -- Extra labels added to every resource
 extraLabels: {}
 
-# -- Test images used in Helm test pods
+# -- Kubernetes cluster domain (bootstrap and Schema Registry FQDNs)
+clusterDomain: cluster.local
+
+# -- Pull secrets for the workers and the chart's own pods
+imagePullSecrets: []
+
+# -- Pull policy for the pods THIS CHART owns (tests, secret sync, preflight).
+# The workers' pull policy is operator-wide (STRIMZI_IMAGE_PULL_POLICY).
+imagePullPolicy: ""
+
+# -- Images the chart's own pods use
 testImages:
   kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
 
-# -- Connector plugins the Helm test asserts the running worker offers.
-#
-# A count is not enough. A plugin whose jars cannot resolve their own imports is
-# dropped during the worker's plugin scan and the worker starts regardless, so a
-# broken image passes every health check and simply does not offer the
-# connector. Naming them is what turns that into a test failure. Trim this list
-# in an overlay for a deployment that deliberately ships fewer plugins.
-tests:
-  expectedPlugins:
-    - io.debezium.connector.postgresql.PostgresConnector
-    - io.debezium.connector.mysql.MySqlConnector
-    - io.debezium.connector.mongodb.MongoDbConnector
-    - io.debezium.connector.sqlserver.SqlServerConnector
-    - io.debezium.connector.jdbc.JdbcSinkConnector
-    - io.aiven.connect.jdbc.JdbcSourceConnector
-    - io.aiven.kafka.connect.s3.AivenKafkaConnectS3SinkConnector
-    - io.aiven.kafka.connect.s3.source.S3SourceConnector
-
-# -- Number of Kafka Connect worker replicas
+# ── Workers ─────────────────────────────────────────────────────────────────
+# -- Number of worker replicas (seeded from autoscaling.minReplicas under an HPA)
 replicas: 3
-# -- Kafka Connect image (leave empty to use Strimzi default)
+# -- Connect image, with the plugins baked in. Empty = Strimzi's image for
+# `version`, which has no connector plugins beyond Kafka's own. The tag names
+# the Debezium line and the Kafka line; Chart.yaml's `kates.io/connect-image`
+# annotation records the same pin and scripts/check-versions.sh compares them.
 image: "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1"
-# -- Kafka version
+# -- Kafka version the workers run (Chart.yaml appVersion tracks it)
 version: "4.3.1"
-# -- Group ID for the Connect cluster
+# -- Strimzi version, used only for the preflight client image
+# (quay.io/strimzi/kafka:<strimziVersion>-kafka-<version>)
+strimziVersion: "1.2.0"
+# -- Connect group ID. It also names the internal topics, the worker's
+# transactional ID and the default dead letter queues.
 groupId: kates-connect-cluster
 
-# -- Kubernetes cluster domain (used for Schema Registry FQDN computation)
-clusterDomain: cluster.local
-
-# ── Kafka Connection Settings ───────────────────────────────────────────────
-# By default, this assumes the Kafka cluster is named 'krafter' and is deployed
-# in the same namespace as this Connect cluster. Adjust these if Kafka is deployed
-# elsewhere or has a different name.
+# ── Kafka connection ────────────────────────────────────────────────────────
+# The bootstrap is <clusterName>-kafka-bootstrap.<namespace>.svc.<domain> on
+# 9092, or 9093 with tls.enabled, unless bootstrapServers is set. The
+# namespace defaults to THIS release's namespace (mirror-maker2's defaults to
+# `kafka`).
 kafka:
-  # -- Kafka cluster name
+  # -- Strimzi Kafka cluster name
   clusterName: "krafter"
-  # -- Namespace where the Kafka cluster is deployed (leave empty if same namespace as Connect)
+  # -- Namespace of the Kafka cluster (empty = the release namespace)
   namespace: ""
-  # -- Bootstrap servers for the Kafka cluster (leave empty to compute automatically)
+  # -- Explicit bootstrap servers (wins over the computed address)
   bootstrapServers: ""
+  # -- Listener port for the computed address (empty = 9092, or 9093 with TLS)
+  listenerPort: ""
+  # -- Number of brokers, when known: the chart then refuses a replication
+  # factor above it
+  brokerCount: null
   tls:
     enabled: false
-    # -- Secret containing the CA certificate for Kafka
-    trustedCertificateSecret: "krafter-cluster-ca-cert"
+    # -- Secret with the cluster CA (empty = <clusterName>-cluster-ca-cert)
+    trustedCertificateSecret: ""
     certificateKey: "ca.crt"
   authentication:
+    # -- scram-sha-512 | scram-sha-256 | plain | tls | custom | "" (none)
     type: scram-sha-512
     username: "kates-connect"
-    # -- Secret containing the authentication password (defaults to username if empty)
-    secretName: "kates-connect"
-    # -- Key in the Secret containing the authentication password
+    # -- Secret holding the password (scram, plain) or the certificate and key
+    # (tls). Empty = the username, which is what the User Operator names it.
+    secretName: ""
+    # -- Key of the password in that Secret
     secretKey: "password"
+    # -- tls only: keys of the certificate and key
+    certificate: "user.crt"
+    key: "user.key"
+    # -- custom only (OAuth and other SASL mechanisms, the v1 home of `oauth`)
+    custom:
+      sasl: false
+      config: {}
 
-# ── Managed KafkaUser ───────────────────────────────────────────────────────
-# One flag provisions everything: KafkaUser (in the Kafka namespace), ACLs,
-# and the credentials Secret in the Connect namespace. Requires the Strimzi
-# User Operator; ACLs apply when the Kafka cluster has authorization enabled.
-kafkaUser:
-  create: false
-  # -- User name (defaults to kafka.authentication.username)
-  name: ""
-  authorization:
-    enabled: true
-    type: simple
-    # -- auto: derive least-privilege ACLs from chart values (groupId,
-    # internal topics, exactly-once, topicGrants). custom: use acls verbatim.
-    mode: auto
-  # -- Data topics connectors read/write (auto mode). Prefix patterns recommended.
-  topicGrants:
-    - name: cdc
-      patternType: prefix
-  # -- Extra consumer groups beyond <groupId> and connect-*
-  groupGrants: []
-  # -- Used only when authorization.mode=custom
-  acls: []
-  quotas: {}
-  # -- KafkaUser template passthrough (labels/annotations on the generated Secret)
-  template: {}
-  # -- Make the credentials Secret available in the Connect namespace when
-  # Kafka lives elsewhere. job: hook Job copies it (re-runs on upgrade for
-  # rotation). reflector: annotate for kubernetes-reflector instead.
-  secretSync:
-    enabled: true
-    method: job
-    timeoutSeconds: 300
-
-# ── Scheduling ──────────────────────────────────────────────────────────────
-topologySpreadConstraints:
+# ── Exactly-once source support ─────────────────────────────────────────────
+# Sets the worker's exactly.once.source.support and, on a chart-managed
+# KafkaUser, the transactional-ID grants it needs. Every worker in a group
+# must agree, so it is a group-wide switch rather than an extraConfig line.
+exactlyOnce:
   enabled: true
-  maxSkew: 1
-  topologyKey: topology.kubernetes.io/zone
-  whenUnsatisfiable: ScheduleAnyway
-  additional: []
 
-podDisruptionBudget:
-  maxUnavailable: 1
-
-rack:
-  enabled: true
-  topologyKey: topology.kubernetes.io/zone
-
-tolerations: []
-nodeSelector: {}
-nodeAffinity: {}
-podAntiAffinity:
-  enabled: true
-  topologyKey: kubernetes.io/hostname
-
-# -- Pod-level security context
-podSecurityContext:
-  fsGroup: 1001
-  runAsNonRoot: true
-  # runAsUser: 1001
-  seccompProfile: RuntimeDefault
-
-# -- DNS settings
-dnsPolicy: ""
-dnsConfig: {}
-
-# -- Termination grace period (seconds)
-terminationGracePeriodSeconds: 30
-
-priorityClassName: "system-cluster-critical"
-imagePullSecrets: []
-
-
-# ── Internal Topics ─────────────────────────────────────────────────────────
+# ── Internal topics ─────────────────────────────────────────────────────────
 internalTopics:
-  prefix: ""  # defaults to groupId
-  # -- Override individual topic names (defaults to <groupId>-<suffix>)
-  # offsetsName: ""
-  # configsName: ""
-  # statusName: ""
+  # -- Prefix of the three topics (empty = groupId)
+  prefix: ""
+  # -- Full names, overriding <prefix>-offsets / -configs / -status
+  offsetsName: ""
+  configsName: ""
+  statusName: ""
 
-# ── JVM & Resources ────────────────────────────────────────────────────────
+# ── Worker configuration ────────────────────────────────────────────────────
+config:
+  # -- Replication factor of the internal topics (and of dead letter queues)
+  replicationFactor: 3
+  keyConverter: org.apache.kafka.connect.json.JsonConverter
+  valueConverter: org.apache.kafka.connect.json.JsonConverter
+  keyConverterSchemasEnable: true
+  valueConverterSchemasEnable: true
+
+# -- Further worker properties. exactly.once.source.support belongs to
+# `exactlyOnce`; the chart refuses it here.
+extraConfig:
+  producer.acks: "all"
+  producer.enable.idempotence: "true"
+  consumer.auto.offset.reset: "earliest"
+  group.initial.rebalance.delay.ms: "3000"
+
+# ── Schema Registry (Apicurio, Confluent-compatible API) ────────────────────
+schemaRegistry:
+  enabled: false
+  serviceName: apicurio-apicurio-registry
+  # -- Namespace of the registry (empty = the Kafka namespace)
+  namespace: ""
+  port: 80
+  path: /apis/ccompat/v7
+  # -- Registry pod labels, for the NetworkPolicy egress rule
+  podSelector:
+    app.kubernetes.io/name: apicurio-registry
+
+# ── Plugins ─────────────────────────────────────────────────────────────────
+# Three ways to get connector plugins onto the workers:
+#
+#   image    (recommended) a Connect image with the plugins inside — `image`
+#   plugins  OCI images mounted as volumes at start-up (spec.plugins): no
+#            custom Connect image and no build, but the ImageVolume feature
+#            must be enabled on every node
+#   build    the operator builds and pushes an image (spec.build)
+#
+# plugins:
+#   - name: debezium-postgres
+#     artifacts:
+#       - type: image
+#         reference: ghcr.io/example/debezium-postgres@sha256:…
+#     # -- Connector classes the Helm test expects this plugin to offer
+#     expect: [io.debezium.connector.postgresql.PostgresConnector]
+plugins: []
+# -- spec.plugins mounts images as volumes, which needs the Kubernetes
+# ImageVolume feature (alpha in 1.31, beta from 1.33) on every node that may
+# run a worker. The chart cannot see a feature gate; set this once you have
+# checked, and the plugins render.
+imageVolumes:
+  acknowledged: false
+
+# -- spec.build passthrough (output + plugins); rendered when output is set
+build: {}
+  # output:
+  #   type: docker
+  #   image: "registry.example.com/connect:3.6.2-kafka-4.3.1"
+  #   pushSecret: my-registry-credentials
+  # plugins:
+  #   - name: camel-s3-sink
+  #     artifacts:
+  #       - type: maven
+  #         group: org.apache.camel.kafkaconnector
+  #         artifact: camel-aws-s3-sink-kafka-connector
+  #         version: "4.8.3"
+
+# ── Logging and tracing ─────────────────────────────────────────────────────
+# -- Two shapes:
+#   external — the chart renders a log4j2 ConfigMap (rootLevel, loggers)
+#   inline   — { type: inline, loggers: { rootLogger.level: INFO } }, passed through
+logging:
+  type: external
+  rootLevel: INFO
+  # -- Extra loggers for the external ConfigMap, name → level
+  loggers:
+    org.reflections: ERROR
+
+tracing:
+  enabled: true
+  type: opentelemetry
+  # -- OTLP endpoint, e.g. http://otel-collector.observability.svc:4317.
+  # The workers export nothing until it is set.
+  endpoint: ""
+  # -- Service name in traces (empty = the release fullname)
+  serviceName: ""
+
+# -- Extra env for the worker container
+env: []
+# -- Passthrough merged into spec.template.connectContainer (volumeMounts, …)
+connectContainer: {}
+# -- Passthrough deep-merged into spec.template last (pod metadata,
+# apiService, headlessService, buildPod, …)
+templateExtra: {}
+
+# ── JVM, resources, probes ──────────────────────────────────────────────────
 jvmOptions:
   -Xms: 1024m
   -Xmx: 1024m
@@ -167,147 +225,6 @@ resources:
     memory: 4Gi
     cpu: 4000m
 
-# ── Schema Registry (Apicurio) ──────────────────────────────────────────────
-schemaRegistry:
-  enabled: false
-  serviceName: apicurio-apicurio-registry
-  # -- Namespace where the Schema Registry is deployed (defaults to the Kafka namespace)
-  namespace: ""
-  port: 80
-  path: /apis/ccompat/v7
-  # -- Pod labels used by the NetworkPolicy egress rule
-  podSelector:
-    app.kubernetes.io/name: apicurio-registry
-
-# ── Secret Access (Strimzi 1.0.0+) ──────────────────────────────────────────
-# The KubernetesSecretConfigProvider is always enabled. Use the syntax
-# ${secrets:<namespace>/<secret-name>:<key>} in connector configs to reference
-# Kubernetes Secrets without volume mounts. The Connect ServiceAccount must
-# have RBAC permissions to read the target secrets.
-# See: https://strimzi.io/docs/operators/latest/configuring.html#type-ExternalConfiguration-reference
-
-
-# ── Network Policy ──────────────────────────────────────────────────────────
-# Default-deny posture: the chart ships a deny-all policy for the Connect pods
-# and every allowed flow below is an explicit, individually configurable rule.
-# Anything not listed is blocked.
-# Deprecated flat keys (kafkaPorts, monitoringNamespace, restApiClients) are
-# still honored and win over the structured equivalents when set.
-networkPolicy:
-  enabled: true
-
-  # -- Deny-all Ingress+Egress for the Connect pods. Disable only when a
-  # platform-level default-deny already exists and duplicates are forbidden.
-  defaultDeny:
-    enabled: true
-    # -- Pod selector for the deny policy (empty = Connect pods only)
-    selector: {}
-
-  # -- DNS egress. Empty selectors = any destination; on locked-down clusters
-  # pin to kube-dns, e.g.:
-  #   namespaceSelector: {kubernetes.io/metadata.name: kube-system}
-  #   podSelector: {k8s-app: kube-dns}
-  dns:
-    enabled: true
-    namespaceSelector: {}
-    podSelector: {}
-    ports: [53]
-
-  # -- Kubernetes API server egress (needed by KubernetesSecretConfigProvider).
-  # Empty ipBlock = any destination; pin the control-plane CIDR on strict
-  # clusters, e.g. ipBlock: {cidr: 10.0.0.1/32}
-  apiServer:
-    enabled: true
-    ports: [443, 6443]
-    ipBlock: {}
-
-  # -- Worker-to-worker REST traffic on 8083 (leader forwarding)
-  workerToWorker:
-    enabled: true
-
-  # -- Kafka broker egress
-  kafka:
-    enabled: true
-    ports: [9092, 9093]
-
-  # -- Metrics scrape ingress (JMX exporter, port 9404)
-  monitoring:
-    enabled: true
-    namespace: monitoring
-    port: 9404
-
-  # -- Connect REST API (8083) ingress. No catch-all: kubelet probes bypass
-  # NetworkPolicy, so only the clients listed here (plus the Strimzi operator)
-  # get access. allowAll: true restores the old open behavior.
-  restApi:
-    allowAll: false
-    operator: true
-    clients:
-      - namespace: kates
-        podSelector:
-          app.kubernetes.io/name: kates
-
-  # -- Schema Registry egress (rendered only when schemaRegistry.enabled)
-  schemaRegistry:
-    enabled: true
-
-  # -- OTLP tracing egress (rendered only when tracing.endpoint is set).
-  # Port is parsed from tracing.endpoint; pin selectors to the collector
-  # namespace/pods if desired.
-  tracing:
-    enabled: true
-    namespaceSelector: {}
-    podSelector: {}
-    # port: 4317
-
-  # -- Namespace where the Strimzi Operator is deployed (leave empty if same as Kafka)
-  strimziOperatorNamespace: ""
-
-  # -- Extra raw NetworkPolicy rule fragments, appended verbatim
-  extraIngress: []
-  extraEgress: []
-
-# ── Database Egress (NetworkPolicy) ─────────────────────────────────────────
-databaseEgress: []
-  # - namespace: database
-  #   port: 5432
-  #   podSelector:
-  #     app.kubernetes.io/name: postgresql
-
-# ── Converter Configuration ─────────────────────────────────────────────────
-config:
-  replicationFactor: 3
-  keyConverter: org.apache.kafka.connect.json.JsonConverter
-  valueConverter: org.apache.kafka.connect.json.JsonConverter
-  keyConverterSchemasEnable: true
-  valueConverterSchemasEnable: true
-
-# -- Arbitrary extra Kafka Connect worker config properties
-extraConfig:
-  producer.acks: "all"
-  producer.enable.idempotence: "true"
-  consumer.auto.offset.reset: "earliest"
-  exactly.once.source.support: "enabled"
-  group.initial.rebalance.delay.ms: "3000"
-
-# ── Logging ─────────────────────────────────────────────────────────────────
-logging:
-  type: external
-
-# ── Tracing (OpenTelemetry) ─────────────────────────────────────────────────
-tracing:
-  enabled: true
-  type: opentelemetry
-  # -- OTLP collector endpoint, e.g. http://otel-collector.observability.svc:4317
-  # Tracing is inert until this is set (injects OTEL_* env vars into workers).
-  endpoint: ""
-  # -- Service name reported in traces (defaults to the release fullname)
-  serviceName: ""
-
-# ── Environment Variables ───────────────────────────────────────────────────
-env: []
-
-# ── Probes ──────────────────────────────────────────────────────────────────
 readinessProbe:
   initialDelaySeconds: 15
   periodSeconds: 10
@@ -319,88 +236,111 @@ livenessProbe:
   failureThreshold: 20
   timeoutSeconds: 30
 
-# ── Strimzi Build (Custom Plugins) ──────────────────────────────────────────
-# Enable this to let Strimzi build a custom Connect image with plugins.
-# If using a pre-built image (recommended), leave this empty.
-build: {}
-  # output:
-  #   type: docker
-  #   image: "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1"
-  #   pushSecret: my-registry-credentials
-  # plugins:
-  #   # --- Cloud Storage ---
-  #   - name: camel-s3-sink
-  #     artifacts:
-  #       - type: maven
-  #         group: org.apache.camel.kafkaconnector
-  #         artifact: camel-aws-s3-sink-kafka-connector
-  #         version: "4.8.3"
-  #
-  #   # --- Search / Analytics ---
-  #   - name: elasticsearch-sink
-  #     artifacts:
-  #       - type: maven
-  #         group: io.confluent
-  #         artifact: kafka-connect-elasticsearch
-  #         version: "14.1.0"
-  #
-  #   # --- Data Warehouse ---
-  #   - name: bigquery-sink
-  #     artifacts:
-  #       - type: maven
-  #         group: com.wepay.kcbq
-  #         artifact: kcbq-connector
-  #         version: "2.5.0"
-  #
-  #   # --- HTTP / Webhooks ---
-  #   - name: http-sink
-  #     artifacts:
-  #       - type: maven
-  #         group: io.aiven
-  #         artifact: aiven-kafka-connect-http
-  #         version: "0.6.0"
-  #
-  #   # --- JDBC (Aiven; already bundled in the default connect image) ---
-  #   # Not on Maven Central — Aiven publishes release archives on GitHub.
-  #   - name: aiven-jdbc
-  #     artifacts:
-  #       - type: zip
-  #         url: https://github.com/Aiven-Open/jdbc-connector-for-apache-kafka/releases/download/v6.10.0/jdbc-connector-for-apache-kafka-6.10.0.zip
-  #
-  #   # --- Incubating Debezium ---
-  #   - name: debezium-vitess
-  #     artifacts:
-  #       - type: maven
-  #         group: io.debezium
-  #         artifact: debezium-connector-vitess
-  #         version: "3.6.2.Final"
+# -- Authenticated JMX on the workers, e.g. { authentication: { type: password } }
+jmxOptions: {}
 
-# ── Metrics ─────────────────────────────────────────────────────────────────
-metricsConfig:
-  # -- Create the JMX exporter ConfigMap in-chart (recommended; makes the chart
-  # self-contained). Set false to reference an existing ConfigMap.
-  create: true
-  # -- ConfigMap name (empty = <fullname>-metrics when create=true)
-  configMapName: ""
-  configMapKey: kafka-metrics-config.yml
+# ── Scheduling ──────────────────────────────────────────────────────────────
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: ScheduleAnyway
+  additional: []
 
-# ── Pod Template Overrides ──────────────────────────────────────────────────
-template:
-  pod:
-    metadata: {}
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+rack:
+  enabled: true
+  topologyKey: topology.kubernetes.io/zone
+  # -- Image of the init container that reads the node's zone label (empty =
+  # the operator's). Name it on a mirrored or air-gapped registry.
+  clientRackInitImage: ""
+
+podDisruptionBudget:
+  # -- Rendered only when more than one worker runs
+  enabled: true
+  maxUnavailable: 1
+
+tolerations: []
+# -- Node labels the workers must run on. Strimzi's pod template has no
+# nodeSelector, so it becomes a required node-affinity term.
+nodeSelector: {}
+nodeAffinity: {}
+
+podSecurityContext:
+  fsGroup: 1001
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+dnsPolicy: ""
+dnsConfig: {}
+
+# -- Seconds a worker gets to stop its tasks and commit offsets
+terminationGracePeriodSeconds: 30
+
+# -- PriorityClass for the workers. Empty by default: system-cluster-critical
+# is for what the cluster itself cannot run without.
+priorityClassName: ""
+# -- A PriorityClass for streaming workloads, rendered by this chart (set
+# priorityClassName to its name to use it). Cluster-scoped: create it from ONE
+# release per cluster.
+priorityClass:
+  create: false
+  name: kates-streaming
+  value: 1000000
+  description: "Kafka Connect and MirrorMaker 2 workers"
 
 # ── Connectors ──────────────────────────────────────────────────────────────
-# Default auto-restart settings applied to all connectors unless overridden
-# at the individual connector level.
-autoRestart:
-  enabled: true
-  maxRestarts: 10
+# -- Merged under every connector (the connector's own keys win)
+connectorDefaults:
+  autoRestart:
+    enabled: true
+    maxRestarts: 10
+  config: {}
 
-connectors: []
+# -- KafkaConnectors, keyed by name, so an overlay can change one connector
+# without restating the others:
+#
+# connectors:
+#   orders-cdc:
+#     class: io.debezium.connector.postgresql.PostgresConnector
+#     tasksMax: 1
+#     state: running            # running | paused | stopped
+#     version: ""               # plugin version range (Kafka 4.1+)
+#     autoRestart: { enabled: true, maxRestarts: 10 }
+#     listOffsets: { toConfigMap: { name: orders-cdc-offsets } }
+#     alterOffsets: { fromConfigMap: { name: orders-cdc-new-offsets } }
+#     config:
+#       database.hostname: postgresql.database.svc
+#       database.password: "${secrets:connect/pg-credentials:password}"
+#       database.dbname: orders
+#       topic.prefix: cdc
+#   orders-sink:
+#     class: io.debezium.connector.jdbc.JdbcSinkConnector
+#     deadLetterQueue:
+#       enabled: true           # errors.tolerance=all + a KafkaTopic for the DLQ
+#       topic: ""               # empty = <groupId>-dlq-<connector>
+#       replicationFactor: null # empty = config.replicationFactor
+#       partitions: 1
+#       contextHeaders: true
+#       createTopic: true       # a KafkaTopic in the Kafka namespace
+#     config:
+#       topics: cdc.public.orders
+#       connection.url: jdbc:postgresql://postgresql.database.svc:5432/orders
+#
+# `enabled: false` drops one. A list of {name, …} is still accepted in 2.x.
+# Every ${secrets:<namespace>/<name>:<key>} reference is granted to the
+# workers (get on that one Secret) — see `rbac`.
+connectors: {}
 
-# ── Test Connectors ─────────────────────────────────────────────────────────
-# These connectors are ONLY deployed when running `helm test`, and they are
-# automatically deleted when the test succeeds. Use this for testing/examples.
+# ── Test connectors ─────────────────────────────────────────────────────────
+# Created by `helm test` and deleted when it passes. Values are templates:
+# {{ .Release.Namespace }} and {{ include "connect-cluster.bootstrap" . }} work.
+# They are the platform's demo pipeline (PostgreSQL in `database`, SCRAM over
+# plaintext for Debezium's schema history); set testConnectors: [] elsewhere.
 testConnectors:
   - name: debezium-postgres-source-working-example
     class: io.debezium.connector.postgresql.PostgresConnector
@@ -408,8 +348,8 @@ testConnectors:
     config:
       database.hostname: "postgresql.database.svc"
       database.port: "5432"
-      database.user: "${secrets:connect/connect-pg-credentials:username}"
-      database.password: "${secrets:connect/connect-pg-credentials:password}"
+      database.user: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:username}"
+      database.password: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:password}"
       database.dbname: "orders"
       topic.prefix: "cdc"
       schema.include.list: "public"
@@ -421,10 +361,10 @@ testConnectors:
       snapshot.mode: "initial"
       decimal.handling.mode: "double"
       tombstones.on.delete: "false"
-      schema.history.internal.kafka.bootstrap.servers: "krafter-kafka-bootstrap.kafka.svc:9092"
+      schema.history.internal.kafka.bootstrap.servers: "{{ include \"connect-cluster.bootstrap\" . }}"
       schema.history.internal.kafka.security.protocol: "SASL_PLAINTEXT"
       schema.history.internal.kafka.sasl.mechanism: "SCRAM-SHA-512"
-      schema.history.internal.kafka.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-connect\" password=\"${secrets:connect/kates-connect:password}\";"
+      schema.history.internal.kafka.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"{{ .Values.kafka.authentication.username }}\" password=\"${secrets:{{ .Release.Namespace }}/{{ .Values.kafka.authentication.secretName | default .Values.kafka.authentication.username }}:password}\";"
       schema.history.internal.kafka.topic: "cdc-schema-history"
 
   - name: jdbc-sink-from-cdc-working-example
@@ -433,8 +373,8 @@ testConnectors:
     config:
       topics: "cdc.public.demo_orders"
       connection.url: "jdbc:postgresql://postgresql.database.svc:5432/orders"
-      connection.username: "${secrets:connect/connect-pg-credentials:username}"
-      connection.password: "${secrets:connect/connect-pg-credentials:password}"
+      connection.username: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:username}"
+      connection.password: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:password}"
       table.name.format: "demo_orders_replica"
       insert.mode: "upsert"
       primary.key.mode: "record_key"
@@ -448,8 +388,8 @@ testConnectors:
     config:
       topics: "kates-results"
       connection.url: "jdbc:postgresql://postgresql.database.svc:5432/orders"
-      connection.username: "${secrets:connect/connect-pg-credentials:username}"
-      connection.password: "${secrets:connect/connect-pg-credentials:password}"
+      connection.username: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:username}"
+      connection.password: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:password}"
       insert.mode: "insert"
       auto.create: "true"
       auto.evolve: "true"
@@ -460,13 +400,14 @@ testConnectors:
     tasksMax: 1
     config:
       connection.url: "jdbc:postgresql://postgresql.database.svc:5432/orders"
-      connection.user: "${secrets:connect/connect-pg-credentials:username}"
-      connection.password: "${secrets:connect/connect-pg-credentials:password}"
+      connection.user: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:username}"
+      connection.password: "${secrets:{{ .Release.Namespace }}/connect-pg-credentials:password}"
       mode: "bulk"
       query: "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
       topic.prefix: "kates-jdbc-source-"
       poll.interval.ms: "30000"
 
+# -- KafkaTopics `helm test` creates (in the Kafka namespace)
 testTopics:
   - name: cdc-public-demo-orders
     topicName: cdc.public.demo_orders
@@ -474,41 +415,96 @@ testTopics:
     replicas: 3
     config:
       min.insync.replicas: "2"
-# ── Autoscaling (HPA) ───────────────────────────────────────────────────────
-# KafkaConnect exposes the scale subresource, so a standard HPA works.
-# When enabled, the chart stops managing spec.replicas.
+
+# ── Autoscaling ─────────────────────────────────────────────────────────────
+# KafkaConnect has a scale subresource. Under the HPA, spec.replicas is seeded
+# from minReplicas and read back from the live CR on upgrade.
 autoscaling:
   enabled: false
   minReplicas: 3
   maxReplicas: 10
   targetCPUUtilizationPercentage: 80
-  # -- Set to enable memory-based scaling (e.g. 80)
   targetMemoryUtilizationPercentage: ""
-  # -- Additional autoscaling/v2 metrics entries
   extraMetrics: []
-  # -- HPA scaling behavior (autoscaling/v2 behavior block)
   behavior: {}
+  # -- Connect runs at most sum(tasksMax) tasks, so workers beyond that idle.
+  # With connectors declared here the chart refuses maxReplicas above that
+  # sum; set this to allow the headroom anyway.
+  allowIdleWorkers: false
 
-# ── RBAC ────────────────────────────────────────────────────────────────────
-# -- Restrict the secret-reader Role to specific secrets. Empty = all secrets
-# in the namespace (get/list/watch). When set, verbs narrow to get/watch and
-# access is limited to the named secrets.
+# ── Managed KafkaUser ───────────────────────────────────────────────────────
+# A KafkaUser in the Kafka namespace with least-privilege ACLs derived from
+# these values: the internal topics, the worker group and connect-* sink
+# groups, the exactly-once transactional IDs, the dead letter queues, and
+# topicGrants. The User Operator writes the credentials Secret next to it;
+# `secretSync` brings it here when Kafka lives elsewhere.
+#
+# kafka-cluster's platform profile also provisions `kates-connect`. To move it
+# here, adopt it rather than recreate it (docs/connect-cluster-2.0-upgrade.md);
+# NOTES print the commands when the user already belongs to another release.
+kafkaUser:
+  create: false
+  # -- User name (empty = kafka.authentication.username)
+  name: ""
+  authorization:
+    enabled: true
+    type: simple
+    # -- auto: derive the ACLs; custom: use `acls` verbatim
+    mode: auto
+  # -- Data topics the connectors read and write (auto mode)
+  topicGrants:
+    - name: cdc
+      patternType: prefix
+  # -- Consumer groups beyond <groupId> and connect-*
+  groupGrants: []
+  # -- custom mode only
+  acls: []
+  quotas: {}
+  # -- KafkaUser spec.template passthrough
+  template: {}
+
+# ── Credential sync ─────────────────────────────────────────────────────────
+# The workers read their password or certificate, and the cluster CA, from
+# THIS namespace. When Kafka lives elsewhere, the chart copies them here:
+# the managed user's Secret (kafkaUser.create) and the cluster CA (tls) are
+# added automatically, `secrets` adds more.
+secretSync:
+  enabled: true
+  # -- job: a post-install/upgrade Job copies them (and a CronJob with
+  # `watch`); reflector: annotate the managed user's Secret for
+  # kubernetes-reflector instead
+  method: job
+  timeoutSeconds: 300
+  # -- Re-copy on a schedule as well (a standing cross-namespace read grant)
+  watch: false
+  schedule: "*/15 * * * *"
+  # -- Image with kubectl and jq (empty = testImages.kubectl)
+  image: ""
+  # -- Extra Secrets to copy: {name, fromNamespace, as}
+  secrets: []
+
+# ── Secret access for connector configs ─────────────────────────────────────
+# The workers resolve ${secrets:<namespace>/<name>:<key>} with Strimzi's
+# KubernetesSecretConfigProvider, as the <fullname>-connect ServiceAccount.
+# The chart grants `get` on exactly the Secrets the connectors (and test
+# connectors) reference, one Role per namespace.
 rbac:
+  # -- Secrets referenced from outside this chart (connectors applied by hand
+  # or by another tool): `name` (this namespace) or `namespace/name`
   secretNames: []
-  # - kates-connect
-  # - connect-pg-credentials
+  # -- get/list/watch on every Secret in the release namespace and the Kafka
+  # namespace — the 1.x default. productionMode refuses it.
+  allSecrets: false
 
+# -- ServiceAccount for the chart's test pods. Its annotations also go on the
+# operator-made <fullname>-connect account the workers run as (IRSA,
+# Workload Identity).
 serviceAccount:
-  # -- Create a dedicated ServiceAccount for Connect pods
   create: true
-  # -- Annotations to add to the ServiceAccount (e.g. for IRSA/Workload Identity)
   annotations: {}
-  # -- Name of the ServiceAccount (defaults to fullname)
   name: ""
 
-# ── REST API Exposure ───────────────────────────────────────────────────────
-# Expose the Kafka Connect REST API (port 8083) via a Kubernetes Service
-# and optionally an Ingress for external tooling (Kafka UI, monitoring).
+# ── REST API ────────────────────────────────────────────────────────────────
 restApi:
   service:
     enabled: true
@@ -519,46 +515,166 @@ restApi:
     enabled: false
     className: ""
     annotations: {}
-      # nginx.ingress.kubernetes.io/rewrite-target: /
     hosts: []
       # - host: connect.example.com
       #   paths:
       #     - path: /
       #       pathType: Prefix
     tls: []
-      # - secretName: connect-tls
-      #   hosts:
-      #     - connect.example.com
 
-# ── Observability ───────────────────────────────────────────────────────────
+# ── Network policy ──────────────────────────────────────────────────────────
+# A deny-all policy for the workers plus one policy of explicit allows.
+networkPolicy:
+  enabled: true
+  defaultDeny:
+    enabled: true
+    # -- Pods the deny policy selects (empty = the workers)
+    selector: {}
+  dns:
+    enabled: true
+    # -- Empty = any destination; pin kube-dns on strict clusters
+    namespaceSelector: {}
+    podSelector: {}
+    ports: [53]
+  # -- The API server (KubernetesSecretConfigProvider)
+  apiServer:
+    enabled: true
+    ports: [443, 6443]
+    ipBlock: {}
+  # -- Worker-to-worker REST (leader forwarding)
+  workerToWorker:
+    enabled: true
+  kafka:
+    enabled: true
+    # -- Broker ports (empty = the ports the bootstrap dials). When set, a
+    # bootstrap port outside the list is refused.
+    ports: []
+  monitoring:
+    enabled: true
+    namespace: monitoring
+    port: 9404
+  # -- REST API (8083) ingress: declared clients and the Cluster Operator.
+  # allowAll: true opens it to any source.
+  restApi:
+    allowAll: false
+    operator: true
+    clients:
+      - namespace: kates
+        podSelector:
+          app.kubernetes.io/name: kates
+  # -- Namespace of the Strimzi Cluster Operator
+  strimziOperatorNamespace: "strimzi-operator"
+  schemaRegistry:
+    enabled: true
+  tracing:
+    enabled: true
+    namespaceSelector: {}
+    podSelector: {}
+    # port: 4317   # empty = parsed from tracing.endpoint
+  egress:
+    # -- Databases the connectors reach. Each entry also renders a matching
+    # ingress policy in the database namespace unless createIngressPolicy is false.
+    databases: []
+      # - namespace: database
+      #   port: 5432
+      #   podSelector:
+      #     app.kubernetes.io/name: postgresql
+  extraIngress: []
+  extraEgress: []
+
+# ── Metrics ─────────────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  # -- jmxPrometheusExporter (the chart's rules, which the alerts and the
+  # dashboard read) or strimziMetricsReporter
+  type: jmxPrometheusExporter
+  # -- strimziMetricsReporter only
+  allowList:
+    - "kafka_connect.*"
+    - "kafka_producer.*"
+    - "kafka_consumer.*"
+  # -- An existing ConfigMap with exporter rules instead of the chart's
+  existingConfigMap:
+    name: ""
+    key: ""
+
+monitoring:
+  podMonitor:
+    enabled: true
+    labels:
+      release: kafka
+      prometheus: kube-prometheus
+    interval: ""
+    scrapeTimeout: ""
+    honorLabels: false
+    metricRelabelings: []
+
+# ── Alerts ──────────────────────────────────────────────────────────────────
+# A PrometheusRule, rendered where the monitoring.coreos.com/v1 API exists.
+# Every rule is scoped to this release's workers and links its section of
+# docs/connect-cluster-runbook.md.
 alerts:
   enabled: true
   labels:
     release: kafka
     prometheus: kube-prometheus
-    severity: warning
+  runbookBaseUrl: "https://github.com/bmscomp/kates/blob/main/docs/connect-cluster-runbook.md"
+  # -- The rules read the JMX exporter's names; with the metrics reporter they
+  # would never fire, so the chart refuses the pair unless this is set.
+  allowReporterMetrics: false
   thresholds:
     heapUsagePercent: 85
     errorRatePerSecond: 1
     rebalanceRatePerSecond: 0.1
-    sourceLagMinutes: 15
+    # -- Minutes a running source may poll nothing (sourceIdle)
+    sourceIdleMinutes: 15
+    # -- Records a sink connector's consumer group may lag (sinkLag)
+    sinkLagRecords: 100000
+  # -- Opt-in: a source that polls nothing can be normal
+  sourceIdle:
+    enabled: false
+  # -- Reads kafka_consumergroup_lag, which kafka-cluster's Kafka Exporter publishes
+  sinkLag:
+    enabled: true
+  # -- Task availability SLO: the fraction of declared tasks running
+  slo:
+    enabled: false
+    target: 0.99
+    burnRate: 14.4
 
-podMonitors:
-  enabled: true
-  labels:
-    release: kafka
-    prometheus: kube-prometheus
-
+# ── Dashboard ───────────────────────────────────────────────────────────────
 dashboards:
   enabled: true
-  namespace: ""   # defaults to release namespace
+  # -- Namespace of the ConfigMap (empty = the release namespace)
+  namespace: ""
   label: grafana_dashboard
   labelValue: "1"
+  folder: Kafka
 
-# ── Monitoring (PodMonitor) ─────────────────────────────────────────────────
-monitoring:
-  enabled: true
-  interval: ""
-  scrapeTimeout: ""
-  honorLabels: false
-  metricRelabelings: []
+# ── Preflight ───────────────────────────────────────────────────────────────
+# A pre-install/upgrade Job that dials the Kafka cluster with the workers'
+# Kafka client line and reports PROTOCOL / DNS / TLS / AUTH / LISTENER /
+# NETWORK before the KafkaConnect exists.
+preflight:
+  enabled: false
+  # -- Client image (empty = the Strimzi image for `version`)
+  image: ""
+  timeoutSeconds: 180
+  backoffLimit: 0
+  failOnError: true
+
+# ── Helm tests ──────────────────────────────────────────────────────────────
+tests:
+  # -- Connector classes the running workers must offer. A plugin whose jars
+  # cannot load is dropped by the worker's plugin scan while the worker starts
+  # anyway, so only naming them catches a broken image. `plugins[].expect`
+  # entries are added to this list.
+  expectedPlugins:
+    - io.debezium.connector.postgresql.PostgresConnector
+    - io.debezium.connector.mysql.MySqlConnector
+    - io.debezium.connector.mongodb.MongoDbConnector
+    - io.debezium.connector.sqlserver.SqlServerConnector
+    - io.debezium.connector.jdbc.JdbcSinkConnector
+    - io.aiven.connect.jdbc.JdbcSourceConnector
+    - io.aiven.kafka.connect.s3.AivenKafkaConnectS3SinkConnector
+    - io.aiven.kafka.connect.s3.source.S3SourceConnector

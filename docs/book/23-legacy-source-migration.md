@@ -289,9 +289,14 @@ as plain StatefulSets through the `legacy-kafka` chart, which is how a 2.x or
 cluster:
 
 ```bash
-# A 2.8.2 source, its own namespace, no operator involved
+# A 2.8.2 source, its own namespace, no operator involved. legacy-kafka has no
+# chart dependencies, so this renders straight from a checkout.
 helm install legacy charts/legacy-kafka -n kafka-legacy-2x --create-namespace \
   -f charts/legacy-kafka/values-kafka-2x.yaml
+
+# Or let the CLI pick the era, build the image the version needs, create the
+# namespace and topics, and run the chart's own test
+kates migrate source deploy --version 2.8.2
 ```
 
 A 4.x source is different: it can run under Strimzi, though possibly not under

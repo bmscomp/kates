@@ -13,12 +13,17 @@ Heatmaps show the **full latency distribution over time** — something percenti
 
 ### Export a Heatmap
 
+`kates report export` has no output-file flag. On a terminal it writes a
+default file beside you and tells you the name — `kates-heatmap-<id>.<ext>` for
+the two heatmap formats, `kates-report-<id>.<ext>` for the rest; redirect it
+when you want a name of your own:
+
 ```bash
 # JSON format (Grafana-compatible)
-kates report export <id> --format heatmap -o heatmap.json
+kates report export <id> --format heatmap > heatmap.json
 
 # CSV format (spreadsheet-friendly)
-kates report export <id> --format heatmap-csv -o heatmap.csv
+kates report export <id> --format heatmap-csv > heatmap.csv
 ```
 
 ### Understanding the Data
@@ -55,7 +60,7 @@ graph TD
 
 ### Load into a Spreadsheet
 
-1. Export as CSV: `kates report export <id> --format heatmap-csv -o heatmap.csv`
+1. Export as CSV: `kates report export <id> --format heatmap-csv > heatmap.csv`
 2. Open in Excel/Sheets
 3. Select all data → Insert → Chart → Heatmap/Surface
 4. Time on X-axis, latency buckets on Y-axis, count as color intensity
@@ -100,7 +105,7 @@ View performance evolution over time with sparkline charts.
 kates trend --type LOAD --metric p99LatencyMs --days 7
 
 # Throughput trend
-kates trend --type LOAD --metric throughputRecordsPerSec --days 7
+kates trend --type LOAD --metric avgThroughputRecPerSec --days 7
 
 # Average latency
 kates trend --type LOAD --metric avgLatencyMs --days 30
@@ -158,25 +163,36 @@ This is particularly valuable after chaos tests — you can see how load redistr
 
 All export formats and their use cases:
 
+`--format` takes `csv`, `junit`, `heatmap`, `heatmap-csv`, `md` or `html`.
+There is no `json` export format — the JSON of a report comes from the global
+`-o json` output mode instead.
+
 ### JSON (Programmatic)
 
 ```bash
-kates report export <id> --format json -o report.json
-cat report.json | jq '.summary.p99LatencyMs'
+kates report show <id> -o json > report.json
+jq '.summary.p99LatencyMs' report.json
 ```
 
 ### CSV (Spreadsheets)
 
 ```bash
-kates report export <id> --format csv -o report.csv
+kates report export <id> --format csv > report.csv
 # Open in Excel, Google Sheets, etc.
 ```
 
 ### JUnit XML (CI/CD)
 
 ```bash
-kates report export <id> --format junit -o results.xml
+kates report export <id> --format junit > results.xml
 # Upload to Jenkins, GitLab CI, etc.
+```
+
+### Markdown and HTML (Humans)
+
+```bash
+kates report export <id> --format md
+kates report export <id> --format html   # always writes kates-report-<id>.html
 ```
 
 ### JSON Output Mode
@@ -189,7 +205,7 @@ kates test list -o json | jq '.[].id'
 
 # Script: run test and extract P99
 ID=$(kates test create --type LOAD --records 50000 -o json | jq -r '.id')
-kates test watch $ID
+kates test watch "$ID"
 P99=$(kates test get $ID -o json | jq '.results[0].p99LatencyMs')
 echo "P99 Latency: ${P99}ms"
 ```

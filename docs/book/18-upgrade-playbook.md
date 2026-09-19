@@ -25,20 +25,23 @@ Each Strimzi release supports only a narrow window of Kafka versions, and that w
 
 | Component | Pinned version | Source |
 |-----------|----------------|--------|
-| Strimzi operator | 1.1.0 | `STRIMZI_VERSION` in `versions.env` |
+| Strimzi operator | 1.2.0 | `STRIMZI_VERSION` in `versions.env` |
 | Kafka image | `quay.io/strimzi/kafka:1.2.0-kafka-4.3.1` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
-| Chart default (`kafkaVersion`) | 4.3.0 | `charts/kafka-cluster/values.yaml` |
+| Chart default (`kafkaVersion`) | 4.3.1 | `charts/kafka-cluster/values.yaml` |
+
+The generated [Version & Compatibility Matrix](appendix-d-versions.md) is the authority when this table and it disagree.
 
 ### Procedure
 
 **Step 1 — Backup:**
 
-```bash
-# Ensure the Velero backup schedule exists
-# (config/kafka/kafka-backup.yaml defines the kafka-daily-backup Schedule)
-kubectl apply -f config/kafka/kafka-backup.yaml
+The `kafka-cluster` chart owns the backup objects. Setting `backup.enabled=true` renders a daily Velero `Schedule` named `<cluster>-daily-backup` and, with `backup.preUpgrade` (on by default), a one-shot `Backup` named `<cluster>-pre-upgrade-r<revision>` as a `pre-upgrade` Helm hook — so a chart-driven upgrade snapshots itself.
 
-# Take an ad-hoc pre-upgrade backup
+```bash
+# Confirm the schedule exists (it comes from backup.enabled in the values)
+kubectl get schedule krafter-daily-backup -n velero
+
+# Take an ad-hoc pre-upgrade backup as well
 velero backup create kafka-pre-upgrade --include-namespaces kafka --wait
 
 # Confirm completion
@@ -62,18 +65,24 @@ kates test create --type INTEGRITY --records 50000 --wait
 
 **Step 3 — Upgrade:**
 
+The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. Change it in the environment's values file and re-run the same values chain the deploy uses — the platform profile first, then the environment overlay:
+
 ```yaml
-# In config/kafka/kafka.yaml — change the version
-spec:
-  kafka:
-    version: 4.3.0  # → new version
+# charts/kafka-cluster/values-<env>.yaml
+kafkaVersion: <new-version>
 ```
 
 ```bash
-kubectl apply -f config/kafka/kafka.yaml
+helm dependency build charts/kafka-cluster
+
+helm upgrade krafter charts/kafka-cluster -n kafka \
+  -f charts/kafka-cluster/values-platform.yaml \
+  -f charts/kafka-cluster/values-<env>.yaml
 ```
 
-Strimzi will perform a rolling restart, one broker at a time, with PDB constraints honored.
+`kates deploy --kafka-version <new-version>` does the same thing through the CLI, and refuses a version the running operator's window does not contain.
+
+Strimzi performs a rolling restart, one broker at a time, with PDB constraints honored.
 
 **Step 4 — Monitor the rolling restart:**
 
@@ -103,7 +112,7 @@ make gameday
 
 ### Rollback
 
-Revert `spec.kafka.version` in `config/kafka/kafka.yaml` and re-apply — Strimzi rolls the brokers back one at a time. See [Kafka Version Rollback](#kafka-version-rollback) under Rollback Procedures for the full procedure and the KRaft metadata caveat.
+Put `kafkaVersion` back to the previous value and re-run the same `helm upgrade` — Strimzi rolls the brokers back one at a time. See [Kafka Version Rollback](#kafka-version-rollback) under Rollback Procedures for the full procedure and the KRaft metadata caveat.
 
 ## Strimzi Operator Upgrade
 
@@ -129,7 +138,7 @@ kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 
 ### Post-Upgrade — API Migration
 
-Strimzi periodically deprecates API versions. The manifests in this repository already use `kafka.strimzi.io/v1` (see `config/kafka/kafka.yaml`). When a future Strimzi release drops an API version your manifests still use, migrate them in bulk — this is the pattern used for the `v1beta2` → `v1` migration:
+Strimzi periodically deprecates API versions. Everything in this repository already uses `kafka.strimzi.io/v1` — the `kafka-cluster` chart templates render it, and the raw manifests under `config/kafka/` carry it too. When a future Strimzi release drops an API version your own manifests still use, migrate them in bulk — this is the pattern used for the `v1beta2` → `v1` migration:
 
 ```bash
 # GNU sed; on macOS use `sed -i ''` instead of `sed -i`
@@ -144,14 +153,17 @@ kubectl apply -f config/kafka/
 
 ## Drain Cleaner Upgrade
 
-Drain Cleaner is not a standalone Helm release in this repository — it is deployed by the `kafka-cluster` chart (`charts/kafka-cluster/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (the prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.6.1`). To upgrade it, bump the image tag and re-deploy the chart:
+Drain Cleaner is part of the `strimzi-operator` release (`charts/strimzi-operator/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (its prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.6.1`). kafka-cluster 0.4 used to deploy it; see `docs/kafka-cluster-1.0-upgrade.md` for the move. To upgrade it, bump the image tag and re-deploy the operator chart:
 
 ```bash
-# Update drainCleaner.image in charts/kafka-cluster/values.yaml, then:
-make kafka-upgrade
+helm dependency build charts/strimzi-operator
+
+helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator \
+  --reset-values -f charts/strimzi-operator/values-prod.yaml \
+  --set drainCleaner.image=quay.io/strimzi/drain-cleaner:<version>
 
 # Verify
-kubectl get pods -n kafka -l app=strimzi-drain-cleaner
+kubectl get pods -n strimzi-operator -l app=strimzi-drain-cleaner
 ```
 
 ## Kates Application Upgrade
@@ -316,7 +328,7 @@ The backup phase reads `Completed` and both tests pass; note the LOAD test ID �
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `UnsupportedVersionException` | Local Strimzi chart has mismatched Kafka images | Use the remote Helm chart |
+| `UnsupportedVersionException` | The requested Kafka version is outside the running operator's window | Upgrade the operator first through the wrapper chart (`kates deploy --strimzi-version <v>`); `kates versions strimzi` prints each release's window |
 | `ConfigException: Invalid value` | Kafka tightened config validation | Check release notes for deprecated configs |
 | Brokers stuck in CrashLoop | Config incompatible with new version | Check `kubectl logs`, fix config, re-apply |
 | Topics not reconciling | Topic Operator API version mismatch | Migrate CRDs to `v1` |
@@ -328,18 +340,22 @@ Rollback is a critical part of any upgrade plan. Each component has different ro
 
 ### Kafka Version Rollback
 
-**Step 1 — Revert the Kafka version in the CR:**
+**Step 1 — Revert the Kafka version in the chart values:**
 
 ```yaml
-# Revert kafka.yaml to the previous version
-spec:
-  kafka:
-    version: <previous-version>  # e.g., 3.9.0
+# charts/kafka-cluster/values-<env>.yaml
+kafkaVersion: <previous-version>
 ```
 
 ```bash
-kubectl apply -f config/kafka/kafka.yaml
+helm dependency build charts/kafka-cluster
+
+helm upgrade krafter charts/kafka-cluster -n kafka \
+  -f charts/kafka-cluster/values-platform.yaml \
+  -f charts/kafka-cluster/values-<env>.yaml
 ```
+
+The previous version must still be inside the running operator's Kafka window — `kates versions strimzi` prints the window of each operator release.
 
 **Step 2 — Monitor the rolling restart:**
 
@@ -449,7 +465,7 @@ kates test create --type LOAD --records 50000 --wait
 ## Summary
 
 - Always upgrade the Strimzi operator before Kafka, take a Velero backup and record LOAD and INTEGRITY baselines before either, and run `make gameday` after any upgrade.
-- A Kafka version bump is a one-line change to `spec.kafka.version` in `config/kafka/kafka.yaml`; Strimzi rolls the brokers one at a time with PDB constraints honored.
+- A Kafka version bump is a one-line change to `kafkaVersion` in the environment's `kafka-cluster` values file, re-applied with `helm upgrade` over the platform profile (or `kates deploy --kafka-version`); Strimzi rolls the brokers one at a time with PDB constraints honored.
 - Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it makes downgrade irreversible.
 - Kyverno upgrades go CRDs first, controller second; afterwards verify with `kates kyverno status` and confirm `PolicyException` resources still use a served API version.
 - A Helm rollback of the Strimzi operator does not revert migrated CRDs — those need a manual restore from backup.

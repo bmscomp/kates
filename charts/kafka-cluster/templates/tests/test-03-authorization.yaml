@@ -1,0 +1,79 @@
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $testUser := include "kafka-cluster.testUser" . -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-authorization"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: auth-check
+      image: {{ include "kafka-cluster.kubectlImage" $ }}
+      {{- include "kafka-common.imagePullPolicy" .Values.testImages.pullPolicy | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          echo "=== Tier 3: Authorization Verification ==="
+
+          echo "Checking KafkaUser CRs are Ready..."
+          USERS=$(kubectl get kafkausers -n $NAMESPACE -l strimzi.io/cluster=$CLUSTER -o jsonpath='{.items[*].metadata.name}')
+          FAIL=0
+          for u in $USERS; do
+            STATUS=$(kubectl get kafkauser $u -n $NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+            if [ "$STATUS" = "True" ]; then
+              echo "  ✓ KafkaUser $u: Ready"
+            else
+              echo "  ✗ KafkaUser $u: NOT Ready ($STATUS)"
+              FAIL=1
+            fi
+          done
+
+          echo ""
+          echo "Checking SCRAM credential secrets exist..."
+          for u in $USERS; do
+            if kubectl get secret $u -n $NAMESPACE -o jsonpath='{.data.password}' > /dev/null 2>&1; then
+              echo "  ✓ Secret $u: exists"
+            else
+              echo "  ⚠ Secret $u: missing (may use TLS auth)"
+            fi
+          done
+
+          echo ""
+          echo "Checking authorization type..."
+          AUTH_TYPE=$(kubectl get kafka $CLUSTER -n $NAMESPACE -o jsonpath='{.spec.kafka.authorization.type}')
+          echo "  Authorization type: $AUTH_TYPE"
+          if [ "$AUTH_TYPE" = "simple" ]; then
+            echo "  ✓ Simple ACL authorization enabled"
+          elif [ -z "$AUTH_TYPE" ]; then
+            echo "  ⚠ No authorization configured (open access)"
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "✗ Some users not ready" && exit 1
+          fi
+          echo "✓ Tier 3 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

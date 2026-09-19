@@ -1,7 +1,33 @@
-# Production overlay for connect-cluster
-# Usage: helm upgrade --install connect-cluster charts/connect-cluster -f charts/connect-cluster/values-prod.yaml
+# Production overlay for connect-cluster.
+# helm upgrade --install connect-cluster charts/connect-cluster -n connect \
+#   -f charts/connect-cluster/values-prod.yaml
+#
+# The workers use kafka-cluster's TLS listener (9093), which authenticates
+# clients by certificate, so this release owns its KafkaUser with `tls`
+# authentication; the User Operator issues the certificate and the chart copies
+# it (and the cluster CA) into this namespace. If kafka-cluster's platform
+# profile still provisions `kates-connect`, disable it there
+# (users.items.kates-connect.enabled=false) and adopt the object — NOTES print
+# the commands (docs/connect-cluster-2.0-upgrade.md).
+
+productionMode: true
 
 replicas: 3
+
+kafka:
+  namespace: kafka
+  tls:
+    enabled: true
+  authentication:
+    type: tls
+  brokerCount: 9
+
+kafkaUser:
+  create: true
+
+secretSync:
+  # Re-copy the certificate the User Operator renews, without an upgrade
+  watch: true
 
 topologySpreadConstraints:
   enabled: true
@@ -33,24 +59,24 @@ resources:
 podDisruptionBudget:
   maxUnavailable: 1
 
-priorityClassName: "system-cluster-critical"
+priorityClassName: kates-streaming
+priorityClass:
+  create: true
+
+connectorDefaults:
+  autoRestart:
+    enabled: true
+    maxRestarts: 20
 
 alerts:
   enabled: true
+  slo:
+    enabled: true
 
-podMonitors:
-  enabled: true
-
-dashboards:
-  enabled: true
-
-tracing:
-  enabled: true
-  type: opentelemetry
-
-autoRestart:
-  enabled: true
-  maxRestarts: 20
+# The test connectors need the platform's demo database; production runs
+# `helm test` for the workers and plugins only.
+testConnectors: []
+testTopics: []
 
 networkPolicy:
   enabled: true
@@ -62,22 +88,20 @@ networkPolicy:
       kubernetes.io/metadata.name: kube-system
     podSelector:
       k8s-app: kube-dns
-  kafka:
-    ports:
-      - 9093
+  # Kafka egress follows the bootstrap: 9093.
   monitoring:
     namespace: monitoring
-
-databaseEgress:
-  - namespace: database
-    port: 5432
-    podSelector:
-      app.kubernetes.io/name: postgresql
-  - namespace: database
-    port: 3306
-    podSelector:
-      app.kubernetes.io/name: mysql
-  - namespace: database
-    port: 27017
-    podSelector:
-      app.kubernetes.io/name: mongodb
+  egress:
+    databases:
+      - namespace: database
+        port: 5432
+        podSelector:
+          app.kubernetes.io/name: postgresql
+      - namespace: database
+        port: 3306
+        podSelector:
+          app.kubernetes.io/name: mysql
+      - namespace: database
+        port: 27017
+        podSelector:
+          app.kubernetes.io/name: mongodb

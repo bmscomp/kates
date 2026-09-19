@@ -1,0 +1,70 @@
+suite: Kafka CR, names and the profile
+tests:
+  - it: names every namespaced resource after the cluster
+    templates: [templates/metrics-configmap.yaml]
+    set: {clusterName: east}
+    asserts:
+      - equal: {path: metadata.name, value: east-kafka-metrics}
+        documentIndex: 0
+      - equal: {path: metadata.name, value: east-cruise-control-metrics}
+        documentIndex: 1
+
+  - it: keeps the 0.4 metrics ConfigMap name on request
+    templates: [templates/kafka.yaml]
+    set: {compatibility: {legacyResourceNames: true}}
+    asserts:
+      - equal: {path: spec.kafka.metricsConfig.valueFrom.configMapKeyRef.name, value: kafka-metrics}
+
+  - it: adds the externalAccess listener
+    templates: [templates/kafka.yaml]
+    set: {kafka: {externalAccess: {type: loadbalancer, port: 9096}}}
+    asserts:
+      - equal: {path: 'spec.kafka.listeners[2]', value: {name: external, port: 9096, type: loadbalancer, tls: true, authentication: {type: scram-sha-512}}}
+
+  - it: grants the platform super user only with the profile
+    templates: [templates/kafka.yaml]
+    set: {profile: platform, kafka: {authorization: {superUsers: [ops]}}}
+    asserts:
+      - equal: {path: spec.kafka.authorization.superUsers, value: [kates-backend, ops]}
+
+  - it: drops share-group keys below Kafka 4.2
+    templates: [templates/kafka.yaml]
+    set: {kafkaVersion: 4.1.1, kafka: {metadataVersion: "4.1"}}
+    asserts:
+      - notExists: {path: 'spec.kafka.config["group.share.enable"]'}
+
+  - it: renders tiered storage with the SeaweedFS endpoint
+    templates: [templates/kafka.yaml]
+    set:
+      seaweedfs: {enabled: true}
+      tieredStorage:
+        enabled: true
+        image: r.example.com/kafka:1
+        remoteStorageManager: {className: a.B, classPath: /p, config: {chunk.size: 4194304}}
+    asserts:
+      - equal: {path: spec.kafka.image, value: r.example.com/kafka:1}
+      - equal: {path: 'spec.kafka.tieredStorage.remoteStorageManager.config["storage.s3.endpoint.url"]', value: http://seaweedfs-filer.NAMESPACE.svc.cluster.local:8333}
+      - equal: {path: 'spec.kafka.tieredStorage.remoteStorageManager.config["chunk.size"]', value: "4194304"}
+
+  - it: derives topic replication from the broker count
+    templates: [templates/topics.yaml]
+    set:
+      nodePools: {roleDefaults: {broker: {replicas: 2}}}
+      kafka: {config: {offsets.topic.replication.factor: 2, transaction.state.log.replication.factor: 2, default.replication.factor: 2, min.insync.replicas: 1}}
+      topics: {items: {t: {partitions: 1}}}
+    asserts:
+      - equal: {path: spec.replicas, value: 2}
+      - equal: {path: 'spec.config["min.insync.replicas"]', value: "1"}
+
+  - it: merges a user over the profile's by name
+    templates: [templates/users.yaml]
+    set:
+      profile: platform
+      tests: {user: {create: false}}
+      users: {items: {kates-backend: {quotas: {producerByteRate: 5}}, kafka-ui: {enabled: false}, apicurio-registry: {enabled: false}, litmus-chaos: {enabled: false}, kates-connect: {enabled: false}, kates-mm2: {enabled: false}}}
+    asserts:
+      - hasDocuments: {count: 1}
+      - equal: {path: metadata.name, value: kates-backend}
+      - equal: {path: spec.quotas.producerByteRate, value: 5}
+      - equal: {path: spec.authentication.type, value: scram-sha-512}
+

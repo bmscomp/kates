@@ -1,0 +1,72 @@
+# The shape `kates detect --generate-values` writes for kafka-cluster
+# (cli/pkg/detect GeneratedValues), for a three-zone cluster: the 0.4 pool
+# keys, networkPolicies, podMonitors, crdUpgrade, kafkaConnect and the other
+# keys kafka-cluster 1.x still has to accept. The matrix layers it the way
+# `kates deploy` does (with the CLI's --set flags) to prove the unchanged CLI
+# keeps working.
+global:
+  clusterDomain: cluster.local
+  storageClass: standard
+clusterName: krafter
+strimziOperator:
+  enabled: true
+crdUpgrade:
+  enabled: false
+controllerPools:
+  - {name: controllers-alpha, zone: alpha, replicas: 1, storageSize: 10Gi, storageClass: std-alpha}
+  - {name: controllers-beta, zone: beta, replicas: 1, storageSize: 10Gi, storageClass: std-beta}
+  - {name: controllers-gamma, zone: gamma, replicas: 1, storageSize: 10Gi, storageClass: std-gamma}
+controllerDefaults:
+  resources:
+    requests: {memory: 1Gi, cpu: 500m}
+    limits: {memory: 1Gi, cpu: 500m}
+  topologySpreadConstraints: {enabled: true, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway}
+  podAntiAffinity: {enabled: true, topologyKey: kubernetes.io/hostname}
+brokerPools:
+  - {name: brokers-alpha, zone: alpha, replicas: 1, storageSize: 20Gi, storageClass: std-alpha}
+  - {name: brokers-beta, zone: beta, replicas: 1, storageSize: 20Gi, storageClass: std-beta}
+  - {name: brokers-gamma, zone: gamma, replicas: 1, storageSize: 20Gi, storageClass: std-gamma}
+brokerDefaults:
+  resources:
+    requests: {memory: 2Gi, cpu: 1000m}
+    limits: {memory: 2Gi, cpu: 1000m}
+  topologySpreadConstraints: {enabled: true, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway}
+  podAntiAffinity: {enabled: true, topologyKey: kubernetes.io/hostname}
+kafka:
+  listeners:
+    - {name: plain, port: 9092, type: internal, tls: false, authentication: {type: scram-sha-512}}
+    - {name: tls, port: 9093, type: internal, tls: true, authentication: {type: tls}}
+    - {name: external, port: 9094, type: nodeport, tls: true, authentication: {type: scram-sha-512}}
+  rack: {topologyKey: topology.kubernetes.io/zone}
+dashboards: {enabled: false, namespace: monitoring}
+podMonitors: {enabled: false}
+alerts: {enabled: false}
+networkPolicies:
+  enabled: true
+  defaultDeny: true
+  defaultDenySelector: {app.kubernetes.io/part-of: strimzi-krafter}
+  allowDNS: true
+  allowDNSSelector: {app.kubernetes.io/part-of: strimzi-krafter}
+topics: {enabled: true}
+cruiseControl: {enabled: false}
+kafkaExporter: {enabled: false}
+drainCleaner: {enabled: false}
+rebalance: {enabled: true}
+kafkaConnect:
+  enabled: false
+  replicas: 3
+  groupId: kates-connect-cluster
+  jvmOptions: {-Xms: 1024m, -Xmx: 1024m}
+  resources: {requests: {memory: 1536Mi, cpu: 1000m}, limits: {memory: 2048Mi, cpu: 2000m}}
+  tls: {enabled: false}
+  rack: {enabled: false}
+  tracing: {enabled: false}
+  topologySpreadConstraints: {enabled: false, topologyKey: kubernetes.io/hostname}
+  podAntiAffinity: {enabled: false, topologyKey: kubernetes.io/hostname}
+  podDisruptionBudget: {maxUnavailable: 1}
+  config: {replicationFactor: 3, keyConverter: org.apache.kafka.connect.json.JsonConverter}
+rbac: {enabled: false, create: true}
+entityOperator:
+  topicOperator: {resources: {requests: {memory: 256Mi, cpu: 100m}, limits: {memory: 256Mi, cpu: 500m}}, jvmOptions: {-Xms: 128m, -Xmx: 256m}, reconciliationIntervalMs: 60000}
+  userOperator: {resources: {requests: {memory: 256Mi, cpu: 100m}, limits: {memory: 256Mi, cpu: 500m}}, jvmOptions: {-Xms: 128m, -Xmx: 256m}}
+strimzi-kafka-operator: {}

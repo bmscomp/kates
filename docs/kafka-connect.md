@@ -7,8 +7,9 @@ Production-ready Kafka Connect image with pre-installed CDC, Schema Registry, JD
 ## Quick Start
 
 ```bash
-# Pull from GHCR
-docker pull ghcr.io/bmscomp/connect:3.6.2
+# Pull from GHCR (the published tag carries both lines, and is what
+# charts/connect-cluster pins)
+docker pull ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1
 
 # Or build locally
 make connect-build
@@ -19,8 +20,8 @@ make connect-build
 | Property | Value |
 |----------|-------|
 | **Base Image** | `quay.io/strimzi/kafka:1.2.0-kafka-4.3.1` |
-| **Kafka Version** | 4.3.0 |
-| **Strimzi Version** | 1.1.0 |
+| **Kafka Version** | 4.3.1 |
+| **Strimzi Version** | 1.2.0 |
 | **Architecture** | `linux/amd64`, `linux/arm64` |
 | **License** | Apache 2.0 |
 
@@ -66,7 +67,7 @@ git tag v3.0.3 && git push origin v3.0.3
 
 ### Adding Plugins
 
-Edit the `Dockerfile` in `connect/` to add additional plugins:
+Edit `Dockerfile.connect` at the repository root to add additional plugins:
 
 ```dockerfile
 # Add a new connector plugin

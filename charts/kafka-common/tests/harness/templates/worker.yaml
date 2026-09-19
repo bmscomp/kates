@@ -1,0 +1,8 @@
+apiVersion: kafka.strimzi.io/v1
+kind: {{ .Values.worker.kind }}
+metadata:
+  name: harness
+  namespace: {{ include "kafka-common.namespace" . }}
+spec:
+  {{- $w := merge (dict "name" "harness" "namespace" (include "kafka-common.namespace" .)) (deepCopy .Values.worker) }}
+  {{- include "kafka-common.connectWorker.spec" (dict "ctx" . "w" $w) | nindent 2 }}

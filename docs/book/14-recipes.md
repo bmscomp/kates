@@ -25,7 +25,7 @@ kates test apply -f upgrade-suite.yaml --wait
 # Note the test IDs from the output
 ```
 
-**Step 2 — Perform the upgrade** (via Strimzi CR update).
+**Step 2 — Perform the upgrade** — change `kafkaVersion` in the environment's `kafka-cluster` values and re-run `helm upgrade` over the platform profile, or `kates deploy --kafka-version <new-version>`. The full procedure, including the `metadataVersion` point of no return, is in [Upgrade Playbook](18-upgrade-playbook.md).
 
 **Step 3 — Re-run the same suite:**
 

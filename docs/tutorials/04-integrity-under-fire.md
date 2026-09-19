@@ -39,19 +39,40 @@ If this fails, stop here — you have a configuration problem that must be fixed
 
 Now the real test — produce 100K messages while killing a broker in the middle:
 
-### Step 1: Generate the Chaos Integrity Scaffold
+### Step 1: Write the Chaos Integrity Config
+
+No scenario template carries chaos — a scaffold describes a test, and pairing
+one with a fault is what `kates resilience run` is for. Its config puts the
+`testRequest` and the `chaosSpec` side by side:
 
 ```bash
-kates test scaffold --type INTEGRITY -o integrity-chaos.yaml
+cat > integrity-chaos.json <<'EOF'
+{
+  "testRequest": {
+    "testType": "INTEGRITY",
+    "spec": {
+      "records": 100000,
+      "acks": "all",
+      "consumers": 1
+    }
+  },
+  "chaosSpec": {
+    "experimentName": "kafka-pod-kill",
+    "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka"
+  },
+  "steadyStateSec": 30
+}
+EOF
 ```
 
-### Step 2: Review the Scaffold
+### Step 2: Review It
 
 ```bash
-cat integrity-chaos.yaml
+cat integrity-chaos.json
 ```
 
-The scaffold defines a multi-phase test:
+The run has a shape the results are read against:
 
 ```mermaid
 graph LR
@@ -61,8 +82,10 @@ graph LR
 ### Step 3: Run It
 
 ```bash
-kates test apply -f integrity-chaos.yaml --wait
+kates resilience run -f integrity-chaos.json
 ```
+
+Add `--dry-run` first to have the config parsed and echoed without executing.
 
 ### Step 4: Analyze the Results
 
@@ -128,7 +151,7 @@ Create `integrity-partition.json`:
 ```
 
 ```bash
-kates resilience run --config integrity-partition.json
+kates resilience run -f integrity-partition.json
 ```
 
 ### CPU Stress
@@ -196,13 +219,32 @@ graph TD
 
 Schedule nightly integrity tests to catch regressions:
 
+A schedule is a cron expression plus a test request read from a JSON file —
+`--name`, `--cron` and `--request` are all required:
+
 ```bash
-# Run integrity test every night at 2 AM
-kates schedule create --type INTEGRITY --records 100000 --cron "0 2 * * *"
+cat > nightly-integrity.json <<'EOF'
+{
+  "testType": "INTEGRITY",
+  "spec": { "records": 100000, "acks": "all", "consumers": 1 }
+}
+EOF
+
+# Run the integrity test every night at 2 AM
+kates schedule create \
+  --name "Nightly Integrity" \
+  --cron "0 2 * * *" \
+  --request nightly-integrity.json
 
 # Monitor trends
-kates trend --type INTEGRITY --metric lostRecords --days 30
+kates trend --type INTEGRITY --metric errorRate --days 30
 ```
+
+`--metric` takes one of the report-summary metrics the trend service knows:
+`avgThroughputRecPerSec`, `peakThroughputRecPerSec`, `avgThroughputMBPerSec`,
+`avgLatencyMs`, `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs`, `p999LatencyMs`,
+`maxLatencyMs` and `errorRate`. Per-run loss counts are not one of them — read
+those from the integrity verdict on the run itself.
 
 A regression in the integrity trend is the most critical alert you can have — it means your cluster configuration may have changed in a way that risks data loss.
 

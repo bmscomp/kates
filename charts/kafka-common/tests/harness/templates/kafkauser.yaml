@@ -1,0 +1,3 @@
+{{- if .Values.kafkaUser.enabled }}
+{{- include "kafka-common.kafkaUser" (dict "name" "u" "namespace" "kafka" "cluster" "krafter" "labels" (include "kafka-common.selectorLabels" .) "keep" true "authType" .Values.kafkaUser.authType "authorization" .Values.kafkaUser.authorization "acls" "\n- resource: { type: cluster }\n  operations: [Describe]\n") }}
+{{- end }}

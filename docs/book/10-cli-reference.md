@@ -256,7 +256,7 @@ kates version
 
 #### doctor
 
-Aliases: `pre-flight`, `check`
+Aliases: `preflight`, `check`
 
 Pre-flight cluster readiness checklist. The doctor command verifies that the Kates API is reachable, Kafka is connected, the broker count meets the 3-broker minimum, ISR health is clean, topics are listable, and benchmark backends are available. It also checks whether Kyverno is installed with active policies and no workload violations (Kyverno checks warn rather than fail — it's optional but recommended). Failing checks come with remediation hints. It's the first command to run when something "feels wrong" but `kates health` reports healthy.
 
@@ -378,15 +378,15 @@ kates cluster topology -o json
 Expected output (abbreviated — full output includes all sections listed below):
 
 ```text
- Kafka Cluster Topology — Cluster: krafter  │  Kafka 4.3.0  │  KRaft Mode
+ Kafka Cluster Topology — Cluster: krafter  │  Kafka 4.3.1  │  KRaft Mode
 
   Kubernetes Platform
-  Version:   v1.31.4
+  Version:   v1.34.11
   Platform:  linux/arm64
   Nodes:     3
 
   Strimzi Operator
-  Version:     1.1.0
+  Version:     1.2.0
   Components:  ✓ Operator  ✓ Entity Operator  ✓ Cruise Control
 
   Kafka Cluster
@@ -449,8 +449,8 @@ kates cluster alerts --severity critical
 kates cluster alerts --severity warning
 
 # Filter by alert group
-kates cluster alerts --group kafka.kraft
-kates cluster alerts --group kafka.cluster
+kates cluster alerts --group kafka-cluster.krafter.kraft
+kates cluster alerts --group kafka-cluster.krafter.availability
 
 # JSON output for scripting
 kates cluster alerts -o json
@@ -462,9 +462,9 @@ kates cluster alerts --severity critical && echo "safe"
 | Flag | Description |
 |------|-------------|
 | `--severity` | Filter by severity: `critical` or `warning` |
-| `--group` | Filter by alert group (e.g. `kafka.cluster`, `kafka.kraft`, `kafka.certificates`) |
+| `--group` | Filter by alert group (e.g. `kafka-cluster.krafter.availability`, `kafka-cluster.krafter.kraft`) |
 
-Alert groups: `kafka.cluster`, `kafka.consumer`, `kafka.kraft`, `kafka.network`, `strimzi.operator`, `kafka.replication`, `kafka.performance`, `kafka.cruisecontrol`, `kafka.certificates`.
+Group names are scoped to the cluster they cover, so two clusters in one namespace never collide. The `kafka-cluster` chart renders `kafka-cluster.<cluster>.` followed by `availability`, `consumers`, `cruise-control`, `kraft`, `performance`, `records`, `replication` and `storage`. The operator's own alerts — including `StrimziOperatorDown` and the certificate-expiry rules — live in the `strimzi-operator` release's `strimzi-operator.<release>` group, not in the Kafka cluster's rules.
 
 #### cluster watch
 
@@ -1015,7 +1015,7 @@ kates deploy --yes
 | Screen | What it asks |
 |:---|:---|
 | What to deploy | topology, schema registry, HA sizing, and the components — Strimzi, Kafka Connect + PostgreSQL, Kafka UI, MirrorMaker 2, chaos, monitoring, Cert-Manager, Kyverno |
-| Versions | the operator scope — *mono cluster* (one Strimzi, one Kafka version, the operator watching every namespace) or *namespace-scoped* (one operator per Kafka namespace); the Strimzi version (the pin first, then the catalogue when reachable); then the Kafka version for the primary, whose options are exactly the chosen operator's window — pick 1.0.1 and the list is `4.2.0 4.1.2 4.1.1 4.1.0`, pick 1.1.0 and it is `4.3.0 4.2.1 4.2.0` |
+| Versions | the operator scope — *mono cluster* (one Strimzi, one Kafka version, the operator watching every namespace) or *namespace-scoped* (one operator per Kafka namespace); the Strimzi version (the pin first, then the catalogue when reachable); then the Kafka version for the primary, whose options are exactly the chosen operator's window, newest first — with the pinned Strimzi 1.2.0 that is `4.3.1 4.3.0 4.2.1 4.2.0`, and an older operator offers its own, older window |
 | Namespaces | one input per selected component (isolated topology only) |
 | Review | every choice as it will resolve — operator and where its chart came from, Kafka version and metadata version, window, components, sizing, namespaces — and a Deploy/Cancel confirmation |
 
@@ -1095,7 +1095,7 @@ kates clean --force
 
 #### detect
 
-Aliases: `pre-flight-cluster`, `cluster-check`
+Aliases: `preflight-cluster`, `cluster-check`
 
 Deep cluster compatibility report for 3-AZ Kafka.
 
@@ -1182,17 +1182,17 @@ Every Strimzi Cluster Operator on the cluster, discovered from its Deployment: n
 ```bash
 kates migrate pairs                          # every old → new pair this cluster can stand up, with the provider each source gets
 kates migrate plan --from 2.8.2              # what up would create — nothing changes
-kates migrate up   --from 2.8.2 [--to 4.3.0] [-i]
+kates migrate up   --from 2.8.2 [--to <version>] [-i]
 kates migrate up   --from 2.8.2 --from 3.9.1 # two sources, one target, one MirrorMaker 2 release
-kates migrate status | verify | cutover | rollback | down [--name m282-430]
+kates migrate status | verify | cutover | rollback | down [--name m282-431]
 kates migrate run  --from 2.8.2 [--keep] [--skip-build] [-o json]    # up → verify → cutover → down, one report
 ```
 
-`--from` is resolved to a provider: a version the primary's operator supports becomes a Strimzi cluster; 2.x and 3.x become a `legacy-kafka` cluster (ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0); a version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the backend, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` (`m282-430`), every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster — there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
+`--from` is resolved to a provider: a version the primary's operator supports becomes a Strimzi cluster; 2.x and 3.x become a `legacy-kafka` cluster (ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0); a version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the backend, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` with the dots dropped — `m282-431` for 2.8.2 onto a 4.3.1 primary — every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster — there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
 
 #### Several sources in one release
 
-`--from` is repeatable on `plan`, `up` and `run`. Each source gets its own **alias** derived from its version (`src282`, `src391` — lowercase and dash-free, because a dot is MirrorMaker's own separator between alias and topic), and from that alias its own namespace (`kafka-m282-391-430-src282`), release, credential, corpus topic (`kates.orders.src282`) and entry in the generated `mirrors:` list — one MirrorMaker 2 release reading both. The lab is named for all of them (`m282-391-430`); with one `--from` nothing changes: the lab is `m282-430`, the alias is `source`, the release is `m282-430-src`.
+`--from` is repeatable on `plan`, `up` and `run`. Each source gets its own **alias** derived from its version (`src282`, `src391` — lowercase and dash-free, because a dot is MirrorMaker's own separator between alias and topic), and from that alias its own namespace (`kafka-m282-391-431-src282`), release, credential, corpus topic (`kates.orders.src282`) and entry in the generated `mirrors:` list — one MirrorMaker 2 release reading both. The lab is named for all of them (`m282-391-431`); with one `--from` nothing changes: the lab is `m282-431`, the alias is `source`, the release is `m282-431-src`.
 
 Every per-source assertion becomes its own leg of the report, named by the alias (`record count [src391]`), while the rows about the release itself — `MirrorMaker 2 installed`, `CR Ready`, `connectors RUNNING`, `cutover applied` — stay single. `status` prints one `source <alias>` block per leg and `down` removes every source it finds under the lab's label.
 
@@ -1591,8 +1591,11 @@ Alter topic configuration entries.
 
 ```bash
 kates kafka alter-topic <name>
-kates kafka alter-topic my-events --set retention.ms=604800000
+kates kafka alter-topic my-events --config retention.ms=604800000
+kates kafka alter-topic my-events --config retention.ms=604800000 --config cleanup.policy=compact
 ```
+
+`--config` takes a `key=value` entry and repeats for each config you set. `--dry-run` prints the request JSON instead of sending it.
 
 #### kafka delete-topic
 
@@ -1708,13 +1711,17 @@ kates gate --min-grade A --timeout 300
 | `--backend` | | Benchmark backend |
 | `--timeout` | 180 | Timeout in seconds |
 
-#### baseline
+#### test baseline
 
-The baseline command sets a specific test run as the performance reference point for future regression detection. Once set, you can run `baseline regression <id>` to compare any new test against the baseline and see exactly where performance has changed. Baselines work hand-in-hand with trend analysis — trends show long-term drift, baselines catch acute regressions. The typical workflow is: run a comprehensive test on a known-good configuration, set it as baseline, then compare every subsequent run against it.
+`test baseline` marks a specific test run as the performance reference point for its test type, and `report regression` compares a later run against it to show exactly where performance changed. Baselines work hand-in-hand with trend analysis — trends show long-term drift, baselines catch acute regressions. The typical workflow is: run a comprehensive test on a known-good configuration, set it as the baseline for its type, then compare every subsequent run against it.
 
 ```bash
-kates baseline set <id>
-kates baseline regression <id>
+kates test baseline set <run-id>
+kates test baseline list
+kates test baseline show <type>
+kates test baseline unset <type>
+
+kates report regression <run-id>
 ```
 
 **See also:** [Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [CI/CD Pipeline](appendix-c-cicd.md) for quality gate examples.

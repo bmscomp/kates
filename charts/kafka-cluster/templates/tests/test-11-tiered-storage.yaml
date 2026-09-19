@@ -1,0 +1,119 @@
+{{- /*
+Tier 11: tiered storage end to end. Rendered only when tiered storage is
+enabled.
+
+Produces a few MB to a topic with 1 MB segments and a one-second local
+retention, waits until the broker's earliest LOCAL offset moves past 0 (the
+first segments were copied to object storage and deleted from disk), then
+reads offset 0 back, which the broker can only serve from object storage.
+The local-retention check runs every log.retention.check.interval.ms (five
+minutes by default), so run `helm test` with --timeout 15m.
+*/ -}}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $testUser := include "kafka-cluster.testUser" . -}}
+{{- if and $r.tiered $testUser }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-tiered-storage"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.componentLabels" (dict "ctx" . "component" "helm-test") | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "11"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: tiered-storage
+      image: {{ include "kafka-cluster.kafkaImage" . }}
+      {{- include "kafka-common.imagePullPolicy" .Values.testImages.pullPolicy | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -eu
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+          BOOTSTRAP="{{ include "kafka-cluster.bootstrapServers" . }}"
+          TOPIC="helm-test-tiered-$(date +%s)"
+          USER="{{ $testUser }}"
+          PASSWORD=$(cat /opt/kafka/user/password)
+
+          echo "=== Tier 11: Tiered Storage ==="
+          printf 'security.protocol=SASL_PLAINTEXT\nsasl.mechanism=SCRAM-SHA-512\n' > /tmp/client.properties
+          printf 'sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="%s" password="%s";\n' "$USER" "$PASSWORD" >> /tmp/client.properties
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: kafka.strimzi.io/v1
+          kind: KafkaTopic
+          metadata:
+            name: ${TOPIC}
+            namespace: ${NAMESPACE}
+            labels:
+              strimzi.io/cluster: ${CLUSTER}
+          spec:
+            partitions: 1
+            replicas: 1
+            config:
+              remote.storage.enable: "true"
+              segment.bytes: "1048576"
+              local.retention.ms: "1000"
+              retention.ms: "3600000"
+          EOF
+          trap 'kubectl delete kafkatopic "$TOPIC" -n "$NAMESPACE" --ignore-not-found' EXIT
+          kubectl wait "kafkatopic/${TOPIC}" --for=condition=Ready --timeout=60s -n "$NAMESPACE"
+
+          echo "Producing 6 MB..."
+          kafka-producer-perf-test.sh --topic "$TOPIC" --num-records 6000 --record-size 1000 \
+            --throughput -1 --producer.config /tmp/client.properties \
+            --producer-props bootstrap.servers="$BOOTSTRAP" acks=all >/dev/null
+
+          echo "Waiting for the first segments to leave local disk..."
+          EARLIEST_LOCAL=0
+          for i in $(seq 1 60); do
+            # -4: earliest LOCAL offset (KIP-1005)
+            EARLIEST_LOCAL=$(kafka-get-offsets.sh --bootstrap-server "$BOOTSTRAP" \
+              --command-config /tmp/client.properties --topic "$TOPIC" --time -4 2>/dev/null \
+              | awk -F: '{print $3}' | head -1)
+            [ "${EARLIEST_LOCAL:-0}" -gt 0 ] && break
+            sleep 10
+          done
+          if [ "${EARLIEST_LOCAL:-0}" -le 0 ]; then
+            echo "  ✗ nothing was offloaded in 10 minutes (earliest local offset is still 0)" && exit 1
+          fi
+          echo "  ✓ earliest local offset is ${EARLIEST_LOCAL}: older segments live in object storage"
+
+          echo "Reading offset 0 back..."
+          GOT=$(timeout 60 kafka-console-consumer.sh --bootstrap-server "$BOOTSTRAP" \
+            --consumer.config /tmp/client.properties --topic "$TOPIC" --partition 0 --offset 0 \
+            --max-messages 1 2>/dev/null | wc -c)
+          if [ "$GOT" -gt 0 ]; then
+            echo "  ✓ offset 0 was served from object storage"
+          else
+            echo "  ✗ offset 0 could not be read" && exit 1
+          fi
+          echo "✓ Tier 11 complete"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: user
+          mountPath: /opt/kafka/user
+          readOnly: true
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    - name: user
+      secret:
+        secretName: {{ $testUser }}
+{{- end }}

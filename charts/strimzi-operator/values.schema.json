@@ -49,10 +49,186 @@
     "operatorPolicy": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The kates-owned NetworkPolicy for the Cluster Operator (formerly written into the operator namespace by charts/kafka-cluster). Egress follows the watch scope.",
+      "description": "The kates-owned NetworkPolicy for the Cluster Operator (formerly written into the operator namespace by charts/kafka-cluster 0.4). Egress follows the watch scope. Skipped while another release still owns the object.",
       "properties": {
         "enabled": { "type": "boolean" }
       }
+    },
+    "productionMode": {
+      "type": "boolean",
+      "description": "Refuse settings that are unsafe in production."
+    },
+    "drainCleaner": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": [
+            "",
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "denyEviction": {
+          "type": "boolean"
+        },
+        "namespaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minAvailable": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "certManager": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "issuerRef": {
+                  "type": "object"
+                },
+                "duration": {
+                  "type": "string"
+                },
+                "renewBefore": {
+                  "type": "string"
+                }
+              }
+            },
+            "secretName": {
+              "type": "string"
+            },
+            "caBundle": {
+              "type": "string"
+            }
+          }
+        },
+        "webhookAnnotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "array"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "resources": {
+          "type": "object"
+        }
+      },
+      "description": "The Strimzi Drain Cleaner webhook (moved from kafka-cluster 0.4). Once per Kubernetes cluster."
+    },
+    "monitoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "podMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "interval": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "The operator's PodMonitor (rendered where the monitoring.coreos.com API exists)."
+    },
+    "alerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "runbookBaseUrl": {
+          "type": "string"
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "certificateWarningDays": {
+              "type": "number",
+              "minimum": 0
+            },
+            "certificateCriticalDays": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "description": "StrimziOperatorDown, reconciliation failures and certificate expiry for every managed cluster."
     },
     "strimzi-kafka-operator": {
       "type": "object",

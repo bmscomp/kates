@@ -19,11 +19,11 @@
 {{- end }}
 {{- range $mirrors }}
 {{- if include "mirror-maker2.testAuthUnsupported" (dict "c" .source) }}
-{{- fail (printf "tests.offsetTranslation.enabled: source %q uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." (.source.alias | default "source")) }}
+{{- fail (printf "tests.offsetTranslation.enabled: source %q uses TLS, mTLS or custom authentication, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." (.source.alias | default "source")) }}
 {{- end }}
 {{- end }}
 {{- if include "mirror-maker2.testAuthUnsupported" (dict "c" $target) }}
-{{- fail "tests.offsetTranslation.enabled: the target uses TLS/mTLS, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
+{{- fail "tests.offsetTranslation.enabled: the target uses TLS, mTLS or custom authentication, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
 {{- end }}
 {{- $image := $t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
 {{- /*

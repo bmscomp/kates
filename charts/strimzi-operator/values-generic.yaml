@@ -26,9 +26,6 @@
 #      strimzi-kafka-operator:
 #        defaultImageRegistry: registry.example.com
 #        defaultImageRepository: strimzi
-
-strimzi-kafka-operator:
-  # Unknown clusters may or may not run Grafana with a dashboard sidecar, and
-  # these ConfigMaps collide with kafka-cluster's dashboards block.
-  dashboards:
-    enabled: false
+#
+# The operator's dashboards stay on: they are ConfigMaps, inert without a
+# Grafana sidecar, and kafka-cluster 1.0 has no dashboards of its own.

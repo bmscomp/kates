@@ -21,7 +21,7 @@ extraLabels: {}
 
 # -- Images used by the Helm test pods
 testImages:
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.21.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
 
 # -- Number of MM2 (Connect) worker replicas
 replicas: 3
@@ -383,8 +383,18 @@ podDisruptionBudget:
   maxUnavailable: 1
 
 tolerations: []
+# -- Node labels the workers must run on. Strimzi's pod template has no
+# nodeSelector field, so the chart renders it as a required node-affinity term
+# (ANDed into nodeAffinity's own required terms).
 nodeSelector: {}
-priorityClassName: "system-cluster-critical"
+# -- Node affinity for the workers, passed through (see nodeSelector)
+nodeAffinity: {}
+# -- PriorityClass for the workers. Empty by default: system-cluster-critical is
+# for components the cluster itself cannot run without; values-prod.yaml sets
+# it explicitly.
+priorityClassName: ""
+# -- Grace period for a worker to stop its tasks and commit offsets
+terminationGracePeriodSeconds: 30
 imagePullSecrets: []
 
 # -- Pod-level security context

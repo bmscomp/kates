@@ -12,26 +12,7 @@ metadata:
     {{- end }}
     strimzi.io/use-connector-resources: "false"
 spec:
-  version: {{ .Values.version | quote }}
-  {{- if .Values.image }}
-  image: {{ .Values.image | quote }}
-  {{- end }}
-  {{- /* replicas is REQUIRED by the v1 CRD (no default), so it cannot simply
-         be omitted when the HPA owns scaling. On INSTALL it is seeded from
-         minReplicas. On UPGRADE it is read back from the live CR with
-         `lookup`, because re-rendering minReplicas would patch a scaled-out
-         mirror back down every time anyone ran `helm upgrade`, and the HPA
-         would have to climb back up from there. `lookup` returns nothing under
-         `helm template` and on a fresh install, in which case the seed is used. */}}
-  {{- $replicas := .Values.replicas }}
-  {{- if .Values.autoscaling.enabled }}
-  {{- $replicas = .Values.autoscaling.minReplicas | default 2 }}
-  {{- $live := lookup "kafka.strimzi.io/v1" "KafkaMirrorMaker2" (include "mirror-maker2.namespace" .) (include "mirror-maker2.fullname" .) }}
-  {{- if and $live $live.spec $live.spec.replicas }}
-  {{- $replicas = $live.spec.replicas }}
-  {{- end }}
-  {{- end }}
-  replicas: {{ $replicas }}
+  {{- include "kafka-common.connectWorker.spec" (dict "ctx" . "w" (include "mirror-maker2.worker" . | fromYaml)) | nindent 2 }}
   {{- $t := .Values.target }}
   {{- $gid := $t.groupId | default "mirror-maker2" }}
   target:
@@ -41,7 +22,7 @@ spec:
     configStorageTopic: {{ $t.configStorageTopic | default (printf "%s-configs" $gid) | quote }}
     offsetStorageTopic: {{ $t.offsetStorageTopic | default (printf "%s-offsets" $gid) | quote }}
     statusStorageTopic: {{ $t.statusStorageTopic | default (printf "%s-status" $gid) | quote }}
-    {{- with include "mirror-maker2.clusterTlsAuth" (dict "c" $t) }}
+    {{- with include "mirror-maker2.clusterTlsAuth" (dict "c" $t "field" "target") | trim }}
     {{- . | nindent 4 }}
     {{- end }}
     {{- /* exactly.once.source.support is a WORKER property and belongs here,
@@ -60,7 +41,7 @@ spec:
         {{- /* `with` rather than a bare include: an unauthenticated source
                renders nothing here, and a bare nindent would leave a stray
                blank line in the middle of the CR. */}}
-        {{- with include "mirror-maker2.clusterTlsAuth" (dict "c" .source) }}
+        {{- with include "mirror-maker2.clusterTlsAuth" (dict "c" .source "field" (printf "mirrors[%s].source" (.source.alias | default "source"))) | trim }}
         {{- . | nindent 8 }}
         {{- end }}
         {{- with include "mirror-maker2.sourceConfig" (dict "m" $mirror "ctx" $) }}
@@ -155,155 +136,53 @@ spec:
         {{- end }}
       {{- end }}
     {{- end }}
-  resources:
-    {{- toYaml .Values.resources | nindent 4 }}
-  jvmOptions:
-    {{- toYaml .Values.jvmOptions | nindent 4 }}
-  {{- with .Values.livenessProbe }}
-  livenessProbe:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .Values.readinessProbe }}
-  readinessProbe:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- /* Two shapes. `inline` passes {type, loggers} through as the CRD
-         expects. `external` points the CR at the ConfigMap this chart renders
-         from logging.rootLevel / mirrorLevel / extraLoggers (see
-         logging-configmap.yaml) unless the user supplied their own valueFrom.
-         Dumping .Values.logging verbatim used to push those chart-only keys
-         into spec.logging, where the API server pruned them and Strimzi then
-         rejected an `external` block with no valueFrom. */}}
-  {{- with .Values.logging }}
-  {{- if eq (.type | default "") "external" }}
-  logging:
-    type: external
-    valueFrom:
-      {{- if .valueFrom }}
-      {{- toYaml .valueFrom | nindent 6 }}
-      {{- else }}
-      configMapKeyRef:
-        name: {{ include "mirror-maker2.fullname" $ }}-logging
-        key: log4j2.properties
-      {{- end }}
-  {{- else if .type }}
-  logging:
-    type: {{ .type }}
-    {{- with .loggers }}
-    loggers:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
-  {{- end }}
-  {{- end }}
-  {{- with .Values.tracing }}
-  tracing:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- if .Values.rack.enabled }}
-  rack:
-    topologyKey: {{ .Values.rack.topologyKey }}
-  {{- /* The operator runs an init container to read the node's topology
-         label; on a mirrored or air-gapped registry it needs naming. */}}
-  {{- with .Values.rack.clientRackInitImage }}
-  clientRackInitImage: {{ . | quote }}
-  {{- end }}
-  {{- end }}
-  {{- with .Values.jmxOptions }}
-  jmxOptions:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- if .Values.metrics.enabled }}
-  metricsConfig:
-    {{- if eq (.Values.metrics.type | default "jmxPrometheusExporter") "strimziMetricsReporter" }}
-    {{- /* The operator's native path: the broker-side reporter publishes
-           Prometheus metrics directly, so no exporter sidecar and no JMX
-           scrape. The allow-list is a values key rather than a ConfigMap
-           because it is a list of regexes, not a file. */}}
-    type: strimziMetricsReporter
-    values:
-      allowList:
-        {{- toYaml (.Values.metrics.allowList | default (list "kafka_connect.*" "kafka_producer.*" "kafka_consumer.*")) | nindent 8 }}
-    {{- else }}
-    type: jmxPrometheusExporter
-    valueFrom:
-      configMapKeyRef:
-        name: {{ include "mirror-maker2.fullname" . }}-metrics
-        key: metrics-config.yml
-    {{- end }}
-  {{- end }}
-  template:
-    {{- /* Gate on the replica count that will actually run: under the HPA
-           that is at least minReplicas, whatever `replicas` says. */}}
-    {{- $effective := ternary (.Values.autoscaling.minReplicas | default 2) .Values.replicas .Values.autoscaling.enabled }}
-    {{- if and .Values.podDisruptionBudget.enabled (gt (int $effective) 1) }}
-    # Strimzi manages the PDB for its own pods; setting maxUnavailable here
-    # avoids a second, overlapping standalone PDB fighting the operator's.
-    podDisruptionBudget:
-      maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
-    {{- end }}
-    pod:
-      {{- with .Values.podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- if .Values.priorityClassName }}
-      priorityClassName: {{ .Values.priorityClassName }}
-      {{- end }}
-      terminationGracePeriodSeconds: 30
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.nodeSelector }}
-      # nodeSelector is set via affinity below to co-exist with pod anti-affinity
-      {{- end }}
-      {{- if or .Values.podAntiAffinity.enabled .Values.nodeSelector }}
-      affinity:
-        {{- if .Values.podAntiAffinity.enabled }}
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    {{- include "mirror-maker2.podSelectorLabels" . | nindent 20 }}
-                topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
-        {{- end }}
-        {{- with .Values.nodeSelector }}
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  {{- range $k, $v := . }}
-                  - key: {{ $k }}
-                    operator: In
-                    values: [{{ $v | quote }}]
-                  {{- end }}
-        {{- end }}
-      {{- end }}
-      {{- if .Values.topologySpreadConstraints.enabled }}
-      topologySpreadConstraints:
-        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
-          topologyKey: {{ .Values.topologySpreadConstraints.topologyKey }}
-          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.whenUnsatisfiable }}
-          labelSelector:
-            matchLabels:
-              {{- include "mirror-maker2.podSelectorLabels" . | nindent 14 }}
-      {{- end }}
-    {{- /* Env and security context for the worker container itself: proxy
-           settings, KAFKA_OPTS, a JVM agent. Strimzi owns the rest of the
-           container, so this is the whole surface. */}}
-    {{- with .Values.connectContainer }}
-    connectContainer:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
-    {{- /* The remaining spec.template sub-objects (apiService, headlessService,
-           podSet, serviceAccount, clusterRoleBinding, jmxSecret, initContainer)
-           as one passthrough rather than seven values nobody would set twice. */}}
-    {{- with .Values.templateExtra }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
+
+{{- /*
+The Connect-worker part of the spec, as the map kafka-common's
+connectWorker.spec reads. Everything a KafkaMirrorMaker2 shares with a
+KafkaConnect lives there: replicas (lookup-preserved under the HPA), JVM,
+probes, logging, tracing, rack, JMX, metrics and spec.template — the last
+built as one map and merged with templateExtra, never written beside it.
+*/}}
+{{- define "mirror-maker2.worker" -}}
+{{- $fullname := include "mirror-maker2.fullname" . -}}
+{{- $w := dict
+      "kind" "KafkaMirrorMaker2"
+      "name" $fullname
+      "namespace" (include "mirror-maker2.namespace" .)
+      "version" .Values.version
+      "image" .Values.image
+      "replicas" .Values.replicas
+      "minReplicasDefault" 2
+      "autoscaling" .Values.autoscaling
+      "resources" .Values.resources
+      "jvmOptions" .Values.jvmOptions
+      "livenessProbe" .Values.livenessProbe
+      "readinessProbe" .Values.readinessProbe
+      "jmxOptions" .Values.jmxOptions
+      "logging" .Values.logging
+      "loggingConfigMap" (printf "%s-logging" $fullname)
+      "tracing" .Values.tracing
+      "rack" .Values.rack
+      "metrics" (dict
+          "enabled" (.Values.metrics.enabled | default false)
+          "type" .Values.metrics.type
+          "allowList" .Values.metrics.allowList
+          "configMapName" (printf "%s-metrics" $fullname)
+          "configMapKey" "metrics-config.yml")
+      "podSelector" (include "mirror-maker2.podSelectorLabels" . | fromYaml)
+      "template" (dict
+          "pdb" .Values.podDisruptionBudget
+          "podSecurityContext" .Values.podSecurityContext
+          "imagePullSecrets" .Values.imagePullSecrets
+          "priorityClassName" .Values.priorityClassName
+          "terminationGracePeriodSeconds" (.Values.terminationGracePeriodSeconds | default 30)
+          "tolerations" .Values.tolerations
+          "nodeSelector" .Values.nodeSelector
+          "nodeAffinity" .Values.nodeAffinity
+          "podAntiAffinity" .Values.podAntiAffinity
+          "topologySpread" .Values.topologySpreadConstraints
+          "container" (dict "harden" true "extra" .Values.connectContainer)
+          "extra" .Values.templateExtra) -}}
+{{- toYaml $w -}}
+{{- end }}

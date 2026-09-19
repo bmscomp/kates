@@ -1,0 +1,260 @@
+{{- /*
+A Kyverno ClusterPolicy restricting the pods of this release's namespace.
+ClusterPolicies are cluster-scoped, so the name carries the namespace and the
+cluster (0.4 used one fixed name, and a second cluster could not enable it).
+Formerly `podSecurityPolicy`; the old key is still read in 1.x.
+*/ -}}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $ky := $r.kyverno -}}
+{{- if and $ky.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+{{- $ns := include "kafka-cluster.namespace" . -}}
+{{- $policy := include "kafka-cluster.kyvernoPolicyName" . -}}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Kafka Pod Security Standards
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Enforces restricted pod security standards for all pods in the Kafka
+      namespace: non-root containers, read-only root filesystem, dropped
+      capabilities, and seccomp profile. Strimzi-managed pods are excluded
+      from mutation and capability validation to avoid operator conflicts.
+spec:
+  validationFailureAction: {{ $ky.action | default "Audit" }}
+  background: true
+  rules:
+    {{- if $ky.mutate }}
+    # ── Mutate: auto-inject pod-level security context ────────────────────────
+    - name: mutate-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(runAsNonRoot): true
+
+    - name: mutate-drop-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(capabilities):
+                    +(drop):
+                      - "ALL"
+
+    - name: mutate-seccomp-profile
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                +(type): RuntimeDefault
+
+    - name: mutate-disable-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            containers:
+              - (name): "*"
+                securityContext:
+                  +(allowPrivilegeEscalation): false
+    {{- end }}
+
+    # ── Validate: enforce standards ───────────────────────────────────────────
+    - name: require-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      validate:
+        message: "Kafka pods must run as non-root."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+
+    - name: restrict-capabilities
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      validate:
+        message: "Containers must drop ALL capabilities."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop: ["ALL"]
+
+    - name: require-seccomp
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      validate:
+        message: "Pods must use RuntimeDefault or Localhost seccomp profile."
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: "RuntimeDefault | Localhost"
+
+    - name: restrict-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      {{- if (include "kafka-common.enabled" (list $ky.excludeStrimziPods true)) }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+              selector:
+                matchExpressions:
+                  - key: strimzi.io/kind
+                    operator: Exists
+      {{- end }}
+      validate:
+        message: "Containers must not allow privilege escalation."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+
+    - name: restrict-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: [{{ $ns | quote }}]
+      validate:
+        message: "Pods must not use host network, PID, or IPC namespaces."
+        pattern:
+          spec:
+            =(hostNetwork): false
+            =(hostPID): false
+            =(hostIPC): false
+{{- $pe := $ky.policyExceptions | default dict }}
+{{- if and $pe.enabled (.Capabilities.APIVersions.Has "kyverno.io/v2") }}
+{{- range $exNs := ($pe.namespaces | default list) }}
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: {{ printf "%s-exception" $policy | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $exNs }}
+  labels:
+    {{- include "kafka-cluster.labels" $ | nindent 4 }}
+spec:
+  exceptions:
+    - policyName: {{ $policy }}
+      ruleNames:
+        {{- toYaml ($pe.exemptRules | default list) | nindent 8 }}
+  match:
+    any:
+      - resources:
+          namespaces: [{{ $exNs | quote }}]
+          kinds: ["Pod"]
+{{- end }}
+{{- end }}
+{{- end }}

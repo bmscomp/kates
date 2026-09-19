@@ -60,6 +60,31 @@ kates test create --type LOAD         # Run your first load test
 
 Prefer `make`? `make all` provisions the same stack (Kind cluster, local registry, monitoring, Kafka, UI, schema registry, chaos) through a ten-step idempotent pipeline — see the [Local Development Stack guide](docs/local-development.md).
 
+Installing from a checkout with Helm directly? Two rules the CLI and the `make` targets already follow for you:
+
+1. **The Strimzi operator is its own release, and it goes first.** `charts/strimzi-operator` owns the Strimzi CRDs through a `pre-install`/`pre-upgrade` hook; `charts/kafka-cluster` no longer applies them, and a `Kafka` resource cannot validate before its CRD is `Established`.
+2. **Run `helm dependency build` before every render, lint, install or upgrade.** `strimzi-operator` pulls the upstream operator chart from `quay.io`, and `kafka-cluster`, `connect-cluster` and `mirror-maker2` each resolve the `kafka-common` library chart.
+
+```bash
+helm dependency build charts/strimzi-operator
+helm upgrade --install strimzi-operator charts/strimzi-operator \
+  --namespace strimzi-operator --create-namespace \
+  --timeout 10m --wait
+kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
+
+helm dependency build charts/kafka-cluster
+helm upgrade --install kafka-cluster charts/kafka-cluster \
+  --namespace kafka --create-namespace \
+  -f charts/kafka-cluster/values-platform.yaml \
+  -f charts/kafka-cluster/values-dev.yaml \
+  -f charts/kafka-cluster/values-kind.yaml \
+  --timeout 15m --wait
+```
+
+That is the release name and the `-f` chain `scripts/deploy-kafka.sh` uses for `ENV=kind` (it passes `--timeout 10m` and waits with `kubectl wait` rather than `--wait`); other environments swap the last two files for `values-dev.yaml`, `values-staging.yaml` or `values-prod.yaml`. Keep the release named `kafka-cluster` — `helm test kafka-cluster -n kafka` and `make helm-test-all` both assume it.
+
+`values-platform.yaml` is a profile, not an environment overlay — it carries the Kates topics, users and client grants, and it comes *before* the environment overlay so the overlay can still change anything in it. The chapters walk both releases in full: [Deploying the Strimzi Operator](docs/book/deploying-strimzi-operator.md) and [Installing Kafka with the kafka-cluster Helm Chart](docs/book/20-installation-guide.md).
+
 ### Access Points
 
 Once the stack is provisioned, the following services are available via NodePort or port-forwarding (`kates ports --all`).
@@ -72,7 +97,7 @@ Once the stack is provisioned, the following services are available via NodePort
 | Kates API | http://localhost:30083 | — | Protected by API key in production; disabled in dev/test profiles. |
 | Jaeger UI | http://localhost:30086 | — | Displays distributed traces for REST, Kafka, and JDBC operations. |
 | Prometheus | http://localhost:30090 | — | Exposes `/api/v1/query` for ad-hoc PromQL queries. |
-| Litmus UI | `make chaos-ui` then http://localhost:9091 | admin / litmus | Requires an explicit port-forward; not exposed by default. |
+| LitmusChaos | — | — | The `kates-chaos` chart ships the execution plane only, with no web portal. Drive experiments through `ChaosEngine` resources and inspect state with `make chaos-status`; `make chaos-ui` explains this. |
 
 ### Teardown
 
@@ -161,18 +186,19 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.4.0 | 3.3.0 | Apicurio Registry (KafkaSQL) backed by the in-repo kafka-cluster chart |
-| [`connect-cluster`](charts/connect-cluster/) | 1.3.3 | 3.6.2 | A Helm chart for deploying Strimzi Kafka Connect clusters |
+| [`connect-cluster`](charts/connect-cluster/) | 2.0.0 | 4.3.1 | A Helm chart for deploying Strimzi Kafka Connect clusters |
 | [`headlamp`](charts/headlamp/) | 0.2.0 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
-| [`kafka-cluster`](charts/kafka-cluster/) | 0.4.0 | 4.3.1 | Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability |
+| [`kafka-cluster`](charts/kafka-cluster/) | 1.0.0 | 4.3.1 | A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability |
+| [`kafka-common`](charts/kafka-common/) | 0.1.0 |  | Library chart — the templates the Strimzi charts share (names and labels, rails, Kafka client authentication, the Connect worker spec, KafkaUser, secret sync, NetworkPolicy and monitoring fragments) |
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
 | [`kates-chaos`](charts/kates-chaos/) | 2.0.0 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
-| [`kates-platform`](charts/kates-platform/) | 0.6.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
+| [`kates-platform`](charts/kates-platform/) | 0.7.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
 | [`kates`](charts/kates/) | 0.7.0 | 1.22.0 | Kates — Kafka Advanced Testing & Engineering Suite |
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.0 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source Strimzi cannot deploy |
 | [`minio`](charts/minio/) | 17.0.22 | 2025.7.23 | MinIO(R) is an object storage server, compatible with Amazon S3 cloud |
-| [`mirror-maker2`](charts/mirror-maker2/) | 0.7.1 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
-| [`monitoring`](charts/monitoring/) | 1.1.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
-| [`strimzi-operator`](charts/strimzi-operator/) | 0.2.0 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
+| [`mirror-maker2`](charts/mirror-maker2/) | 0.8.0 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
+| [`monitoring`](charts/monitoring/) | 1.2.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
+| [`strimzi-operator`](charts/strimzi-operator/) | 0.3.0 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
 | [`velero`](charts/velero/) | 11.3.3 | 1.17.1 | A Helm chart for velero |
 <!-- chart-table:end -->
 

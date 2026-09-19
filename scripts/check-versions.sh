@@ -251,6 +251,24 @@ else
   echo "OK: every cluster, kind included, runs ${connect_image} (Debezium ${dockerfile_tag} per Dockerfile.connect)."
 fi
 
+# connect-cluster 2.0: appVersion is the Kafka line (as mirror-maker2's is),
+# and the image pin is recorded in the kates.io/connect-image annotation, which
+# publish-connect.yml moves together with values.yaml.
+CONNECT_CHART_YAML="charts/connect-cluster/Chart.yaml"
+connect_app_version=$(grep -E '^appVersion:' "$CONNECT_CHART_YAML" | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+connect_image_annotation=$(grep -E '^  kates.io/connect-image:' "$CONNECT_CHART_YAML" | head -1 | sed -E 's/^[[:space:]]*kates\.io\/connect-image:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+printf '  %-46s %s\n' "${CONNECT_CHART_YAML} appVersion:"            "${connect_app_version:-<unset>}"
+printf '  %-46s %s\n' "${CONNECT_CHART_YAML} kates.io/connect-image:" "${connect_image_annotation:-<unset>}"
+if [[ "$connect_app_version" != "$env_kafka_version" ]]; then
+  echo "DRIFT: ${CONNECT_CHART_YAML} appVersion is ${connect_app_version:-<unset>}, the Kafka pin is ${env_kafka_version}." >&2
+  fail=1
+elif [[ "$connect_image_annotation" != "$connect_image" ]]; then
+  echo "DRIFT: ${CONNECT_CHART_YAML} kates.io/connect-image is ${connect_image_annotation:-<unset>}, values.yaml runs ${connect_image}." >&2
+  fail=1
+else
+  echo "OK: connect-cluster appVersion and image annotation agree with the pins."
+fi
+
 # ---------------------------------------------------------------------------
 # What the vendored operator actually supports.
 #
@@ -546,6 +564,47 @@ if [[ -n "$env_kubectl_version" && -n "$env_node_version" ]]; then
   else
     echo "OK: kubectl ${env_kubectl_version} is within ±1 minor of ${env_node_version}."
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# The tester image the Strimzi charts' Helm tests, hooks and secret-sync jobs
+# run. ghcr.io/bmscomp/kates-tester is published with each Kates release, so
+# every chart pins the same tag, and it is the kates chart's appVersion
+# (docs/kafka-charts-refactor-plan.md, M4). A chart left behind runs test
+# tooling a release older than the rest.
+# ---------------------------------------------------------------------------
+kates_app_version=$(grep -E '^appVersion:' charts/kates/Chart.yaml | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
+echo ""
+echo "Tester image (kates-tester):"
+printf '  %-46s %s\n' "charts/kates/Chart.yaml appVersion:" "${kates_app_version:-<unset>}"
+tester_drift=0
+tester_pins=0
+while IFS= read -r hit; do
+  tester_pins=$((tester_pins + 1))
+  file=${hit%%:*}
+  tag=$(echo "$hit" | sed -E 's/.*kates-tester:([^" ]+).*/\1/')
+  printf '  %-46s %s\n' "${file}:" "$tag"
+  if [[ "$tag" != "$kates_app_version" ]]; then
+    tester_drift=1
+  fi
+done < <(grep -HE '^[[:space:]]*[A-Za-z]+:[[:space:]]*"?ghcr.io/bmscomp/kates-tester:' \
+           charts/strimzi-operator/values*.yaml charts/kafka-cluster/values*.yaml \
+           charts/connect-cluster/values*.yaml charts/mirror-maker2/values*.yaml 2>/dev/null)
+if [[ -z "$kates_app_version" ]]; then
+  echo "ERROR: could not read charts/kates/Chart.yaml appVersion" >&2
+  fail=1
+elif [[ "$tester_pins" -lt 4 ]]; then
+  # One per Strimzi chart, and kafka-cluster pins two images: fewer than four
+  # means the grep stopped matching (a moved path, a renamed key), and a check
+  # that silently matches nothing is no check.
+  echo "ERROR: found ${tester_pins} kates-tester pin(s) in the Strimzi charts; expected at least 4." >&2
+  fail=1
+elif [[ "$tester_drift" -ne 0 ]]; then
+  echo "DRIFT: a Strimzi chart pins kates-tester at a tag other than ${kates_app_version}." >&2
+  echo "  Move every testImages pin to ghcr.io/bmscomp/kates-tester:${kates_app_version}." >&2
+  fail=1
+else
+  echo "OK: every Strimzi chart runs kates-tester:${kates_app_version}."
 fi
 
 exit "$fail"

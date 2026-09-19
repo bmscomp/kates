@@ -22,7 +22,7 @@ import (
 
 // kates migrate — the cross-version migration lab.
 //
-// The front door takes a pair of versions (`up --from 2.8.2 [--to 4.3.0]`)
+// The front door takes a pair of versions (`up --from 2.8.2 [--to <version>]`)
 // and stands up an old Kafka beside the platform's primary, a MirrorMaker 2
 // between them, a corpus, the verification, the cutover and the teardown;
 // the building blocks underneath (`source`, `mirror`, `target`, `image`)
@@ -45,9 +45,9 @@ cutover and tear everything down — from one pair of versions.
 The front door:
   kates migrate pairs                       every old → new pair this cluster can stand up
   kates migrate plan --from 2.8.2           what up would create; nothing changes
-  kates migrate up   --from 2.8.2 [--to 4.3.0]
+  kates migrate up   --from 2.8.2 [--to <version>]
   kates migrate up   --from 2.8.2 --from 3.9.1   several sources into one target
-  kates migrate status | verify | cutover | rollback | down [--name m282-430]
+  kates migrate status | verify | cutover | rollback | down [--name m282-431]
   kates migrate run  --from 2.8.2 [--keep] [--skip-build] [-o json]
 
 --read-only-source keeps every MirrorMaker write on the target (KIP-716), so
@@ -460,7 +460,7 @@ type migratePairFlags struct {
 func addMigratePairFlags(cmd *cobra.Command, f *migratePairFlags) {
 	cmd.Flags().StringArrayVar(&f.From, "from", nil, "Source Kafka version, x.y.z (required; repeat it to mirror several sources into one target)")
 	cmd.Flags().StringVar(&f.To, "to", "", "Target Kafka version (default: the primary as it runs)")
-	cmd.Flags().StringVar(&f.Name, "name", "", "Lab name (default: m<from>[-<from>…]-<to> with the dots removed, e.g. m282-430)")
+	cmd.Flags().StringVar(&f.Name, "name", "", "Lab name (default: m<from>[-<from>…]-<to> with the dots removed, e.g. m282-431)")
 	cmd.Flags().StringVar(&f.SourceProvider, "source-provider", "auto", "Who runs the source: auto, strimzi or legacy")
 	cmd.Flags().StringVar(&f.SourceStrimziVersion, "source-strimzi-version", "", "Operator version of a Strimzi source in its own namespace (namespace scope)")
 	cmd.Flags().StringVar(&f.Policy, "policy", migrate.PolicyIdentity, "Replication policy: identity (keep topic names) or default (<alias>.<topic>)")
@@ -835,6 +835,18 @@ func helmSourceArgs(s *migrate.Source, valuesPath, userValues string, timeout ti
 		args = append(args, "-f", userValues)
 	}
 	return append(args, "--wait", "--timeout", formatSeconds(timeout))
+}
+
+// ensureMirrorChartDeps builds the mirror-maker2 chart's local dependency
+// (the kafka-common library chart) before any helm command renders it. Helm
+// refuses a chart whose dependencies are declared but not built, and a
+// checkout does not carry them (charts/*/charts/ is gitignored). The build is
+// offline — the dependency is a file:// reference — and idempotent.
+func ensureMirrorChartDeps(ctx context.Context) error {
+	if _, err := defaultRunner.Run(ctx, "helm", "dependency", "build", migrate.MirrorChartPath); err != nil {
+		return fmt.Errorf("build the %s dependencies: %w", migrate.MirrorChartPath, err)
+	}
+	return nil
 }
 
 // helmMirrorArgs is the helm command that installs the mirror: the kind

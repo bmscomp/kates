@@ -61,3 +61,11 @@ strimzi-kafka-operator:
       memory: 384Mi
   podDisruptionBudget:
     enabled: false
+  dashboards:
+    enabled: false
+
+# ── Once per Kubernetes cluster: the primary operator's release has these ────
+# The dashboards' ConfigMap names are fixed, and one drain-cleaner webhook
+# serves every operator.
+drainCleaner:
+  enabled: false

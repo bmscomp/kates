@@ -1,0 +1,197 @@
+# Metric contract for charts/kafka-cluster.
+#
+# Read by scripts/check-metric-contract.sh; the format is described in
+# mirror-maker2.yaml. Two exporters scrape this chart's pods: the brokers and
+# controllers (Strimzi's kafka-metrics rule set, vendored in
+# files/metrics/kafka-metrics.yaml) and Cruise Control (its own rule set,
+# files/metrics/cruise-control-metrics.yaml). Each bean says which one reads it.
+#
+# The references checked are the chart's alerts and recording rules, AND the
+# Strimzi operator's own dashboards for Kafka, KRaft, Cruise Control and the
+# Kafka Exporter (external_dashboards): kafka-cluster 1.0 ships no dashboards
+# and relies on those, so the rules it vendors must serve them.
+#
+# The catalogue follows Kafka's documented metrics (kafka.apache.org/
+# documentation/#monitoring, #kraft_monitoring, #tiered_storage_monitoring).
+# Yammer meters expose Count and the *Rate attributes, histograms and timers
+# add Mean/Max and the percentiles; gauges expose Value. Property order is the
+# order Kafka registers the tags in.
+
+chart: charts/kafka-cluster
+
+set:
+  - alerts.enabled=true
+  - alerts.slo.enabled=true
+  - monitoring.podMonitor.enabled=true
+  - cruiseControl.enabled=true
+  - kafkaExporter.enabled=true
+
+renders:
+  - name: base
+    values: [values-dev.yaml]
+  - name: prod
+    values: [values-prod.yaml]
+  - name: tiered
+    values: [values-dev.yaml]
+    set:
+      - tieredStorage.enabled=true
+      - tieredStorage.image=registry.example.com/kafka-tiered:1
+      - tieredStorage.remoteStorageManager.className=a.B
+      - tieredStorage.remoteStorageManager.classPath=/opt/p
+      - tieredStorage.credentials.existingSecret=creds
+
+exporters:
+  kafka: '.*-kafka-metrics'
+  cruise-control: '.*-cruise-control-metrics'
+
+external_dashboards:
+  - archive: charts/strimzi-operator/charts/strimzi-kafka-operator-*.tgz
+    files: [strimzi-kafka\.json, strimzi-kraft\.json, strimzi-cruise-control\.json, strimzi-kafka-exporter\.json]
+
+builtin:
+  - "^jvm_"
+  - "^process_"
+  - "^jmx_"
+  - "^up$"
+  - "^scrape_"
+
+# Series that other exporters publish. This chart reads them; it does not
+# produce them.
+external:
+  - pattern: "^kafka_consumergroup_"          # kafka-exporter (spec.kafkaExporter)
+  - pattern: "^kafka_topic_partition"         # kafka-exporter
+  - pattern: "^kafka_broker_info$"            # kafka-exporter
+  - pattern: "^kubelet_volume_stats_"         # kubelet, via kube-prometheus-stack
+  - pattern: "^kube_"                         # kube-state-metrics
+  - pattern: "^container_"                    # cAdvisor
+
+alternatives:
+  - [jvm_memory_used_bytes, jvm_memory_bytes_used]
+  - [jvm_memory_max_bytes, jvm_memory_bytes_max]
+
+# Known-dead references. Empty since 1.0.0: the K4 alerts were rewritten on
+# the vendored rules and the K16 dashboards were removed.
+known_missing: {}
+
+# Not expected in the live capture the metrics-live job takes (the references
+# are still checked against the rules, as everything else is).
+live:
+  absentOk:
+    - pattern: "^kafka_server_brokertopicmetrics_remotecopyerrors_total$"   # tiered storage is off on the CI cluster
+
+# Label defects in the VENDORED rules, which stay byte-identical to Strimzi's.
+# Upstream's generic one-tag gauge rule captures LogCleanerManager's quoted
+# logDirectory tag with the quotes (the label name is the rule's "$4"
+# template). Nothing in this chart or the operator's dashboards selects on it.
+known_label_defects:
+  "$4": upstream-kafka-metrics
+
+_meter: &meter [Count, MeanRate, OneMinuteRate, FiveMinuteRate, FifteenMinuteRate]
+_timer: &timer [Count, Mean, Min, Max, StdDev, 50thPercentile, 75thPercentile, 95thPercentile, 98thPercentile, 99thPercentile, 999thPercentile, MeanRate, OneMinuteRate]
+_histogram: &histogram [Count, Mean, Min, Max, StdDev, 50thPercentile, 75thPercentile, 95thPercentile, 98thPercentile, 99thPercentile, 999thPercentile]
+
+mbeans:
+  # ── Replica manager ───────────────────────────────────────────────────────
+  - {bean: "kafka.server<type=ReplicaManager, name=UnderReplicatedPartitions>", attributes: [Value]}
+  - {bean: "kafka.server<type=ReplicaManager, name=UnderMinIsrPartitionCount>", attributes: [Value]}
+  - {bean: "kafka.server<type=ReplicaManager, name=AtMinIsrPartitionCount>", attributes: [Value]}
+  - {bean: "kafka.server<type=ReplicaManager, name=OfflineReplicaCount>", attributes: [Value]}
+  - {bean: "kafka.server<type=ReplicaManager, name=PartitionCount>", attributes: [Value]}
+  - {bean: "kafka.server<type=ReplicaManager, name=LeaderCount>", attributes: [Value]}
+  - {bean: "kafka.server<type=ReplicaManager, name=IsrShrinksPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=ReplicaManager, name=IsrExpandsPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=ReplicaManager, name=FailedIsrUpdatesPerSec>", attributes: *meter}
+  - {bean: "kafka.cluster<type=Partition, name=UnderMinIsr, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.cluster<type=Partition, name=AtMinIsr, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.cluster<type=Partition, name=ReplicasCount, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.cluster<type=Partition, name=InSyncReplicasCount, topic=orders, partition=0>", attributes: [Value]}
+
+  # ── Throughput ────────────────────────────────────────────────────────────
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=BytesInPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=BytesOutPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=MessagesInPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=BytesRejectedPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=FailedProduceRequestsPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=FailedFetchRequestsPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=TotalProduceRequestsPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=TotalFetchRequestsPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=ReplicationBytesInPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=ReplicationBytesOutPerSec>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=BytesInPerSec, topic=orders>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=BytesOutPerSec, topic=orders>", attributes: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=MessagesInPerSec, topic=orders>", attributes: *meter}
+
+  # ── Tiered storage (KIP-405 / KIP-963) ────────────────────────────────────
+  # Registered only when remote.log.storage.system.enable is true.
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=RemoteCopyBytesPerSec>", optional: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=RemoteFetchBytesPerSec>", optional: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=RemoteCopyErrorsPerSec>", optional: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=RemoteFetchErrorsPerSec>", optional: *meter}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=RemoteCopyLagBytes>", optional: [Value]}
+  - {bean: "kafka.server<type=BrokerTopicMetrics, name=RemoteLogSizeBytes>", optional: [Value]}
+
+  # ── Requests and the network layer ────────────────────────────────────────
+  - {bean: "kafka.server<type=KafkaRequestHandlerPool, name=RequestHandlerAvgIdlePercent>", attributes: *meter}
+  - {bean: "kafka.network<type=SocketServer, name=NetworkProcessorAvgIdlePercent>", attributes: [Value]}
+  - {bean: "kafka.network<type=RequestChannel, name=RequestQueueSize>", attributes: [Value]}
+  - {bean: "kafka.network<type=RequestChannel, name=ResponseQueueSize>", attributes: [Value]}
+  - {bean: "kafka.network<type=RequestMetrics, name=TotalTimeMs, request=Produce>", attributes: *histogram}
+  - {bean: "kafka.network<type=RequestMetrics, name=TotalTimeMs, request=FetchConsumer>", attributes: *histogram}
+  - {bean: "kafka.network<type=RequestMetrics, name=RequestQueueTimeMs, request=Produce>", attributes: *histogram}
+  - {bean: "kafka.network<type=RequestMetrics, name=RequestsPerSec, request=Produce, version=11>", attributes: *meter}
+  - {bean: "kafka.network<type=RequestMetrics, name=ErrorsPerSec, request=Produce, error=NONE>", attributes: *meter}
+  - bean: "kafka.server<type=socket-server-metrics, listener=PLAIN-9092, networkProcessor=3>"
+    attributes: [connection-count, connection-creation-rate, connection-creation-total, failed-authentication-rate,
+                 failed-authentication-total, successful-authentication-rate, successful-authentication-total]
+  - {bean: "kafka.server<type=KafkaServer, name=linux-disk-read-bytes>", attributes: [Value]}
+  - {bean: "kafka.server<type=KafkaServer, name=linux-disk-write-bytes>", attributes: [Value]}
+
+  # ── Log layer ─────────────────────────────────────────────────────────────
+  - {bean: "kafka.log<type=LogFlushStats, name=LogFlushRateAndTimeMs>", attributes: *timer}
+  - {bean: "kafka.log<type=LogManager, name=OfflineLogDirectoryCount>", attributes: [Value]}
+  - {bean: "kafka.log<type=Log, name=Size, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.log<type=LogCleanerManager, name=uncleanable-partitions-count, logDirectory=\"/var/lib/kafka/data-0/kafka-log0\">", attributes: [Value]}
+
+  # ── Controller (KRaft) ────────────────────────────────────────────────────
+  - {bean: "kafka.controller<type=KafkaController, name=ActiveControllerCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=OfflinePartitionsCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=GlobalPartitionCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=GlobalTopicCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=ActiveBrokerCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=FencedBrokerCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=PreferredReplicaImbalanceCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=KafkaController, name=MetadataErrorCount>", attributes: [Value]}
+  - {bean: "kafka.controller<type=ControllerStats, name=UncleanLeaderElectionsPerSec>", attributes: *meter}
+  - {bean: "kafka.controller<type=ControllerEventManager, name=EventQueueTimeMs>", attributes: *histogram}
+
+  # ── KRaft quorum (KafkaMetrics, attribute-per-metric) ─────────────────────
+  - bean: "kafka.server<type=raft-metrics>"
+    attributes: [current-leader, current-epoch, current-vote, high-watermark, log-end-offset, log-end-epoch,
+                 number-unknown-voter-connections, poll-idle-ratio-avg, commit-latency-avg, commit-latency-max,
+                 election-latency-avg, election-latency-max, fetch-records-rate, append-records-rate]
+    strings: [current-state]
+  - bean: "kafka.server<type=raft-channel-metrics>"
+    attributes: [connection-count, incoming-byte-rate, incoming-byte-total, outgoing-byte-rate, outgoing-byte-total,
+                 request-rate, request-total, response-rate, response-total, request-latency-avg, request-latency-max]
+  - bean: "kafka.server<type=broker-metadata-metrics>"
+    attributes: [last-applied-record-offset, last-applied-record-timestamp, last-applied-record-lag-ms,
+                 metadata-load-error-count, metadata-apply-error-count]
+
+  # ── Cruise Control (its own exporter) ─────────────────────────────────────
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=AnomalyDetector.balancedness-score>", attributes: [Value]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=AnomalyDetector.goal-violation-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=AnomalyDetector.disk-failure-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=AnomalyDetector.metric-anomaly-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=Executor.ongoing-execution-kafka-assigner>", attributes: [Value]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=Executor.ongoing-execution-non-kafka-assigner>", attributes: [Value]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=GoalOptimizer.proposal-computation-timer>", attributes: [Count, Mean, Max, 99thPercentile, 999thPercentile]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=LoadMonitor.monitored-partitions-percentage>", attributes: [Value]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=LoadMonitor.valid-windows>", attributes: [Value]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=LoadMonitor.total-monitored-windows>", attributes: [Value]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=LoadMonitor.cluster-model-creation-timer>", attributes: [Count, Mean, Max, 99thPercentile, 999thPercentile]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=KafkaCruiseControlServlet.rebalance-request-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=KafkaCruiseControlServlet.proposals-request-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=KafkaCruiseControlServlet.state-request-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=KafkaCruiseControlServlet.user-tasks-request-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=MetricFetcherManager.partition-samples-fetcher-failure-rate>", attributes: [Count, OneMinuteRate]}
+  - {exporter: cruise-control, bean: "kafka.cruisecontrol<name=MetricFetcherManager.training-samples-fetcher-failure-rate>", attributes: [Count, OneMinuteRate]}

@@ -16,12 +16,12 @@
 # compares the names that come out with every name the PromQL reads. Static;
 # no cluster; seconds.
 #
-# With --scrape FILE a real /metrics capture is checked too: every reference
-# must be in it, and the catalogue is diffed against it both ways so a Kafka
+# With --scrape FILE (repeatable, one per exporter) real /metrics captures are
+# checked too: every reference must be in one of them, and the catalogue is diffed against it both ways so a Kafka
 # upgrade that renames an attribute shows up as a NOTE before it shows up as
 # an empty panel. ci-mirror-maker2.yml's live job produces that capture.
 #
-# Usage: scripts/check-metric-contract.sh <chart> [--scrape FILE] [--quiet]
+# Usage: scripts/check-metric-contract.sh <chart> [--scrape FILE]... [--quiet]
 #        scripts/check-metric-contract.sh --list
 #
 # Needs helm and python3 with PyYAML. Also run in CI (ci-mirror-maker2.yml,
@@ -37,11 +37,12 @@ usage() {
   exit 2
 }
 
-CHART="" SCRAPE="" QUIET=""
+CHART="" QUIET=""
+SCRAPES=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --list)  for f in "$CONTRACTS"/*.yaml; do basename "$f" .yaml; done; exit 0 ;;
-    --scrape) SCRAPE="${2:?--scrape needs a file}"; shift 2 ;;
+    --scrape) SCRAPES+=("${2:?--scrape needs a file}"); shift 2 ;;
     --quiet) QUIET="--quiet"; shift ;;
     -h|--help) usage ;;
     -*) echo "unknown option: $1" >&2; usage ;;
@@ -55,10 +56,12 @@ if [ ! -f "$CONTRACT" ]; then
   echo "no contract for '$CHART' — expected $CONTRACT (--list shows the charts that have one)" >&2
   exit 2
 fi
-if [ -n "$SCRAPE" ] && [ ! -s "$SCRAPE" ]; then
-  echo "--scrape: $SCRAPE is missing or empty" >&2
-  exit 2
-fi
+for f in ${SCRAPES[@]+"${SCRAPES[@]}"}; do
+  if [ ! -s "$f" ]; then
+    echo "--scrape: $f is missing or empty" >&2
+    exit 2
+  fi
+done
 command -v helm >/dev/null 2>&1 || { echo "helm is required" >&2; exit 2; }
 python3 -c 'import yaml' 2>/dev/null || { echo "python3 with PyYAML is required (pip install pyyaml)" >&2; exit 2; }
 
@@ -96,6 +99,6 @@ PY
 )
 
 ARGS=()
-[ -n "$SCRAPE" ] && ARGS+=(--scrape "$SCRAPE")
+for f in ${SCRAPES[@]+"${SCRAPES[@]}"}; do ARGS+=(--scrape "$f"); done
 [ -n "$QUIET" ] && ARGS+=("$QUIET")
-python3 "$CONTRACTS/contract.py" "$CONTRACT" "${RENDERS[@]}" "${ARGS[@]}"
+python3 "$CONTRACTS/contract.py" "$CONTRACT" "${RENDERS[@]}" ${ARGS[@]+"${ARGS[@]}"}

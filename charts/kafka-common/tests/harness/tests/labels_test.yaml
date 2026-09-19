@@ -1,0 +1,49 @@
+suite: names, labels and values helpers
+templates:
+  - labels.yaml
+tests:
+  - it: builds the standard labels once each
+    set:
+      extraLabels: {kates.io/lab: blue, app.kubernetes.io/component: overridden}
+    asserts:
+      - equal:
+          path: 'metadata.labels["app.kubernetes.io/part-of"]'
+          value: kates
+      - equal:
+          path: 'metadata.labels["strimzi.io/cluster"]'
+          value: krafter
+      - equal:
+          path: 'metadata.labels["kates.io/lab"]'
+          value: blue
+      - equal:
+          path: 'metadata.labels["app.kubernetes.io/component"]'
+          value: overridden
+  - it: normalises versions
+    asserts:
+      - equal: {path: data.semver, value: "4.2.0"}
+      - equal: {path: data.semverShort, value: "2.8.0"}
+  - it: resolves the cluster domain from global first
+    set:
+      global.clusterDomain: g.local
+      clusterDomain: t.local
+    asserts:
+      - equal: {path: data.domain, value: g.local}
+  - it: falls back to the top-level cluster domain
+    set:
+      clusterDomain: t.local
+    asserts:
+      - equal: {path: data.domain, value: t.local}
+  - it: treats false as false (`false | default true` is true in Helm)
+    set:
+      toggles:
+        a: {value: false, default: true}
+        b: {default: true}
+        c: {value: true, default: false}
+        d: {default: false}
+        e: {value: "false", default: true}
+    asserts:
+      - equal: {path: data.toggle-a, value: ""}
+      - equal: {path: data.toggle-b, value: "true"}
+      - equal: {path: data.toggle-c, value: "true"}
+      - equal: {path: data.toggle-d, value: ""}
+      - equal: {path: data.toggle-e, value: ""}

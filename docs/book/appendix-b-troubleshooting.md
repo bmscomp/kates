@@ -12,7 +12,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [The Cluster Under Test](03-cluster.md#failure-tolerance-matrix) |
 | Cruise Control `unsupported goals` error | Goals list doesn't match Strimzi's default goals | [Kafka Deployment Engineering](15-kafka-deployment.md#cruise-control-goal-mismatch) |
-| Kafka CR stuck on `NotReady` (often with `UnforceableProblem`) | Strimzi CRDs missing, insufficient resources, or operator egress blocked by `generateNetworkPolicy` / isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#kafka-cr-stuck-on-notready), [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
+| Kafka CR stuck on `NotReady` (often with `UnforceableProblem`) | Strimzi CRDs missing, insufficient resources, or operator egress blocked by `operatorNetworkPolicy` / isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#kafka-cr-stuck-on-notready), [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 
 ## Kafka Connectivity
 
@@ -32,7 +32,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Connect cluster stuck in `REBALANCING` — `KafkaConnectRebalanceTooLong` alert fires | Workers crashing mid-rebalance, NetworkPolicy blocking inter-worker traffic on port 8083, or OOM kills during task assignment | [Operating Kafka Connect](operating-kafka-connect.md#rebalancing-takes-too-long) |
 | Connect worker pods restart with `OOMKilled` | Container memory limit under 2× the JVM heap — off-heap memory pushes usage over the limit | [Operating Kafka Connect](operating-kafka-connect.md#connect-workers-oomkilled) |
 | PostgreSQL disk usage grows while a connector is down or paused | Replication slot retains WAL segments until the connector drains them | [Operating Kafka Connect](operating-kafka-connect.md#replication-slot-wal-retention-growing) |
-| `helm upgrade` of the Connect chart hangs or fails with `validation FAILED` | Pre-install hook found missing required fields in a connector config | [Operating Kafka Connect](operating-kafka-connect.md#validation-hook-blocks-deployment) |
+| `helm upgrade` of the Connect chart fails with `connect-cluster: connectors.<name> …` | A connector in the values misses a class, a required config key or `topics`, or breaks a production rule — checked at render time | [Operating Kafka Connect](operating-kafka-connect.md#connector-validation-blocks-deployment) |
+| `KafkaConnector` `FAILED` with `Forbidden` or `secrets "…" is forbidden` | Chart 2.0 grants the workers `get` on only the Secrets its own connector configs reference — a connector applied outside the chart needs its Secret in `rbac.secretNames` | [Operating Kafka Connect](operating-kafka-connect.md#connector-fails-with-forbidden-reading-a-secret) |
 
 ## Performance Issues
 
@@ -141,8 +142,9 @@ kubectl get kafka,kafkanodepool,kafkatopic,kafkauser -n kafka
 # Pod health
 kubectl get pods -n kafka -o wide
 
-# Strimzi operator logs (last 50 lines)
-kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=50
+# Strimzi operator logs (last 50 lines) — the operator is its own release,
+# in its own namespace
+kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50
 
 # Broker logs (last crash)
 kubectl logs <broker-pod> -n kafka --previous --tail=30

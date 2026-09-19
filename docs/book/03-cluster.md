@@ -77,6 +77,8 @@ You can verify the zone distribution at any time with `kates cluster topology`. 
 | Broker | 4Gi | 1000m / 2000m | 50Gi | 2Gi fixed |
 | **Total cluster** | **15Gi** | **4.5 / 9 cores** | **165Gi** | — |
 
+These are the `krafter` lab cluster's figures. The `kafka-cluster` chart's own `nodePools.roleDefaults` match the memory, CPU and heap above but size volumes larger — 100Gi per broker and 10Gi per controller — and `kates detect --generate-values` sizes the per-zone pools from the cluster it finds, so read the values you deployed with rather than this table.
+
 The 4Gi broker memory with a 2Gi fixed heap (`-Xms2048m -Xmx2048m`) leaves ~2Gi for the OS page cache. This is an intentional design choice — and an important one to understand.
 
 Kafka relies heavily on page cache for read performance. When a consumer reads recently-produced data, the operating system serves it directly from RAM (page cache) without touching disk. But with only 2Gi of page cache per broker, eviction happens quickly under load. As soon as a consumer falls behind or you run a test with large messages, reads start hitting disk, and latency climbs.
@@ -148,15 +150,16 @@ The default 3-broker, 3-controller topology covers the most common testing scena
 To add brokers (e.g., testing partition rebalancing after scale-up):
 
 ```bash
-# Add a 4th broker pool
+# Add a broker to the default pool
+helm dependency build charts/kafka-cluster
 helm upgrade krafter charts/kafka-cluster -n kafka \
-  --set brokerPools[3].name=brokers-delta \
-  --set brokerPools[3].replicas=1 \
-  --set brokerPools[3].storageSize=10Gi \
+  --set nodePools.roleDefaults.broker.replicas=4 \
   --reuse-values
 ```
 
-After the new broker joins, existing partitions won't automatically rebalance. Use Cruise Control to redistribute partitions — the chart provisions `KafkaRebalance` resources (`full-rebalance` and `add-broker-rebalance`) for exactly this.
+`charts/kafka-cluster/charts/` is generated and gitignored, so the `helm dependency build` that resolves the `kafka-common` library chart is not optional on a fresh checkout — without it Helm refuses to render. The same applies to every `helm` command against `connect-cluster` and `mirror-maker2`, which share that library.
+
+When the new broker joins, Cruise Control's auto-rebalance moves partitions onto it: the chart references its `krafter-add-brokers-template` KafkaRebalance template from `cruiseControl.autoRebalance`. A full rebalance is opt-in (`rebalance.full.enabled`).
 
 ### Testing Single-Zone Failures
 
@@ -191,7 +194,9 @@ Remember to re-apply zone labels after testing. Without rack awareness, a single
 |------|------|------|------|-----|----------|
 | `plain` | 9092 | internal | SCRAM-SHA-512 | No | Service-to-service traffic, performance tests |
 | `tls` | 9093 | internal | mTLS | Yes | Encrypted internal communication |
-| `external` | 9094 | nodeport | SCRAM-SHA-512 | Yes | Access from outside the cluster |
+| `external` | 9094 | nodeport | SCRAM-SHA-512 | Yes | Access from outside the cluster — **opt-in** |
+
+The two internal listeners are the chart's base `kafka.listeners`. The external one is not: `kafka.externalAccess.type` defaults to `none`, so nothing is exposed outside the cluster until you set it to `nodeport`, `loadbalancer` or `ingress` (0.4 exposed a NodePort on every install; 1.0 does not, and the Kind overlay pins it to `none`). The preset appends a listener named `external` on port 9094 with TLS and SCRAM-SHA-512, and `externalAccess.allowedCidrs` narrows the NetworkPolicy rule it brings with it.
 
 Performance tests use port 9092 (plain) for baseline measurements. TLS adds measurable CPU overhead — test both to quantify the encryption cost on a memory-constrained cluster. Because the CPU budget per broker is limited here, that overhead is more pronounced than on production hardware, so measure it directly rather than assuming a fixed figure.
 
@@ -217,7 +222,7 @@ Beyond the brokers and controllers, the cluster includes several components that
 |-----------|---------|---------------------------|
 | **Cruise Control** | Automated partition rebalancing based on resource utilization | Can trigger unexpected partition movements during long tests — be aware of this if latency shifts mid-run |
 | **Kafka Exporter** | Consumer lag and topic offset metrics | Provides the lag data that `kates cluster watch` displays in sparklines |
-| **Drain Cleaner** | Graceful pod rolling during node drains | Ensures broker restarts during chaos tests are clean (finalizes log segments, flushes buffers) |
+| **Drain Cleaner** | Graceful pod rolling during node drains | Ensures broker restarts during chaos tests are clean (finalizes log segments, flushes buffers). It is operator-wide, not per cluster: the `strimzi-operator` chart deploys it, not `kafka-cluster` |
 | **Entity Operator** | Topic and User lifecycle management via CRDs | Creates and reconciles the `KafkaTopic` and `KafkaUser` resources declared in the chart |
 
 For deep operational details on each component, see [Kafka Deployment Engineering](15-kafka-deployment.md).
@@ -229,7 +234,9 @@ For deep operational details on each component, see [Kafka Deployment Engineerin
 | Grafana | http://localhost:30080 | admin / admin |
 | Kafka UI | http://localhost:30081 | — |
 | Kates API | http://localhost:30083 | — |
-| Litmus UI | `make chaos-ui` → http://localhost:9091 | admin / litmus |
+| Chaos state | `make chaos-status` | — |
+
+The `kates-chaos` chart deploys the LitmusChaos execution plane only — there is no bundled web portal. `make chaos-ui` says so and points you at `make chaos-status`; drive experiments through `ChaosEngine` resources instead.
 
 ## Using the CLI to Inspect the Cluster
 

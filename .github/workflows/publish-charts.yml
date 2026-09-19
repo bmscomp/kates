@@ -56,10 +56,20 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # kates-platform depends on kafka-cluster and kates via local file://
-      # references — build them so the umbrella packages cleanly.
-      - name: Build kates-platform local dependencies
-        run: helm dependency build charts/kates-platform/
+      # helm package refuses a chart whose declared dependencies are not
+      # built. Order matters: the kafka-common consumers before the umbrella,
+      # which packages its file:// subcharts as they are on disk. minio and
+      # apicurio-registry vendor theirs in-tree and are left alone.
+      - name: Build chart dependencies
+        run: |
+          set -euo pipefail
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          for chart in strimzi-operator kafka-cluster kates-chaos monitoring mirror-maker2 kates-platform; do
+            helm dependency build "charts/${chart}/"
+          done
 
       - name: Package charts
         run: |

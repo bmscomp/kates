@@ -85,7 +85,7 @@ Referenced as `testImages.kubectl` (and `testImages.kafka`) in:
 
 | Chart | Used by |
 |---|---|
-| [`kafka-cluster`](https://github.com/bmscomp/kates/blob/main/charts/kafka-cluster/README.md) | 8 tiered connection tests, performance and profiler tests, CRD-upgrade hook |
+| [`kafka-cluster`](https://github.com/bmscomp/kates/blob/main/charts/kafka-cluster/README.md) | The numbered test suite in `templates/tests/` — connectivity, produce/consume, authorization, KRaft quorum, topics, listeners, node pools, Cruise Control, metrics, performance, tiered storage — plus the profiler pod. (`test-00-egress.yaml` is the tests' NetworkPolicy, not a pod, so it uses no image.) |
 | [`strimzi-operator`](https://github.com/bmscomp/kates/blob/main/charts/strimzi-operator/README.md) | Operator test, CRD-upgrade hook |
 | [`connect-cluster`](https://github.com/bmscomp/kates/blob/main/charts/connect-cluster/README.md) | Connect health test, KafkaUser secret-sync Job |
 | [`mirror-maker2`](https://github.com/bmscomp/kates/blob/main/charts/mirror-maker2/README.md) | MM2 readiness test, secret-sync Job |
@@ -94,8 +94,8 @@ Override it like any other value:
 
 ```yaml
 testImages:
-  kubectl: ghcr.io/bmscomp/kates-tester:1.21.0
-  kafka:   ghcr.io/bmscomp/kates-tester:1.21.0
+  kubectl: ghcr.io/bmscomp/kates-tester:1.22.0
+  kafka:   ghcr.io/bmscomp/kates-tester:1.22.0
 ```
 
 ---
@@ -151,7 +151,7 @@ docker run --rm -it -v "$HOME/.kube:/home/kates/.kube:ro" \
 
 | Tag | Meaning |
 |---|---|
-| `1.21.0` | Release version — what the charts pin |
+| `1.22.0` | Release version — what the charts pin |
 | `latest` | Latest default-branch build |
 | `sha-<short-sha>` | Exact commit |
 

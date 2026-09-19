@@ -1,0 +1,232 @@
+{{- /*
+The workers' traffic contract: a deny-all policy, and one policy of explicit
+allows. Anything not listed is dropped. 1.x's flat keys (kafkaPorts,
+monitoringNamespace, restApiClients, databaseEgress) still win over the
+structured ones when set.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $np := .Values.networkPolicy }}
+{{- $fullname := include "connect-cluster.fullname" . }}
+{{- $ns := include "connect-cluster.namespace" . }}
+{{- $selector := include "connect-cluster.podSelectorLabels" . | fromYaml }}
+{{- $dns := $np.dns | default dict }}
+{{- $api := $np.apiServer | default dict }}
+{{- $kafkaCfg := $np.kafka | default dict }}
+{{- $mon := $np.monitoring | default dict }}
+{{- $rest := $np.restApi | default dict }}
+{{- $monNs := $np.monitoringNamespace | default ($mon.namespace | default "monitoring") }}
+{{- $clients := $np.restApiClients | default ($rest.clients | default list) }}
+{{- $kafkaOn := include "kafka-common.enabled" (list $kafkaCfg.enabled true) }}
+{{- /* A bootstrap port outside explicitly listed ports would be dropped at
+       the network layer while every pod reports Running (C4). Derived ports
+       cover the bootstrap by construction. */}}
+{{- if and $kafkaOn $r.kafkaPortsExplicit }}
+{{- include "kafka-common.rails.bootstrapPorts" (dict "chart" "connect-cluster" "bootstrap" $r.bootstrap "ports" $r.kafkaPorts "field" "networkPolicy.kafka.ports") }}
+{{- end }}
+{{- if include "kafka-common.enabled" (list ($np.defaultDeny | default dict).enabled true) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-connect-default-deny
+  namespace: {{ $ns }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml (($np.defaultDeny).selector | default (dict "strimzi.io/name" (printf "%s-connect" $fullname))) | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-connect-extra
+  namespace: {{ $ns }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/name: {{ $fullname }}-connect
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if include "kafka-common.enabled" (list $mon.enabled true) }}
+    # Metrics scrape
+    {{- include "kafka-common.netpol.monitoringIngress" (dict "namespace" $monNs "port" ($mon.port | default 9404)) | nindent 4 }}
+    {{- end }}
+    {{- if $rest.allowAll }}
+    # REST API open to every source (explicit opt-in)
+    - ports:
+        - port: 8083
+          protocol: TCP
+    {{- else }}
+    {{- with $clients }}
+    # REST API clients
+    - from:
+        {{- range . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | default $ns }}
+          {{- with .podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      ports:
+        - port: 8083
+          protocol: TCP
+    {{- end }}
+    {{- if include "kafka-common.enabled" (list $rest.operator true) }}
+    # The Cluster Operator creates, polls and restarts connectors over REST
+    {{- include "kafka-common.netpol.operatorIngress" (dict "namespace" ($np.strimziOperatorNamespace | default "strimzi-operator") "port" 8083) | nindent 4 }}
+    {{- end }}
+    {{- end }}
+    {{- if include "kafka-common.enabled" (list ($np.workerToWorker | default dict).enabled true) }}
+    # Worker-to-worker REST (leader forwarding)
+    {{- include "kafka-common.netpol.workers" (dict "direction" "from" "selector" $selector "port" 8083) | nindent 4 }}
+    {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    {{- if include "kafka-common.enabled" (list $dns.enabled true) }}
+    # DNS (no selectors: any destination, which includes node-local and
+    # host-network resolvers a pod selector would miss)
+    - {{- if or $dns.namespaceSelector $dns.podSelector }}
+      to:
+        - {{- with $dns.namespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+          {{- with $dns.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      {{- end }}
+      ports:
+        {{- range $dns.ports | default (list 53) }}
+        - port: {{ . }}
+          protocol: UDP
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- if include "kafka-common.enabled" (list ($np.workerToWorker | default dict).enabled true) }}
+    # Worker-to-worker REST
+    {{- include "kafka-common.netpol.workers" (dict "direction" "to" "selector" $selector "port" 8083) | nindent 4 }}
+    {{- end }}
+    {{- if $kafkaOn }}
+    # Kafka brokers, on the ports the bootstrap dials. An explicit bootstrap
+    # outside the cluster (no .svc address) can be anywhere.
+    {{- $external := and .Values.kafka.bootstrapServers (not (contains ".svc" .Values.kafka.bootstrapServers)) }}
+    - {{- if not $external }}
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "connect-cluster.kafkaNamespace" . }}
+          podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ .Values.kafka.clusterName | default "krafter" }}
+        {{- end }}
+      ports:
+        {{- range $r.kafkaPorts }}
+        - port: {{ int . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- if and .Values.schemaRegistry.enabled (include "kafka-common.enabled" (list ($np.schemaRegistry | default dict).enabled true)) }}
+    # Schema Registry
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "connect-cluster.schemaRegistryNamespace" . }}
+          podSelector:
+            matchLabels:
+              {{- .Values.schemaRegistry.podSelector | default (dict "app.kubernetes.io/name" "apicurio-registry") | toYaml | nindent 14 }}
+      ports:
+        - port: {{ .Values.schemaRegistry.port | default 80 }}
+          protocol: TCP
+    {{- end }}
+    {{- $tr := $np.tracing | default dict }}
+    {{- if and .Values.tracing.enabled .Values.tracing.endpoint (include "kafka-common.enabled" (list $tr.enabled true)) }}
+    # OTLP collector
+    - {{- if or $tr.namespaceSelector $tr.podSelector }}
+      to:
+        - {{- with $tr.namespaceSelector }}
+          namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+          {{- with $tr.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      {{- end }}
+      ports:
+        - port: {{ $tr.port | default (include "connect-cluster.tracingEgressPort" . | int) }}
+          protocol: TCP
+    {{- end }}
+    {{- range $r.databases }}
+    # Database {{ .namespace }}:{{ .port | default 5432 }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          {{- with .podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - port: {{ .port | default 5432 }}
+          protocol: TCP
+    {{- end }}
+    {{- if include "kafka-common.enabled" (list $api.enabled true) }}
+    # Kubernetes API server (KubernetesSecretConfigProvider)
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" $api.ports "ipBlock" $api.ipBlock) | nindent 4 }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- range $r.databases }}
+{{- if include "kafka-common.enabled" (list .createIngressPolicy true) }}
+---
+# The database side of the same flow (createIngressPolicy: false when the
+# database namespace's policies are someone else's)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "allow-%s-ingress-%v" $fullname (.port | default 5432) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "connect-cluster.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml (.podSelector | default dict) | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              strimzi.io/name: {{ $fullname }}-connect
+      ports:
+        - port: {{ .port | default 5432 }}
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}
