@@ -1,0 +1,40 @@
+# Inputs for the harness templates; each test sets what it needs.
+extraLabels: {}
+namespaceOverride: ""
+global:
+  clusterDomain: ""
+clusterDomain: ""
+
+worker:
+  kind: KafkaConnect
+  version: "4.3.1"
+  replicas: 3
+  minReplicasDefault: 2
+  autoscaling: {}
+  metrics:
+    enabled: true
+    configMapName: harness-metrics
+  podSelector:
+    strimzi.io/name: harness-connect
+  template: {}
+
+cluster: {}
+chartField: kafka
+
+images: {}
+toggles: {}
+hpa:
+  enabled: false
+  autoscaling: {}
+kafkaUser:
+  enabled: false
+  authType: scram-sha-512
+  authorization: {}
+secretSync:
+  secrets: []
+  watch: false
+netpol:
+  dns: {}
+bootstrapPorts:
+  bootstrap: ""
+  ports: []

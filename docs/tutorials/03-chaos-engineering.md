@@ -8,26 +8,43 @@ This tutorial teaches you to inject controlled failures into your Kafka cluster 
 - LitmusChaos deployed (`make litmus`)
 - A baseline LOAD test completed (from Tutorial 1)
 
-## Part 1: Direct Disruption with Makefile
+## Part 1: The Chaos Execution Plane
 
-The quickest way to run chaos experiments is through the Makefile:
+The `kates-chaos` chart deploys the LitmusChaos execution plane — the operator
+and the ChaosExperiment definitions — but no web portal and no per-experiment
+Make targets. There are two Make targets, one to install it and one to look at
+it:
 
 ```bash
-# Kill a Kafka broker pod
-make chaos-kafka-pod-delete
+# Deploy the chaos execution plane (Kind overlay)
+make litmus
 
-# Create a network partition
-make chaos-kafka-network-partition
-
-# Stress CPU on a broker
-make chaos-kafka-cpu-stress
-
-# Run ALL chaos experiments
-make chaos-kafka-all
-
-# Check experiment status
-make chaos-kafka-status
+# Show the release, its pods, and the chaos CRs in the namespace
+make chaos-status
 ```
+
+The experiments the chart installs are `pod-delete`, `pod-cpu-hog`,
+`pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`
+(all namespaced) and `node-drain` (cluster-scoped).
+
+Running one means creating a `ChaosEngine`. Declaratively, that is an entry
+under the chart's `engines:` map:
+
+```yaml
+# values-chaos.yaml
+engines:
+  kafka-pod-delete:
+    enabled: true
+    appLabel: "strimzi.io/kind=Kafka"
+    experiment: pod-delete
+    duration: 30
+    interval: 10
+    force: true
+    podsAffectedPerc: "50"
+```
+
+Everything from Part 2 on drives the same machinery through the CLI instead,
+which is what you want for anything repeatable.
 
 Monitor the cluster during chaos:
 
@@ -36,8 +53,16 @@ Monitor the cluster during chaos:
 kubectl get pods -n kafka -w
 
 # In another terminal — watch Grafana
-# Open http://localhost:30080 → Kafka Cluster Health dashboard
+# Open http://localhost:30080 → "Kafka Chaos Dashboard"
 ```
+
+> **Not the "Kafka Cluster Health" board.** It is one of the nine legacy Kafka
+> boards behind `legacyKafkaDashboards.enabled` in `charts/monitoring` — still
+> installed in 1.2.0, but it reads series names that kafka-cluster 1.0's
+> exporter rules (Strimzi's own) no longer produce, so its panels come up empty.
+> The flag defaults to false in 1.3 and the boards go in 2.0. The maintained
+> Kafka views now ship with `charts/strimzi-operator`, `charts/connect-cluster`
+> and `charts/mirror-maker2`.
 
 ## Part 2: Kates Disruption Plans
 
@@ -53,20 +78,23 @@ Output:
 
 ```
   Available Disruption Types
-  ┌────────────────────┬──────────────────────────────────────────────┐
-  │ Type               │ Description                                  │
-  ├────────────────────┼──────────────────────────────────────────────┤
-  │ POD_KILL           │ Immediately terminate a broker pod            │
-  │ POD_DELETE         │ Gracefully delete a broker pod                │
-  │ NETWORK_PARTITION  │ Isolate a broker from the cluster             │
-  │ NETWORK_LATENCY    │ Inject latency into broker network            │
-  │ CPU_STRESS         │ Saturate CPU on a broker node                 │
-  │ DISK_FILL          │ Fill the broker's persistent volume           │
-  │ ROLLING_RESTART    │ Restart all brokers sequentially              │
-  │ LEADER_ELECTION    │ Force leader re-election for a partition      │
-  │ SCALE_DOWN         │ Reduce the number of broker replicas          │
-  │ NODE_DRAIN         │ Drain a Kubernetes node                       │
-  └────────────────────┴──────────────────────────────────────────────┘
+  ┌────────────────────┬──────────────────────────────────────────────────────────────┐
+  │ Type               │ Description                                                  │
+  ├────────────────────┼──────────────────────────────────────────────────────────────┤
+  │ POD_KILL           │ Force-delete a broker pod (SIGKILL, gracePeriod=0)            │
+  │ POD_DELETE         │ Gracefully delete a broker pod (SIGTERM with grace period)    │
+  │ NETWORK_PARTITION  │ Isolate a broker from peers via NetworkPolicy                 │
+  │ NETWORK_LATENCY    │ Inject network latency on broker interfaces                   │
+  │ CPU_STRESS         │ Exhaust CPU on broker container                               │
+  │ MEMORY_STRESS      │ Consume memory on broker container to simulate OOM pressure   │
+  │ IO_STRESS          │ Inject disk I/O pressure on broker storage                    │
+  │ DNS_ERROR          │ Inject DNS resolution failures on broker pods                 │
+  │ DISK_FILL          │ Fill broker log directory to simulate storage pressure        │
+  │ ROLLING_RESTART    │ Trigger StatefulSet rolling restart                           │
+  │ LEADER_ELECTION    │ Kill the controller broker to force leader election           │
+  │ SCALE_DOWN         │ Reduce StatefulSet replica count                              │
+  │ NODE_DRAIN         │ Drain the Kubernetes node hosting a broker                    │
+  └────────────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
 ### Step 2: Create a Disruption Plan
@@ -246,7 +274,7 @@ Save as `resilience-test.json`.
 ### Step 2: Execute
 
 ```bash
-kates resilience run --config resilience-test.json
+kates resilience run -f resilience-test.json
 ```
 
 ### Step 3: Interpret the Impact Analysis

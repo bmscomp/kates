@@ -52,18 +52,18 @@ THROUGHPUT_THRESHOLD=30000
 
 if (( $(echo "$P99 > $P99_THRESHOLD" | bc -l) )); then
   echo "❌ FAILED: P99 latency ${P99}ms exceeds threshold ${P99_THRESHOLD}ms"
-  kates report export "$ID" --format junit -o performance-results.xml
+  kates report export "$ID" --format junit > performance-results.xml
   exit 1
 fi
 
 if (( $(echo "$THROUGHPUT < $THROUGHPUT_THRESHOLD" | bc -l) )); then
   echo "❌ FAILED: Throughput ${THROUGHPUT} rec/s below threshold ${THROUGHPUT_THRESHOLD} rec/s"
-  kates report export "$ID" --format junit -o performance-results.xml
+  kates report export "$ID" --format junit > performance-results.xml
   exit 1
 fi
 
 echo "✅ Performance gate passed"
-kates report export "$ID" --format junit -o performance-results.xml
+kates report export "$ID" --format junit > performance-results.xml
 ```
 
 ### GitLab CI Example
@@ -76,7 +76,7 @@ performance-gate:
     - kates ctx use ci
     - |
       ID=$(kates test create --type LOAD --records 100000 --wait -o json | jq -r '.id')
-      kates report export "$ID" --format junit -o performance-results.xml
+      kates report export "$ID" --format junit > performance-results.xml
       P99=$(kates test get "$ID" -o json | jq '.results[0].p99LatencyMs')
       if (( $(echo "$P99 > 50" | bc -l) )); then
         echo "P99 latency regression: ${P99}ms"
@@ -145,8 +145,8 @@ set -e
 
 echo "Running integrity gate..."
 
-# Generate and run integrity chaos test
-kates test scaffold --type INTEGRITY -o /tmp/integrity.yaml
+# Export the built-in INTEGRITY template and run it
+kates test scaffold export integrity-tx -o /tmp/integrity.yaml
 ID=$(kates test apply -f /tmp/integrity.yaml --wait -o json | jq -r '.id')
 
 # Check verdict
@@ -154,24 +154,35 @@ VERDICT=$(kates test get "$ID" -o json | jq -r '.results[0].integrity.verdict')
 
 if [ "$VERDICT" != "PASS" ]; then
   echo "❌ Data integrity check FAILED: $VERDICT"
-  kates report export "$ID" --format junit -o integrity-results.xml
+  kates report export "$ID" --format junit > integrity-results.xml
   exit 1
 fi
 
 echo "✅ Data integrity verified"
-kates report export "$ID" --format junit -o integrity-results.xml
+kates report export "$ID" --format junit > integrity-results.xml
 ```
 
 ## Strategy 4: Scheduled Regression Detection
 
 Set up nightly performance tests to catch slow regressions:
 
+A schedule is a name, a cron expression and a test request read from a JSON
+file — `--name`, `--cron` and `--request` are all required:
+
 ```bash
+cat > nightly-load.json <<'EOF'
+{ "testType": "LOAD", "spec": { "records": 100000, "acks": "all" } }
+EOF
+
+cat > weekly-integrity.json <<'EOF'
+{ "testType": "INTEGRITY", "spec": { "records": 100000, "acks": "all", "consumers": 1 } }
+EOF
+
 # Schedule nightly LOAD test
-kates schedule create --type LOAD --records 100000 --cron "0 2 * * *"
+kates schedule create --name "Nightly Load" --cron "0 2 * * *" --request nightly-load.json
 
 # Schedule weekly integrity test
-kates schedule create --type INTEGRITY --records 100000 --cron "0 3 * * 0"
+kates schedule create --name "Weekly Integrity" --cron "0 3 * * 0" --request weekly-integrity.json
 
 # View scheduled tests
 kates schedule list
@@ -216,14 +227,14 @@ kates ctx use ci
 
 echo "═══ Step 1: Performance Gate ═══"
 PERF_ID=$(kates test create --type LOAD --records 100000 --producers 4 --wait -o json | jq -r '.id')
-kates report export "$PERF_ID" --format junit -o performance.xml
+kates report export "$PERF_ID" --format junit > performance.xml
 P99=$(kates test get "$PERF_ID" -o json | jq '.results[0].p99LatencyMs')
 echo "P99: ${P99}ms"
 (( $(echo "$P99 > 100" | bc -l) )) && { echo "❌ P99 too high"; exit 1; }
 
 echo "═══ Step 2: Integrity Gate ═══"
 INTEG_ID=$(kates test create --type INTEGRITY --records 50000 --wait -o json | jq -r '.id')
-kates report export "$INTEG_ID" --format junit -o integrity.xml
+kates report export "$INTEG_ID" --format junit > integrity.xml
 VERDICT=$(kates test get "$INTEG_ID" -o json | jq -r '.results[0].integrity.verdict // "PASS"')
 [ "$VERDICT" != "PASS" ] && { echo "❌ Integrity failed: $VERDICT"; exit 1; }
 
@@ -258,12 +269,12 @@ echo "✅ All gates passed — safe to deploy"
 After all gates pass, collect artifacts for the build record:
 
 ```bash
-# Performance reports
-kates report export "$PERF_ID" --format json -o perf-report.json
-kates report export "$PERF_ID" --format heatmap -o perf-heatmap.json
+# Performance reports (`--format` has no json; the report's JSON is -o json)
+kates report show "$PERF_ID" -o json > perf-report.json
+kates report export "$PERF_ID" --format heatmap > perf-heatmap.json
 
 # Integrity reports
-kates report export "$INTEG_ID" --format json -o integrity-report.json
+kates report show "$INTEG_ID" -o json > integrity-report.json
 
 # All JUnit XML files are ready for CI upload
 ls -la *.xml

@@ -7,7 +7,7 @@ worked. For what the values mean, see [Configuration](configuration.md).
 
 | | Why |
 |---|---|
-| A Strimzi Cluster Operator watching the release namespace | The chart renders a `KafkaMirrorMaker2` custom resource; the operator is what turns it into pods. Nothing happens without one |
+| A Strimzi Cluster Operator watching the release namespace | The chart renders a `KafkaMirrorMaker2` custom resource; the operator is what turns it into pods. Nothing happens without one. It is its own release here — [`charts/strimzi-operator`](../../strimzi-operator/), which also owns the Strimzi CRDs |
 | A **target** Kafka cluster, reachable from that namespace | MirrorMaker's Connect runtime runs against the target and stores its config, offset and status topics there |
 | A **source** Kafka cluster of 2.1 or newer | Below that, a 4.x client cannot read it at all — the chart refuses at render time |
 | Credentials for both ends | See [the credential contract](../README.md#the-credential-contract-read-this). This is the step that most often stalls a first install |
@@ -40,6 +40,20 @@ Two modifiers compose with any of them: `values-readonly-source.yaml` for a
 source you may only read, and `values-scale.yaml` for a large estate.
 
 ## First Install
+
+**From a checkout, build the chart's one dependency first.** `mirror-maker2` is
+built on the [`kafka-common`](../../kafka-common/) library chart, and
+`charts/*/charts/` is generated rather than committed — so on a fresh clone
+every `helm install`, `upgrade`, `template` and `lint` on this page fails with
+*"found in Chart.yaml, but missing in charts/ directory: kafka-common"* until
+you run, once:
+
+```bash
+helm dependency build charts/mirror-maker2
+```
+
+A packaged chart already carries it; this is only for rendering from the
+repository.
 
 ### The loopback, to prove the chart works
 
@@ -148,10 +162,10 @@ helm uninstall mm2 -n kafka
 kubectl delete kafkamirrormaker2 mm2 -n kafka
 ```
 
-Or, in this repository:
+Or, in this repository, as one command:
 
 ```bash
-make mm2-undeploy
+kates migrate mirror remove --release mm2 --namespace kafka --yes
 ```
 
 Deleting the resource stops replication. It does not delete the replicated

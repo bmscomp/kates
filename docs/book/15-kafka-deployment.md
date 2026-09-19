@@ -13,16 +13,17 @@ After this chapter, you can:
 
 ## Strimzi Operator
 
-Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.1.0`), installed from the OCI Helm chart on quay.io into a dedicated `strimzi-operator` namespace (this is exactly what `scripts/deploy-kafka.sh` runs when the Strimzi CRDs are not yet present):
+Kafka on Kubernetes is managed by the **Strimzi Kafka Operator** (`1.2.0`), installed into a dedicated `strimzi-operator` namespace from this repository's wrapper chart, `charts/strimzi-operator` (chart `0.3.0`). This is what `scripts/deploy-kafka.sh` runs on every deploy, unconditionally:
 
 ```bash
-helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version 1.1.0 \
+helm dependency build charts/strimzi-operator
+helm upgrade --install strimzi-operator charts/strimzi-operator \
   --namespace strimzi-operator \
-  --set watchAnyNamespace=true \
-  --set replicas=1 \
-  --timeout 5m --wait
+  --reset-values \
+  --timeout 10m --wait
 ```
+
+The wrapper declares the upstream `strimzi-kafka-operator` chart as a subchart — which is why `helm dependency build` comes first — and adds what the operator needs to be a managed part of the platform rather than a one-off `--set` invocation: a CRD-upgrade hook that owns the Strimzi CRDs across upgrades, pinned defaults (`watchAnyNamespace`, replicas, resources, reconciliation timeouts) in place of drifting flags, a strict values schema that nests every operator setting under the `strimzi-kafka-operator:` key, the optional Drain Cleaner, and the operator's own PodMonitor, alerts and Grafana dashboards. The install is unconditional by design: the CRD hook is what keeps the CRDs current, so skipping the upgrade when the operator is already there would freeze them at whatever version installed them first. The full lifecycle — adoption, upgrade, rollback, namespace scope — is [Deploying the Strimzi Operator](deploying-strimzi-operator.md).
 
 Strimzi watches for `Kafka`, `KafkaNodePool`, `KafkaTopic`, and `KafkaUser` custom resources and reconciles the desired state into StatefulSets, ConfigMaps, Secrets, and Services.
 
@@ -362,20 +363,25 @@ graph LR
     end
 ```
 
+Every policy kafka-cluster 1.0 renders is named `<cluster>-…`, so two clusters can share a namespace without fighting over one object:
+
 | Policy | What It Allows |
 |--------|---------------|
-| `default-deny` | Block all traffic by default |
-| `allow-dns` | UDP/TCP port 53 for all pods |
-| `kafka-brokers` | Ingress from known clients + inter-broker + Prometheus |
-| `kafka-controllers` | Inter-controller Raft + broker→controller metadata fetch |
-| `strimzi-operator` | Operator → Kafka pods + K8s API |
-| `kafka-ui` | HTTP ingress + egress to brokers |
-| `cruise-control` | Operator + Prometheus access |
-| `strimzi-drain-cleaner` | Webhook port + K8s API |
+| `krafter-default-deny` | Block all traffic by default, for every pod labelled `app.kubernetes.io/part-of: strimzi-krafter` |
+| `krafter-allow-dns` | UDP/TCP port 53 for those same pods |
+| `krafter-kafka` | Brokers and controllers: inter-cluster traffic on 9090–9093, the Cluster Operator on 9090/9091/8443/9092/9093, Prometheus on 9404, and each entry in `networkPolicy.clients` on the listener ports it names |
+| `krafter-cruise-control` | Operator and Prometheus access to Cruise Control |
+| `krafter-entity-operator` | Entity Operator metrics ingress and egress to the brokers |
+| `krafter-kafka-exporter` | Exporter metrics ingress and egress to the brokers |
+| `krafter-test-egress` | The Helm test pods' egress to the Kafka ports, DNS and the API server |
+
+::: {.callout-note}
+kafka-cluster 1.0 dropped the policies that selected **other releases'** pods — the Cluster Operator's, the drain cleaner's, kafka-ui's, MirrorMaker 2's and Connect's. The operator's and drain cleaner's belong to `charts/strimzi-operator`; kafka-ui, connect-cluster and mirror-maker2 each render their own. Who may reach which listener is now one list, `networkPolicy.clients`, with the ports derived from `kafka.listeners`.
+:::
 
 ### Hardened Strimzi Operator NetworkPolicy (Isolated Topology)
 
-When deploying with `kates deploy --topology isolated` (the kates CLI's default topology), the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. This requires a precisely scoped NetworkPolicy to allow the operator to function while maintaining strict network isolation:
+When deploying with `kates deploy --topology isolated` (the kates CLI's default topology), the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. That needs a precisely scoped NetworkPolicy, and since strimzi-operator 0.3 the wrapper chart renders it: `operatorPolicy.enabled`, on by default, produces one policy named after the release (`strimzi-operator`) in the operator's own namespace. kafka-cluster 0.4 used to write a fixed-name policy *into* the operator's namespace, so two Kafka releases naming the same operator fought over one object; kafka-cluster 1.0 no longer renders it at all.
 
 ```mermaid
 graph LR
@@ -383,9 +389,9 @@ graph LR
         OP["Strimzi Operator"]
     end
 
-    subgraph "kafka namespace"
-        Brokers["Kafka Brokers"]
-        Controllers["Controllers"]
+    subgraph "watched namespaces"
+        Brokers["Brokers + controllers<br/>strimzi.io/kind"]
+        Workers["Connect / MirrorMaker 2 workers<br/>strimzi.io/kind"]
     end
 
     subgraph Kubernetes
@@ -397,8 +403,8 @@ graph LR
     Kubelet -->|"ingress :8080"| OP
     OP -->|"egress :53"| DNS
     OP -->|"egress :443,:6443"| API
-    OP -->|"egress (all ports)"| Brokers
-    OP -->|"egress (all ports)"| Controllers
+    OP -->|"egress :9090-9093, :8443"| Brokers
+    OP -->|"egress :8083"| Workers
 ```
 
 | Direction | Target | Ports | Purpose |
@@ -406,15 +412,24 @@ graph LR
 | Ingress | All sources | `8080` TCP | Kubelet health probes + Prometheus metrics scraping |
 | Egress | CoreDNS | `53` UDP/TCP | DNS resolution for service discovery |
 | Egress | API Server | `443`, `6443` TCP | Kubernetes API communication (watch, patch, create) |
-| Egress | Kafka namespace pods | All | Operator → broker/controller admin API and reconciliation |
-| Egress | Own namespace pods | All | Intra-namespace communication |
+| Egress | Pods labelled `strimzi.io/kind` in every watched namespace | `9090`–`9093`, `8443` TCP | Broker and controller control plane, replication, clients, and the Kafka agent the operator asks for broker state during a roll |
+| Egress | The same pods | `8083` TCP | Connect and MirrorMaker 2 worker REST, through which connectors are created and polled |
+| Egress | Own namespace's operator pods | All | Leader-election peers |
+
+The watch scope decides which namespaces that egress reaches: every namespace under `watchAnyNamespace`, otherwise `watchNamespaces` plus the release namespace. The policy records the answer in its `kates.io/watch-scope` annotation, which is the quickest way to confirm what the running operator is actually allowed to reach.
 
 ::: {.callout-important}
 The operator ingress on port `8080` is intentionally open to **all sources** (not scoped to a specific namespace). This is required because Kubelet health probes originate from the node's host network — not from a pod with namespace labels. Restricting ingress to a namespace selector would silently block liveness and readiness checks, causing the operator pod to be restarted by the Kubelet.
 :::
 
 ::: {.callout-caution}
-**Do not set `generateNetworkPolicy: true` in the Strimzi Helm values** unless you also provide explicit egress rules in `operatorNetworkPolicy.egress`. When enabled with no egress rules, Strimzi creates an operator NetworkPolicy with empty egress — Kubernetes interprets this as "deny all outgoing traffic." The operator cannot reach the Kafka controllers' admin API (port 9090), causing the Kafka CR to remain `NotReady` indefinitely. Set `generateNetworkPolicy: false` and manage operator network policies manually.
+**Two upstream keys are easy to confuse, and only one of them can produce an empty-egress operator policy.**
+
+`strimzi-kafka-operator.operatorNetworkPolicy.enabled` (upstream default `false`) renders `strimzi-cluster-operator-network-policy` from the `ingress` and `egress` lists beside it. Upstream's defaults are the metrics ingress and an unrestricted `egress: [{}]`, so enabling it as shipped is safe — `values-prod.yaml` does exactly that. Replace that `egress` with an empty list, though, and Kubernetes reads it as "deny all outgoing traffic": the operator cannot reach the controllers' admin API on 9090 and the Kafka CR stays `NotReady` indefinitely.
+
+`strimzi-kafka-operator.generateNetworkPolicy` (upstream default `true`) is a different thing entirely. It sets `STRIMZI_NETWORK_POLICY_GENERATION` and controls whether the operator generates NetworkPolicies for its **operands** — it never creates a policy for the operator pod. Turning it off does not fix a deny-all operator policy.
+
+Both live under the `strimzi-kafka-operator:` key in the wrapper chart, whose schema rejects them at the top level rather than silently ignoring them.
 :::
 
 ## Operational Components
@@ -557,26 +572,34 @@ kubectl apply -f config/kafka/kafka-backup.yaml
 
 ## Deploy Script Flow
 
-The `deploy-kafka.sh` script is Helm-chart-driven: it installs the `charts/kafka-cluster` chart (which templates the Kafka CR, node pools, users, topics, alerts, and network policies, and pulls in SeaweedFS as a subchart) with per-environment values files, installing the Strimzi operator first if its CRDs are missing:
+`deploy-kafka.sh` is Helm-chart-driven and reconciles two releases in order: the operator wrapper (`charts/strimzi-operator`), then the cluster (`charts/kafka-cluster`, which templates the Kafka CR, node pools, users, topics, alerts and network policies). Each chart gets its own `helm dependency build` — the wrapper's fetches the upstream operator subchart, the cluster's fetches the `kafka-common` library and SeaweedFS — and the cluster's values chain is always the platform profile followed by the environment overlay:
 
 ```mermaid
 graph TD
-    A["Ensure kafka namespace"] --> B{"Strimzi CRDs present?"}
-    B -->|"no"| C["Install Strimzi Operator<br/>(OCI chart → strimzi-operator namespace)"]
-    B -->|"yes"| D["helm dependency build<br/>(SeaweedFS subchart)"]
-    C --> D
-    D --> E{"ENV = kind?"}
-    E -->|"yes"| F["Apply zone-specific StorageClasses"]
-    E -->|"no"| G["Select values files<br/>(values-dev / values-kind /<br/>values-staging / values-prod)"]
-    F --> G
-    G --> H["Adopt pre-existing KafkaTopics + KafkaUsers<br/>into the Helm release"]
-    H --> I["helm upgrade --install kafka-cluster<br/>charts/kafka-cluster -n kafka"]
-    I --> J["Wait for kafka/krafter Ready<br/>(up to 10 min)"]
-    J --> K["Wait for KafkaUser secrets"]
-    K --> L["Done ✅"]
+    A["Ensure kafka + strimzi-operator namespaces"] --> B["helm dependency build<br/>charts/strimzi-operator<br/>(upstream operator subchart)"]
+    B --> C["helm upgrade --install strimzi-operator<br/>charts/strimzi-operator --reset-values --wait<br/>(unconditional: the CRD hook runs here)"]
+    C --> D["kubectl wait crd kafkas.kafka.strimzi.io<br/>Established"]
+    D --> E["helm dependency build charts/kafka-cluster<br/>(kafka-common library + SeaweedFS)<br/>falls back to dependency update"]
+    E --> F{"ENV = kind?"}
+    F -->|"yes"| G["Apply zone-specific StorageClasses"]
+    F -->|"no"| H["Build the values chain:<br/>values-platform.yaml first,<br/>then values-dev / -kind / -staging / -prod"]
+    G --> H
+    H --> I["Adopt pre-existing KafkaTopics + KafkaUsers<br/>into the Helm release"]
+    I --> J["helm upgrade --install kafka-cluster<br/>charts/kafka-cluster -n kafka"]
+    J --> K["Wait for kafka/krafter Ready<br/>(up to 10 min)"]
+    K --> L["Wait for KafkaUser secrets"]
+    L --> M["Done"]
 ```
 
-**Order matters:** The operator must exist before the cluster chart is installed — its CRDs are a hard dependency, which is why it lives in a separate Helm release. User secrets only appear after the cluster is Ready (the User Operator needs a running cluster), so downstream scripts like `deploy-kafka-ui.sh` wait for the `kafka-ui` secret before deploying.
+`deploy-kafka-generic.sh` runs the same shape on a cluster whose topology is not known ahead of time. It starts with `kates detect --generate-values`, prepends that generated file to the values chain (`values-detected` → `values-platform` → the provider overlay → any `-f` you passed), injects the detected DNS domain into the operator with `--set strimzi-kafka-operator.kubernetesServiceDnsDomain=…` and `--set global.clusterDomain=…` into the cluster, and finishes with `helm test`. Its only opt-out from installing the operator is an explicit `strimziOperator.enabled: false` in the detected values, which means a pipeline manages the operator itself.
+
+**Order matters, three times over:**
+
+- **Operator before cluster.** Its CRDs are a hard dependency, which is why it is a separate Helm release. kafka-cluster 1.0 no longer applies the CRDs at all — the wrapper's `crdUpgrade` hook owns them.
+- **Dependency build before either `helm upgrade`.** Neither chart renders with its `charts/` directory empty, and both scripts build unconditionally rather than testing for it.
+- **Profile before overlay.** `values-platform.yaml` carries the platform's topics, users and client grants; the environment overlay comes after so it can change any of them.
+
+User secrets only appear after the cluster is Ready (the User Operator needs a running cluster), so downstream scripts like `deploy-kafka-ui.sh` wait for the `kafka-ui` secret before deploying.
 
 ::: {.callout-tip}
 **Try it**
@@ -601,12 +624,15 @@ Expect the Kafka CR to report Ready, every node pool at its desired replica coun
 
 **Cause:** The Helm chart's Kafka image map includes versions not supported by the operator binary
 
-**Fix:** Use the OCI-distributed chart from quay.io (always in sync with the operator):
+**Fix:** Reconcile the wrapper chart, whose vendored subchart is the OCI chart published beside the operator binary and therefore always in sync with it. `helm dependency build` resolves it from `Chart.lock`, so the pinned Strimzi version cannot drift:
 
 ```bash
-helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version 1.1.0 --namespace strimzi-operator
+helm dependency build charts/strimzi-operator
+helm upgrade --install strimzi-operator charts/strimzi-operator \
+  --namespace strimzi-operator --reset-values --wait
 ```
+
+`scripts/check-versions.sh` is the guard against this drifting again: it asserts that the chart `appVersion`, the dependency version, `strimziVersion` and `versions.env` all name the same Strimzi release, and that the default `kafkaVersion` is the newest entry in that operator's image map.
 
 ### Brokers Crash with ConfigException
 
@@ -651,35 +677,42 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 **Symptom:** Kafka CR stuck on `NotReady` with `UnforceableProblem: An error while trying to determine the active controller`
 
 **Cause:** The Strimzi operator's `describeMetadataQuorum` admin API call to port 9090 times out. Most commonly caused by:
-- `generateNetworkPolicy: true` in Helm values creating an empty-egress NetworkPolicy that blocks all operator outgoing traffic
+- An operator NetworkPolicy with empty egress — `strimzi-kafka-operator.operatorNetworkPolicy.enabled: true` with upstream's unrestricted `egress: [{}]` replaced by an empty list
+- A watch scope that does not cover the Kafka namespace, which leaves the wrapper's own `strimzi-operator` policy with no egress rule for those pods (its `kates.io/watch-scope` annotation is the fastest way to see what it admits)
 - Resource pressure on the active controller pod causing admin API timeouts
-- Under `--topology isolated`, the operator runs in the `strimzi-operator` namespace. If the operator's NetworkPolicy does not include egress rules for DNS (port 53), Kubernetes API server (ports 443/6443), and the target Kafka namespace, the operator cannot resolve service names or communicate with controllers
 
 **Diagnosis:**
 
 ```bash
-# Check for blocking NetworkPolicy
-kubectl describe networkpolicy strimzi-cluster-operator-network-policy -n strimzi-operator
+# The two policies that can select the operator pod
+kubectl describe networkpolicy strimzi-operator -n strimzi-operator
+kubectl get networkpolicy strimzi-cluster-operator-network-policy -n strimzi-operator -o yaml
 # Look for: "Allowing egress traffic: <none>"
+
+# What the wrapper's policy believes the watch scope is
+kubectl get networkpolicy strimzi-operator -n strimzi-operator \
+  -o jsonpath='{.metadata.annotations.kates\.io/watch-scope}'
 
 # Check operator logs
 kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 # Look for: "Error getting controller config: TimeoutException"
 ```
 
-**Fix:**
+**Fix:** correct the values and reconcile the release — the policy is chart-managed, so deleting the object by hand only lasts until the next upgrade:
 
 ```bash
-# Set generateNetworkPolicy to false in Helm chart values
-helm upgrade strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  -n strimzi-operator --reuse-values --set generateNetworkPolicy=false
-
-# Delete the blocking NetworkPolicy
-kubectl delete networkpolicy strimzi-cluster-operator-network-policy -n strimzi-operator
+helm dependency build charts/strimzi-operator
+helm upgrade strimzi-operator charts/strimzi-operator \
+  -n strimzi-operator --reset-values \
+  --set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false
 
 # Restart the operator to clear stale backoff state
 kubectl rollout restart deployment/strimzi-cluster-operator -n strimzi-operator
 ```
+
+::: {.callout-note}
+`--reset-values` rather than `--reuse-values`: a release carried over from the old `oci://` install stores flat upstream keys the wrapper's schema rejects, so reusing them fails validation before the upgrade starts.
+:::
 
 ### Cruise Control Goal Mismatch
 
@@ -718,7 +751,7 @@ Component versions for the whole platform are tracked centrally in the [Version 
 - `krafter` runs dedicated KRaft roles: a three-controller Raft quorum survives one failure, while zone-pinned brokers satisfy `default.replication.factor: 3` with `min.insync.replicas: 2` — writes keep flowing through a single broker loss.
 - Every `KafkaNodePool` setting is a deliberate trade-off: fixed 2048m heaps prevent resize stalls, memory requests equal to limits buy Guaranteed QoS, and `deleteClaim: false` keeps PVCs alive for recovery.
 - Listeners split traffic by trust level — SCRAM-SHA-512 on 9092 for in-cluster services, mTLS on 9093, a NodePort on 9094 for the outside — all gated by simple ACLs with `kates-backend` as the sole superUser.
-- The `kafka` namespace is default-deny in both directions; the one setting to avoid is `generateNetworkPolicy: true` without egress rules, whose empty-egress policy leaves the Kafka CR `NotReady` indefinitely.
+- The `kafka` namespace is default-deny in both directions, and every policy kafka-cluster 1.0 renders is scoped to one cluster; the operator's own policy belongs to `charts/strimzi-operator` (`operatorPolicy`), and the setting to avoid is `strimzi-kafka-operator.operatorNetworkPolicy` enabled with its egress list emptied, whose deny-all policy leaves the Kafka CR `NotReady` indefinitely.
 - Cruise Control rebalances against declared broker capacities, the Kafka Exporter feeds consumer-lag alerts, and the Drain Cleaner turns node drains into controlled rolling restarts — with `kafka-alerts.yaml` watching all of it.
 
 With the engineering rationale behind the cluster settled, [Deployment Guide](12-deployment.md) turns to the stack that uses it — choosing a topology, sizing resources, and deploying the Kates backend, monitoring, and chaos tooling.

@@ -18,9 +18,9 @@ specific constraints, and two of them shape the plan:
 | | Value | Where it comes from |
 |---|---|---|
 | Cluster name | `krafter` | `clusterName` in [`values.yaml`](../../kafka-cluster/values.yaml) |
-| Kafka version | 4.3.0 | `kafkaVersion` — the newest in the vendored operator's window |
-| Operator | Strimzi 1.1.0 | `strimziVersion`, vendored under `charts/strimzi-operator` |
-| Versions that operator can run | 4.2.0, 4.2.1, 4.3.0 | the operator chart's own `STRIMZI_KAFKA_IMAGES` map |
+| Kafka version | 4.3.1 | `kafkaVersion` — the newest in the vendored operator's window |
+| Operator | Strimzi 1.2.0 | `strimziVersion`, vendored under `charts/strimzi-operator` |
+| Versions that operator can run | 4.2.0, 4.2.1, 4.3.0, 4.3.1 | the operator chart's own `STRIMZI_KAFKA_IMAGES` map |
 | Platform floor | 4.2.0 | `kates.io/kafka-floor` in [`Chart.yaml`](../../kafka-cluster/Chart.yaml) — the default configuration enables share groups |
 | KRaft metadata version | 4.2-IV1 | `kafka.metadataVersion`, deliberately one step behind |
 
@@ -31,7 +31,7 @@ Confirm these against the charts rather than trusting this table —
 **The metadata version is one step behind on purpose.** Left unset, the operator
 raises it to the new Kafka version's default the moment `kafkaVersion` changes,
 and a raised metadata version forecloses any rollback to the previous Kafka
-line. Keeping it at 4.2-IV1 while the brokers run 4.3.0 means the target itself
+line. Keeping it at 4.2-IV1 while the brokers run 4.3.1 means the target itself
 can still go back. That matters here: for the duration of a migration you have
 two clusters that can both fail, and you want the new one to be the reversible
 of the two.
@@ -49,7 +49,7 @@ cannot operate a Kafka older than its window:
 | 2.1.0 – 3.2.x | legacy — ZooKeeper, built image | `kates migrate image build --version <v> --load` |
 | 3.3.0 – 3.6.x | legacy — KRaft, built image | Build the image (no official one exists below 3.7) |
 | 3.7.0 – 4.1.x | legacy — KRaft, `apache/kafka:<v>` | Nothing — the official image is multi-arch |
-| 4.2.0 – 4.3.0 | Strimzi 1.1.0, the primary's operator | Nothing (plan-only in this release — see below) |
+| 4.2.0 – 4.3.1 | Strimzi 1.2.0, the primary's operator | Nothing (plan-only in this release — see below) |
 
 The row that surprises people is the fourth. A **4.0 or 4.1 source also runs as
 legacy**, not under Strimzi, because the cluster-wide operator this platform
@@ -67,7 +67,7 @@ The same thing as a decision, which is how you will actually use it:
 flowchart TB
     S["Source cluster<br/>ask the wire, not the ticket"] --> F{"Kafka 2.1<br/>or newer?"}
     F -->|"no"| TWO["Two hops<br/>via an intermediate 3.9"]
-    F -->|"yes"| W{"Inside the operator's<br/>window? 4.2.0 – 4.3.0"}
+    F -->|"yes"| W{"Inside the operator's<br/>window? 4.2.0 – 4.3.1"}
     W -->|"yes"| ST["Strimzi<br/>the primary's operator<br/>plan-only in this release"]
     W -->|"no"| K{"Kafka 3.7<br/>or newer?"}
     K -->|"yes"| OFF["legacy-kafka<br/>KRaft, apache/kafka image<br/>nothing to build"]
@@ -94,11 +94,11 @@ kates migrate pairs
 ```
 
 ```text
-FROM (source)  PROVIDER                           TO (target)          NOTE
-2.1.0 – 3.2.x  legacy — ZooKeeper, built image    4.2.0 4.2.1 [4.3.0]  image built on first use
-3.3.0 – 3.6.x  legacy — KRaft, built image        4.2.0 4.2.1 [4.3.0]  image built on first use
-3.7.0 – 4.1.x  legacy — KRaft, official image     4.2.0 4.2.1 [4.3.0]  the 4.x line below 4.2.0 is legacy
-4.2.0 – 4.3.0  Strimzi 1.1.0, primary's operator  4.2.0 4.2.1 [4.3.0]  in-window: plan only in this version
+FROM (source)  PROVIDER                           TO (target)                NOTE
+2.1.0 – 3.2.x  legacy — ZooKeeper, built image    4.2.0 4.2.1 4.3.0 [4.3.1]  image built on first use
+3.3.0 – 3.6.x  legacy — KRaft, built image        4.2.0 4.2.1 4.3.0 [4.3.1]  image built on first use
+3.7.0 – 4.1.x  legacy — KRaft, official image     4.2.0 4.2.1 4.3.0 [4.3.1]  the 4.x line below 4.2.0 is legacy
+4.2.0 – 4.3.1  Strimzi 1.2.0, primary's operator  4.2.0 4.2.1 4.3.0 [4.3.1]  in-window: plan only in this version
 ```
 
 The bracketed target is the primary as it actually runs; any version in the
@@ -117,7 +117,7 @@ A source older than 2.1 needs an intermediate cluster:
 ```mermaid
 flowchart LR
     A["Source<br/>0.11 – 2.0"] -->|"MM2 on a 3.9 line"| B["Intermediate<br/>3.9.x"]
-    B -->|"MM2 on the 4.x line"| C["Target<br/>krafter, 4.3.0"]
+    B -->|"MM2 on the 4.x line"| C["Target<br/>krafter, 4.3.1"]
 ```
 
 Plan it as **two migrations**, because that is what it is: two cutovers, two
@@ -136,7 +136,7 @@ somewhere less convenient.
 |---|---|
 | A source principal | With the exact ACLs from [the credential contract](../README.md#the-credential-contract-read-this), which differ depending on whether the mirror may write to the source |
 | Its Secret in the mirror's namespace | The chart reads a Secret; it cannot create one for a cluster it does not manage. `secretSync` copies it across namespaces if it lives elsewhere |
-| A target principal | Provisioned by `kafka-cluster` as `kates-mm2`, or by this chart with `kafkaUser.create=true` |
+| A target principal | Provisioned by `kafka-cluster` as `kates-mm2` when the target was installed with `values-platform.yaml` (the platform profile owns that user), or by this chart with `kafkaUser.create=true` |
 | Kubernetes access | To the mirror's namespace, and read access to the source's if it is in-cluster |
 | Someone who can grant source ACLs | Usually not you. Start this in Phase 0; it is the longest lead time in the plan |
 
@@ -383,6 +383,7 @@ alerts: { enabled: true }
 Then prove the connection before deploying workers:
 
 ```bash
+helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
 helm install mm2 charts/mirror-maker2 -n kafka \
   -f charts/mirror-maker2/values-migrate-2x.yaml \
   -f my-migration.yaml \
@@ -681,7 +682,7 @@ This document is the shape of a migration. For your exact pairing, the CLI emits
 the specifics as data:
 
 ```bash
-kates migrate plan --from 2.8.2 --to 4.3.0 -o json
+kates migrate plan --from 2.8.2 --to 4.3.1 -o json
 ```
 
 It resolves the source's provider and mode, the images, namespaces and releases,

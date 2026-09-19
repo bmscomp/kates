@@ -64,9 +64,9 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 |---------|---------|
 | `values-kind.yaml` | Local kind — lowers the operator to 384Mi |
 | `values-dev.yaml` | Dev — `logLevel: DEBUG` |
-| `values-prod.yaml` | Prod **uplift** — hardening, PDB, NetworkPolicy. Never applied to any cluster before; read the header. |
+| `values-prod.yaml` | Prod **uplift** — hardening, PDB, upstream NetworkPolicy, `productionMode`, and the drain cleaner (two replicas, cert-manager certificate). Read the header. |
 | `values-generic.yaml` | Unknown clusters — documents DNS-domain injection and registry redirection |
-| `values-namespace-scope.yaml` | An **additional** operator, co-located with the Kafka namespace it watches: `watchAnyNamespace: false`, `createGlobalResources: false`, `crdUpgrade.enabled: false`, `globalBindings.enabled: true`, kind-sized. Never for the primary. |
+| `values-namespace-scope.yaml` | An **additional** operator, co-located with the Kafka namespace it watches: `watchAnyNamespace: false`, `createGlobalResources: false`, `crdUpgrade.enabled: false`, `globalBindings.enabled: true`, dashboards and drain cleaner off (once per Kubernetes cluster), kind-sized. Never for the primary. |
 
 ## Configuration Reference
 
@@ -74,14 +74,23 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `strimziVersion` | `1.1.0` | Builds the CRD bundle URL. Must equal `Chart.yaml` `appVersion` + dependency version. |
-| `testImages.kubectl` | `ghcr.io/bmscomp/kates-tester:1.17.0` | Image for the CRD hook Job and Helm tests |
+| `strimziVersion` | `1.2.0` | Builds the CRD bundle URL. Must equal `Chart.yaml` `appVersion` + dependency version. |
+| `testImages.kubectl` | `ghcr.io/bmscomp/kates-tester:1.22.0` | Image for the CRD hook Job and Helm tests |
 | `crdUpgrade.enabled` | `true` | Apply CRDs via the pre-install/pre-upgrade hook |
 | `crdUpgrade.url` | `""` | Override the bundle URL (empty = derive from `strimziVersion`). Use an internal mirror when airgapped. |
 | `crdUpgrade.backoffLimit` | `3` | Job retries before the install/upgrade aborts |
 | `crdUpgrade.ttlSecondsAfterFinished` | `300` | Retention of a **failed** Job for log inspection. A successful Job is deleted immediately by Helm's `hook-succeeded` policy, so this only governs the failure path. |
 | `globalBindings.enabled` | `false` | Render `ClusterRoleBinding`s named `strimzi-cluster-operator-<namespace>-{global,kafka-broker-delegation,kafka-client-delegation}` binding this release's ServiceAccount to the primary's `strimzi-cluster-operator-global`, `strimzi-kafka-broker` and `strimzi-kafka-client` ClusterRoles. On for additional operators (`createGlobalResources: false` skips upstream's fixed-name copies). |
-| `operatorPolicy.enabled` | `false` | Render the Cluster Operator's NetworkPolicy in the release namespace: probe/metrics ingress on 8080, egress to DNS, the API server and every `strimzi.io/kind` pod in the watched namespaces (all namespaces under `watchAnyNamespace`). This is the policy `charts/kafka-cluster` used to write into the operator namespace; set `networkPolicies.operatorPolicy.enabled=false` there when enabling it here — both render the same name and Helm refuses two owners. |
+| `operatorPolicy.enabled` | `true` | Render the Cluster Operator's NetworkPolicy in the release namespace: probe/metrics ingress on 8080, egress to DNS, the API server and every `strimzi.io/kind` pod in the watched namespaces (all namespaces under `watchAnyNamespace`) on 9090–9093, 8443 and 8083. `charts/kafka-cluster` 0.4 wrote this policy into the operator namespace; while such a release still owns the object, this chart skips it and NOTES say so. kafka-cluster 1.0 no longer renders it. |
+| `productionMode` | `false` | Refuse unsafe production settings (a single drain-cleaner replica) |
+| `drainCleaner.enabled` | `false` | The [Strimzi Drain Cleaner](https://github.com/strimzi/drain-cleaner): a validating webhook that turns node-drain evictions of Kafka pods into operator-driven rolls. **One per Kubernetes cluster** — enable it on the primary operator's release only. Moved here from kafka-cluster 0.4. |
+| `drainCleaner.tls.certManager.enabled` | `false` | Issue the webhook certificate with cert-manager and inject its CA (`issuerRef` empty: a self-signed Issuer). Without this, `tls.secretName` plus `tls.caBundle` are required — the render fails otherwise, because an uncallable webhook with `failurePolicy: Ignore` lets every eviction through. |
+| `drainCleaner.replicas` | `1` | 2+ in production; a PDB is rendered above one replica |
+| `drainCleaner.denyEviction` | `true` | Deny the eviction and have the operator roll the pod (Strimzi's recommended mode) |
+| `drainCleaner.namespaces` | `[]` | Namespaces whose evictions are intercepted (empty: the operator's watch scope) |
+| `drainCleaner.image` | `quay.io/strimzi/drain-cleaner:1.6.1` | Floating tags are refused |
+| `monitoring.podMonitor.enabled` | `true` | PodMonitor for the operator (`http` port). Rendered only where the `monitoring.coreos.com/v1` API exists. |
+| `alerts.enabled` | `true` | `StrimziOperatorDown`, `StrimziReconciliationsFailing`, `KafkaCertificateExpiringSoon` and `KafkaCertificateExpiryCritical` (on `strimzi_certificate_expiration_timestamp_ms`, for every cluster the operator manages). Thresholds: `alerts.thresholds.certificate{Warning,Critical}Days` (30, 7). Runbook: `docs/kafka-cluster-runbook.md`. |
 | `nameOverride` / `fullnameOverride` | `""` | Standard name overrides |
 | `commonLabels` / `commonAnnotations` | `{}` | Applied to chart-owned resources |
 
@@ -100,6 +109,7 @@ Only these deviate from stock upstream. Everything else in the [upstream values]
 | `strimzi-kafka-operator.fullReconciliationIntervalMs` | `120000` | Upstream default, verified live |
 | `strimzi-kafka-operator.createGlobalResources` | `true` | `false` is the additional-operator shape: the fixed-name ClusterRoles and bindings come from the primary's release. On its own it leaves the ServiceAccount unbound from three of them — pair it with `globalBindings.enabled: true`. |
 | `strimzi-kafka-operator.watchNamespaces` | `[]` | With `watchAnyNamespace: false`, the namespaces to watch. The release namespace is always included, so `[]` means "only my own namespace". |
+| `strimzi-kafka-operator.dashboards.enabled` | `true` | The operator's nine Grafana dashboards (Kafka, KRaft, Cruise Control, Kafka Exporter, Connect, MirrorMaker 2, Kafka Bridge, Kafka OAuth, operators). They read exactly the series kafka-cluster's vendored exporter rules produce; kafka-cluster 1.0 has no dashboards of its own. Names are fixed: enable on one operator release. |
 
 > **There is no `global` block.** Upstream contains zero `.Values.global` references and ignores `global.imageRegistry` entirely. Declaring it to satisfy the schema would convert a loud failure into a silent one, so `--set global.*` is rejected. For registry redirection use `strimzi-kafka-operator.defaultImageRegistry`.
 
@@ -125,7 +135,7 @@ Airgapped CRD mirror:
 
 ```bash
 helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator \
-  --set crdUpgrade.url=https://mirror.internal/strimzi-crds-1.1.0.yaml
+  --set crdUpgrade.url=https://mirror.internal/strimzi-crds-1.2.0.yaml
 ```
 
 ## CRD Lifecycle
@@ -149,6 +159,15 @@ helm test strimzi-operator -n strimzi-operator
 Three hooks, all on a scoped ephemeral ServiceAccount: the operator Deployment is `Available`; all ten CRDs are `Established`; and — when `watchAnyNamespace` is true — `STRIMZI_NAMESPACE == "*"`. The last is defense-in-depth: the subchart's values block keeps `additionalProperties: true` (upstream has ~40 keys that drift each release), so a typo *inside* that block stays silent, and this assertion is what makes it loud.
 
 ## Upgrading
+
+### 0.2 → 0.3 (with kafka-cluster 1.0)
+
+The drain cleaner, the operator's NetworkPolicy, scrape and alerts, and the dashboards move here from `kafka-cluster`. Upgrade in this order:
+
+1. `kafka-cluster` to 1.0 with `drainCleaner.enabled=false` (1.0 refuses `true`). Helm removes its drain cleaner and its copy of the operator NetworkPolicy.
+2. This chart to 0.3, with `drainCleaner.enabled=true` where you had it (`values-prod.yaml` does).
+
+Upgrading this chart first is safe: an object still owned by a `kafka-cluster` 0.4 release is skipped (NOTES name the owner), and the next upgrade of this chart after step 1 creates it. See [docs/kafka-cluster-1.0-upgrade.md](../../docs/kafka-cluster-1.0-upgrade.md).
 
 ### Ad-hoc OCI install → this chart
 

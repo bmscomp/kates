@@ -37,7 +37,9 @@ The detect command performs a deep analysis of your cluster:
 
 Review the report. If any critical issues are flagged (🔴), resolve them before proceeding.
 
-> **Tip**: Export the report for your team: `kates detect --export report.pdf`
+> **Tip**: Export the report for your team: `kates detect --output-file report.pdf`
+> (`.md`, `.json` and `.pdf` are all understood). `--fail-on-warning` and
+> `--fail-on-error` turn the same scan into a CI gate.
 
 ---
 
@@ -179,7 +181,7 @@ kates test create --type LOAD --records 10000
 Watch the test in real-time:
 
 ```bash
-kates watch --id <test-id>
+kates test watch <test-id>
 ```
 
 View the results:

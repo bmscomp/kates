@@ -1,0 +1,36 @@
+{{- /*
+Egress for the test pods (kates.io/test-pod=true): the cluster's listeners and
+the Kafka agent, DNS, and the Kubernetes API (the tests run kubectl). Rendered
+with networkPolicy.enabled; kept on uninstall so a later `helm test` of a
+reinstalled release still works.
+*/ -}}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- if $r.netpol.enabled }}
+{{- $ports := list 9090 9091 -}}
+{{- range $r.listeners }}{{- $ports = append $ports (int .port) }}{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-egress"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.componentLabels" (dict "ctx" . "component" "helm-test") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  podSelector:
+    matchLabels:
+      kates.io/test-pod: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ include "kafka-cluster.clusterName" . }}
+      ports:
+        {{- include "kafka-cluster.tcpPorts" $ports | nindent 8 }}
+    {{- include "kafka-common.netpol.dnsEgress" (dict) | nindent 4 }}
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" (($r.netpol.apiServer).ports) "ipBlock" (($r.netpol.apiServer).ipBlock)) | nindent 4 }}
+{{- end }}

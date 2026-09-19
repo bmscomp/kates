@@ -608,6 +608,15 @@ func TestMirrorValuesRenderWithHelm(t *testing.T) {
 	if _, err := os.Stat(chart); err != nil {
 		t.Skipf("chart not available: %v", err)
 	}
+	// The chart depends on the kafka-common library chart, and helm refuses to
+	// render with a dependency missing from charts/ — which is where a bare
+	// checkout starts, since that directory is generated and not tracked. The
+	// dependency is a file:// one, so building it reaches no registry.
+	depCtx, depCancel := context.WithTimeout(context.Background(), time.Minute)
+	defer depCancel()
+	if out, err := exec.CommandContext(depCtx, helm, "dependency", "build", chart).CombinedOutput(); err != nil {
+		t.Fatalf("helm dependency build: %v\n%s", err, out)
+	}
 	l := legacyLab(t)
 	doc, err := MirrorValues(l, MirrorInputs{TargetBrokerCount: 1})
 	if err != nil {

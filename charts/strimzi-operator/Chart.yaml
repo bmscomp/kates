@@ -1,9 +1,10 @@
 apiVersion: v2
 name: strimzi-operator
-# Minor bump: the chart now describes two operator shapes — the cluster-wide
-# primary and a namespace-scoped additional operator (values-namespace-scope.yaml,
-# globalBindings, operatorPolicy) — and the CRD hook judges a bundle by content.
-version: 0.2.0
+# Minor bump: the operator-wide pieces kafka-cluster 0.4 carried per Kafka
+# cluster move here — the drain cleaner, the operator's scrape and alerts, and
+# its NetworkPolicy (now on by default) — and the operator's own dashboards
+# replace the Kafka chart's.
+version: 0.3.0
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -31,12 +32,14 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: added
-      description: values-namespace-scope.yaml — the shape of an additional, co-located operator (watches its own namespace, createGlobalResources off, no CRD hook, kind-sized)
+      description: drainCleaner — the Strimzi Drain Cleaner webhook, moved from kafka-cluster 0.4, with cert-manager certificates, a PDB above one replica, a NetworkPolicy, and the operator's watch scope as its namespace selector. values-prod.yaml runs two replicas
     - kind: added
-      description: globalBindings.enabled renders unique-name ClusterRoleBindings (strimzi-cluster-operator-<namespace>-*) so an additional operator keeps rack awareness and volume-expansion checks without upstream's fixed names
+      description: monitoring.podMonitor and alerts — the operator's PodMonitor, StrimziOperatorDown, StrimziReconciliationsFailing and the certificate-expiry alerts on strimzi_certificate_expiration_timestamp_ms (kafka-cluster 0.4's versions selected nothing and read a series the operator does not publish)
     - kind: added
-      description: operatorPolicy.enabled renders the Cluster Operator's NetworkPolicy here, once per operator, with operand egress following the watch scope — it used to be written into the operator namespace by charts/kafka-cluster
+      description: productionMode refuses a single drain-cleaner replica
     - kind: changed
-      description: The CRD hook validates a bundle by the presence of the ten CRDs this platform renders CRs for, not by an exact count, so bundles of other Strimzi releases are judged by what matters
+      description: operatorPolicy is on by default; while a kafka-cluster 0.4 release still owns the NetworkPolicy it is skipped and NOTES say so. Its egress admits the Kafka agent (8443) and no longer ZooKeeper (2181)
     - kind: changed
-      description: NOTES print the operator version, the scope and watch list, and whether the CRD hook and the global bindings are on
+      description: The operator's Grafana dashboards are on (strimzi-kafka-operator.dashboards.enabled); kafka-cluster 1.0 ships none. values-namespace-scope.yaml turns them off
+    - kind: changed
+      description: The Helm-test image is kates-tester 1.22.0, as in the other Kafka charts

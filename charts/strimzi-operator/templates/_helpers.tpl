@@ -120,3 +120,47 @@ bundle for .Values.strimziVersion.
 {{- printf "https://github.com/strimzi/strimzi-kafka-operator/releases/download/%s/strimzi-crds-%s.yaml" .Values.strimziVersion .Values.strimziVersion -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+The release that already owns a resource, when it is not this one: a lookup of
+the live object's meta.helm.sh/release-name. Empty when the object does not
+exist, belongs to this release, or cannot be looked up (helm template).
+
+kafka-cluster 0.4 rendered the operator's NetworkPolicy and the drain cleaner;
+0.3 of this chart renders them. On a cluster upgraded operator-first, the old
+objects are still owned by the Kafka release, and Helm refuses to take them
+over. The templates skip such an object and NOTES say why; the next upgrade
+after kafka-cluster 1.0 (which drops them) creates it here.
+
+Call with (dict "ctx" $ "apiVersion" … "kind" … "namespace" … "name" …).
+*/}}
+{{- define "strimzi-operator.ownedElsewhere" -}}
+{{- $obj := lookup .apiVersion .kind (.namespace | default "") .name -}}
+{{- if $obj -}}
+{{- $owner := index (($obj.metadata).annotations | default dict) "meta.helm.sh/release-name" | default "" -}}
+{{- $ownerNs := index (($obj.metadata).annotations | default dict) "meta.helm.sh/release-namespace" | default "" -}}
+{{- if and $owner (or (ne $owner .ctx.Release.Name) (ne $ownerNs .ctx.Release.Namespace)) -}}
+{{- printf "%s/%s" $ownerNs $owner -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The namespaces whose Kafka pods this operator manages: every namespace, or
+watchNamespaces plus the release namespace. Returns "*" or a comma list.
+*/}}
+{{- define "strimzi-operator.watchScope" -}}
+{{- $op := index .Values "strimzi-kafka-operator" -}}
+{{- if $op.watchAnyNamespace -}}
+*
+{{- else -}}
+{{- append ($op.watchNamespaces | default list) .Release.Namespace | uniq | sortAlpha | join "," -}}
+{{- end -}}
+{{- end }}
+
+{{/* Labels for a component other than the operator itself. */}}
+{{- define "strimzi-operator.componentLabels" -}}
+{{- $l := include "strimzi-operator.labels" .ctx | fromYaml -}}
+{{- $_ := set $l "app.kubernetes.io/component" .component -}}
+{{- toYaml $l -}}
+{{- end }}

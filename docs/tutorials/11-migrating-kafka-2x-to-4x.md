@@ -1,6 +1,6 @@
 # Tutorial 11: Migrating Kafka 2.x to 4.x with MirrorMaker 2
 
-This tutorial migrates a real Apache Kafka **2.8.2** cluster onto Kafka **4.3.0**
+This tutorial migrates a real Apache Kafka **2.8.2** cluster onto Kafka **4.3.1**
 using MirrorMaker 2 — topics, records, and consumer offsets — and then rehearses
 the cutover. Every step runs locally in your kind cluster, and every claim it
 makes is checked by `scripts/test-mm2-migration.sh`, which does the same thing
@@ -18,7 +18,7 @@ version problem.
 
 [KIP-896](https://cwiki.apache.org/confluence/x/K5sODg) removed the pre-2.1
 client protocol API versions in Kafka 4.0. MirrorMaker 2's consumer *is* a 4.x
-client — the Connect workers run `spec.version: 4.3.0` — so:
+client — the Connect workers run `spec.version: 4.3.1` — so:
 
 | Source broker | A 4.x MirrorMaker 2 can read it? |
 |---|---|
@@ -36,7 +36,7 @@ and genuinely old: ZooKeeper, the 2.8 inter-broker protocol, the pre-KRaft world
 ```text
   kafka-legacy-2x namespace              kafka namespace
   ┌───────────────────────────┐          ┌──────────────────────────────┐
-  │  ZooKeeper 3.5            │          │  krafter (Kafka 4.3.0, KRaft)│
+  │  ZooKeeper 3.5            │          │  krafter (Kafka 4.3.1, KRaft)│
   │  Kafka 2.8.2 broker       │          │                              │
   │                           │  MM2     │  kates.orders   ◄────────────┼─ same name
   │  kates.orders  ───────────┼─────────►│  (identity policy)           │
@@ -76,10 +76,15 @@ export GROUP=kates-migration-consumer
 ```
 
 ```bash
-make cluster && make deploy-strimzi && make deploy-kafka
+make cluster && make kafka-deploy
 kubectl -n "${KAFKA_NS}" get kafka krafter
 kubectl -n "${KAFKA_NS}" get secret kates-mm2
 ```
+
+`make kafka-deploy` reconciles the Strimzi operator from
+`charts/strimzi-operator` first and the `krafter` cluster second, layering
+`values-platform.yaml` — which is where the `kates-mm2` user this tutorial
+authenticates with comes from.
 
 ---
 
@@ -208,7 +213,15 @@ numbers offset translation has to carry across.
 
 ## Step 4: Install MirrorMaker 2
 
+Since 0.8.0 the `mirror-maker2` chart is built on the `kafka-common` library
+chart, declared as a `file://` dependency, and `charts/*/charts/` is generated
+rather than committed. Nothing renders until that dependency is resolved — not
+`helm template`, not `helm lint`, not `helm upgrade`. The build is idempotent,
+so running it once here covers the cutover upgrade in Step 7 as well:
+
 ```bash
+helm dependency build charts/mirror-maker2
+
 helm upgrade --install mm2 charts/mirror-maker2 \
   -n "${KAFKA_NS}" \
   -f charts/mirror-maker2/values-migrate-2x.yaml \
@@ -227,10 +240,10 @@ kubectl -n "${KAFKA_NS}" logs job/mm2-mirror-maker2-preflight
 MirrorMaker 2 preflight — client quay.io/strimzi/kafka:1.2.0-kafka-4.3.1
 
 ══ source: legacy ── legacy-legacy-kafka-bootstrap.kafka-legacy-2x.svc.cluster.local:9092  [plaintext]
-  ✅ HANDSHAKE broker answered ApiVersions to a 4.3.0 client
+  ✅ HANDSHAKE broker answered ApiVersions to a 4.3.1 client
                legacy-legacy-kafka-0.legacy-legacy-kafka-headless...:9092 (id: 0 rack: null) -> (
 
-✅ preflight: every source is reachable by a 4.3.0 client
+✅ preflight: every source is reachable by a 4.3.1 client
 ```
 
 That handshake is the KIP-896 check performed for real, by the exact client the
@@ -299,7 +312,7 @@ kubectl -n "${KAFKA_NS}" run verify --rm -i --restart=Never \
       2>/dev/null | wc -l"
 ```
 
-Two hundred records, written by a Kafka 2.8.2 producer, read by a Kafka 4.3.0
+Two hundred records, written by a Kafka 2.8.2 producer, read by a Kafka 4.3.1
 consumer, having crossed a protocol boundary that did not exist five years ago.
 
 ## Step 6: Verify Offset Translation
@@ -432,7 +445,7 @@ same rows to a pipeline.
 ## Step 9: Clean Up
 
 ```bash
-kates migrate down --name m282-430
+kates migrate down --name m282-431
 ```
 
 `down` finds the lab by its `kates.io/lab` label and removes exactly what

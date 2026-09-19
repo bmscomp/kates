@@ -590,6 +590,9 @@ func (r *labRun) phaseOffsetTranslation(ctx context.Context, s *migrate.State) e
 // then the source connector STOPPED and the checkpoint connector RUNNING.
 func (r *labRun) applyCutover(ctx context.Context, s *migrate.State) error {
 	l := r.lab
+	if err := ensureMirrorChartDeps(ctx); err != nil {
+		return err
+	}
 	if _, err := defaultRunner.Run(ctx, "helm", helmCutoverArgs(l.MirrorRelease, l.MirrorNamespace, r.timeout)...); err != nil {
 		s.Report.Fail(migrate.RowCutoverApplied, "helm upgrade with values-cutover.yaml failed")
 		return fmt.Errorf("apply the cutover: %w", err)
@@ -665,6 +668,9 @@ func (r *labRun) applyRollback(ctx context.Context, s *migrate.State) error {
 	l := r.lab
 	path := rollbackValuesPath(l.Name)
 	if err := writeLabFile(path, rollbackValues); err != nil {
+		return err
+	}
+	if err := ensureMirrorChartDeps(ctx); err != nil {
 		return err
 	}
 	if _, err := defaultRunner.Run(ctx, "helm", helmRollbackArgs(l.MirrorRelease, l.MirrorNamespace, path, r.timeout)...); err != nil {

@@ -1,0 +1,401 @@
+name: CI — Kafka charts
+
+# The Strimzi charts (strimzi-operator, kafka-cluster, connect-cluster,
+# mirror-maker2, and the kafka-common library they share) checked the way
+# ci-mirror-maker2.yml checks mirror-maker2 — rendered across every overlay
+# and toggle, not only defaults.
+#
+# `metrics-live` asks what a render cannot: what does a real worker expose? It
+# stands up a kind cluster, runs Kafka (and Connect), scrapes the pods, and
+# checks every series the rules and dashboards read against the capture — and
+# the catalogue against the capture both ways, so an attribute a Kafka upgrade
+# renames shows up here before it shows up as an empty panel. Minutes and a
+# cluster, so weekly and on demand rather than on every push.
+#
+# `matrix` renders each chart through scripts/chart-matrix/<chart>.yaml and
+# checks every render against the Strimzi CRDs the repository pins
+# (scripts/check-strimzi-crs.py: pruned fields, missing required fields, enum
+# violations, duplicate keys), kubeconform for built-in kinds, and the render's
+# own assertions. A render marked `known: <ID>` is a documented defect
+# (docs/kafka-charts-refactor-plan.md §2.3) that must still reproduce; the job
+# fails when it stops reproducing, so a marker cannot outlive its fix. The same
+# job proves the rails refuse what they claim to refuse, that every series an
+# alert or panel reads is one the exporter rules produce, and that every rule
+# is PromQL the pinned Prometheus accepts.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/kafka-cluster/**"
+      - "charts/connect-cluster/**"
+      - "charts/mirror-maker2/**"
+      - "charts/kafka-common/**"
+      - "charts/strimzi-operator/**"
+      - "scripts/check-strimzi-crs.py"
+      - "scripts/check-strimzi-metrics.sh"
+      - "scripts/check-chart-matrix.py"
+      - "scripts/chart-matrix/**"
+      - "scripts/check-metric-contract.sh"
+      - "scripts/metric-contract/**"
+      - "images.env"
+      - "versions.env"
+      - ".github/workflows/ci-kafka-charts.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "charts/kafka-cluster/**"
+      - "charts/connect-cluster/**"
+      - "charts/mirror-maker2/**"
+      - "charts/kafka-common/**"
+      - "charts/strimzi-operator/**"
+      - "scripts/check-strimzi-crs.py"
+      - "scripts/check-strimzi-metrics.sh"
+      - "scripts/check-chart-matrix.py"
+      - "scripts/chart-matrix/**"
+      - "scripts/check-metric-contract.sh"
+      - "scripts/metric-contract/**"
+      - "images.env"
+      - "versions.env"
+      - ".github/workflows/ci-kafka-charts.yml"
+  workflow_dispatch:
+  # metrics-live: weekly, and on demand.
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: v3.17.0
+  KUBECONFORM_VERSION: v0.6.7
+
+jobs:
+  # The kafka-common library cannot be rendered on its own. Its harness chart
+  # (charts/kafka-common/tests/harness) calls every template, and helm-unittest
+  # asserts on the output — including the refusals.
+  library:
+    name: kafka-common
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install helm-unittest (the pinned version)
+        run: |
+          set -euo pipefail
+          V=$(grep -E '^HELM_UNITTEST_VERSION=' versions.env | sed -E 's/^[^=]+="?//; s/"$//')
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "$V"
+
+      - name: Lint and unit-test the library
+        run: |
+          helm lint charts/kafka-common
+          helm dependency build charts/kafka-common/tests/harness
+          helm unittest charts/kafka-common/tests/harness
+
+      - name: The packaged library carries no test harness
+        run: |
+          helm package charts/kafka-common --destination /tmp/pkg
+          if tar tzf /tmp/pkg/kafka-common-*.tgz | grep -q '/tests/'; then
+            echo "::error::charts/kafka-common/.helmignore must exclude tests/"
+            exit 1
+          fi
+
+  matrix:
+    name: ${{ matrix.chart }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: [strimzi-operator, kafka-cluster, connect-cluster, mirror-maker2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform, promtool and PyYAML
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/kubeconform.tgz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          curl -sSL -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
+          sudo mv /tmp/promtool /usr/local/bin/
+          pip install --quiet pyyaml
+
+      # The CRD schemas every render is checked against come from the operator
+      # chart this repository pins — not from a community catalogue that may
+      # not carry the v1 Strimzi schemas at all.
+      - name: Fetch the pinned Strimzi CRDs and chart dependencies
+        run: |
+          set -euo pipefail
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm dependency build charts/strimzi-operator/
+          chart="charts/${{ matrix.chart }}"
+          if [ "${{ matrix.chart }}" != strimzi-operator ] && grep -q '^dependencies:' "$chart/Chart.yaml"; then
+            # Library dependencies are local (file://) and need no repository.
+            helm dependency build "$chart/"
+          fi
+
+      - name: Render matrix (CRD schemas, kubeconform, assertions, rails)
+        run: scripts/check-chart-matrix.py "${{ matrix.chart }}"
+
+      - name: Every series the rules and dashboards read is one the exporter produces
+        run: |
+          if [ -f "scripts/metric-contract/${{ matrix.chart }}.yaml" ]; then
+            scripts/check-metric-contract.sh "${{ matrix.chart }}"
+          else
+            echo "no metric contract for ${{ matrix.chart }}"
+          fi
+
+      - name: Alert and recording rules are valid PromQL
+        run: scripts/check-chart-matrix.py "${{ matrix.chart }}" --promtool
+
+      # kafka-cluster vendors Strimzi's exporter rules unchanged, because the
+      # operator's dashboards read exactly what they produce.
+      - name: Vendored Strimzi metrics rules match upstream
+        if: matrix.chart == 'kafka-cluster'
+        run: scripts/check-strimzi-metrics.sh
+
+      - name: Unit tests
+        if: hashFiles(format('charts/{0}/tests/*_test.yaml', matrix.chart)) != ''
+        run: |
+          set -euo pipefail
+          V=$(grep -E '^HELM_UNITTEST_VERSION=' versions.env | sed -E 's/^[^=]+="?//; s/"$//')
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "$V"
+          helm unittest "charts/${{ matrix.chart }}"
+
+      - name: The packaged chart carries no unit tests
+        if: matrix.chart == 'kafka-cluster' || matrix.chart == 'connect-cluster'
+        run: |
+          c="${{ matrix.chart }}"
+          helm package "charts/$c" --destination /tmp/pkg
+          tar tzf /tmp/pkg/"$c"-*.tgz > /tmp/pkg/files
+          if grep -q "^$c/tests/" /tmp/pkg/files; then
+            echo "::error::charts/$c/.helmignore must exclude /tests/"; exit 1
+          fi
+          grep -q "^$c/templates/tests/" /tmp/pkg/files || { echo "::error::the Helm test pods are missing from the package"; exit 1; }
+          if [ "$c" = kafka-cluster ]; then
+            grep -q '^kafka-cluster/profiles/platform.yaml' /tmp/pkg/files || { echo "::error::the platform profile is missing from the package"; exit 1; }
+          fi
+
+  # ── Live scrape ───────────────────────────────────────────────────────────
+  metrics-live:
+    name: Metric contract (live scrape, ${{ matrix.chart }})
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: [kafka-cluster, connect-cluster]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load toolchain pins from versions.env
+        run: |
+          set -euo pipefail
+          grep -E '^(KIND_VERSION|KUBECTL_VERSION|STRIMZI_KAFKA_VERSION)=' versions.env | tr -d '"' | tee -a "$GITHUB_ENV"
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+          cache-dependency-path: cli/go.sum
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Create kind cluster (3-zone topology)
+        uses: helm/kind-action@v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: panda
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      # values-ci.yaml is the one-broker shape the other E2E jobs use; the live
+      # overlay adds the exporter agent and leaves the Prometheus-operator
+      # kinds off, since this cluster has no such CRDs.
+      - name: Deploy Strimzi and Kafka with the exporter on
+        run: |
+          set -euo pipefail
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm dependency build charts/kafka-cluster/
+          ./scripts/deploy-kafka-generic.sh --yes --skip-tests \
+            -f charts/kafka-cluster/values-ci.yaml
+          helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values \
+            -f scripts/metric-contract/live/kafka-cluster.yaml
+          kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=600s
+
+      # Traffic, so the per-topic, request and consumer-group beans exist at
+      # all: a cluster nobody has written to registers a fraction of them.
+      - name: Produce and consume, as the platform's own principal
+        run: |
+          set -euo pipefail
+          kubectl -n kafka get secret kates-backend -o jsonpath='{.data.password}' | base64 -d > /tmp/pw
+          kubectl -n kafka create secret generic live-client --from-file=password=/tmp/pw \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n kafka delete pod live-traffic --ignore-not-found
+          cat > /tmp/traffic.yaml <<YAML
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: live-traffic
+            namespace: kafka
+            labels:
+              kates.io/test-pod: "true"
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: traffic
+                image: quay.io/strimzi/kafka:${STRIMZI_KAFKA_VERSION}
+                command: ["/bin/sh", "-c", "/opt/scripts/traffic.sh"]
+                volumeMounts:
+                  - { name: creds, mountPath: /etc/creds, readOnly: true }
+                  - { name: scripts, mountPath: /opt/scripts }
+            volumes:
+              - name: creds
+                secret: { secretName: live-client }
+              - name: scripts
+                configMap: { name: live-traffic, defaultMode: 0755 }
+          YAML
+          cat > /tmp/traffic.sh <<'SH'
+          set -e
+          BS=krafter-kafka-bootstrap.kafka.svc:9092
+          PW=$(cat /etc/creds/password)
+          {
+            echo 'security.protocol=SASL_PLAINTEXT'
+            echo 'sasl.mechanism=SCRAM-SHA-512'
+            printf '%s\n' "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-backend\" password=\"$PW\";"
+          } > /tmp/c.properties
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --command-config /tmp/c.properties \
+            --create --if-not-exists --topic live-in --partitions 3 --replication-factor 1
+          /opt/kafka/bin/kafka-producer-perf-test.sh --topic live-in --num-records 20000 --record-size 512 \
+            --throughput 2000 --producer.config /tmp/c.properties --producer-props bootstrap.servers=$BS acks=all
+          timeout 90 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server $BS \
+            --consumer.config /tmp/c.properties --topic live-in --group live-consumers \
+            --from-beginning --max-messages 20000 > /dev/null || true
+          echo "traffic done"
+          SH
+          kubectl -n kafka create configmap live-traffic --from-file=traffic.sh=/tmp/traffic.sh \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n kafka apply -f /tmp/traffic.yaml
+          # The pod runs to completion, so it is Succeeded that is waited for;
+          # `condition=Ready` is never true again once the container exits.
+          kubectl -n kafka wait --for=jsonpath='{.status.phase}'=Succeeded pod/live-traffic --timeout=420s \
+            || { kubectl -n kafka describe pod live-traffic; kubectl -n kafka logs live-traffic | tail -50; exit 1; }
+          kubectl -n kafka logs live-traffic | tail -20
+
+      - name: Deploy Connect with the exporter on
+        if: matrix.chart == 'connect-cluster'
+        run: |
+          set -euo pipefail
+          helm dependency build charts/connect-cluster/
+          helm upgrade --install connect-cluster charts/connect-cluster -n kafka \
+            -f charts/connect-cluster/values-dev.yaml \
+            -f scripts/metric-contract/live/connect-cluster.yaml
+          kubectl -n kafka wait kafkaconnect/connect-cluster --for=condition=Ready --timeout=600s
+          # The connectors register the task and client beans; give the
+          # heartbeat and the mirror a moment to actually run.
+          for _ in $(seq 1 30); do
+            states=$(kubectl -n kafka get kafkaconnectors \
+              -o jsonpath='{range .items[*]}{.status.connectorStatus.connector.state}{"\n"}{end}' || true)
+            echo "connector states: $(echo "$states" | tr '\n' ' ')"
+            if [ "$(echo "$states" | grep -c RUNNING || true)" -ge 2 ]; then break; fi
+            sleep 10
+          done
+          kubectl -n kafka get kafkaconnectors
+
+      # One capture per exporter: the contract checks every reference against
+      # their union, and diffs the catalogue against them both ways.
+      - name: Capture /metrics from each exporter
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/scrape
+          capture() {   # name, label selector, series to wait for
+            pod=$(kubectl -n kafka get pods -l "$2" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -z "$pod" ]; then echo "::warning::no pod matches $2"; return 0; fi
+            echo "scraping $1 from $pod"
+            kubectl -n kafka port-forward "pod/$pod" 9404:9404 > "/tmp/scrape/$1-port-forward.log" 2>&1 &
+            pf=$!
+            sleep 3
+            for _ in $(seq 1 20); do
+              curl -sf http://localhost:9404/metrics > "/tmp/scrape/$1.txt" || true
+              if [ -s "/tmp/scrape/$1.txt" ] && grep -q "$3" "/tmp/scrape/$1.txt"; then break; fi
+              sleep 10
+            done
+            kill "$pf" 2>/dev/null || true
+            echo "$1: $(grep -c '^[a-z]' "/tmp/scrape/$1.txt" || true) samples"
+          }
+          if [ "${{ matrix.chart }}" = kafka-cluster ]; then
+            capture broker "strimzi.io/name=krafter-kafka,strimzi.io/pool-name=brokers-ci" kafka_server_replicamanager
+            capture controller "strimzi.io/name=krafter-kafka,strimzi.io/pool-name=controllers-ci" kafka_server_raftmetrics
+            capture cruise-control "strimzi.io/name=krafter-cruise-control" kafka_cruisecontrol
+            capture kafka-exporter "strimzi.io/name=krafter-kafka-exporter" kafka_consumergroup
+          else
+            capture connect "strimzi.io/name=connect-cluster-connect" kafka_connect_worker_metrics
+          fi
+          ls -l /tmp/scrape
+
+      - name: Every referenced series is in the scrape; diff the catalogue against it
+        run: |
+          set -euo pipefail
+          args=""
+          for f in /tmp/scrape/*.txt; do
+            [ -s "$f" ] && args="$args --scrape $f"
+          done
+          [ -n "$args" ] || { echo "::error::no capture was taken"; exit 1; }
+          # shellcheck disable=SC2086
+          scripts/check-metric-contract.sh "${{ matrix.chart }}" $args
+
+      # The captures outlive the job, so a NOTE about an uncatalogued series
+      # can be turned into a catalogue entry without re-running the cluster.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.chart }}-metrics-scrape
+          path: /tmp/scrape/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p /tmp/diag
+          kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
+          kubectl -n kafka get kafka,kafkanodepools,kafkaconnects,kafkaconnectors,kafkausers -o yaml > /tmp/diag/crs.yaml 2>&1 || true
+          kubectl -n kafka get events --sort-by=.lastTimestamp > /tmp/diag/events.txt 2>&1 || true
+          for p in $(kubectl -n kafka get pods -o name 2>/dev/null); do
+            kubectl -n kafka logs "$p" --all-containers --tail=300 > "/tmp/diag/$(basename "$p").log" 2>&1 || true
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ${{ matrix.chart }}-metrics-live-diagnostics
+          path: /tmp/diag/
+          retention-days: 7

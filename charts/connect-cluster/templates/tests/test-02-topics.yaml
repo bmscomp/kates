@@ -1,0 +1,24 @@
+{{- /* Topics the test connectors write, created by the Topic Operator in the
+       Kafka namespace (a KafkaTopic belongs to its Kafka cluster). */}}
+{{- range .Values.testTopics }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ .name | quote }}
+  namespace: {{ include "connect-cluster.kafkaNamespace" $ }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" $ "component" "test-topic" "extra" (merge (dict "strimzi.io/cluster" ($.Values.kafka.clusterName | default "krafter")) (.labels | default dict))) | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  topicName: {{ .topicName | default .name | quote }}
+  partitions: {{ .partitions | default 1 }}
+  replicas: {{ .replicas | default 1 }}
+  {{- with .config }}
+  config:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

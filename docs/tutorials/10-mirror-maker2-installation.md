@@ -19,7 +19,7 @@ them has a meaningful answer.
 ## What You Will Build
 
 ```text
-        ┌──────────────────────── krafter (Kafka 4.3.0) ────────────────────────┐
+        ┌──────────────────────── krafter (Kafka 4.3.1) ────────────────────────┐
         │                                                                       │
         │   kates.demo  ──────►  MirrorMaker 2  ──────►  source.kates.demo      │
         │   (you produce here)   (Connect workers)       (records arrive here)  │
@@ -50,8 +50,36 @@ kubectl -n "${KAFKA_NS}" get secret kates-mm2
 If any of these is missing:
 
 ```bash
-make cluster && make deploy-strimzi && make deploy-kafka
+make cluster
+make kafka-deploy
 ```
+
+`make kafka-deploy` runs `scripts/deploy-kafka-generic.sh`, which reconciles the
+Strimzi operator from `charts/strimzi-operator` first and the `krafter` cluster
+second — operator before cluster, because `kafka-cluster` 1.0 no longer applies
+the Strimzi CRDs and the operator chart's `crdUpgrade` hook owns them. It layers
+`values-platform.yaml`, which is where the `kates-mm2` user comes from.
+
+One more prerequisite, and it is the one that bites: since 0.8.0 the
+`mirror-maker2` chart is built on the `kafka-common` library chart, declared as a
+`file://` dependency. Nothing renders until that dependency is resolved — not
+`helm template`, not `helm lint`, not `helm upgrade`:
+
+```bash
+helm dependency build charts/mirror-maker2
+```
+
+`make mm2-chart-deps` is the same command, and every `mm2-chart-*` target in the
+Makefile already depends on it. The bare `helm` commands below do not, so run it
+once now.
+
+> **What it looks like when you skip it.** `helm template` and `helm upgrade`
+> stop before touching the cluster with
+> `found in Chart.yaml, but missing in charts/ directory: kafka-common`. `helm
+> lint` fails too, but for a confusing reason — it reports
+> `no template "kafka-common.fullname" associated with template "gotpl"`
+> alongside the dependency warning, because the chart's own helpers call into
+> the library. Both messages mean the same thing: run the dependency build.
 
 ## Step 1: Understand What You Are Installing
 
@@ -64,7 +92,8 @@ splits into two halves:
 | Worker | `replicas`, `jvmOptions`, `resources`, `metrics`, `networkPolicy` | The Connect runtime — same surface as `charts/connect-cluster` |
 | Mirror | `target`, `mirrors[]`, `replicationPolicy`, `compatibility` | The two-cluster part, which is everything that is different |
 
-Read the rendered CR before installing anything:
+Read the rendered CR before installing anything (the dependency build from the
+prerequisites must have run, or this stops before it renders a line):
 
 ```bash
 helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
@@ -94,11 +123,17 @@ versions following the operator's; `kates deploy status` and `kates clean`
 know about it. By hand, the same install is:
 
 ```bash
+helm dependency build charts/mirror-maker2
+
 helm upgrade --install "${MM2_RELEASE}" charts/mirror-maker2 \
   --namespace "${KAFKA_NS}" \
   -f charts/mirror-maker2/values-kind.yaml \
   --wait --timeout 10m
 ```
+
+The dependency build is repeated here on purpose: every upgrade in this tutorial
+needs it too, and `helm dependency build` is idempotent — it resolves
+`Chart.lock` and does nothing when the library is already in place.
 
 The `values-kind.yaml` overlay drops every replication factor to 1, because the
 kind cluster has one broker and RF3 internal topics would fail to create — not
@@ -185,13 +220,15 @@ Wait for the refresh interval (60 seconds by default), then look for the
 replicated topic:
 
 ```bash
-make mm2-topics | grep 'source.kates.demo'
+kates migrate target topics --namespace "${KAFKA_NS}" --cluster "${KAFKA_CLUSTER}" \
+  | grep 'source.kates.demo'
 ```
 
-`make mm2-topics` asks the brokers, as the `kates-mm2` user. It has to: the
-Strimzi Topic Operator is unidirectional, so topics MirrorMaker creates directly
-in Kafka never become `KafkaTopic` resources, and `kubectl get kafkatopics`
-would show you nothing.
+That asks the brokers, as the `kates-mm2` user. It has to: the Strimzi Topic
+Operator is unidirectional, so topics MirrorMaker creates directly in Kafka never
+become `KafkaTopic` resources, and `kubectl get kafkatopics` would show you
+nothing. `make mm2-topics` still works and runs exactly this, printing a
+deprecation notice first.
 
 The name is `source.kates.demo`, not `kates.demo`. That prefix is the
 `DefaultReplicationPolicy` at work, and it is the next thing to understand.
@@ -204,11 +241,40 @@ cluster is information you need. It is **wrong for a migration**, where the whol
 point is that consumers repoint at a new cluster and find the topics they
 already know.
 
-See what the other policy would render — render, not apply:
+Try switching this loopback to identity mode and the chart refuses to render at
+all:
 
 ```bash
-diff <(helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" -f charts/mirror-maker2/values-kind.yaml) \
-     <(helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" -f charts/mirror-maker2/values-kind.yaml \
+helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
+  -f charts/mirror-maker2/values-kind.yaml \
+  --set replicationPolicy.mode=identity
+```
+
+Output:
+
+```text
+Error: execution error at (mirror-maker2/templates/kafka-mirror-maker2.yaml:1:4): mirror-maker2: mirror "source" reads from krafter-kafka-bootstrap.kafka.svc.cluster.local:9092, which is also the target — and the replication policy is identity, so every topic is mirrored onto itself and the connector re-reads its own output, forever. A loopback is only safe under the default policy, where the replicated topic is renamed. Point the source at another cluster, or use replicationPolicy.mode=default.
+```
+
+That is a safety rail, not a bug. On a loopback, identity mode makes source and
+target the *same topic*: the mirror reads back what it writes, an infinite loop
+of its own records. The computed exclusions keep the internal topics safe (and,
+under the default policy, keep `source.*` from being re-mirrored as
+`source.source.*`), but nothing can stop `kates.demo → kates.demo` on a single
+cluster — so the chart refuses rather than rendering something that would eat a
+broker.
+
+To see what identity mode *does* change, give the render a source that is not
+the target. Naming a cluster that does not exist is fine here, because this is a
+render and never reaches the API server:
+
+```bash
+diff <(helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
+         -f charts/mirror-maker2/values-kind.yaml \
+         --set 'mirrors[0].source.clusterName=legacy') \
+     <(helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
+         -f charts/mirror-maker2/values-kind.yaml \
+         --set 'mirrors[0].source.clusterName=legacy' \
          --set replicationPolicy.mode=identity)
 ```
 
@@ -217,13 +283,8 @@ connectors, and the computed `topicsExcludePattern` grows to keep MM2's own
 `heartbeats`, `checkpoints` and offset-syncs topics out of a flow that would
 otherwise consume them.
 
-> **Why this is a render and not an upgrade.** On a loopback, identity mode
-> makes source and target the *same topic*: the mirror reads back what it
-> writes, an infinite loop of its own records. The computed exclusions keep the
-> internal topics safe (and, under the default policy, keep `source.*` from
-> being re-mirrored as `source.source.*`), but nothing can stop
-> `kates.demo → kates.demo` on a single cluster. Identity mode needs a
-> genuinely separate source, which is what the migration tutorials provide.
+Identity mode needs a genuinely separate source, which is what the migration
+tutorials provide.
 
 Notice, too, what the *default* policy already excludes on this loopback:
 `source\..*`. Without it, `source.kates.demo` matches `.*` on the next refresh
@@ -283,11 +344,14 @@ whether a cutover is safe.
 ## Step 7: Clean Up
 
 ```bash
-make mm2-undeploy MM2_RELEASE="${MM2_RELEASE}"
+kates migrate mirror remove --release "${MM2_RELEASE}" --namespace "${KAFKA_NS}" --yes
 # equivalent to:
 #   helm uninstall mm2 -n kafka
 #   kubectl -n kafka delete kafkamirrormaker2 mm2-mirror-maker2
 ```
+
+`make mm2-undeploy MM2_RELEASE="${MM2_RELEASE}"` runs the same thing behind a
+deprecation notice.
 
 `keepOnDelete` leaves the CR running on purpose, so the second command is not
 optional. That default is deliberate: in production, `helm uninstall` should not tear down

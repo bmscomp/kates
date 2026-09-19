@@ -1,0 +1,3 @@
+{{- if .Values.hpa.enabled }}
+{{- include "kafka-common.hpa" (dict "name" "harness" "namespace" "ns" "kind" "KafkaConnect" "labels" (include "kafka-common.selectorLabels" .) "autoscaling" .Values.hpa.autoscaling "minDefault" 2 "maxDefault" 6) }}
+{{- end }}

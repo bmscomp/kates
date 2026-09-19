@@ -89,6 +89,12 @@ The `mirror-maker2` chart turns this into a render-time failure: declare
 goes further and performs the `ApiVersions` handshake against the real source
 with the workers' own client, so a pass is evidence rather than an assumption.
 
+That rail only fires once helm can render at all. The chart is built on the
+`kafka-common` library chart, and `charts/mirror-maker2/charts/` is generated
+and gitignored, so run `helm dependency build charts/mirror-maker2` on a fresh
+checkout before any `helm install`, `upgrade`, `template` or `lint`.
+`kates migrate` does it for you.
+
 ### Identity Mode Makes the Mirror Self-Matching
 
 Preserve topic names and the mirror becomes eligible to read its own output —
@@ -160,14 +166,14 @@ Three questions, in increasing order of how much they tell you:
 |:---------|:----|:---------------|
 | Are the workers up? | `condition=Ready` on the CR | Almost nothing |
 | Are the connectors running? | `.status.connectors[].connector.state` | The connectors started |
-| Is data arriving? | End offsets on the target, twice (`scripts/mm2-kafka-cli.sh offsets`) | The mirror works |
+| Is data arriving? | End offsets on the target, twice (`kates migrate target offsets <topic>`) | The mirror works |
 
 A test suite that stops at the first question reports success on a dead mirror.
 The chart's Helm tests span all three — CR readiness, connector state, and (off
 by default, because they need credentials) a produce-and-consume round trip and
-an offset-translation check — and `scripts/test-mm2-migration.sh` performs the
-third question against a real legacy broker, diffing the full set of distinct
-records read back rather than counting lines.
+an offset-translation check — and `kates migrate run` performs the third
+question against a real legacy broker, diffing the full set of distinct records
+read back rather than counting lines.
 
 ## Metrics That Answer Operational Questions
 
@@ -196,11 +202,14 @@ runs Kafka 4.x only and validates `spec.version` against its supported set, so a
 2.x or 3.x cluster cannot be expressed as a `Kafka` custom resource at all. The
 `legacy-kafka` chart fills that gap: plain StatefulSets running the last 2.x
 line on ZooKeeper, or the last 3.x line on KRaft, in their own namespace, purely
-to be replicated from. The exact versions live in that chart's overlays and in
-the matrix, not here.
+to be replicated from. Which 2.x and 3.x lines those are is pinned in that
+chart's overlays, and `kates migrate pairs` prints the pairs this cluster can
+actually stand up.
 
 ```bash
-make mm2-migration-test          # both legs
+kates migrate pairs              # the source→target pairs available here
+kates migrate run --from 3.9.1   # the 3.x leg
+kates migrate run --from 2.8.2   # the 2.x leg
 ```
 
 Each run stands up the legacy broker, produces a known corpus, commits a consumer
@@ -232,7 +241,10 @@ The step-by-step procedures live outside the book, next to the code they drive:
 `11-migrating-kafka-2x-to-4x.md` and `12-migrating-kafka-3x-to-4x.md` for the two
 migration paths, and `docs/mirror-maker2-runbook.md` for the cutover checklist
 and the failure table. Chart reference: `charts/mirror-maker2/README.md`. Two
-operational helpers are worth knowing by name: `make mm2-topics` lists what the
-mirror created on the target (the Topic Operator is unidirectional, so
-`kubectl get kafkatopics` never will), and `scripts/mm2-kafka-cli.sh offsets` sums a
-topic's end offsets with whichever offset tool the target's Kafka line ships.
+operational helpers are worth knowing by name: `kates migrate target topics`
+lists what the mirror created on the target (the Topic Operator is
+unidirectional, so `kubectl get kafkatopics` never will), and
+`kates migrate target offsets <topic>` sums a topic's end offsets with whichever
+offset tool the target's Kafka line ships. The `make mm2-topics` and
+`make mm2-migration-test` targets still work and print the `kates migrate`
+command they now stand for.

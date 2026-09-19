@@ -1,0 +1,29 @@
+# Layered LAST on the CI cluster by the `metrics-live` job in
+# ci-kafka-charts.yml (`deploy-kafka-generic.sh -f <this file>`).
+#
+# The live job scrapes what the brokers, the controllers, Cruise Control and
+# the Kafka Exporter actually expose, and diffs it against the contract's
+# catalogue. It needs the exporter agent and its port, and nothing else: no
+# PodMonitor and no PrometheusRule (the CI cluster has no Prometheus operator
+# CRDs), and no dashboards. The references come from a render, which the
+# contract does itself.
+metrics:
+  enabled: true
+monitoring:
+  podMonitor:
+    enabled: false
+alerts:
+  enabled: false
+dashboards:
+  enabled: false
+# One broker, so every internal topic is RF 1 (values-ci sets the rest).
+cruiseControl:
+  enabled: true
+  config:
+    default.goals: >-
+      com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal,com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal
+    hard.goals: >-
+      com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal,com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal
+    sample.store.topic.replication.factor: 1
+kafkaExporter:
+  enabled: true

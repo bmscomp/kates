@@ -1,0 +1,16 @@
+{{- /* The worker's exporter rules. The file is the chart's (see its header);
+       the pod template carries a checksum of it, so a rule change rolls the
+       workers and a chart version bump alone does not. */}}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- if $r.metrics.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $r.metrics.configMapName }}
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.labels" . | nindent 4 }}
+data:
+  {{ $r.metrics.configMapKey }}: |
+    {{- .Files.Get "files/metrics/connect-metrics.yaml" | nindent 4 }}
+{{- end }}

@@ -19,10 +19,10 @@ After this chapter, you can:
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Docker | 20.10+ | Container runtime |
-| Kind | 0.20+ | Local Kubernetes cluster |
-| kubectl | 1.28+ | Kubernetes CLI |
-| Helm | 3.12+ | Kubernetes package manager |
+| Docker | 24+ | Container runtime |
+| Kind | 0.33+ | Local Kubernetes cluster — older releases do not publish the node image `config/cluster.yaml` asks for |
+| kubectl | 1.33+ | Kubernetes CLI — stay within one minor of the cluster, which runs Kubernetes 1.34 locally |
+| Helm | 3.14+ | Kubernetes package manager |
 | jq | 1.6+ | JSON processing (optional) |
 | Go | 1.25+ | CLI compilation (if building from source) |
 | Java | 21+ | Backend compilation (if building from source) |
@@ -43,11 +43,12 @@ Why? Each namespace can have independent:
 - **Resource quotas** — prevent the monitoring stack from starving Kafka of memory during a spike
 - **Network policies** — default-deny per namespace means a compromised monitoring pod can't reach broker ports
 
-The Kates stack uses four namespaces by default:
+The isolated topology uses these namespaces by default:
 
 | Namespace | Components | Why Separated |
 |-----------|-----------|---------------|
-| `kafka` | Strimzi operator, brokers, controllers, schema registry | Kafka lifecycle is managed by the Strimzi operator — isolating it prevents accidental interference |
+| `strimzi-operator` | The Strimzi Cluster Operator, its CRD-upgrade hook and the Drain Cleaner | The operator is its own Helm release (`charts/strimzi-operator`) and owns cluster-scoped objects — the CRDs and its RBAC — which cannot belong to a per-cluster release |
+| `kafka` | Brokers, controllers, Kafka UI, schema registry | The data plane the operator reconciles; a cluster-scoped operator watches it from outside |
 | `kates` | Kates backend, PostgreSQL, CLI service | Application-tier isolation; independent scaling and restart policies |
 | `monitoring` | Prometheus, Grafana, alerting rules | Monitoring must survive application failures — separate namespace ensures it stays up during chaos tests |
 | `litmus` | LitmusChaos operator, experiment runners | Chaos tools need elevated privileges; isolation limits the blast radius of those permissions |
@@ -167,39 +168,54 @@ The default deployment targets Kind. Moving to a cloud provider requires adjustm
 **IAM:** Use IAM Roles for Service Accounts (IRSA) so the Kates pod can access AWS services (S3 for report storage, CloudWatch for metrics export) without embedding credentials.
 
 ```yaml
-# values-eks.yaml — overlay for EKS deployments
-kafka:
-  storage:
-    class: gp3
-    size: 100Gi
-  listeners:
-    external:
-      type: loadbalancer
-      annotations:
-        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-        service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
-        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+# kafka-eks.yaml — overlay for charts/kafka-cluster
+nodePools:
+  defaults:
+    storage:
+      volumes:
+        - id: 0
+          size: 100Gi
+          class: gp3
 
-kates:
-  serviceAccount:
-    annotations:
-      eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/kates-irsa-role"
+kafka:
+  externalAccess:
+    type: loadbalancer
+    configuration:
+      bootstrap:
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+          service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+```
+
+```yaml
+# kates-eks.yaml — overlay for charts/kates
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/kates-irsa-role"
 
 postgresql:
   storage:
-    class: gp3
     size: 20Gi
+    storageClass: gp3
+```
 
-monitoring:
-  prometheus:
-    storage:
-      class: gp3
-      size: 100Gi
+```yaml
+# monitoring-eks.yaml — overlay for charts/monitoring
+kube-prometheus-stack:
   grafana:
     service:
       type: LoadBalancer
       annotations:
         service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+  prometheus:
+    prometheusSpec:
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: gp3
+            resources:
+              requests:
+                storage: 100Gi
 ```
 
 ### Google GKE
@@ -211,46 +227,61 @@ monitoring:
 **Identity:** Use Workload Identity to bind Kubernetes service accounts to Google Cloud IAM service accounts — no key files to manage.
 
 ```yaml
-# values-gke.yaml — overlay for GKE deployments
-kafka:
-  storage:
-    class: premium-rwo
-    size: 100Gi
-  listeners:
-    external:
-      type: loadbalancer
+# kafka-gke.yaml — overlay for charts/kafka-cluster
+nodePools:
+  defaults:
+    storage:
+      volumes:
+        - id: 0
+          size: 100Gi
+          class: premium-rwo
 
-kates:
-  serviceAccount:
-    annotations:
-      iam.gke.io/gcp-service-account: "kates@my-project.iam.gserviceaccount.com"
-  ingress:
-    enabled: true
-    className: gce
-    annotations:
-      cloud.google.com/backend-config: '{"default": "kates-backend-config"}'
-    hosts:
-      - host: kates.example.com
-        paths:
-          - path: /
-            pathType: Prefix
+kafka:
+  externalAccess:
+    type: loadbalancer
+```
+
+```yaml
+# kates-gke.yaml — overlay for charts/kates
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: "kates@my-project.iam.gserviceaccount.com"
+
+ingress:
+  enabled: true
+  className: gce
+  annotations:
+    cloud.google.com/backend-config: '{"default": "kates-backend-config"}'
+  hosts:
+    - host: kates.example.com
+      paths:
+        - path: /
+          pathType: Prefix
 
 postgresql:
   storage:
-    class: premium-rwo
     size: 20Gi
+    storageClass: premium-rwo
+```
 
-monitoring:
-  prometheus:
-    storage:
-      class: premium-rwo
-      size: 100Gi
+```yaml
+# monitoring-gke.yaml — overlay for charts/monitoring
+kube-prometheus-stack:
   grafana:
     ingress:
       enabled: true
-      className: gce
+      ingressClassName: gce
       hosts:
         - grafana.example.com
+  prometheus:
+    prometheusSpec:
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: premium-rwo
+            resources:
+              requests:
+                storage: 100Gi
 ```
 
 ### Azure AKS
@@ -262,45 +293,70 @@ monitoring:
 **Identity:** Use Azure AD Pod Identity (or the newer Workload Identity Federation) to grant pods access to Azure resources without storing credentials.
 
 ```yaml
-# values-aks.yaml — overlay for AKS deployments
-kafka:
-  storage:
-    class: managed-premium
-    size: 100Gi
-  listeners:
-    external:
-      type: loadbalancer
-      annotations:
-        service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+# kafka-aks.yaml — overlay for charts/kafka-cluster
+nodePools:
+  defaults:
+    storage:
+      volumes:
+        - id: 0
+          size: 100Gi
+          class: managed-premium
 
-kates:
-  serviceAccount:
-    labels:
-      azure.workload.identity/use: "true"
-    annotations:
-      azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000000"
-  podLabels:
-    azure.workload.identity/use: "true"
+kafka:
+  externalAccess:
+    type: loadbalancer
+    configuration:
+      bootstrap:
+        annotations:
+          service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+```
+
+```yaml
+# kates-aks.yaml — overlay for charts/kates
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000000"
+
+podLabels:
+  azure.workload.identity/use: "true"
 
 postgresql:
   storage:
-    class: managed-premium
     size: 20Gi
+    storageClass: managed-premium
+```
 
-monitoring:
-  prometheus:
-    storage:
-      class: managed-premium
-      size: 100Gi
+```yaml
+# monitoring-aks.yaml — overlay for charts/monitoring
+kube-prometheus-stack:
   grafana:
     service:
       type: LoadBalancer
       annotations:
         service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+  prometheus:
+    prometheusSpec:
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: managed-premium
+            resources:
+              requests:
+                storage: 100Gi
 ```
 
 ::: {.callout-note}
-These YAML overlays are passed via `helm upgrade --install -f values-eks.yaml` (or `-f values-gke.yaml`, etc.) alongside the base `values.yaml`. They override only the keys specified — all other defaults remain unchanged.
+Each chart is its own Helm release, so each takes its own overlay — there is no single file that spans them. Layer the Kafka one after the platform profile, and remember the dependency build:
+
+```bash
+helm dependency build charts/kafka-cluster
+
+helm upgrade --install krafter charts/kafka-cluster -n kafka \
+  -f charts/kafka-cluster/values-platform.yaml \
+  -f kafka-eks.yaml
+```
+
+An overlay changes only the keys it names; every other default stands.
 :::
 
 ---
@@ -321,7 +377,7 @@ graph TD
     S3 --> S4["Prompt: deployment topology<br/>1) single namespace (kates-stack)<br/>2) isolated namespaces"]
     S4 --> S5["kates deploy --topology &lt;choice&gt;<br/>--with-schema-registry apicurio"]
     S5 --> S6["Expose service ports<br/>(scripts/port-forward.sh)"]
-    S6 --> S7["Print access points<br/>(Apicurio 30082, Kates 30083,<br/>Litmus UI 9091)"]
+    S6 --> S7["Print access points<br/>(Apicurio 30082, Kates 30083;<br/>chaos is execution plane only)"]
 ```
 
 ## Component-by-Component Deployment
@@ -391,9 +447,9 @@ For deep Kafka configuration details (broker tuning, security, Cruise Control, t
 # Deploy LitmusChaos operator
 make litmus
 
-# Access Litmus UI
+# Explain how to reach chaos state — the chart deploys the execution
+# plane only, so there is no bundled UI to open
 make chaos-ui
-# Opens http://localhost:9091 (admin/litmus)
 
 # Run the chaos chart's Helm tests
 make litmus-test
@@ -629,7 +685,7 @@ kubectl logs deployment/kates -n kates | head -1
 | `make litmus-test` | Run the chaos chart's Helm tests |
 | `make litmus-gameday` | Trigger Game Day validation via the chaos chart |
 | `make chaos-status` | Check chaos status |
-| `make chaos-ui` | Port-forward the Litmus UI (localhost:9091) |
+| `make chaos-ui` | Explain chaos access — the chart deploys the execution plane only, so there is no UI |
 | `make gameday` | Run automated Game Day validation pipeline |
 | `make velero` | Deploy Velero backup |
 | `make chart-lint` | Lint Kates Helm chart |
@@ -645,7 +701,7 @@ The Kafka cluster uses multiple layers of security:
 
 - **SCRAM-SHA-512** on the plain (9092) and external (9094) listeners
 - **TLS mutual auth** on the TLS listener (9093)
-- Credentials managed via `KafkaUser` CRs in `config/kafka/kafka-users.yaml`
+- Credentials are `KafkaUser` CRs rendered by the `kafka-cluster` chart from `users.items`; the platform's own principals come from the `platform` profile that `values-platform.yaml` selects
 
 ### Certificate Rotation
 
@@ -656,17 +712,26 @@ Certificates are auto-managed by Strimzi:
 
 ### Network Policies
 
-`config/kafka/kafka-networkpolicies.yaml` implements default-deny with client whitelisting:
-- Only kates, kafka-ui, apicurio, litmus, and monitoring can reach brokers
-- Controller mesh traffic isolated
-- Operator access scoped to Kafka pods + K8s API
+The `kafka-cluster` chart renders them from `networkPolicy`, default-deny first and then one allow per client:
+
+- `networkPolicy.defaultDeny` denies everything else for this cluster's pods
+- `networkPolicy.clients` is the allow list — each entry names a namespace, a pod selector and the listener *names* it may reach, and the ports are derived from `kafka.listeners`. The `platform` profile grants `kates`, `litmus`, `kafka-ui`, `apicurio-registry`, Connect and MirrorMaker 2
+- `networkPolicy.monitoring.namespace` admits the Prometheus scrape, `networkPolicy.apiServer` the rack-awareness init container and the entity operator, and `networkPolicy.operatorNamespace` (default `strimzi-operator`) the operator itself
+- Pods labelled `kates.io/test-pod=true` in the release namespace are always allowed, so Helm tests and CLI clients work without their own entry
+
+The `strimzi-operator` chart carries the operator's own policy (`operatorPolicy`, on by default); `kafka-cluster` no longer renders policies that select another release's pods.
 
 ### ACL Management
 
-ACLs are declared via `KafkaUser` CRs (GitOps):
-- `kates-backend` — superUser with full access
-- `kafka-ui` — read-only on all topics
-- `apicurio-registry` — read/write on internal topics
+ACLs are declared via `KafkaUser` CRs that the chart renders from `users.items` (GitOps). With the `platform` profile selected the release carries `kates-backend` (the one super user), `kafka-ui`, `apicurio-registry`, `litmus-chaos`, `kates-connect`, `kates-mm2` and the Helm-test principal. Confirm what a given values chain produces rather than trusting a list:
+
+```bash
+helm dependency build charts/kafka-cluster
+
+helm template krafter charts/kafka-cluster -n kafka \
+  -f charts/kafka-cluster/values-platform.yaml \
+  | grep -A2 'kind: KafkaUser' | grep 'name:'
+```
 
 ### PostgreSQL Database
 
@@ -832,7 +897,7 @@ kates health
 
 ## Summary
 
-- Three decisions shape your topology before you deploy anything: namespace isolation (`kafka`, `kates`, `monitoring`, `litmus` by default), service exposure (NodePort locally, LoadBalancer or Ingress in the cloud), and storage durability — Kafka broker volumes are always persistent.
+- Three decisions shape your topology before you deploy anything: namespace isolation (`strimzi-operator`, `kafka`, `kates`, `monitoring`, `litmus` by default), service exposure (NodePort locally, LoadBalancer or Ingress in the cloud), and storage durability — Kafka broker volumes are always persistent.
 - Size for what you measure: under-provisioned brokers benchmark resource contention, not Kafka, and the Minimal profile's 16 GB leaves almost no headroom.
 - Cloud moves are values overlays, not rewrites: `gp3` on EKS, `premium-rwo` on GKE, `managed-premium` on AKS, plus workload-identity annotations instead of embedded credentials.
 - `make all` drives the whole deployment through `kates deploy`; per-component targets (`make cluster`, `make monitoring`, `make kafka`, `make litmus`, `make kates`) build the same stack piece by piece.

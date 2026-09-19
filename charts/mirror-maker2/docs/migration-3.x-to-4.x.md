@@ -75,6 +75,7 @@ consumers move before the producers.
 ## Configuration
 
 ```bash
+helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
 helm install mm2 charts/mirror-maker2 -n kafka \
   -f charts/mirror-maker2/values-migrate-3x.yaml \
   -f my-migration.yaml

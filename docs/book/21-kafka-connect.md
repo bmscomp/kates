@@ -64,42 +64,53 @@ graph TB
 
 ## Helm Chart Structure
 
-The `connect-cluster` chart lives at `charts/connect-cluster/` and produces the Strimzi `KafkaConnect` and `KafkaConnector` resources (plus an optional chart-managed `KafkaUser`):
+The `connect-cluster` chart lives at `charts/connect-cluster/` and produces the Strimzi `KafkaConnect` and `KafkaConnector` resources (plus an optional chart-managed `KafkaUser`). The worker spec, client authentication, `KafkaUser`, secret sync, PodMonitor and NetworkPolicy fragments come from the `kafka-common` library chart, which it shares with `mirror-maker2`:
 
 ```text
 charts/connect-cluster/
-├── Chart.yaml                          # v1.3.0, appVersion 4.3.0
-├── values.yaml                         # Production defaults
-├── values-generic.yaml                 # Generic cluster overlay (no Prometheus CRDs)
-├── values-kind.yaml                    # Kind overlay (generic + local DB egress, Schema Registry)
-├── values-dev.yaml                     # Development overlay
-├── values-prod.yaml                    # Production overlay
-├── values.schema.json                  # Input validation
-├── README.md                           # Chart documentation
+├── Chart.yaml                     # 2.0.0; appVersion is the Kafka version, the image pin is the kates.io/connect-image annotation
+├── Chart.lock                     # kafka-common dependency (file://../kafka-common)
+├── charts/                        # kafka-common, filled by `helm dependency build`
+├── values.yaml                    # Defaults
+├── values-generic.yaml            # kates deploy on clusters other than kind
+├── values-kind.yaml               # kates deploy on kind (no monitoring, platform database egress, Schema Registry)
+├── values-dev.yaml                # One small worker, replication factor 1
+├── values-prod.yaml               # productionMode: TLS listener, chart-managed certificate user, SLO alert
+├── values.schema.json             # Input validation
+├── README.md                      # Chart documentation
+├── files/
+│   └── metrics/
+│       └── connect-metrics.yaml   # JMX Prometheus exporter rules
+├── tests/                         # helm-unittest suites
 └── templates/
-    ├── NOTES.txt                       # Post-install instructions
-    ├── _helpers.tpl                    # Naming, labels, namespace helpers
-    ├── kafka-connect.yaml              # KafkaConnect CR
-    ├── connectors.yaml                 # KafkaConnector CRs
-    ├── kafka-user.yaml                 # Managed KafkaUser (SCRAM + auto ACLs)
-    ├── kafka-user-secret-sync.yaml     # Cross-namespace credentials Secret sync
-    ├── kafka-connect-logging.yaml      # External log4j configuration
-    ├── metrics-configmap-connect.yaml  # JMX Prometheus exporter rules
-    ├── validate-connectors.yaml        # Pre-install/pre-upgrade validation hook
-    ├── networkpolicies.yaml            # Explicit ingress/egress allow rules
-    ├── networkpolicy-default-deny.yaml # Default-deny policy for Connect pods
-    ├── secret-reader-rbac.yaml         # RBAC for KubernetesSecretConfigProvider
-    ├── serviceaccount.yaml             # Dedicated ServiceAccount
-    ├── service-rest-api.yaml           # REST API Service
-    ├── ingress.yaml                    # Optional REST API Ingress
-    ├── hpa.yaml                        # Optional HorizontalPodAutoscaler
-    ├── alerts-connect.yaml             # Prometheus alert rules
-    ├── podmonitor-connect.yaml         # Prometheus PodMonitor
-    ├── dashboard-connect.yaml          # Grafana dashboard
+    ├── NOTES.txt                  # Release summary, DEPRECATED 1.x keys, KafkaUser adoption commands
+    ├── _helpers.tpl               # Naming, labels, bootstrap, known connector classes
+    ├── _resolve.tpl               # Derived values, 1.x key translation, connector resolution and checks
+    ├── _validate.tpl              # Render-time rails
+    ├── kafka-connect.yaml         # KafkaConnect CR
+    ├── connectors.yaml            # KafkaConnector CRs and dead letter queue KafkaTopics
+    ├── kafka-user.yaml            # Managed KafkaUser (auto ACLs)
+    ├── secret-sync.yaml           # Copies the user's Secret and the cluster CA across namespaces
+    ├── logging-configmap.yaml     # External log4j2 configuration
+    ├── metrics-configmap.yaml     # Exporter rules ConfigMap (key metrics-config.yml)
+    ├── rbac-secrets.yaml          # get on exactly the Secrets connector configs reference
+    ├── rbac-tests.yaml            # What the Helm test pods may read
+    ├── serviceaccount.yaml        # The test pods' ServiceAccount
+    ├── service-rest-api.yaml      # REST API Service
+    ├── ingress.yaml               # Optional REST API Ingress
+    ├── hpa.yaml                   # Optional HorizontalPodAutoscaler
+    ├── networkpolicy.yaml         # Default-deny plus explicit allows, database-side ingress
+    ├── preflight-job.yaml         # Optional pre-install/upgrade Kafka connection check
+    ├── priorityclass.yaml         # Optional kates-streaming PriorityClass
+    ├── podmonitor.yaml            # Prometheus PodMonitor
+    ├── alerts.yaml                # PrometheusRule: alerts and recording rules
+    ├── dashboard.yaml             # Grafana dashboard
     └── tests/
-        ├── test-connect.yaml           # Helm test pod (REST API connectivity)
-        ├── test-connectors.yaml        # helm-test example KafkaConnectors
-        └── test-topics.yaml            # helm-test KafkaTopics
+        ├── test-00-egress.yaml            # NetworkPolicy for the test pods
+        ├── test-01-connect.yaml           # Credentials, Ready, workers, REST API, plugins, declared connectors
+        ├── test-02-topics.yaml            # helm-test KafkaTopics (in the Kafka namespace)
+        ├── test-02-connectors.yaml        # helm-test example KafkaConnectors
+        └── test-03-test-connectors.yaml   # Each test connector reaches RUNNING
 ```
 
 ### Deployment
@@ -122,15 +133,29 @@ The CLI deploys the `connect-cluster` chart as a separate Helm release (into the
 For CI pipelines or when fine-grained control is needed:
 
 ```bash
+# Build the kafka-common library dependency first
+helm dependency build charts/connect-cluster
+
 # Basic deployment (same namespace as Kafka)
 helm upgrade --install connect-cluster charts/connect-cluster \
   --namespace kafka
 
+# Connect in its own namespace
+helm upgrade --install connect-cluster charts/connect-cluster \
+  --namespace connect --create-namespace \
+  --set kafka.namespace=kafka
+
 # With environment overlay
 helm upgrade --install connect-cluster charts/connect-cluster \
-  --namespace kafka \
+  --namespace connect --create-namespace \
   -f charts/connect-cluster/values-prod.yaml
 ```
+
+`kafka.namespace` defaults to the release's own namespace, so a release outside the Kafka namespace has to name it. `values-prod.yaml` sets it to `kafka`, turns on `productionMode`, and dials the TLS listener (9093) with `kafka.authentication.type: tls` and a chart-managed `KafkaUser` (`kafkaUser.create: true`).
+
+::: {.callout-note}
+A release installed from chart 1.x upgrades in place: 1.x keys still render in 2.x and appear as `DEPRECATED` lines in the release notes. The key-by-key table and the changes that need attention (secret access, Kafka egress ports, alert names) are in [the 2.0 upgrade guide](../connect-cluster-2.0-upgrade.md).
+:::
 
 ## The KafkaConnect Custom Resource
 
@@ -161,9 +186,11 @@ sequenceDiagram
 |---------|---------|---------|
 | `groupId` | `kates-connect-cluster` | All workers sharing this ID form a single cluster |
 | `replicas` | 3 (the CLI sets 1 with `--ha=false`; the dev overlay uses 1) | Number of worker pods |
-| `image` | `ghcr.io/bmscomp/connect:3.6.2` | Pre-built image with Debezium + Apicurio plugins |
-| `kafka.bootstrapServers` | `""` — computed as `<clusterName>-kafka-bootstrap.<ns>.svc:9092` (9093 when `kafka.tls.enabled`) | Connection to Kafka |
-| `version` | 4.3.0 | Kafka protocol version |
+| `image` | `ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1` | Pre-built image with Debezium, Aiven and Apicurio plugins; the chart refuses `:latest` and untagged images |
+| `kafka.bootstrapServers` | `""` — computed as `<clusterName>-kafka-bootstrap.<kafka.namespace>.svc.<clusterDomain>:9092` (9093 when `kafka.tls.enabled`, or `kafka.listenerPort`) | Connection to Kafka |
+| `kafka.namespace` | `""` — the release's namespace | Where the Kafka cluster, its `KafkaUser` and the test topics live |
+| `version` | 4.3.1 | Kafka version the workers run; `Chart.yaml` `appVersion` tracks it |
+| `productionMode` | `false` | Refuses plaintext connector passwords, `rbac.allSecrets`, and an unencrypted or unauthenticated Kafka connection |
 
 ### Internal Topics
 
@@ -175,7 +202,7 @@ Connect stores its state in three compacted Kafka topics:
 | `<groupId>-configs` | Connector and task configuration snapshots | Compacted (forever) |
 | `<groupId>-status` | Connector and task status updates | Compacted (forever) |
 
-These topics are automatically created by Connect workers on first startup. The `config.storage.replication.factor` is set to 3 to match the broker replication factor.
+These topics are automatically created by Connect workers on first startup. `internalTopics.prefix` (default: `groupId`) names them, and `internalTopics.offsetsName`, `configsName` and `statusName` override single names. The chart sets all three replication factors from `config.replicationFactor` (3; the dev overlay uses 1), and refuses a value above `kafka.brokerCount` when you set it.
 
 ::: {.callout-important}
 Never delete the offsets topic. If deleted, all source connectors lose their position and will re-snapshot their entire database on restart.
@@ -183,22 +210,46 @@ Never delete the offsets topic. If deleted, all source connectors lose their pos
 
 ### Authentication
 
-Connect authenticates to Kafka using SCRAM-SHA-512 (TLS is off by default and switched on with `kafka.tls.enabled`):
+By default Connect authenticates to Kafka with SCRAM-SHA-512 on the plaintext listener (9092). The chart renders this into the `KafkaConnect` spec:
 
 ```yaml
+bootstrapServers: "krafter-kafka-bootstrap.kafka.svc.cluster.local:9092"
 authentication:
   type: scram-sha-512
-  username: kates-connect
+  username: "kates-connect"
   passwordSecret:
-    secretName: kates-connect
+    secretName: "kates-connect"
     password: password
-tls:
-  trustedCertificates:
-    - secretName: krafter-cluster-ca-cert
-      certificate: ca.crt
 ```
 
-The `kates-connect` KafkaUser can be managed by the chart itself: setting `kafkaUser.create: true` provisions the `KafkaUser` in the Kafka namespace, and with `authorization.mode: auto` derives least-privilege ACLs from the chart values (`groupId`, the internal topics, exactly-once transactional IDs, and the data-topic prefixes in `kafkaUser.topicGrants`). When Connect runs in a different namespace than Kafka, `kafkaUser.secretSync` makes the generated credentials Secret available in the Connect namespace — either via a hook Job that copies it (re-run on upgrades for rotation) or via kubernetes-reflector annotations. This requires the Strimzi User Operator; the ACLs take effect when the Kafka cluster has authorization enabled.
+`kafka.authentication.type` picks the mechanism: `scram-sha-512`, `scram-sha-256` or `plain` (a username and `passwordSecret`), `tls` (a client certificate), `custom` (the SASL and config of `kafka.authentication.custom`, the v1 API's home of OAuth), or `""` for none. `kafka.tls.enabled` moves the workers to 9093 and trusts `<clusterName>-cluster-ca-cert`. The `krafter` Kafka cluster's TLS listener authenticates clients by certificate, so the chart refuses TLS together with SCRAM or PLAIN on that port. `values-prod.yaml` uses mutual TLS instead:
+
+```yaml
+bootstrapServers: "krafter-kafka-bootstrap.kafka.svc.cluster.local:9093"
+tls:
+  trustedCertificates:
+    - secretName: "krafter-cluster-ca-cert"
+      certificate: ca.crt
+authentication:
+  type: tls
+  certificateAndKey:
+    secretName: "kates-connect"
+    certificate: user.crt
+    key: user.key
+```
+
+The `kates-connect` KafkaUser can be managed by the chart itself: setting `kafkaUser.create: true` provisions a `scram-sha-512` or `tls` `KafkaUser` in the Kafka namespace. With `kafkaUser.authorization.mode: auto` (the default), the chart derives least-privilege ACLs from its values:
+
+- the three internal topics, the worker group, the `connect-*` groups of sink connectors, `kafkaUser.groupGrants`, and the data-topic prefixes in `kafkaUser.topicGrants`
+- the dead letter queues of the declared connectors
+- with `exactlyOnce.enabled`, the transactional IDs `connect-cluster-<groupId>` (the leader) and `<groupId>-*` (the source tasks)
+- cluster `Describe` and `DescribeConfigs`
+
+`kafkaUser.authorization.mode: custom` takes `kafkaUser.acls` verbatim. When Connect runs in a different namespace than Kafka, `secretSync` copies the user's Secret — and, with TLS, the cluster CA — into the Connect namespace with a post-install/upgrade Job. `secretSync.watch` adds a CronJob that follows certificate and password rotation, and `secretSync.method: reflector` annotates the user's Secret for kubernetes-reflector instead. This requires the Strimzi User Operator; the ACLs take effect when the Kafka cluster has authorization enabled.
+
+::: {.callout-note}
+The `krafter` cluster's platform profile also provisions `kates-connect`. To let this chart own that user, adopt the existing object rather than recreate it — a new `KafkaUser` gets new credentials. The release notes print the `kubectl annotate` and `kubectl label` commands when the user belongs to another release.
+:::
 
 ## Connector Lifecycle
 
@@ -246,21 +297,22 @@ stateDiagram-v2
 
 ### Auto-Restart
 
-The chart configures automatic restart for failed connectors:
+The chart configures automatic restart for failed connectors through `connectorDefaults`, which is merged under every connector:
 
 ```yaml
-autoRestart:
-  enabled: true
-  maxRestarts: 10
+connectorDefaults:
+  autoRestart:
+    enabled: true
+    maxRestarts: 10
 ```
 
-When a connector fails, Strimzi will restart it up to `maxRestarts` times with exponential backoff. This is configured globally and can be overridden per-connector.
+When a connector fails, Strimzi restarts it up to `maxRestarts` times with exponential backoff. A connector's own `autoRestart` overrides the default, and `connectorDefaults.config` adds settings every connector shares. The 1.x top-level `autoRestart` key still works in 2.x and is listed as deprecated.
 
 ## Change Data Capture with Debezium
 
 ### The Connect Image
 
-The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.2`) bundles the following plugins:
+The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1` — the Debezium line, then the Kafka line) bundles the following plugins:
 
 | Plugin | Version | Use Case |
 |--------|---------|----------|
@@ -277,9 +329,17 @@ The pre-built Connect image (`ghcr.io/bmscomp/connect:3.6.2`) bundles the follow
 
 ### Extending the Image with Additional Plugins
 
-While the pre-built image contains the most common CDC connectors, you may need additional plugins (e.g., Elasticsearch Sink, Snowflake Sink). There are two ways to add plugins at runtime without rebuilding the Docker image:
+While the pre-built image contains the most common CDC connectors, you may need additional plugins (e.g., Elasticsearch Sink, Snowflake Sink). The chart offers three ways to get them onto the workers:
 
-#### 1. Using Strimzi `spec.build` (Recommended)
+| Way | How | When |
+|-----|-----|------|
+| `image` | A Connect image with the plugins inside | Recommended — bake them in (`make connect-build`) or layer your own image |
+| `build` | The operator builds and pushes an image (`spec.build`) | A registry the operator can push to |
+| `plugins` | OCI images mounted as volumes at start-up (`spec.plugins`) | No custom image, and every node has the Kubernetes ImageVolume feature |
+
+The last two add plugins without you rebuilding the Docker image:
+
+#### 1. Using Strimzi `spec.build`
 
 Strimzi can download plugins from Maven Central and build a new image automatically during operator reconciliation. Enable this in `values.yaml`:
 
@@ -298,16 +358,33 @@ build:
           version: "4.8.3"
 ```
 
-#### 2. Using the Plugin Loader Script
+#### 2. Mounting Plugin Images
 
-For environments where Strimzi image builds aren't possible, the repo ships `scripts/connect-plugin-loader.sh`, which downloads plugin JARs from Maven Central and extracts them into a `/plugins` directory:
+`plugins` renders `spec.plugins`: each artifact is an OCI image that Kubernetes mounts into the workers as a volume. The feature gate is invisible to the chart, so `plugins` renders only once you set `imageVolumes.acknowledged: true`, and only on Kubernetes 1.31 or later (ImageVolume is alpha in 1.31 and beta from 1.33). `expect` adds the plugin's connector classes to the Helm test's list, so a plugin that fails to load fails `helm test`:
+
+```yaml
+imageVolumes:
+  acknowledged: true
+
+plugins:
+  - name: camel-s3-sink
+    artifacts:
+      - type: image
+        reference: registry.example.com/plugins/camel-aws-s3-sink:4.8.3
+    expect:
+      - org.apache.camel.kafkaconnector.awss3sink.CamelAwss3sinkSinkConnector
+```
+
+#### 3. Using the Plugin Loader Script
+
+For environments where neither route is possible, the repo ships `scripts/connect-plugin-loader.sh`, which downloads plugin JARs from Maven Central and extracts them into a `/plugins` directory:
 
 ```bash
 EXTRA_PLUGINS="org.apache.camel.kafkaconnector:camel-aws-s3-sink-kafka-connector:4.8.3" \
   ./scripts/connect-plugin-loader.sh
 ```
 
-The script is written to run as an init container that populates a shared volume on the worker's `plugin.path`, but the chart does not wire this up for you — its `template.pod` passthrough only covers pod metadata, so using the script this way means customizing the `KafkaConnect` resource yourself. In most cases, prefer `spec.build` above or bake the plugins into the image (`make connect-build`).
+The script is written to run as an init container that populates a shared volume on the worker's `plugin.path`, but the chart does not wire this up for you. `templateExtra` (deep-merged into `spec.template`) and `connectContainer` can add a volume and its mount, but Strimzi's pod template cannot add an init container of your own, so using the script this way means running it outside the `KafkaConnect` resource. In most cases, prefer the image or one of the routes above.
 
 ### PostgreSQL CDC Pipeline
 
@@ -339,11 +416,14 @@ graph LR
 
 #### Connector Configuration
 
+`connectors` is a map keyed by connector name, so an overlay can change one connector, or drop it with `enabled: false`, without restating the others. A 1.x-style list of `{name, …}` entries still renders in 2.x and is listed as deprecated.
+
 ```yaml
 connectors:
-  - name: debezium-postgres-source
+  debezium-postgres-source:
     class: io.debezium.connector.postgresql.PostgresConnector
     tasksMax: 1
+    state: running                 # running | paused | stopped
     config:
       database.hostname: postgresql.database.svc
       database.port: "5432"
@@ -359,6 +439,8 @@ connectors:
       decimal.handling.mode: double
       tombstones.on.delete: "true"
 ```
+
+Beside `class`, `tasksMax`, `state` and `config`, a connector takes `autoRestart`, `deadLetterQueue` (see [Dead Letter Queue (DLQ)](#dead-letter-queue-dlq)), `enabled`, and three keys passed through to the `KafkaConnector`: `version` (a plugin version range, Kafka 4.1+), `listOffsets` and `alterOffsets`.
 
 #### Configuration Deep Dive
 
@@ -386,57 +468,97 @@ config.providers.dir.class: org.apache.kafka.common.config.provider.DirectoryCon
 config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
 ```
 
-Connectors reference Kubernetes Secrets directly with the `${secrets:<namespace>/<secret-name>:<key>}` syntax — no volume mounts required. The chart's `secret-reader-rbac.yaml` grants the Connect ServiceAccount read access to Secrets in its namespace.
+Connectors reference Kubernetes Secrets directly with the `${secrets:<namespace>/<secret-name>:<key>}` syntax — no volume mounts required. The workers resolve those references as the `<release>-connect` ServiceAccount that Strimzi creates. The chart's `rbac-secrets.yaml` reads every connector and test connector config in the values and grants that account `get` on exactly the Secrets they reference, with one Role per namespace. A reference without a namespace fails the render.
 
-::: {.callout-tip}
-By default the secret-reader Role covers all Secrets in the namespace. Set `rbac.secretNames` to narrow the grant to the specific Secrets your connectors reference.
+Connectors applied outside the chart — by hand, or the CDC connectors `kates deploy` applies next to the release — need their Secrets listed in `rbac.secretNames`, as a bare name (this namespace) or `namespace/name`. The kind and generic overlays list `connect-pg-credentials` and `kates-connect`, which `kates deploy`'s connectors read. For example:
+
+```yaml
+rbac:
+  secretNames:
+    - connect-pg-credentials      # this namespace
+    - vault-sync/api-token        # another namespace
+```
+
+::: {.callout-warning}
+Chart 1.x let the workers read every Secret in the Connect namespace and in the Kafka namespace. A connector that relied on that fails with `Forbidden` after the upgrade until its Secret is in `rbac.secretNames`. `rbac.allSecrets: true` restores the 1.x breadth for the transition; `productionMode` refuses it.
 :::
 
 ## Pre-Deploy Validation
 
-The chart includes a **pre-install/pre-upgrade Helm hook** that validates connector configurations before they reach the Strimzi operator.
+The chart validates connector configurations while Helm renders it (`_resolve.tpl` and `_validate.tpl`), before anything reaches the Kubernetes API or the Strimzi operator. A mistake fails `helm template`, `helm install` or `helm upgrade` itself, naming the connector and the setting — there is no hook Pod to wait for or read logs from.
 
 ```mermaid
 graph LR
-    A["helm upgrade"] --> B{"Pre-install hook:<br/>validate-connectors"}
-    B -->|"All checks pass"| C["Deploy KafkaConnect CR"]
-    B -->|"Validation errors"| D["❌ Deploy blocked"]
+    A["helm upgrade"] --> B{"Render:<br/>_resolve.tpl + _validate.tpl"}
+    B -->|"All checks pass"| C["Apply KafkaConnect + KafkaConnectors"]
+    B -->|"A check fails"| D["❌ Upgrade refused, nothing applied"]
 ```
 
 ### What It Validates
 
-| Check | Connector Type | Severity |
-|-------|---------------|----------|
-| `name` present | All | Error |
-| `class` present | All | Error |
-| `state` is valid enum | All | Error |
-| `tasksMax` specified | All | Warning |
-| `database.hostname` present | PostgreSQL, MySQL | Error |
-| `database.dbname` present | PostgreSQL | Error |
-| `topic.prefix` present | PostgreSQL | Warning |
-| `plugin.name` present | PostgreSQL | Warning |
-| `database.server.id` present | MySQL | Warning |
-| `connection.url` present | JDBC Source/Sink | Error |
+Every check is an error:
+
+| Check | Connector Type |
+|-------|---------------|
+| Name is a DNS-1123 subdomain, declared once | All |
+| `class` present | All |
+| `state` is `running`, `paused` or `stopped` | All |
+| `tasksMax` is a whole number of at least 1 | All |
+| Every `${secrets:…}` reference names a namespace | All |
+| `version` only when the workers run Kafka 4.1+ | All |
+| `topics` or `topics.regex` present | Sinks |
+| `deadLetterQueue` only on a sink | All |
+| No plaintext `*password` value | All, under `productionMode` |
+| `database.hostname`, `database.dbname`, `topic.prefix` | Debezium PostgreSQL |
+| `database.hostname`, `database.server.id`, `topic.prefix` | Debezium MySQL |
+| `mongodb.connection.string`, `topic.prefix` | Debezium MongoDB |
+| `database.hostname`, `database.names`, `topic.prefix` | Debezium SQL Server |
+| `connection.url` | Debezium JDBC sink, Aiven JDBC sink |
+| `connection.url`, `mode` | Aiven JDBC source |
+| `aws.s3.bucket.name` | Aiven S3 sink |
+| `file` | FileStream sink |
+| `source.cluster.alias`, `target.cluster.alias` | MirrorHeartbeat |
+
+A class outside this table counts as a sink when its name contains `Sink`; `type: sink` or `type: source` on the connector overrides that. The same pass checks the rest of the values too — floating image tags, TLS with SCRAM on the mutual-TLS port, `exactly.once.source.support` in `extraConfig`, a replication factor above `kafka.brokerCount` — and the chart README lists every rail. Render your values before an upgrade; a PostgreSQL connector without `topic.prefix`, for example, fails like this:
+
+```bash
+# charts/connect-cluster/charts/ is generated and gitignored, so a fresh
+# checkout needs the kafka-common library before helm will render anything
+helm dependency build charts/connect-cluster
+
+helm template connect-cluster charts/connect-cluster -n connect -f my-values.yaml > /dev/null
+```
+
+Output:
+
+```text
+Error: execution error at (connect-cluster/templates/…): connect-cluster: connectors.orders-cdc (io.debezium.connector.postgresql.PostgresConnector) needs config.topic.prefix
+```
 
 This catches misconfigurations at `helm upgrade` time rather than at runtime, preventing connector failures that could take minutes to surface.
 
 ## Environment Overlays
 
-The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters — the two are identical except that the Kind overlay adds database egress to the local `kates` namespace and enables the Schema Registry integration. `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml` rather than set by the overlay:
+The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters. Both turn tracing off and list the Secrets the CLI's own connectors read in `rbac.secretNames`; the Kind overlay also turns monitoring off, adds database egress to the local `kates` namespace, and enables the Schema Registry integration. On the generic overlay, the PodMonitor and alerts render only where the `monitoring.coreos.com/v1` API exists (the CLI also turns them off when the Prometheus CRDs are missing). `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml` rather than set by the overlay:
 
-| Setting | Kind/Generic | Dev | Prod |
-|---------|:----:|:---:|:----:|
-| Replicas | 3 *(base)* — CLI sets 1 with `--ha=false` | 1 | 3 |
-| JVM Heap | 1024m *(base)* | 512m | 2048m |
-| Memory request/limit | 2Gi/4Gi *(base)* | 1Gi/2Gi | 4Gi/6Gi |
-| Topology spread | Zone-aware, `ScheduleAnyway` *(base)* | Disabled | Zone-aware, `DoNotSchedule` |
-| Pod anti-affinity | Per-hostname *(base)* | Disabled | Per-hostname |
-| Alerts | Off | Off | On |
-| PodMonitors | Off | On | On |
-| Dashboards | Off | On | On |
-| Tracing | Off | OpenTelemetry | OpenTelemetry |
-| Schema Registry | On (Kind only) | Off *(base)* | Off *(base)* |
-| Priority class | `system-cluster-critical` *(base)* | — (cleared) | `system-cluster-critical` |
+| Setting | Kind | Generic | Dev | Prod |
+|---------|:----:|:----:|:---:|:----:|
+| Replicas | 3 *(base)* — CLI sets 1 with `--ha=false` | 3 *(base)* — CLI sets 1 with `--ha=false` | 1 | 3 |
+| JVM Heap | 1024m *(base)* | 1024m *(base)* | 512m | 2048m |
+| Memory request/limit | 2Gi/4Gi *(base)* | 2Gi/4Gi *(base)* | 1Gi/2Gi | 4Gi/6Gi |
+| Internal topic replication factor | 3 *(base)* | 3 *(base)* | 1 | 3 *(base)* |
+| Topology spread | Zone-aware, `ScheduleAnyway` *(base)* | Zone-aware, `ScheduleAnyway` *(base)* | Disabled | Zone-aware, `DoNotSchedule` |
+| Pod anti-affinity | Per-hostname *(base)* | Per-hostname *(base)* | Disabled | Per-hostname |
+| Kafka connection | SCRAM, 9092 *(base)* | SCRAM, 9092 *(base)* | SCRAM, 9092 *(base)* | Mutual TLS, 9093, chart-managed `KafkaUser` |
+| `productionMode` | Off *(base)* | Off *(base)* | Off *(base)* | On |
+| Alerts | Off | On *(base)* | Off | On, plus the task-availability SLO |
+| PodMonitor | Off | On *(base)* | On *(base)* | On *(base)* |
+| Dashboard | Off | On *(base)* | On *(base)* | On *(base)* |
+| Tracing | Off | Off | OpenTelemetry, no endpoint *(base)* | OpenTelemetry, no endpoint *(base)* |
+| Schema Registry | On | Off *(base)* | Off *(base)* | Off *(base)* |
+| Database egress | `kates` (PostgreSQL) | — | — | `database` (PostgreSQL, MySQL, MongoDB) |
+| Test connectors | Demo pipeline *(base)* | Demo pipeline *(base)* | Demo pipeline *(base)* | None |
+| Priority class | None *(base)* | None *(base)* | None *(base)* | `kates-streaming`, created by the release |
 
 ## CLI Reference
 
@@ -475,11 +597,13 @@ For chart development and CI pipelines, Makefile targets are also available:
 
 | Target | Description |
 |--------|-------------|
-| `make connect-chart-lint` | Lint the chart |
+| `make connect-chart-deps` | Build the `kafka-common` dependency (the targets below run it first) |
+| `make connect-chart-lint` | Lint the chart with the default, prod and kind values |
+| `make connect-chart-unittest` | Run the `helm unittest` suites (connectors, secret scoping, KafkaConnect, KafkaUser, alerts) |
 | `make connect-chart-template` | Render templates → `.build/connect-rendered.yaml` |
 | `make connect-chart-package` | Package → `.build/connect-cluster-<version>.tgz` |
 | `make connect-chart-push` | Push to OCI registry |
-| `make connect-chart-all` | lint + template + package |
+| `make connect-chart-all` | lint + unit tests + template + package |
 
 ## Exactly-Once Semantics
 
@@ -506,20 +630,24 @@ Without EOS, Connect commits offsets and data separately — a crash between the
 
 ### Configuration
 
-The chart enables EOS by default:
+The chart enables EOS by default. It is a group-wide switch rather than an `extraConfig` line, because every worker in the group must agree and a chart-managed `KafkaUser` needs the matching transactional-ID grants:
 
 ```yaml
+exactlyOnce:
+  enabled: true
+
 extraConfig:
-  exactly.once.source.support: "enabled"
   producer.acks: "all"
   producer.enable.idempotence: "true"
 ```
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
-| `exactly.once.source.support` | `enabled` | Wraps source records + offsets in a single transaction |
+| `exactly.once.source.support` | `enabled` (from `exactlyOnce.enabled`) | Wraps source records + offsets in a single transaction |
 | `producer.acks` | `all` | Wait for all ISR replicas to acknowledge |
 | `producer.enable.idempotence` | `true` | Deduplicates retried produce requests at the broker |
+
+The chart refuses `exactly.once.source.support` in `extraConfig`; set `exactlyOnce.enabled` instead.
 
 ::: {.callout-important}
 EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the Connect producer. The krafter cluster satisfies both by default.
@@ -531,7 +659,7 @@ EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the
 |----------|---------------|
 | Sink-only connectors | Not applicable — EOS is for source connectors only |
 | Extremely high throughput (>100k records/s) | EOS adds ~5% latency — benchmark first |
-| Non-critical data (metrics, logs) | Disable for better throughput; at-least-once is acceptable |
+| Non-critical data (metrics, logs) | Disable (`exactlyOnce.enabled: false`) for better throughput; at-least-once is acceptable |
 
 ---
 
@@ -568,10 +696,12 @@ Transforms are chained in order — each receives the output of the previous one
 
 ```yaml
 connectors:
-  - name: cdc-orders
+  cdc-orders:
     class: io.debezium.connector.postgresql.PostgresConnector
     config:
-      # ... database config ...
+      database.hostname: postgresql.database.svc   # plus the rest of the database config
+      database.dbname: orders
+      topic.prefix: cdc
       transforms: unwrap,route
       transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
       transforms.unwrap.drop.tombstones: "false"
@@ -667,37 +797,45 @@ When a sink connector encounters a record it cannot process (malformed data, sch
 graph LR
     T["Source Topic"] --> SK["Sink Connector"]
     SK -->|"success"| DB["Target Database"]
-    SK -->|"error"| DLQ["DLQ Topic<br/>(connect-dlq-sink-name)"]
+    SK -->|"error"| DLQ["DLQ Topic<br/>(groupId-dlq-connector)"]
     DLQ --> ALERT["Alert on DLQ growth"]
     DLQ --> REPAIR["Manual inspection & replay"]
 ```
 
 ### Configuration
 
+A sink connector's `deadLetterQueue` block sets the error handling for you and, with `createTopic` (the default), renders the queue's `KafkaTopic` in the Kafka namespace. A chart-managed `KafkaUser` is granted the queue:
+
 ```yaml
 connectors:
-  - name: jdbc-sink-warehouse
+  jdbc-sink-warehouse:
     class: io.aiven.connect.jdbc.JdbcSinkConnector
+    deadLetterQueue:
+      enabled: true            # errors.tolerance=all, the queue topic, context headers
+      topic: ""                # empty = <groupId>-dlq-<connector>
+      replicationFactor: 3     # empty = config.replicationFactor
+      createTopic: true        # a KafkaTopic in the Kafka namespace
     config:
-      # ... connection config ...
-      errors.tolerance: all
-      errors.deadletterqueue.topic.name: connect-dlq-jdbc-sink
-      errors.deadletterqueue.topic.replication.factor: 3
-      errors.deadletterqueue.context.headers.enable: true
-      errors.log.enable: true
-      errors.log.include.messages: true
+      topics: cdc.public.orders
+      connection.url: jdbc:postgresql://warehouse.database.svc:5432/warehouse
+      errors.log.include.messages: "true"
 ```
+
+The connector's config then carries:
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
 | `errors.tolerance` | `all` | Continue processing despite errors (vs. `none` = fail fast) |
-| `errors.deadletterqueue.topic.name` | `connect-dlq-*` | DLQ topic name |
-| `errors.deadletterqueue.context.headers.enable` | `true` | Include error context (exception, stack trace) in record headers |
+| `errors.deadletterqueue.topic.name` | `<groupId>-dlq-<connector>` (`deadLetterQueue.topic`) | DLQ topic name |
+| `errors.deadletterqueue.topic.replication.factor` | `deadLetterQueue.replicationFactor` | DLQ topic replication factor |
+| `errors.deadletterqueue.context.headers.enable` | `true` (`deadLetterQueue.contextHeaders`) | Include error context (exception, stack trace) in record headers |
 | `errors.log.enable` | `true` | Log errors to Connect worker logs |
-| `errors.log.include.messages` | `true` | Include the problematic record in the log (disable for sensitive data) |
+| `errors.log.include.messages` | `true`, from `config` above (the chart doesn't set it) | Include the problematic record in the log (leave it off for sensitive data) |
+
+`KafkaConnectDeadLetterWrites` fires while records are dead-lettered and `KafkaConnectDeadLetterFailures` when the queue refuses them; see [the Connect runbook](../connect-cluster-runbook.md).
 
 ::: {.callout-caution}
-Setting `errors.tolerance: all` without a DLQ silently drops bad records. Always configure a DLQ topic when using tolerant error handling.
+Setting `errors.tolerance: all` without a DLQ silently drops bad records. Always configure a DLQ topic when using tolerant error handling. Connect ignores a DLQ on a source connector, so the chart refuses `deadLetterQueue` there.
 :::
 
 ---
@@ -788,28 +926,22 @@ Cross-database sync introduces eventual consistency. The sink always lags behind
 ::: {.callout-tip}
 **Try it**
 
-The chart ships a complete CDC pipeline as `testConnectors` — `helm test` creates those connectors, exercises them, and deletes them again once the suite succeeds, so keeping the pipeline running means applying the same manifests persistently. With the stack running and the demo tables created in the `orders` database (one-time prep: `docs/tutorials/09-kafka-connect-working-examples.md`), replicate a row end to end:
+The chart ships a complete CDC pipeline as `testConnectors` — `helm test` creates those connectors and their topic, checks that each one reaches RUNNING with all its tasks, and deletes them again once the suite succeeds, so keeping the pipeline running means applying the same manifests persistently. With the stack running and the demo tables created in the `orders` database (one-time prep: `docs/tutorials/09-kafka-connect-working-examples.md`), replicate a row end to end:
 
 ```bash
-# Validate the release — the suite probes the REST API and creates the
-# working-example connectors transiently, removing them when it succeeds
+# Validate the release — the suite checks the workers, the REST API and the
+# plugins, then runs the working-example connectors transiently
 helm test connect-cluster -n connect
 
-# Create the CDC topic on the krafter cluster
-kubectl apply -n kafka -f - <<'EOF'
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata: {name: cdc-public-demo-orders, labels: {strimzi.io/cluster: krafter}}
-spec:
-  topicName: cdc.public.demo_orders
-  partitions: 3
-  replicas: 3
-  config: {min.insync.replicas: "2"}
-EOF
-
-# Deploy the working-example connectors persistently
+# Deploy the CDC topic (in the kafka namespace, on the krafter cluster) and the
+# working-example connectors persistently. kafka.namespace defaults to the
+# release namespace, so name it as kates deploy does. The chart renders only
+# once the kafka-common library is in charts/connect-cluster/charts/.
+helm dependency build charts/connect-cluster
 helm template connect-cluster charts/connect-cluster -n connect \
-  -s templates/tests/test-connectors.yaml | kubectl apply -f -
+  --set kafka.namespace=kafka \
+  -s templates/tests/test-02-topics.yaml \
+  -s templates/tests/test-02-connectors.yaml | kubectl apply -f -
 
 # Wait for the Debezium source and the JDBC sink to come up
 kubectl wait -n connect --for=condition=Ready kafkaconnector/debezium-postgres-source-working-example --timeout=300s
@@ -826,7 +958,7 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
   \"SELECT id, customer_name, amount FROM public.demo_orders_replica WHERE id = 1001;\""
 ```
 
-The SELECT returns the row within a few seconds — Debezium captures the insert from the WAL, produces it to `cdc.public.demo_orders`, and the JDBC sink upserts it into `demo_orders_replica`. When you're done, the tutorial's cleanup section removes the connectors and the CDC topic.
+The SELECT returns the row within a few seconds — Debezium captures the insert from the WAL, produces it to `cdc.public.demo_orders`, and the JDBC sink upserts it into `demo_orders_replica`. The applied objects keep their Helm test annotations, so a later `helm test` replaces them and removes them again when it passes. When you're done, the tutorial's cleanup section removes the connectors and the CDC topic.
 :::
 
 ## Summary

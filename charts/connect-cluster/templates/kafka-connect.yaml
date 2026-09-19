@@ -1,3 +1,6 @@
+{{- include "connect-cluster.validate" . }}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $topics := include "connect-cluster.internalTopics" . | fromYaml }}
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnect
 metadata:
@@ -6,58 +9,38 @@ metadata:
   labels:
     {{- include "connect-cluster.labels" . | nindent 4 }}
   annotations:
-    {{- if not (eq (toString .Values.keepOnDelete) "false") }}
+    {{- if include "kafka-common.enabled" (list .Values.keepOnDelete true) }}
     helm.sh/resource-policy: keep
     {{- end }}
     strimzi.io/use-connector-resources: "true"
 spec:
-  {{- if .Values.image }}
-  image: "{{ .Values.image }}"
+  {{- /* version, image, replicas (lookup-preserved under the HPA), JVM,
+         probes, logging, tracing, rack, JMX, metrics and spec.template — the
+         last built as one map and merged with templateExtra. */}}
+  {{- include "kafka-common.connectWorker.spec" (dict "ctx" . "w" (include "connect-cluster.worker" . | fromYaml)) | nindent 2 }}
+  bootstrapServers: {{ $r.bootstrap | quote }}
+  {{- with include "kafka-common.clientTlsAuth" (dict "c" (include "connect-cluster.kafka" . | fromYaml) "field" "kafka" "chart" "connect-cluster") | trim }}
+  {{- . | nindent 2 }}
   {{- end }}
-  version: {{ .Values.version }}
-  {{- /* When HPA is enabled it owns the replica count via the scale subresource */}}
-  {{- if not (.Values.autoscaling).enabled }}
-  replicas: {{ .Values.replicas }}
-  {{- end }}
-  bootstrapServers: {{ include "connect-cluster.bootstrapServers" . }}
-  authentication:
-    type: {{ .Values.kafka.authentication.type | default "scram-sha-512" }}
-    {{- if or (eq (.Values.kafka.authentication.type | default "scram-sha-512") "scram-sha-512") (eq (.Values.kafka.authentication.type | default "scram-sha-512") "scram-sha-256") }}
-    username: {{ .Values.kafka.authentication.username | default "kates-connect" }}
-    passwordSecret:
-      secretName: {{ .Values.kafka.authentication.secretName | default .Values.kafka.authentication.username | default "kates-connect" }}
-      password: {{ .Values.kafka.authentication.secretKey | default "password" }}
-    {{- else if eq .Values.kafka.authentication.type "tls" }}
-    certificateAndKey:
-      secretName: {{ .Values.kafka.authentication.certificateSecret | default "kates-connect-tls" }}
-      certificate: {{ .Values.kafka.authentication.certificate | default "user.crt" }}
-      key: {{ .Values.kafka.authentication.key | default "user.key" }}
-    {{- else if eq .Values.kafka.authentication.type "oauth" }}
-    {{- with .Values.kafka.authentication.oauth }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
-    {{- end }}
-  {{- if .Values.kafka.tls.enabled }}
-  tls:
-    trustedCertificates:
-      - secretName: {{ .Values.kafka.tls.trustedCertificateSecret }}
-        certificate: {{ .Values.kafka.tls.certificateKey | default "ca.crt" }}
-  {{- end }}
-  groupId: {{ .Values.groupId | default "kates-connect-cluster" }}
-  offsetStorageTopic: {{ .Values.internalTopics.offsetsName | default (printf "%s-offsets" .Values.groupId) }}
-  configStorageTopic: {{ .Values.internalTopics.configsName | default (printf "%s-configs" .Values.groupId) }}
-  statusStorageTopic: {{ .Values.internalTopics.statusName | default (printf "%s-status" .Values.groupId) }}
+  groupId: {{ .Values.groupId | quote }}
+  offsetStorageTopic: {{ $topics.offsets }}
+  configStorageTopic: {{ $topics.configs }}
+  statusStorageTopic: {{ $topics.status }}
   config:
-    offset.storage.replication.factor: {{ .Values.config.replicationFactor | default 3 }}
-    config.storage.replication.factor: {{ .Values.config.replicationFactor | default 3 }}
-    status.storage.replication.factor: {{ .Values.config.replicationFactor | default 3 }}
+    {{- $rf := .Values.config.replicationFactor | default 3 }}
+    offset.storage.replication.factor: {{ $rf }}
+    config.storage.replication.factor: {{ $rf }}
+    status.storage.replication.factor: {{ $rf }}
     key.converter: {{ .Values.config.keyConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
     value.converter: {{ .Values.config.valueConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
-    key.converter.schemas.enable: {{ .Values.config.keyConverterSchemasEnable | default true }}
-    value.converter.schemas.enable: {{ .Values.config.valueConverterSchemasEnable | default true }}
+    key.converter.schemas.enable: {{ eq (include "kafka-common.enabled" (list .Values.config.keyConverterSchemasEnable true)) "true" }}
+    value.converter.schemas.enable: {{ eq (include "kafka-common.enabled" (list .Values.config.valueConverterSchemasEnable true)) "true" }}
     {{- if .Values.schemaRegistry.enabled }}
     schema.registry.url: {{ printf "http://%s.%s.svc.%s:%d%s" .Values.schemaRegistry.serviceName (include "connect-cluster.schemaRegistryNamespace" .) (include "connect-cluster.clusterDomain" .) (.Values.schemaRegistry.port | int) .Values.schemaRegistry.path }}
     {{- end }}
+    {{- /* Every worker of a group must agree on this, so it is a chart switch;
+           the managed KafkaUser grants the transactional IDs it needs. */}}
+    exactly.once.source.support: {{ ternary "enabled" "disabled" (eq (include "kafka-common.enabled" (list .Values.exactlyOnce.enabled true)) "true") }}
     config.providers: file,dir,secrets
     config.providers.file.class: org.apache.kafka.common.config.provider.FileConfigProvider
     config.providers.dir.class: org.apache.kafka.common.config.provider.DirectoryConfigProvider
@@ -65,152 +48,15 @@ spec:
     {{- range $key, $value := .Values.extraConfig }}
     {{ $key }}: {{ $value | toJson }}
     {{- end }}
-  jvmOptions:
-    {{- toYaml .Values.jvmOptions | nindent 4 }}
-  resources:
-    {{- toYaml .Values.resources | nindent 4 }}
-  logging:
-    {{- if eq ((.Values.logging).type | default "inline") "external" }}
-    type: external
-    valueFrom:
-      configMapKeyRef:
-        name: {{ include "connect-cluster.fullname" . }}-logging
-        key: log4j2.properties
-    {{- else }}
-    {{- toYaml .Values.logging | nindent 4 }}
+  {{- with .Values.plugins }}
+  plugins:
+    {{- range . }}
+    - name: {{ .name }}
+      artifacts:
+        {{- toYaml .artifacts | nindent 8 }}
     {{- end }}
-  {{- if .Values.rack.enabled }}
-  rack:
-    topologyKey: {{ .Values.rack.topologyKey }}
   {{- end }}
   {{- if and .Values.build .Values.build.output }}
   build:
     {{- toYaml .Values.build | nindent 4 }}
   {{- end }}
-  metricsConfig:
-    type: jmxPrometheusExporter
-    valueFrom:
-      configMapKeyRef:
-        name: {{ include "connect-cluster.metricsConfigMapName" . }}
-        key: {{ .Values.metricsConfig.configMapKey | default "kafka-metrics-config.yml" }}
-  {{- if .Values.tracing.enabled }}
-  tracing:
-    type: {{ .Values.tracing.type | default "opentelemetry" }}
-  {{- end }}
-
-  readinessProbe:
-    {{- toYaml .Values.readinessProbe | nindent 4 }}
-  livenessProbe:
-    {{- toYaml .Values.livenessProbe | nindent 4 }}
-  template:
-    {{- if .Values.podDisruptionBudget }}
-    podDisruptionBudget:
-      {{- toYaml .Values.podDisruptionBudget | nindent 6 }}
-    {{- end }}
-    pod:
-      metadata:
-        {{- with .Values.template.pod.metadata.labels }}
-        labels:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        annotations:
-          {{- with .Values.template.pod.metadata.annotations }}
-          {{- toYaml . | nindent 10 }}
-          {{- end }}
-          checksum/logging: {{ include (print $.Template.BasePath "/kafka-connect-logging.yaml") . | sha256sum }}
-          {{- if .Values.metricsConfig.create }}
-          checksum/metrics: {{ include (print $.Template.BasePath "/metrics-configmap-connect.yaml") . | sha256sum }}
-          {{- end }}
-      securityContext:
-        fsGroup: {{ .Values.podSecurityContext.fsGroup | default 1001 }}
-        {{- if .Values.podSecurityContext.runAsNonRoot }}
-        runAsNonRoot: {{ .Values.podSecurityContext.runAsNonRoot }}
-        {{- end }}
-        {{- if .Values.podSecurityContext.runAsUser }}
-        runAsUser: {{ .Values.podSecurityContext.runAsUser }}
-        {{- end }}
-        seccompProfile:
-          type: {{ .Values.podSecurityContext.seccompProfile | default "RuntimeDefault" }}
-
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- if or .Values.podAntiAffinity.enabled .Values.nodeAffinity }}
-      affinity:
-        {{- with .Values.nodeAffinity }}
-        nodeAffinity:
-          {{- toYaml . | nindent 8 }}
-        {{- end }}
-        {{- if .Values.podAntiAffinity.enabled }}
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    strimzi.io/name: {{ include "connect-cluster.fullname" . }}-connect
-                topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
-        {{- end }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.dnsPolicy }}
-      dnsPolicy: {{ . }}
-      {{- end }}
-      {{- with .Values.dnsConfig }}
-      dnsConfig:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- if .Values.priorityClassName }}
-      priorityClassName: {{ .Values.priorityClassName }}
-      {{- end }}
-      {{- if .Values.terminationGracePeriodSeconds }}
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
-      {{- end }}
-      {{- if .Values.topologySpreadConstraints.enabled }}
-      topologySpreadConstraints:
-        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
-          topologyKey: {{ .Values.topologySpreadConstraints.topologyKey }}
-          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.whenUnsatisfiable }}
-          labelSelector:
-            matchLabels:
-              strimzi.io/name: {{ include "connect-cluster.fullname" . }}-connect
-        {{- range .Values.topologySpreadConstraints.additional }}
-        - {{- toYaml . | nindent 10 }}
-        {{- end }}
-      {{- end }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-    connectContainer:
-      {{- $tracingEnv := and .Values.tracing.enabled .Values.tracing.endpoint }}
-      {{- if or .Values.env $tracingEnv }}
-      env:
-        {{- if $tracingEnv }}
-        - name: OTEL_SERVICE_NAME
-          value: {{ .Values.tracing.serviceName | default (include "connect-cluster.fullname" .) | quote }}
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: {{ .Values.tracing.endpoint | quote }}
-        - name: OTEL_TRACES_EXPORTER
-          value: "otlp"
-        {{- end }}
-        {{- with .Values.env }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-      {{- end }}
-      securityContext:
-        {{- include "connect-cluster.containerSecurityContext" . | nindent 8 }}
-    {{- if .Values.serviceAccount.create }}
-    serviceAccount:
-      metadata:
-        labels:
-          {{- include "connect-cluster.labels" . | nindent 10 }}
-        {{- with .Values.serviceAccount.annotations }}
-        annotations:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-    {{- end }}

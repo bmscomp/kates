@@ -1,0 +1,46 @@
+{{- /* What the Helm test pods read: the Connect resources, the worker pods
+       (and exec, to call the REST API from inside a worker), and the
+       credentials Secret they check for. */}}
+{{- if .Values.serviceAccount.create }}
+{{- $name := printf "%s-test-reader" (include "connect-cluster.fullname" .) }}
+{{- $kafka := include "connect-cluster.kafka" . | fromYaml }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkaconnects", "kafkaconnectors"]
+    verbs: ["get", "list"]
+  {{- with ($kafka.authentication).secretName }}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ . | quote }}]
+    verbs: ["get"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "connect-cluster.serviceAccountName" . }}
+    namespace: {{ include "connect-cluster.namespace" . }}
+{{- end }}

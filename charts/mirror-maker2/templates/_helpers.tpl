@@ -1,61 +1,37 @@
-{{/* Expand the name of the chart. */}}
+{{/* Chart name (kafka-common). */}}
 {{- define "mirror-maker2.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- include "kafka-common.name" . }}
 {{- end }}
 
-{{/* Fully qualified app name. */}}
+{{/* Fully qualified app name (kafka-common). */}}
 {{- define "mirror-maker2.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
+{{- include "kafka-common.fullname" . }}
 {{- end }}
 
-{{/* Release namespace, overridable. */}}
+{{/* Release namespace, overridable (kafka-common). */}}
 {{- define "mirror-maker2.namespace" -}}
-{{- .Values.namespaceOverride | default .Release.Namespace }}
+{{- include "kafka-common.namespace" . }}
 {{- end }}
 
 {{- define "mirror-maker2.chart" -}}
-{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- include "kafka-common.chart" . }}
 {{- end }}
 
 {{- define "mirror-maker2.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "mirror-maker2.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+{{- include "kafka-common.selectorLabels" . }}
 {{- end }}
 
+{{/* Standard labels (kafka-common) — built as a map, so no key can repeat. */}}
 {{- define "mirror-maker2.labels" -}}
-helm.sh/chart: {{ include "mirror-maker2.chart" . }}
-{{ include "mirror-maker2.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/component: mirror-maker2
-app.kubernetes.io/part-of: kates
-{{- with .Values.extraLabels }}
-{{ toYaml . }}
-{{- end }}
+{{- include "kafka-common.labels" (dict "ctx" . "component" "mirror-maker2" "partOf" "kates") }}
 {{- end }}
 
 {{/*
 Standard labels with app.kubernetes.io/component replaced. Call with
 (dict "component" "test" "ctx" $).
-
-`mirror-maker2.labels` already sets component: mirror-maker2, so appending a
-second component line produced a duplicate YAML key — accepted by Kubernetes
-(last wins) but rejected by kubeconform, and silently ambiguous either way.
 */}}
 {{- define "mirror-maker2.componentLabels" -}}
-{{- $l := mergeOverwrite (include "mirror-maker2.labels" .ctx | fromYaml) (dict "app.kubernetes.io/component" .component) -}}
-{{- toYaml $l -}}
+{{- include "kafka-common.labels" (dict "ctx" .ctx "component" .component "partOf" "kates") }}
 {{- end }}
 
 {{- define "mirror-maker2.serviceAccountName" -}}
@@ -73,41 +49,20 @@ strimzi.io/kind: KafkaMirrorMaker2
 {{- end }}
 
 {{/*
-Bootstrap servers for a cluster entry (target or a mirror source).
-Call with (dict "c" <clusterValues> "ctx" $).
-- If `bootstrapServers` is set, it wins verbatim (external / inter-cluster).
-- Otherwise the FQDN is computed from `clusterName` + `namespace` for an
-  in-cluster Strimzi cluster: <clusterName>-kafka-bootstrap.<namespace>.svc.
-  <clusterDomain>:<9093 if tls else 9092>. This makes intra-cluster (same or
-  different namespace) and inter-cluster topologies configurable uniformly.
+Bootstrap servers for a cluster entry (target or a mirror source), via
+kafka-common. Call with (dict "c" <clusterValues> "ctx" $). An explicit
+`bootstrapServers` wins; otherwise the in-cluster FQDN is computed from
+`clusterName` + `namespace` (default: krafter in kafka) and the TLS port.
 */}}
 {{- define "mirror-maker2.bootstrap" -}}
-{{- $c := .c -}}{{- $ctx := .ctx -}}
-{{- if $c.bootstrapServers -}}
-{{- $c.bootstrapServers -}}
-{{- else -}}
-{{- $name := $c.clusterName | default "krafter" -}}
-{{- $ns := $c.namespace | default "kafka" -}}
-{{- $domain := $ctx.Values.clusterDomain | default "cluster.local" -}}
-{{- $port := 9092 -}}
-{{- if and $c.tls $c.tls.enabled -}}{{- $port = 9093 -}}{{- end -}}
-{{- printf "%s-kafka-bootstrap.%s.svc.%s:%v" $name $ns $domain $port -}}
-{{- end -}}
+{{- include "kafka-common.bootstrap" (dict "c" .c "ctx" .ctx "defaultCluster" "krafter" "defaultNamespace" "kafka") -}}
 {{- end }}
 
 {{/*
-Normalise a Kafka version to something semverCompare will accept. "2.8" and
-"3.9.1-rhel" are both things people write in a values file; semverCompare
-rejects the first outright and mis-sorts the second.
-Call with the version string.
+Normalise a Kafka version for semverCompare ("2.8" -> 2.8.0), via kafka-common.
 */}}
 {{- define "mirror-maker2.semver" -}}
-{{- $v := regexReplaceAll "[^0-9.].*$" . "" | trimSuffix "." -}}
-{{- $p := splitList "." $v -}}
-{{- if eq (len $p) 1 -}}{{- printf "%s.0.0" (index $p 0) -}}
-{{- else if eq (len $p) 2 -}}{{- printf "%s.%s.0" (index $p 0) (index $p 1) -}}
-{{- else -}}{{- printf "%s.%s.%s" (index $p 0) (index $p 1) (index $p 2) -}}
-{{- end -}}
+{{- include "kafka-common.semver" . -}}
 {{- end }}
 
 {{/*
@@ -208,49 +163,16 @@ hand-set value that disagrees with the mirror's.
 {{- end }}
 
 {{/*
-Shell commands that WRITE a client.properties for a cluster entry, for the test
-pods. Call with (dict "c" <cluster> "env" "<ENV VAR holding the password>"
-"file" "<path>").
-
-It emits `echo`/`printf` lines rather than a heredoc on purpose. A heredoc rendered
-through nindent has its terminator indented too, and an indented terminator does
-not close a heredoc (`<<-` strips tabs, never spaces) — so the whole rest of the
-script would be swallowed as heredoc content, and the pod would exit 0 having
-done nothing. Quietly.
-
-Scope, stated plainly: SASL over plaintext (none / plain / scram-*) only. TLS
-and mTLS need a truststore — and for mTLS a keystore assembled from
-user.crt/user.key — which these tests do not build. The callers check for that
-and refuse to render rather than emitting a config that cannot connect.
-
-The JAAS line is written with printf, not echo: dash's builtin echo interprets
-backslash escapes, and a password containing one would be silently altered.
-The password is also escaped for the JAAS string (`"` and `\`) before use.
+Shell lines that write a client.properties for a cluster entry (kafka-common).
+Call with (dict "c" <cluster> "env" "<ENV VAR holding the password>" "file" "<path>").
 */}}
 {{- define "mirror-maker2.testClientProps" -}}
-{{- $c := .c -}}{{- $envVar := .env -}}{{- $file := .file -}}
-{{- $auth := $c.authentication | default dict -}}
-{{- $t := $auth.type | default "" -}}
-{{- if eq $t "" }}
-echo 'security.protocol=PLAINTEXT' > {{ $file }}
-{{- else if eq $t "plain" }}
-ESC_{{ $envVar }}=$(printf '%s' "${{ $envVar }}" | sed 's/[\\"]/\\&/g')
-echo 'security.protocol=SASL_PLAINTEXT' > {{ $file }}
-echo 'sasl.mechanism=PLAIN' >> {{ $file }}
-printf '%s\n' "sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username=\"{{ $auth.username }}\" password=\"$ESC_{{ $envVar }}\";" >> {{ $file }}
-{{- else }}
-ESC_{{ $envVar }}=$(printf '%s' "${{ $envVar }}" | sed 's/[\\"]/\\&/g')
-echo 'security.protocol=SASL_PLAINTEXT' > {{ $file }}
-echo 'sasl.mechanism={{ upper $t }}' >> {{ $file }}
-printf '%s\n' "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"{{ $auth.username }}\" password=\"$ESC_{{ $envVar }}\";" >> {{ $file }}
-{{- end }}
+{{- include "kafka-common.test.clientProps" . }}
 {{- end }}
 
-{{/* True when a cluster entry is beyond what the test pods can configure. */}}
+{{/* True when a cluster entry is beyond what the test pods can configure (kafka-common). */}}
 {{- define "mirror-maker2.testAuthUnsupported" -}}
-{{- $c := .c -}}
-{{- $auth := $c.authentication | default dict -}}
-{{- if or (and $c.tls $c.tls.enabled) (eq ($auth.type | default "") "tls") -}}true{{- end -}}
+{{- include "kafka-common.test.authUnsupported" . -}}
 {{- end }}
 
 {{/*
@@ -283,18 +205,7 @@ Ready while nothing replicates.
        Tuesday can move the workers across the KIP-896 floor that every other
        rail in this file is checking, and nothing in the CR would record that
        it happened. Refused for the workers and for every helper image. */ -}}
-{{- range $field, $img := dict "image" (.Values.image | default "") "preflight.image" ((.Values.preflight).image | default "") "secretSync.image" ((.Values.secretSync).image | default "") "testImages.kubectl" ((.Values.testImages).kubectl | default "") -}}
-{{- if $img -}}
-{{- /* The tag is what follows the last colon of the last path segment, so a
-       registry port (registry:5000/kafka) is not mistaken for one. A digest
-       reference contains "@" and is always fine. */ -}}
-{{- $lastSegment := $img | splitList "/" | last -}}
-{{- $untagged := and (not (contains "@" $img)) (not (contains ":" $lastSegment)) -}}
-{{- if or (hasSuffix ":latest" $img) $untagged -}}
-{{- fail (printf "mirror-maker2: %s is %q, which resolves to a floating tag. What runs then depends on when a pod last restarted rather than on anything recorded here — and for the worker and preflight images that means the Kafka client version, the one variable every compatibility rail in this chart exists to hold still. Use an explicit version tag, or better a @sha256: digest." $field $img) -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
+{{- include "kafka-common.rails.noFloatingTag" (dict "chart" "mirror-maker2" "images" (dict "image" (.Values.image | default "") "preflight.image" ((.Values.preflight).image | default "") "secretSync.image" ((.Values.secretSync).image | default "") "testImages.kubectl" ((.Values.testImages).kubectl | default ""))) -}}
 {{- $c := .Values.compatibility | default dict -}}
 {{- $floor := include "mirror-maker2.semver" ($c.minSourceVersion | default "2.1.0") -}}
 {{- $workers := include "mirror-maker2.semver" (.Values.version | default "4.3.0") -}}
@@ -486,35 +397,12 @@ Ready while nothing replicates.
 {{- end }}
 
 {{/*
-Render the tls + authentication blocks for a cluster entry (target or a
-mirror source). Call with (dict "c" <clusterValues>). Emits at column 0; the
-caller applies nindent.
+The tls + authentication blocks for a cluster entry (target or a mirror
+source), via kafka-common: scram-*, plain, tls and custom (OAuth and other
+SASL mechanisms). Call with (dict "c" <clusterValues> "field" <values path>).
 */}}
 {{- define "mirror-maker2.clusterTlsAuth" -}}
-{{- $c := .c -}}
-{{- if and $c.tls $c.tls.enabled }}
-tls:
-  trustedCertificates:
-    - secretName: {{ required "tls.trustedCertificateSecret is required when tls.enabled" $c.tls.trustedCertificateSecret }}
-      certificate: {{ $c.tls.certificateKey | default "ca.crt" }}
-{{- end }}
-{{- with $c.authentication }}
-{{- if .type }}
-authentication:
-  type: {{ .type }}
-  {{- if or (eq .type "scram-sha-512") (eq .type "scram-sha-256") (eq .type "plain") }}
-  username: {{ .username | quote }}
-  passwordSecret:
-    secretName: {{ .secretName | default .username | quote }}
-    password: {{ .secretKey | default "password" }}
-  {{- else if eq .type "tls" }}
-  certificateAndKey:
-    secretName: {{ .secretName | default (printf "%s-tls" .username) | quote }}
-    certificate: {{ .certificate | default "user.crt" }}
-    key: {{ .key | default "user.key" }}
-  {{- end }}
-{{- end }}
-{{- end }}
+{{- include "kafka-common.clientTlsAuth" (dict "c" .c "chart" "mirror-maker2" "field" (.field | default "cluster")) }}
 {{- end }}
 
 {{/*
@@ -640,19 +528,11 @@ a connector one — the connector half is the isolation level above.
 
 {{/*
 Image pull policy for the pods THIS CHART owns: the preflight Job, the
-secret-sync Job and CronJob, and the Helm test pods.
-
-Deliberately not the MM2 workers. Those pods are created by the Cluster
-Operator from the KafkaMirrorMaker2 CR, whose spec has `image` but no pull
-policy — that is an operator-wide setting (STRIMZI_IMAGE_PULL_POLICY), and a
-value here that silently did nothing to the workers would be worse than no
-value at all. values.yaml says so where an operator will read it.
-
-Empty renders nothing, leaving Kubernetes' own rule: IfNotPresent for a
-tagged image, Always for `:latest`.
+secret-sync Job and CronJob, and the Helm test pods. Deliberately not the MM2
+workers — their pull policy is an operator-wide setting
+(STRIMZI_IMAGE_PULL_POLICY), and a value here that silently did nothing to the
+workers would be worse than none.
 */}}
 {{- define "mirror-maker2.imagePullPolicy" -}}
-{{- with .Values.imagePullPolicy }}
-imagePullPolicy: {{ . }}
-{{- end }}
+{{- include "kafka-common.imagePullPolicy" .Values.imagePullPolicy }}
 {{- end }}

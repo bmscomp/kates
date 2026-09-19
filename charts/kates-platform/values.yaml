@@ -1,5 +1,8 @@
 kafka-cluster:
   enabled: true
+  # The kates platform's topics, users (kates-backend, kafka-ui, …) and client
+  # NetworkPolicy grants — kafka-cluster's profiles/platform.yaml.
+  profile: platform
 
 kates:
   enabled: true
@@ -17,6 +20,12 @@ apicurio-registry:
 #     mirrors:
 #       - source: { alias: dc-east, bootstrapServers: kafka-east.example.com:9092, kafkaVersion: "3.9.1" }
 mirror-maker2:
+  enabled: false
+
+# Kafka Connect (Debezium CDC and JDBC connectors) against the kafka-cluster
+# subchart. Disabled by default — `kates deploy` installs it as a separate
+# release. Enabled here it runs in the umbrella's namespace, next to Kafka.
+connect-cluster:
   enabled: false
 
 # Image used by the helm test connectivity pod (needs `nc`)

@@ -1,0 +1,4 @@
+{{- include "kafka-common.rails.noFloatingTag" (dict "chart" "harness" "images" .Values.images) }}
+{{- with .Values.bootstrapPorts.bootstrap }}
+{{- include "kafka-common.rails.bootstrapPorts" (dict "chart" "harness" "bootstrap" . "ports" $.Values.bootstrapPorts.ports "field" "networkPolicy.kafka.ports") }}
+{{- end }}

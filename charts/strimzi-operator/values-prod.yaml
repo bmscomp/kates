@@ -8,11 +8,11 @@
 # not the 60000 that file specifies.
 #
 # So this overlay is a REAL BEHAVIOR CHANGE, not a restatement of the status
-# quo. Measured against this chart: it takes the operator from 17 to 19
-# resources (+1 NetworkPolicy, +1 PodDisruptionBudget), tightens the
-# reconciliation loop, and flips the operator to a read-only root filesystem.
-# Enabling dashboards below would add 9 more ConfigMaps. Roll it out
-# deliberately, not as a default.
+# quo. Measured against the base values it adds upstream's operator
+# NetworkPolicy and PodDisruptionBudget and the drain cleaner (with its
+# cert-manager Issuer and Certificate), tightens the reconciliation loop, and
+# flips the operator to a read-only root filesystem. Roll it out deliberately,
+# not as a default.
 
 strimzi-kafka-operator:
   # ── Hardening ──────────────────────────────────────────────────────────────
@@ -54,14 +54,20 @@ strimzi-kafka-operator:
     requests:
       memory: 768Mi
 
-  # ── Dashboards: left OFF deliberately ──────────────────────────────────────
-  # Upstream creates 9 Grafana ConfigMaps whose names are independent of the
-  # release name, and charts/kafka-cluster/values.yaml has its own dashboards
-  # block targeting the `kafka` namespace. Enabling this without resolving
-  # ownership produces colliding ConfigMaps. Decide who owns the dashboards
-  # first, then enable on ONE side.
-  dashboards:
-    enabled: false
+  # Dashboards: on by default since 0.3 (values.yaml).
+
+productionMode: true
+
+# ── Drain Cleaner ──────────────────────────────────────────────────────────
+# Moved here from kafka-cluster's prod overlay. Two replicas and a PDB: with
+# one, evictions during a webhook restart bypass drain protection
+# (failurePolicy: Ignore). cert-manager issues the certificate.
+drainCleaner:
+  enabled: true
+  replicas: 2
+  tls:
+    certManager:
+      enabled: true
 
 # ── Airgapped / restricted-egress clusters ───────────────────────────────────
 # The CRD hook needs egress to the bundle URL on EVERY install AND upgrade —

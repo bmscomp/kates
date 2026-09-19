@@ -1,0 +1,106 @@
+# Render matrix for charts/mirror-maker2 — read by scripts/check-chart-matrix.py.
+# The chart's own rails live in ci-mirror-maker2.yml; this file adds the strict
+# CRD check over every overlay and the toggles those renders do not reach.
+chart: charts/mirror-maker2
+namespace: kafka
+apiVersions: [monitoring.coreos.com/v1]
+set: [metrics.enabled=true, alerts.enabled=true, dashboard.enabled=true, podMonitors.enabled=true]
+
+# Every alert links a runbook section that exists.
+checks: [runbook-anchors]
+
+renders:
+  - name: base
+  - {name: kind, values: [values-kind.yaml]}
+  - {name: dev, values: [values-dev.yaml]}
+  - {name: prod, values: [values-prod.yaml]}
+  - {name: generic, values: [values-generic.yaml]}
+  - {name: mtls, values: [values-mtls.yaml]}
+  - {name: migrate-2x, values: [values-migrate-2x.yaml]}
+  - {name: migrate-3x, values: [values-migrate-3x.yaml]}
+  - {name: migrate-4x, values: [values-migrate-4x.yaml]}
+  - {name: migrate-2x + cutover, values: [values-migrate-2x.yaml, values-cutover.yaml]}
+  - {name: readonly-source, values: [values-readonly-source.yaml]}
+  - {name: fan-in, values: [values-fan-in.yaml]}
+  - {name: failover, values: [values-failover.yaml]}
+  - {name: failback, values: [values-failback.yaml], set: ["mirrors[0].source.clusterName=failover-cluster"]}
+  - {name: scale, values: [values-scale.yaml]}
+  - {name: prod + scale, values: [values-prod.yaml, values-scale.yaml]}
+  - name: autoscaling
+    set: [autoscaling.enabled=true, autoscaling.maxReplicas=4]
+  - name: nodeSelector
+    set: [nodeSelector.pool=mm2]
+  - name: reporter metrics
+    set: [metrics.type=strimziMetricsReporter, alerts.enabled=false]
+  - name: preflight + secret sync
+    set: [preflight.enabled=true, secretSync.enabled=true, "secretSync.secrets[0].name=kates-mm2", "secretSync.secrets[0].fromNamespace=kafka-src", "secretSync.secrets[0].as=kates-mm2-src"]
+  - name: templateExtra.pod
+    set: [templateExtra.pod.hostUsers=false, "templateExtra.apiService.metadata.labels.team=data"]
+    assert:
+      - why: "templateExtra.pod must merge into the chart's pod template, not replace it (M2)"
+        kind: KafkaMirrorMaker2
+        path: spec/template/pod/securityContext/runAsNonRoot
+        equals: true
+      - why: "templateExtra.pod fields reach the pod template (M2)"
+        kind: KafkaMirrorMaker2
+        path: spec/template/pod/hostUsers
+        equals: false
+      - why: "other templateExtra sub-objects still pass through"
+        kind: KafkaMirrorMaker2
+        path: spec/template/apiService/metadata/labels/team
+        equals: data
+  - name: custom authentication (OAuth) on target and source
+    inline: |
+      preflight: {enabled: true}
+      target:
+        authentication:
+          type: custom
+          custom: {sasl: true, config: {sasl.mechanism: OAUTHBEARER, sasl.jaas.config: "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;"}}
+      mirrors:
+        - source:
+            alias: idp
+            bootstrapServers: "kafka.idp.example.com:9092"
+            authentication:
+              type: custom
+              custom: {sasl: true, config: {sasl.mechanism: OAUTHBEARER}}
+          sourceConnector: {tasksMax: 1}
+          checkpointConnector: {tasksMax: 1}
+    assert:
+      - why: "custom authentication reaches the CR (M1)"
+        kind: KafkaMirrorMaker2
+        path: spec/target/authentication/config/sasl.mechanism
+        equals: OAUTHBEARER
+      - why: "the preflight probe runs the source without credentials it cannot build"
+        kind: Job
+        name: .*preflight
+        path: spec/template/spec/containers/0/args/0
+        matches: 'probe "idp" .* "custom"'
+  - name: grace period and priority class
+    set: [terminationGracePeriodSeconds=90, priorityClassName=kafka-critical]
+    assert:
+      - why: "terminationGracePeriodSeconds is a value (M3)"
+        kind: KafkaMirrorMaker2
+        path: spec/template/pod/terminationGracePeriodSeconds
+        equals: 90
+      - kind: KafkaMirrorMaker2
+        path: spec/template/pod/priorityClassName
+        equals: kafka-critical
+  - name: operator ingress and ACLs can be turned off
+    set: [networkPolicy.operator.enabled=false, kafkaUser.create=true, kafkaUser.authorization.enabled=false]
+    assert:
+      - why: "`false | default true` is true — networkPolicy.operator.enabled=false used to be ignored"
+        kind: NetworkPolicy
+        path: spec/ingress/*/from/0/podSelector/matchLabels/strimzi.io~1kind
+        notEquals: cluster-operator
+      - why: "kafkaUser.authorization.enabled=false used to be ignored"
+        kind: KafkaUser
+        path: spec/authorization
+        exists: false
+
+rails:
+  - name: custom authentication without configuration
+    want: "target.authentication.type=custom needs target.authentication.custom"
+    set: [target.authentication.type=custom]
+
+rules:
+  set: []

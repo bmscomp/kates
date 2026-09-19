@@ -1,0 +1,60 @@
+suite: 0.4 compatibility
+release:
+  name: krafter
+  namespace: kafka
+templates:
+  - backup.yaml
+  - topics.yaml
+set:
+  nodePools:
+    pools:
+      - { name: controllers, roles: [controller] }
+      - { name: brokers, roles: [broker], replicas: 3 }
+tests:
+  - it: keeps backup.volumes set in a higher layer over the 0.4 keys
+    templates:
+      - backup.yaml
+    documentIndex: 0
+    set:
+      backup:
+        enabled: true
+        volumes: fs-backup
+        snapshotVolumes: false
+        defaultVolumesToFsBackup: false
+    asserts:
+      - equal:
+          path: 'metadata.annotations["kates.io/volume-data"]'
+          value: fs-backup
+      - equal: { path: spec.template.defaultVolumesToFsBackup, value: true }
+
+  - it: reads the 0.4 keys when backup.volumes is left empty
+    templates:
+      - backup.yaml
+    documentIndex: 0
+    set:
+      backup:
+        enabled: true
+        snapshotVolumes: true
+        defaultVolumesToFsBackup: false
+    asserts:
+      - equal:
+          path: 'metadata.annotations["kates.io/volume-data"]'
+          value: snapshot
+      - equal: { path: spec.template.snapshotVolumes, value: true }
+
+  - it: derives a topic's min.insync.replicas only when nothing asks for one
+    templates:
+      - topics.yaml
+    set:
+      topics:
+        defaults:
+          config:
+            min.insync.replicas: "3"
+        items:
+          orders: { partitions: 3 }
+          events: { partitions: 3, config: { min.insync.replicas: "1" } }
+    asserts:
+      - documentIndex: 1
+        equal: { path: 'spec.config["min.insync.replicas"]', value: "3" }
+      - documentIndex: 0
+        equal: { path: 'spec.config["min.insync.replicas"]', value: "1" }

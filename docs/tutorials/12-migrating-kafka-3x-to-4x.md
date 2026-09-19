@@ -1,6 +1,6 @@
 # Tutorial 12: Migrating Kafka 3.x to 4.x with MirrorMaker 2
 
-This tutorial migrates Apache Kafka **3.9.1** onto Kafka **4.3.0** with
+This tutorial migrates Apache Kafka **3.9.1** onto Kafka **4.3.1** with
 MirrorMaker 2. It is the same shape as the
 [2.x migration](11-migrating-kafka-2x-to-4x.md) with one dimension removed —
 and the interesting part is exactly *which* dimension, because it changes where
@@ -30,7 +30,7 @@ spends its time on the checks rather than the setup.
 ```text
   kafka-legacy-3x namespace              kafka namespace
   ┌───────────────────────────┐          ┌──────────────────────────────┐
-  │  Kafka 3.9.1 (KRaft)      │  MM2     │  krafter (Kafka 4.3.0, KRaft)│
+  │  Kafka 3.9.1 (KRaft)      │  MM2     │  krafter (Kafka 4.3.1, KRaft)│
   │  kates.orders  ───────────┼─────────►│  kates.orders                │
   │  group: kates-migration   │          │  group offsets translated    │
   └───────────────────────────┘          └──────────────────────────────┘
@@ -49,8 +49,13 @@ export GROUP=kates-migration-consumer
 ```
 
 ```bash
-make cluster && make deploy-strimzi && make deploy-kafka
+make cluster && make kafka-deploy
 ```
+
+`make kafka-deploy` reconciles the Strimzi operator from
+`charts/strimzi-operator` first and the `krafter` cluster second, layering
+`values-platform.yaml` — which is where the `kates-mm2` user Step 4
+authenticates with comes from.
 
 ---
 
@@ -110,7 +115,14 @@ kubectl -n "${LEGACY_NS}" run consumer --rm -i --restart=Never \
 
 ## Step 3: Install MirrorMaker 2
 
+The chart is built on the `kafka-common` library chart, declared as a `file://`
+dependency, and `charts/*/charts/` is generated rather than committed — so
+resolve it first or nothing renders. It is idempotent, and running it once here
+covers the upgrades in Steps 5 and 6 too:
+
 ```bash
+helm dependency build charts/mirror-maker2
+
 helm upgrade --install mm2 charts/mirror-maker2 \
   -n "${KAFKA_NS}" \
   -f charts/mirror-maker2/values-migrate-3x.yaml \
@@ -250,7 +262,7 @@ And, because the 3.x path is cheap enough to test both policies, the renaming
 one as well — with its own lab name so the two can coexist:
 
 ```bash
-kates migrate run --from 3.9.1 --policy default --name m391-430-default
+kates migrate run --from 3.9.1 --policy default --name m391-431-default
 ```
 
 That second run expects `legacy.kates.orders` on the target rather than
@@ -262,7 +274,7 @@ effect rather than being ignored.
 ## Step 8: Clean Up
 
 ```bash
-kates migrate down --name m391-430
+kates migrate down --name m391-431
 ```
 
 or, by hand:

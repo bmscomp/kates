@@ -322,14 +322,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Update Chart versions
         env:
-          # appVersion tracks the Debezium version (the chart's headline
-          # component); the image pin carries the full build identity.
-          APP_VERSION: ${{ needs.meta.outputs.version }}
+          # connect-cluster 2.0: appVersion is the Kafka line (like
+          # mirror-maker2's) and stays with the Kafka pin; the image pin and
+          # the kates.io/connect-image annotation carry the build identity.
           IMAGE_TAG: ${{ needs.meta.outputs.image_tag }}
         run: |
-          # Anchored to ^ so the commented example image: line is left alone.
-          sed -i "s/^appVersion: .*/appVersion: \"${APP_VERSION}\"/" charts/connect-cluster/Chart.yaml
+          # Anchored to ^ (and the annotation's indent) so comments are left alone.
           sed -i "s|^image: .*|image: \"ghcr.io/bmscomp/connect:${IMAGE_TAG}\"|" charts/connect-cluster/values.yaml
+          sed -i "s|^  kates.io/connect-image: .*|  kates.io/connect-image: \"ghcr.io/bmscomp/connect:${IMAGE_TAG}\"|" charts/connect-cluster/Chart.yaml
           
       - name: Commit and Push
         run: |
