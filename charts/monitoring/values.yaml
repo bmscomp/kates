@@ -19,6 +19,13 @@ kube-prometheus-stack:
       imagePullPolicy: IfNotPresent
       dashboards:
         enabled: true
+        # -- The annotation the sidecar reads to file a board into a Grafana
+        # folder. Upstream leaves this unset, so the `grafana_folder`
+        # annotations that connect-cluster and mirror-maker2 have always
+        # emitted were inert and every board landed in one flat list.
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: true
       datasources:
         enabled: true
 

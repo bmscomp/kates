@@ -150,6 +150,10 @@ mbeans:
   - {bean: "kafka.log<type=LogFlushStats, name=LogFlushRateAndTimeMs>", attributes: *timer}
   - {bean: "kafka.log<type=LogManager, name=OfflineLogDirectoryCount>", attributes: [Value]}
   - {bean: "kafka.log<type=Log, name=Size, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.log<type=Log, name=LogEndOffset, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.log<type=Log, name=LogStartOffset, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.log<type=Log, name=NumLogSegments, topic=orders, partition=0>", attributes: [Value]}
+  - {bean: "kafka.server<type=KafkaServer, name=BrokerState>", attributes: [Value]}
   - {bean: "kafka.log<type=LogCleanerManager, name=uncleanable-partitions-count, logDirectory=\"/var/lib/kafka/data-0/kafka-log0\">", attributes: [Value]}
 
   # ── Controller (KRaft) ────────────────────────────────────────────────────
