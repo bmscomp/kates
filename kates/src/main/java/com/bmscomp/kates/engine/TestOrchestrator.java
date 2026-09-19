@@ -45,6 +45,14 @@ public class TestOrchestrator {
     private final TestTypeDefaults typeDefaults;
     private final BenchmarkMetrics benchmarkMetrics;
     private final KatesMetrics katesMetrics;
+    /**
+     * Evaluates the run's SLA against each poll so the violations reach
+     * Prometheus while the run is still going. The report path evaluates the
+     * same definition through the same class once the run is over, which is
+     * the only reason both can be trusted to agree.
+     */
+    private final SlaEvaluator slaEvaluator;
+
     private final Event<TestLifecycleEvent> lifecycleEvents;
     private final String defaultBackend;
     private final String bootstrapServers;
@@ -82,6 +90,7 @@ public class TestOrchestrator {
             TestTypeDefaults typeDefaults,
             BenchmarkMetrics benchmarkMetrics,
             KatesMetrics katesMetrics,
+            SlaEvaluator slaEvaluator,
             Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
@@ -92,6 +101,7 @@ public class TestOrchestrator {
         this.typeDefaults = typeDefaults;
         this.benchmarkMetrics = benchmarkMetrics;
         this.katesMetrics = katesMetrics;
+        this.slaEvaluator = slaEvaluator;
         this.lifecycleEvents = lifecycleEvents;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
@@ -426,6 +436,11 @@ public class TestOrchestrator {
         boolean anyFailed = false;
 
         List<TestResult> updatedResults = new java.util.ArrayList<>();
+        // Every violation this poll found, across every task, merged before it
+        // is published: recording per task would have the last task polled
+        // clear the violations of the ones before it.
+        List<com.bmscomp.kates.domain.SlaViolation> slaViolations = new java.util.ArrayList<>();
+        boolean polledAnything = false;
         for (TestResult result : run.getResults()) {
             if (result.getStatus() == TestResult.TaskStatus.RUNNING
                     || result.getStatus() == TestResult.TaskStatus.PENDING) {
@@ -434,6 +449,10 @@ public class TestOrchestrator {
                     try {
                         BenchmarkStatus status = backend.poll(handle);
                         result = applyStatus(result, status);
+                        polledAnything = true;
+                        publishLiveMetrics(runId, result, status);
+                        slaViolations.addAll(
+                                slaEvaluator.evaluate(run.getSla(), status).violations());
 
                         // Propagate CDC phase data to the TestRun
                         if (status.getPhaseDurations() != null
@@ -479,6 +498,10 @@ public class TestOrchestrator {
             }
 
             updatedResults.add(result);
+        }
+
+        if (polledAnything) {
+            benchmarkMetrics.recordSlaViolations(runId, slaViolations);
         }
 
         updatedResults = abortStrandedConsumers(updatedResults, backend, handleMap);
@@ -528,6 +551,11 @@ public class TestOrchestrator {
                 }
                 if (r.getRecordsSent() > 0) {
                     katesMetrics.recordRecordsProcessed(typeName, r.getRecordsSent());
+                    // The per-run counter takes the task's final cumulative
+                    // total. Safe to repeat what the last poll already
+                    // published: the phase counter clamps each task's total
+                    // upward, so this can only close a gap, never double-count.
+                    benchmarkMetrics.recordRecords(runId, r.getTaskId(), r.getPhaseName(), r.getRecordsSent());
                 }
                 if (r.getStatus() == TestResult.TaskStatus.FAILED) {
                     benchmarkMetrics.recordError(runId, r.getPhaseName());
@@ -1102,6 +1130,40 @@ public class TestOrchestrator {
         }
 
         topicService.createTopic(topicName, spec.getPartitions(), spec.getReplicationFactor(), topicConfig);
+    }
+
+    /**
+     * Feeds one poll of one task into the run's Prometheus meters.
+     *
+     * <p>This is the live path, and until it existed the per-run meters only
+     * ever held a value for the instant between the terminal transition writing
+     * them and {@code endRun} unregistering them — so
+     * {@code kates_benchmark_throughput_rec_sec} was, in practice, never
+     * scraped with a value at all. Everything published here comes from the
+     * poll the backend just answered; nothing is derived or estimated.
+     *
+     * <p>{@code getRecordsProcessed()} is the task's cumulative total, which is
+     * what {@code recordRecords} wants — see its contract for why a delta would
+     * be wrong.
+     */
+    private void publishLiveMetrics(String runId, TestResult result, BenchmarkStatus status) {
+        if (status.getThroughputRecordsPerSec() > 0 || status.getThroughputMBPerSec() > 0) {
+            benchmarkMetrics.recordThroughput(
+                    runId, result.getPhaseName(), status.getThroughputRecordsPerSec(), status.getThroughputMBPerSec());
+        }
+        if (status.getRecordsProcessed() > 0) {
+            benchmarkMetrics.recordRecords(
+                    runId, result.getTaskId(), result.getPhaseName(), status.getRecordsProcessed());
+        }
+        benchmarkMetrics.recordLatency(
+                runId,
+                result.getTaskId(),
+                result.getPhaseName(),
+                status.getP50LatencyMs(),
+                status.getP95LatencyMs(),
+                status.getP99LatencyMs(),
+                status.getP999LatencyMs(),
+                status.getMaxLatencyMs());
     }
 
     private TestResult applyStatus(TestResult result, BenchmarkStatus status) {

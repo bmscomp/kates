@@ -232,19 +232,31 @@ Chart 2.0 renamed three alerts, so Alertmanager routes and silences that match o
 
 ### Grafana Dashboard
 
-The chart's `dashboard.yaml` ships one board, "Kafka Connect — `<release>`", as the `<release>-dashboard` ConfigMap (`dashboards.enabled`, folder `Kafka`). A stat row sits on top, followed by one row per concern:
+The board is [`dashboards/kafka-connect/`](https://github.com/bmscomp/kates/tree/main/dashboards/kafka-connect), built from `board.py` by `scripts/gen-dashboards.py`. The generator writes a copy into `charts/connect-cluster/files/dashboards/`, and the chart's `dashboard.yaml` loads that copy with `.Files.Get` and ships it as the `<release>-dashboard` ConfigMap, titled "Kafka Connect — `<release>`" in the `Kafka` folder (`dashboards.enabled`). Only the uid and the title are injected per release; everything else is the same file for every install.
+
+Thirty-five panels: a stat row on top, then one row per concern, in the order an incident asks them.
 
 | Row | Panels | Example metric |
 |-----|--------|----------------|
 | Top (stats) | Workers up, connectors, failed connectors, failed tasks, tasks running, record errors | `kafka_connect_connector_task_status{status="failed"}` |
-| Connectors and tasks | Connector status, task status, tasks per worker | `kafka_connect_connector_metrics` |
+| Connectors and tasks | Connector status, task status, tasks per worker, task running and paused ratio, sink partitions assigned | `kafka_connect_connector_metrics` |
 | Throughput | Source records polled / written / in flight, sink records read / put, sink lag | `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` |
 | Errors and dead letter queue | Errors logged, record failures and skips, dead letter queue writes and failures | `rate(kafka_connect_task_error_metrics_total_errors_logged[5m])` |
 | Offset commits | Commit time, commit failures, sink commit rate | `kafka_connect_connector_task_metrics_offset_commit_failure_percentage` |
-| Workers | Rebalances, rebalance time, startup failures, heap used | `rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total[5m])` |
-| Client path | The embedded producer and consumer: records sent, errors and retries, request latency, consumer lag | `kafka_producer_*`, `kafka_consumer_*` |
+| Workers | Rebalances, rebalance time, rebalance in progress, time since last rebalance, startup failures, heap used, heap used / max | `rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total[5m])` |
+| Client path (collapsed) | The embedded producer and consumer: records sent, errors and retries, request latency, consumer lag | `kafka_producer_*`, `kafka_consumer_*` |
 
-The metrics come from the chart's exporter rules (`files/metrics/connect-metrics.yaml`, in the `<release>-metrics` ConfigMap under `metrics-config.yml`); `metrics.existingConfigMap` points the workers at rules of your own instead. `monitoring.podMonitor` renders the PodMonitor that scrapes them.
+Four of those panels are new, and each closes a gap the rest of the board leaves open. **Task running and paused ratio** says how much of the window each task actually spent running — a task that keeps restarting reports RUNNING on every status panel. **Sink partitions assigned** should equal the partition count of the subscribed topics; less than that is a task holding nothing, which looks from every throughput panel like a quiet day. **Rebalance in progress** pinned at 1 is a group that cannot converge, and **time since last rebalance** resets to zero at each one, so its drops are the storm the rate panel only averages.
+
+Every panel now carries a description saying what it shows, what it means when it moves, and where the number comes from. They had none before, and the layout gate in `ci-kafka-charts.yml` will not accept a panel without one.
+
+The board is scoped by two template variables, `$namespace` and `$cluster`, rather than by a per-release pod regex. `strimzi_io_cluster` reaches the series through `kafka-common.strimziRelabelings` on the chart's PodMonitor and Strimzi sets it to the `KafkaConnect` CR name, which this chart sets to the release fullname — so one copy of the file serves every Connect group in a Grafana and the dropdown separates them.
+
+The metrics come from the chart's exporter rules (`files/metrics/connect-metrics.yaml`, in the `<release>-metrics` ConfigMap under `metrics-config.yml`); `metrics.existingConfigMap` points the workers at rules of your own instead. `monitoring.podMonitor` renders the PodMonitor that scrapes them. `scripts/check-metric-contract.sh connect-cluster` runs those rules over a catalogue of MBeans and fails the build if any panel reads a series they cannot produce.
+
+`dashboards/kafka-connect/README.md` documents the board section by section, including the three traps that make Connect metrics easy to misread: worker, connector and task are three different scopes and aggregate differently; sink record lag is the gap inside a task, not the backlog; and the `total-*` error series are typed GAUGE while being cumulative. `dashboards/METRICS.md` has a row for every series the board reads.
+
+Upstream's `strimzi-kafka-connect.json` is not an alternative to this board. It reads 21 `kafka_*` names and exactly one of them is producible by this chart's exporter rules, because the chart's rules and Strimzi's example use different name templates.
 
 ### Helm Test
 

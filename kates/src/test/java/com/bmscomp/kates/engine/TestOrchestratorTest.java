@@ -37,6 +37,9 @@ class TestOrchestratorTest {
                 typeDefaults,
                 mock(BenchmarkMetrics.class),
                 mock(KatesMetrics.class),
+                // Real, not mocked: it is stateless and a mock would return a
+                // null verdict, which the poll path dereferences.
+                new SlaEvaluator(),
                 mock(Event.class),
                 "native",
                 "localhost:9092",

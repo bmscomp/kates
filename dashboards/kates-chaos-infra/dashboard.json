@@ -1,0 +1,471 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Is the LitmusChaos execution plane installed, running and doing anything \u2014 the operator and exporter this chart deploys, and the experiment verdicts they report. What a fault did to Kafka and to the workload is the separate \"Kates \u2014 Chaos\" board.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "ChaosResults whose verdict is currently Pass, counted from `litmuschaos_experiment_verdict{chaosresult_verdict=\"Pass\"}`. The old board selected `verdict=\"Pass\"`; the label the chaos-exporter emits is `chaosresult_verdict`, so that panel matched every verdict rather than the passing ones. The `== 1` matters: the exporter sets the series to 0 for an Awaited verdict, and back to 0 once a verdict has been repeated for longer than its `TSDB_SCRAPE_INTERVAL`, so a count of the series and a count of the ones reading 1 are different numbers. Passed means Litmus' own probes were satisfied; what the Kafka cluster and the workload did is the `Kates \u2014 Chaos` board.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "count(litmuschaos_experiment_verdict{chaosresult_verdict=\"Pass\"} == 1) or vector(0)",
+          "legendFormat": "Pass",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Chaos experiments \u2014 Pass",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The same count for a Fail verdict. A failure here is not necessarily a cluster problem: Litmus marks an experiment failed when it could not inject the fault at all, which makes the resilience claim for that window unsupported rather than disproved. `or vector(0)` is deliberate \u2014 with no failing ChaosResult the series does not exist, and *No data* on a red tile reads as a broken board rather than a clean run.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "count(litmuschaos_experiment_verdict{chaosresult_verdict=\"Fail\"} == 1) or vector(0)",
+          "legendFormat": "Fail",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Chaos experiments \u2014 Fail",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Replicas of the Litmus chaos operator Deployment that are available, from kube-state-metrics rather than from Litmus \u2014 an operator that is down cannot report that it is down. Red at zero means no ChaosEngine will be acted on, whatever the CRs in the cluster say. The old board asked for pods matching `.*chaos-operator.*`; `chaos-operator` is the operator's *container* name, while the Deployment is named by litmus-core's `fullnameOverride` (`litmus`), so that panel could never match a pod and was a permanent, reassuring zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max(kube_deployment_status_replicas_available{namespace=\"$namespace\", deployment=\"$operator_deployment\"}) or vector(0)",
+          "legendFormat": "Available",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Chaos operator",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 4,
+      "panels": [],
+      "title": "Experiment history",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How long each Litmus experiment ran, by chaos engine and chaos result. This is the duration of the *injection*, not of the recovery, and it is the timeline the `Kates \u2014 Chaos` board is read against. The panel this replaces was titled *Chaos Engine Duration (seconds)* and read `litmuschaos_engine_experiment_count`, which is neither a duration nor a series the chaos-exporter publishes under any name \u2014 the title was right and the expression was a guess. The exporter spells the real one `_total_duration`, with no unit suffix, even though the value is seconds.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "litmuschaos_experiment_total_duration",
+          "legendFormat": "{{chaosengine_name}} \u2014 {{chaosresult_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Experiment duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The three cluster-wide aggregates the exporter publishes, as cumulative lines: every run it has seen, and how those runs were graded. A step in `runs` with no step in either of the others is an experiment still awaited. The panel this replaces plotted `increase(litmuschaos_experiment_verdict[1h])` \u2014 `increase()` over a gauge that flips between 0 and 1 as verdicts are set and aged out, which produces a number with no meaning. These three are monotonic and are the exporter's own answer to *how much chaos has this cluster actually run*. The `cluster_scoped` family is the right one here because litmus-core deploys the exporter with an empty `WATCH_NAMESPACE`, which makes it aggregate over every namespace; the `namespace_scoped` family stays empty on this install. Cumulative since the exporter started, so read the change across a GameDay, not the absolute number.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "litmuschaos_cluster_scoped_experiments_run_count",
+          "legendFormat": "Runs",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "litmuschaos_cluster_scoped_passed_experiments",
+          "legendFormat": "Passed",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "litmuschaos_cluster_scoped_failed_experiments",
+          "legendFormat": "Failed",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Runs, passes and failures \u2014 cluster totals",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 7,
+      "panels": [],
+      "title": "The execution plane",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Every Running pod in the namespace the execution plane is installed in \u2014 the Litmus operator and, when `litmus-core.exporter.enabled` is set, the chaos-exporter that publishes every `litmuschaos_*` series on this board. `$namespace` is `monitoring.grafanaDashboard.namespace`, which defaults to the release namespace; it is not the Kafka namespace the experiments target. An empty table means either nothing here is Running or kube-state-metrics is not installed, and those are very different problems.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 8,
+      "options": {
+        "footer": {
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kube_pod_status_phase{namespace=\"$namespace\", phase=\"Running\"} == 1",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{pod}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Chaos infra pods \u2014 status",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace": true,
+              "service": true,
+              "uid": true
+            }
+          }
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "chaos",
+    "litmus",
+    "kates"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "text": "litmus",
+          "value": "litmus"
+        },
+        "hide": 2,
+        "label": "Chaos infra namespace",
+        "name": "namespace",
+        "query": "litmus",
+        "type": "constant"
+      },
+      {
+        "current": {
+          "text": "litmus",
+          "value": "litmus"
+        },
+        "hide": 2,
+        "label": "Chaos operator Deployment",
+        "name": "operator_deployment",
+        "query": "litmus",
+        "type": "constant"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Kates \u2014 Chaos infrastructure",
+  "uid": "kates-chaos-overview",
+  "version": 1
+}

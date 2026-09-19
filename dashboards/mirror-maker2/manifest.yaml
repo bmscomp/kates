@@ -1,0 +1,46 @@
+# The mirror board — a MirrorMaker 2 release that runs for months.
+#
+# `uid` and `title` here are the BASE. charts/mirror-maker2 rewrites both as
+# it loads the file, because Grafana keys a board by uid and two releases in
+# one Grafana would otherwise overwrite each other's board. See README.md.
+uid: kates-mm2
+title: Kafka MirrorMaker 2
+tags: [kafka, mirrormaker2, replication, kates]
+refresh: 30s
+time_from: now-6h
+links:
+  - title: MirrorMaker 2 runbook
+    type: link
+    icon: doc
+    url: https://github.com/bmscomp/kates/blob/main/docs/mirror-maker2-runbook.md
+    targetBlank: true
+
+# Two things the board cannot decide for itself, so the generator builds every
+# combination and the chart picks one (§6.1 of the refactor plan):
+#
+#   no-slo    the Replication SLO row reads `mm2:*` recorded series, which
+#             exist only where the PrometheusRule that records them is
+#             installed. `alerts.enabled && alerts.slo.enabled` selects it,
+#             and every row below the SLO row shifts by 9.
+#   identity  under an identity replication policy the replicated topic keeps
+#             its source name, so the per-source lag panel has no prefix to
+#             match: a different expression AND a different description, not
+#             a different label value.
+variants:
+  - no-slo
+  - identity
+  - identity-no-slo
+
+targets:
+  - chart: charts/mirror-maker2
+    file: files/dashboards/mirror-maker2.json
+    variant: default
+  - chart: charts/mirror-maker2
+    file: files/dashboards/mirror-maker2-no-slo.json
+    variant: no-slo
+  - chart: charts/mirror-maker2
+    file: files/dashboards/mirror-maker2-identity.json
+    variant: identity
+  - chart: charts/mirror-maker2
+    file: files/dashboards/mirror-maker2-identity-no-slo.json
+    variant: identity-no-slo

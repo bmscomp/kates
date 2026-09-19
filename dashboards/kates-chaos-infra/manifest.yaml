@@ -1,0 +1,26 @@
+# Kates — Chaos infrastructure. Delivered by charts/kates-chaos, which is the
+# chart that installs the LitmusChaos execution plane this board watches.
+#
+# The uid is kept from the hand-written board this replaces (the inline JSON
+# in charts/kates-chaos/templates/grafana-dashboard.yaml) so that existing
+# Grafana links, playlists and annotations keep resolving. The TITLE changes:
+# "Kates Chaos Engineering" and "Kates — Chaos" sat next to each other in one
+# Grafana and neither name said which was which.
+uid: kates-chaos-overview
+title: Kates — Chaos infrastructure
+description: >-
+  Is the LitmusChaos execution plane installed, running and doing anything —
+  the operator and exporter this chart deploys, and the experiment verdicts
+  they report. What a fault did to Kafka and to the workload is the separate
+  "Kates — Chaos" board.
+tags:
+  - chaos
+  - litmus
+  - kates
+refresh: 30s
+# The control plane is a slow-moving thing; a GameDay is hours, not minutes.
+time_from: now-6h
+
+targets:
+  - chart: charts/kates-chaos
+    file: files/dashboards/kates-chaos-infra.json

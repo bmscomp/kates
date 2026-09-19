@@ -1,6 +1,10 @@
 # Grafana dashboard refactor
 
-**Status:** plan, awaiting approval · **Base:** `main` at `c7fa18a` · **Branch:** `refactor/grafana-dashboards`
+**Status:** executed · **Base:** `main` at `c7fa18a` · **Branch:** `refactor/grafana-dashboards`
+
+All seven phases have landed. The counts below describe the state this refactor
+started from; `dashboards/README.md` and `dashboards/METRICS.md` describe what
+it produced.
 
 The repository ships 19 Grafana dashboards from six places. Nine of them are
 deprecated, most of those are duplicates of each other, and the panels that make
@@ -48,9 +52,14 @@ gone in 2.0).
 Across the nine legacy boards: **82 panels carrying 31 distinct concepts — 62%
 redundant.** `kafka_controller_kafkacontroller_activebrokercount` appears in six
 of them. A panel titled *Active Brokers* with an identical expression exists five
-times; *Offline Partitions* four times. `kafka-jvm-dashboard.json` has **zero**
-unique panels — every one of its four is a strict subset of `kafka-perf-global`'s
-JVM row.
+times; *Offline Partitions* four times. `kafka-jvm-dashboard.json` has **one**
+unique panel out of four: three of them are a strict subset of
+`kafka-perf-global`'s JVM row, but *JVM Non-Heap Memory* is the only place in
+the nine that reads `jvm_memory_used_bytes{area="nonheap"}` — `kafka-perf-global`'s
+JVM row is heap-only, and upstream `strimzi-kafka.json` sums the same series
+across areas without breaking them out. That one series is carried into
+**Kafka — Performance & Load Testing**'s heap panel rather than dropped with
+the board.
 
 The same three scalars are rendered six times in three different panel types,
 because `kafka-working` chose gauge and `kafka-performance` chose timeseries
@@ -126,7 +135,10 @@ JVM/container/volume set, all scoped by templated cluster and broker.
 
 `kafka-dashboard`, `kafka-comprehensive`, `kafka-working`, `kafka-all-metrics` and
 `kafka-jvm` are subsets of it — several with dead names where upstream has live
-ones.
+ones. One exception, and it is the whole of it: `strimzi-kafka.json` sums
+`jvm_memory_used_bytes` across memory areas without breaking them out, so
+`kafka-jvm`'s *JVM Non-Heap Memory* panel is not covered by it either. That
+series moves to the new performance board's heap panel.
 
 But the reverse holds for Connect and MirrorMaker 2. Both charts ship their own
 exporter rules with different name templates from Strimzi's examples:
@@ -193,7 +205,11 @@ broker caught up, and is anything failing to apply it?*
 
 ## 4. The target set
 
-Eleven boards, down from nineteen. Kafka goes from nine to two, as asked.
+Twelve boards, down from nineteen. Kafka goes from nine to two, as asked.
+The twelfth is `kates-chaos-infra`: `charts/kates-chaos`'s own hand-written
+board, which the first pass left in its template and which is migrated here
+rather than folded into `kates-chaos` — different question, different
+namespace, different chart. §1.2 counted it; the target set had not.
 
 ### `dashboards/kafka-kraft/` — **Kafka — KRaft Operations** (new)
 
@@ -233,6 +249,24 @@ the model the others are brought up to.
 The Kates set. Mutually disjoint (pairwise Jaccard 0.00), so they merge with
 nothing. Moved, deduplicated against `charts/kates`'s competing spellings, and the
 dead-metric decision in §8 applied.
+
+### `dashboards/kates-chaos-infra/` — **Kates — Chaos infrastructure**
+
+`charts/kates-chaos`'s own six-panel board, §1.2's sixth chart-rendered one.
+Migrated rather than folded into `kates-chaos`: it asks whether the chaos
+*platform* is installed and running, not what a fault did to Kafka; it is
+scoped to the namespace the execution plane runs in rather than to the Kafka
+namespace; and four of its six panels have no counterpart on the other board.
+Folding would also have moved it to `charts/monitoring`, leaving
+`charts/kates-chaos`'s `monitoring.grafanaDashboard.enabled` shipping nothing
+and breaking the rule the rest of the delivery table follows — the chart that
+owns the workload ships the board that watches it.
+
+The `uid` (`kates-chaos-overview`) is kept; the title is not, because *Kates
+Chaos Engineering* and *Kates — Chaos* beside each other in one Grafana named
+nothing. Four series or labels it read do not exist — §8's decision applied to
+a board §1.4 never examined. `dashboards/kates-chaos-infra/README.md` has the
+table.
 
 ### Deleted outright — 9 boards
 

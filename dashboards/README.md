@@ -29,6 +29,16 @@ dashboards/
     README.md          what this board is for, and how to read it
 ```
 
+[`METRICS.md`](METRICS.md) is the cross-cutting half of the documentation. A
+board's own README says what that board answers and what each section means
+when it moves; `METRICS.md` takes every series read by any board — 211 of them
+— and gives its type, its labels, one or two sentences of operational meaning,
+how to query it where that is not obvious, and which boards read it. It opens
+with the four naming traps that caused this refactor, and it says for each
+series whether this repository publishes it or something else has to be
+installed first — so an empty panel can be read as *nothing is wrong* or as
+*nothing publishes this*, which are not the same problem.
+
 ## The JSON is generated
 
 `dashboard.json` is built from `board.py`. Edit the Python, then:
@@ -60,6 +70,16 @@ The second one matters most. It runs the exporter rules over a catalogue of
 JMX beans and fails when a board reads a series no rule can emit. Eleven such
 names shipped before it covered dashboards.
 
+A third runs only in CI, in `ci-kafka-charts.yml`'s `Dashboards` job: every
+`targets[].expr` on every board is wrapped as a recording rule and put through
+`promtool check rules`, with the pinned Prometheus' own parser. A panel's
+PromQL is no less able to be wrong than an alert's, and a stray bracket
+renders as an empty panel — exactly what an idle cluster renders as.
+`$namespace` parses inside a label value and a `$` anywhere else does not, so
+the extractor substitutes a placeholder for declared variables inside label
+values only and **fails on any `$` that survives**, which is what catches a
+variable used in a duration rather than skipping the query.
+
 ## Adding a board
 
 1. `mkdir dashboards/<name>` with `board.py` and `manifest.yaml`.
@@ -69,18 +89,39 @@ names shipped before it covered dashboards.
    renames as it publishes — `BytesInPerSec` becomes `bytesin_total`,
    `AvgIdlePercent` becomes `avgidle_percent` — and guessing is what produced
    the dead panels this directory was built to clear out.
-4. Run `scripts/gen-dashboards.py` and both checks.
+4. Run `scripts/gen-dashboards.py` and both checks. Keep every Grafana
+   variable inside a label value; CI rejects a `$` anywhere else, because a
+   variable in a duration or an operand is not PromQL outside Grafana.
 5. Write the board's `README.md`: what question it answers, who opens it, and
    what each section means when it moves.
+6. Add it to the delivery table below, and to `METRICS.md` — its totals, its
+   producer table, and a row for each series it is the first to read.
 
 ## Where the boards are delivered
 
 | Board | Delivered by |
 |---|---|
-| `kafka-kraft`, `kafka-performance`, the `kates-*` set | `charts/monitoring` |
+| `kafka-kraft`, `kafka-performance` | `charts/monitoring` |
+| `kates-application`, `kates-benchmark`, `kates-chaos`, `kates-trend` | `charts/monitoring` |
+| `kates-overview`, `kyverno-security` | `charts/kates` |
+| `kates-chaos-infra` | `charts/kates-chaos` |
 | `kafka-connect` | `charts/connect-cluster` |
 | `mirror-maker2`, `mirror-maker2-migration` | `charts/mirror-maker2` |
-| `kyverno-security` | `charts/kates` |
+
+`kates-overview` is the odd one in the `kates-*` set: the application chart
+ships it, and it reads **nothing but series the application publishes about
+itself** — no kube-state-metrics, no cAdvisor, no exporter. Install
+`charts/kates` and a Grafana and it works. Four of the rest need the
+monitoring stack, which is why `charts/monitoring` delivers them.
+
+`kates-chaos-infra` is the other one out of that set, and for the same reason:
+`charts/kates-chaos` installs the LitmusChaos execution plane, so it is the
+chart that ships the board watching it. It is not `kates-chaos` — that board
+asks what a fault did to the Kafka cluster and the workload; this one asks
+whether the chaos platform is installed and running at all. Until this
+refactor it was the twelfth board and the only one outside this directory:
+hand-written JSON inside its chart's template, with no panel descriptions, no
+layout gate, and four series or labels LitmusChaos does not publish.
 
 Broker health, quorum identity, Cruise Control and consumer lag are covered by
 the Strimzi operator's own dashboards, which `charts/strimzi-operator` enables

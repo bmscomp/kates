@@ -631,9 +631,18 @@ dashboard:
     # -- Replication lag under which the mirror counts as drained, for the
     # go/no-go panel and the threshold lines. The lag alert's 60s is a
     # steady-state number; a cutover wants close to zero.
+    #
+    # FROZEN AT GENERATION TIME. The board is built from
+    # dashboards/mirror-maker2-migration/board.py, and this number is baked
+    # into the JSON there — as a threshold colour, which Grafana cannot
+    # template, and inside the go/no-go panel's `< bool 5000`, where a
+    # Grafana variable would not parse as PromQL. Changing the board means
+    # editing that file and running scripts/gen-dashboards.py; setting this
+    # value in a release no longer moves it.
     drainedBelowMs: 5000
     # -- Translation age above which a consumer group's position is shown as
     # stale — old enough that moving that consumer would replay from it.
+    # Frozen at generation time for the same reason as drainedBelowMs above.
     translationFreshMs: 60000
 
 # ── Helm tests ──────────────────────────────────────────────────────────────

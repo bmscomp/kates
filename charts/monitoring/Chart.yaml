@@ -1,6 +1,6 @@
 apiVersion: v2
 name: kates-monitoring
-version: 1.2.0
+version: 1.3.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -15,3 +15,15 @@ dependencies:
     version: "82.4.3"
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: kube-prometheus-stack.enabled
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: removed
+      description: The nine deprecated Kafka and Strimzi boards and the legacyKafkaDashboards.enabled switch that gated them. Eight were subsets of the Strimzi operator's own dashboards or of each other; seven of kafka-perf-global's metric names could not be produced by any exporter rule, and those seven were its only unique panels
+    - kind: added
+      description: "Kafka — KRaft Operations (dashboards/kafka-kraft): quorum health, metadata propagation and errors, fenced brokers, ISR dynamics, per-error-code request failures, storage and the security counters. Every panel of the four KRaft alerts that previously fired into a board showing none of their inputs"
+    - kind: added
+      description: "Kafka — Performance & Load Testing (dashboards/kafka-performance): kafka-perf-global rebuilt on corrected names, with per-topic templating and per-partition offsets, absorbing the topic panels of kafka-perf-test, kafka-performance and kafka-working"
+    - kind: changed
+      description: Both Kafka boards are generated from dashboards/<board>/board.py by scripts/gen-dashboards.py; every series they read is checked against the exporter rules by scripts/check-metric-contract.sh kafka-cluster

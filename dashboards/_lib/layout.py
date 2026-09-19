@@ -34,11 +34,18 @@ GRID_WIDTH = 24
 
 @dataclass
 class Row:
-    """One section of a board. An empty title places the panels inline."""
+    """One section of a board. An empty title places the panels inline.
+
+    `repeat` names a template variable and draws the row once per selected
+    value, which is Grafana's own way of saying "one of these per mirror".
+    The row is written to the JSON once; the copies appear at view time, so
+    the packer places it exactly as it places any other row.
+    """
 
     title: str = ""
     panels: list[dict[str, Any]] = field(default_factory=list)
     collapsed: bool = False
+    repeat: str = ""
 
 
 def layout(rows: list[Row]) -> list[dict[str, Any]]:
@@ -61,7 +68,11 @@ def layout(rows: list[Row]) -> list[dict[str, Any]]:
                 "gridPos": {"h": 1, "w": GRID_WIDTH, "x": 0, "y": y},
                 "panels": [],
             }
+            if row.repeat:
+                header["repeat"] = row.repeat
             y += 1
+        elif row.repeat:
+            raise ValueError("a row with no title cannot repeat (repeat=%r)" % row.repeat)
 
         x = 0
         band_h = 0

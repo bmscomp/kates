@@ -1,0 +1,23 @@
+# Kates — Benchmark (live). Delivered by charts/monitoring, whose ConfigMap
+# template globs `dashboards/*.json` inside the chart.
+uid: kates-benchmark-overview
+title: Kates — Benchmark (live)
+description: >-
+  One benchmark run while it is running: throughput, the latency percentiles
+  the backend measured, records and errors per phase, and which SLA constraint
+  is breaking. Empty between runs by design — the history is on Kates — Trend
+  & Regression.
+tags:
+  - kates
+  - kafka
+  - benchmark
+  - live
+# Every series on this board is written by a poll of a running task, and the
+# reconciler polls every 5 seconds. Refreshing slower than that is watching a
+# live run through a delay.
+refresh: 10s
+time_from: now-30m
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kates-benchmark.json

@@ -20,8 +20,9 @@ from typing import Any
 DATASOURCE = {"type": "prometheus", "uid": "${datasource}"}
 
 
-def target(expr: str, legend: str = "", instant: bool = False, ref: str = "A") -> dict[str, Any]:
-    """One query. `legend` is Grafana's legendFormat."""
+def target(expr: str, legend: str = "", instant: bool = False, ref: str = "A",
+           fmt: str = "") -> dict[str, Any]:
+    """One query. `legend` is Grafana's legendFormat, `fmt` its format."""
     t: dict[str, Any] = {
         "datasource": DATASOURCE,
         "expr": expr,
@@ -30,6 +31,8 @@ def target(expr: str, legend: str = "", instant: bool = False, ref: str = "A") -
     }
     if legend:
         t["legendFormat"] = legend
+    if fmt:
+        t["format"] = fmt
     if instant:
         t["instant"] = True
         t["range"] = False
@@ -71,7 +74,9 @@ def _base(title: str, description: str, kind: str, w: int, h: int) -> dict[str, 
 
 
 def _field_config(unit: str, thresholds: list[tuple[str, float | None]] | None,
-                  extra_defaults: dict[str, Any] | None = None) -> dict[str, Any]:
+                  extra_defaults: dict[str, Any] | None = None, *,
+                  color: str | None = None,
+                  overrides: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     defaults: dict[str, Any] = {"unit": unit} if unit else {}
     if thresholds:
         defaults["thresholds"] = {
@@ -79,24 +84,50 @@ def _field_config(unit: str, thresholds: list[tuple[str, float | None]] | None,
             "steps": [{"color": c, "value": v} for c, v in thresholds],
         }
         defaults["color"] = {"mode": "thresholds"}
+    if color:
+        defaults["color"] = {"mode": color}
     if extra_defaults:
         defaults.update(extra_defaults)
-    return {"defaults": defaults, "overrides": []}
+    return {"defaults": defaults, "overrides": overrides or []}
+
+
+def _scalar_defaults(min_value: float | None, max_value: float | None,
+                     decimals: int | None,
+                     mappings: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """The `fieldConfig.defaults` keys a single-value panel may also carry."""
+    extra: dict[str, Any] = {}
+    if min_value is not None:
+        extra["min"] = min_value
+    if max_value is not None:
+        extra["max"] = max_value
+    if decimals is not None:
+        extra["decimals"] = decimals
+    if mappings:
+        extra["mappings"] = mappings
+    return extra
 
 
 def stat(title: str, description: str, queries: list[dict[str, Any]], *,
          unit: str = "", thresholds: list[tuple[str, float | None]] | None = None,
          w: int = 4, h: int = 4, text_mode: str = "auto",
-         mappings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """A single current value. Use for things an operator checks at a glance."""
+         mappings: list[dict[str, Any]] | None = None,
+         min_value: float | None = None, max_value: float | None = None,
+         decimals: int | None = None, graph_mode: str = "area",
+         color_mode: str = "value") -> dict[str, Any]:
+    """A single current value. Use for things an operator checks at a glance.
+
+    `mappings` turns the number into a word — DRAINED, STOPPED — which is the
+    only honest way to render a `bool` expression, and `color_mode` paints the
+    whole tile with it.
+    """
     p = _base(title, description, "stat", w, h)
-    p["fieldConfig"] = _field_config(unit, thresholds,
-                                     {"mappings": mappings} if mappings else None)
+    p["fieldConfig"] = _field_config(
+        unit, thresholds, _scalar_defaults(min_value, max_value, decimals, mappings))
     p["options"] = {
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
         "textMode": text_mode,
-        "colorMode": "value",
-        "graphMode": "area",
+        "colorMode": color_mode,
+        "graphMode": graph_mode,
         "justifyMode": "auto",
     }
     p["targets"] = queries
@@ -108,8 +139,16 @@ def timeseries(title: str, description: str, queries: list[dict[str, Any]], *,
                thresholds: list[tuple[str, float | None]] | None = None,
                legend_mode: str = "list", fill: int = 10,
                min_value: float | None = None,
-               max_value: float | None = None) -> dict[str, Any]:
-    """A value over time. The default panel for anything with a trend."""
+               max_value: float | None = None,
+               decimals: int | None = None,
+               threshold_style: str = "",
+               color: str | None = None) -> dict[str, Any]:
+    """A value over time. The default panel for anything with a trend.
+
+    `threshold_style="line"` draws the threshold on the plot rather than
+    colouring the series by it — which is what a panel whose thresholds come
+    from an alert's own numbers wants: the line IS the alert.
+    """
     p = _base(title, description, "timeseries", w, h)
     custom: dict[str, Any] = {
         "drawStyle": "line",
@@ -120,12 +159,11 @@ def timeseries(title: str, description: str, queries: list[dict[str, Any]], *,
     }
     if stack:
         custom["stacking"] = {"mode": "normal", "group": "A"}
+    if threshold_style:
+        custom["thresholdsStyle"] = {"mode": threshold_style}
     extra: dict[str, Any] = {"custom": custom}
-    if min_value is not None:
-        extra["min"] = min_value
-    if max_value is not None:
-        extra["max"] = max_value
-    p["fieldConfig"] = _field_config(unit, thresholds, extra)
+    extra.update(_scalar_defaults(min_value, max_value, decimals, None))
+    p["fieldConfig"] = _field_config(unit, thresholds, extra, color=color)
     p["options"] = {
         "legend": {"displayMode": legend_mode, "placement": "bottom", "showLegend": True,
                    "calcs": []},
@@ -170,14 +208,35 @@ def table(title: str, description: str, queries: list[dict[str, Any]], *,
 
 
 def piechart(title: str, description: str, queries: list[dict[str, Any]], *,
-             w: int = 8, h: int = 8) -> dict[str, Any]:
+             w: int = 8, h: int = 8, color: str | None = None,
+             overrides: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """A breakdown of a whole. Used sparingly — a table is usually clearer."""
     p = _base(title, description, "piechart", w, h)
-    p["fieldConfig"] = {"defaults": {}, "overrides": []}
+    p["fieldConfig"] = _field_config("", None, color=color, overrides=overrides)
     p["options"] = {
         "legend": {"displayMode": "list", "placement": "right", "showLegend": True},
         "pieType": "donut",
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+    }
+    p["targets"] = queries
+    return p
+
+
+def barchart(title: str, description: str, queries: list[dict[str, Any]], *,
+             unit: str = "", w: int = 12, h: int = 8, horizontal: bool = True,
+             fill: int = 80, color: str | None = None) -> dict[str, Any]:
+    """A ranking across a label set at one instant — which rule, which policy.
+
+    Horizontal by default: the categories are names, and a name is easier to
+    read along the axis than under it.
+    """
+    p = _base(title, description, "barchart", w, h)
+    p["fieldConfig"] = _field_config(unit, None, {"custom": {"fillOpacity": fill}},
+                                     color=color)
+    p["options"] = {
+        "orientation": "horizontal" if horizontal else "vertical",
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True},
+        "showValue": "auto",
     }
     p["targets"] = queries
     return p
@@ -204,6 +263,47 @@ def datasource_var() -> dict[str, Any]:
         "current": {},
         "hide": 0,
         "refresh": 1,
+    }
+
+
+def constant_var(name: str, value: str, *, label: str = "", hide: int = 2) -> dict[str, Any]:
+    """A value the RELEASE knows and the board cannot ask Prometheus for.
+
+    The namespace a release runs in, the regex that matches its pods, the
+    name its recording rules label as `cluster`: none of these are derivable
+    from the data, and baking them into an expression is what made the boards
+    this directory replaces per-release JSON. They are variables instead, and
+    the chart injects the value into the generated file (see each board's
+    README). Hidden by default — an operator has nothing to choose here.
+    """
+    return {
+        "name": name,
+        "label": label or name,
+        "type": "constant",
+        "query": value,
+        "current": {"text": value, "value": value},
+        "hide": hide,
+    }
+
+
+def custom_var(name: str, values: list[str], *, label: str = "",
+               multi: bool = True, hide: int = 0) -> dict[str, Any]:
+    """A fixed list of values, every one of them selected.
+
+    What a `repeat` needs when the list comes from the chart's values rather
+    than from a label: one row per mirror, whatever the aliases are.
+    """
+    return {
+        "name": name,
+        "label": label or name,
+        "type": "custom",
+        "query": ",".join(values),
+        "options": [{"text": v, "value": v, "selected": True} for v in values],
+        "current": {"text": list(values), "value": list(values), "selected": True},
+        "multi": multi,
+        "includeAll": False,
+        "hide": hide,
+        "refresh": 0,
     }
 
 

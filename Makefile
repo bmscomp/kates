@@ -151,6 +151,16 @@ check-chart-tests: ## Fail if a chart test calls an endpoint that does not exist
 # one its JMX exporter rules can produce — simulated over the MBean catalogue
 # in scripts/metric-contract/<chart>.yaml. An alert on a name no rule emits
 # installs fine and never fires. Also run in CI (ci-mirror-maker2.yml).
+# Every board in dashboards/ is generated from its board.py and synced into the
+# charts that deliver it. --check fails when a board was edited without
+# regenerating, or when a chart copy was edited by hand.
+check-dashboards: ## Verify the dashboards are in sync and their layout holds
+	@./scripts/gen-dashboards.py --check
+	@./scripts/check-dashboards.py
+
+gen-dashboards: ## Regenerate every dashboard and its chart copies
+	@./scripts/gen-dashboards.py
+
 check-metric-contract: kafka-chart-deps connect-chart-deps mm2-chart-deps ## Verify the alerts and dashboards read series the exporter rules produce
 	@for c in $$(./scripts/check-metric-contract.sh --list); do ./scripts/check-metric-contract.sh "$$c" --quiet || exit 1; done
 

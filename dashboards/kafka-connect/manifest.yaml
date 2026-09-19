@@ -1,0 +1,32 @@
+# Kafka Connect — delivered by charts/connect-cluster.
+#
+# `uid` and `title` here are the board's identity when it is read straight out
+# of this directory. The chart overwrites both at render time, because a
+# Connect board belongs to one release: Grafana keys a board by uid, and a uid
+# built from the release name alone collides whenever two release names share
+# a prefix. charts/connect-cluster/templates/dashboard.yaml has the details.
+uid: kates-connect
+title: Kafka Connect
+description: >-
+  One Kafka Connect group: whether the workers are up, which connectors and
+  tasks are running, how much data is moving, what is failing or being
+  dead-lettered, and whether a restart will reprocess.
+tags:
+  - kafka
+  - connect
+  - strimzi
+  - kates
+refresh: 30s
+# Connect problems are slow: a rebalance storm, a drifting sink, a connector
+# that has been logging errors since the deploy. An hour is too short to see
+# any of them start.
+time_from: now-6h
+links:
+  - title: Kafka Connect runbook
+    type: link
+    url: https://github.com/bmscomp/kates/blob/main/docs/connect-cluster-runbook.md
+    targetBlank: true
+
+targets:
+  - chart: charts/connect-cluster
+    file: files/dashboards/kafka-connect.json

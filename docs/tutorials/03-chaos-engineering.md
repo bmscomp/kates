@@ -53,16 +53,28 @@ Monitor the cluster during chaos:
 kubectl get pods -n kafka -w
 
 # In another terminal — watch Grafana
-# Open http://localhost:30080 → "Kafka Chaos Dashboard"
+# Open http://localhost:30080 → "Kates — Chaos"
 ```
 
-> **Not the "Kafka Cluster Health" board.** It is one of the nine legacy Kafka
-> boards behind `legacyKafkaDashboards.enabled` in `charts/monitoring` — still
-> installed in 1.2.0, but it reads series names that kafka-cluster 1.0's
-> exporter rules (Strimzi's own) no longer produce, so its panels come up empty.
-> The flag defaults to false in 1.3 and the boards go in 2.0. The maintained
-> Kafka views now ship with `charts/strimzi-operator`, `charts/connect-cluster`
-> and `charts/mirror-maker2`.
+> **Not the "Kafka Cluster Health" board.** It was one of the nine legacy Kafka
+> boards behind `legacyKafkaDashboards.enabled` in `charts/monitoring`, and both
+> the boards and the flag are gone in 1.3.0 — they read series names that
+> kafka-cluster 1.0's exporter rules (Strimzi's own) do not produce, so their
+> panels came up empty. For the cluster's side of a chaos run, open **Kafka —
+> KRaft Operations**; for broker health as a machine, the Strimzi operator's own
+> `strimzi-kafka.json`. Every board this repository ships now lives in
+> `dashboards/`, with a README each and a metric reference in
+> `dashboards/METRICS.md` — including the last holdout, `charts/kates-chaos`'s
+> own board, which until chart 2.1.0 was hand-written JSON inside its template.
+
+> **If "Kates — Chaos" is empty, open "Kates — Chaos infrastructure" next.**
+> That board (uid `kates-chaos-overview`, shipped by `charts/kates-chaos`
+> behind `monitoring.grafanaDashboard.enabled`) answers whether the LitmusChaos
+> execution plane is installed and running at all, which is a different
+> question from what a fault did to the cluster. Its two kube-state-metrics
+> panels fill whether or not Litmus is scraped, so a green operator tile beside
+> blank Litmus panels means the chaos-exporter is off — it is, by default
+> (`litmus-core.exporter.enabled`) — rather than that nothing ran.
 
 ## Part 2: Kates Disruption Plans
 

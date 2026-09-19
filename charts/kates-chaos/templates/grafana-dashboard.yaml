@@ -1,6 +1,69 @@
 {{- if .Values.monitoring.grafanaDashboard.enabled }}
 {{- $gd := .Values.monitoring.grafanaDashboard }}
 {{- $ns := $gd.namespace | default .Release.Namespace }}
+{{- /*
+THE BOARD ITSELF LIVES IN dashboards/kates-chaos-infra/, NOT HERE.
+
+It used to be 120 lines of hand-written JSON in this file — the twelfth board
+in the repository and the only one outside dashboards/: no panel descriptions,
+not covered by the layout gate, in no delivery table, and nothing checking the
+series it read. Four of those series or labels did not exist
+(litmuschaos_engine_experiment_count, the `verdict` label on
+litmuschaos_experiment_verdict, increase() over that gauge, and a
+`.*chaos-operator.*` pod regex that can never match litmus-core's `litmus`
+Deployment). dashboards/kates-chaos-infra/README.md has the table.
+
+It is now built from `board.py` by scripts/gen-dashboards.py, which writes the
+generated JSON both to dashboards/kates-chaos-infra/dashboard.json and to the
+copy below — Helm cannot read a file outside its own chart directory, so the
+chart gets its own copy and `gen-dashboards.py --check` fails when the two
+drift.
+
+WHAT IS INJECTED. Two hidden `constant` template variables that the panels
+name and never spell out as a literal, which is what lets one generated file
+serve every release:
+
+  namespace            where the LitmusChaos execution plane runs. NOT the
+                       namespace the experiments target — that one appears
+                       nowhere on this board.
+  operator_deployment  the Litmus operator Deployment's name, for the
+                       availability tile. Defaults to litmus-core's own
+                       fullname, which its packaged values pin to `litmus`
+                       via fullnameOverride; override it with
+                       monitoring.grafanaDashboard.operatorDeployment when
+                       you bring your own Litmus under another name.
+
+The ConfigMap's name, namespace, labels, folder annotation and data key are
+unchanged from the hand-written version, so an existing install keeps the same
+object and the Grafana sidecar keeps picking it up. The uid is unchanged too
+(`kates-chaos-overview`), so existing links, playlists and annotations keep
+resolving; only the board's TITLE changed, because "Kates Chaos Engineering"
+and "Kates — Chaos" sat next to each other in one Grafana and neither name
+said which was which.
+
+This chart has no kafka-common dependency, so the ConfigMap stays hand-built
+here rather than calling kafka-common.dashboardConfigMap.
+*/}}
+{{- /* litmus-core pins fullnameOverride: litmus in its own values, so its
+       operator Deployment is `litmus` on every default install — and stays
+       `litmus` when litmus-core is disabled and the same upstream chart is
+       installed alongside. Anything else is an override, here or there. */}}
+{{- $lc := (index .Values "litmus-core") | default dict }}
+{{- $operator := $gd.operatorDeployment | default $lc.fullnameOverride | default "litmus" | trunc 63 | trimSuffix "-" }}
+{{- $file := "files/dashboards/kates-chaos-infra.json" }}
+{{- $raw := .Files.Get $file }}
+{{- if not $raw }}
+{{- fail (printf "kates-chaos: %s is missing from the chart. It is generated from dashboards/kates-chaos-infra/ — run scripts/gen-dashboards.py." $file) }}
+{{- end }}
+{{- $board := fromJson $raw }}
+{{- $constants := dict "namespace" $ns "operator_deployment" $operator }}
+{{- range $var := (index $board "templating" "list") }}
+{{- if hasKey $constants $var.name }}
+{{- $value := index $constants $var.name }}
+{{- $_ := set $var "query" $value }}
+{{- $_ := set $var "current" (dict "text" $value "value" $value) }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,123 +79,6 @@ metadata:
     grafana_folder: {{ $gd.folder | quote }}
   {{- end }}
 data:
-  kates-chaos-dashboard.json: |
-    {
-      "annotations": { "list": [] },
-      "editable": true,
-      "fiscalYearStartMonth": 0,
-      "graphTooltip": 1,
-      "id": null,
-      "links": [],
-      "panels": [
-        {
-          "title": "Chaos Experiments — Pass/Fail",
-          "type": "stat",
-          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
-          "targets": [
-            {
-              "expr": "count(litmuschaos_experiment_verdict{verdict=\"Pass\"})",
-              "legendFormat": "Pass"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "red", "value": 0 }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "title": "Chaos Experiments — Fail Count",
-          "type": "stat",
-          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
-          "targets": [
-            {
-              "expr": "count(litmuschaos_experiment_verdict{verdict=\"Fail\"}) or vector(0)",
-              "legendFormat": "Fail"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "red", "value": 1 }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "title": "Chaos Engine Duration (seconds)",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-          "targets": [
-            {
-              "expr": "litmuschaos_engine_experiment_count",
-              "legendFormat": "{{`{{`}} chaosengine_name {{`}}`}}"
-            }
-          ]
-        },
-        {
-          "title": "Experiment Run Count Over Time",
-          "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-          "targets": [
-            {
-              "expr": "increase(litmuschaos_experiment_verdict[1h])",
-              "legendFormat": "{{`{{`}} experiment_name {{`}}`}} ({{`{{`}} verdict {{`}}`}})"
-            }
-          ]
-        },
-        {
-          "title": "Chaos Infra — Pod Status",
-          "type": "table",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-          "targets": [
-            {
-              "expr": "kube_pod_status_phase{namespace=\"{{ $ns }}\", phase=\"Running\"} == 1",
-              "legendFormat": "{{`{{`}} pod {{`}}`}}",
-              "instant": true,
-              "format": "table"
-            }
-          ]
-        },
-        {
-          "title": "Chaos Operator Up",
-          "type": "stat",
-          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 14 },
-          "targets": [
-            {
-              "expr": "count(kube_pod_status_phase{namespace=\"{{ $ns }}\", pod=~\".*chaos-operator.*\", phase=\"Running\"} == 1) or vector(0)",
-              "legendFormat": "Operator"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "steps": [
-                  { "color": "red", "value": null },
-                  { "color": "green", "value": 1 }
-                ]
-              }
-            }
-          }
-        }
-      ],
-      "refresh": "30s",
-      "schemaVersion": 39,
-      "tags": ["chaos", "litmus", "kates"],
-      "templating": { "list": [] },
-      "time": { "from": "now-6h", "to": "now" },
-      "title": "Kates Chaos Engineering",
-      "uid": "kates-chaos-overview"
-    }
+  kates-chaos-dashboard.json: |-
+    {{- toPrettyJson $board | nindent 4 }}
 {{- end }}

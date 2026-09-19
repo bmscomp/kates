@@ -262,11 +262,16 @@ monitoring:
   grafanaDashboard:
     enabled: true
     namespace: ""            # namespace used in dashboard PromQL (default: release ns)
+    operatorDeployment: ""   # Litmus operator Deployment name (default: litmus-core's own)
     folder: ""               # grafana_folder annotation
     labels: { grafana_dashboard: "1" }
 ```
 
-Dashboard panels: experiment pass/fail counts, engine duration, run-count over time, chaos-infra pod status, chaos operator up.
+**The board lives in [`dashboards/kates-chaos-infra/`](../dashboards/kates-chaos-infra/README.md)**, not in this chart's templates. Chart 2.1.0 moved it there, where it is generated from `board.py` by `scripts/gen-dashboards.py` alongside the other eleven; the chart loads the generated copy with `.Files.Get`. The ConfigMap's name, namespace, labels, folder annotation and data key are unchanged, as is the board's `uid` (`kates-chaos-overview`), so an existing install keeps the same object and existing Grafana links keep resolving. The title changed to **Kates — Chaos infrastructure**.
+
+Six panels: experiment Pass and Fail counts, chaos operator availability, experiment duration, cluster-wide run/pass/fail totals, and chaos-infra pod status. Four of the series or labels the old inline board read do not exist in LitmusChaos and are corrected — that README has the table.
+
+Every `litmuschaos_*` panel needs the chaos-exporter, which `litmus-core.exporter.enabled` leaves off by default. The two kube-state-metrics panels fill regardless, which makes them the ones to read first.
 
 ### Kyverno Pod Security Policies
 

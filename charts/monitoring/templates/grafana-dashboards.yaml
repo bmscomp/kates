@@ -1,13 +1,21 @@
 {{- /*
-The Kates dashboards (application, benchmark, trend, chaos) always, and the
-legacy Kafka boards only while legacyKafkaDashboards.enabled. Those read
-hand-written series names that the Strimzi exporter rules kafka-cluster 1.0
-ships do not produce; the maintained boards are the Strimzi operator's
-(charts/strimzi-operator), connect-cluster's and mirror-maker2's own.
+Every board in this chart's dashboards/ directory, in one ConfigMap the
+Grafana sidecar discovers by label.
+
+Every file in it is GENERATED. scripts/gen-dashboards.py builds each board
+from dashboards/<board>/board.py in the repository root and writes the copy
+here, because Helm cannot read a file outside its own chart directory;
+`scripts/gen-dashboards.py --check` fails CI when a copy has drifted, so
+editing the JSON here does not survive. The glob stays a glob so that adding
+a board is a manifest entry and nothing else.
+
+Until 1.3.0 this template also carried a `legacyKafkaDashboards.enabled`
+switch over nine deprecated Kafka and Strimzi boards. Those files are deleted;
+the Strimzi operator's own dashboards cover broker health, quorum identity,
+Cruise Control and consumer lag (charts/strimzi-operator), and the two boards
+above cover what they leave out.
 */}}
 {{- if .Values.dashboards.enabled }}
-{{- $legacy := include "kates-monitoring.legacyKafkaDashboards" . | fromYamlArray }}
-{{- $keepLegacy := ne (toString (.Values.legacyKafkaDashboards).enabled) "false" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,9 +29,7 @@ metadata:
 data:
   {{- $files := .Files }}
   {{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
-  {{- if or $keepLegacy (not (has (base $path) $legacy)) }}
   {{ base $path }}: |-
 {{ $files.Get $path | indent 4 }}
-  {{- end }}
   {{- end }}
 {{- end }}

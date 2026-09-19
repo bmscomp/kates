@@ -3,8 +3,10 @@ name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Minor bump, not a patch: the default readiness path and startup probe
-# thresholds changed, so a default install behaves differently after upgrade.
-version: 0.7.0
+# thresholds changed, so a default install behaves differently after upgrade;
+# and both Grafana boards are replaced in place, losing four panels that could
+# never have had data. docs/grafana-dashboards-refactor-plan.md, phase 6.
+version: 0.8.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -27,6 +29,21 @@ icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
 annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: "Both boards move to dashboards/kates-overview and dashboards/kyverno-security, are built from board.py by scripts/gen-dashboards.py, and are loaded from files/dashboards/ with .Files.Get instead of being written inline in the template. ConfigMap names, namespaces, labels and data keys are unchanged, so an existing install keeps the same objects and the Grafana sidecar keeps picking them up"
+    - kind: changed
+      description: "The uid of each board is unchanged (kates-overview, kyverno-security-overview), so Grafana replaces them in place and existing links, playlists and annotations keep resolving. The overview board's title changes from KATES — Kafka Testing Suite to KATES — Overview"
+    - kind: fixed
+      description: "Five metric names on the overview board that no meter has ever published, renamed in place: agroal_pool_{active,available,max_used}_count (Quarkus publishes agroal_*, with no pool segment), kates_active_runs and kates_benchmark_throughput_records_per_sec. The monitoring chart's boards spelled these the other way, so the repository shipped three spellings of the same metric; they now agree with each other and with the code"
+    - kind: fixed
+      description: "Two label names on the Kyverno board that Kyverno does not emit. Policy Violations Over Time grouped on `policy` and Violations by Rule on `rule`; kyverno_policy_results_total carries policy_name and rule_name, and a group on a label that does not exist collapsed both panels to one unlabelled series"
+    - kind: removed
+      description: "Three overview panels no rename could fix — Benchmark P99 Latency (ms), which read kates_benchmark_p99_latency_ms (there has never been such a meter; the percentiles are one series with a quantile label, and the per-run series that does publish them belongs on the benchmark boards, not on this one), Kafka Admin Connections (Micrometer binds only clients the Kafka extension creates, and this application builds its own AdminClient), and Vert.x Event Loop Latency (Vert.x metrics options are not enabled). The CPU and JVM panels survived on corrected series: process_cpu_usage and system_cpu_usage in place of process_cpu_seconds_total, and jvm_memory_used_bytes{area=nonheap} in place of process_resident_memory_bytes, both of which are Prometheus simpleclient default exports a Quarkus Micrometer registry never publishes. Two legends also read a task_id tag no meter carries"
+    - kind: added
+      description: "A $job template variable on the overview board, so one copy serves every Kates release a Grafana can see; the release name is no longer interpolated into 16 of its 21 expressions as a literal job= selector. Descriptions on all nine Kyverno panels, which had none — the layout gate in ci-kafka-charts.yml now covers this chart and will not accept a panel without one"
+    - kind: changed
+      description: "metrics.grafanaDashboard.enabled and kyvernoPolicy.grafanaDashboard now fail the render with a named file if the generated board is missing from the chart, rather than shipping an empty ConfigMap. Run scripts/gen-dashboards.py when rendering from a checkout"
 # No subchart dependencies: the bundled database is a self-contained
 # StatefulSet on the official `postgres` image (templates/postgresql.yaml).
 # For production HA, set postgresql.enabled=false and point externalDatabase

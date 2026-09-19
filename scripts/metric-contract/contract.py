@@ -141,6 +141,8 @@ def load_external_dashboards(contract, contract_path):
     refs = {}
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(contract_path))))
     for spec in contract.get("external_dashboards") or []:
+        if not spec.get("archive"):
+            continue      # a `paths`-only entry; the second loop reads it
         archives = sorted(glob.glob(os.path.join(root, spec["archive"])))
         if not archives:
             sys.exit("::error::external_dashboards: nothing matches %s (run helm dependency build?)" % spec["archive"])

@@ -87,18 +87,9 @@ The kafka-cluster chart then creates the `PodMonitor` and `PrometheusRule` resou
 **Whatever namespace you choose, tell kafka-cluster about it.** The broker NetworkPolicy admits Prometheus on 9404 from `networkPolicy.monitoring.namespace`, which defaults to `monitoring` — so the command above works out of the box. The repository's own path does not use it: `make monitoring` and `scripts/deploy-monitoring.sh` install the release into `kafka`, alongside the brokers, and [Observability & Monitoring](09-observability.md) documents that form. If you follow them, add `--set networkPolicy.monitoring.namespace=kafka` to the kafka-cluster install, or the scrape is dropped the moment network policies are on (staging and prod; they are off in `values-dev.yaml` and `values-kind.yaml`, which is why the mismatch is invisible locally).
 :::
 
-**One value to decide on.** Chart 1.2.0 puts the hand-written Kafka boards — the `kafka-*` dashboards and the Strimzi operator board — behind `legacyKafkaDashboards.enabled`, which still defaults to `true`. They read series names that kafka-cluster 1.0's exporter rules (Strimzi's own) do not produce, so they render empty panels. The boards that are maintained now ship with the charts that own the workloads: the Strimzi operator's come from `charts/strimzi-operator` (section 3.2), and connect-cluster and mirror-maker2 each ship their own. Once those are in place, turn the legacy set off:
+**Nothing to decide about boards.** Chart 1.3.0 deleted the nine hand-written Kafka and Strimzi boards, along with the `legacyKafkaDashboards.enabled` key that used to gate them; setting that key now does nothing and the chart's NOTES say so on upgrade. They read series names that kafka-cluster 1.0's exporter rules (Strimzi's own) do not produce, so they rendered empty panels.
 
-```bash
-helm upgrade --install monitoring charts/monitoring \
-  -f charts/monitoring/values-generic.yaml \
-  --set legacyKafkaDashboards.enabled=false \
-  --namespace monitoring --create-namespace
-```
-
-::: {.callout-note}
-The key is deprecated: it flips to `false` by default in kates-monitoring 1.3 and disappears in 2.0. Setting it now is the migration, not a workaround.
-:::
+What `charts/monitoring` ships instead is two Kafka boards — **Kafka — KRaft Operations** and **Kafka — Performance & Load Testing** — plus four Kates boards, all generated from `dashboards/` and all checked against the exporter rules on every build. Broker health, quorum identity, Cruise Control and consumer lag come from the Strimzi operator's own dashboards (`charts/strimzi-operator`, section 3.2), and connect-cluster, mirror-maker2 and kates each ship the board for the workload they own. [Observability & Monitoring](09-observability.md) is the tour.
 
 ### 1.5 Kyverno (Optional)
 

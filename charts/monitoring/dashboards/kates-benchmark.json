@@ -1,0 +1,921 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "One benchmark run while it is running: throughput, the latency percentiles the backend measured, records and errors per phase, and which SLA constraint is breaking. Empty between runs by design \u2014 the history is on Kates \u2014 Trend & Regression.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How many benchmark runs the engine currently holds. A process-wide gauge registered at startup and incremented per run, not tagged with a run id, so it is the one number on this board that is still there between runs. It is bounded by `kates.engine.max-concurrent-tests`; sitting at that ceiling means new submissions are being rejected. Sitting above zero with every other panel empty means a run is registered but its tasks are producing nothing \u2014 look at the Errors panel and at the application's logs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(kates_benchmark_active_runs{job=\"$job\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active runs",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Total records the selected run has carried, summed over its phases. A counter: it climbs through the run and stops at the final total. Each phase's series is the sum of the latest cumulative total reported by each of that phase's tasks, clamped so it cannot fall \u2014 a task that restarts and re-counts from zero holds the counter flat rather than resetting it, because a counter reset makes `rate()` invent a spike that never happened.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(kates_benchmark_records_total{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Records moved",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Task-level failures recorded for this run, across all phases. The engine increments this once per task that reaches a FAILED state, so it counts failed *tasks*, not failed records \u2014 a producer that dropped ten thousand messages and then completed contributes nothing here. Non-zero means part of the run did not do what it was asked, and every number elsewhere on this board is an average over a run that was partly not running.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(kates_benchmark_errors_total{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Errors",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How many of this run's SLA constraints are violated *right now*. One gauge per (constraint, severity), valued 1 while breaching and 0 once it recovers, re-evaluated on every poll against the same `SlaEvaluator` the report path uses \u2014 so a live breach here and a pass in the final report are not a contradiction, they are a constraint that recovered. A constraint that has never been violated in this run is never registered, which is why the `or vector(0)` is load-bearing: with no violations there is no series at all.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(kates_benchmark_sla_violations{job=\"$job\", run_id=~\"$run_id\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "SLA constraints breaching",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "panels": [],
+      "title": "Throughput",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "What the backend reported on its last poll, per run and test type. A gauge the engine overwrites each poll, not a rate computed from a counter, so it is the backend's own measurement over its own window and does not need `rate()`. Until phase 6 this was only ever written once, in the instant between a run reaching its terminal state and its meters being unregistered \u2014 so in practice it was never scraped with a value at all. `TestOrchestrator` now feeds it from every poll.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_throughput_rec_sec{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}",
+          "legendFormat": "{{run_id}} \u2014 {{test_type}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Throughput \u2014 records/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The same measurement in bytes. Read the two together: records/s holding while MB/s falls is a run that switched to smaller records, and MB/s holding while records/s falls is the reverse. Only when both fall together has the pipeline actually slowed down. If this pins flat while records/s moves, the backend is not reporting a byte count and the number is its default, not a measurement.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "MBs"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_throughput_mb_sec{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}",
+          "legendFormat": "{{run_id}} \u2014 {{test_type}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Throughput \u2014 MB/s",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 8,
+      "panels": [],
+      "title": "Latency \u2014 selected quantiles, never histogram_quantile",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "p50, p95, p99 and p99.9 for each phase of the run. These are **pre-computed percentile gauges with a `quantile` label**, published under the names a Micrometer summary would use but carrying the backend's own percentiles \u2014 the engine never sees individual latencies, only the aggregates a poll returns, so a real summary here would be publishing percentiles of averages under a name that claims to be a distribution. Select the quantile; never `histogram_quantile()`, and never average two of these together. A phase with several tasks reports its worst task's value for each quantile, recomputed per poll, so the line falls again when the slow task recovers.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_latency_ms{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.5\"}",
+          "legendFormat": "p50 {{phase}} {{run_id}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_latency_ms{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.95\"}",
+          "legendFormat": "p95 {{phase}} {{run_id}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_latency_ms{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.99\"}",
+          "legendFormat": "p99 {{phase}} {{run_id}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_latency_ms{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.999\"}",
+          "legendFormat": "p99.9 {{phase}} {{run_id}}",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Latency percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The single slowest observation the backend has seen in each phase \u2014 `kates_benchmark_latency_ms_max`, a separate gauge and not a member of the percentile family above it, which is why it has no `quantile` label. The backend reports it cumulatively, so it is a high-water mark within the run and a step upward here is one bad request, not a trend. It is the gap between this and p99.9 that matters: a max far above p99.9 is a single stall (a GC pause, a leader election), while a max close to p99.9 means the whole tail moved.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_latency_ms_max{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}",
+          "legendFormat": "max {{phase}} {{run_id}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Worst observed latency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 11,
+      "panels": [],
+      "title": "Phase detail",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The derivative of the records counter, per phase \u2014 how fast each phase is moving right now. This is the counter-derived rate, and the throughput gauge two rows up is the backend's own; they should agree, and a persistent disagreement means the backend's window and this 30-second one are measuring different things. A phase whose line is flat at zero while the run is RUNNING has not started or has stalled.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 23
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (phase) (rate(kates_benchmark_records_total{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}[30s]))",
+          "legendFormat": "{{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Record rate by phase",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The same p99 series as the Latency row, grouped so each phase is one line. Worth its own panel because phases do different work: a produce phase and a consume phase have no reason to share a latency profile, and reading them on one axis is how a slow consumer gets blamed on the producer. `max by (phase)` collapses the phase's tasks to its worst.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 23
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (phase) (kates_benchmark_latency_ms{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\", quantile=\"0.99\"})",
+          "legendFormat": "p99 {{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "p99 latency by phase",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Cumulative records per phase \u2014 the same counter as the header stat, split. This is the panel that says whether the phases are balanced: a produce phase far ahead of its consume phase is a backlog building, and one that never leaves zero is a phase whose tasks never started. Compare the final heights rather than the slopes; the slopes are the panel to the left.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 23
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (phase) (kates_benchmark_records_total{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"})",
+          "legendFormat": "{{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Records by phase",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 15,
+      "panels": [],
+      "title": "SLA and errors",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Task failures per second, by phase. The counter behind it moves once per failed task, so on a healthy run this is flat zero and any departure from zero is worth stopping for \u2014 it is not a per-record error rate and there is no acceptable background level. A step here with the record rate unchanged is a task dying while its siblings carry on, which is the failure that leaves the run's aggregate numbers looking almost normal.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (phase) (rate(kates_benchmark_errors_total{job=\"$job\", run_id=~\"$run_id\", test_type=~\"$test_type\"}[1m]))",
+          "legendFormat": "{{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Error rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Which constraint is breaking, and how badly the run is judged for it. One line per (constraint, severity) at 1 while violated and 0 once it recovers \u2014 the zero matters, because a series that simply stops publishing leaves a gap that looks identical to a constraint that was never evaluated. `severity` comes from the SLA definition: CRITICAL constraints fail the run, WARNING ones are recorded and do not. Cross-check the offending metric against its panel above before concluding the threshold is wrong; a p99 constraint breaching while the p99 panel looks calm usually means one phase, not the run.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "max": 1,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (metric, severity) (kates_benchmark_sla_violations{job=\"$job\", run_id=~\"$run_id\"})",
+          "legendFormat": "{{metric}} ({{severity}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "SLA constraints breaching, by constraint",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "kates",
+    "kafka",
+    "benchmark",
+    "live"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kates_benchmark_active_runs, job)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Scrape job",
+        "multi": false,
+        "name": "job",
+        "options": [],
+        "query": {
+          "query": "label_values(kates_benchmark_active_runs, job)",
+          "refId": "job-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kates_benchmark_records_total{job=\"$job\"}, run_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Run",
+        "multi": false,
+        "name": "run_id",
+        "options": [],
+        "query": {
+          "query": "label_values(kates_benchmark_records_total{job=\"$job\"}, run_id)",
+          "refId": "run_id-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kates_benchmark_records_total{job=\"$job\"}, test_type)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Test type",
+        "multi": true,
+        "name": "test_type",
+        "options": [],
+        "query": {
+          "query": "label_values(kates_benchmark_records_total{job=\"$job\"}, test_type)",
+          "refId": "test_type-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Kates \u2014 Benchmark (live)",
+  "uid": "kates-benchmark-overview",
+  "version": 1
+}

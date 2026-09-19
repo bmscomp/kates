@@ -10,10 +10,13 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
+
+import com.bmscomp.kates.domain.SlaViolation;
 
 /**
  * Bridges internal benchmark metrics to Micrometer for Prometheus export.
@@ -26,6 +29,27 @@ import io.micrometer.core.instrument.Tags;
  * each run permanently added time series and Prometheus memory grew without
  * bound. The number of run_ids alive at once is bounded by the engine's
  * concurrency cap.
+ *
+ * <p><b>Published names.</b> Micrometer's Prometheus naming convention turns
+ * the dots into underscores and appends {@code _total} to a counter whose name
+ * does not already end in it, so the meters below publish as:
+ *
+ * <pre>
+ *   kates.benchmark.active.runs        -&gt; kates_benchmark_active_runs
+ *   kates.benchmark.throughput.rec.sec -&gt; kates_benchmark_throughput_rec_sec
+ *   kates.benchmark.throughput.mb.sec  -&gt; kates_benchmark_throughput_mb_sec
+ *   kates.benchmark.records.total      -&gt; kates_benchmark_records_total
+ *   kates.benchmark.errors.total       -&gt; kates_benchmark_errors_total
+ *   kates.benchmark.latency.ms         -&gt; kates_benchmark_latency_ms{quantile=…}
+ *   kates.benchmark.latency.ms.max     -&gt; kates_benchmark_latency_ms_max
+ *   kates.benchmark.sla.violations     -&gt; kates_benchmark_sla_violations
+ * </pre>
+ *
+ * Those are the names {@code dashboards/kates-benchmark}, {@code kates-trend}
+ * and {@code kates-chaos} read, and {@code BenchmarkMetricsTest} asserts every
+ * one of them against a real {@code PrometheusMeterRegistry} — the boards read
+ * the published spelling, not the registered one, and guessing the translation
+ * is exactly what left four of these names unregistered for so long.
  */
 @ApplicationScoped
 public class BenchmarkMetrics {
@@ -115,12 +139,159 @@ public class BenchmarkMetrics {
         }
     }
 
+    /**
+     * Publishes one task's CUMULATIVE record count for its phase.
+     *
+     * <p>Cumulative, not a delta: every caller has the running total the
+     * backend reports, and a counter fed with deltas double-counts the moment
+     * two polls of the same task overlap. The phase's counter reads the sum of
+     * the latest total per task, and each task's total only ever moves up
+     * ({@code Math::max}), so the series is monotonic — which is what makes
+     * {@code rate(kates_benchmark_records_total[30s])} on the benchmark board
+     * mean anything. A backend that restarts a task and re-counts from zero
+     * therefore holds the counter flat rather than resetting it.
+     */
+    public void recordRecords(String runId, String taskId, String phaseName, long recordsProcessed) {
+        RunMeters meters = runMeters.get(runId);
+        if (meters == null) return;
+
+        PhaseRecords records = meters.phaseRecords(phaseName);
+        if (records != null) {
+            records.observe(taskId, recordsProcessed);
+        }
+    }
+
+    /**
+     * Publishes one task's latency percentiles for its phase, in milliseconds.
+     *
+     * <p>These are <b>gauges carrying a {@code quantile} label</b>, not a
+     * Micrometer {@code DistributionSummary}. They publish under exactly the
+     * names a summary would — {@code kates_benchmark_latency_ms{quantile="…"}}
+     * and {@code kates_benchmark_latency_ms_max} — but the values are the
+     * backend's own percentiles rather than percentiles Micrometer computed.
+     * That is deliberate: the engine never sees individual latencies, only the
+     * aggregates a poll returns, and feeding those aggregates into a summary
+     * would publish percentiles OF AVERAGES under a name that claims to be a
+     * latency distribution. Pre-computed percentile gauges are the same shape
+     * the Kafka JMX exporter publishes, and {@code dashboards/METRICS.md}
+     * documents the rule that goes with them: select the quantile, never
+     * {@code histogram_quantile()}.
+     *
+     * <p>A phase with several tasks reports the worst task's value for each
+     * quantile, recomputed on every poll — so a phase recovers on the board
+     * when its slowest task recovers, which a last-writer-wins gauge would not
+     * show.
+     *
+     * <p>A non-positive value means the backend has not measured that quantile
+     * yet and is ignored, so an unmeasured p99.9 reads as absent rather than as
+     * a zero-millisecond p99.9.
+     */
+    public void recordLatency(
+            String runId,
+            String taskId,
+            String phaseName,
+            double p50Ms,
+            double p95Ms,
+            double p99Ms,
+            double p999Ms,
+            double maxMs) {
+        RunMeters meters = runMeters.get(runId);
+        if (meters == null) return;
+
+        PhaseLatency latency = meters.phaseLatency(phaseName);
+        if (latency != null) {
+            latency.observe(taskId, p50Ms, p95Ms, p99Ms, p999Ms, maxMs);
+        }
+    }
+
+    /**
+     * Publishes the run's currently violated SLA constraints, one gauge per
+     * (metric, severity), valued 1 while violated and 0 once it recovers.
+     *
+     * <p>Zero rather than removal: the benchmark board graphs
+     * {@code sum by (metric, severity)} over time, and a constraint that stops
+     * publishing leaves a gap that reads the same as a constraint that was
+     * never evaluated. A constraint that has never been violated is never
+     * registered at all, so the board shows only what actually broke, and the
+     * meter set is bounded by the number of constraints an SLA can define.
+     *
+     * <p>Called once per poll with every task's violations merged, not once per
+     * task: called per task, the last task polled would clear the violations of
+     * the ones before it.
+     */
+    public void recordSlaViolations(String runId, List<SlaViolation> violations) {
+        RunMeters meters = runMeters.get(runId);
+        if (meters == null) return;
+
+        meters.applySlaViolations(violations == null ? List.of() : violations);
+    }
+
+    /**
+     * The latest cumulative record count of every task in one phase.
+     *
+     * <p>Held per task so the phase total is a sum rather than whichever task
+     * was polled last, and clamped upward so the sum can only ever grow: a
+     * counter that goes backwards reads to Prometheus as a counter reset, and
+     * {@code rate()} over a reset invents a spike that never happened.
+     */
+    private static final class PhaseRecords {
+        private final Map<String, Long> perTask = new ConcurrentHashMap<>();
+
+        void observe(String taskId, long cumulative) {
+            if (cumulative < 0) return;
+            perTask.merge(taskId == null ? "default" : taskId, cumulative, Math::max);
+        }
+
+        double total() {
+            long sum = 0;
+            for (long v : perTask.values()) {
+                sum += v;
+            }
+            return sum;
+        }
+    }
+
+    /**
+     * The latest latency aggregates of every task in one phase.
+     *
+     * <p>Each gauge reads the worst task's value for its quantile, recomputed
+     * on every read, so a phase's p99 falls again when its slowest task
+     * recovers. A task that has not reported a given quantile contributes
+     * nothing rather than contributing a zero.
+     */
+    private static final class PhaseLatency {
+        static final int P50 = 0;
+        static final int P95 = 1;
+        static final int P99 = 2;
+        static final int P999 = 3;
+        static final int MAX = 4;
+
+        private final Map<String, double[]> perTask = new ConcurrentHashMap<>();
+
+        void observe(String taskId, double p50, double p95, double p99, double p999, double max) {
+            perTask.put(taskId == null ? "default" : taskId, new double[] {p50, p95, p99, p999, max});
+        }
+
+        double worst(int index) {
+            double worst = 0;
+            for (double[] sample : perTask.values()) {
+                if (sample[index] > worst) {
+                    worst = sample[index];
+                }
+            }
+            return worst;
+        }
+    }
+
     private class RunMeters {
         final String runId;
         final String testType;
         final DoubleAccumulator throughputRecPerSec;
         final DoubleAccumulator throughputMBPerSec;
         private final Map<String, Counter> errorCounters = new ConcurrentHashMap<>();
+        private final Map<String, PhaseRecords> phaseRecords = new ConcurrentHashMap<>();
+        private final Map<String, PhaseLatency> phaseLatencies = new ConcurrentHashMap<>();
+        private final Map<String, AtomicInteger> slaViolationGauges = new ConcurrentHashMap<>();
 
         /** Every meter this run registered, so endRun can remove all of them. */
         private final List<Meter.Id> meterIds = new CopyOnWriteArrayList<>();
@@ -169,6 +340,103 @@ public class BenchmarkMetrics {
             });
         }
 
+        /**
+         * The record counter for a phase, registered on first sight. Null once
+         * the run is over, for the same reason {@link #errorCount(String)} is:
+         * a late poll must not register a fresh meter after the id list has
+         * been cleared, which would leave that run_id series in the registry
+         * for the life of the process.
+         */
+        PhaseRecords phaseRecords(String phase) {
+            if (unregistered) {
+                return null;
+            }
+            return phaseRecords.computeIfAbsent(phase == null ? "default" : phase, p -> {
+                PhaseRecords records = new PhaseRecords();
+                meterIds.add(FunctionCounter.builder("kates.benchmark.records.total", records, PhaseRecords::total)
+                        .tags("run_id", runId, "test_type", testType, "phase", p)
+                        .description("Records processed by this run's phase")
+                        .register(registry)
+                        .getId());
+                return records;
+            });
+        }
+
+        /** The five latency gauges for a phase, registered on first sight. */
+        PhaseLatency phaseLatency(String phase) {
+            if (unregistered) {
+                return null;
+            }
+            return phaseLatencies.computeIfAbsent(phase == null ? "default" : phase, p -> {
+                PhaseLatency latency = new PhaseLatency();
+                Tags phaseTags = Tags.of("run_id", runId, "test_type", testType, "phase", p);
+                registerQuantile(latency, phaseTags, "0.5", PhaseLatency.P50);
+                registerQuantile(latency, phaseTags, "0.95", PhaseLatency.P95);
+                registerQuantile(latency, phaseTags, "0.99", PhaseLatency.P99);
+                registerQuantile(latency, phaseTags, "0.999", PhaseLatency.P999);
+                meterIds.add(Gauge.builder("kates.benchmark.latency.ms.max", latency, l -> l.worst(PhaseLatency.MAX))
+                        .tags(phaseTags)
+                        .description("Worst latency observed in this run's phase, ms")
+                        .register(registry)
+                        .getId());
+                return latency;
+            });
+        }
+
+        private void registerQuantile(PhaseLatency latency, Tags phaseTags, String quantile, int index) {
+            meterIds.add(Gauge.builder("kates.benchmark.latency.ms", latency, l -> l.worst(index))
+                    .tags(phaseTags.and("quantile", quantile))
+                    .description("Latency percentile for this run's phase, ms")
+                    .register(registry)
+                    .getId());
+        }
+
+        /**
+         * Sets every violated constraint to 1 and every constraint that has
+         * ever been violated in this run and is not in {@code violations} back
+         * to 0.
+         */
+        void applySlaViolations(List<SlaViolation> violations) {
+            if (unregistered) {
+                return;
+            }
+            java.util.Set<String> violated = new java.util.HashSet<>();
+            for (SlaViolation violation : violations) {
+                if (violation == null || violation.metric() == null) {
+                    continue;
+                }
+                String severity = violation.severity() == null
+                        ? "unknown"
+                        : violation.severity().name().toLowerCase(java.util.Locale.ROOT);
+                String key = violation.metric() + "\u0000" + severity;
+                violated.add(key);
+                AtomicInteger state = slaViolationGauge(violation.metric(), severity, key);
+                if (state != null) {
+                    state.set(1);
+                }
+            }
+            for (Map.Entry<String, AtomicInteger> entry : slaViolationGauges.entrySet()) {
+                if (!violated.contains(entry.getKey())) {
+                    entry.getValue().set(0);
+                }
+            }
+        }
+
+        private AtomicInteger slaViolationGauge(String metric, String severity, String key) {
+            if (unregistered) {
+                return null;
+            }
+            return slaViolationGauges.computeIfAbsent(key, k -> {
+                AtomicInteger state = new AtomicInteger();
+                meterIds.add(Gauge.builder("kates.benchmark.sla.violations", state, AtomicInteger::get)
+                        .tags("run_id", runId, "test_type", testType, "metric", metric, "severity", severity)
+                        .description("1 while this SLA constraint is violated by the run, 0 once it recovers")
+                        .register(registry)
+                        .getId());
+                return state;
+            });
+        }
+
         void unregister() {
             unregistered = true;
             for (Meter.Id id : meterIds) {
@@ -176,6 +444,9 @@ public class BenchmarkMetrics {
             }
             meterIds.clear();
             errorCounters.clear();
+            phaseRecords.clear();
+            phaseLatencies.clear();
+            slaViolationGauges.clear();
         }
     }
 }

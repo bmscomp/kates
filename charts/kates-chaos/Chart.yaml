@@ -1,6 +1,10 @@
 apiVersion: v2
 name: kates-chaos
-version: 2.0.0
+# Minor bump: the Grafana board moves out of the template into
+# dashboards/kates-chaos-infra/ and four of the series it read are corrected,
+# so the same board shows different — and for the first time non-empty — data
+# after upgrade. docs/grafana-dashboards-refactor-plan.md.
+version: 2.1.0
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
@@ -24,6 +28,16 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The Grafana board moves to dashboards/kates-chaos-infra, is built from board.py by scripts/gen-dashboards.py, and is loaded from files/dashboards/ with .Files.Get instead of being written inline in the template. It was the twelfth board in the repository and the only one outside dashboards/: no panel descriptions, not covered by the layout gate, and in no delivery table. ConfigMap name, namespace, labels, folder annotation and data key are unchanged, so an existing install keeps the same object and the Grafana sidecar keeps picking it up"
+    - kind: changed
+      description: "The board's uid is unchanged (kates-chaos-overview), so Grafana replaces it in place and existing links, playlists and annotations keep resolving. Its title changes from Kates Chaos Engineering to Kates — Chaos infrastructure, because that name and the monitoring chart's Kates — Chaos sat next to each other in one Grafana and neither said which was which"
+    - kind: fixed
+      description: "Four series or labels the board read that LitmusChaos does not publish: the verdict label on litmuschaos_experiment_verdict (the chaos-exporter emits chaosresult_verdict), litmuschaos_engine_experiment_count (no such series; the duration panel wanted litmuschaos_experiment_total_duration), increase() over litmuschaos_experiment_verdict (increase over a 0/1 gauge; the run total is litmuschaos_cluster_scoped_experiments_run_count), and a pod=~\".*chaos-operator.*\" matcher that can never match litmus-core's `litmus` Deployment (chaos-operator is the container name), replaced by kube_deployment_status_replicas_available"
+    - kind: added
+      description: "Descriptions on all six panels, which had none — the layout gate in ci-kafka-charts.yml now covers this chart and will not accept a panel without one. A hidden $operator_deployment constant, and monitoring.grafanaDashboard.operatorDeployment to override it when you bring your own Litmus under another name"
+    - kind: changed
+      description: "monitoring.grafanaDashboard.enabled now fails the render with a named file if the generated board is missing from the chart, rather than shipping an empty ConfigMap. Run scripts/gen-dashboards.py when rendering from a checkout"
     - kind: changed
       description: Scoped the chart to the LitmusChaos execution plane (operator-only); removed portal (frontend/server/MongoDB) references from NOTES, tests, and GameDay
     - kind: added
