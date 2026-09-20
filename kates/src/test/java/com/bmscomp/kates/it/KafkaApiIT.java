@@ -79,20 +79,31 @@ class KafkaApiIT {
                 .body("partitionInfo[0].underReplicated", is(false));
 
         // A config change has to survive a re-describe, which is the whole
-        // point of PATCH and is untested today.
+        // point of PATCH and is untested today. The PATCH response body is
+        // deliberately NOT asserted on the new value: incrementalAlterConfigs
+        // is acked by the KRaft controller, and the broker answering the
+        // immediate re-describe may not have applied the metadata delta yet,
+        // so the response can legitimately still carry the old value. The
+        // change is awaited on the follow-up describe instead.
         given().contentType(ContentType.JSON)
                 .body(Map.of("configs", Map.of("retention.ms", "60000")))
                 .when()
                 .patch("/api/kafka/topics/" + topic)
                 .then()
                 .statusCode(200)
-                .body("configs.'retention.ms'", equalTo("60000"));
+                .body("name", equalTo(topic));
 
-        given().when()
-                .get("/api/kafka/topics/" + topic)
-                .then()
-                .statusCode(200)
-                .body("configs.'retention.ms'", equalTo("60000"));
+        assertTrue(
+                ItSupport.waitUntil(Duration.ofSeconds(15), () -> {
+                    String value = given().when()
+                            .get("/api/kafka/topics/" + topic)
+                            .then()
+                            .statusCode(200)
+                            .extract()
+                            .path("configs.'retention.ms'");
+                    return "60000".equals(value);
+                }),
+                "an altered config must survive a re-describe");
 
         given().when().delete("/api/kafka/topics/" + topic).then().statusCode(204);
 
