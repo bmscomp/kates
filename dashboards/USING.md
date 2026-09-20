@@ -156,6 +156,41 @@ signature. kube-prometheus-stack defaults its five selectors to
 `release: <its own release name>`, so a stack installed as `monitoring` ignores
 every monitor labelled anything else — or labelled nothing.
 
+The other signature is the third command printing **no PodMonitors at all**.
+Then nothing is unselected; nothing was ever created. Every chart here keeps
+its scrape and its rules behind a switch — `monitoring.podMonitor.enabled` and
+`alerts.enabled` on kafka-cluster and connect-cluster, `metrics.enabled` and
+`podMonitors.enabled` on mirror-maker2, `metrics.serviceMonitor.enabled` on
+kates, `monitoring.serviceMonitor.enabled` with `litmus-core.exporter.enabled`
+on kates-chaos — and for a long time the kind overlays and `kates detect` held
+every one of them at `false`, so `kates deploy` installed the twelve boards
+and nothing for them to read. `helm get values <release> -n <ns>` shows which
+switch a release was installed with. `kates deploy --with-monitoring` now sets
+them itself, on every component it installs; a release you already have gets
+them by hand. The Kafka line also names the 0.4 key, `podMonitors`, which an
+older `kates detect` left in the stored values and which wins over the current
+one:
+
+```bash
+helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values \
+  --set monitoring.podMonitor.enabled=true --set podMonitors.enabled=true --set alerts.enabled=true
+helm upgrade connect-cluster charts/connect-cluster -n connect --reuse-values \
+  --set monitoring.podMonitor.enabled=true --set alerts.enabled=true
+helm upgrade mm2 charts/mirror-maker2 -n kafka --reuse-values \
+  --set metrics.enabled=true --set podMonitors.enabled=true --set alerts.enabled=true
+helm upgrade kates charts/kates -n kates --reuse-values \
+  --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true
+helm upgrade chaos charts/kates-chaos -n litmus --reuse-values \
+  --set litmus-core.exporter.enabled=true --set monitoring.serviceMonitor.enabled=true
+helm upgrade monitoring charts/monitoring -n monitoring --reuse-values \
+  --set chaosAlerts.enabled=true
+helm upgrade kyverno kyverno/kyverno --version 3.6.4 -n kyverno --reuse-values \
+  --set admissionController.serviceMonitor.enabled=true --set backgroundController.serviceMonitor.enabled=true
+```
+
+Give Prometheus a minute after each: the operator regenerates its configuration
+and the reloader picks it up on the kubelet's next secret sync.
+
 The fix is five lines of `charts/monitoring/values.yaml` — the five
 `*SelectorNilUsesHelmValues: false` settings, which leave all ten selectors on
 the rendered Prometheus CR as `{}`, meaning *select everything in the watched
