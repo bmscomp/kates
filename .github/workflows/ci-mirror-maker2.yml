@@ -677,14 +677,36 @@ jobs:
       # that still carries a variable after substitution is refused: a value
       # this step cannot resolve is one the cases below would silently stop
       # matching.
-      - name: The migration board's go/no-go panel behaves
+      # The catch-up ETA and the window row's panels ride along. The ETA's
+      # arithmetic once divided seconds by a thousand and drew a ten-hour
+      # drain as thirty-five; the window row pivots a week of traffic into an
+      # hour-of-day profile with twenty-four `hour()` subqueries, which is the
+      # kind of expression that has to be run to be believed —
+      # mirror-maker2.migration-window-test.yaml holds a slow drain and a
+      # synthetic day with one quiet hour.
+      - name: The migration board's go/no-go and window panels behave
         run: |
           set -e
           d=$(mktemp -d)
           cat > /tmp/gate.py <<'PY'
           import json, re, sys, yaml
 
-          WANT = "Safe to cut over?"
+          # Panel title on the board -> the recording rule the cases read.
+          WANT = {
+              "Safe to cut over?": "dashboard:safe_to_cut_over",
+              "Catch-up ETA": "dashboard:catch_up_eta",
+              "Quietest hour (UTC)": "dashboard:quietest_hour",
+              "Busiest hour (UTC)": "dashboard:busiest_hour",
+              "Now, against the quietest hour": "dashboard:now_vs_quietest",
+          }
+
+
+          def panels(ps):
+              """Every panel, including those folded inside a collapsed row."""
+              for p in ps:
+                  yield p
+                  for q in panels(p.get("panels") or []):
+                      yield q
 
           # The values the promtool cases' input_series carry — renaming one
           # here means renaming it in mirror-maker2.cutover-gate-test.yaml,
@@ -716,26 +738,32 @@ jobs:
 
 
           dash = json.load(open(sys.argv[1]))
-          for p in dash.get("panels") or []:
-              if p.get("title") != WANT:
+          rules, found = [], set()
+          for p in panels(dash.get("panels") or []):
+              record = WANT.get(p.get("title"))
+              if not record:
                   continue
               expr = interpolate(p["targets"][0]["expr"], dash)
               if "$" in expr:
                   sys.exit("::error::%s still reads a template variable after "
                            "substituting the board's variables, so the cases "
-                           "below would match nothing: %s" % (WANT, expr))
-              yaml.safe_dump({"groups": [{"name": "cutover-gate", "rules": [
-                  {"record": "dashboard:safe_to_cut_over", "expr": expr}]}]},
-                  sys.stdout, default_flow_style=False)
-              print("  extracted from %s" % sys.argv[1], file=sys.stderr)
-              sys.exit(0)
-          sys.exit("::error::no panel titled %r on the board — the test below "
-                   "would silently check nothing" % WANT)
+                           "below would match nothing: %s" % (p["title"], expr))
+              rules.append({"record": record, "expr": expr})
+              found.add(p["title"])
+          missing = sorted(set(WANT) - found)
+          if missing:
+              sys.exit("::error::no panel titled %s on the board — the tests "
+                       "below would silently check nothing" % ", ".join(map(repr, missing)))
+          yaml.safe_dump({"groups": [{"name": "cutover-gate", "rules": rules}]},
+                         sys.stdout, default_flow_style=False)
+          print("  extracted %d panels from %s" % (len(rules), sys.argv[1]), file=sys.stderr)
           PY
           python3 /tmp/gate.py dashboards/mirror-maker2-migration/dashboard.json \
             > "$d/cutover-gate.yaml"
-          cp scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml "$d/"
+          cp scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml \
+             scripts/metric-contract/tests/mirror-maker2.migration-window-test.yaml "$d/"
           promtool test rules "$d/mirror-maker2.cutover-gate-test.yaml"
+          promtool test rules "$d/mirror-maker2.migration-window-test.yaml"
 
       # An alert whose runbook_url 404s is an alert that wakes someone at 3am
       # and then tells them nothing. The anchors are GitHub's heading slugs, so

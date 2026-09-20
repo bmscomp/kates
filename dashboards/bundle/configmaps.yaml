@@ -18709,7 +18709,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "(max(kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0) / -deriv(max(kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)[10m:])) / 1000",
+              "expr": "max(kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0) / -deriv(max(kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)[10m:])",
               "legendFormat": "eta",
               "range": true,
               "refId": "A"
@@ -18795,7 +18795,7 @@ data:
           "type": "stat"
         },
         {
-          "collapsed": false,
+          "collapsed": true,
           "gridPos": {
             "h": 1,
             "w": 24,
@@ -18803,6 +18803,394 @@ data:
             "y": 6
           },
           "id": 7,
+          "panels": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "description": "The hour of day with the least crossing the mirror, averaged over the last 7 days, and how much crosses then. This is the migration window the traffic points at: the fewest records to stop at the source, the least to drain, the fewest consumers reading. UTC, because hour() knows no other zone. No data is a mirror with no samples yet.",
+              "fieldConfig": {
+                "defaults": {
+                  "decimals": 1,
+                  "mappings": [
+                    {
+                      "options": {
+                        "match": "null",
+                        "result": {
+                          "color": "text",
+                          "index": 0,
+                          "text": "No data"
+                        }
+                      },
+                      "type": "special"
+                    }
+                  ],
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 0,
+                "y": 7
+              },
+              "id": 8,
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "auto",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "textMode": "value_and_name"
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "editorMode": "code",
+                  "expr": "bottomk(1, label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\"))",
+                  "legendFormat": "{{hour}}:00",
+                  "range": true,
+                  "refId": "A"
+                }
+              ],
+              "title": "Quietest hour (UTC)",
+              "type": "stat"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "description": "The other end of the same profile \u2014 the hour to avoid, and the size of the gap between the two. A busiest hour barely above the quietest is a source with no daily pattern, and then the window is whenever the people are ready rather than whenever the traffic is.",
+              "fieldConfig": {
+                "defaults": {
+                  "decimals": 1,
+                  "mappings": [
+                    {
+                      "options": {
+                        "match": "null",
+                        "result": {
+                          "color": "text",
+                          "index": 0,
+                          "text": "No data"
+                        }
+                      },
+                      "type": "special"
+                    }
+                  ],
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 6,
+                "y": 7
+              },
+              "id": 9,
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "auto",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "textMode": "value_and_name"
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "editorMode": "code",
+                  "expr": "topk(1, label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\"))",
+                  "legendFormat": "{{hour}}:00",
+                  "range": true,
+                  "refId": "A"
+                }
+              ],
+              "title": "Busiest hour (UTC)",
+              "type": "stat"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "description": "What is crossing right now as a multiple of the quietest hour's average: 1 is as quiet as this source ever gets, 5 is five times busier than its best hour. Green within one and a half times, amber to three, red beyond \u2014 a cutover started in red drains against a source still at full flow.",
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "decimals": 1,
+                  "mappings": [
+                    {
+                      "options": {
+                        "match": "null",
+                        "result": {
+                          "color": "text",
+                          "index": 0,
+                          "text": "No data"
+                        }
+                      },
+                      "type": "special"
+                    }
+                  ],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": null
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 1.5
+                      },
+                      {
+                        "color": "red",
+                        "value": 3
+                      }
+                    ]
+                  }
+                },
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 12,
+                "y": 7
+              },
+              "id": 10,
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "textMode": "auto"
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "editorMode": "code",
+                  "expr": "sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) / on() bottomk(1, label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\"))",
+                  "legendFormat": "now / quietest",
+                  "range": true,
+                  "refId": "A"
+                }
+              ],
+              "title": "Now, against the quietest hour",
+              "type": "stat"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "description": "Records crossing the mirror this instant, the number the profile is built from. The zero is anchored to the workers' own rebalance series, so a release Prometheus is not scraping reads No data rather than quiet.",
+              "fieldConfig": {
+                "defaults": {
+                  "decimals": 1,
+                  "mappings": [
+                    {
+                      "options": {
+                        "match": "null",
+                        "result": {
+                          "color": "text",
+                          "index": 0,
+                          "text": "No data"
+                        }
+                      },
+                      "type": "special"
+                    }
+                  ],
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 18,
+                "y": 7
+              },
+              "id": 11,
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "textMode": "auto"
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "editorMode": "code",
+                  "expr": "(sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+                  "legendFormat": "records/s",
+                  "range": true,
+                  "refId": "A"
+                }
+              ],
+              "title": "Crossing now",
+              "type": "stat"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "description": "The daily shape of the source's traffic as the mirror saw it: one bar per hour of day, each the average of every half-hour sample of the last 7 days that fell in that hour. The trough is the window; a bar missing at one end is an hour the mirror has not seen yet \u2014 it has been up for less than a day. Hours are UTC.",
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "fillOpacity": 80
+                  },
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 11
+              },
+              "id": 12,
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "orientation": "vertical",
+                "showValue": "auto"
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "editorMode": "code",
+                  "expr": "label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\")",
+                  "format": "table",
+                  "instant": true,
+                  "legendFormat": "{{hour}}",
+                  "range": false,
+                  "refId": "A"
+                }
+              ],
+              "title": "Records crossing by hour of day (UTC), last 7 days",
+              "type": "barchart"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "description": "The same traffic as it happened, so the profile can be read against the days that made it: a weekend that flattens the curve, a batch that runs at the same hour every night, a trend the average hides. Drawn over the last 7 days whatever the board's time range says.",
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "lineWidth": 1,
+                    "showPoints": "never",
+                    "spanNulls": false
+                  },
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 11
+              },
+              "id": 13,
+              "options": {
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${datasource}"
+                  },
+                  "editorMode": "code",
+                  "expr": "sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+                  "legendFormat": "records/s",
+                  "range": true,
+                  "refId": "A"
+                }
+              ],
+              "timeFrom": "7d",
+              "title": "Records crossing /s, last 7 days",
+              "type": "timeseries"
+            }
+          ],
+          "title": "Migration window \u2014 when the traffic says it can be done",
+          "type": "row"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 7
+          },
+          "id": 14,
           "panels": [],
           "title": "Draining",
           "type": "row"
@@ -18849,9 +19237,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 7
+            "y": 8
           },
-          "id": 8,
+          "id": 15,
           "options": {
             "legend": {
               "calcs": [],
@@ -18903,9 +19291,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 7
+            "y": 8
           },
-          "id": 9,
+          "id": 16,
           "options": {
             "legend": {
               "calcs": [],
@@ -18957,9 +19345,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 15
+            "y": 16
           },
-          "id": 10,
+          "id": 17,
           "options": {
             "legend": {
               "calcs": [],
@@ -19011,9 +19399,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 15
+            "y": 16
           },
-          "id": 11,
+          "id": 18,
           "options": {
             "legend": {
               "calcs": [],
@@ -19048,9 +19436,9 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 23
+            "y": 24
           },
-          "id": 12,
+          "id": 19,
           "panels": [],
           "title": "Consumer groups \u2014 will they resume in the right place?",
           "type": "row"
@@ -19108,9 +19496,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 24
+            "y": 25
           },
-          "id": 13,
+          "id": 20,
           "options": {
             "footer": {
               "reducer": [
@@ -19175,9 +19563,9 @@ data:
             "h": 8,
             "w": 6,
             "x": 12,
-            "y": 24
+            "y": 25
           },
-          "id": 14,
+          "id": 21,
           "options": {
             "legend": {
               "calcs": [],
@@ -19229,9 +19617,9 @@ data:
             "h": 8,
             "w": 6,
             "x": 18,
-            "y": 24
+            "y": 25
           },
-          "id": 15,
+          "id": 22,
           "options": {
             "legend": {
               "calcs": [],
@@ -19266,9 +19654,9 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 32
+            "y": 33
           },
-          "id": 16,
+          "id": 23,
           "panels": [],
           "title": "Topics \u2014 what is crossing",
           "type": "row"
@@ -19338,9 +19726,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 33
+            "y": 34
           },
-          "id": 17,
+          "id": 24,
           "options": {
             "footer": {
               "reducer": [
@@ -19437,9 +19825,9 @@ data:
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 33
+            "y": 34
           },
-          "id": 18,
+          "id": 25,
           "options": {
             "legend": {
               "calcs": [],
@@ -19474,9 +19862,9 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 41
+            "y": 42
           },
-          "id": 19,
+          "id": 26,
           "panels": [],
           "title": "Cutover state",
           "type": "row"
@@ -19531,9 +19919,9 @@ data:
             "h": 5,
             "w": 6,
             "x": 0,
-            "y": 42
+            "y": 43
           },
-          "id": 20,
+          "id": 27,
           "options": {
             "colorMode": "background",
             "graphMode": "none",
@@ -19613,9 +20001,9 @@ data:
             "h": 5,
             "w": 6,
             "x": 6,
-            "y": 42
+            "y": 43
           },
-          "id": 21,
+          "id": 28,
           "options": {
             "colorMode": "background",
             "graphMode": "none",
@@ -19674,9 +20062,9 @@ data:
             "h": 5,
             "w": 6,
             "x": 12,
-            "y": 42
+            "y": 43
           },
-          "id": 22,
+          "id": 29,
           "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -19751,9 +20139,9 @@ data:
             "h": 5,
             "w": 6,
             "x": 18,
-            "y": 42
+            "y": 43
           },
-          "id": 23,
+          "id": 30,
           "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -19806,9 +20194,9 @@ data:
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 48
           },
-          "id": 24,
+          "id": 31,
           "options": {
             "legend": {
               "calcs": [],

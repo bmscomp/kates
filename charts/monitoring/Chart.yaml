@@ -1,9 +1,8 @@
 apiVersion: v2
 name: kates-monitoring
-# Minor: the Grafana sidecar's searchNamespace is pinned here instead of
-# inherited, and the dashboards ConfigMap gains the namespace/label/
-# labelValue/folder surface the other charts already had.
-version: 1.5.0
+# Patch: the MirrorMaker 2 migration board gains its window row and its
+# catch-up ETA is corrected; nothing else in the chart moves.
+version: 1.5.1
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -22,6 +21,10 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "The MirrorMaker 2 migration board has a Migration window row, collapsed under the go/no-go: when the traffic says the migration can be done. The last seven days of records crossing the mirror, profiled by hour of day (UTC), its quietest and busiest hours, what is crossing now as a multiple of the quietest, and the week as it happened"
+    - kind: fixed
+      description: "The migration board's catch-up ETA was a thousand times too small: record age in milliseconds over a per-second slope of milliseconds is already seconds, and the panel divided by a thousand on top, drawing a ten-hour drain as thirty-five seconds. promtool cases over the extracted panel now pin it"
     - kind: fixed
       description: "Prometheus now selects every PodMonitor, ServiceMonitor and PrometheusRule in the watched namespaces. It selected only those labelled with this release name, which no chart in this repository sets — so no broker, Connect or MirrorMaker series was scraped and not one alert was loaded."
     - kind: added

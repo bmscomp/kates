@@ -40,7 +40,7 @@ is exactly what the Cutover section plots.
 from __future__ import annotations
 
 from layout import Row
-from panels import or_zero, query_var, stat, table, target, targets, timeseries
+from panels import barchart, or_zero, query_var, stat, table, target, targets, timeseries
 
 # ── Frozen at generation time ──────────────────────────────────────────────
 # dashboard.migration.drainedBelowMs and .translationFreshMs. DRAINED_MS is
@@ -65,6 +65,35 @@ SEL = 'namespace="$namespace", strimzi_io_cluster="$cluster"'
 # pickers fill even on a release whose connectors have all failed — which on a
 # migration is exactly when this board is open.
 ANCHOR = "kafka_connect_worker_rebalance_metrics_completed_rebalances_total"
+
+# How long until the fetchers reach the end of the source's log, at the rate
+# the record age has been falling over the last ten minutes.
+#
+# Milliseconds over a per-second slope of milliseconds is already seconds.
+# This used to divide by a thousand on top, which drew a ten-hour drain as
+# thirty-five seconds; promtool over a synthetic drain is what caught it.
+ETA = ("max(kafka_connect_mirror_source_connector_record_age_ms_max{%s} >= 0) "
+       "/ -deriv(max(kafka_connect_mirror_source_connector_record_age_ms_max"
+       "{%s} >= 0)[10m:])" % (SEL, SEL))
+
+# ── The migration window ───────────────────────────────────────────────────
+# When can the migration be done? The mirror sees every record its producers
+# write to the mirrored topics, so what crosses it, hour by hour, IS the
+# source's traffic pattern — and the window is the trough in it: the hours
+# with the least to stop, the least to drain and the fewest consumers to
+# disturb. PromQL cannot pivot time into a label, so the profile is
+# twenty-four clauses, one per hour of day, each averaging the crossing rate
+# over the samples of the last seven days that fall in that hour. `hour()`
+# inside a subquery takes each step's own time, which promtool over a
+# synthetic day holds (scripts/metric-contract/tests/
+# mirror-maker2.migration-window-test.yaml). Hours are UTC — hour() knows no
+# other — and the panels say so.
+CROSSING = "sum(kafka_connect_mirror_source_connector_record_rate{%s})" % SEL
+PROFILE_DAYS = 7
+PROFILE = " or ".join(
+    'label_replace(avg_over_time((%s and on() (hour() == %d))[%dd:30m]), "hour", "%02d", "", "")'
+    % (CROSSING, h, PROFILE_DAYS, h)
+    for h in range(24))
 
 
 def zero_if_live(expr: str) -> str:
@@ -158,9 +187,7 @@ def _go_no_go() -> Row:
             "minutes. Negative means it is getting further behind, not closer — "
             "the mirror is losing to the producers, and no amount of waiting "
             "will drain it.",
-            targets(("(max(kafka_connect_mirror_source_connector_record_age_ms_max{%s} >= 0) "
-                     "/ -deriv(max(kafka_connect_mirror_source_connector_record_age_ms_max"
-                     "{%s} >= 0)[10m:])) / 1000" % (SEL, SEL), "eta")),
+            targets((ETA, "eta")),
             w=4, h=5, unit="s", decimals=0),
         stat(
             "Failed tasks",
@@ -172,6 +199,85 @@ def _go_no_go() -> Row:
                 "{%s})" % SEL), "failed")),
             w=4, h=5, thresholds=[("green", None), ("red", 1)]),
     ])
+
+
+def _window() -> Row:
+    quietest = "bottomk(1, %s)" % PROFILE
+    busiest = "topk(1, %s)" % PROFILE
+    # Collapsed: this row is consulted while a migration is being planned,
+    # not while a cutover is being run, and Grafana runs no query for a row
+    # that is closed — which matters, because the profile is twenty-four
+    # seven-day subqueries and the board refreshes every ten seconds.
+    return Row("Migration window — when the traffic says it can be done", [
+        stat(
+            "Quietest hour (UTC)",
+            "The hour of day with the least crossing the mirror, averaged over "
+            "the last %d days, and how much crosses then. This is the "
+            "migration window the traffic points at: the fewest records to "
+            "stop at the source, the least to drain, the fewest consumers "
+            "reading. UTC, because hour() knows no other zone. No data is a "
+            "mirror with no samples yet." % PROFILE_DAYS,
+            targets((quietest, "{{hour}}:00")),
+            w=6, h=4, unit="reqps", decimals=1, text_mode="value_and_name",
+            graph_mode="none"),
+        stat(
+            "Busiest hour (UTC)",
+            "The other end of the same profile — the hour to avoid, and the "
+            "size of the gap between the two. A busiest hour barely above the "
+            "quietest is a source with no daily pattern, and then the window "
+            "is whenever the people are ready rather than whenever the traffic "
+            "is.",
+            targets((busiest, "{{hour}}:00")),
+            w=6, h=4, unit="reqps", decimals=1, text_mode="value_and_name",
+            graph_mode="none"),
+        stat(
+            "Now, against the quietest hour",
+            "What is crossing right now as a multiple of the quietest hour's "
+            "average: 1 is as quiet as this source ever gets, 5 is five times "
+            "busier than its best hour. Green within one and a half times, "
+            "amber to three, red beyond — a cutover started in red drains "
+            "against a source still at full flow.",
+            targets(("%s / on() %s" % (CROSSING, quietest), "now / quietest")),
+            w=6, h=4, decimals=1,
+            thresholds=[("green", None), ("yellow", 1.5), ("red", 3)]),
+        stat(
+            "Crossing now",
+            "Records crossing the mirror this instant, the number the profile "
+            "is built from. The zero is anchored to the workers' own rebalance "
+            "series, so a release Prometheus is not scraping reads No data "
+            "rather than quiet.",
+            targets((zero_if_live(CROSSING), "records/s")),
+            w=6, h=4, unit="reqps", decimals=1),
+        barchart(
+            "Records crossing by hour of day (UTC), last %d days" % PROFILE_DAYS,
+            "The daily shape of the source's traffic as the mirror saw it: one "
+            "bar per hour of day, each the average of every half-hour sample "
+            "of the last %d days that fell in that hour. The trough is the "
+            "window; a bar missing at one end is an hour the mirror has not "
+            "seen yet — it has been up for less than a day. Hours are UTC." % PROFILE_DAYS,
+            [target(PROFILE, "{{hour}}", instant=True, fmt="table")],
+            w=12, h=8, unit="reqps", horizontal=False, color="palette-classic"),
+        seven_day(timeseries(
+            "Records crossing /s, last %d days" % PROFILE_DAYS,
+            "The same traffic as it happened, so the profile can be read "
+            "against the days that made it: a weekend that flattens the curve, "
+            "a batch that runs at the same hour every night, a trend the "
+            "average hides. Drawn over the last %d days whatever the board's "
+            "time range says." % PROFILE_DAYS,
+            targets((CROSSING, "records/s")),
+            w=12, h=8, unit="reqps")),
+    ], collapsed=True)
+
+
+def seven_day(panel: dict) -> dict:
+    """Pin a panel to the last seven days, whatever the board's time range.
+
+    Grafana's per-panel relative-time override. The board opens on the last
+    hour and refreshes every ten seconds, because that is what a cutover
+    needs; the window row wants the week that shaped the profile.
+    """
+    panel["timeFrom"] = "%dd" % PROFILE_DAYS
+    return panel
 
 
 def _draining() -> Row:
@@ -399,4 +505,4 @@ def _cutover() -> Row:
 
 def build(variant: str = "default") -> list[Row]:
     identity = "identity" in variant
-    return [_go_no_go(), _draining(), _groups(), _topics(identity), _cutover()]
+    return [_go_no_go(), _window(), _draining(), _groups(), _topics(identity), _cutover()]
