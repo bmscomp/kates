@@ -83,6 +83,19 @@ node_name and node_ip. Emits a YAML list at column 0.
   targetLabel: node_ip
   replacement: $1
   action: replace
+{{- /*
+The node pools set a `zone` pod label and nothing carried it into the series,
+so every legacy dashboard legend that said `{{`{{`}}zone{{`}}`}}` rendered as
+`()`. The regex is `(.+)` rather than `(.*)` on purpose: a pod with no zone
+label keeps no zone label, instead of gaining an empty one that groups every
+unzoned pod together.
+*/}}
+- sourceLabels: [__meta_kubernetes_pod_label_zone]
+  separator: ;
+  regex: (.+)
+  targetLabel: zone
+  replacement: $1
+  action: replace
 {{- end }}
 
 {{/*

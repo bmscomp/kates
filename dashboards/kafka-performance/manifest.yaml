@@ -1,0 +1,49 @@
+# Kafka — Performance & Load Testing. Delivered by charts/monitoring.
+#
+# A static uid, for the same reason kafka-kraft has one: this board belongs to
+# a Kafka cluster, there is one per monitoring release, and the cluster it
+# shows is chosen in the board rather than baked into the file. The monitoring
+# chart globs `dashboards/*.json` and copies the contents through unchanged.
+#
+# The uid is NOT `kafka-perf-global`. The board this one is rebuilt from
+# carried that uid, and re-using it would have a fresh install of the new
+# board silently overwrite an operator's edits to the old one — and, worse,
+# make a rollback look like it had worked while Grafana still served the new
+# panels. A deleted board should read as deleted.
+uid: kates-kafka-performance
+title: Kafka — Performance & Load Testing
+description: >-
+  What a Kafka cluster does under load: throughput per broker and per zone,
+  where the replication path is straining, how saturated the brokers are, and
+  a per-topic, per-partition view of the test topic while a run is in flight.
+tags:
+  - kafka
+  - performance
+  - benchmark
+  - kates
+# A load test is watched rather than consulted: a run lasts minutes and the
+# question is what is happening right now.
+refresh: 10s
+time_from: now-1h
+links:
+  # `kraft` is this repository's own lower-case tag, so this finds the KRaft
+  # Operations board; `Strimzi` is upstream's capitalised one (Grafana matches
+  # tags exactly) and finds the operator's boards.
+  - title: KRaft operations
+    type: dashboards
+    tags: [kraft]
+    asDropdown: true
+  - title: Broker health (Strimzi operator's boards)
+    type: dashboards
+    tags: [Strimzi]
+    asDropdown: true
+  - title: Test types and what they measure
+    type: link
+    icon: doc
+    url: https://github.com/bmscomp/kates/blob/main/docs/book/05-test-types.md
+    targetBlank: true
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kafka-performance.json
+    variant: default

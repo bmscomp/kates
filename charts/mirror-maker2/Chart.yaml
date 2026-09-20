@@ -2,11 +2,18 @@ apiVersion: v2
 name: mirror-maker2
 description: Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x)
 type: application
-# Minor: the chart is built on the kafka-common library (one implementation of
-# the Connect worker spec, client auth, secret sync and the monitoring and
-# NetworkPolicy fragments it shares with connect-cluster), and gains custom
-# authentication. docs/kafka-charts-refactor-plan.md, phase 2.
-version: 0.8.0
+# Minor: both dashboards move to dashboards/ and are loaded with .Files.Get
+# instead of being written inline, the uid scheme changes (so an upgrade
+# leaves the old board behind in Grafana), and two values that used to move
+# the migration board are now frozen at generation time.
+# docs/grafana-dashboards-refactor-plan.md, phase 3.
+# Minor: dashboard.namespace, so both boards' ConfigMaps can go somewhere
+# other than the workload's namespace. Defaults are unchanged.
+# Minor: dashboard.migration.drainedBelowMs and .translationFreshMs are
+# REMOVED. 0.10.0 froze them into the generated board and documented them as
+# inert, which left two keys that accept a number and ignore it; a release
+# setting either is now refused with the constant to edit named.
+version: 0.11.0
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -33,6 +40,18 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: removed
+      description: "ACTION REQUIRED — the dashboard block is GONE, and a release that still sets any dashboard.* key is refused with the replacement named. Both boards are delivered by charts/monitoring (dashboards.enabled there) for every release in the cluster, under the stable uids kates-mm2 and kates-mm2-mig; their $namespace/$cluster variables select a release, so the per-release ConfigMaps, the uid/title rewrite and the no-slo/identity variants are gone with the block. An upgrade leaves the old per-release-uid boards behind in Grafana: delete them, and repoint any link, playlist or annotation that names one"
+    - kind: changed
+      description: "Both boards move to dashboards/mirror-maker2 and dashboards/mirror-maker2-migration and are built from board.py by scripts/gen-dashboards.py, instead of being written inline in the template. Same expressions, same descriptions; each board now has a README.md beside it and every series it reads is listed in dashboards/METRICS.md"
+    - kind: removed
+      description: "ACTION REQUIRED — dashboard.migration.drainedBelowMs and .translationFreshMs are GONE, and a release that still sets either is refused rather than ignoring it. They are baked into the generated board: drainedBelowMs is not only a threshold colour but the number inside the go/no-go panel's `< bool` comparison, where a Grafana variable does not parse as PromQL. 0.10.0 froze them and documented them as inert, which still left two keys that accept a number and change nothing, with the chart's own docs showing a snippet setting them. To change either line, edit DRAINED_MS or FRESH_MS in dashboards/mirror-maker2-migration/board.py and run scripts/gen-dashboards.py"
+    - kind: changed
+      description: "The per-mirror rows are a Grafana `repeat` over a $source custom variable, in place of the `range .Values.mirrors` the template ran at render time, so the board file itself names no namespace, release or pod regex; edit the variable's options to your source aliases"
+    - kind: changed
+      description: "Both boards select on $namespace and $cluster as ordinary query variables driven by label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total, ...), in place of the hidden constant variables the chart used to inject. This chart's PodMonitor applies kafka-common.strimziRelabelings, so namespace and strimzi_io_cluster are on every series the workers publish; $pods — a pod-name regex built from the release name, which no picker could offer — is gone, and the migration board gains a $cluster it never had. A board imported by any route (the monitoring chart, install.py, dashboards/bundle, another cluster) now resolves instead of staying frozen to the release that generated it. The Replication SLO panels select cluster= rather than strimzi_io_cluster=, because the SLI recording rules aggregate with `max by (namespace)` and attach `cluster` themselves — the same string under a different label"
+    - kind: changed
+      description: "The datasource variable on both boards asks for the org's DEFAULT Prometheus (current: default) instead of leaving `current` empty. Grafana resolves an empty current to the alphabetically first datasource of the plugin, which on any Grafana with more than one Prometheus is not the default one"
     - kind: changed
       description: Built on the kafka-common library chart (run `helm dependency build charts/mirror-maker2` before rendering from a checkout). Every overlay renders the same objects as 0.7.2 apart from the entries below
     - kind: added

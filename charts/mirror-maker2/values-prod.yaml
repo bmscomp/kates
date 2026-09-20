@@ -86,8 +86,10 @@ metrics:
   enabled: true
 podMonitors:
   enabled: true
-  labels:
-    release: kafka
+  # No `release: kafka` here either: kates-monitoring 1.5.0 selects every
+  # PodMonitor in the watched namespaces, and that label matched no Prometheus
+  # this repository installs. See charts/mirror-maker2/values.yaml.
+  labels: {}
 
 networkPolicy:
   enabled: true

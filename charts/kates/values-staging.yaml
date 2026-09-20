@@ -26,8 +26,6 @@ metrics:
     enabled: true
   prometheusRule:
     enabled: true
-  grafanaDashboard:
-    enabled: true
 
 backup:
   enabled: true

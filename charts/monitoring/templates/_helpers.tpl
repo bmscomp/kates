@@ -19,17 +19,13 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 
 {{/*
-The deprecated Kafka and Strimzi boards (see grafana-dashboards.yaml). Removed
-in kates-monitoring 2.0.
+`kates-monitoring.legacyKafkaDashboards` used to list the nine deprecated
+Kafka and Strimzi boards this chart shipped, so that grafana-dashboards.yaml
+could leave them out when `legacyKafkaDashboards.enabled` was false. All nine
+files are gone in 1.3.0 — eight of them were subsets of the Strimzi operator's
+own boards or of each other, and the ninth, kafka-perf-global, is rebuilt on
+producible metric names as dashboards/kafka-performance. The helper and the
+value it read are removed with them: a list that is empty gates nothing, and
+leaving the switch in place would have promised a set of boards that no longer
+exists. See docs/grafana-dashboards-refactor-plan.md.
 */}}
-{{- define "kates-monitoring.legacyKafkaDashboards" -}}
-- kafka-all-metrics-dashboard.json
-- kafka-comprehensive-dashboard.json
-- kafka-dashboard.json
-- kafka-jvm-dashboard.json
-- kafka-perf-global-dashboard.json
-- kafka-perf-test-dashboard.json
-- kafka-performance-dashboard.json
-- kafka-working-dashboard.json
-- strimzi-operator-dashboard.json
-{{- end }}

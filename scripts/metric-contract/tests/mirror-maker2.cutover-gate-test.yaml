@@ -7,10 +7,11 @@
 # which is precisely the kind of expression that looks right and is not.
 #
 # The rule under test is EXTRACTED FROM THE BOARD at check time, not copied
-# here, so this cannot pass against an expression the chart no longer renders.
+# here, so this cannot pass against an expression the board no longer draws.
 # The Chart validation job in ci-mirror-maker2.yml pulls the panel's expr out
-# of the rendered ConfigMap, writes it as `dashboard:safe_to_cut_over` into
-# cutover-gate.yaml beside this file, and runs promtool over the pair.
+# of dashboards/mirror-maker2-migration/dashboard.json, writes it as
+# `dashboard:safe_to_cut_over` into cutover-gate.yaml beside this file, and
+# runs promtool over the pair.
 #
 # Case 5 is why the query has a fourth factor. Every other factor defaults to
 # its healthy value when its series is absent (`or vector(0)`), so a release
@@ -20,6 +21,19 @@
 # panel reads No data instead.
 #
 # Thresholds are the chart defaults: dashboard.migration.drainedBelowMs 5000.
+#
+# The label values are the ones the extraction step substitutes for the
+# board's `$namespace` and `$cluster` query variables: namespace="kafka" and
+# strimzi_io_cluster="mm2-mirror-maker2". The board itself names neither —
+# both resolve from Prometheus at view time, and since mirror-maker2 0.11.0
+# no chart preselects them. Renaming a value in the workflow's VALUES map
+# means renaming it here, and the extractor's "$ survived" check is what
+# stops a mismatch from passing quietly.
+#
+# Case 6 is the one strimzi_io_cluster exists for. A namespace-only selector
+# summed two releases together, so a second mirror that was still behind
+# dragged this one's answer to NOT YET — on the panel whose whole job is to
+# say whether THIS migration can cut over.
 
 rule_files:
   - cutover-gate.yaml
@@ -30,13 +44,13 @@ tests:
   - name: drained — lag under the objective, nothing in flight, nothing failed
     interval: 1m
     input_series:
-      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",pod="mm2-mirrormaker2-0"}'
         values: '2x10'
-      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
         values: '900x10'
-      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector",task="0"}'
         values: '0x10'
-      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector"}'
         values: '0x10'
     promql_expr_test:
       - expr: dashboard:safe_to_cut_over
@@ -48,13 +62,13 @@ tests:
   - name: not yet — the mirror is still behind
     interval: 1m
     input_series:
-      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",pod="mm2-mirrormaker2-0"}'
         values: '2x10'
-      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
         values: '42000x10'
-      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector",task="0"}'
         values: '0x10'
-      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector"}'
         values: '0x10'
     promql_expr_test:
       - expr: dashboard:safe_to_cut_over
@@ -66,13 +80,13 @@ tests:
   - name: not yet — lag is fine but records are still in flight
     interval: 1m
     input_series:
-      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",pod="mm2-mirrormaker2-0"}'
         values: '2x10'
-      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
         values: '900x10'
-      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector",task="0"}'
         values: '37x10'
-      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector"}'
         values: '0x10'
     promql_expr_test:
       - expr: dashboard:safe_to_cut_over
@@ -84,13 +98,13 @@ tests:
   - name: not yet — a failed task means some partitions are behind by an unknown amount
     interval: 1m
     input_series:
-      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",pod="mm2-mirrormaker2-0"}'
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",pod="mm2-mirrormaker2-0"}'
         values: '2x10'
-      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",topic="source.orders",partition="0"}'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
         values: '900x10'
-      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",connector="source->target.MirrorSourceConnector",task="0"}'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector",task="0"}'
         values: '0x10'
-      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",connector="source->target.MirrorSourceConnector"}'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector"}'
         values: '1x10'
     promql_expr_test:
       - expr: dashboard:safe_to_cut_over
@@ -110,3 +124,33 @@ tests:
       - expr: dashboard:safe_to_cut_over
         eval_time: 5m
         exp_samples: []
+
+  # Two mirrors, one namespace: this release drained, the neighbour 42 seconds
+  # behind with a failed task and records still in flight. Every one of those
+  # would flip a factor if the selector were namespace alone.
+  - name: drained — a second release in the same namespace does not count against this one
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",pod="mm2-mirrormaker2-0"}'
+        values: '2x10'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
+        values: '900x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector",task="0"}'
+        values: '0x10'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",connector="source->target.MirrorSourceConnector"}'
+        values: '0x10'
+      # The neighbour.
+      - series: 'kafka_connect_worker_metrics_task_count{namespace="kafka",strimzi_io_cluster="other-mirror-maker2",pod="other-mirrormaker2-0"}'
+        values: '2x10'
+      - series: 'kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace="kafka",strimzi_io_cluster="other-mirror-maker2",topic="west.orders",partition="0"}'
+        values: '42000x10'
+      - series: 'kafka_connect_source_task_metrics_source_record_active_count{namespace="kafka",strimzi_io_cluster="other-mirror-maker2",connector="west->target.MirrorSourceConnector",task="0"}'
+        values: '37x10'
+      - series: 'kafka_connect_worker_metrics_connector_failed_task_count{namespace="kafka",strimzi_io_cluster="other-mirror-maker2",connector="west->target.MirrorSourceConnector"}'
+        values: '1x10'
+    promql_expr_test:
+      - expr: dashboard:safe_to_cut_over
+        eval_time: 5m
+        exp_samples:
+          - labels: 'dashboard:safe_to_cut_over'
+            value: 1

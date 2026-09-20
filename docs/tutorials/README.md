@@ -19,6 +19,7 @@ Hands-on tutorials for learning Kates — from your first test to advanced chaos
 | 10 | [Installing and Setting Up MirrorMaker 2](10-mirror-maker2-installation.md) | Intermediate | 30 min | Tutorial 1 |
 | 11 | [Migrating Kafka 2.x to 4.x](11-migrating-kafka-2x-to-4x.md) | Advanced | 60 min | Tutorial 10 |
 | 12 | [Migrating Kafka 3.x to 4.x](12-migrating-kafka-3x-to-4x.md) | Intermediate | 40 min | Tutorial 10 |
+| 13 | [Using the Grafana Dashboards](13-using-the-dashboards.md) | Intermediate | 45 min | Tutorial 1 |
 
 Tutorials 10–12 rehearse a migration on Kind, where nothing costs anything if
 it goes wrong. When you are ready to migrate a real cluster, the chart's own
@@ -32,7 +33,7 @@ The tutorials are designed to build on each other. Here's the recommended learni
 ```
 Tutorial 1 (Getting Started)
     ├── Tutorial 2 (Test Types) ──── Tutorial 3 (Chaos) ──── Tutorial 4 (Integrity)
-    ├── Tutorial 5 (Observability)
+    ├── Tutorial 5 (Observability) ──── Tutorial 13 (Grafana Dashboards)
     ├── Tutorial 6 (CI/CD) ← requires Tutorial 2
     ├── Tutorial 7 (Security)
     ├── Tutorial 8 (Deploy & Detect)
@@ -42,6 +43,7 @@ Tutorial 1 (Getting Started)
 
 - **Start here:** Tutorial 1 is required for all others.
 - **Performance track:** Tutorials 1 → 2 → 5 — learn test types, then understand the metrics.
+- **Observability track:** Tutorials 1 → 5 → 13 — the CLI's own views of a run first, then the twelve Grafana boards that watch the cluster around it.
 - **Chaos track:** Tutorials 1 → 2 → 3 → 4 — build up to chaos engineering and data integrity.
 - **Operations track:** Tutorials 1 → 8 → 7 — deployment, security, and lifecycle management.
 

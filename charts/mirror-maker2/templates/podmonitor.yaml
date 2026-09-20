@@ -21,6 +21,12 @@ Both are values (podMonitors.scrape.<type>) rather than constants: a PodMonitor
 naming a port the pod does not have scrapes nothing and reports nothing, and
 that failure is invisible until an alert that should have fired did not.
 */}}
+{{- /*
+The endpoint carries the same relabelings connect-cluster and kafka-cluster
+apply. Without them these series arrive with no `strimzi_io_cluster`, which is
+why the MirrorMaker boards had to select workers by a pod-name regex built from
+the release name — a selector no dashboard variable can express.
+*/}}
 {{- $ep := (index (.Values.podMonitors.scrape | default dict) $type) | default dict }}
 {{- $labels := include "mirror-maker2.labels" . }}
 {{- with .Values.podMonitors.labels }}
@@ -35,5 +41,6 @@ that failure is invisible until an alert that should have fired did not.
           "port" ($ep.port | default "tcp-prometheus")
           "path" ($ep.path | default "/metrics")
           "interval" .Values.monitoring.interval
-          "scrapeTimeout" .Values.monitoring.scrapeTimeout)) }}
+          "scrapeTimeout" .Values.monitoring.scrapeTimeout
+          "relabelings" (include "kafka-common.strimziRelabelings" . | fromYamlArray))) }}
 {{- end }}

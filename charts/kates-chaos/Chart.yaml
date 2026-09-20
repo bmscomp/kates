@@ -1,6 +1,13 @@
 apiVersion: v2
 name: kates-chaos
-version: 2.0.0
+# Minor bump: the Grafana board moves out of the template into
+# dashboards/kates-chaos-infra/ and four of the series it read are corrected,
+# so the same board shows different — and for the first time non-empty — data
+# after upgrade. docs/grafana-dashboards-refactor-plan.md.
+# Minor: the board's ConfigMap namespace and sidecar label become settable,
+# and the label can no longer be lost by setting the labels map. Defaults are
+# unchanged.
+version: 2.2.0
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
@@ -24,6 +31,16 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: removed
+      description: "ACTION REQUIRED — monitoring.grafanaDashboard.* is GONE, and a release that still sets any of its keys is refused with the replacement named. The board is delivered by charts/monitoring (dashboards.enabled there) with every other board, and this chart's <fullname>-grafana-dashboard ConfigMap is no longer rendered. Its $namespace and $operator_deployment constants default to litmus, litmus-core's own fullname; a Litmus under another name or namespace edits them on the board or in board.py rather than in values"
+    - kind: changed
+      description: "The Grafana board moves to dashboards/kates-chaos-infra and is built from board.py by scripts/gen-dashboards.py, instead of being written inline in this chart's template. It was the twelfth board in the repository and the only one outside dashboards/: no panel descriptions, not covered by the layout gate"
+    - kind: changed
+      description: "The board's uid is unchanged (kates-chaos-overview), so Grafana replaces it in place and existing links, playlists and annotations keep resolving. Its title changes from Kates Chaos Engineering to Kates — Chaos infrastructure, because that name and the monitoring chart's Kates — Chaos sat next to each other in one Grafana and neither said which was which"
+    - kind: fixed
+      description: "Four series or labels the board read that LitmusChaos does not publish: the verdict label on litmuschaos_experiment_verdict (the chaos-exporter emits chaosresult_verdict), litmuschaos_engine_experiment_count (no such series; the duration panel wanted litmuschaos_experiment_total_duration), increase() over litmuschaos_experiment_verdict (increase over a 0/1 gauge; the run total is litmuschaos_cluster_scoped_experiments_run_count), and a pod=~\".*chaos-operator.*\" matcher that can never match litmus-core's `litmus` Deployment (chaos-operator is the container name), replaced by kube_deployment_status_replicas_available"
+    - kind: added
+      description: "Descriptions on all six panels, which had none — the layout gate in ci-kafka-charts.yml now covers the board and will not accept a panel without one. A hidden $operator_deployment constant replaces the pod-name matcher that could never match"
     - kind: changed
       description: Scoped the chart to the LitmusChaos execution plane (operator-only); removed portal (frontend/server/MongoDB) references from NOTES, tests, and GameDay
     - kind: added

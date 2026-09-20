@@ -7,6 +7,14 @@ Included once, from kafka-connect.yaml.
 {{- $v := .Values -}}
 {{- $r := include "connect-cluster.resolve" . | fromJson -}}
 
+{{- /* The Kafka Connect board is delivered by charts/monitoring since
+       2.1.0. Refused rather than silently ignored; the schema keeps a
+       permissive stub so this message is reached instead of a bare
+       additionalProperties error. */ -}}
+{{- if hasKey $v "dashboards" -}}
+{{- fail "connect-cluster: the dashboards block was removed in 2.1.0. The Kafka Connect board is delivered by charts/monitoring (dashboards.enabled there) for every Connect group in the cluster, and the board's $namespace/$cluster variables select a release — there is no per-release copy or uid rewrite to configure any more. Remove the dashboards block to proceed." -}}
+{{- end -}}
+
 {{- /* Floating tags on every image the chart names. */ -}}
 {{- $images := dict "image" $v.image "testImages.kubectl" $v.testImages.kubectl "secretSync.image" (($v.secretSync | default dict).image) "preflight.image" (($v.preflight | default dict).image) "rack.clientRackInitImage" (($v.rack | default dict).clientRackInitImage) -}}
 {{- range $p := ($v.plugins | default list) -}}

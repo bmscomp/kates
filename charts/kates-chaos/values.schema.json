@@ -83,13 +83,7 @@
           }
         },
         "grafanaDashboard": {
-          "type": "object",
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "namespace": { "type": "string" },
-            "folder": { "type": "string" },
-            "labels": { "type": "object" }
-          }
+          "description": "REMOVED in 2.2.0: the Kates — Chaos infrastructure board is delivered by charts/monitoring (dashboards.enabled there). Kept in the schema only so that a release still setting any grafanaDashboard.* key reaches the chart's own refusal, which names the replacement, instead of a bare additionalProperties error."
         }
       }
     },

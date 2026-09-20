@@ -476,7 +476,15 @@
                     "type": "object",
                     "properties": {
                         "enabled": { "type": "boolean" },
-                        "labels": { "type": "object" }
+                        "namespace": { "type": "string" },
+                        "label": { "type": "string" },
+                        "labelValue": { "type": "string" },
+                        "folder": { "type": "string" },
+                        "labels": {
+                            "type": "object",
+                            "description": "Extra labels, merged with (not replacing) label/labelValue",
+                            "additionalProperties": { "type": "string" }
+                        }
                     }
                 }
             }

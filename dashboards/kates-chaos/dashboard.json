@@ -1,0 +1,1467 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "The Litmus experiment timeline with the Kafka cluster and the Kates benchmark run laid over it: what was injected, what the brokers did, and what the workload underneath actually experienced.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "ChaosEngine custom resources currently in the `initialized` state \u2014 a fault is being applied right now. This is the panel that decides how to read every other panel on the board: a broker restart with this above zero is the experiment working, and the same restart with this at zero is an incident. The same distinction drives `KafkaBrokerRestartUnexpected` in prometheus-chaos-rules.yaml. Needs kube-state-metrics with custom-resource metrics enabled for ChaosEngine. The zero fallback is anchored to the *unfiltered* ChaosEngine series rather than to this board's ANCHOR, and the distinction is the whole point: kube-state being up proves nothing here, because the failure this panel used to hide was kube-state running without the custom-resource collector configured. Anchoring on a ChaosEngine series of any status is what proves the collector works, so a cluster with engines but none initialized reads 0, and a cluster the collector cannot see reads No data.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(count(kube_customresource_chaosengine_status_engine_status{namespace=\"$namespace\", status=\"initialized\"} == 1)) or (sum(kube_customresource_chaosengine_status_engine_status{namespace=\"$namespace\"}) * 0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Chaos engines running",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Cumulative count of chaos experiments whose hypothesis held, from the Litmus chaos-exporter. Cumulative since the exporter started, so the useful reading is the change across a GameDay rather than the absolute number. Passed means Litmus' own probes were satisfied; it says nothing about what the Kates run underneath observed, which is the bottom row of this board.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(litmuschaos_passed_experiments) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Experiments passed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The same counter for experiments whose hypothesis did not hold. A failure here is not necessarily a cluster problem: Litmus marks an experiment failed when it could not inject the fault at all, which is a chaos-tooling problem and means the resilience claim for that window is unsupported rather than disproved. `ChaosExperimentFailed` alerts on this. The zero fallback is anchored on the passed counter beside it: the chaos-exporter publishes both from startup, so if one is missing the exporter is not being scraped and neither tile should claim a number.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(litmuschaos_failed_experiments)) or (sum(litmuschaos_passed_experiments) * 0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Experiments failed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The mean of Litmus' per-experiment probe success percentage. Probes are the experiment's own assertions \u2014 an HTTP check, a command, a Prometheus query \u2014 so this is Litmus grading itself, and it is averaged across every experiment the exporter knows about, including ones that finished hours ago. Below 50% raises `ChaosProbeSuccessLow`. Treat it as a hint to open the Litmus UI, not as a measurement of the cluster.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "avg(litmuschaos_probe_success_percentage) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Probe success rate",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "panels": [],
+      "title": "Kafka under fault",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The `Ready` condition per pod, 1 or 0, from kube-state-metrics. During a pod-delete experiment this is the fault itself becoming visible, and the width of the trough is how long Kubernetes took to get the broker back \u2014 which is *not* RTO. RTO is how long the clients took to recover, and it is not measured anywhere in this repository; see the collapsed row at the bottom. A pod that never comes back raises `KafkaClusterNotReadyPostChaos`.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "max": 1,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (kube_pod_status_ready{namespace=\"$namespace\", pod=~\"$pod\"})",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Broker pod readiness",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Container restarts in the last five minutes, per pod. Under an active experiment this is expected; outside one it is `KafkaBrokerRestartUnexpected`, which is the alert the whole chaos rule file is built around. `increase()` over a counter that resets when the pod is replaced undercounts across a delete-and-recreate \u2014 the right direction to be wrong in, since it cannot report restarts that did not happen.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", pod=~\"$pod\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Broker restarts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU seconds per second, per broker pod, from cAdvisor. The shape to look for is *after* the fault clears: a broker that comes back and then sits at a much higher CPU than its peers is replaying log segments or catching up as a follower, and it is not really recovered yet even though its readiness probe passes. `KafkaHighCPUPostChaos` fires on exactly that above 0.8 cores with no experiment running.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"$pod\", container=\"kafka\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Broker CPU cores",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Container memory usage per broker pod, cAdvisor. Included because a memory-hog experiment is one of the faults Litmus injects and because a broker recovering from a delete rebuilds its page cache, which shows up here as a slow climb back to the pre-fault level. A broker whose memory never returns to that level has not finished recovering, whatever readiness says.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (container_memory_usage_bytes{namespace=\"$namespace\", pod=~\"$pod\", container=\"kafka\"})",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Broker memory",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Experiment history",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How long each Litmus experiment ran, by chaos engine and chaos result \u2014 the chaos timeline this board is organised around. Line these steps up with the troughs in `Broker pod readiness` and the dips in the Kates row below: everything on this board is read relative to when the fault was being applied. This is the duration of the *injection*, not of the recovery.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "litmuschaos_experiment_total_duration",
+          "legendFormat": "{{chaosengine_name}} \u2014 {{chaosresult_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Experiment duration",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "id": 12,
+      "panels": [],
+      "title": "Kates during chaos \u2014 the resilience evidence that works",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "What the Kates run underneath the experiment was actually achieving, records/second, per run. This is the resilience evidence: Litmus grades whether it injected the fault, and this panel grades whether the workload survived it. Throughput that dips and recovers is a cluster that failed over; throughput that goes to zero and stays there is one that did not. Empty means no benchmark was running during the window \u2014 a chaos experiment with no load under it proves nothing.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 31
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_throughput_rec_sec{job=\"$kates_job\"}",
+          "legendFormat": "{{run_id}} ({{test_type}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Benchmark throughput during chaos",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The run's p99, selected from the pre-computed percentile gauges the engine publishes \u2014 a `quantile` label to select, never `histogram_quantile()`. The interesting number is how high the spike goes and how long it lasts, because that is what a client of the real system would have experienced. A latency spike with no throughput dip is a failover the producers rode out; both together is an outage.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 31
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kates_benchmark_latency_ms{job=\"$kates_job\", quantile=\"0.99\"}",
+          "legendFormat": "p99 {{phase}} {{run_id}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Benchmark p99 latency during chaos",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Task failures per second in the run underneath the experiment. Errors here are the clearest statement that the fault reached the workload: not slower, actually failing. A pod-delete experiment that produces a latency spike and no errors is a cluster whose replication and client retries did their job, and that is the result the exercise is looking for.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 31
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (run_id, phase) (rate(kates_benchmark_errors_total{job=\"$kates_job\"}[1m]))",
+          "legendFormat": "{{run_id}} \u2014 {{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Benchmark errors during chaos",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 16,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Prose, because the row is empty for two very different reasons and an operator opening it during an incident has to be able to tell them apart.",
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 40
+          },
+          "id": 17,
+          "options": {
+            "content": "**These panels fill only for a run that verified integrity.**\n\nThey read the `kafka:chaos:*` recording rules in `charts/monitoring/templates/prometheus-chaos-rules.yaml`, which record the `kates_integrity_result_*` series the Kates application publishes from `IntegrityResult` \u2014 one set per run, tagged `run_id` and `test_type`. A plain load test never runs the verifier, so it publishes none of them and this row stays blank. That is the expected state, not a fault.\n\nSo: **blank during an ordinary run** means integrity was not verified. **Blank during a chaos run** means either the verifier has not finished yet \u2014 it publishes from the first poll after it completes \u2014 or the Kates ServiceMonitor is not being scraped, which `dashboards/METRICS.md` and tutorial 13 both cover.\n\nThe four SLA alerts on these same series \u2014 `KafkaRTOExceedsSLA`, `KafkaRPOExceedsSLA`, `KafkaDataLossDetected`, `KafkaE2ELatencySpike` \u2014 fire off the recording rules, so they are live exactly when this row is.\n\nThe values are in **seconds**. `IntegrityResult` holds them as `Duration` and exposes milliseconds; the publisher divides, because a millisecond value under a `_seconds` name would make `KafkaRTOExceedsSLA` \u2014 which fires above 30 seconds \u2014 fire on every run that took longer than 30ms to recover.",
+            "mode": "markdown"
+          },
+          "targets": [],
+          "title": "What this row is and when it fills",
+          "type": "text"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "How long producers took to resume after the fault, in seconds. Reads `kafka:chaos:producer_rto_seconds`, recorded from `kates_integrity_result_producer_rto_seconds`, published from `IntegrityResult.producerRto`. Red above 30s, the threshold `KafkaRTOExceedsSLA` uses, so the panel and the alert agree by construction.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 30
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 46
+          },
+          "id": 18,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:producer_rto_seconds",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Producer RTO",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The same for consumers: how long before the consumer side was reading again. Reads `kafka:chaos:consumer_rto_seconds`. Producer and consumer RTO are tracked separately in `IntegrityResult` on purpose \u2014 a cluster can accept writes again well before its readers have caught up, and a single recovery number hides exactly that gap.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 30
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 46
+          },
+          "id": 19,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:consumer_rto_seconds",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Consumer RTO",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Percentage of records produced and acknowledged that were never consumed. Reads `kafka:chaos:data_loss_percent`. `KafkaDataLossDetected` alerts on the same series above 0.1%, which is this panel's red threshold. With `acks=all` and a healthy ISR this should be zero; anything else is the headline finding of the run.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.1
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 46
+          },
+          "id": 20,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:data_loss_percent",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Data loss",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The recovery point objective actually observed: the width of the window whose writes did not survive, in seconds. Reads `kafka:chaos:rpo_seconds`. With `acks=all` and a healthy ISR this should be zero, and this panel is the evidence for that claim rather than an assumption of it.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 46
+          },
+          "id": 21,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:rpo_seconds",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "RPO",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The absolute count behind the data-loss percentage. Reads `kafka:chaos:lost_records`. A percentage alone cannot be acted on \u2014 0.4% is a handful of records on a small run and a serious incident on a large one \u2014 so the count sits beside it.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 51
+          },
+          "id": 22,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:lost_records",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Records lost",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Records the consumer saw more than once. Reads `kafka:chaos:duplicate_records`. Duplicates after a fault are expected without idempotence and are not data loss; they are here so a run's verdict can distinguish the two rather than reading every anomaly as loss.",
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 51
+          },
+          "id": 23,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:duplicate_records",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Duplicate records",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The run's p99 latency across the fault, in milliseconds. Reads `kafka:chaos:e2e_latency_ms`, which records `max by (run_id, test_type) (kates_benchmark_latency_ms{quantile=\"0.99\"})`. That rule used to read `kafka_chaos_e2e_latency_ms`, a name nothing published and which would have been misplaced if it had \u2014 `kafka_` is the JMX exporter's namespace, and this is the workload's own measurement. `KafkaE2ELatencySpike` fires off this series above 10s.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 51
+          },
+          "id": 24,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:e2e_latency_ms",
+              "legendFormat": "p99 latency",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "End-to-end latency during chaos",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Records per second across the fault. Reads `kafka:chaos:producer_throughput`, which records `sum by (run_id, test_type) (kates_benchmark_throughput_rec_sec)`. Like the panel beside it, this rule used to read a `kafka_chaos_*` name nothing published; it now reads the throughput the benchmark engine already reports, so the number is the same one `Benchmark throughput during chaos` shows above, aggregated per run rather than per phase.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 59
+          },
+          "id": 25,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "kafka:chaos:producer_throughput",
+              "legendFormat": "records/s",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Producer throughput during chaos",
+          "type": "timeseries"
+        }
+      ],
+      "title": "RTO / RPO / data integrity \u2014 chaos and resilience runs only",
+      "type": "row"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "kafka",
+    "chaos",
+    "litmus",
+    "kates"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_customresource_chaosengine_status_engine_status, namespace)",
+        "description": "Namespaces that hold a ChaosEngine. Empty here means kube-state-metrics is running without custom-resource metrics for ChaosEngine \u2014 not that no chaos has run.",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Kafka namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": {
+          "query": "label_values(kube_customresource_chaosengine_status_engine_status, namespace)",
+          "refId": "namespace-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_pod_status_ready{namespace=\"$namespace\"}, pod)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Pods under test",
+        "multi": true,
+        "name": "pod",
+        "options": [],
+        "query": {
+          "query": "label_values(kube_pod_status_ready{namespace=\"$namespace\"}, pod)",
+          "refId": "pod-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kates_benchmark_active_runs, job)",
+        "description": "The Kates release's scrape job. Empty here means Prometheus is not scraping the application at all \u2014 check that its ServiceMonitor carries the label the Prometheus CR's serviceMonitorSelector asks for.",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Kates scrape job",
+        "multi": false,
+        "name": "kates_job",
+        "options": [],
+        "query": {
+          "query": "label_values(kates_benchmark_active_runs, job)",
+          "refId": "kates_job-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Kates \u2014 Chaos",
+  "uid": "kafka-chaos-dashboard",
+  "version": 1
+}

@@ -229,39 +229,7 @@
       }
     },
     "dashboard": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "label": {
-          "type": "string"
-        },
-        "labelValue": {
-          "type": "string"
-        },
-        "folder": {
-          "type": "string"
-        },
-        "migration": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "drainedBelowMs": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "translationFreshMs": {
-              "type": "integer",
-              "minimum": 1
-            }
-          }
-        }
-      }
+      "description": "REMOVED in 0.11.0: the mirror and migration boards are delivered by charts/monitoring (dashboards.enabled there). Kept in the schema only so that a release still setting any dashboard.* key reaches the chart's own refusal, which names the replacement, instead of a bare additionalProperties error."
     },
     "tests": {
       "type": "object",

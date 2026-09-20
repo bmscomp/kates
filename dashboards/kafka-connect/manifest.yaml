@@ -1,0 +1,33 @@
+# Kafka Connect — delivered by charts/monitoring with every other board.
+#
+# Through connect-cluster 2.0.0 the chart shipped its own copy and rewrote
+# `uid` and `title` per release. Central delivery ships this one file
+# unmodified: the expressions are scoped by the `$namespace` and `$cluster`
+# template variables (`strimzi_io_cluster` is on every series the workers
+# publish), so one board serves every Connect group a Grafana can see and
+# the dropdowns separate them — there is no per-release uid to collide.
+uid: kates-connect
+title: Kafka Connect
+description: >-
+  One Kafka Connect group: whether the workers are up, which connectors and
+  tasks are running, how much data is moving, what is failing or being
+  dead-lettered, and whether a restart will reprocess.
+tags:
+  - kafka
+  - connect
+  - strimzi
+  - kates
+refresh: 30s
+# Connect problems are slow: a rebalance storm, a drifting sink, a connector
+# that has been logging errors since the deploy. An hour is too short to see
+# any of them start.
+time_from: now-6h
+links:
+  - title: Kafka Connect runbook
+    type: link
+    url: https://github.com/bmscomp/kates/blob/main/docs/connect-cluster-runbook.md
+    targetBlank: true
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kafka-connect.json

@@ -151,16 +151,66 @@ check-chart-tests: ## Fail if a chart test calls an endpoint that does not exist
 # one its JMX exporter rules can produce — simulated over the MBean catalogue
 # in scripts/metric-contract/<chart>.yaml. An alert on a name no rule emits
 # installs fine and never fires. Also run in CI (ci-mirror-maker2.yml).
-check-metric-contract: kafka-chart-deps connect-chart-deps mm2-chart-deps ## Verify the alerts and dashboards read series the exporter rules produce
+# Every board in dashboards/ is generated from its board.py and synced into the
+# charts that deliver it, and into the two chartless install bundles under
+# dashboards/bundle/ (see dashboards/README.md, "Installing these anywhere").
+# --check fails when a board was edited without regenerating, or when a chart
+# copy or a bundle file was edited by hand.
+check-dashboards: ## Verify the dashboards are in sync and their layout holds
+	@./scripts/gen-dashboards.py --check
+	@./scripts/check-dashboards.py
+
+gen-dashboards: ## Regenerate every dashboard, its chart copies and the install bundles
+	@./scripts/gen-dashboards.py
+
+# dashboards/install.py is one of the four documented install routes and is
+# called from ci-kafka-charts.yml, and it had no test at all — the only route
+# whose failures would be found by a person running it. The suite talks to a
+# real http.server that answers like Grafana rather than to a mock, because the
+# things most likely to be wrong in an HTTP client (the base64 in a basic-auth
+# header, overwrite:true, an empty 200 body) are exactly what a mock removes.
+# Standard library only: no pytest, like every other gate here.
+check-install-script: ## Test dashboards/install.py against a fake Grafana
+	@python3 -m unittest discover -s dashboards -p 'test_*.py' -q
+
+# Every other dashboard check is static: the contract asks whether a NAME is
+# producible, promtool asks whether a query PARSES, check-dashboards.py asks
+# about layout and documentation. None of them runs a query, and a correct
+# name in a query that selects on a label the series does not carry draws an
+# empty panel — which looks exactly like a healthy idle cluster. Point this at
+# a Prometheus with real data, or hand it captured /metrics bodies:
+#
+#   make check-dashboards-live PROMETHEUS_URL=http://localhost:9090
+#   scripts/check-dashboards-live.py --scrape /tmp/scrape/broker.txt
+#
+# CI runs it in the weekly metrics-live job over that job's own captures.
+check-dashboards-live: ## Run the boards' selectors against a live Prometheus
+	@test -n "$(PROMETHEUS_URL)" || { echo "set PROMETHEUS_URL=http://host:9090"; exit 2; }
+	@./scripts/check-dashboards-live.py --prometheus "$(PROMETHEUS_URL)"
+
+# Everything above treats a board as JSON. This starts a real Grafana of each
+# version, provisions all twelve, and drives a headless browser over them, so
+# it answers a question the JSON cannot: does the FRONTEND draw this. A panel
+# type a given Grafana does not have renders "Panel plugin not found" and the
+# API is perfectly happy about it.
+#
+#   make check-grafana-compat                      # the pinned version
+#   make check-grafana-compat GRAFANA_VERSIONS="9.5.21 10.4.19 11.6.6 12.3.1"
+#
+# Needs docker; the browser half additionally needs node with playwright and
+# skips itself with a notice when that is absent.
+check-grafana-compat: ## Load and render every board on one or more Grafana versions
+	@./scripts/check-grafana-compat.sh $(GRAFANA_VERSIONS)
+
+check-metric-contract: kafka-chart-deps connect-chart-deps mm2-chart-deps strimzi-chart-deps monitoring-chart-deps ## Verify the alerts and dashboards read series the exporter rules produce
 	@for c in $$(./scripts/check-metric-contract.sh --list); do ./scripts/check-metric-contract.sh "$$c" --quiet || exit 1; done
 
 # Render each Strimzi chart across every overlay and toggle in
 # scripts/chart-matrix/<chart>.yaml and check the output against the pinned
 # Strimzi CRDs (pruned fields, missing required fields, enums, duplicate keys),
-# the render's assertions, and the rails. Needs `helm dependency build
-# charts/strimzi-operator` once. Also run in CI (ci-kafka-charts.yml).
-check-chart-matrix: mm2-chart-deps kafka-chart-deps ## Render the Strimzi charts across their overlays and check every render
-	@for c in strimzi-operator kafka-cluster connect-cluster mirror-maker2; do ./scripts/check-chart-matrix.py "$$c" --offline || exit 1; done
+# the render's assertions, and the rails. Also run in CI (ci-kafka-charts.yml).
+check-chart-matrix: mm2-chart-deps kafka-chart-deps connect-chart-deps strimzi-chart-deps monitoring-chart-deps ## Render the Strimzi charts across their overlays and check every render
+	@for c in strimzi-operator kafka-cluster connect-cluster mirror-maker2 monitoring; do ./scripts/check-chart-matrix.py "$$c" --offline || exit 1; done
 
 # kafka-cluster ships Strimzi's own JMX exporter rules unchanged; this compares
 # them with upstream for STRIMZI_VERSION (needs network).
@@ -189,6 +239,9 @@ cluster:  ## Start Kind cluster only
 	./scripts/start-cluster.sh
 
 # Deploy monitoring stack (auto-detect provider)
+monitoring-chart-deps:  ## Fetch monitoring chart dependencies (kube-prometheus-stack)
+	@helm dependency build charts/monitoring > /dev/null 2>&1 || helm dependency update charts/monitoring > /dev/null
+
 monitoring:  ## Deploy Prometheus & Grafana
 	@echo "📊 Deploying monitoring stack..."
 	@helm dependency build charts/monitoring 2>/dev/null || true
@@ -1043,7 +1096,15 @@ chaos-chart-push: chaos-chart-package  ## Push the packaged kates-chaos chart to
 	helm push .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz $(CHART_REGISTRY)
 	@echo "✅ Chaos chart pushed: $(CHART_REGISTRY)/kates-chaos:$(CHAOS_CHART_VERSION)"
 
-strimzi-chart-package:  ## Package the strimzi-operator chart into .build/
+# The operator chart vendors upstream strimzi-kafka-operator as a dependency
+# tarball, and charts/*/charts/ is generated and gitignored. Two checks read
+# that tarball — the kafka-cluster metric contract, for the dashboards the
+# operator chart delivers, and the chart matrix — so on a fresh checkout both
+# failed with "nothing matches ...-*.tgz" until this target existed.
+strimzi-chart-deps:  ## Fetch strimzi-operator chart dependencies
+	@helm dependency build $(STRIMZI_CHART_DIR) > /dev/null 2>&1 || helm dependency update $(STRIMZI_CHART_DIR) > /dev/null
+
+strimzi-chart-package: strimzi-chart-deps  ## Package the strimzi-operator chart into .build/
 	@mkdir -p .build
 	helm package $(STRIMZI_CHART_DIR) --destination .build/
 	@echo "✅ Strimzi operator chart packaged: .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz"

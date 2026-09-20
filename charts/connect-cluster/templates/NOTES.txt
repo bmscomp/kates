@@ -13,7 +13,7 @@ Kafka Connect {{ $name }} in {{ $ns }} (connect-cluster {{ .Chart.Version }})
   Secret access   {{ if (.Values.rbac).allSecrets }}every Secret (rbac.allSecrets){{ else if $r.secretRefs }}{{ range $sns, $names := $r.secretRefs }}{{ $sns }}: {{ join ", " $names }}; {{ end }}{{ else }}none referenced{{ end }}
   Managed user    {{ if .Values.kafkaUser.create }}{{ include "connect-cluster.kafkaUsername" . }} in {{ include "connect-cluster.kafkaNamespace" . }}{{ if $r.secretSync.resolvedSecrets }}, copied here by the secret-sync Job{{ else if $r.secretSync.reflector }}, reflected here{{ end }}{{ else }}no — Secret {{ ($k.authentication).secretName | default "(none)" }} must exist in {{ $ns }}{{ end }}
   NetworkPolicy   {{ if .Values.networkPolicy.enabled }}on (Kafka ports {{ join ", " $r.kafkaPorts }}){{ else }}off{{ end }}
-  Monitoring      metrics {{ ternary $r.metrics.type "off" $r.metrics.enabled }}, PodMonitor {{ ternary "on" "off" $r.podMonitor.enabled }}, alerts {{ ternary "on" "off" .Values.alerts.enabled }}, dashboard {{ ternary "on" "off" .Values.dashboards.enabled }}
+  Monitoring      metrics {{ ternary $r.metrics.type "off" $r.metrics.enabled }}, PodMonitor {{ ternary "on" "off" $r.podMonitor.enabled }}, alerts {{ ternary "on" "off" .Values.alerts.enabled }}, dashboard via charts/monitoring
 {{- if and (or .Values.alerts.enabled $r.podMonitor.enabled) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1")) }}
                   (the monitoring.coreos.com/v1 API is absent: no PodMonitor or alerts rendered)
 {{- end }}

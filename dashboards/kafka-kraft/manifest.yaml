@@ -1,0 +1,50 @@
+# Kafka — KRaft Operations. Delivered by charts/monitoring.
+#
+# A STATIC uid, unlike the Connect and MirrorMaker 2 boards. Those belong to a
+# release and one Grafana may hold several, so their charts rewrite the uid
+# with a digest of the release name. This board belongs to a Kafka CLUSTER,
+# there is one per monitoring release, and the monitoring chart globs
+# `dashboards/*.json` into a single ConfigMap without touching the contents.
+# The cluster it shows is chosen in the board, by the `$namespace` and
+# `$cluster` dropdowns, which is what makes one static file enough.
+uid: kates-kafka-kraft
+title: Kafka — KRaft Operations
+description: >-
+  The KRaft half of a Kafka cluster: whether the controller quorum is healthy,
+  whether metadata is committing, whether every broker has applied it, and
+  what is failing to replicate, serve or store the data underneath. Broker
+  health, quorum identity, Cruise Control and consumer lag are the Strimzi
+  operator's own boards.
+tags:
+  - kafka
+  - kraft
+  - strimzi
+  - kates
+refresh: 30s
+# A quorum problem is minutes long and a metadata-lag problem is hours long.
+# An hour shows the first and hides the second.
+time_from: now-6h
+links:
+  # The operator's own boards are tagged `Strimzi` (capitalised — upstream's
+  # spelling, and Grafana matches tags exactly), so this dropdown lands on
+  # strimzi-kafka, strimzi-kraft, strimzi-cruise-control and
+  # strimzi-kafka-exporter: everything this board deliberately does not
+  # restate.
+  - title: Broker health, quorum identity, Cruise Control, consumer lag
+    type: dashboards
+    tags: [Strimzi]
+    asDropdown: true
+  - title: Performance & load testing
+    type: dashboards
+    tags: [performance]
+    asDropdown: true
+  - title: Kafka cluster runbook
+    type: link
+    icon: doc
+    url: https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md
+    targetBlank: true
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kafka-kraft.json
+    variant: default

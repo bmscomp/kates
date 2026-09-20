@@ -2,19 +2,25 @@
 
 Two boards, because a mirror and a migration are not the same job.
 
-`dashboard.enabled` renders the **mirror board**: a DR leg or a fan-in that runs
-for months, watched the way anything long-lived is watched — is it up, is it
-lagging, is it erroring. `dashboard.migration.enabled` renders the **migration
-board**: the hours between installing the mirror and cutting over, where the
-only question is whether you can cut over yet and, if not, what is left.
+The **mirror board** watches a DR leg or a fan-in that runs for months, the
+way anything long-lived is watched — is it up, is it lagging, is it erroring.
+The **migration board** covers the hours between installing the mirror and
+cutting over, where the only question is whether you can cut over yet and, if
+not, what is left. During a migration the second one is often the only board
+anybody opens; on a permanent DR leg it is noise — collapse or ignore it.
 
-They are independent. During a migration the second one is often the only board
-anybody opens; on a permanent DR leg the second one is noise. Both are
-ConfigMaps picked up by the Grafana sidecar, both carry the same
-`dashboard.label` / `labelValue` / `folder`, and both need `metrics.enabled`
-plus something scraping the workers.
+Since chart 0.11.0 **both are delivered by `charts/monitoring`**
+(`dashboards.enabled` there), with every other board in `dashboards/`; this
+chart renders neither, and setting its old `dashboard.*` values is refused
+with that location named. Their `$namespace`/`$cluster` dropdowns select a
+release from the data.
+[`dashboards/README.md`](../../../dashboards/README.md#installing-these-anywhere)
+has the four install routes and every knob.
 
-## Turning them on
+## Making them fill
+
+The boards install with the monitoring stack; whether they have data is this
+chart's side:
 
 ```yaml
 metrics:
@@ -22,23 +28,17 @@ metrics:
                          # scrape port when this is set
 podMonitors:
   enabled: true          # requires the Prometheus Operator CRDs
-dashboard:
-  enabled: true          # the mirror board
-  migration:
-    enabled: true        # the migration board
 ```
 
 The migration presets ship with metrics **off** — `values-migrate-2x.yaml` and
 its siblings are written for a lab on a laptop, where there is no Prometheus to
-scrape anything. Turn both on together when you want the board during a real
-migration:
+scrape anything. Turn both on for a real migration:
 
 ```bash
 helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
 helm upgrade mm2 charts/mirror-maker2 -n kafka \
   -f charts/mirror-maker2/values-migrate-3x.yaml \
-  --set metrics.enabled=true --set podMonitors.enabled=true \
-  --set dashboard.migration.enabled=true
+  --set metrics.enabled=true --set podMonitors.enabled=true
 ```
 
 Turn it on **before the first record crosses**, not after the first problem: lag
@@ -118,21 +118,39 @@ which is the thing it is built around.
 | **Topics** | The punch list: lag, record age and rate per replicated topic, plus bytes crossing |
 | **Cutover state** | Source connector, checkpoint connector, still-replicating rate, errors, and the freeze plotted per connector |
 
-### Its two thresholds are not the alert's
+### Its two thresholds are not the alert's, and they are not in values
 
-```yaml
-dashboard:
-  migration:
-    drainedBelowMs: 5000        # lag under which the mirror counts as drained
-    translationFreshMs: 60000   # translation age past which a group reads stale
+```python
+# dashboards/mirror-maker2-migration/board.py
+DRAINED_MS = 5000    # lag under which the mirror counts as drained
+FRESH_MS   = 60000   # translation age past which a group reads stale
 ```
 
 `alerts.thresholds.replicationLatencyMs` is 60s, and that is right for a mirror
 that runs: it is the point at which lag is worth waking someone. A cutover wants
-lag near zero, so the migration board judges against `drainedBelowMs` instead.
-Lower it if your window is tight; raising it above the alert's threshold means
-the board can say DRAINED while the alert says the lag is high, which is a
-contradiction worth avoiding.
+lag near zero, so the migration board judges against `DRAINED_MS` instead. A
+tight cutover window wants a lower number; a number above the alert's threshold
+means the board can say DRAINED while the alert says the lag is high, which is
+a contradiction worth avoiding.
+
+**Both numbers live in the board's source, not in a release.** `DRAINED_MS` is
+a threshold colour, which Grafana cannot template, *and* the `< bool 5000`
+inside the go/no-go query, where a `$variable` does not parse as PromQL — the
+"every dashboard query is valid PromQL" gate would reject it. To move either
+line, edit
+[`dashboards/mirror-maker2-migration/board.py`](../../../dashboards/mirror-maker2-migration/README.md)
+and run `scripts/gen-dashboards.py`.
+
+> **Removed in 0.11.0.** `dashboard.migration.drainedBelowMs` and
+> `.translationFreshMs` used to be values keys, and this section used to show
+> them being set. They were baked into the generated board, so setting them
+> changed nothing — documented as inert, which is better than silent but is
+> still a key that accepts a number and ignores it. A release that sets either
+> one is now **refused**, with the constant to edit named in the error.
+
+The mirror board's `alerts.thresholds.*` lines and its SLO error budget work
+the same way: the alerts still honour `values.yaml`, the panel lines are the
+chart defaults.
 
 ### Safe to cut over?
 
@@ -227,23 +245,39 @@ are, in `.github/workflows/ci-mirror-maker2.yml`:
 | Metric contract | Every series a panel reads is one the chart's JMX exporter rules can actually produce — simulated over a catalogue of the MBeans a worker registers |
 | Layout | For every board: no two panels on the same cell, nothing past column 24, rows in order, every panel with a description and a query |
 | PromQL | Every query on every board parses, under the same promtool the alerts get |
-| Go/no-go behaviour | The "Safe to cut over?" query — extracted from the rendered board, not copied — held to five cases including a release reporting nothing |
+| Go/no-go behaviour | The "Safe to cut over?" query — extracted from the rendered board, not copied — held to six cases including a release reporting nothing and a second release in the same namespace |
 | Live scrape *(on demand)* | A real worker's `/metrics`, diffed against the catalogue both ways |
 
 `make check-metric-contract` runs the first of those locally.
 
 ## Adding a panel
 
-Both templates follow the same three conventions, and the gates enforce them:
+**Neither board lives in this chart.** They live in
+[`dashboards/mirror-maker2/`](../../../dashboards/mirror-maker2/README.md) and
+[`dashboards/mirror-maker2-migration/`](../../../dashboards/mirror-maker2-migration/README.md)
+as Python that `scripts/gen-dashboards.py` turns into JSON, delivered by
+`charts/monitoring`. Nothing is injected per release any more: `$namespace`
+and `$cluster` are ordinary `query` variables resolved from
+`label_values(...)`, so the one file resolves wherever it is imported, and
+`$source` is a `custom` variable whose options you edit on the board — a
+value rather than data, on purpose, because a leg whose connectors never
+started publishes no series with its alias in. (Through 0.10.0 the chart
+rewrote uid, title and `$source` per release; `$pods`, a pod-name regex built
+from the release name, went even earlier — the PodMonitor carries
+`kafka-common.strimziRelabelings`, so workers are selected by
+`strimzi_io_cluster`.)
 
-1. **Every panel after the first emits its own leading comma.** A section that
-   renders conditionally can then be added or dropped without moving a comma
-   anywhere else — and invalid JSON means the dashboard silently never appears.
-2. **Grid positions come from the `$y` cursor**, never written down. Each
-   section places its header at `$y`, its panels at `$y + 1` (and `$y + 9` for a
-   second band), then advances past itself.
-3. **A description and a query are required.** A panel with neither is a panel
-   nobody can read during an incident.
+So: edit `board.py`, run `scripts/gen-dashboards.py`, and run
+`python3 scripts/check-dashboards.py`. Never edit the generated copies under
+`charts/monitoring/dashboards/`; `gen-dashboards.py --check` fails on a
+hand-edited one. Each board's README says which numbers are frozen into its
+JSON — the alert thresholds, the SLO budget and the migration board's
+`drainedBelowMs` among them, because a Grafana threshold is not templatable
+and one of those numbers sits inside a PromQL comparison.
+
+A description and a query are still required on every panel; `panels.py` will
+not build a panel without a description, and the layout gate rejects one that
+has none.
 
 New series need a catalogue entry in
 `scripts/metric-contract/mirror-maker2.yaml` — if the MBean and attribute are

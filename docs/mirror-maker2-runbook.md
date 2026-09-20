@@ -77,10 +77,10 @@ verification between them.
 - [ ] You know which consumers move when, and who owns each one.
 - [ ] You have read the rollback section below **before** you need it.
 
-The migration board (`dashboard.migration.enabled`) is built around this
-checklist: its go/no-go panel is the first three boxes, its per-topic table is
-the second, and its consumer-group table is the third. It cannot see the
-producers — that box stays yours.
+The migration board (delivered by `charts/monitoring` with every other
+board) is built around this checklist: its go/no-go panel is the first three
+boxes, its per-topic table is the second, and its consumer-group table is the
+third. It cannot see the producers — that box stays yours.
 [Dashboards](../charts/mirror-maker2/docs/dashboards.md#reading-the-board-through-a-cutover)
 maps each step below to what to watch while you run it.
 
@@ -879,7 +879,7 @@ the objective, and has been for a while.
 
 Enable them with `metrics.enabled=true`; `alerts.enabled=true` turns them into
 PrometheusRules — each carrying a `runbook_url` into the section of this file
-that resolves it — and `dashboard.enabled=true` renders a Grafana dashboard
+that resolves it — and `charts/monitoring` delivers a Grafana dashboard
 built around exactly these questions, in the order this runbook asks them: a
 six-stat header (is it up, is it lagging, is it erroring), then task states,
 replication, offset translation, errors and dead letters, the SLO, workers,

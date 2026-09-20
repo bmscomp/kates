@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import jakarta.inject.Inject;
 
@@ -185,7 +186,6 @@ class GrpcApiIT {
     void clusterServiceDescribesTheContainerBroker() {
         String topic = ItSupport.uniqueTopic("grpc-cluster-it");
         topicService.createTopic(topic, 2, 1, null);
-        topicService.evictCache();
 
         var stub = ClusterServiceGrpc.newBlockingStub(channel);
 
@@ -194,9 +194,18 @@ class GrpcApiIT {
         assertEquals(1, info.getBrokersCount());
         assertFalse(info.getBrokers(0).getHost().isBlank());
 
-        var topics = stub.listTopics(ListTopicsRequest.newBuilder().setSize(200).build());
+        // createTopics is acked by the KRaft controller, but the broker
+        // answering listTopics may not have applied the metadata delta yet —
+        // and listTopics() memoises whatever it saw for 30s, so a stale
+        // listing has to be evicted before every retry, not just once up
+        // front.
         assertTrue(
-                topics.getItemsList().stream().anyMatch(t -> topic.equals(t.getName())),
+                ItSupport.waitUntil(Duration.ofSeconds(15), () -> {
+                    topicService.evictCache();
+                    var topics = stub.listTopics(
+                            ListTopicsRequest.newBuilder().setSize(200).build());
+                    return topics.getItemsList().stream().anyMatch(t -> topic.equals(t.getName()));
+                }),
                 "the topic just created must appear in the listing");
 
         var detail =
