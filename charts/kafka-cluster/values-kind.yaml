@@ -40,12 +40,10 @@ tieredStorage:
 backup:
   enabled: false
 
-alerts:
-  enabled: false
-
-monitoring:
-  podMonitor:
-    enabled: false
+# Scrape and rules are deliberately NOT held off here. A PodMonitor and a
+# PrometheusRule cost nothing on a laptop, the chart renders them only where
+# the monitoring.coreos.com API exists, and this overlay switching them off
+# is what left every board `kates deploy` installs with nothing to show.
 
 rebalance:
   enabled: false

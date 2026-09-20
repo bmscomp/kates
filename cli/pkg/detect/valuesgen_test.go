@@ -117,6 +117,51 @@ func TestGenerateValues_StrimziNotInstalled(t *testing.T) {
 	}
 }
 
+func TestGenerateValues_MonitoringFollowsCRDs(t *testing.T) {
+	r := buildTestReport(3, []string{"standard"})
+	vals := NewValuesGenerator(r, "krafter").Generate()
+	if !vals.Monitoring.PodMonitor.Enabled {
+		t.Error("expected monitoring.podMonitor.enabled=true when the PodMonitor CRD exists")
+	}
+	if !vals.Alerts.Enabled {
+		t.Error("expected alerts.enabled=true when both operator CRDs exist")
+	}
+
+	r.Monitoring.PrometheusRuleCRD = false
+	vals = NewValuesGenerator(r, "krafter").Generate()
+	if !vals.Monitoring.PodMonitor.Enabled || vals.Alerts.Enabled {
+		t.Errorf("expected scrape on and rules off without the PrometheusRule CRD, got podMonitor=%v alerts=%v",
+			vals.Monitoring.PodMonitor.Enabled, vals.Alerts.Enabled)
+	}
+
+	r.Monitoring.PodMonitorCRD = false
+	vals = NewValuesGenerator(r, "krafter").Generate()
+	if vals.Monitoring.PodMonitor.Enabled || vals.Alerts.Enabled {
+		t.Errorf("expected scrape and rules off without prometheus-operator, got podMonitor=%v alerts=%v",
+			vals.Monitoring.PodMonitor.Enabled, vals.Alerts.Enabled)
+	}
+}
+
+func TestRenderValues_EmitsTheCurrentMonitoringKey(t *testing.T) {
+	r := buildTestReport(3, []string{"standard"})
+	var buf bytes.Buffer
+	if err := RenderValues(r, "krafter", &buf); err != nil {
+		t.Fatalf("RenderValues failed: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "monitoring:\n    podMonitor:\n        enabled: true") {
+		t.Errorf("expected monitoring.podMonitor.enabled in the output, got:\n%s", content)
+	}
+	// The 0.4 key wins over the current one inside the chart whenever the
+	// current one holds the default, so it must not be emitted at all.
+	if strings.Contains(content, "podMonitors:") {
+		t.Error("the deprecated podMonitors key must not be emitted")
+	}
+	if strings.Contains(content, "dashboards:") {
+		t.Error("dashboards.enabled does nothing on kafka-cluster 1.x and must not be emitted")
+	}
+}
+
 func TestGenerateValues_KyvernoSafe(t *testing.T) {
 	r := buildTestReport(3, []string{"standard"})
 	r.Admission.Kyverno.Installed = true

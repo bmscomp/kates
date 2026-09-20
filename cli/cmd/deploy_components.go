@@ -14,6 +14,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// kyvernoChartVersion pins the Kyverno chart: the last stable patch of the
+// 3.6 minor series. Chart versions: https://kyverno.github.io/kyverno/
+const kyvernoChartVersion = "3.6.4"
+
 // deployGroupA deploys Group A components (Operators & CRDs) in parallel:
 // Strimzi, Cert-Manager, and Kyverno.
 func deployGroupA(dc *deployContext) error {
@@ -36,6 +40,7 @@ func deployGroupA(dc *deployContext) error {
 	if deployWithKyverno {
 		deployKyvernoFlag = !isHelmReleaseDeployedFn(ctx, "kyverno", "kyverno")
 	}
+	dc.kyvernoInstalled = deployKyvernoFlag
 
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -261,13 +266,11 @@ spec:
 			runHelmFn(gCtx, "repo", "update", "kyverno")
 
 			// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
-			// Pinned to 3.6.4 — the last stable patch of the 3.6 minor series.
-			// Chart versions: https://kyverno.github.io/kyverno/
 			// global.clusterDomain ensures Kyverno webhook certificates use the
 			// correct cluster DNS domain — same value detected for all other components.
 			kyvernoDomain := dc.resolveClusterDomain()
 			err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
-				"--version", "3.6.4",
+				"--version", kyvernoChartVersion,
 				"-n", "kyverno", "--create-namespace",
 				"--set", "admissionController.replicas=1",
 				"--set", "backgroundController.replicas=1",
@@ -411,22 +414,33 @@ func deployGroupB(dc *deployContext) error {
 		}
 	}
 
-	g2, g2Ctx := errgroup.WithContext(ctx)
-
-	// Deploy Monitoring (Prometheus + Grafana via charts/monitoring)
+	// Monitoring first, on its own. kube-prometheus-stack carries the
+	// monitoring.coreos.com CRDs, and every chart below renders its
+	// PodMonitor and PrometheusRule only if that API exists when Helm
+	// renders it — a release is never revisited when a CRD turns up later.
+	// Installed in parallel with Kafka, the CRDs landed seconds after Kafka
+	// had rendered without them (see deploy_monitoring.go). Without --wait
+	// this costs the time the chart takes to apply, not the minutes its pods
+	// take to start; the readiness wait further down is unchanged.
+	//
+	// chaosAlerts is the monitoring chart's own set of rules: the
+	// kafka:chaos:* recording series the chaos board is drawn from.
 	if deployWithMonitoring && deployMon {
-		g2.Go(func() error {
-			// Update chart dependencies (kube-prometheus-stack subchart).
-			runHelmFn(g2Ctx, "dependency", "update", "charts/monitoring")
+		// Update chart dependencies (kube-prometheus-stack subchart).
+		runHelmFn(ctx, "dependency", "update", "charts/monitoring")
 
-			return runHelmFn(g2Ctx, "upgrade", "--install", "monitoring",
-				"charts/monitoring",
-				"-n", jaegerNS, "--create-namespace",
-				"-f", dc.chartOverlay("charts/monitoring"),
-				"--set", "kube-prometheus-stack.global.clusterDomain="+dc.report.Network.ClusterDomain,
-				"--timeout", "10m")
-		})
+		if err := runHelmFn(ctx, "upgrade", "--install", "monitoring",
+			"charts/monitoring",
+			"-n", jaegerNS, "--create-namespace",
+			"-f", dc.chartOverlay("charts/monitoring"),
+			"--set", "kube-prometheus-stack.global.clusterDomain="+dc.report.Network.ClusterDomain,
+			"--set", fmt.Sprintf("chaosAlerts.enabled=%t", deployWithChaos),
+			"--timeout", "10m"); err != nil {
+			return fmt.Errorf("failed during Group B (Core Infra) deployments: %w", err)
+		}
 	}
+
+	g2, g2Ctx := errgroup.WithContext(ctx)
 
 	if deployWithKafkaConnect && deployPG {
 		g2.Go(func() error {
@@ -507,6 +521,8 @@ metadata:
 
 			// (Values files are already appended above so these overrides take precedence)
 
+			kafkaArgs = append(kafkaArgs, dc.scrapeArgs("charts/kafka-cluster")...)
+
 			if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
 				return err
 			}
@@ -534,6 +550,9 @@ metadata:
 		if err := dc.deployComponent("monitoring", jaegerNS, "release=monitoring", 10*time.Minute, ""); err != nil {
 			return fmt.Errorf("monitoring readiness failed: %w", err)
 		}
+	}
+	if err := wireKyvernoScrape(dc); err != nil {
+		return err
 	}
 
 	// 2. PostgreSQL
@@ -754,23 +773,10 @@ stringData:
 			connectArgs = append(connectArgs, "--set", "replicas=1")
 		}
 
-		monitoringEnabled := deployWithMonitoring
-		if monitoringEnabled {
-			// Cleverly detect if CRDs are actually present before enabling monitoring on Connect
-			out, err := runExecCombinedFn(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found")
-			if err != nil || len(bytes.TrimSpace(out)) == 0 {
-				monitoringEnabled = false
-				dl.Printf("    ⚠  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
-			}
-		}
-
-		if !monitoringEnabled {
-			connectArgs = append(connectArgs,
-				"--set", "alerts.enabled=false",
-				"--set", "monitoring.podMonitor.enabled=false",
-				"--set", "dashboards.enabled=false",
-			)
-		}
+		// Monitoring is installed and ready by now (Group B), so the CRDs its
+		// PodMonitor needs exist; without --with-monitoring the chart's own
+		// API check keeps a bare cluster installable.
+		connectArgs = append(connectArgs, dc.scrapeArgs("charts/connect-cluster")...)
 
 		if err := runHelmFn(ctx, connectArgs...); err != nil {
 			return err
@@ -999,8 +1005,9 @@ data:
 		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
-			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring),
-			"--timeout", "8m")
+			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
+		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
+		katesArgs = append(katesArgs, "--timeout", "8m")
 
 		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
 		if err := runHelmFn(ctx, katesArgs...); err != nil {
@@ -1134,6 +1141,7 @@ data:
 					"--set-string", "strimziVersion="+dc.versions.StrimziVersion,
 				)
 			}
+			helmArgs = append(helmArgs, dc.scrapeArgs("charts/mirror-maker2")...)
 			helmArgs = append(helmArgs, "--timeout", "10m")
 			if err := runHelmFn(ctx, helmArgs...); err != nil {
 				dl.FinishComponent("mirror-maker2", false)
@@ -1156,12 +1164,14 @@ data:
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
 			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
 			dl.Println("    - Waiting for Litmus Chaos pods to become ready (this may take a few minutes)...")
-			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos",
+			chaosArgs := []string{"upgrade", "--install", "chaos", "charts/kates-chaos",
 				"-n", chaosNS, "--create-namespace",
 				"-f", dc.valuesFile,
 				"-f", dc.chartOverlay("charts/kates-chaos"),
-				"--set", "rbac.kafkaNamespace="+kafkaNS,
-				"--timeout", "5m"); err != nil {
+				"--set", "rbac.kafkaNamespace=" + kafkaNS}
+			chaosArgs = append(chaosArgs, dc.scrapeArgs("charts/kates-chaos")...)
+			chaosArgs = append(chaosArgs, "--timeout", "5m")
+			if err := runHelmFn(ctx, chaosArgs...); err != nil {
 				return err
 			}
 

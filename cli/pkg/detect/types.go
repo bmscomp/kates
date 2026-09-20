@@ -413,8 +413,7 @@ type GeneratedValues struct {
 	BrokerPools        []GenBrokerPool        `yaml:"brokerPools"`
 	BrokerDefaults     GenBrokerDefaults      `yaml:"brokerDefaults"`
 	Kafka              GenKafka               `yaml:"kafka"`
-	Dashboards         GenDashboards          `yaml:"dashboards"`
-	PodMonitors        GenPodMonitors         `yaml:"podMonitors"`
+	Monitoring         GenMonitoring          `yaml:"monitoring"`
 	Alerts             GenAlerts              `yaml:"alerts"`
 	NetPolicies        GenNetPolicies         `yaml:"networkPolicies"`
 	Users              *GenUsers              `yaml:"users,omitempty"`
@@ -530,19 +529,20 @@ type GenRack struct {
 	TopologyKey string `yaml:"topologyKey"`
 }
 
-type GenDashboards struct {
-	Enabled   bool   `yaml:"enabled"`
-	Namespace string `yaml:"namespace,omitempty"`
+// GenMonitoring is kafka-cluster 1.x's monitoring block. The 0.4 key
+// podMonitors is still accepted there, but it wins over this one whenever
+// this one carries the chart default, so emitting it would make an explicit
+// monitoring.podMonitor.enabled=true from the caller a no-op.
+type GenMonitoring struct {
+	PodMonitor GenPodMonitor `yaml:"podMonitor"`
 }
 
-type GenPodMonitors struct {
-	Enabled bool              `yaml:"enabled"`
-	Labels  map[string]string `yaml:"labels,omitempty"`
+type GenPodMonitor struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type GenAlerts struct {
-	Enabled bool              `yaml:"enabled"`
-	Labels  map[string]string `yaml:"labels,omitempty"`
+	Enabled bool `yaml:"enabled"`
 }
 
 type GenNetPolicies struct {

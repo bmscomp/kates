@@ -2,11 +2,10 @@ apiVersion: v2
 name: connect-cluster
 description: A Helm chart for deploying Strimzi Kafka Connect clusters
 type: application
-# Major: the worker spec, client auth, KafkaUser, secret sync and monitoring
-# come from the kafka-common library; connectors are a map; secret access is
-# scoped to what connectors reference. docs/kafka-charts-refactor-plan.md §5,
-# docs/connect-cluster-2.0-upgrade.md.
-version: 2.1.0
+# Patch: values-kind.yaml no longer switches the PodMonitor and the alerts
+# off, so a kind install with prometheus-operator present is scraped like a
+# generic one. Defaults are unchanged.
+version: 2.1.1
 # Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
 # set is in the image; its pin is the kates.io/connect-image annotation.
 appVersion: "4.3.1"
@@ -33,5 +32,7 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "values-kind.yaml held monitoring.podMonitor.enabled and alerts.enabled at false, so a kind install was never scraped and the Kafka Connect board stayed empty. The overlay now follows values-generic.yaml: monitoring stays on, and the chart renders it only where the monitoring.coreos.com API exists"
     - kind: removed
       description: "ACTION REQUIRED — the dashboards block is GONE, and a release that still sets any dashboards.* key is refused with the replacement named. The Kafka Connect board is delivered by charts/monitoring (dashboards.enabled there) for every Connect group in the cluster; its $namespace/$cluster variables select a release, so the per-release copy and uid rewrite this chart carried are gone with the block, and the <fullname>-dashboard ConfigMap is no longer rendered. The board installs once, under the stable uid kates-connect — delete the old per-release boards from Grafana and repoint any link that names one"

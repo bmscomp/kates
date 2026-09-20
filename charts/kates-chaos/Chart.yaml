@@ -4,10 +4,10 @@ name: kates-chaos
 # dashboards/kates-chaos-infra/ and four of the series it read are corrected,
 # so the same board shows different — and for the first time non-empty — data
 # after upgrade. docs/grafana-dashboards-refactor-plan.md.
-# Minor: the board's ConfigMap namespace and sidecar label become settable,
-# and the label can no longer be lost by setting the labels map. Defaults are
-# unchanged.
-version: 2.2.0
+# Patch: the exporter the infrastructure board reads gets a values block of
+# its own, and the chart's ServiceMonitor stops scraping the operator pod by
+# mistake. Defaults are unchanged.
+version: 2.2.1
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
@@ -31,6 +31,10 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: added
+      description: "litmus-core.exporter — the chaos exporter the Kates — Chaos infrastructure board reads (litmuschaos_* series), off upstream and still off by default here, with its image pinned to docker.io like the operator and runner rather than pulled through the scarf.sh redirector. kates deploy --with-monitoring turns it on together with monitoring.serviceMonitor"
+    - kind: fixed
+      description: "monitoring.serviceMonitor scraped the chaos operator too: litmus-core's exporter Service selects on labels both pods carry and both name a container port http, so the Service resolved to the operator's port 80 and every scrape of it was refused. The default relabelings keep the exporter's port only"
     - kind: removed
       description: "ACTION REQUIRED — monitoring.grafanaDashboard.* is GONE, and a release that still sets any of its keys is refused with the replacement named. The board is delivered by charts/monitoring (dashboards.enabled there) with every other board, and this chart's <fullname>-grafana-dashboard ConfigMap is no longer rendered. Its $namespace and $operator_deployment constants default to litmus, litmus-core's own fullname; a Litmus under another name or namespace edits them on the board or in board.py rather than in values"
     - kind: changed

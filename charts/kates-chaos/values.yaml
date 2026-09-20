@@ -57,6 +57,16 @@ litmus-core:
     image:
       repository: docker.io/litmuschaos/chaos-runner
       tag: "3.28.0"
+  # The chaos exporter is what the "Kates — Chaos infrastructure" board reads
+  # (litmuschaos_* series). Off upstream; `kates deploy --with-monitoring`
+  # turns it on together with monitoring.serviceMonitor below. The image is
+  # pinned to docker.io like the two above — the subchart's default goes
+  # through the scarf.sh redirector.
+  exporter:
+    enabled: false
+    image:
+      repository: docker.io/litmuschaos/chaos-exporter
+      tag: "3.28.0"
 
 # ── Chaos service account ────────────────────────────────────────────────────
 # The identity ChaosEngines and experiment pods run as. Created by the RBAC
@@ -102,7 +112,15 @@ monitoring:
     interval: 30s
     scrapeTimeout: ""
     honorLabels: false
-    relabelings: []
+    # -- litmus-core's exporter Service selects on labels the chaos operator
+    # pod carries too, and both pods name a container port `http` (the
+    # operator's is 80), so the Service resolves to both and the operator
+    # answers every scrape with a refused connection. Keep the exporter's
+    # port only.
+    relabelings:
+      - sourceLabels: [__address__]
+        regex: ".*:8080"
+        action: keep
     metricRelabelings: []
     labels: {}
   # -- GONE in 2.2.0: the "Kates — Chaos infrastructure" board

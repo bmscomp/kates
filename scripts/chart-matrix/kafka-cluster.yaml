@@ -214,10 +214,21 @@ renders:
       - kafkaVersion=4.3.1
       - kafka.metadataVersion=4.2
       - strimziVersion=1.2.0
+      # With --with-monitoring the CLI wires the scrape and the rules itself
+      # (cli/cmd/deploy_monitoring.go); the detected file says false because
+      # detection ran before monitoring was installed.
+      - monitoring.podMonitor.enabled=true
+      - alerts.enabled=true
     assert:
       - why: "the 0.4 pool keys translate, names kept"
         kind: KafkaNodePool
         count: 6
+      - why: "the CLI's scrape flag beats the detected false: brokers and the entity operator are scraped (Cruise Control and the exporter are off on kind)"
+        kind: PodMonitor
+        count: 2
+      - why: "and the rules come with it"
+        kind: PrometheusRule
+        count: 1
       - kind: KafkaNodePool
         name: brokers-alpha
         path: spec/template/pod/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/0/values/0
