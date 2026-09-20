@@ -417,4 +417,9 @@ type deployContext struct {
 	// describes. Both replace the "krafter"/pinned-version literals.
 	versions *versionPlan
 	primary  primaryCluster
+	// kyvernoInstalled is set by Group A when it installs Kyverno in this
+	// run, so Group B can wire its scrape once the monitoring CRDs exist
+	// (deploy_monitoring.go). A Kyverno that was already there is left
+	// alone, like every other existing release.
+	kyvernoInstalled bool
 }

@@ -2,14 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor bump, not a patch: the default readiness path and startup probe
-# thresholds changed, so a default install behaves differently after upgrade;
-# and both Grafana boards are replaced in place, losing four panels that could
-# never have had data. docs/grafana-dashboards-refactor-plan.md, phase 6.
-# Minor: the two dashboard ConfigMaps gain the namespace/label/labelValue/
-# folder surface, and the sidecar label can no longer be lost by setting the
-# labels map. Defaults are unchanged.
-version: 0.9.0
+# Patch: the ServiceMonitor selects the Service it was always meant to, and
+# both monitor templates carry the monitoring.coreos.com API check every other
+# chart here has. Defaults are unchanged.
+version: 0.9.1
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -33,6 +29,10 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The ServiceMonitor matched on the pod selector labels (app: kates), which the Service does not carry, so with metrics.serviceMonitor.enabled=true Prometheus discovered the backend's endpoints and dropped every one of them — silently, and every Kates board stayed empty. It now selects on app.kubernetes.io/name and app.kubernetes.io/instance, which the Service has"
+    - kind: fixed
+      description: "The ServiceMonitor and PrometheusRule templates render only where the monitoring.coreos.com/v1 API exists, like every other chart in the repository; before, either flag on a cluster without prometheus-operator failed the release at apply time"
     - kind: removed
       description: "ACTION REQUIRED — metrics.grafanaDashboard.*, kyvernoPolicy.grafanaDashboard and kyvernoPolicy.grafanaDashboardNamespace are GONE, and a release that still sets any of them is refused with the replacement named. Both boards are delivered by charts/monitoring (dashboards.enabled there) with every other board; the overview board's $job variable already lets one copy serve every release, and there is one Kyverno per cluster. The chart's <fullname>-grafana-dashboard and <fullname>-kyverno-dashboard ConfigMaps are no longer rendered"
     - kind: changed

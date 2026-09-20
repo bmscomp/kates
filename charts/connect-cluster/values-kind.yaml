@@ -17,13 +17,9 @@
 # names, so on kind a fresh local build shadows the registry copy without any
 # override at all (the pull policy is IfNotPresent).
 
-alerts:
-  enabled: false
-
-monitoring:
-  podMonitor:
-    enabled: false
-
+# Monitoring stays on, as in values-generic.yaml: the chart renders the
+# PodMonitor and alerts only where the monitoring.coreos.com/v1 API exists,
+# and holding them off here is what left the Connect board empty on kind.
 
 tracing:
   enabled: false

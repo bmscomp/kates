@@ -2,12 +2,11 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Major: node pools get working defaults, every namespaced resource carries the
-# cluster name, the platform's topics/users/clients become a profile, and the
-# operator-wide pieces (CRD hook, drain cleaner, operator scrape) move to
-# strimzi-operator 0.3. The 0.4 keys still work in 1.x and NOTES name their
-# replacements; docs/kafka-cluster-1.0-upgrade.md is the migration.
-version: 1.0.0
+# Patch: values-kind.yaml no longer switches the scrape and the rules off.
+# Defaults are unchanged; a kind install with prometheus-operator present now
+# gets its PodMonitors and PrometheusRule, which is the difference between the
+# Kafka boards and twelve empty panels.
+version: 1.0.1
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -41,6 +40,8 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: fixed
+      description: values-kind.yaml held monitoring.podMonitor.enabled and alerts.enabled at false, so a kind install never created its PodMonitors or its PrometheusRule and every Kafka board stayed empty. The overlay leaves both at the chart defaults; the templates already render nothing where the monitoring.coreos.com API is absent
     - kind: added
       description: nodePools — one model for every pool (defaults, roleDefaults, pools) with working defaults of three controllers and three brokers, per-pool storage/resources/scheduling, dual-role pools and namespaced sysctls. The 0.4 pool keys are translated
     - kind: added

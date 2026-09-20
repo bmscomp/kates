@@ -1276,7 +1276,18 @@ kubectl get podmonitors,servicemonitors -A
 On a full Kates deploy you should find `krafter-kafka`,
 `krafter-cruise-control`, `krafter-kafka-exporter` and
 `krafter-entity-operator` (from `charts/kafka-cluster`), one PodMonitor per
-Connect and MirrorMaker 2 release, and the `kates` ServiceMonitor.
+Connect and MirrorMaker 2 release, and the `kates` ServiceMonitor. (On kind,
+`values-kind.yaml` leaves Cruise Control and the Kafka Exporter off, so two
+of those four are absent by design.)
+
+If the list is **empty**, nothing is unselected: the releases were installed
+with their scrape switched off. Every chart keeps it behind a value, and until
+`kates deploy --with-monitoring` learned to set those values itself, its kind
+overlays held all of them at `false` — twelve boards installed, nothing for
+them to read. `helm get values <release> -n <ns>` shows which switch each
+release got; the "When the whole board is empty" section of
+[`dashboards/USING.md`](../../dashboards/USING.md) has the `helm upgrade`
+line for each.
 
 Confirm a chart would render the relabelings before blaming the cluster — the
 labelmap from 6.2, plus the five `replace` rules that follow it:

@@ -1,9 +1,16 @@
 # The shape `kates detect --generate-values` writes for kafka-cluster
 # (cli/pkg/detect GeneratedValues), for a three-zone cluster: the 0.4 pool
-# keys, networkPolicies, podMonitors, crdUpgrade, kafkaConnect and the other
-# keys kafka-cluster 1.x still has to accept. The matrix layers it the way
+# keys, networkPolicies, crdUpgrade, kafkaConnect and the other keys
+# kafka-cluster 1.x still has to accept. The matrix layers it the way
 # `kates deploy` does (with the CLI's --set flags) to prove the unchanged CLI
 # keeps working.
+#
+# monitoring.podMonitor and alerts follow the operator CRDs at detection
+# time; on the fresh cluster `kates deploy` detects they are off, which is
+# why the CLI's own --set flags below turn them on rather than trusting this
+# file. It is the 1.x key on purpose: the 0.4 `podMonitors` wins over it
+# whenever it holds the default, so `podMonitors: {enabled: false}` here
+# would silently defeat that --set.
 global:
   clusterDomain: cluster.local
   storageClass: standard
@@ -38,8 +45,7 @@ kafka:
     - {name: tls, port: 9093, type: internal, tls: true, authentication: {type: tls}}
     - {name: external, port: 9094, type: nodeport, tls: true, authentication: {type: scram-sha-512}}
   rack: {topologyKey: topology.kubernetes.io/zone}
-dashboards: {enabled: false, namespace: monitoring}
-podMonitors: {enabled: false}
+monitoring: {podMonitor: {enabled: false}}
 alerts: {enabled: false}
 networkPolicies:
   enabled: true
