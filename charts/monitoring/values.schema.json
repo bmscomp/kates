@@ -31,17 +31,18 @@
         },
         "dashboards": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "enabled": { "type": "boolean" },
-                "labels": { "type": "object" }
-            }
-        },
-        "legacyKafkaDashboards": {
-            "type": "object",
-            "deprecated": true,
-            "description": "DEPRECATED: the legacy Kafka and Strimzi dashboards (removed in 2.0)",
-            "properties": {
-                "enabled": { "type": "boolean" }
+                "namespace": { "type": "string" },
+                "label": { "type": "string" },
+                "labelValue": { "type": "string" },
+                "folder": { "type": "string" },
+                "labels": {
+                    "type": "object",
+                    "description": "Extra labels, merged with (not replacing) label/labelValue",
+                    "additionalProperties": { "type": "string" }
+                }
             }
         },
         "test": {

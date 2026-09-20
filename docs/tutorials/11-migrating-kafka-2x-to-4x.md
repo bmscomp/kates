@@ -482,7 +482,8 @@ checkpoints factor and `target.config.*.storage.replication.factor` to the
 target's real durability, and set `target.brokerCount` so the chart checks them.
 
 **Monitoring before you start, not after.** Turn on `metrics.enabled`,
-`alerts.enabled` and `dashboard.enabled` before the first record moves.
+`podMonitors.enabled` and `alerts.enabled` before the first record moves —
+the boards arrive with `charts/monitoring`; these are what fill them.
 Replication lag is the number the cutover decision rests on, and you want its
 history, not a spot reading.
 

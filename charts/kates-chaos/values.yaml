@@ -105,15 +105,15 @@ monitoring:
     relabelings: []
     metricRelabelings: []
     labels: {}
-  grafanaDashboard:
-    enabled: false
-    # -- Namespace used in dashboard PromQL queries (defaults to the release
-    # namespace where the chaos infra runs)
-    namespace: ""
-    # -- Grafana folder annotation (empty = General)
-    folder: ""
-    labels:
-      grafana_dashboard: "1"
+  # -- GONE in 2.2.0: the "Kates — Chaos infrastructure" board
+  # (dashboards/kates-chaos-infra/) is delivered by charts/monitoring with
+  # every other board in dashboards/ (its `dashboards.enabled`). The board's
+  # `$operator_deployment` variable defaults to `litmus`, which is what
+  # litmus-core's packaged fullnameOverride pins; a bring-your-own Litmus
+  # under another name edits that variable on the board rather than a values
+  # key here. A release that still sets any `monitoring.grafanaDashboard.*`
+  # key is REFUSED with the new location named, rather than accepted and
+  # silently ignored.
 
 # ── ChaosExperiment definitions (installed via post-install Job) ─────────────
 experiments:

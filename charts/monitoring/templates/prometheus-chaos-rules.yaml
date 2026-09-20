@@ -1,4 +1,11 @@
-{{- if .Values.chaosAlerts.enabled }}
+{{- /*
+  The CRD check matches every other chart here (kafka-cluster, connect-cluster,
+  strimzi-operator all render nothing without it) and this one was missing it.
+  With chaosAlerts.enabled=true on a cluster that has no Prometheus Operator,
+  the release failed at apply time with "no matches for kind PrometheusRule" —
+  after the rest of the chart had already been installed.
+*/ -}}
+{{- if and .Values.chaosAlerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -101,7 +108,17 @@ spec:
     - name: kafka-chaos-rto-rpo
       interval: 15s
       rules:
-        # Recording rules for KATES integrity metrics (from pushgateway or KATES exporter)
+        # The Kates application's own integrity verifier publishes these, one
+        # set per run, tagged run_id and test_type. It only publishes them for a
+        # run that actually verified integrity, so a plain load test leaves
+        # these recording rules empty rather than recording a perfect RTO it
+        # never measured.
+        #
+        # The values are in SECONDS. IntegrityResult measures in Duration and
+        # exposes milliseconds; BenchmarkMetrics.recordIntegrity divides before
+        # publishing, because the alert thresholds below are in seconds and a
+        # millisecond value under a _seconds name makes KafkaRTOExceedsSLA fire
+        # on every run.
         - record: kafka:chaos:producer_rto_seconds
           expr: |
             kates_integrity_result_producer_rto_seconds
@@ -110,12 +127,17 @@ spec:
           expr: |
             kates_integrity_result_consumer_rto_seconds
 
+        # The verifier already computes the worse of the two, so this reads it
+        # rather than deriving it. It used to be
+        #   max without(instance) (producer, consumer)
+        # which is not valid PromQL — an aggregation takes one expression, not
+        # two — so promtool refused the whole PrometheusRule and Prometheus
+        # loaded NONE of this file's rules, including the three groups above.
+        # Nothing rendered this template with chaosAlerts.enabled=true, so no
+        # gate ever saw it; ci-kafka-charts.yml now renders every toggle.
         - record: kafka:chaos:max_rto_seconds
           expr: |
-            max without(instance) (
-              kates_integrity_result_producer_rto_seconds,
-              kates_integrity_result_consumer_rto_seconds
-            )
+            kates_integrity_result_max_rto_seconds
 
         - record: kafka:chaos:rpo_seconds
           expr: |
@@ -125,13 +147,33 @@ spec:
           expr: |
             kates_integrity_result_data_loss_percent
 
+        - record: kafka:chaos:lost_records
+          expr: |
+            kates_integrity_result_lost_records
+
+        - record: kafka:chaos:duplicate_records
+          expr: |
+            kates_integrity_result_duplicate_records
+
+        # These two used to read kafka_chaos_e2e_latency_ms and
+        # kafka_chaos_producer_throughput_records_per_sec, which nothing
+        # publishes and which would have been misnamed if something did: kafka_
+        # is the JMX exporter's namespace, and these are the workload's own
+        # numbers. They are also numbers Kates already publishes, so rather than
+        # registering duplicate meters under a second name, the rules now read
+        # the series that exist. End-to-end latency is the run's p99, which is
+        # what the panel above them is labelled.
         - record: kafka:chaos:e2e_latency_ms
           expr: |
-            kafka_chaos_e2e_latency_ms
+            max by (run_id, test_type) (
+              kates_benchmark_latency_ms{quantile="0.99"}
+            )
 
         - record: kafka:chaos:producer_throughput
           expr: |
-            kafka_chaos_producer_throughput_records_per_sec
+            sum by (run_id, test_type) (
+              kates_benchmark_throughput_rec_sec
+            )
 
         # SLA breach alerts
         - alert: KafkaRTOExceedsSLA

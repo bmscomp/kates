@@ -159,7 +159,7 @@ kafka-cluster admits Connect through its own `networkPolicy.clients`.
 
 - **Metrics.** `metrics.type: jmxPrometheusExporter` uses the chart's rules (`files/metrics/connect-metrics.yaml`): Strimzi's, with COUNTER rules for cumulative attributes and connector captures that stop at the bean. `strimziMetricsReporter` is available; the alerts refuse it unless `alerts.allowReporterMetrics`. `metrics.existingConfigMap` points at rules of your own.
 - **Scrape.** `monitoring.podMonitor`, with the Strimzi relabelings.
-- **Dashboard.** One board (`dashboards.enabled`), laid out by kafka-common's grid: health, connectors and tasks, throughput and sink lag, errors and the dead letter queue, offset commits, workers, and the client path.
+- **Dashboard.** One board — health, connectors and tasks, throughput and sink lag, errors and the dead letter queue, offset commits, workers, and the client path — delivered by `charts/monitoring` with every other board since 2.1.0 (`dashboards.enabled` there); its `$namespace`/`$cluster` variables select the Connect group, so nothing is rendered per release any more, and setting this chart's old `dashboards.*` keys is refused with that location named. [`dashboards/README.md`](../../dashboards/README.md#installing-these-anywhere) has the four install routes.
 - **Alerts.** Scoped to the release's workers, each with a `runbook_url`. PodMonitor and alerts render only where the `monitoring.coreos.com/v1` API exists.
 
 | Alert | Severity | Fires when |

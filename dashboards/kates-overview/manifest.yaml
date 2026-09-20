@@ -1,0 +1,28 @@
+# KATES — Overview. Delivered by charts/monitoring with every other board.
+#
+# Neither the uid nor the title needs a per-release rewrite: every expression
+# is scoped by the `$job` template variable, which is the ServiceMonitor's job
+# label and therefore the release's Service name. One copy in a Grafana serves
+# every Kates release it can see, and the dropdown separates them — so there
+# is no uid to collide.
+#
+# The uid is carried over from the board charts/kates shipped through 0.8.0,
+# so existing links keep resolving.
+uid: kates-overview
+title: KATES — Overview
+description: >-
+  What one Kates release knows about itself: uptime, active runs, the API's
+  traffic and latency, the JVM, and the Agroal connection pool. Reads only
+  series the application publishes, so it works with nothing installed beside
+  it but a Grafana.
+tags:
+  - kates
+  - kafka
+  - benchmarking
+  - chaos
+refresh: 30s
+time_from: now-1h
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kates-overview.json

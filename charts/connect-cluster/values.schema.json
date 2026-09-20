@@ -1687,25 +1687,7 @@
       "additionalProperties": false
     },
     "dashboards": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "namespace": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
-        },
-        "labelValue": {
-          "type": "string"
-        },
-        "folder": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
+      "description": "REMOVED in 2.1.0: the Kafka Connect board is delivered by charts/monitoring (dashboards.enabled there). Kept in the schema only so that a release still setting any dashboards.* key reaches the chart's own refusal, which names the replacement, instead of a bare additionalProperties error."
     },
     "preflight": {
       "type": "object",

@@ -110,7 +110,6 @@ helm upgrade --install kates "${ROOT_DIR}/charts/kates" \
     --set kafka.bootstrapServers="${KAFKA_BOOTSTRAP}" \
     --set metrics.serviceMonitor.enabled=false \
     --set metrics.prometheusRule.enabled=false \
-    --set metrics.grafanaDashboard.enabled=false \
     --timeout 5m
 
 # Auto-configure Kates CLI Context

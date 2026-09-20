@@ -1,6 +1,9 @@
 apiVersion: v2
 name: kates-monitoring
-version: 1.2.0
+# Minor: the Grafana sidecar's searchNamespace is pinned here instead of
+# inherited, and the dashboards ConfigMap gains the namespace/label/
+# labelValue/folder surface the other charts already had.
+version: 1.5.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -15,3 +18,21 @@ dependencies:
     version: "82.4.3"
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: kube-prometheus-stack.enabled
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: "Prometheus now selects every PodMonitor, ServiceMonitor and PrometheusRule in the watched namespaces. It selected only those labelled with this release name, which no chart in this repository sets — so no broker, Connect or MirrorMaker series was scraped and not one alert was loaded."
+    - kind: added
+      description: "kube-prometheus-stack.grafana.sidecar.dashboards.searchNamespace is now set here, to ALL, instead of being inherited from the subchart. connect-cluster, mirror-maker2 and kates-chaos put their dashboard ConfigMap in the WORKLOAD's namespace, not Grafana's, so a sidecar watching only its own namespace picks up none of them — generated, synced, labelled and invisible, with nothing reporting a problem. kube-prometheus-stack has defaulted it to ALL since 46.x so the behaviour is unchanged on the pinned 82.4.3; pinning it here stops a version bump or a partial override taking it away. The trade-off, and the namespace-list alternative, are documented on the value"
+    - kind: added
+      description: "dashboards.namespace, dashboards.label, dashboards.labelValue and dashboards.folder. The ConfigMap's namespace, the label the sidecar watches and the Grafana folder were all unsettable; dashboards.labels was the only knob and it could only add labels. label/labelValue are now always applied and dashboards.labels is merged on top of them, so no value can leave the ConfigMap without the label that makes it discoverable. Defaults are unchanged: grafana_dashboard=1, the release namespace, and no folder annotation"
+    - kind: removed
+      description: The nine deprecated Kafka and Strimzi boards and the legacyKafkaDashboards.enabled switch that gated them. Eight were subsets of the Strimzi operator's own dashboards or of each other; seven of kafka-perf-global's metric names could not be produced by any exporter rule, and those seven were its only unique panels
+    - kind: added
+      description: "Kafka — KRaft Operations (dashboards/kafka-kraft): quorum health, metadata propagation and errors, fenced brokers, ISR dynamics, per-error-code request failures, storage and the security counters. Every panel of the four KRaft alerts that previously fired into a board showing none of their inputs"
+    - kind: added
+      description: "Kafka — Performance & Load Testing (dashboards/kafka-performance): kafka-perf-global rebuilt on corrected names, with per-topic templating and per-partition offsets, absorbing the topic panels of kafka-perf-test, kafka-performance and kafka-working"
+    - kind: changed
+      description: Both Kafka boards are generated from dashboards/<board>/board.py by scripts/gen-dashboards.py; every series they read is checked against the exporter rules by scripts/check-metric-contract.sh kafka-cluster

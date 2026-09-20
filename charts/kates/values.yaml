@@ -452,13 +452,12 @@ metrics:
         annotations:
           summary: "KATES high error rate"
           description: "KATES is returning more than 10% 5xx responses."
-  # -- Grafana dashboard auto-provisioning
-  grafanaDashboard:
-    # -- Enable Grafana dashboard ConfigMap
-    enabled: false
-    # -- Labels for Grafana sidecar discovery
-    labels:
-      grafana_dashboard: "1"
+  # -- GONE in 0.9.0: the "KATES — Overview" board (dashboards/kates-overview/)
+  # is delivered by charts/monitoring with every other board in dashboards/
+  # (its `dashboards.enabled`), scoped to a release by its `$job` template
+  # variable. A release that still sets any `metrics.grafanaDashboard.*` key
+  # is REFUSED with the new location named (this chart has no values schema,
+  # so without the refusal the key would be accepted and silently ignored).
 
 # -- Bundled PostgreSQL configuration.
 # A self-contained single-instance StatefulSet on the official `postgres`
@@ -687,10 +686,12 @@ kyvernoPolicy:
     - registry.k8s.io/
     - quay.io/strimzi/
     - curlimages/
-  # -- Deploy Kyverno Grafana dashboard ConfigMap
-  grafanaDashboard: false
-  # -- Target namespace for the dashboard ConfigMap (must match Grafana sidecar namespace)
-  grafanaDashboardNamespace: monitoring
+  # -- GONE in 0.9.0: the Kyverno board (dashboards/kyverno-security/) is
+  # delivered by charts/monitoring with every other board in dashboards/ (its
+  # `dashboards.enabled`) — one Kyverno per cluster, one board, and it belongs
+  # where the rest of the cluster's boards live. `grafanaDashboard` (both the
+  # bool and the map shape) and `grafanaDashboardNamespace` are REFUSED if
+  # set, with the new location named.
   # -- Cosign image signature verification
   cosign:
     # -- Enable image signature verification via Cosign

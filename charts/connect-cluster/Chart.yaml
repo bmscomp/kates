@@ -6,7 +6,7 @@ type: application
 # come from the kafka-common library; connectors are a map; secret access is
 # scoped to what connectors reference. docs/kafka-charts-refactor-plan.md §5,
 # docs/connect-cluster-2.0-upgrade.md.
-version: 2.0.0
+version: 2.1.0
 # Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
 # set is in the image; its pin is the kates.io/connect-image annotation.
 appVersion: "4.3.1"
@@ -33,29 +33,5 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
-    - kind: changed
-      description: Built on the kafka-common library — the worker spec (replicas preserved under the HPA, nodeSelector as node affinity, templateExtra deep-merged), client authentication, KafkaUser, secret sync, PodMonitor and NetworkPolicy fragments are the ones mirror-maker2 uses. New worker keys connectContainer, templateExtra, jmxOptions, rack.clientRackInitImage, metrics.type
-    - kind: changed
-      description: connectors is a map keyed by name, merged over connectorDefaults (a list still renders in 2.x); version, listOffsets and alterOffsets are passed through; deadLetterQueue sets the error handling and renders a KafkaTopic
-    - kind: changed
-      description: Connector validation happens at render time (name, class, state, tasksMax, required keys of known classes, topics on sinks, plaintext passwords under productionMode); the pre-install hook Pod and its busybox image are gone
-    - kind: security
-      description: Secret access is scoped to the ${secrets:ns/name:key} references in connector configs (get on those Secrets only), bound to the operator-made <name>-connect account whether or not serviceAccount.create is set. rbac.allSecrets restores the 1.x breadth and productionMode refuses it
-    - kind: fixed
-      description: A chart-managed KafkaUser lacked the connect-cluster-<groupId> transactional ID the leader writes the config topic with under exactly-once source support
-    - kind: fixed
-      description: Test KafkaTopics were created in the Connect namespace, labelled with the Connect cluster instead of the Kafka cluster, so the Topic Operator never saw them
-    - kind: changed
-      description: exactlyOnce.enabled replaces exactly.once.source.support in extraConfig (refused there)
-    - kind: changed
-      description: Kafka egress ports are derived from the bootstrap unless networkPolicy.kafka.ports is set; the operator namespace defaults to strimzi-operator; databaseEgress is networkPolicy.egress.databases
-    - kind: changed
-      description: values-prod.yaml uses the TLS listener with mutual-TLS authentication and a chart-managed KafkaUser; productionMode refuses an unencrypted connection
-    - kind: added
-      description: plugins (spec.plugins image volumes, behind imageVolumes.acknowledged), a preflight Job, an optional kates-streaming PriorityClass, and a task-availability SLO
-    - kind: changed
-      description: Alerts gained KafkaConnectConnectorFailed, KafkaConnectDeadLetterWrites/Failures, KafkaConnectOffsetCommitFailures and KafkaConnectSinkLag, recording rules, and runbook links; KafkaConnectTaskCountMismatch is KafkaConnectTasksNotRunning, KafkaConnectHighErrorRate is KafkaConnectErrorsLogged, KafkaConnectSourceLag is KafkaConnectSourceIdle (opt-in)
-    - kind: changed
-      description: The dashboard is rebuilt on the library's grid layout; podMonitors, metricsConfig and monitoring.* moved to monitoring.podMonitor and metrics (1.x keys still read, listed in NOTES)
-    - kind: changed
-      description: priorityClassName defaults to "" and appVersion is the Kafka version
+    - kind: removed
+      description: "ACTION REQUIRED — the dashboards block is GONE, and a release that still sets any dashboards.* key is refused with the replacement named. The Kafka Connect board is delivered by charts/monitoring (dashboards.enabled there) for every Connect group in the cluster; its $namespace/$cluster variables select a release, so the per-release copy and uid rewrite this chart carried are gone with the block, and the <fullname>-dashboard ConfigMap is no longer rendered. The board installs once, under the stable uid kates-connect — delete the old per-release boards from Grafana and repoint any link that names one"

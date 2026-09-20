@@ -197,9 +197,11 @@ throughput and timing, so turn on metrics and actually look:
 helm upgrade mm2 charts/mirror-maker2 -n "${KAFKA_NS}" --reuse-values \
   --set metrics.enabled=true \
   --set podMonitors.enabled=true \
-  --set alerts.enabled=true \
-  --set dashboard.enabled=true
+  --set alerts.enabled=true
 ```
+
+The boards themselves arrive with `charts/monitoring` (`dashboards.enabled`,
+on by default) — these switches are what give them data.
 
 Three metrics answer three different questions:
 

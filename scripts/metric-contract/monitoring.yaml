@@ -1,0 +1,101 @@
+# Metric contract for charts/monitoring.
+#
+# Unlike the other three, this chart runs no JMX exporter. It ships recording
+# rules and alerts over series OTHER things publish: the Kates application's
+# Micrometer registry, kube-state-metrics, and the LitmusChaos exporter. So
+# `exporterless: true` and the catalogue is the `external` list below — every
+# name a rule here reads must appear in it, with a note saying who publishes
+# it and where that is asserted.
+#
+# What this would have caught. charts/monitoring's only PrometheusRule lives
+# behind `chaosAlerts.enabled`, which defaults to false, and nothing in the
+# repository rendered it with that toggle on. It contained:
+#
+#   * `max without(instance) (a, b)` — not valid PromQL, so Prometheus would
+#     have refused the entire PrometheusRule and loaded none of its four
+#     groups, including the three that were correct;
+#   * six recording rules over `kates_integrity_result_*` and `kafka_chaos_*`
+#     series that NOTHING in this repository published, carrying four SLA
+#     alerts that therefore installed cleanly and could never fire;
+#   * no `monitoring.coreos.com/v1` capability check, so enabling it on a
+#     cluster without the Prometheus Operator failed at apply time.
+#
+# All three are fixed, and all three were invisible because no gate rendered
+# the file. scripts/chart-matrix/monitoring.yaml now renders every toggle and
+# promtool sees the result; this contract checks the names.
+chart: charts/monitoring
+exporterless: true
+
+# This chart's own objects. It vendors kube-prometheus-stack, which renders
+# around thirty PrometheusRules and as many dashboard ConfigMaps of its own;
+# holding upstream's expressions to this repository's catalogue would be a
+# standing maintenance cost for no benefit, and upstream's rules are not what
+# this chart is responsible for.
+#
+# The dashboards ConfigMap this chart ships is deliberately NOT matched. The
+# boards in it read broker, Connect, MirrorMaker 2, Litmus and application
+# series, and each is held to the catalogue of the chart whose exporter has
+# to produce those series — `external_dashboards` in kafka-cluster.yaml,
+# connect-cluster.yaml and mirror-maker2.yaml — not to this exporterless
+# chart's `external` list. (An earlier objects term named the ConfigMap as
+# `monitoring-kates-dashboards`, which never matched: the contract renders
+# with release name `contract`, so the object is `contract-kates-dashboards`.)
+objects: "kafka-chaos-alerts"
+
+set:
+  - chaosAlerts.enabled=true
+
+renders:
+  - name: base
+  - name: another kafka namespace
+    set: [kafkaNamespace=kafka-prod]
+
+external:
+  # ── Published by the Kates application, via Micrometer ──────────────────
+  #
+  # com.bmscomp.kates.engine.BenchmarkMetrics registers these from
+  # IntegrityResult on every poll of a run that verified integrity, tagged
+  # run_id and test_type. BenchmarkMetricsTest asserts each published spelling
+  # against a real PrometheusMeterRegistry — the boards and these rules read
+  # the PUBLISHED name, and Micrometer renames as it publishes, so a test
+  # against meter ids would prove nothing.
+  #
+  # The values are in SECONDS. IntegrityResult holds Durations and exposes
+  # milliseconds; the publisher divides. KafkaRTOExceedsSLA fires above 30,
+  # meaning thirty seconds, so an unconverted millisecond value would have
+  # made it fire on every run.
+  - pattern: "^kates_integrity_result_(producer|consumer|max)_rto_seconds$"
+  - pattern: "^kates_integrity_result_rpo_seconds$"
+  - pattern: "^kates_integrity_result_data_loss_percent$"
+  - pattern: "^kates_integrity_result_(lost|duplicate)_records$"
+  # The benchmark meters the e2e-latency and throughput rules read. Same
+  # class, same test.
+  - pattern: "^kates_benchmark_latency_ms$"
+  - pattern: "^kates_benchmark_throughput_rec_sec$"
+
+  # ── Published by things this chart does not install ─────────────────────
+  #
+  # Written out name by name, not as `^kube_`, `^litmuschaos_` and `^kafka_`.
+  # The first draft of this file used those three prefixes and the proof that
+  # the gate works caught it: kafka_chaos_e2e_latency_ms — one of the two dead
+  # names this very change is removing — passed straight through `^kafka_`.
+  # That is the same blanket-prefix hole this branch closes for ^jvm_,
+  # ^process_, ^jmx_ and ^scrape_, reintroduced in the file written to prevent
+  # it. A prefix is not a catalogue.
+  #
+  # kube-state-metrics, with a custom-resource configuration for the Litmus
+  # and Argo CRDs. See docs/tutorials/07-chaos-engineering.md.
+  - pattern: "^kube_customresource_chaosengine_status_engine_status$"
+  - pattern: "^kube_customresource_kafka_status_ready$"
+  - pattern: "^kube_workflow_status$"
+  # kube-state-metrics, core.
+  - pattern: "^kube_pod_container_status_restarts_total$"
+  # The LitmusChaos exporter.
+  - pattern: "^litmuschaos_failed_experiments$"
+  - pattern: "^litmuschaos_probe_success_percentage$"
+  # cAdvisor, via the kubelet.
+  - pattern: "^container_cpu_usage_seconds_total$"
+
+builtin:
+  - "^up$"
+  - "^scrape_(duration_seconds|samples_scraped|samples_post_metric_relabeling|series_added)$"

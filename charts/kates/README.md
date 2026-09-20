@@ -119,7 +119,12 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `metrics.serviceMonitor.metricRelabelings` | `[]` | Metric relabeling rules |
 | `metrics.serviceMonitor.relabelings` | `[]` | Target relabeling rules |
 | `metrics.prometheusRule.enabled` | `false` | Enable alerting rules |
-| `metrics.grafanaDashboard.enabled` | `false` | Auto-provision Grafana dashboard |
+| ~~`metrics.grafanaDashboard.*`~~ | — | **REMOVED in 0.9.0** — the KATES — Overview board is delivered by `charts/monitoring` (`dashboards.enabled` there); setting any of these keys is refused with that location named |
+| ~~`kyvernoPolicy.grafanaDashboard`~~ / ~~`grafanaDashboardNamespace`~~ | — | **REMOVED in 0.9.0** — the Kyverno board is delivered by `charts/monitoring` too |
+
+[`dashboards/README.md`](../../dashboards/README.md#installing-these-anywhere)
+has the four install routes — Helm via `charts/monitoring`, the API
+installer, file provisioning and a plain ConfigMap bundle — and every knob.
 
 ### Operations
 
@@ -180,7 +185,6 @@ helm install kates ./charts/kates \
   --set networkPolicy.enabled=true \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
-  --set metrics.grafanaDashboard.enabled=true \
   --set backup.enabled=true \
   --set cleanup.enabled=true
 ```

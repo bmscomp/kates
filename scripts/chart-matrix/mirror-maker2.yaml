@@ -4,7 +4,7 @@
 chart: charts/mirror-maker2
 namespace: kafka
 apiVersions: [monitoring.coreos.com/v1]
-set: [metrics.enabled=true, alerts.enabled=true, dashboard.enabled=true, podMonitors.enabled=true]
+set: [metrics.enabled=true, alerts.enabled=true, podMonitors.enabled=true]
 
 # Every alert links a runbook section that exists.
 checks: [runbook-anchors]
@@ -101,6 +101,16 @@ rails:
   - name: custom authentication without configuration
     want: "target.authentication.type=custom needs target.authentication.custom"
     set: [target.authentication.type=custom]
+  # The whole dashboard block went to charts/monitoring in 0.11.0. A refusal
+  # is only worth having if it fires, and a rail is the only thing that says
+  # so — once for the block's own switch, once for a nested key, which proves
+  # the guard catches the block however deep the setting sits.
+  - name: the removed dashboard block is refused, not ignored
+    want: "dashboard block was removed in 0.11.0"
+    set: [dashboard.enabled=true]
+  - name: a nested key of the removed dashboard block is refused too
+    want: "dashboard block was removed in 0.11.0"
+    set: [dashboard.migration.drainedBelowMs=500]
 
 rules:
   set: []

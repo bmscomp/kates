@@ -608,33 +608,22 @@ alerts:
     burnRate: 14.4
 
 # ── Grafana dashboard ───────────────────────────────────────────────────────
-# Rendered as a ConfigMap the Grafana sidecar picks up (label selector below).
+# GONE in 0.11.0: the mirror board and the migration board are delivered by
+# charts/monitoring with every other board in dashboards/ (its
+# `dashboards.enabled`), and their `$namespace`/`$cluster` variables scope
+# them to a release — the per-release uid rewrite, the no-slo and identity
+# variants, and both ConfigMaps this chart rendered are gone with the block.
+# A release that still sets any `dashboard.*` key is REFUSED with the new
+# location named (see mirror-maker2.validate), because a values key that is
+# silently ignored is the failure this chart's 0.11.0 line is about.
 #
-# The panel list is generated from `mirrors`, like the alerts: release-wide
-# rows first (is it replicating, task states, throughput, workers), then one
-# collapsible row per source alias. A fan-in release therefore shows each leg
-# separately rather than a sum that hides the dead one.
-dashboard:
-  enabled: false
-  # -- Label the Grafana sidecar watches for
-  label: grafana_dashboard
-  labelValue: "1"
-  # -- Folder annotation for the sidecar
-  folder: Kafka
-  # -- A SECOND board, for the hours a migration runs rather than the months a
-  # mirror runs: go/no-go, the drain, which consumer groups have a translated
-  # position, and the cutover freeze. Independent of `enabled` — during a
-  # migration this is often the only board wanted. It shares `label`,
-  # `labelValue` and `folder` with the board above.
-  migration:
-    enabled: false
-    # -- Replication lag under which the mirror counts as drained, for the
-    # go/no-go panel and the threshold lines. The lag alert's 60s is a
-    # steady-state number; a cutover wants close to zero.
-    drainedBelowMs: 5000
-    # -- Translation age above which a consumer group's position is shown as
-    # stale — old enough that moving that consumer would replay from it.
-    translationFreshMs: 60000
+# The migration thresholds went one release earlier and for their own reason:
+# drainedBelowMs and translationFreshMs are baked into the generated board —
+# drainedBelowMs is not only a threshold colour but the number inside the
+# go/no-go panel's `< bool 5000`, where a Grafana variable does not parse as
+# PromQL. To move either line: edit DRAINED_MS or FRESH_MS in
+# dashboards/mirror-maker2-migration/board.py and run
+# scripts/gen-dashboards.py.
 
 # ── Helm tests ──────────────────────────────────────────────────────────────
 # test-mm2 (CR Ready) and test-connectors (connectors RUNNING) always run.

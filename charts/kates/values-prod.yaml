@@ -44,8 +44,6 @@ metrics:
     interval: "15s"
   prometheusRule:
     enabled: true
-  grafanaDashboard:
-    enabled: true
 
 # Fail rendering if insecure chart defaults would reach production.
 productionMode: true
