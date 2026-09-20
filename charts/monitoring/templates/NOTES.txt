@@ -18,15 +18,21 @@ AlertManager:
   URL:   kubectl port-forward svc/{{ .Release.Name }}-kube-prometheus-stack-alertmanager 9093:9093 -n {{ .Release.Namespace }}
 
 {{- if .Values.dashboards.enabled }}
-Dashboards:
-  ✓ Kates application, benchmark, trend and chaos dashboards (auto-discovered by the Grafana sidecar)
-{{- if ne (toString (.Values.legacyKafkaDashboards).enabled) "false" }}
-  DEPRECATED: {{ len (include "kates-monitoring.legacyKafkaDashboards" . | fromYamlArray) }} legacy Kafka and Strimzi dashboards are installed too
-  (legacyKafkaDashboards.enabled). They read series the Strimzi exporter rules of
-  kafka-cluster 1.0 do not produce. Use the Strimzi operator's dashboards
-  (charts/strimzi-operator: strimzi-kafka-operator.dashboards.enabled), and
-  connect-cluster's and mirror-maker2's own; set legacyKafkaDashboards.enabled=false.
-  The default becomes false in kates-monitoring 1.3 and the boards go in 2.0.
+
+Dashboards (auto-discovered by the Grafana sidecar):
+  ✓ Kafka — KRaft Operations      quorum, metadata, replication, request path, storage
+  ✓ Kafka — Performance & Load Testing   throughput and per-topic detail during a run
+  ✓ Kates application, benchmark, trend and chaos
+
+  Broker health, KRaft quorum identity, Cruise Control and consumer-group lag are the
+  Strimzi operator's own boards (charts/strimzi-operator:
+  strimzi-kafka-operator.dashboards.enabled). Kafka Connect and MirrorMaker 2 ship
+  their boards with their own charts.
+{{- if hasKey .Values "legacyKafkaDashboards" }}
+
+  NOTE: legacyKafkaDashboards was removed in kates-monitoring 1.3.0 and the value you
+  set has no effect. The nine deprecated Kafka and Strimzi boards it gated are gone;
+  the two boards above replace them and read only series the exporter rules produce.
 {{- end }}
 {{- end }}
 

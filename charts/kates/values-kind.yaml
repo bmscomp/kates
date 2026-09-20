@@ -46,8 +46,6 @@ metrics:
     enabled: false
   prometheusRule:
     enabled: false
-  grafanaDashboard:
-    enabled: false
 
 autoscaling:
   enabled: false

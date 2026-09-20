@@ -24,8 +24,6 @@ monitoring:
   podMonitor:
     enabled: false
 
-dashboards:
-  enabled: false
 
 tracing:
   enabled: false

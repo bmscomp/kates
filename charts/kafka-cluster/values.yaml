@@ -574,16 +574,24 @@ monitoring:
     # -- PodMonitors for the brokers/controllers, Cruise Control, the
     # Kafka Exporter and the entity operator
     enabled: true
-    labels:
-      release: kafka
+    # Extra labels on the PodMonitor, for a Prometheus whose podMonitorSelector
+    # has been narrowed. Empty by default: kates-monitoring 1.5.0 selects every
+    # PodMonitor in the watched namespaces, and the `release: kafka` that used
+    # to be here selected nothing under any Prometheus this repository installs
+    # — the monitoring release is called `monitoring`, not `kafka`. It also went
+    # stale the moment the chart was installed under another release name,
+    # while `app.kubernetes.io/instance`, which the chart already sets, tracks
+    # the real one. Prefer selecting on that.
+    labels: {}
     interval: ""
     scrapeTimeout: ""
 
 alerts:
   enabled: true
-  labels:
-    release: kafka
-    prometheus: kube-prometheus
+  # Extra labels on the PrometheusRule, for a Prometheus whose ruleSelector has
+  # been narrowed. Empty for the same reason as monitoring.podMonitor.labels;
+  # `prometheus: kube-prometheus` named a Prometheus no chart here installs.
+  labels: {}
   # -- The rules read the JMX exporter's series names; with
   # metrics.type=strimziMetricsReporter they would never fire, so the chart
   # refuses that pairing unless this is set (after porting the rules).

@@ -1,3 +1,9 @@
+{{- /* The chaos-infrastructure board is delivered by charts/monitoring
+       since 2.2.0. Refused rather than silently ignored: the values schema
+       allows unknown keys at this level, so nothing else would say so. */ -}}
+{{- if hasKey (.Values.monitoring | default dict) "grafanaDashboard" -}}
+{{- fail "kates-chaos: monitoring.grafanaDashboard was removed in 2.2.0. The Kates — Chaos infrastructure board is delivered by charts/monitoring (dashboards.enabled there); a non-default Litmus operator Deployment name is set on the board's $operator_deployment variable rather than in values. Remove the block to proceed." -}}
+{{- end -}}
 {{- $kafkaNamespace := include "kates-chaos.kafkaNamespace" . }}
 {{- $defaultSA := include "kates-chaos.serviceAccountName" . }}
 {{- range $name, $engine := .Values.engines }}

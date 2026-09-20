@@ -31,10 +31,6 @@ monitoring:
     interval: 15s
     labels:
       release: monitoring
-  grafanaDashboard:
-    enabled: true
-    labels:
-      grafana_dashboard: "1"
 
 networkPolicy:
   enabled: true

@@ -77,15 +77,30 @@ def metric_names(expr):
 
 # ── The rendered chart ─────────────────────────────────────────────────────
 
-def load_render(path):
+def load_render(path, exporterless=False, objects=None):
     """Split one rendered manifest into exporter configs (by ConfigMap name),
-    PromQL references and recording-rule names."""
+    PromQL references and recording-rule names.
+
+    `exporterless` is for a chart that ships rules and boards but no JMX
+    exporter of its own — charts/monitoring, whose chaos rules read series the
+    Kates application publishes through Micrometer. Everything such a chart
+    references has to be covered by `external` or `builtin`, which is what
+    makes its contract meaningful rather than vacuous.
+
+    `objects` is a compiled name regex limiting which ConfigMaps and
+    PrometheusRules are read. A chart that vendors a large subchart renders
+    that subchart's rules and boards too — charts/monitoring pulls in around
+    thirty of each from kube-prometheus-stack — and holding upstream's
+    expressions to this repository's catalogue is neither useful nor
+    maintainable. The contract is about what the chart itself writes."""
     rules, refs, records = {}, {}, set()
     with open(path) as fh:
         docs = [d for d in yaml.safe_load_all(fh) if d]
     for doc in docs:
         kind = doc.get("kind")
         meta = doc.get("metadata") or {}
+        if objects is not None and not objects.fullmatch(meta.get("name") or ""):
+            continue
         if kind == "ConfigMap":
             for name, body in (doc.get("data") or {}).items():
                 if name.endswith((".yml", ".yaml")) and "pattern:" in body:
@@ -115,24 +130,35 @@ def load_render(path):
                         where = "alert %s" % rule.get("alert", "?")
                     for n in metric_names(str(rule.get("expr", ""))):
                         refs.setdefault(n, set()).add(where)
-    if not rules:
+    if not rules and not exporterless:
         sys.exit("::error::%s: no JMX exporter rules ConfigMap in the render "
-                 "(is metrics.enabled set for this render?)" % path)
+                 "(is metrics.enabled set for this render? a chart that has no "
+                 "exporter at all sets `exporterless: true`)" % path)
     return rules, refs, records
 
 
 def load_external_dashboards(contract, contract_path):
     """PromQL references from dashboards the chart does not render but its
-    exporter rules must serve: `external_dashboards: [{archive: <glob, from the
-    repository root>, files: [<regex of member names>]}]`. kafka-cluster uses
-    it for the Strimzi operator's own dashboards, shipped inside the operator
-    chart's tarball, because those are the Kafka dashboards it relies on."""
+    exporter rules must serve. Two forms:
+
+    `{archive: <glob, from the repository root>, files: [<regex of member
+    names>]}` reads them out of a tarball — kafka-cluster uses it for the
+    Strimzi operator's own dashboards, shipped inside the operator chart's
+    tarball, because those are the Kafka dashboards it relies on.
+
+    `{paths: [<glob, from the repository root>]}` reads them off disk, for the
+    boards in dashboards/ that the monitoring chart delivers rather than this
+    one. Without it those boards would read this chart's exporter rules with
+    nothing checking that the rules can produce what they read, which is how
+    the legacy boards came to reference eleven series that never existed."""
     import glob
     import os
     import tarfile
     refs = {}
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(contract_path))))
     for spec in contract.get("external_dashboards") or []:
+        if not spec.get("archive"):
+            continue      # a `paths`-only entry; the second loop reads it
         archives = sorted(glob.glob(os.path.join(root, spec["archive"])))
         if not archives:
             sys.exit("::error::external_dashboards: nothing matches %s (run helm dependency build?)" % spec["archive"])
@@ -144,31 +170,49 @@ def load_external_dashboards(contract, contract_path):
                     continue
                 seen += 1
                 dash = json.load(tf.extractfile(member))
-                exprs = []
-                for panel in _panels(dash.get("panels") or []):
-                    for target in panel.get("targets") or []:
-                        if target.get("expr"):
-                            exprs.append(("panel %r" % panel.get("title", "?"), target["expr"]))
-                for var in (dash.get("templating") or {}).get("list") or []:
-                    q = var.get("query")
-                    if isinstance(q, dict):
-                        q = q.get("query")
-                    if var.get("type") == "query" and q:
-                        q = str(q).strip()
-                        # label_values(<selector>, <label>): the label is not a series
-                        m = re.fullmatch(r"label_values\((.*),\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", q)
-                        if m:
-                            q = m.group(1)
-                        elif re.fullmatch(r"label_values\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", q):
-                            continue
-                        exprs.append(("variable %r" % var.get("name"), q))
-                for where, expr in exprs:
+                for where, expr in _dashboard_exprs(dash):
                     for n in metric_names(expr):
                         refs.setdefault(n, set()).add("%s %s" % (base, where))
         if seen != len(spec["files"]):
             sys.exit("::error::external_dashboards: %d of %d files found in %s"
                      % (seen, len(spec["files"]), archives[-1]))
+    for spec in contract.get("external_dashboards") or []:
+        for pattern in spec.get("paths") or []:
+            hits = sorted(glob.glob(os.path.join(root, pattern)))
+            if not hits:
+                sys.exit("::error::external_dashboards: nothing matches %s "
+                         "(run scripts/gen-dashboards.py?)" % pattern)
+            for path in hits:
+                base = os.path.relpath(path, root)
+                with open(path) as fh:
+                    dash = json.load(fh)
+                for where, expr in _dashboard_exprs(dash):
+                    for n in metric_names(expr):
+                        refs.setdefault(n, set()).add("%s %s" % (base, where))
     return refs
+
+
+def _dashboard_exprs(dash):
+    """(where, expr) for every panel target and query variable in a board."""
+    exprs = []
+    for panel in _panels(dash.get("panels") or []):
+        for target in panel.get("targets") or []:
+            if target.get("expr"):
+                exprs.append(("panel %r" % panel.get("title", "?"), target["expr"]))
+    for var in (dash.get("templating") or {}).get("list") or []:
+        q = var.get("query")
+        if isinstance(q, dict):
+            q = q.get("query")
+        if var.get("type") == "query" and q:
+            q = str(q).strip()
+            # label_values(<selector>, <label>): the label is not a series
+            m = re.fullmatch(r"label_values\((.*),\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", q)
+            if m:
+                q = m.group(1)
+            elif re.fullmatch(r"label_values\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", q):
+                continue
+            exprs.append(("variable %r" % var.get("name"), q))
+    return exprs
 
 
 def pick_exporters(contract, rules, path):
@@ -413,13 +457,20 @@ def main():
     declared = list((contract.get("exporters") or {}).keys())
     default_ident = declared[0] if declared else None
     xpass = set()
+    exporterless = bool(contract.get("exporterless"))
+    objects = contract.get("objects")
+    objects = re.compile(objects) if objects else None
     external_refs = load_external_dashboards(contract, args.contract)
     for spec in args.renders:
         label, path = spec.split("=", 1)
-        cfgs, refs, records = load_render(path)
+        cfgs, refs, records = load_render(path, exporterless, objects)
         for n, where in external_refs.items():
             refs.setdefault(n, set()).update(where)
-        picked = pick_exporters(contract, cfgs, path)
+        # A chart with no exporter of its own simulates nothing: `names` stays
+        # empty, so every reference must be matched by `external` or `builtin`
+        # below or it is reported MISSING. The reference check itself is the
+        # same one every other contract runs.
+        picked = {} if exporterless else pick_exporters(contract, cfgs, path)
         names, optional = {}, set()
         exporters = []
         for ident, cfg in picked.items():
@@ -429,7 +480,7 @@ def main():
             for k, v in n.items():
                 names.setdefault(k, []).extend(v)
             optional |= o
-        exporter = exporters[0][1]
+        exporter = exporters[0][1] if exporters else None
         cfg = {"rules": [r for _, _, c in exporters for r in c["rules"]]}
         all_names.update(names)
         all_optional |= optional
@@ -483,7 +534,7 @@ def main():
         if not args.quiet or missing:
             print("==> %s: %d references, %d producible series from %d rules and %d catalogued beans"
                   % (label, len(refs), len(names), len(cfg["rules"]), len(mbeans)))
-        families = exporter.families()
+        families = exporter.families() if exporter else []
         for n in missing:
             rc = 1
             print("MISSING: %s" % n)
@@ -497,7 +548,7 @@ def main():
             close = difflib.get_close_matches(n, list(names) + sorted(records), n=3, cutoff=0.75)
             if close:
                 print("    did you mean: %s" % ", ".join(close))
-            for bean, verdicts in related_beans(exporter, mbeans, n):
+            for bean, verdicts in (related_beans(exporter, mbeans, n) if exporter else []):
                 print("    %s" % bean)
                 for v in verdicts:
                     print("        %s" % v)
@@ -569,7 +620,7 @@ def main():
         # names — and a series that NO rule explains is listed in full,
         # because that is the one worth a look.
         by_rule, orphans = {}, []
-        families = exporter.families()
+        families = exporter.families() if exporter else []
         for n in uncatalogued:
             for i, tmpl, rx in families:
                 if rx.match(n):

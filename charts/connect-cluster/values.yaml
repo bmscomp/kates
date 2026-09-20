@@ -601,9 +601,15 @@ metrics:
 monitoring:
   podMonitor:
     enabled: true
-    labels:
-      release: kafka
-      prometheus: kube-prometheus
+    # Extra labels on the PodMonitor, for a Prometheus whose podMonitorSelector
+    # has been narrowed. Empty by default: kates-monitoring 1.5.0 selects every
+    # PodMonitor in the watched namespaces, and the `release: kafka` that used
+    # to be here selected nothing under any Prometheus this repository installs
+    # — the monitoring release is called `monitoring`, not `kafka`. It also went
+    # stale the moment the chart was installed under another release name,
+    # while `app.kubernetes.io/instance`, which the chart already sets, tracks
+    # the real one. Prefer selecting on that.
+    labels: {}
     interval: ""
     scrapeTimeout: ""
     honorLabels: false
@@ -615,9 +621,10 @@ monitoring:
 # docs/connect-cluster-runbook.md.
 alerts:
   enabled: true
-  labels:
-    release: kafka
-    prometheus: kube-prometheus
+  # Extra labels on the PrometheusRule, for a Prometheus whose ruleSelector has
+  # been narrowed. Empty for the same reason as monitoring.podMonitor.labels;
+  # `prometheus: kube-prometheus` named a Prometheus no chart here installs.
+  labels: {}
   runbookBaseUrl: "https://github.com/bmscomp/kates/blob/main/docs/connect-cluster-runbook.md"
   # -- The rules read the JMX exporter's names; with the metrics reporter they
   # would never fire, so the chart refuses the pair unless this is set.
@@ -643,13 +650,12 @@ alerts:
     burnRate: 14.4
 
 # ── Dashboard ───────────────────────────────────────────────────────────────
-dashboards:
-  enabled: true
-  # -- Namespace of the ConfigMap (empty = the release namespace)
-  namespace: ""
-  label: grafana_dashboard
-  labelValue: "1"
-  folder: Kafka
+# GONE in 2.1.0: the Kafka Connect board is delivered by charts/monitoring
+# with every other board in dashboards/ (its `dashboards.enabled`), scoped to
+# a release by its `$namespace`/`$cluster` variables rather than a per-release
+# copy. A release that still sets any `dashboards.*` key is REFUSED with the
+# new location named (see connect-cluster.validate), instead of silently
+# shipping nothing.
 
 # ── Preflight ───────────────────────────────────────────────────────────────
 # A pre-install/upgrade Job that dials the Kafka cluster with the workers'

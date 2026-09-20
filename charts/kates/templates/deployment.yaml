@@ -1,3 +1,12 @@
+{{- /* Both boards this chart shipped are delivered by charts/monitoring
+       since 0.9.0. Refused rather than silently ignored — this chart has no
+       values schema, so nothing else would say so. */ -}}
+{{- if hasKey (.Values.metrics | default dict) "grafanaDashboard" -}}
+{{- fail "kates: metrics.grafanaDashboard was removed in 0.9.0. The KATES — Overview board is delivered by charts/monitoring (dashboards.enabled there), and its $job variable scopes it to a release — nothing is configured per release any more. Remove the block to proceed." -}}
+{{- end -}}
+{{- if or (hasKey (.Values.kyvernoPolicy | default dict) "grafanaDashboard") (hasKey (.Values.kyvernoPolicy | default dict) "grafanaDashboardNamespace") -}}
+{{- fail "kates: kyvernoPolicy.grafanaDashboard and kyvernoPolicy.grafanaDashboardNamespace were removed in 0.9.0. The Kyverno board is delivered by charts/monitoring (dashboards.enabled there). Remove the keys to proceed." -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

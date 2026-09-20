@@ -45,11 +45,10 @@ renders:
         kind: KafkaConnect
         path: spec/template/pod/priorityClassName
         exists: false
-      - why: "the dashboard's panels are laid out by the library"
+      - why: "no dashboard ConfigMap: charts/monitoring delivers the board (2.1.0)"
         kind: ConfigMap
-        name: connect-cluster-dashboard
-        path: data/kafka-connect.json
-        matches: '"gridPos"'
+        name: .*dashboard.*
+        count: 0
       - why: "test topics belong to the Kafka cluster"
         kind: KafkaTopic
         path: metadata/labels/strimzi.io~1cluster
@@ -100,7 +99,7 @@ renders:
         equals: kafka.svc.cluster.local
   - name: generic (kates deploy, no monitoring)
     values: [values-generic.yaml]
-    set: [alerts.enabled=false, podMonitors.enabled=false, dashboards.enabled=false, networkPolicy.enabled=true]
+    set: [alerts.enabled=false, podMonitors.enabled=false, networkPolicy.enabled=true]
     assert:
       - why: "1.x podMonitors.enabled=false still turns the PodMonitor off"
         kind: PodMonitor

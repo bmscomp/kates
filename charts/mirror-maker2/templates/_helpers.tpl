@@ -200,6 +200,19 @@ Ready while nothing replicates.
 */}}
 {{- define "mirror-maker2.validate" -}}
 {{- $ctx := . -}}
+{{- /* The whole dashboard block is gone. The mirror and migration boards
+       are delivered by charts/monitoring for the entire cluster, and their
+       $namespace/$cluster variables pick a release — so the per-release
+       ConfigMaps, the uid/title rewrite and the no-slo/identity variants
+       this block configured have nothing left to configure. Refused rather
+       than ignored, because a values key that is silently ignored is the
+       failure this whole branch is about. The two migration thresholds it
+       once held were never movable from here anyway: they are baked into
+       the generated JSON (a threshold colour, and the `< bool 5000` inside
+       the go/no-go query, where a Grafana variable does not parse). */ -}}
+{{- if hasKey .Values "dashboard" -}}
+{{- fail "mirror-maker2: the dashboard block was removed in 0.11.0. The mirror and migration boards are delivered by charts/monitoring (dashboards.enabled there) for every release in the cluster, and the board's $namespace/$cluster variables select a release — there is no per-release copy, uid rewrite, or no-slo/identity variant to configure any more. The migration thresholds are baked into the board: edit DRAINED_MS or FRESH_MS in dashboards/mirror-maker2-migration/board.py and run scripts/gen-dashboards.py. Remove the dashboard block to proceed." -}}
+{{- end -}}
 {{- /* `latest` is not a version. A mirror pinned to a moving tag changes
        Kafka client version on any pod restart — a rolling restart on a
        Tuesday can move the workers across the KIP-896 floor that every other
