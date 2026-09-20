@@ -21,7 +21,7 @@ The runbook's checklist, and where each step reads:
 
 | Runbook step | On this board |
 |---|---|
-| Before you start | **Can I cut over yet?**, plus the per-topic and per-group tables |
+| Before you start | **Migration window** for when — the quiet hours the last week points at; then **Can I cut over yet?**, plus the per-topic and per-group tables |
 | 1. Stop the producers | **Not visible here** — confirm end offsets on the source, twice, 60s apart |
 | 2. Let the mirror drain | **Draining**: lag and record age falling, records in flight at zero, the ETA agreeing |
 | 3. Apply the cutover | **Cutover state**: source connector STOPPED, checkpoint still RUNNING |
@@ -62,6 +62,32 @@ minutes. Negative means the age is rising — the mirror is losing to the
 producers and no amount of waiting will drain it. That is the signal to add
 tasks (`sourceConnector.tasksMax`, toward the source's partition count), not
 to wait longer.
+
+**Migration window** — *when can it be done?* Collapsed, because it is
+consulted while the migration is being planned rather than while the cutover
+is being run, and Grafana runs no query for a closed row. The mirror sees
+every record its producers write to the mirrored topics, so what crosses it,
+hour by hour, *is* the source's traffic pattern — and the window is the trough
+in it: the hours with the least to stop at the source, the least to drain, and
+the fewest consumers reading. *Quietest hour* and *Busiest hour* are the two
+ends of a profile built from the last seven days, one bar per hour of day in
+the chart beside them; *Now, against the quietest hour* is what is crossing
+this instant as a multiple of the quietest hour's average — 1 is as quiet as
+this source ever gets, green within one and a half times, amber to three, red
+beyond — and *Records crossing /s, last 7 days* is the same traffic as it
+happened, pinned to the week that shaped the profile whatever the board's
+time range is. Hours are UTC, because PromQL's `hour()` knows no other zone.
+
+PromQL cannot pivot time into a label, so the profile is twenty-four clauses,
+one per hour of day, each averaging the crossing rate over the half-hour
+samples of the last seven days that fell in that hour — `hour()` inside a
+subquery takes each step's own time, which
+`scripts/metric-contract/tests/mirror-maker2.migration-window-test.yaml`
+holds against a synthetic day with one quiet hour. A bar missing at one end
+is an hour the mirror has not seen yet: it has been up for less than a day,
+and the profile is only as good as the week behind it. A busiest hour barely
+above the quietest is a source with no daily pattern, and then the window is
+whenever the people are ready rather than whenever the traffic is.
 
 **Draining.** The three numbers that have to reach zero, per topic. A topic
 that flattens above the line while the others fall is the one holding the
@@ -117,7 +143,7 @@ target and no consumer knowing where to start reading it.
 | `default` | prefixing replication policy | |
 | `identity` | an identity policy | the Topics row title and the per-topic table's description say the replicated names are the source's own |
 
-Nothing else on this board depends on the policy, and the panel list is 19
+Nothing else on this board depends on the policy, and the panel list is 25
 either way.
 
 ## What the chart injects, and what is frozen
@@ -169,14 +195,20 @@ error. That is the one thing this port gives up, said plainly rather than left
 for someone to discover after setting `drainedBelowMs: 500` and trusting the
 colour.
 
-## The panel CI extracts by name
+## The panels CI extracts by name
 
-`ci-mirror-maker2.yml` pulls the panel titled exactly **`Safe to cut over?`**
-out of the *rendered* ConfigMap and runs `promtool test rules` over six cases
-from `scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml`:
+`ci-mirror-maker2.yml` pulls five panels out of this board by their exact
+titles — into the collapsed window row too — and runs `promtool test rules`
+over them. **`Safe to cut over?`** gets six cases from
+`scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml`:
 drained, still behind, still in flight, a failed task, a release reporting
 nothing at all, and a second release in the same namespace that is none of
-those things. Rename that panel and the test silently checks nothing — the
+those things. **`Catch-up ETA`**, **`Quietest hour (UTC)`**, **`Busiest hour
+(UTC)`** and **`Now, against the quietest hour`** get three from
+`mirror-maker2.migration-window-test.yaml`: a drain whose ETA is in seconds
+(the panel once divided by a thousand on top and drew a ten-hour drain as
+thirty-five seconds), a synthetic day with one quiet hour, and a mirror with
+no samples. Rename any of the five and its test silently checks nothing — the
 extraction step fails loudly for exactly that reason.
 
 The test's input series carry the namespace and cluster that workflow's own
