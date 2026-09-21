@@ -118,7 +118,9 @@ jobs:
           set -euo pipefail
           PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
           [ -n "$PROM" ] || { echo "::error::no prometheus pin in images.env"; exit 1; }
-          curl -sSL -o /tmp/prom.tgz \
+          # --fail and retries: a release-asset hiccup once saved an HTML error page
+          # in place of the archive, which tar rejected as "not in gzip format".
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
             "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
           tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
           sudo mv /tmp/promtool /usr/local/bin/
@@ -229,7 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           for c in connect-cluster mirror-maker2; do
-            helm dependency build "charts/$c" >/dev/null
+            scripts/retry.sh 5 helm dependency build "charts/$c" >/dev/null
             if helm template x "charts/$c" -n x \
                 --api-versions monitoring.coreos.com/v1 \
                 | grep -q "grafana_dashboard"; then
@@ -244,7 +246,7 @@ jobs:
           helm repo add prometheus-community \
             https://prometheus-community.github.io/helm-charts \
             --force-update >/dev/null
-          helm dependency build charts/monitoring >/dev/null
+          scripts/retry.sh 5 helm dependency build charts/monitoring >/dev/null
           helm template mon charts/monitoring -n monitoring \
             --show-only templates/grafana-dashboards.yaml \
             | python3 -c '
@@ -355,7 +357,7 @@ jobs:
           helm repo add prometheus-community \
             https://prometheus-community.github.io/helm-charts \
             --force-update >/dev/null
-          helm dependency build charts/monitoring >/dev/null
+          scripts/retry.sh 5 helm dependency build charts/monitoring >/dev/null
           helm template mon charts/monitoring -n monitoring \
             --show-only templates/grafana-dashboards.yaml \
             | ./scripts/check-dashboards.py --render
@@ -382,7 +384,7 @@ jobs:
       - name: Lint and unit-test the library
         run: |
           helm lint charts/kafka-common
-          helm dependency build charts/kafka-common/tests/harness
+          scripts/retry.sh 5 helm dependency build charts/kafka-common/tests/harness
           helm unittest charts/kafka-common/tests/harness
 
       - name: The packaged library carries no test harness
@@ -414,12 +416,14 @@ jobs:
       - name: Install kubeconform, promtool and PyYAML
         run: |
           set -euo pipefail
-          curl -sSL -o /tmp/kubeconform.tgz \
+          # --fail and retries: a release-asset hiccup once saved an HTML error page
+          # in place of the archive, which tar rejected as "not in gzip format".
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/kubeconform.tgz \
             "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
           tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
           sudo mv /tmp/kubeconform /usr/local/bin/
           PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
-          curl -sSL -o /tmp/prom.tgz \
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
             "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
           tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
           sudo mv /tmp/promtool /usr/local/bin/
@@ -433,12 +437,12 @@ jobs:
           set -euo pipefail
           helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm dependency build charts/strimzi-operator/
+          scripts/retry.sh 5 helm dependency build charts/strimzi-operator/
           chart="charts/${{ matrix.chart }}"
           if [ "${{ matrix.chart }}" != strimzi-operator ] && grep -q '^dependencies:' "$chart/Chart.yaml"; then
             # Library dependencies are local (file://) and need no repository;
             # monitoring's kube-prometheus-stack is the one that is not.
-            helm dependency build "$chart/"
+            scripts/retry.sh 5 helm dependency build "$chart/"
           fi
 
       - name: Render matrix (CRD schemas, kubeconform, assertions, rails)
@@ -539,7 +543,7 @@ jobs:
         run: |
           set -euo pipefail
           helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-          helm dependency build charts/kafka-cluster/
+          scripts/retry.sh 5 helm dependency build charts/kafka-cluster/
           ./scripts/deploy-kafka-generic.sh --yes --skip-tests \
             -f charts/kafka-cluster/values-ci.yaml
           helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values \
@@ -609,7 +613,7 @@ jobs:
         if: matrix.chart == 'connect-cluster'
         run: |
           set -euo pipefail
-          helm dependency build charts/connect-cluster/
+          scripts/retry.sh 5 helm dependency build charts/connect-cluster/
           helm upgrade --install connect-cluster charts/connect-cluster -n kafka \
             -f charts/connect-cluster/values-dev.yaml \
             -f scripts/metric-contract/live/connect-cluster.yaml
@@ -688,7 +692,7 @@ jobs:
           done
           [ -n "$args" ] || { echo "::error::no capture was taken"; exit 1; }
           PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
-          curl -sSL -o /tmp/prom-full.tgz \
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom-full.tgz \
             "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
           tar -xzf /tmp/prom-full.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/prometheus"
           sudo mv /tmp/prometheus /usr/local/bin/

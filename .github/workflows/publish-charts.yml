@@ -68,7 +68,7 @@ jobs:
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
           for chart in strimzi-operator kafka-cluster kates-chaos monitoring mirror-maker2 kates-platform; do
-            helm dependency build "charts/${chart}/"
+            scripts/retry.sh 5 helm dependency build "charts/${chart}/"
           done
 
       - name: Package charts
