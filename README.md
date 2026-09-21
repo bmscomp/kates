@@ -197,7 +197,7 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.0 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source that Strimzi 1.1.0 cannot deploy |
 | [`minio`](charts/minio/) | 17.0.22 | 2025.7.23 | MinIO(R) is an object storage server, compatible with Amazon S3 cloud |
 | [`mirror-maker2`](charts/mirror-maker2/) | 0.11.0 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
-| [`monitoring`](charts/monitoring/) | 1.5.1 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
+| [`monitoring`](charts/monitoring/) | 1.6.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
 | [`strimzi-operator`](charts/strimzi-operator/) | 0.3.0 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
 | [`velero`](charts/velero/) | 11.3.3 | 1.17.1 | A Helm chart for velero |
 <!-- chart-table:end -->

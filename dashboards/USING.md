@@ -226,9 +226,9 @@ Work down this list; it is ordered by how often each is the answer.
    every board; with two Prometheus datasources, check it is the one holding
    these series.
 3. **Nothing publishes that series here.** Twenty series need something
-   installed first — LitmusChaos and its chaos-exporter, Kyverno,
-   kube-state-metrics configured for `ChaosEngine` — or need the right kind of
-   run. [`METRICS.md`](METRICS.md) says for every series whether this
+   installed first — LitmusChaos and its chaos-exporter, Kyverno — or need
+   the right kind of run, a chaos run included: the ChaosEngine state series
+   exists only once an engine does. [`METRICS.md`](METRICS.md) says for every series whether this
    repository publishes it, which is what lets *nothing is wrong* be told apart
    from *nothing publishes this*.
 4. **The exporter is off.** Strimzi only opens the scrape port when

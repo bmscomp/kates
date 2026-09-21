@@ -27,9 +27,12 @@ start with `kates-`.
 pool's timing gauges with `baseUnit("milliseconds")`, so Micrometer publishes
 `agroal_blocking_time_total_milliseconds`, `…_average_milliseconds` and
 `…_max_milliseconds`, and there is no `_count` companion at all — the count of
-acquisitions is a separate gauge, `agroal_acquire_count`. The panel that
+acquisitions is a separate counter, `agroal_acquire_count_total`. The panel that
 divided the one by the other rendered empty over an empty. See
-io.quarkus.agroal.runtime.metrics.AgroalMetricsRecorder for the full list.
+io.quarkus.agroal.runtime.metrics.AgroalMetricsRecorder for the full list, and
+note that none of it is published unless `quarkus.datasource.metrics.enabled`
+is on — it was not, for the whole life of this board, until the release that
+reads these names against a live pod.
 
 **The `jvm_*` names here are Micrometer's, not the JMX agent's.** This board
 reads a Quarkus application, not a Kafka broker. Micrometer's JVM binder
@@ -264,7 +267,11 @@ def _jvm() -> list[dict]:
             "spent stopped — and it is what turns up as HTTP p99 latency in "
             "the row above without any corresponding rise in p50. The `_max` "
             "series is a Micrometer gauge of the worst pause in its window, "
-            "not a counter: never `rate()` it.",
+            "not a counter: never `rate()` it. No data here on a release "
+            "running the NATIVE image is not a fault: GraalVM exposes no GC "
+            "notification beans, so Micrometer registers no pause meters. The "
+            "JVM image publishes them; the heap panel beside this one draws on "
+            "both.",
             P.targets(
                 ("sum by (cause, action) (rate(jvm_gc_pause_seconds_sum{%s}[1m]))" % APP,
                  "{{cause}} / {{action}}"),
@@ -314,14 +321,12 @@ def _database() -> list[dict]:
         P.timeseries(
             "Acquisitions per second",
             "How often the application takes a connection out of the pool. "
-            "`agroal_acquire_count` is a *gauge* holding a cumulative total, "
-            "not a Prometheus counter — Quarkus registers it with "
-            "`Gauge.builder`, so it carries no `_total` suffix and Prometheus "
-            "does not type it as a counter. `rate()` over it still gives the "
-            "right answer because the underlying value only ever increases, "
-            "but it will not be corrected for a restart the way a real "
-            "counter is: expect one spike per pod restart.",
-            P.targets(("sum(rate(agroal_acquire_count{%s}[1m]))" % APP, "acquisitions/s")),
+            "`agroal_acquire_count_total` is a real Prometheus counter — "
+            "Quarkus registers it as a FunctionCounter, hence the `_total` "
+            "suffix — so `rate()` is the right reading and a pod restart is "
+            "handled as a counter reset, not a spike. This panel read the "
+            "name without the suffix and drew nothing.",
+            P.targets(("sum(rate(agroal_acquire_count_total{%s}[1m]))" % APP, "acquisitions/s")),
             unit="ops", w=8,
         ),
         P.timeseries(

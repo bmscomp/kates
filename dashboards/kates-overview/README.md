@@ -61,15 +61,19 @@ Four binders, all configured in `kates/src/main/resources/application.properties
 
 | Binder | Setting | Series here |
 |---|---|---|
-| HTTP server | `quarkus.micrometer.binder.http-server.enabled=true` | `http_server_requests_seconds_*` |
+| HTTP server | `quarkus.micrometer.binder.http-server.enabled=true` for `_count`, `_sum` and `_max`; the `_bucket` series behind *Request latency percentiles* comes from the `HttpLatencyHistogram` `MeterFilter` (eleven fixed SLO boundaries, 5 ms to 10 s), because the binder alone publishes no buckets | `http_server_requests_seconds_*` |
 | JVM | `quarkus.micrometer.binder.jvm=true` | `jvm_memory_*` |
 | System | `quarkus.micrometer.binder.system=true` | `process_uptime_seconds`, `process_cpu_usage`, `system_cpu_usage` |
-| Agroal | Quarkus registers it when the datasource and Micrometer extensions are both present | `agroal_*` |
+| Agroal | `quarkus.datasource.metrics.enabled=true` — off by default whatever extensions are present; the application sets it | `agroal_*` |
 
 Plus this repository's own meters, from
 `kates/src/main/java/com/bmscomp/kates/engine/`: `kates_benchmark_active_runs`
 and `kates_benchmark_throughput_rec_sec` (`BenchmarkMetrics`) and
 `kates_tests_completed_total` (`KatesMetrics`).
+
+The buckets and the pool switch both postdate the `1.22.0` image, which
+publishes neither: on it, *Request latency percentiles* and the *Database*
+row are empty while everything else on the board draws.
 
 ## Eleven names were wrong, and five of them were renamable
 

@@ -81,9 +81,13 @@ def variables(variant: str) -> list[dict]:
             "namespace)",
             label="Kafka namespace",
             description=(
-                "Namespaces that hold a ChaosEngine. Empty here means "
-                "kube-state-metrics is running without custom-resource "
-                "metrics for ChaosEngine — not that no chaos has run."),
+                "Namespaces that hold a ChaosEngine. kube-state-metrics "
+                "publishes one series per engine, and Kates leaves its engines "
+                "in place after a run, so empty here means either that no "
+                "experiment has ever been created on this cluster, or that "
+                "kube-state-metrics is running without custom-resource metrics "
+                "for ChaosEngine — charts/monitoring configures them since "
+                "1.6.0; another stack has to be told the resource's shape."),
         ),
         P.query_var(
             "pod",
@@ -117,7 +121,8 @@ def _header() -> list[dict]:
             "and the same restart with this at zero is an incident. The same "
             "distinction drives `KafkaBrokerRestartUnexpected` in "
             "prometheus-chaos-rules.yaml. Needs kube-state-metrics with "
-            "custom-resource metrics enabled for ChaosEngine. The zero "
+            "custom-resource metrics for ChaosEngine, which charts/monitoring "
+            "configures since 1.6.0. The zero "
             "fallback is anchored to the *unfiltered* ChaosEngine series "
             "rather than to this board's ANCHOR, and the distinction is the "
             "whole point: kube-state being up proves nothing here, because "
