@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.domain.SlaViolation;
+import com.bmscomp.kates.domain.TestResult.TaskStatus;
 
 /**
  * These meters are tagged with {@code run_id}, which is unbounded over time, so
@@ -29,7 +30,7 @@ class BenchmarkMetricsTest {
 
         metrics.startRun("run-1", "LOAD", "native");
         metrics.recordThroughput("run-1", "phase", 100, 1);
-        metrics.recordError("run-1", "phase");
+        metrics.recordTaskStatus("run-1", "task-a", "phase", TaskStatus.FAILED);
         assertFalse(registry.getMeters().isEmpty());
 
         metrics.endRun("run-1");
@@ -52,7 +53,7 @@ class BenchmarkMetricsTest {
         // The run is gone from the map, so this is a no-op — the case that
         // matters is a worker still finishing while endRun runs, which the
         // unregistered flag inside RunMeters covers.
-        metrics.recordError("run-2", "phase");
+        metrics.recordTaskStatus("run-2", "task-a", "phase", TaskStatus.FAILED);
 
         assertTrue(
                 registry.getMeters().stream()
@@ -160,7 +161,7 @@ class BenchmarkMetricsTest {
         metrics.recordThroughput("run-6", "produce", 1000, 12);
         metrics.recordRecords("run-6", "task-a", "produce", 5000);
         metrics.recordLatency("run-6", "task-a", "produce", 1.5, 8, 21, 47, 93);
-        metrics.recordError("run-6", "produce");
+        metrics.recordTaskStatus("run-6", "task-a", "produce", TaskStatus.FAILED);
         metrics.recordSlaViolations("run-6", List.of(SlaViolation.critical("p99LatencyMs", 20, 21)));
 
         String scrape = registry.scrape();
@@ -210,6 +211,29 @@ class BenchmarkMetricsTest {
                 counterValue(registry, "kates.benchmark.records.total", "run-7"),
                 0.001,
                 "the counter must not fall when a task's cumulative total does");
+    }
+
+    @Test
+    @DisplayName("a phase's error counter exists from its first poll and counts each failed task once")
+    void errorCounterExistsAtZeroAndCountsATaskOnce() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        BenchmarkMetrics metrics = new BenchmarkMetrics(registry);
+
+        metrics.startRun("run-11", "LOAD", "native");
+        // A healthy poll. The benchmark board's error-rate panel promises a
+        // flat zero for a healthy run, which needs a series to read zero from.
+        metrics.recordTaskStatus("run-11", "task-a", "produce", TaskStatus.RUNNING);
+        assertEquals(0.0, errorValue(registry, "run-11", "produce"), 0.001, "registered at zero on first sight");
+
+        // The poll that sees the failure counts it; the terminal transition
+        // walking every result afterwards, or a poll repeated after a lost
+        // save, must not count it again.
+        metrics.recordTaskStatus("run-11", "task-a", "produce", TaskStatus.FAILED);
+        metrics.recordTaskStatus("run-11", "task-a", "produce", TaskStatus.FAILED);
+        assertEquals(1.0, errorValue(registry, "run-11", "produce"), 0.001, "one failed task is one");
+
+        metrics.recordTaskStatus("run-11", "task-b", "produce", TaskStatus.FAILED);
+        assertEquals(2.0, errorValue(registry, "run-11", "produce"), 0.001, "a second task is a second failure");
     }
 
     @Test
@@ -283,6 +307,15 @@ class BenchmarkMetricsTest {
     private static double counterValue(SimpleMeterRegistry registry, String name, String runId) {
         var counter = registry.find(name).tag("run_id", runId).functionCounter();
         assertNotNull(counter, name + " is not registered for " + runId);
+        return counter.count();
+    }
+
+    private static double errorValue(SimpleMeterRegistry registry, String runId, String phase) {
+        var counter = registry.find("kates.benchmark.errors.total")
+                .tag("run_id", runId)
+                .tag("phase", phase)
+                .counter();
+        assertNotNull(counter, "no error counter for phase " + phase);
         return counter.count();
     }
 
