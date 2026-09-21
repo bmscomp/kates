@@ -113,6 +113,7 @@ which is the thing it is built around.
 | Section | What it answers |
 |---|---|
 | **Can I cut over yet?** | Go/no-go, replication lag, records in flight, catch-up ETA, failed tasks |
+| **Migration window** *(collapsed)* | When the traffic says it can be done: the quietest and busiest hours of the last seven days, what is crossing now against the quietest, the hour-of-day profile and the week that made it |
 | **Draining** | Lag and record age per topic, the drain rate, the backlog — the three numbers that have to reach zero |
 | **Consumer groups** | Every group with a translated position and how old it is; the trend; whether checkpoints are still being emitted |
 | **Topics** | The punch list: lag, record age and rate per replicated topic, plus bytes crossing |

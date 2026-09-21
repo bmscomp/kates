@@ -75,6 +75,11 @@ verification between them.
 - [ ] Consumer groups appear on the target with translated offsets:
       `kafka-consumer-groups.sh --describe --group <g>` against the target.
 - [ ] You know which consumers move when, and who owns each one.
+- [ ] You have picked the hour. The migration board's *Migration window* row
+      (collapsed, under the go/no-go) profiles the last week of traffic
+      through the mirror by hour of day: its quietest hour is the one with the
+      least to stop, the least to drain and the fewest consumers reading, and
+      *Now, against the quietest hour* says how far from it you are.
 - [ ] You have read the rollback section below **before** you need it.
 
 The migration board (delivered by `charts/monitoring` with every other
