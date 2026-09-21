@@ -96,7 +96,7 @@ jobs:
 
       # mirror-maker2 is built on the kafka-common library (file://).
       - name: Build the chart's kafka-common dependency
-        run: helm dependency build charts/mirror-maker2/
+        run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
 
       - name: Lint
         run: |
@@ -397,7 +397,9 @@ jobs:
 
       - name: Install kubeconform and PyYAML
         run: |
-          curl -sSL -o /tmp/kubeconform.tgz \
+          # --fail and retries: a release-asset hiccup once saved an HTML error page
+          # in place of the archive, which tar rejected as "not in gzip format".
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/kubeconform.tgz \
             https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
           tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
           sudo mv /tmp/kubeconform /usr/local/bin/
@@ -564,7 +566,7 @@ jobs:
           set -euo pipefail
           PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
           [ -n "$PROM" ] || { echo "::error::no prometheus pin in images.env"; exit 1; }
-          curl -sSL -o /tmp/prom.tgz \
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
             "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
           tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
           sudo mv /tmp/promtool /usr/local/bin/
@@ -1156,7 +1158,7 @@ jobs:
             | tar -x -C /tmp/baseline
           BASE_DIR=/tmp/baseline/charts/mirror-maker2
           if grep -q '^dependencies:' "$BASE_DIR/Chart.yaml"; then
-            helm dependency build "$BASE_DIR" > /dev/null
+            scripts/retry.sh 5 helm dependency build "$BASE_DIR" > /dev/null
           fi
 
           rc=0
@@ -1231,7 +1233,7 @@ jobs:
 
       # mirror-maker2 is built on the kafka-common library (file://).
       - name: Build the chart's kafka-common dependency
-        run: helm dependency build charts/mirror-maker2/
+        run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
 
       - uses: actions/setup-go@v7
         with:
@@ -1360,7 +1362,7 @@ jobs:
 
       # mirror-maker2 is built on the kafka-common library (file://).
       - name: Build the chart's kafka-common dependency
-        run: helm dependency build charts/mirror-maker2/
+        run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
 
       - uses: actions/setup-go@v7
         with:

@@ -82,9 +82,22 @@ docker image inspect "${IMAGE}" >/dev/null 2>&1 || {
 docker network create "${NET}" >/dev/null
 
 step "🗄  Starting throwaway Postgres..."
+# docker run does not retry a pull. A registry hiccup on the first pull
+# ("connection reset by peer" from auth.docker.io) failed this test before the
+# binary was ever exercised, so pull first, and retry.
+PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
+for attempt in 1 2 3 4 5; do
+    docker pull -q "${PG_IMAGE}" >/dev/null 2>&1 && break
+    if [ "${attempt}" -eq 5 ]; then
+        error "❌ could not pull ${PG_IMAGE} after ${attempt} attempts"
+        exit 1
+    fi
+    warn "   pull of ${PG_IMAGE} failed (attempt ${attempt}/5), retrying in $((attempt * 5))s..."
+    sleep $((attempt * 5))
+done
 docker run -d --name "${DB}" --network "${NET}" \
     -e POSTGRES_USER=kates -e POSTGRES_PASSWORD=kates -e POSTGRES_DB=kates \
-    postgres:16-alpine >/dev/null
+    "${PG_IMAGE}" >/dev/null
 
 # -h forces the TCP path, and that is the whole point of it.
 #
