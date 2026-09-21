@@ -225,6 +225,10 @@ public class TestOrchestrator {
                             .withStartTime(Instant.now().toString())
                             .withEndTime(Instant.now().toString());
                     run = run.withAddedResult(failedResult);
+                    // Never polled, so this is its only chance to be counted
+                    // while the run is live.
+                    benchmarkMetrics.recordTaskStatus(
+                            run.getId(), task.getTaskId(), phaseNameFor(task), TestResult.TaskStatus.FAILED);
                 }
             }
 
@@ -360,6 +364,8 @@ public class TestOrchestrator {
                                 .withEndTime(Instant.now().toString())
                                 .withPhaseName(phaseName);
                         run = run.withAddedResult(failedResult);
+                        benchmarkMetrics.recordTaskStatus(
+                                run.getId(), task.getTaskId(), phaseName, TestResult.TaskStatus.FAILED);
                     }
                 }
             }
@@ -557,9 +563,11 @@ public class TestOrchestrator {
                     // upward, so this can only close a gap, never double-count.
                     benchmarkMetrics.recordRecords(runId, r.getTaskId(), r.getPhaseName(), r.getRecordsSent());
                 }
-                if (r.getStatus() == TestResult.TaskStatus.FAILED) {
-                    benchmarkMetrics.recordError(runId, r.getPhaseName());
-                }
+                // Counted once per task, so a failure the live poll already
+                // published is not counted twice here; this pass exists for
+                // the tasks no poll ever reported FAILED, such as a consumer
+                // aborted by abortStrandedConsumers.
+                benchmarkMetrics.recordTaskStatus(runId, r.getTaskId(), r.getPhaseName(), r.getStatus());
             }
 
             // Unregister the run's meters and hand back its concurrency slot.
@@ -1147,6 +1155,11 @@ public class TestOrchestrator {
      * be wrong.
      */
     private void publishLiveMetrics(String runId, TestResult result, BenchmarkStatus status) {
+        // Registers the phase's error counter, so the error series exists from
+        // the phase's first poll like the ones below, and counts a failure on
+        // the poll that observes it — see recordTaskStatus for why counting
+        // only at the terminal transition never reached a scrape.
+        benchmarkMetrics.recordTaskStatus(runId, result.getTaskId(), result.getPhaseName(), status.getState());
         if (status.getThroughputRecordsPerSec() > 0 || status.getThroughputMBPerSec() > 0) {
             benchmarkMetrics.recordThroughput(
                     runId, result.getPhaseName(), status.getThroughputRecordsPerSec(), status.getThroughputMBPerSec());
