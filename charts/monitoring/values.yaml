@@ -138,6 +138,48 @@ kube-prometheus-stack:
     image:
       tag: v2.14.0
       pullPolicy: IfNotPresent
+    # The chaos board and the chaos rules below read
+    # kube_customresource_chaosengine_status_engine_status — is an experiment
+    # in progress? kube-state-metrics publishes nothing about a custom
+    # resource unless told its shape, so this is the ChaosEngine's
+    # status.engineStatus as a state set (initialized while the experiment
+    # runs, completed or stopped after; one series per engine and state) plus
+    # the read access it needs. Without it the series never existed: the
+    # board's namespace picker, built on it, resolved to nothing, and
+    # KafkaChaosExperimentActive could not fire. The three alerts guarded by
+    # `and on() count(... == 1) == 0` still cannot: count() over nothing is
+    # empty, not zero, so that guard never passes — a separate fix.
+    # kube-state-metrics keeps running when the CRD is absent and discovers it
+    # when it arrives, so installing this stack before the chaos plane (which
+    # kates deploy does) is fine.
+    rbac:
+      extraRules:
+        - apiGroups: ["litmuschaos.io"]
+          resources: ["chaosengines"]
+          verbs: ["list", "watch"]
+    customResourceState:
+      enabled: true
+      config:
+        kind: CustomResourceStateMetrics
+        spec:
+          resources:
+            - groupVersionKind:
+                group: litmuschaos.io
+                version: v1alpha1
+                kind: ChaosEngine
+              metricNamePrefix: kube_customresource_chaosengine
+              labelsFromPath:
+                name: [metadata, name]
+                namespace: [metadata, namespace]
+              metrics:
+                - name: status_engine_status
+                  help: "ChaosEngine status.engineStatus, one series per state"
+                  each:
+                    type: StateSet
+                    stateSet:
+                      labelName: status
+                      path: [status, engineStatus]
+                      list: [initialized, completed, stopped]
 
   prometheus-node-exporter:
     image:

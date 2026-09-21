@@ -75,7 +75,7 @@ concluding something is broken.
 
 | Source | Series on this board | Installed by |
 |---|---|---|
-| **The application, via Micrometer** | `process_uptime_seconds`, `http_server_requests_seconds_*`, `jvm_*`, `agroal_*` | `quarkus-micrometer-registry-prometheus`, already a dependency. Scraped by `charts/kates`'s ServiceMonitor (`metrics.serviceMonitor.enabled`). |
+| **The application, via Micrometer** | `process_uptime_seconds`, `http_server_requests_seconds_*`, `jvm_*`, `agroal_*` | `quarkus-micrometer-registry-prometheus`, already a dependency. Scraped by `charts/kates`'s ServiceMonitor (`metrics.serviceMonitor.enabled`). The `agroal_*` series and the latency buckets need two settings the application ships and Quarkus does not default to — see below. |
 | **kube-state-metrics** | `kube_pod_status_ready`, `kube_pod_container_status_restarts_total` | the `kube-state-metrics` subchart of kube-prometheus-stack, which `charts/monitoring` enables by default |
 | **cAdvisor, via the kubelet** | `container_cpu_usage_seconds_total`, `container_memory_rss`, `container_memory_working_set_bytes` | the kubelet's own endpoint, scraped when `kube-prometheus-stack.kubelet.enabled` is true (it is) |
 
@@ -87,10 +87,24 @@ enabled in `kates/src/main/resources/application.properties`:
 - `quarkus.micrometer.binder.system=true` — `process_uptime_seconds` in the
   header.
 
-The Agroal pool metrics need `quarkus.datasource.jdbc.enable-metrics`
-(Quarkus enables it when the Micrometer extension is present). They are
-registered by `io.quarkus.agroal.runtime.metrics.AgroalMetricsRecorder`, which
-is where the exact names come from.
+Two more things have to be on, and neither is a Quarkus default:
+
+- **The latency buckets.** The HTTP binder publishes the request timer as
+  `_count`, `_sum` and `_max` only. `http_server_requests_seconds_bucket`
+  exists because `HttpLatencyHistogram`
+  (`kates/src/main/java/com/bmscomp/kates/config/`) is a `MeterFilter` that
+  gives `http.server.requests` eleven fixed SLO boundaries — 5, 10, 25, 50,
+  100, 250 and 500 ms, then 1, 2.5, 5 and 10 s. Fixed boundaries rather than
+  Micrometer's percentile histogram, which is about seventy buckets per
+  `uri × method × status × outcome`.
+- **The pool metrics.** `quarkus.datasource.metrics.enabled=true`. Agroal
+  registers nothing without it, whatever extensions are present — the
+  Micrometer extension alone does not switch it on. The names come from
+  `io.quarkus.agroal.runtime.metrics.AgroalMetricsRecorder`.
+
+Both postdate the `1.22.0` image. On it, and on anything older, the pool row
+and the percentile panel are empty while the rest of the board draws; the
+fix is a newer image, not a chart value.
 
 ## `jvm_*` here is Micrometer's, not the JMX agent's
 
@@ -140,7 +154,10 @@ The latency panel is the **only** place on any Kates board where
 `histogram_quantile()` is correct. `http_server_requests_seconds_bucket` is a
 real cumulative histogram with an `le` label. The benchmark engine's latency
 series are not: they are pre-computed percentile gauges with a `quantile`
-label, and they must be selected, never re-aggregated.
+label, and they must be selected, never re-aggregated. The buckets are the
+eleven fixed boundaries above, so a percentile here is a band rather than a
+millisecond — `histogram_quantile()` interpolates inside the bucket the
+quantile falls in, and a P99 of 7 ms means "between 5 and 10".
 
 ### JVM
 
@@ -174,12 +191,12 @@ with `baseUnit("milliseconds")`, so Micrometer publishes
 rendered an empty series divided by an empty series, which draws exactly like
 a pool nobody is waiting on.
 
-`agroal_acquire_count` is a **gauge** holding a cumulative total, not a
-Prometheus counter — Quarkus registers it with `Gauge.builder`, so it carries
-no `_total` suffix and Prometheus does not type it as a counter. `rate()` over
-it still gives the right answer because the value only increases, but it will
-not be corrected for a restart the way a real counter is: expect one spike per
-pod restart.
+`agroal_acquire_count_total` is a real Prometheus **counter** — Quarkus
+registers it as a `FunctionCounter`, hence the `_total` suffix — so `rate()`
+is the right reading and a pod restart is handled as a counter reset. The
+panel read the name without the suffix and drew nothing; verified against a
+live pod, along with the rest of the pool series, which exist only with
+`quarkus.datasource.metrics.enabled` on (it now is).
 
 ### Container resources — cAdvisor
 

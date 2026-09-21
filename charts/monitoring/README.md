@@ -23,7 +23,7 @@ Grafana is exposed as a NodePort on `30080` by default (dev convenience).
 |---|---|---|
 | `kube-prometheus-stack.enabled` | `true` | Deploy the wrapped stack |
 | `kube-prometheus-stack.*` | see values | Full pass-through to the subchart (Grafana, Prometheus, Alertmanager, exporters) |
-| `chaosAlerts.enabled` | `false` | PrometheusRules for LitmusChaos experiment alerts |
+| `chaosAlerts.enabled` | `false` | PrometheusRules for LitmusChaos experiment alerts; four of them read the ChaosEngine state series described [below](#kube-state-metrics-and-the-chaosengine) |
 | `kafkaNamespace` | `kafka` | Namespace used in Kafka PromQL expressions |
 | `networkPolicy.prometheusKafkaEgress.enabled` | `true` | Allow Prometheus egress to Kafka metrics ports (for default-deny clusters) |
 | `networkPolicy.prometheusKafkaEgress.ports` | `[9404]` | Scrapable ports on Kafka pods |
@@ -33,8 +33,55 @@ Grafana is exposed as a NodePort on `30080` by default (dev convenience).
 | `dashboards.folder` | `""` | `grafana_folder` annotation; empty leaves the boards in the sidecar's default folder |
 | `dashboards.labels` | `{}` | Extra labels, **merged with** `label`/`labelValue` |
 | `kube-prometheus-stack.grafana.sidecar.dashboards.searchNamespace` | `ALL` | Which namespaces the sidecar watches for boards |
+| `kube-prometheus-stack.kube-state-metrics.customResourceState` | ChaosEngine `status.engineStatus` as a state set | What makes `kube_customresource_chaosengine_status_engine_status` exist — see [below](#kube-state-metrics-and-the-chaosengine). `enabled: false` switches it off |
+| `kube-prometheus-stack.kube-state-metrics.rbac.extraRules` | `list`/`watch` on `chaosengines.litmuschaos.io` | The read access that state set needs |
 
 Own keys are validated by `values.schema.json`; subchart keys are validated by kube-prometheus-stack itself.
+
+## kube-state-metrics and the ChaosEngine
+
+Since 1.6.0 the wrapped kube-state-metrics publishes
+`kube_customresource_chaosengine_status_engine_status`: a LitmusChaos
+`ChaosEngine`'s `status.engineStatus` as a **state set** — for every engine,
+one series per state (`initialized` while the experiment runs, `completed` or
+`stopped` after) carrying 1 for the state the engine is in and 0 for the
+other two, labelled `namespace` and `name`. kube-state-metrics publishes
+nothing about a custom resource unless told its shape, so `values.yaml`
+carries the shape under `kube-prometheus-stack.kube-state-metrics.customResourceState`
+and the `list`/`watch` access on `chaosengines.litmuschaos.io` under
+`rbac.extraRules`. Both are plain subchart values.
+
+Three things read the series, and all three were built before anything
+produced it:
+
+- **Kates — Chaos**'s `$namespace` picker resolves from it, and its *Chaos
+  engines running* tile counts the `initialized` engines — with the tile's
+  zero fallback anchored to the series unfiltered by status, so a cluster the
+  collector cannot see reads *No data* rather than a reassuring 0.
+- `KafkaChaosExperimentActive` in `prometheus-chaos-rules.yaml`
+  (`chaosAlerts.enabled`) fires while an engine is `initialized`.
+- The three "unexpected" alerts in the same file — `KafkaBrokerRestartUnexpected`,
+  `KafkaHighCPUPostChaos`, `KafkaClusterNotReadyPostChaos` — guard on
+  `and on() count(… == 1) == 0`. **That guard cannot pass**, series or no
+  series: `count()` over an empty vector is empty rather than zero, and it is
+  empty exactly when no experiment is running, which is the case the guard
+  exists to let through. Those three still never fire; the guard is a
+  separate fix.
+
+The series is per object, not per collector. A cluster that has never
+created a `ChaosEngine` has no series, an empty picker and a *No data* tile,
+and that is the correct reading; Kates leaves its engines in place after a
+run (`completed` or `stopped`), so from the first experiment on the picker
+fills. Installing this chart before the chaos plane is fine — the pinned
+kube-state-metrics keeps running when a configured CRD is absent (it logs
+it) and its CRD discovery rebuilds the collector once the CRD exists. The
+first upgrade that enables the state set rolls the kube-state-metrics
+Deployment, because the config file arrives as a new container argument.
+`helm upgrade --reuse-values` keeps a release's stored values and ignores a
+new chart default, so an existing release upgraded that way does not gain
+the state set; upgrade with `--reset-then-reuse-values`, or pass the block
+explicitly. `kates deploy` passes its values files each run and is not
+affected.
 
 ## Dashboards
 
@@ -90,11 +137,10 @@ bundle for a cluster that runs the sidecar but not these charts.
 
 Broker health, KRaft quorum identity, Cruise Control and consumer-group lag
 are covered by the **Strimzi operator's own** dashboards, which
-`charts/strimzi-operator` enables by default. Kafka Connect and MirrorMaker 2
-ship their boards with `charts/connect-cluster` and `charts/mirror-maker2`,
-`charts/kates` ships **Kates — Overview** and **Kyverno Security Policies**,
-and `charts/kates-chaos` ships **Kates — Chaos infrastructure** — six boards
-here, twelve in [`dashboards/`](../../dashboards/README.md) altogether.
+`charts/strimzi-operator` enables by default. The twelve in
+[`dashboards/`](../../dashboards/README.md) are all delivered here: since
+1.5.0 no other chart in the repository renders a board, and CI fails one
+that starts to.
 
 ### Removed in 1.3.0
 

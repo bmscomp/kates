@@ -170,7 +170,7 @@ means everything. A flat epoch is a stable quorum.
 `Uncommitted metadata records` · `Metadata commit latency` ·
 `Election latency` · `Broker metadata lag` ·
 `Metadata records behind the leader` · `Metadata errors by kind` ·
-`Raft poll idle ratio` · `Quorum peer request latency`
+`Raft poll idle ratio` · `Quorum channel requests and responses /s`
 
 Reads left to right as *is the quorum electing, is it committing, is it
 propagating*. Three pairs are meant to be read together:
@@ -184,9 +184,13 @@ propagating*. Three pairs are meant to be read together:
 - **Metadata lag in milliseconds and in records.** When they disagree, believe
   the records.
 
-`Quorum peer request latency` is where a slow inter-AZ link shows up *first* —
-before commit latency moves, because a commit only needs a majority and one
-slow peer can be the one left out.
+`Quorum channel requests and responses /s` is where a slow inter-AZ link
+shows up *first* — before commit latency moves, because a commit only needs a
+majority and one slow peer can be the one left out. Read it as a pair per
+node: requests pulling ahead of responses is a peer that stopped answering.
+It replaced a panel that read the channel's `request_latency_avg` and
+`request_latency_max_total`, which the raft channel never publishes (they are
+producer and consumer client sensors), so it drew nothing on any cluster.
 
 ### Cluster health — 10 panels
 
@@ -370,13 +374,12 @@ typed.
   type: COUNTER
 ```
 
-So these three are **max gauges in milliseconds wearing a counter's name**:
+So these two are **max gauges in milliseconds wearing a counter's name**:
 
 - `kafka_server_raftmetrics_commit_latency_max_total`
 - `kafka_server_raftmetrics_election_latency_max_total`
-- `kafka_server_raftchannelmetrics_request_latency_max_total`
 
-`rate()` over any of them yields a number that means nothing. The `_avg`
+`rate()` over either yields a number that means nothing. The `_avg`
 companions are ordinary gauges and are read as they are.
 
 ### 2. `_count_total` is the meter's `Count`, and the unit is not always a count

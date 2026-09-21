@@ -431,23 +431,27 @@ def _quorum() -> list[dict]:
             unit="percentunit", w=12, min_value=0, max_value=1,
         ),
         P.timeseries(
-            "Quorum peer request latency",
-            "Round-trip time between quorum peers on the raft channel, "
-            "average and worst, in milliseconds. This is where a slow "
-            "inter-AZ link shows up FIRST — before commit latency moves, "
-            "because a commit only needs a majority and one slow peer can be "
-            "the one left out. On a three-AZ cluster the expected shape is "
-            "two fast peers and one slower; a single peer rising away from the "
-            "others is that link, and all three rising together is the "
-            "controllers' own network or CPU. `request_latency_max_total` is "
-            "the `_max_total` trap again: a max gauge, never rate()d.",
+            "Quorum channel requests and responses /s",
+            "Traffic on the channel between quorum peers, per node: the requests "
+            "this node sent and the responses it received. Read as a pair. "
+            "Matched rates are a quorum talking to itself; requests pulling ahead "
+            "of responses on one node is a peer that has stopped answering it — "
+            "the slow inter-AZ link, or a peer that is gone — and it shows here "
+            "before commit latency moves, because a commit only needs a majority "
+            "and the slow peer can be the one left out. This replaced a panel "
+            "that read request_latency_avg and request_latency_max_total from "
+            "the same bean; the raft channel never registers those sensors (they "
+            "are producer and consumer client metrics), so it drew nothing on "
+            "every cluster.",
             P.targets(
                 ('label_replace(max by (%s) (kafka_server_raftchannelmetrics_'
-                 'request_latency_avg{%s}), "kind", "avg", "", "") or '
-                 'label_replace(max by (%s) (kafka_server_raftchannelmetrics_'
-                 'request_latency_max_total{%s}), "kind", "max", "", "")'
-                 % (POD, SEL, POD, SEL), "{{%s}} {{kind}}" % POD)),
-            unit="ms", w=12,
+                 'request_rate{%s}), "kind", "requests", "", "")'
+                 % (POD, SEL), "{{%s}} {{kind}}" % POD),
+                ('label_replace(max by (%s) (kafka_server_raftchannelmetrics_'
+                 'response_rate{%s}), "kind", "responses", "", "")'
+                 % (POD, SEL), "{{%s}} {{kind}}" % POD),
+            ),
+            unit="reqps", w=12,
         ),
     ]
 

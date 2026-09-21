@@ -138,7 +138,7 @@ PY
 | **The `charts/kates` ServiceMonitor** (scrapes `/q/metrics`) | `metrics.serviceMonitor.enabled` (default **false**) | Boards 6, 7, 9; the header and HTTP/JVM/pool rows of board 8; the *Kates during chaos* row of board 10. |
 | **kube-state-metrics** | subchart of kube-prometheus-stack, on by default | Board 8's header (*Pods ready*, *Container restarts (5m)*, *Database pods ready*); board 10's *Broker pod readiness*, *Broker restarts* and *Chaos engines running*; board 11's *Chaos operator* tile and *Chaos infra pods — status*; board 12's *Controller Pods — Status*. Five series in total. |
 | **cAdvisor, via the kubelet** | `kube-prometheus-stack.kubelet.enabled` (true) | Board 8's *Container resources* row (2 panels) and board 10's *Broker CPU cores* / *Broker memory*. Four series. |
-| **kube-state-metrics configured with custom-resource metrics for `ChaosEngine`** | **not the default anywhere** | Board 10's *Chaos engines running* tile and its `$namespace` picker. The tile's zero fallback is anchored to this series unfiltered, so with the series absent it reads **No data** rather than a reassuring zero, and the picker comes up empty with a tooltip saying why. The alerts cannot be anchored: the `and on() count(…) == 0` guard on `KafkaBrokerRestartUnexpected` is then silently always true. |
+| **kube-state-metrics configured with custom-resource metrics for `ChaosEngine`** | `charts/monitoring` since 1.6.0 (`kube-prometheus-stack.kube-state-metrics.customResourceState`, plus the `list`/`watch` RBAC it needs). **Not** a kube-state-metrics default, so another stack has to copy that block | Board 10's *Chaos engines running* tile and its `$namespace` picker. The series is one per ChaosEngine and state, so both are also empty on a cluster that has never created an experiment. The tile's zero fallback is anchored to this series unfiltered, so with the series absent it reads **No data** rather than a reassuring zero, and the picker comes up empty with a tooltip saying why. The alerts cannot be anchored, and three of them are dead by construction: the `and on() count(…) == 0` guard on `KafkaBrokerRestartUnexpected`, `KafkaHighCPUPostChaos` and `KafkaClusterNotReadyPostChaos` never passes, because `count()` over nothing is empty rather than zero — with or without this series. Only `KafkaChaosExperimentActive` gains from the series existing. |
 | **LitmusChaos, *and* its chaos-exporter** | `charts/kates-chaos` installs the execution plane; the exporter is left off (`litmus-core.exporter.enabled`) | All eight `litmuschaos_*` series: board 11's verdict tiles, cluster totals and experiment duration; board 10's *Experiments passed* / *failed* / *Probe success rate* and its *Experiment history* row. |
 | **Kyverno, and a scrape of it** | not shipped here — install Kyverno separately | Board 12's first eight panels. The ninth, *Controller Pods — Status*, reads `kube_pod_status_phase` on purpose: **a webhook that is down cannot report that it is down.** |
 | **The Kafka Exporter** | `kafkaExporter.enabled` in `charts/kafka-cluster` (default true) | Nothing in `dashboards/`. It is listed here because operators look for consumer lag on board 3 and it is not there: `kafka_consumergroup_lag` feeds `strimzi-kafka-exporter.json` and the `KafkaConsumerGroupLag` alert, and the Connect workers do not publish it. |
@@ -149,13 +149,18 @@ PY
 Two very different groups, and the distinction decides whether there is
 anything to do:
 
-*Install something* — 12 series. The eight `litmuschaos_*` need LitmusChaos
-and its chaos-exporter; the three `kyverno_*` need Kyverno;
-`kube_customresource_chaosengine_status_engine_status` needs kube-state-metrics
-configured for `ChaosEngine`. Each is a supported add-on and the panels fill in
-once it is there.
+*Install something* — 11 series. The eight `litmuschaos_*` need LitmusChaos
+and its chaos-exporter; the three `kyverno_*` need Kyverno. Each is a
+supported add-on and the panels fill in once it is there. (On a stack other
+than `charts/monitoring`, `kube_customresource_chaosengine_status_engine_status`
+belongs in this group too: kube-state-metrics has to be configured for
+`ChaosEngine`, which the chart does since 1.6.0.)
 
-*Run the right kind of test* — 8 series. The `kafka:chaos:*` recording rules in
+*Run the right kind of test* — 9 series. One is
+`kube_customresource_chaosengine_status_engine_status`, published per
+ChaosEngine and therefore present from the first chaos run on — Kates leaves
+its engines in place afterwards. The other eight are `kafka:chaos:*`
+records: the recording rules in
 `charts/monitoring/templates/prometheus-chaos-rules.yaml` read the
 `kates_integrity_result_*` series the Kates application publishes from
 `IntegrityResult`, and it publishes them only for a run that actually verified
@@ -800,9 +805,15 @@ electing, is it committing, is it propagating*.
   the record, so a clock problem makes it meaningless; the record form is
   `scalar(max(…)) - max by (kubernetes_pod_name) (…)` and is immune to it.
   **When they disagree, believe the records.**
-- *Quorum peer request latency* is where a slow inter-AZ link shows up *first*,
-  before commit latency moves — a commit only needs a majority, and the slow
-  peer can be the one left out.
+- *Quorum channel requests and responses /s* draws two series per node,
+  `requests` and `responses`, and is read as a pair. Matched rates are a
+  quorum talking to itself; requests pulling ahead of responses on one node is
+  a peer that has stopped answering it — a slow inter-AZ link, or a peer that
+  is gone — and it shows here *first*, before commit latency moves, because a
+  commit only needs a majority and the slow peer can be the one left out.
+  (The panel it replaced read `request_latency_avg` and
+  `request_latency_max_total` from the same bean; the raft channel never
+  registers those sensors, so it was empty on every cluster.)
 
 **Cluster health, Replication, Request path, Storage.** On a healthy cluster:
 *Which node is the controller* is one line at 1 and the rest at 0; *Registered
@@ -1468,7 +1479,10 @@ to the Kates engine's `kates_benchmark_latency_ms` and
 `kates_tests_duration_seconds`. The only two real cumulative histograms in the
 whole directory are `http_server_requests_seconds_bucket` and
 `kyverno_admission_review_duration_seconds_bucket`, and they are the only two
-places `histogram_quantile()` is correct.
+places `histogram_quantile()` is correct. The first exists only because the
+application gives its HTTP timer buckets through a `MeterFilter`
+(`HttpLatencyHistogram`, eleven fixed boundaries from 5 ms to 10 s); Quarkus
+publishes none by default, and an image from before the filter has none.
 
 The other half of this class is `BrokerTopicMetrics`, registered once per topic
 and once with **no** topic tag for the broker aggregate. An absent label matches
@@ -1534,12 +1548,14 @@ dead or misleading panel somewhere in this repository; all four are in
 1. **`_max_total` is not a counter.** The JMX exporter's 1.x line reserves
    `_total` for counters, and the vendored KRaft rules type `.+-total|.+-max`
    as `COUNTER` in one pattern to keep the genuinely monotonic `-total`
-   attributes correctly typed. Three series are therefore **max gauges in
+   attributes correctly typed. Two series are therefore **max gauges in
    milliseconds wearing a counter's name**:
-   `kafka_server_raftmetrics_commit_latency_max_total`,
-   `kafka_server_raftmetrics_election_latency_max_total` and
-   `kafka_server_raftchannelmetrics_request_latency_max_total`. `rate()` over
-   any of them yields a number that means nothing.
+   `kafka_server_raftmetrics_commit_latency_max_total` and
+   `kafka_server_raftmetrics_election_latency_max_total`. `rate()` over
+   either yields a number that means nothing. (A third,
+   `kafka_server_raftchannelmetrics_request_latency_max_total`, used to be
+   listed here and read by the KRaft board; the raft channel never registers
+   that sensor, so the series has never existed.)
 2. **`_count_total` is the meter's `Count`, and the unit is not always a
    count.** Sometimes it really is events —
    `kafka_controller_controllereventmanager_eventqueuetimems_count_total`

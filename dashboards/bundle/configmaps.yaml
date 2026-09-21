@@ -3363,7 +3363,7 @@ data:
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Round-trip time between quorum peers on the raft channel, average and worst, in milliseconds. This is where a slow inter-AZ link shows up FIRST \u2014 before commit latency moves, because a commit only needs a majority and one slow peer can be the one left out. On a three-AZ cluster the expected shape is two fast peers and one slower; a single peer rising away from the others is that link, and all three rising together is the controllers' own network or CPU. `request_latency_max_total` is the `_max_total` trap again: a max gauge, never rate()d.",
+          "description": "Traffic on the channel between quorum peers, per node: the requests this node sent and the responses it received. Read as a pair. Matched rates are a quorum talking to itself; requests pulling ahead of responses on one node is a peer that has stopped answering it \u2014 the slow inter-AZ link, or a peer that is gone \u2014 and it shows here before commit latency moves, because a commit only needs a majority and the slow peer can be the one left out. This replaced a panel that read request_latency_avg and request_latency_max_total from the same bean; the raft channel never registers those sensors (they are producer and consumer client metrics), so it drew nothing on every cluster.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -3373,7 +3373,7 @@ data:
                 "showPoints": "never",
                 "spanNulls": false
               },
-              "unit": "ms"
+              "unit": "reqps"
             },
             "overrides": []
           },
@@ -3403,13 +3403,24 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_request_latency_avg{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"avg\", \"\", \"\") or label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_request_latency_max_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"max\", \"\", \"\")",
+              "expr": "label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_request_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"requests\", \"\", \"\")",
               "legendFormat": "{{kubernetes_pod_name}} {{kind}}",
               "range": true,
               "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_response_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"responses\", \"\", \"\")",
+              "legendFormat": "{{kubernetes_pod_name}} {{kind}}",
+              "range": true,
+              "refId": "B"
             }
           ],
-          "title": "Quorum peer request latency",
+          "title": "Quorum channel requests and responses /s",
           "type": "timeseries"
         },
         {
@@ -9501,7 +9512,7 @@ data:
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Seconds of garbage-collection pause per second, split by the collector's cause and action, plus the longest single pause. The rate is the one to watch \u2014 0.1 means a tenth of every second is spent stopped \u2014 and it is what turns up as HTTP p99 latency in the row above without any corresponding rise in p50. The `_max` series is a Micrometer gauge of the worst pause in its window, not a counter: never `rate()` it.",
+          "description": "Seconds of garbage-collection pause per second, split by the collector's cause and action, plus the longest single pause. The rate is the one to watch \u2014 0.1 means a tenth of every second is spent stopped \u2014 and it is what turns up as HTTP p99 latency in the row above without any corresponding rise in p50. The `_max` series is a Micrometer gauge of the worst pause in its window, not a counter: never `rate()` it. No data here on a release running the NATIVE image is not a fault: GraalVM exposes no GC notification beans, so Micrometer registers no pause meters. The JVM image publishes them; the heap panel beside this one draws on both.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -9742,7 +9753,7 @@ data:
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "How often the application takes a connection out of the pool. `agroal_acquire_count` is a *gauge* holding a cumulative total, not a Prometheus counter \u2014 Quarkus registers it with `Gauge.builder`, so it carries no `_total` suffix and Prometheus does not type it as a counter. `rate()` over it still gives the right answer because the underlying value only ever increases, but it will not be corrected for a restart the way a real counter is: expect one spike per pod restart.",
+          "description": "How often the application takes a connection out of the pool. `agroal_acquire_count_total` is a real Prometheus counter \u2014 Quarkus registers it as a FunctionCounter, hence the `_total` suffix \u2014 so `rate()` is the right reading and a pod restart is handled as a counter reset, not a spike. This panel read the name without the suffix and drew nothing.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -9782,7 +9793,7 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum(rate(agroal_acquire_count{namespace=\"$namespace\", job=\"$job\"}[1m]))",
+              "expr": "sum(rate(agroal_acquire_count_total{namespace=\"$namespace\", job=\"$job\"}[1m]))",
               "legendFormat": "acquisitions/s",
               "range": true,
               "refId": "A"
@@ -11129,7 +11140,7 @@ data:
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "ChaosEngine custom resources currently in the `initialized` state \u2014 a fault is being applied right now. This is the panel that decides how to read every other panel on the board: a broker restart with this above zero is the experiment working, and the same restart with this at zero is an incident. The same distinction drives `KafkaBrokerRestartUnexpected` in prometheus-chaos-rules.yaml. Needs kube-state-metrics with custom-resource metrics enabled for ChaosEngine. The zero fallback is anchored to the *unfiltered* ChaosEngine series rather than to this board's ANCHOR, and the distinction is the whole point: kube-state being up proves nothing here, because the failure this panel used to hide was kube-state running without the custom-resource collector configured. Anchoring on a ChaosEngine series of any status is what proves the collector works, so a cluster with engines but none initialized reads 0, and a cluster the collector cannot see reads No data.",
+          "description": "ChaosEngine custom resources currently in the `initialized` state \u2014 a fault is being applied right now. This is the panel that decides how to read every other panel on the board: a broker restart with this above zero is the experiment working, and the same restart with this at zero is an incident. The same distinction drives `KafkaBrokerRestartUnexpected` in prometheus-chaos-rules.yaml. Needs kube-state-metrics with custom-resource metrics for ChaosEngine, which charts/monitoring configures since 1.6.0. The zero fallback is anchored to the *unfiltered* ChaosEngine series rather than to this board's ANCHOR, and the distinction is the whole point: kube-state being up proves nothing here, because the failure this panel used to hide was kube-state running without the custom-resource collector configured. Anchoring on a ChaosEngine series of any status is what proves the collector works, so a cluster with engines but none initialized reads 0, and a cluster the collector cannot see reads No data.",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -12513,7 +12524,7 @@ data:
               "uid": "${datasource}"
             },
             "definition": "label_values(kube_customresource_chaosengine_status_engine_status, namespace)",
-            "description": "Namespaces that hold a ChaosEngine. Empty here means kube-state-metrics is running without custom-resource metrics for ChaosEngine \u2014 not that no chaos has run.",
+            "description": "Namespaces that hold a ChaosEngine. kube-state-metrics publishes one series per engine, and Kates leaves its engines in place after a run, so empty here means either that no experiment has ever been created on this cluster, or that kube-state-metrics is running without custom-resource metrics for ChaosEngine \u2014 charts/monitoring configures them since 1.6.0; another stack has to be told the resource's shape.",
             "hide": 0,
             "includeAll": false,
             "label": "Kafka namespace",

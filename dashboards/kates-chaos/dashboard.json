@@ -11,7 +11,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "ChaosEngine custom resources currently in the `initialized` state \u2014 a fault is being applied right now. This is the panel that decides how to read every other panel on the board: a broker restart with this above zero is the experiment working, and the same restart with this at zero is an incident. The same distinction drives `KafkaBrokerRestartUnexpected` in prometheus-chaos-rules.yaml. Needs kube-state-metrics with custom-resource metrics enabled for ChaosEngine. The zero fallback is anchored to the *unfiltered* ChaosEngine series rather than to this board's ANCHOR, and the distinction is the whole point: kube-state being up proves nothing here, because the failure this panel used to hide was kube-state running without the custom-resource collector configured. Anchoring on a ChaosEngine series of any status is what proves the collector works, so a cluster with engines but none initialized reads 0, and a cluster the collector cannot see reads No data.",
+      "description": "ChaosEngine custom resources currently in the `initialized` state \u2014 a fault is being applied right now. This is the panel that decides how to read every other panel on the board: a broker restart with this above zero is the experiment working, and the same restart with this at zero is an incident. The same distinction drives `KafkaBrokerRestartUnexpected` in prometheus-chaos-rules.yaml. Needs kube-state-metrics with custom-resource metrics for ChaosEngine, which charts/monitoring configures since 1.6.0. The zero fallback is anchored to the *unfiltered* ChaosEngine series rather than to this board's ANCHOR, and the distinction is the whole point: kube-state being up proves nothing here, because the failure this panel used to hide was kube-state running without the custom-resource collector configured. Anchoring on a ChaosEngine series of any status is what proves the collector works, so a cluster with engines but none initialized reads 0, and a cluster the collector cannot see reads No data.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1395,7 +1395,7 @@
           "uid": "${datasource}"
         },
         "definition": "label_values(kube_customresource_chaosengine_status_engine_status, namespace)",
-        "description": "Namespaces that hold a ChaosEngine. Empty here means kube-state-metrics is running without custom-resource metrics for ChaosEngine \u2014 not that no chaos has run.",
+        "description": "Namespaces that hold a ChaosEngine. kube-state-metrics publishes one series per engine, and Kates leaves its engines in place after a run, so empty here means either that no experiment has ever been created on this cluster, or that kube-state-metrics is running without custom-resource metrics for ChaosEngine \u2014 charts/monitoring configures them since 1.6.0; another stack has to be told the resource's shape.",
         "hide": 0,
         "includeAll": false,
         "label": "Kafka namespace",
