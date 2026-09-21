@@ -97,7 +97,7 @@ kube-state-metrics, no cAdvisor, no exporter.
 | `kates_benchmark_throughput_rec_sec`, `…_mb_sec` | gauges per run | every poll |
 | `kates_benchmark_latency_ms{quantile}` | gauges per phase and quantile | every poll |
 | `kates_benchmark_latency_ms_max` | gauge per phase | every poll |
-| `kates_benchmark_errors_total` | counter per phase | a task reaching FAILED |
+| `kates_benchmark_errors_total` | counter per phase | every poll: registered at zero, +1 the first time a task polls FAILED |
 | `kates_benchmark_sla_violations` | gauge per constraint and severity | every poll, via `SlaEvaluator` |
 
 ## Two things about the shapes

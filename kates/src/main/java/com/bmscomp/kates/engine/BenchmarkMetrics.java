@@ -17,6 +17,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 
 import com.bmscomp.kates.domain.SlaViolation;
+import com.bmscomp.kates.domain.TestResult.TaskStatus;
 
 /**
  * Bridges internal benchmark metrics to Micrometer for Prometheus export.
@@ -141,14 +142,38 @@ public class BenchmarkMetrics {
         meters.throughputMBPerSec.accumulate(mbPerSec);
     }
 
-    public void recordError(String runId, String phaseName) {
+    /**
+     * Publishes one task's polled status for its phase.
+     *
+     * <p>This is what shapes the error series, and it shapes it the way the
+     * record and latency series beside it are shaped:
+     *
+     * <ul>
+     *   <li>The phase's error counter is registered the first time the phase
+     *       reports at all, so a healthy run publishes a zero. The benchmark
+     *       board's error-rate panel promises a flat zero for a healthy run,
+     *       and a series that does not exist reads as No data, which is not
+     *       the same promise.
+     *   <li>A task is counted the first time it is seen FAILED and never
+     *       again. Keyed by task id, so a poll repeated after a lost save and
+     *       the terminal transition walking every result one last time both
+     *       find the task already counted. That is what lets the count move on
+     *       the poll that observes the failure: the terminal transition used to
+     *       be the only place failures were counted, and it unregisters the
+     *       run's meters in the same call, so a task that died while its
+     *       siblings ran on was published for the microseconds between the two
+     *       and never scraped.
+     * </ul>
+     */
+    public void recordTaskStatus(String runId, String taskId, String phaseName, TaskStatus status) {
         RunMeters meters = runMeters.get(runId);
         if (meters == null) return;
 
         Counter counter = meters.errorCount(phaseName);
-        // null once the run's meters have been unregistered — the error still
+        // null once the run's meters have been unregistered — the failure still
         // happened, but there is no live series to add it to.
-        if (counter != null) {
+        if (counter == null) return;
+        if (status == TaskStatus.FAILED && meters.failedTasks.add(taskId == null ? "default" : taskId)) {
             counter.increment();
         }
     }
@@ -365,6 +390,9 @@ public class BenchmarkMetrics {
         final DoubleAccumulator throughputRecPerSec;
         final DoubleAccumulator throughputMBPerSec;
         private final Map<String, Counter> errorCounters = new ConcurrentHashMap<>();
+        /** Tasks already counted into their phase's error counter. */
+        private final java.util.Set<String> failedTasks = ConcurrentHashMap.newKeySet();
+
         private final Map<String, PhaseRecords> phaseRecords = new ConcurrentHashMap<>();
         private final Map<String, PhaseLatency> phaseLatencies = new ConcurrentHashMap<>();
         private final Map<String, AtomicInteger> slaViolationGauges = new ConcurrentHashMap<>();
@@ -399,7 +427,7 @@ public class BenchmarkMetrics {
         }
 
         Counter errorCount(String phase) {
-            // Returns null once the run is over. A late recordError racing
+            // Returns null once the run is over. A late recordTaskStatus racing
             // unregister() used to register a fresh counter AFTER the id list
             // had been cleared, so that run_id series stayed in the registry
             // for the life of the process — the leak unregister() exists to
@@ -607,6 +635,7 @@ public class BenchmarkMetrics {
             }
             meterIds.clear();
             errorCounters.clear();
+            failedTasks.clear();
             phaseRecords.clear();
             phaseLatencies.clear();
             slaViolationGauges.clear();
