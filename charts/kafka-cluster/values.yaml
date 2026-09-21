@@ -71,8 +71,8 @@ global:
 # -- Images of the Helm-test pods. Pinned: scripts/check-versions.sh keeps
 # them aligned with the other charts.
 testImages:
-  kafka: "ghcr.io/bmscomp/kates-tester:1.22.0"
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
+  kafka: "ghcr.io/bmscomp/kates-tester:1.23.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.23.0"
   # -- Pull policy for test pods (empty: Kubernetes' default)
   pullPolicy: IfNotPresent
 
