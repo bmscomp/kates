@@ -1,10 +1,9 @@
 apiVersion: v2
 name: strimzi-operator
-# Minor bump: the operator-wide pieces kafka-cluster 0.4 carried per Kafka
-# cluster move here — the drain cleaner, the operator's scrape and alerts, and
-# its NetworkPolicy (now on by default) — and the operator's own dashboards
-# replace the Kafka chart's.
-version: 0.3.0
+# Patch: the CRD-hook and Helm-test image moves to kates-tester 1.23.0, the
+# tag the v1.23.0 release publishes; every Strimzi chart pins the same one.
+# Templates and defaults are otherwise unchanged.
+version: 0.3.1
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -31,6 +30,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: added
       description: drainCleaner — the Strimzi Drain Cleaner webhook, moved from kafka-cluster 0.4, with cert-manager certificates, a PDB above one replica, a NetworkPolicy, and the operator's watch scope as its namespace selector. values-prod.yaml runs two replicas
     - kind: added

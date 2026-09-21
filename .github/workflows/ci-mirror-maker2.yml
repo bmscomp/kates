@@ -918,7 +918,7 @@ jobs:
         run: |
           set -e
           cat > /tmp/renderdiff.py <<'PY'
-          import json, sys, yaml
+          import json, re, sys, yaml
 
           ALLOWED_ACL_REMOVALS = ("mm2-offset-syncs.", "heartbeats")
 
@@ -981,6 +981,17 @@ jobs:
           DECLARED_VERSION_KEYS = {"helm.sh/chart": "CHART-VERSION",
                                    "app.kubernetes.io/version": "KAFKA-VERSION"}
 
+          # The third declared version is an image tag. The helper pods run
+          # the kates-tester pin, which scripts/check-versions.sh holds to the
+          # kates chart's appVersion, so it moves with every Kates release the
+          # way helm.sh/chart moves with every chart cut — a release, not a
+          # dropped key. The TAG is blanked and the repository kept: a helper
+          # pod that switches to some other image still reads as REMOVED.
+          # (Through 0.11.0 each move needed its own ALLOWED_LINE_REMOVALS
+          # entry, and the 1.22.0 -> 1.23.0 pin move failed here for want of
+          # one.)
+          TESTER_IMAGE = re.compile(r"^(ghcr\.io/bmscomp/kates-tester):\S+$")
+
 
           def scrub(node):
               """Declared versions change by definition; nothing else may."""
@@ -990,6 +1001,8 @@ jobs:
                           for k, v in node.items()}
               if isinstance(node, list):
                   return [scrub(v) for v in node]
+              if isinstance(node, str):
+                  return TESTER_IMAGE.sub(r"\1:TESTER-VERSION", node)
               return node
 
 

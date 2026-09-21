@@ -41,7 +41,7 @@ imagePullPolicy: ""
 
 # -- Images the chart's own pods use
 testImages:
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.23.0"
 
 # ── Workers ─────────────────────────────────────────────────────────────────
 # -- Number of worker replicas (seeded from autoscaling.minReplicas under an HPA)

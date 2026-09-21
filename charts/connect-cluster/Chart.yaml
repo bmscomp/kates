@@ -2,10 +2,10 @@ apiVersion: v2
 name: connect-cluster
 description: A Helm chart for deploying Strimzi Kafka Connect clusters
 type: application
-# Patch: values-kind.yaml no longer switches the PodMonitor and the alerts
-# off, so a kind install with prometheus-operator present is scraped like a
-# generic one. Defaults are unchanged.
-version: 2.1.1
+# Patch: the Helm-test and secret-sync image moves to kates-tester 1.23.0,
+# the tag the v1.23.0 release publishes; every Strimzi chart pins the same
+# one. Templates and defaults are otherwise unchanged.
+version: 2.1.2
 # Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
 # set is in the image; its pin is the kates.io/connect-image annotation.
 appVersion: "4.3.1"
@@ -32,6 +32,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: fixed
       description: "values-kind.yaml held monitoring.podMonitor.enabled and alerts.enabled at false, so a kind install was never scraped and the Kafka Connect board stayed empty. The overlay now follows values-generic.yaml: monitoring stays on, and the chart renders it only where the monitoring.coreos.com API exists"
     - kind: removed
