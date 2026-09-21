@@ -232,7 +232,11 @@ mbeans:
     strings: [current-state]
   - bean: "kafka.server<type=raft-channel-metrics>"
     attributes: [connection-count, incoming-byte-rate, incoming-byte-total, outgoing-byte-rate, outgoing-byte-total,
-                 request-rate, request-total, response-rate, response-total, request-latency-avg, request-latency-max]
+                 request-rate, request-total, response-rate, response-total]
+    # Not request-latency-avg/max: those are producer and consumer client
+    # sensors. The raft channel's NetworkClient never registers them, and a
+    # live scrape of a three-controller quorum carries forty other
+    # raft-channel-metrics series and neither of these.
   - bean: "kafka.server<type=broker-metadata-metrics>"
     attributes: [last-applied-record-offset, last-applied-record-timestamp, last-applied-record-lag-ms,
                  metadata-load-error-count, metadata-apply-error-count]

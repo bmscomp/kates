@@ -1,8 +1,10 @@
 apiVersion: v2
 name: kates-monitoring
-# Patch: the MirrorMaker 2 migration board gains its window row and its
-# catch-up ETA is corrected; nothing else in the chart moves.
-version: 1.5.1
+# Minor: kube-state-metrics now publishes the ChaosEngine's status as a
+# state set, with the read access that takes — a series the chaos board's
+# namespace picker and four of this chart's own alerts were built on and
+# nothing produced. Defaults change (a CRD is watched); nothing else moves.
+version: 1.6.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -21,6 +23,12 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "kube-state-metrics publishes kube_customresource_chaosengine_status_engine_status (status.engineStatus as a state set: one series per engine and state, initialized, completed, stopped) and may list and watch chaosengines.litmuschaos.io. The chaos board's namespace picker, its 'experiment in progress' tile and this chart's four chaos alerts all read that series, and nothing produced it: the picker resolved to nothing and KafkaChaosExperimentActive could not fire. Both work from the first ChaosEngine on. The three alerts guarded by 'and on() count(... == 1) == 0' still cannot fire, series or no series — count() over nothing is empty, not zero — and that guard is a separate fix. kube-state-metrics keeps running when the CRD is absent and discovers it when the chaos plane arrives, so installing this chart first is fine"
+    - kind: fixed
+      description: "The KRaft board's 'Quorum peer request latency' panel read kafka_server_raftchannelmetrics_request_latency_avg and _max_total, which the raft channel never registers (they are producer and consumer client sensors), so it drew nothing on every cluster. Replaced by the channel's request and response rates per node, read as a pair: requests pulling ahead of responses is a peer that stopped answering"
+    - kind: changed
+      description: "The application board's GC pause panel says why it is empty on the native image (GraalVM exposes no GC notification beans, so Micrometer registers no pause meters) rather than reading as a fault"
     - kind: added
       description: "The MirrorMaker 2 migration board has a Migration window row, collapsed under the go/no-go: when the traffic says the migration can be done. The last seven days of records crossing the mirror, profiled by hour of day (UTC), its quietest and busiest hours, what is crossing now as a multiple of the quietest, and the week as it happened"
     - kind: fixed

@@ -1127,7 +1127,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Round-trip time between quorum peers on the raft channel, average and worst, in milliseconds. This is where a slow inter-AZ link shows up FIRST \u2014 before commit latency moves, because a commit only needs a majority and one slow peer can be the one left out. On a three-AZ cluster the expected shape is two fast peers and one slower; a single peer rising away from the others is that link, and all three rising together is the controllers' own network or CPU. `request_latency_max_total` is the `_max_total` trap again: a max gauge, never rate()d.",
+      "description": "Traffic on the channel between quorum peers, per node: the requests this node sent and the responses it received. Read as a pair. Matched rates are a quorum talking to itself; requests pulling ahead of responses on one node is a peer that has stopped answering it \u2014 the slow inter-AZ link, or a peer that is gone \u2014 and it shows here before commit latency moves, because a commit only needs a majority and the slow peer can be the one left out. This replaced a panel that read request_latency_avg and request_latency_max_total from the same bean; the raft channel never registers those sensors (they are producer and consumer client metrics), so it drew nothing on every cluster.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1137,7 +1137,7 @@
             "showPoints": "never",
             "spanNulls": false
           },
-          "unit": "ms"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -1167,13 +1167,24 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_request_latency_avg{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"avg\", \"\", \"\") or label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_request_latency_max_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"max\", \"\", \"\")",
+          "expr": "label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_request_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"requests\", \"\", \"\")",
           "legendFormat": "{{kubernetes_pod_name}} {{kind}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(max by (kubernetes_pod_name) (kafka_server_raftchannelmetrics_response_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\", strimzi_io_name=\"$cluster-kafka\"}), \"kind\", \"responses\", \"\", \"\")",
+          "legendFormat": "{{kubernetes_pod_name}} {{kind}}",
+          "range": true,
+          "refId": "B"
         }
       ],
-      "title": "Quorum peer request latency",
+      "title": "Quorum channel requests and responses /s",
       "type": "timeseries"
     },
     {

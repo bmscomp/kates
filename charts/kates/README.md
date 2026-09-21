@@ -126,6 +126,15 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 has the four install routes — Helm via `charts/monitoring`, the API
 installer, file provisioning and a plain ConfigMap bundle — and every knob.
 
+What `/q/metrics` publishes is the application's doing, not the chart's, and
+two things the boards read are settings Quarkus does not default to:
+`quarkus.datasource.metrics.enabled` (the Agroal pool row) and the
+`HttpLatencyHistogram` `MeterFilter` (the buckets behind the request-latency
+percentiles). Images newer than `1.22.0` ship both; on `1.22.0` and older,
+**Kates — Application Health** and **KATES — Overview** draw everything
+except the pool row and the latency percentiles, and no chart value changes
+that — `image.tag` does.
+
 ### Operations
 
 | Parameter | Default | Description |

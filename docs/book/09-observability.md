@@ -233,6 +233,8 @@ This dashboard monitors the Kates engine itself — not Kafka, not the test resu
 
 If **time waiting for a connection** is climbing while the pool shows `active` pinned at its ceiling, the pool is too small and raising it will help. The same panel climbing with spare capacity means the database is slow and a bigger pool will not help.
 
+Two of those rows depend on settings the application ships and Quarkus does not default to. The Agroal pool publishes nothing unless `quarkus.datasource.metrics.enabled` is on — the Micrometer extension alone does not switch it on — and the HTTP timer carries `_count`, `_sum` and `_max` only until a `MeterFilter` gives it buckets, which `HttpLatencyHistogram` does with eleven fixed boundaries from 5 ms to 10 s. That filter is what makes `histogram_quantile()` possible on the *request latency* panel, and it also sets its resolution: a percentile is interpolated inside the bucket it falls in, so a P99 of 7 ms means "between 5 and 10". Both are recent additions to the application, and an image built before them publishes neither — the Database row and the latency percentiles are then empty while the rest of the board draws, and no chart value changes that. The GC pause panel is empty on the native image for a different reason: GraalVM exposes no GC notification beans, so Micrometer registers no pause meters, and the panel's description says so.
+
 The `jvm_*` names on this board are **Micrometer's**, not the Prometheus JMX agent's. This is a Quarkus application, not a broker: Micrometer publishes `jvm_memory_used_bytes{area="heap"}` and `jvm_gc_pause_seconds`, while the JMX agent the Kafka boards read publishes `jvm_memory_bytes_used{area="heap"}` and `jvm_gc_collection_seconds` for the same quantities. Neither is a fallback for the other.
 
 ### Kates — Overview
@@ -271,7 +273,7 @@ This is the most specialized dashboard in the stack. It correlates LitmusChaos e
 >
 > Until then, the resilience evidence on this board is the **Kates during chaos** row: throughput, latency and errors observed by the workload while the fault was applied. It reads series the application actually publishes, and for most questions it is the better answer anyway — it measures what a client experienced rather than what a verifier concluded afterwards.
 
-One more caveat on the header. `Chaos engines running` reads `kube_customresource_chaosengine_status_engine_status`, which requires kube-state-metrics to be **configured with custom-resource metrics for `ChaosEngine`** — not the default. Without that configuration the series does not exist. The panel anchors its zero fallback to this same series unfiltered by status — the only thing that proves the collector is configured — so it reads **No data** rather than a reassuring zero, and the board's `$namespace` picker, which resolves from the same series, comes up empty and says why in its tooltip. The alerts have no such option: `KafkaChaosExperimentActive` never fires and the `and on() count(…) == 0` guard on `KafkaBrokerRestartUnexpected` is silently always true. Confirm the series exists before relying on either.
+One more caveat on the header. `Chaos engines running` reads `kube_customresource_chaosengine_status_engine_status`, which kube-state-metrics publishes only when **configured with custom-resource metrics for `ChaosEngine`** — not its default. `charts/monitoring` configures it since 1.6.0 (`kube-prometheus-stack.kube-state-metrics.customResourceState`, with the `list`/`watch` access on `chaosengines.litmuschaos.io` it needs); on another stack, copy that block. The series is one per engine and state — 1 for the state the engine is in, 0 for the other two — so a cluster that has never created an experiment has none. The panel anchors its zero fallback to the same series unfiltered by status, the only thing that proves the collector is configured, so it reads **No data** rather than a reassuring zero, and the board's `$namespace` picker, which resolves from the same series, comes up empty and says why in its tooltip: no experiment yet, or a collector without the configuration. Of the four alerts in `prometheus-chaos-rules.yaml` that read the series, only `KafkaChaosExperimentActive` works: the three guarded by `and on() count(…) == 0` cannot fire whether the series exists or not, because `count()` over nothing is empty rather than zero — and it is empty exactly when no experiment is running. Do not rely on those three until the guard is rewritten.
 
 ### Kates — Chaos infrastructure
 
@@ -310,7 +312,8 @@ individual latencies, only the aggregates each poll of a backend returns, so
 the percentiles are the backend's own and are published as gauges carrying a
 `quantile` label. Select the quantile; never `histogram_quantile()` over
 these, and never average two of them together. `http_server_requests_seconds_*`
-on the application board *is* a real histogram and is the exception.
+on the application board *is* a real histogram — the `HttpLatencyHistogram`
+filter gives the timer its buckets — and is the exception.
 
 Every meter in this table is tagged with `run_id`, which is unbounded over
 time, so `BenchmarkMetrics.endRun` unregisters them when a run finishes. They

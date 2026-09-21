@@ -42,7 +42,7 @@ same restart outside one is an incident — the distinction
 
 | Variable | Query | Notes |
 |---|---|---|
-| `$namespace` | `label_values(kube_pod_status_ready, namespace)` | the Kafka namespace; `charts/monitoring` calls it `kafka` by default in its alert rules |
+| `$namespace` | `label_values(kube_customresource_chaosengine_status_engine_status, namespace)` | namespaces holding a ChaosEngine — the Kafka namespace, which `charts/monitoring` calls `kafka` by default in its alert rules. Empty before the first experiment, or without the kube-state-metrics configuration described below |
 | `$pod` | `label_values(kube_pod_status_ready{namespace="$namespace"}, pod)` | multi-select, defaults to all |
 | `$kates_job` | `label_values(kates_benchmark_active_runs, job)` | which Kates release ran the load |
 
@@ -52,12 +52,12 @@ particular namespace. `$pod` defaults to every pod in the namespace, which
 during chaos is usually what you want: an experiment may hit anything in
 there, and the CPU and memory panels narrow to `container="kafka"` anyway.
 
-`kube_pod_status_ready` is the anchor because kube-state-metrics publishes it
-for every pod in every namespace it watches — it exists whether or not chaos
-is installed, Kafka is up, or a benchmark is running. The labels are
-kube-state-metrics' own: `namespace` and `pod` are on the series it exports,
-not added by a relabeling, so nothing about this scrape has to be configured
-for the dropdowns to fill.
+`kube_pod_status_ready` is the anchor for `$pod` because kube-state-metrics
+publishes it for every pod in every namespace it watches — it exists whether
+or not chaos is installed, Kafka is up, or a benchmark is running. The labels
+are kube-state-metrics' own: `namespace` and `pod` are on the series it
+exports, not added by a relabeling, so nothing about this scrape has to be
+configured for the pod dropdown to fill.
 
 **There is no `$cluster` here, and that is not an oversight.** Every Kafka
 panel on this board reads kube-state-metrics or cAdvisor — `kube_pod_*`,
@@ -65,10 +65,10 @@ panel on this board reads kube-state-metrics or cAdvisor — `kube_pod_*`,
 reach a series only through a PodMonitor relabeling, and neither of those
 producers is scraped through one. `$pod` is the cluster selector, which is
 also why it is multi-select. The cost is the one thing to know before using
-the board on a busy cluster: because the anchor is every namespace
-kube-state-metrics watches, `$namespace` opens on whichever namespace sorts
-first, not on the Kafka one. It is a visible dropdown, so the fix is to pick —
-but pick before reading, not after.
+the board on a busy cluster: `$namespace` opens on whichever namespace holding
+a ChaosEngine sorts first, so with experiments in more than one namespace it
+is not necessarily the Kafka one. It is a visible dropdown, so the fix is to
+pick — but pick before reading, not after.
 
 ## Where each metric comes from — four producers on one board
 
@@ -79,7 +79,7 @@ optional add-ons.
 | Source | Series | Installed by |
 |---|---|---|
 | **Litmus chaos-exporter** | `litmuschaos_passed_experiments`, `litmuschaos_failed_experiments`, `litmuschaos_probe_success_percentage`, `litmuschaos_experiment_total_duration` | LitmusChaos, separately from this repository's charts. Not shipped here. |
-| **kube-state-metrics, custom resources** | `kube_customresource_chaosengine_status_engine_status` | kube-state-metrics **with custom-resource metrics configured for `ChaosEngine`**. Not configured by default — see the warning below. |
+| **kube-state-metrics, custom resources** | `kube_customresource_chaosengine_status_engine_status` | kube-state-metrics **with custom-resource metrics configured for `ChaosEngine`**, which `charts/monitoring` does since 1.6.0 (`kube-prometheus-stack.kube-state-metrics.customResourceState`, plus the `list`/`watch` access on `chaosengines.litmuschaos.io` it needs). Not a kube-state-metrics default: another stack copies that block from `charts/monitoring/values.yaml`. One series per engine and state, so it exists from the first experiment on — see the warning below. |
 | **kube-state-metrics + cAdvisor** | `kube_pod_status_ready`, `kube_pod_container_status_restarts_total`, `container_cpu_usage_seconds_total`, `container_memory_usage_bytes` | the `kube-state-metrics` subchart and the kubelet, both on by default in `charts/monitoring` |
 | **The Kates application** | `kates_benchmark_throughput_rec_sec`, `kates_benchmark_latency_ms`, `kates_benchmark_errors_total` | `charts/kates`, scraped by its ServiceMonitor |
 
@@ -93,11 +93,27 @@ optional add-ons.
 > a cluster the collector cannot see reads *No data*. See [the zero-fallback
 > convention](../README.md#zeros-that-mean-measured-and-zeros-that-mean-absent).
 >
-> **The alerts still have the old problem.** `KafkaChaosExperimentActive`, and
-> the `and on() count(…) == 0` guard on `KafkaBrokerRestartUnexpected`, both
-> read the same series and neither can be anchored the way a panel can — the
-> guard is silently always true without that configuration. If you rely on
-> either, confirm the series exists first.
+> **What the series is, and when it exists.** kube-state-metrics publishes
+> the engine's `status.engineStatus` as a state set: for every ChaosEngine,
+> one series per state — `initialized` while the experiment runs, `completed`
+> or `stopped` after — carrying 1 for the state it is in and 0 for the other
+> two, labelled `namespace` and `name`. Hence the `== 1` in every reader. It
+> is per object, not per collector: a cluster that has never created a
+> ChaosEngine has no series, an empty picker and a *No data* tile, and that is
+> the correct reading. Kates leaves its engines in place after a run, so from
+> the first experiment on the picker fills. `charts/monitoring` configures the
+> collector since 1.6.0; before that, and on any other stack that has not been
+> told the resource's shape, the series never exists.
+>
+> **The alerts: one works, three do not.** `KafkaChaosExperimentActive`
+> (`count(…{status="initialized"} == 1) > 0`) fires while an engine is
+> initialized, now that something publishes the series. The
+> `and on() count(… == 1) == 0` guard on `KafkaBrokerRestartUnexpected`,
+> `KafkaHighCPUPostChaos` and `KafkaClusterNotReadyPostChaos` **cannot pass**,
+> series or no series: `count()` over an empty vector is empty rather than
+> zero, and it is empty exactly when no experiment is running — the case the
+> guard exists to let through. Those three never fire; the guard is a
+> separate fix, and until it lands do not rely on them.
 >
 > **`$namespace` no longer offers every namespace in the cluster.** It used to
 > resolve through `kube_pod_status_ready`, which kube-state publishes for every
@@ -105,7 +121,8 @@ optional add-ons.
 > the rest and the board opened on whichever sorted first — every panel then
 > honestly reading *No data* about the wrong namespace. It is scoped to
 > namespaces holding a ChaosEngine instead. An empty picker is now itself the
-> diagnosis, and the variable's tooltip says so.
+> diagnosis — no experiment yet, or a collector without the configuration —
+> and the variable's tooltip says so.
 
 ## The RTO / RPO / data-integrity row
 

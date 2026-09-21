@@ -33,12 +33,11 @@ keep the genuinely monotonic `-total` attributes correctly typed:
   type: COUNTER
 ```
 
-So three series are **max gauges in milliseconds wearing a counter's name**:
-`kafka_server_raftmetrics_commit_latency_max_total`,
-`kafka_server_raftmetrics_election_latency_max_total` and
-`kafka_server_raftchannelmetrics_request_latency_max_total`. `rate()` over any
-of them yields a number that means nothing. Their `_avg` companions are
-ordinary gauges and are read as they are.
+So two series are **max gauges in milliseconds wearing a counter's name**:
+`kafka_server_raftmetrics_commit_latency_max_total` and
+`kafka_server_raftmetrics_election_latency_max_total`. `rate()` over either
+yields a number that means nothing. Their `_avg` companions are ordinary
+gauges and are read as they are.
 
 ### 2. `_count_total` is the meter's `Count`, and the unit is not always a count
 
@@ -130,29 +129,32 @@ produced by JMX exporter rules this repository ships and proves** with
 | Prometheus recording rules — `kafka:chaos:*` | 9 | Yes — `charts/monitoring/templates/prometheus-chaos-rules.yaml`, over series `BenchmarkMetrics` publishes | `chaosAlerts.enabled` is false (the default), or the run never verified integrity. See [the chaos rules](#the-chaos-recording-rules-kafkachaos) |
 | The Kates application, via Micrometer | 26 | Yes — `kates/`, scraped by `charts/kates`'s ServiceMonitor | No run is in flight (the `run_id`-scoped meters), or the binder is off |
 | JVM and process, from whichever agent scrapes the pod | 17 | The collectors come with the agent, not from a rule: the JMX exporter agent on Kafka, Connect and MirrorMaker 2 pods, Micrometer's JVM binder on Kates pods | The board is reading the other agent's spelling — see [JVM and process](#jvm-and-process--micrometers-spelling-not-the-jmx-agents) |
-| kube-state-metrics | 5 | Subchart of `kube-prometheus-stack`, on by default in `charts/monitoring` | One of the five needs extra configuration — see `kube_customresource_*` |
+| kube-state-metrics | 5 | Subchart of `kube-prometheus-stack`, on by default in `charts/monitoring`, which since 1.6.0 also configures the one custom-resource series among the five | On another stack the custom-resource one needs configuration — see `kube_customresource_*` |
 | cAdvisor, via the kubelet | 4 | Scraped when `kube-prometheus-stack.kubelet.enabled` (it is) | The pod selector matched nothing |
 | LitmusChaos chaos-exporter | 8 | **No.** Install LitmusChaos separately, and its exporter is off by default even then | Litmus is not installed, or `litmus-core.exporter.enabled` is false |
 | Kyverno | 3 | **No.** Install Kyverno separately | Kyverno is not installed, or is not scraped |
 | Prometheus itself | 1 (`up`) | — | The target selector matched nothing |
 
-**Twelve series cannot fill in on a cluster built only from this
-repository's charts**, and a further eight fill only for one kind of run.
+**Eleven series cannot fill in on a cluster built only from this
+repository's charts**, and a further nine fill only once the right kind of
+run has happened.
 
-*Install something — twelve series.* The eight `litmuschaos_*` need LitmusChaos **and** its
+*Install something — eleven series.* The eight `litmuschaos_*` need LitmusChaos **and** its
 chaos-exporter, which `charts/kates-chaos` leaves off by default
-(`litmus-core.exporter.enabled`); the three
-`kyverno_*` need Kyverno; `kube_customresource_chaosengine_status_engine_status`
-needs kube-state-metrics configured with custom-resource metrics for
-`ChaosEngine`, which is not its default. Each is a supported add-on and the
-panels fill in once it is there.
+(`litmus-core.exporter.enabled`); the three `kyverno_*` need Kyverno. Each is
+a supported add-on and the panels fill in once it is there.
 
 *Run the right kind of test.* The nine `kafka:chaos:*` records read series the
 Kates application publishes only for a run that actually verified integrity —
 a chaos or resilience run, not a plain load test. Until this release their
 inputs were names nothing published at all; see
 [the chaos rules](#the-chaos-recording-rules-kafkachaos) for what changed and
-for the millisecond-to-second conversion behind them.
+for the millisecond-to-second conversion behind them. And
+`kube_customresource_chaosengine_status_engine_status` is published per
+`ChaosEngine`, so it exists from the first chaos run on — Kates leaves its
+engines in place afterwards. `charts/monitoring` configures kube-state-metrics
+for it since 1.6.0; on another stack it is an install-something series, and
+the [`kube_customresource_*` row](#kube-state-metrics) says what to install.
 
 ---
 
@@ -227,8 +229,8 @@ observers, so most of these exist on every pod. Read all of them together with
 | `kafka_server_raftmetrics_commit_latency_max_total` | **max GAUGE despite the name**, milliseconds | kafka-kraft | The worst commit in the sampling window. **Trap 1 — never `rate()` it.** The typed `COUNTER` comes from the rule pattern, not from the attribute. |
 | `kafka_server_raftmetrics_election_latency_avg` | GAUGE, milliseconds | kafka-kraft | How long an election took. Three fast elections cost the cluster less than one slow one, because metadata writes are frozen for exactly this long each time. |
 | `kafka_server_raftmetrics_election_latency_max_total` | **max GAUGE**, milliseconds | kafka-kraft | The worst election. Trap 1. |
-| `kafka_server_raftchannelmetrics_request_latency_avg` | GAUGE, milliseconds | kafka-kraft | Round-trip time on the channel between quorum peers. This is where a slow inter-AZ link shows up *first* — before commit latency moves, because a commit only needs a majority and the slow peer can be the one left out. |
-| `kafka_server_raftchannelmetrics_request_latency_max_total` | **max GAUGE**, milliseconds | kafka-kraft | The worst peer round-trip. Trap 1. |
+| `kafka_server_raftchannelmetrics_request_rate` | GAUGE, requests/s | kafka-kraft | Requests this node sends on the channel between quorum peers. Read against the response rate: matched is a quorum talking to itself, requests pulling ahead of responses is a peer that stopped answering — the slow inter-AZ link, or a peer that is gone — and it shows here before commit latency moves, because a commit only needs a majority and the slow peer can be the one left out. |
+| `kafka_server_raftchannelmetrics_response_rate` | GAUGE, responses/s | kafka-kraft | Responses this node receives on the same channel. (`request_latency_avg` and `request_latency_max_total`, which this board used to read, are producer and consumer client sensors the raft channel never registers.) |
 
 ## Broker metadata — `kafka.server<type=broker-metadata-metrics>`
 
@@ -677,12 +679,23 @@ cluster — which is exactly when a trend board is opened.
 
 ## HTTP server — the Quarkus Micrometer binder
 
-`quarkus.micrometer.binder.http-server.enabled=true`.
+`quarkus.micrometer.binder.http-server.enabled=true` — for `_count`, `_sum`
+and `_max`. The `_bucket` series is not the binder's doing: Quarkus publishes
+the request timer without buckets, and `histogram_quantile()` over a series
+that does not exist is an empty panel that looks exactly like an idle service.
+`HttpLatencyHistogram` (`kates/src/main/java/com/bmscomp/kates/config/`) is a
+`MeterFilter` that gives `http.server.requests` eleven fixed SLO boundaries —
+5, 10, 25, 50, 100, 250 and 500 ms, then 1, 2.5, 5 and 10 s. Fixed boundaries
+rather than Micrometer's percentile histogram, which is about seventy buckets
+per `uri × method × status × outcome`. A percentile is therefore a band, not
+a millisecond: `histogram_quantile()` interpolates inside the bucket the
+quantile falls in, so a P99 of 7 ms means "between 5 and 10". An image from
+before the filter (`1.22.0` and older) publishes no `_bucket` series at all.
 
 | Series | Type & labels | Boards | What it means, and how to read it |
 |---|---|---|---|
 | `http_server_requests_seconds_count` | COUNTER, labels `method`, `uri`, `status`, `outcome` | kates-application, kates-overview | Requests served by the Kates REST API. `rate()` by `method` is traffic, by `status=~"4..\|5.."` is failure. 4xx and 5xx are different problems: a 4xx is a client sending something this API rejected (a malformed spec, an unknown run id) and is not an outage; every 5xx has a stack trace in the log. |
-| `http_server_requests_seconds_bucket` | **real cumulative histogram**, label `le` plus the above | kates-application, kates-overview | Request latency. The only place on any Kates board where `histogram_quantile(0.99, sum by (le) (rate(…[1m])))` is correct — everything else with percentiles here is a pre-computed gauge. |
+| `http_server_requests_seconds_bucket` | **real cumulative histogram**, label `le` (the eleven boundaries above, plus `+Inf`) and the above | kates-application, kates-overview | Request latency. The only place on any Kates board where `histogram_quantile(0.99, sum by (le) (rate(…[1m])))` is correct — everything else with percentiles here is a pre-computed gauge. Sum by `le` across pods before taking the quantile: that is a percentile across the fleet, not a mean of per-pod percentiles. |
 
 ## JVM and process — **Micrometer's spelling, not the JMX agent's**
 
@@ -731,7 +744,12 @@ records that.
 ## The Agroal connection pool
 
 Registered by Quarkus' `AgroalMetricsRecorder` when the datasource and
-Micrometer extensions are both present. Labelled by datasource.
+Micrometer extensions are both present **and** `quarkus.datasource.metrics.enabled`
+is on. It is off by default whatever extensions are present — the Micrometer
+extension alone switches nothing on — and the application sets it in
+`application.properties`; an image from before that (`1.22.0` and older)
+publishes none of these, and the pool panels are empty on it while the rest
+of the board draws. Labelled by datasource.
 
 Two corrections landed here in this refactor. The board this replaced read
 `agroal_blocking_time_total_seconds` divided by `agroal_blocking_time_count`,
@@ -749,7 +767,7 @@ spelled `agroal_pool_*` where Quarkus publishes `agroal_*`.
 | `agroal_awaiting_count` | GAUGE | kates-application, kates-overview | Threads blocked waiting for a connection. Anything above zero for any length of time is the application throttling itself. |
 | `agroal_blocking_time_average_milliseconds` | GAUGE, milliseconds | kates-application, kates-overview | Mean wait to acquire a connection. Rising **with** the pool at its ceiling is a pool too small; rising **with spare capacity** is a slow database, and a bigger pool will not help. That distinction is the whole point of reading this panel beside `Pool connections`. |
 | `agroal_blocking_time_max_milliseconds` | GAUGE, milliseconds | kates-application, kates-overview | Worst wait. A gauge — no `rate()`. |
-| `agroal_acquire_count` | **GAUGE holding a cumulative total** | kates-application | Acquisitions since start. Quarkus registers it with `Gauge.builder`, so it carries no `_total` suffix and Prometheus does not type it as a counter. `rate()` still gives the right answer because the value only increases, but it will not be corrected for a restart the way a real counter is — expect one spike per pod restart. |
+| `agroal_acquire_count_total` | COUNTER | kates-application | Acquisitions since start. A `FunctionCounter` in Quarkus, so it carries the `_total` suffix and `rate()` handles a restart as a reset. Read off a live pod, with the rest of the pool series: none of them exist unless `quarkus.datasource.metrics.enabled` is on. |
 
 ---
 
@@ -767,7 +785,7 @@ repository, and the metric contract lists `^kube_` as `external`.
 | `kube_pod_container_status_restarts_total` | COUNTER, labels `namespace`, `pod`, `container` | kates-application, kates-chaos | Container restarts. `increase(…[5m])` is the only useful form: the raw value is cumulative for the pod's lifetime, so a pod that crash-looped yesterday and is fine now still reads high. |
 | `kube_pod_status_phase` | GAUGE, 0 or 1, labels `namespace`, `pod`, `phase` | kyverno-security, kates-chaos-infra | Pod phase as a one-hot set. Used on the Kyverno board with `phase="Running"` to show the controller pods — deliberately *not* from Kyverno itself, because a webhook that is down cannot report that it is down. An empty table means either no controller is Running or kube-state-metrics is not installed, and those are very different problems. |
 | `kube_deployment_status_replicas_available` | GAUGE, labels `namespace`, `deployment` | kates-chaos-infra | Replicas of a Deployment that are available. Used for the Litmus chaos operator, because an operator that is down cannot report that it is down — and because the board this replaces asked for pods matching `.*chaos-operator.*`, which is the operator's *container* name: its Deployment is named by litmus-core's `fullnameOverride` (`litmus`), so that matcher could never match and the tile was a permanent, reassuring zero. The Deployment name is a hidden `constant` the chart injects. |
-| `kube_customresource_chaosengine_status_engine_status` | GAUGE, labels `namespace`, `status` | kates-chaos | Litmus `ChaosEngine` custom resources and their status. **Requires kube-state-metrics to be configured with custom-resource metrics for `ChaosEngine`, which is not the default.** Without that configuration the series does not exist. The `Chaos engines running` panel anchors its zero fallback to this series *unfiltered by status*, which is the only available proof that the collector is configured — kube-state being up proves nothing — so the panel now reads *No data* rather than a reassuring zero. The alerts cannot do the same: `KafkaChaosExperimentActive` never fires, and the `and on() count(…) == 0` guard on `KafkaBrokerRestartUnexpected` is silently always true. Confirm the series exists before relying on either. It also sources `kates-chaos`'s `$namespace`, so an empty namespace picker on that board is this configuration missing. |
+| `kube_customresource_chaosengine_status_engine_status` | GAUGE, 0 or 1, labels `namespace`, `name`, `status` | kates-chaos | A Litmus `ChaosEngine`'s `status.engineStatus` as a **state set**: for every engine, one series per state — `initialized` while the experiment runs, `completed` or `stopped` after — carrying 1 for the state it is in and 0 for the other two. Hence the `== 1` in every reader; `count()` without it counts every engine three times. **Requires kube-state-metrics configured with custom-resource metrics for `ChaosEngine`** — `charts/monitoring` does it since 1.6.0 (`kube-prometheus-stack.kube-state-metrics.customResourceState`, plus `list`/`watch` on `chaosengines.litmuschaos.io`); it is not a kube-state-metrics default, so another stack copies that block. Per object, not per collector: a cluster that has never created an engine has no series, and Kates leaves its engines in place after a run, so from the first experiment on it exists. The `Chaos engines running` panel anchors its zero fallback to this series *unfiltered by status*, the only available proof that the collector is configured — kube-state being up proves nothing — so it reads *No data* rather than a reassuring zero, and it also sources `kates-chaos`'s `$namespace`, so an empty picker is no experiment yet or the configuration missing. Of the four alerts that read it, `KafkaChaosExperimentActive` (`count(… == 1) > 0`) fires now; the three guarded by `and on() count(… == 1) == 0` cannot, series or no series, because `count()` over an empty vector is empty rather than zero — and it is empty exactly when no experiment is running. That guard is a separate fix. |
 
 ## cAdvisor, via the kubelet
 

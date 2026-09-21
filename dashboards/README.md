@@ -127,7 +127,9 @@ whichever sorted first, and the board opened scoped to a namespace that has
 never run a benchmark. Every panel then read *No data*, correctly, about the
 wrong namespace, and nothing on screen could tell the reader that. It is
 scoped to namespaces holding a `ChaosEngine` now, and an empty picker means
-kube-state-metrics is running without custom-resource metrics — which the
+one of two things — no experiment has been created on this cluster yet, or
+kube-state-metrics is running without custom-resource metrics for
+`ChaosEngine`, which `charts/monitoring` configures since 1.6.0 — which the
 variable's own tooltip says, because an empty variable is the one place that
 can explain an empty board.
 
