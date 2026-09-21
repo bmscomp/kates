@@ -21,7 +21,7 @@ extraLabels: {}
 
 # -- Images used by the Helm test pods
 testImages:
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.22.0"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.23.0"
 
 # -- Number of MM2 (Connect) worker replicas
 replicas: 3

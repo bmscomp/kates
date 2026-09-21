@@ -2,11 +2,10 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Patch: values-kind.yaml no longer switches the scrape and the rules off.
-# Defaults are unchanged; a kind install with prometheus-operator present now
-# gets its PodMonitors and PrometheusRule, which is the difference between the
-# Kafka boards and twelve empty panels.
-version: 1.0.1
+# Patch: the Helm-test images move to kates-tester 1.23.0, the tag the
+# v1.23.0 release publishes; every Strimzi chart pins the same one.
+# Templates and defaults are otherwise unchanged.
+version: 1.0.2
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -40,6 +39,8 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kafka and testImages.kubectl move to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: fixed
       description: values-kind.yaml held monitoring.podMonitor.enabled and alerts.enabled at false, so a kind install never created its PodMonitors or its PrometheusRule and every Kafka board stayed empty. The overlay leaves both at the chart defaults; the templates already render nothing where the monitoring.coreos.com API is absent
     - kind: added

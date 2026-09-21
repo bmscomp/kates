@@ -10,7 +10,7 @@ kubectl -n $NS get kafka $CLUSTER -o jsonpath='{range .status.conditions[*]}{.ty
 kubectl -n $NS get kafkanodepools,pods -l strimzi.io/cluster=$CLUSTER
 # A client shell with the platform's backend credentials:
 kubectl -n $NS run kcat --rm -it --restart=Never --labels kates.io/test-pod=true \
-  --image=ghcr.io/bmscomp/kates-tester:1.22.0 -- bash
+  --image=ghcr.io/bmscomp/kates-tester:1.23.0 -- bash
 ```
 
 Inside that shell, `/opt/kafka/bin/kafka-topics.sh --bootstrap-server $CLUSTER-kafka-bootstrap:9092 --command-config client.properties …` answers most partition questions; `kafka-metadata-quorum.sh … describe --status` answers quorum questions.

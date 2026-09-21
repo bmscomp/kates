@@ -75,7 +75,7 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 | Key | Default | Description |
 |-----|---------|-------------|
 | `strimziVersion` | `1.2.0` | Builds the CRD bundle URL. Must equal `Chart.yaml` `appVersion` + dependency version. |
-| `testImages.kubectl` | `ghcr.io/bmscomp/kates-tester:1.22.0` | Image for the CRD hook Job and Helm tests |
+| `testImages.kubectl` | `ghcr.io/bmscomp/kates-tester:1.23.0` | Image for the CRD hook Job and Helm tests |
 | `crdUpgrade.enabled` | `true` | Apply CRDs via the pre-install/pre-upgrade hook |
 | `crdUpgrade.url` | `""` | Override the bundle URL (empty = derive from `strimziVersion`). Use an internal mirror when airgapped. |
 | `crdUpgrade.backoffLimit` | `3` | Job retries before the install/upgrade aborts |

@@ -13,7 +13,10 @@ type: application
 # REMOVED. 0.10.0 froze them into the generated board and documented them as
 # inert, which left two keys that accept a number and ignore it; a release
 # setting either is now refused with the constant to edit named.
-version: 0.11.0
+# Patch: the pre-flight, data-test and secret-sync image moves to
+# kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi
+# chart pins the same one. Templates and defaults are otherwise unchanged.
+version: 0.11.1
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -40,6 +43,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: removed
       description: "ACTION REQUIRED — the dashboard block is GONE, and a release that still sets any dashboard.* key is refused with the replacement named. Both boards are delivered by charts/monitoring (dashboards.enabled there) for every release in the cluster, under the stable uids kates-mm2 and kates-mm2-mig; their $namespace/$cluster variables select a release, so the per-release ConfigMaps, the uid/title rewrite and the no-slo/identity variants are gone with the block. An upgrade leaves the old per-release-uid boards behind in Grafana: delete them, and repoint any link, playlist or annotation that names one"
     - kind: changed
