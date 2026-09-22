@@ -37,7 +37,26 @@ jobs:
       pull-requests: write # the summary comment on failure
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The action needs the repository's dependency graph (Settings →
+      # Code security → Dependency graph), which is a repository setting no
+      # workflow can turn on. Until it is, skip with a warning that says so
+      # rather than failing every pull request with the same message.
+      - name: Is the dependency graph enabled?
+        id: graph
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASEHEAD: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASEHEAD}" > /dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Dependency review skipped: the dependency graph is not enabled for ${GITHUB_REPOSITORY} (Settings → Code security, or: gh api -X PUT repos/${GITHUB_REPOSITORY}/vulnerability-alerts)"
+          fi
+
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: steps.graph.outputs.enabled == 'true'
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
