@@ -1,4 +1,14 @@
-name: Release Kates CLI
+name: Release
+
+# The one workflow a `v*` tag starts. Everything a release consists of — the
+# CLI binaries, the three images, the GitHub Release, the Homebrew tap — is a
+# job on this run, in dependency order, so a failure anywhere is one red run
+# rather than one of four green-looking workflows quietly missing. The image
+# pipelines are the publish-*.yml workflows, called rather than triggered.
+#
+# Order: the Release and the tap are only published once every image is up
+# and verified, so `brew install` can never hand out a version whose image
+# does not exist.
 
 on:
   push:
@@ -6,16 +16,23 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: write # softprops/action-gh-release, update-charts commits
+  packages: write # image pushes in the called workflows
+  id-token: write # cosign keyless signing, build provenance attestations
+  attestations: write # actions/attest-build-provenance
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  GO_VERSION: "1.25"
   MODULE: "github.com/bmscomp/kates/cli/cmd"
 
 jobs:
   build:
     name: Build ${{ matrix.os }}/${{ matrix.arch }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         include:
@@ -28,11 +45,11 @@ jobs:
           - os: linux
             arch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
       - name: Build binary
@@ -60,21 +77,44 @@ jobs:
           tar -czf "${ARCHIVE}" kates
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
 
+      # SLSA build provenance for each tarball, verifiable with
+      # `gh attestation verify kates-<os>-<arch>.tar.gz --repo bmscomp/kates`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: cli/kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kates-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             cli/kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
             cli/kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
 
+  kates-image:
+    name: Kates image
+    uses: ./.github/workflows/publish-docker.yml
+    secrets: inherit
+
+  connect-image:
+    name: Connect image
+    uses: ./.github/workflows/publish-connect.yml
+    secrets: inherit
+
+  tester-image:
+    name: Tester image
+    uses: ./.github/workflows/publish-tester.yml
+    secrets: inherit
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, kates-image, connect-image, tester-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
@@ -83,7 +123,7 @@ jobs:
         run: cat dist/*.sha256 > dist/checksums.txt
 
       - name: Create release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
           files: |
@@ -94,11 +134,12 @@ jobs:
     name: Update Homebrew Tap
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Download darwin artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
@@ -170,3 +211,23 @@ jobs:
           git add Formula/kates.rb
           git commit -m "kates ${TAG}"
           git push
+
+  # The formula's own `test do` block runs `kates version`, but only when
+  # someone runs `brew test`. This installs from the tap the way a user does,
+  # on the OS most users are on, and checks the binary reports the tag.
+  brew-smoke:
+    name: brew install smoke test
+    needs: homebrew
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install from the tap and run it
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          brew install bmscomp/tap/kates
+          out=$(kates version)
+          echo "${out}"
+          echo "${out}" | grep -F -- "${TAG#v}" \
+            || { echo "::error::kates version does not report ${TAG#v}"; exit 1; }

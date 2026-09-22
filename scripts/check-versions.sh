@@ -48,11 +48,61 @@
 # now read versions.env directly; config/cluster.yaml cannot, because kind takes
 # a literal config with no variable substitution, so it is asserted here.
 #
+# The CI toolchain (Helm, kubeconform, the Kyverno CLI, Java, Node, the
+# linters) is the same story one level up: HELM_VERSION was `env:` in six
+# workflows. They are pinned in versions.env and loaded by
+# .github/actions/load-versions; `--workflows` fails on a workflow that
+# hardcodes one again, so the count can only go down.
+#
 # Usage:
-#   scripts/check-versions.sh    Verify the pins agree. Exits non-zero on drift.
+#   scripts/check-versions.sh              Verify the pins agree. Exits non-zero on drift.
+#   scripts/check-versions.sh --workflows  Only: no workflow hardcodes a CI toolchain pin.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# ── CI toolchain pins must come from versions.env ─────────────────────────────
+#
+# Each pattern is what a hardcoded pin looks like in a workflow; the fix is
+# always `${{ env.X }}` after a load-versions step (or go-version-file for Go).
+check_workflows() {
+  local rc=0 hits
+  local -a patterns=(
+    'version: v3\.[0-9]+\.[0-9]+'          # azure/setup-helm
+    'go-version: "?[0-9]'                     # setup-go: use go-version-file: cli/go.mod
+    'java-version: "?[0-9]'                   # setup-java
+    'node-version: "?[0-9]'                   # setup-node
+    'kubeconform/releases/download/v[0-9]'    # install-tools
+    'kyverno/releases/download/v[0-9]'        # install-tools
+    'KIND_VERSION: v'                         # load-versions
+    'KUBECTL_VERSION: v'                      # load-versions
+    'HELM_VERSION: v'                         # load-versions
+  )
+  for pat in "${patterns[@]}"; do
+    hits=$(grep -nE "$pat" .github/workflows/*.yml || true)
+    if [[ -n "$hits" ]]; then
+      echo "ERROR: toolchain pin hardcoded in a workflow (declare it in versions.env, load it with .github/actions/load-versions):" >&2
+      echo "$hits" | sed 's/^/  /' >&2
+      rc=1
+    fi
+  done
+  # Every pin load-versions exports by default has to exist, or the action
+  # fails on its first use.
+  local key
+  for key in $(sed -nE 's/^    default: (.*)$/\1/p' .github/actions/load-versions/action.yml); do
+    if ! grep -qE "^${key}=" versions.env; then
+      echo "ERROR: load-versions exports ${key} by default but versions.env does not declare it" >&2
+      rc=1
+    fi
+  done
+  [[ $rc -eq 0 ]] && echo "OK: no workflow hardcodes a CI toolchain pin."
+  return $rc
+}
+
+if [[ "${1:-}" == "--workflows" ]]; then
+  check_workflows
+  exit $?
+fi
 
 CHART_DIR="charts/strimzi-operator"
 CHART_YAML="${CHART_DIR}/Chart.yaml"
@@ -606,5 +656,7 @@ elif [[ "$tester_drift" -ne 0 ]]; then
 else
   echo "OK: every Strimzi chart runs kates-tester:${kates_app_version}."
 fi
+
+check_workflows || fail=1
 
 exit "$fail"

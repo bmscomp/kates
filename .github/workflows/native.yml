@@ -1,4 +1,4 @@
-name: Native Image
+name: CI · Native image
 
 # The native image ships alongside the JVM one, but until now nothing built it
 # outside a release tag. Ahead-of-time compilation breaks in ways no JVM test can
@@ -36,8 +36,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-smoke-test:
@@ -46,16 +46,19 @@ jobs:
     # A native compile is 15-25 minutes on a 4-core runner; the timeout is a
     # backstop against a hung compiler burning an hour of runner time.
     timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write # notify-scheduled-failure
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       # Builds the SAME Dockerfile the release publishes, so this validates what
       # ships rather than an approximation of it.
       - name: Build native image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: kates/Dockerfile.native
@@ -68,12 +71,25 @@ jobs:
       - name: Smoke-test the native binary
         run: ./scripts/native-smoke-test.sh kates:native-ci
 
-      # Size is a headline reason to ship native at all; surfacing it in the log
-      # makes an accidental regression visible instead of something you notice
-      # months later on a slow node pull.
+      # Size is a headline reason to ship native at all; surfacing it in the
+      # run summary makes an accidental regression visible instead of
+      # something you notice months later on a slow node pull.
       - name: Report image size
         if: always()
         run: |
-          docker image inspect kates:native-ci \
-            --format 'native image size: {{.Size}} bytes ({{len .RootFS.Layers}} layers)' \
-            || true
+          size=$(docker image inspect kates:native-ci --format '{{.Size}}' 2>/dev/null || echo 0)
+          layers=$(docker image inspect kates:native-ci --format '{{len .RootFS.Layers}}' 2>/dev/null || echo 0)
+          echo "native image size: ${size} bytes (${layers} layers)"
+          {
+            echo "### Native image"
+            echo
+            echo "| Size | Layers |"
+            echo "|---:|---:|"
+            echo "| $((size / 1024 / 1024)) MiB | ${layers} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue for a failed nightly run
+        if: failure() && github.event_name == 'schedule'
+        uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

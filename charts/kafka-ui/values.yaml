@@ -112,7 +112,7 @@ auth:
   password: ""
   # -- Use a pre-existing Secret (key 'password') instead of managing one
   existingSecret: ""
-  
+
   # -- Role-Based Access Control (RBAC) settings for Kafka UI
   rbac:
     enabled: false

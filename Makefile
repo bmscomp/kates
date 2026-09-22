@@ -127,6 +127,19 @@ all: check-prerequisites  ## Complete setup (cluster, all services)
 	@echo "  - Chaos:             execution plane only (no UI) — 'make chaos-status'"
 	@echo ""
 
+# Every cheap gate CI · Lint and CI · Backend run, in one command, so "make
+# sure CI passes" has a local answer before the push. Each tool is skipped
+# with a notice when it is not installed (brew install actionlint shellcheck
+# hadolint yamllint golangci-lint); CI never skips.
+check: check-help check-versions check-chart-tests ## Run every cheap CI gate locally (lint, format, pins)
+	@if command -v actionlint >/dev/null 2>&1; then actionlint && echo "OK: actionlint"; else echo "⚠️  actionlint not installed — skipping"; fi
+	@if command -v shellcheck >/dev/null 2>&1; then shellcheck -x -S warning -e SC2317,SC2034,SC2155 scripts/*.sh kates-ci.sh && echo "OK: shellcheck"; else echo "⚠️  shellcheck not installed — skipping"; fi
+	@if command -v hadolint >/dev/null 2>&1; then hadolint --failure-threshold error kates/Dockerfile kates/Dockerfile.native Dockerfile.connect Dockerfile.legacy-kafka tester/Dockerfile && echo "OK: hadolint"; else echo "⚠️  hadolint not installed — skipping"; fi
+	@if command -v yamllint >/dev/null 2>&1; then yamllint -c .yamllint.yaml .github config charts && echo "OK: yamllint"; else echo "⚠️  yamllint not installed — skipping"; fi
+	@if command -v golangci-lint >/dev/null 2>&1; then (cd cli && go vet ./... && golangci-lint run --new-from-merge-base=main ./...) && echo "OK: go vet, golangci-lint (new issues)"; else echo "⚠️  golangci-lint not installed — skipping"; fi
+	@(cd kates && ./mvnw -B -ntp -q spotless:check) && echo "OK: spotless"
+	@./scripts/check-versions.sh --workflows
+
 # Assert the Strimzi pins agree across all five places that declare one, and the
 # kind toolchain pins between versions.env and config/cluster.yaml.
 # Also run in CI (.github/workflows/ci.yml, Helm Lint job).

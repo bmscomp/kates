@@ -1,6 +1,6 @@
 # CI/CD Pipeline
 
-This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect image build check (`ci-connect.yml`), native-image builds (`native.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
+This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect image build check (`ci-connect.yml`), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
 
 Two things to keep in mind while reading. First, **any job that renders a chart runs `helm dependency build` first** — `strimzi-operator` pulls the operator subchart from `quay.io`, and `kafka-cluster`, `connect-cluster` and `mirror-maker2` all resolve the `kafka-common` library through a `file://` dependency. `helm lint` only warns about a missing dependency and still exits 0, so a job that skips the build can be green while the chart cannot be deployed. Second, the expensive jobs — the ones that stand up a Kind cluster and scrape a real broker — are gated behind a schedule, a manual dispatch, or a pull-request label, and never run on an ordinary push.
 
@@ -28,11 +28,11 @@ graph TB
         ML[metrics-live jobs<br/>Kind + real brokers]
     end
 
-    subgraph Release["Release (Tag / Manual)"]
-        PD[publish-docker.yml<br/>Publish Kates Image]
-        PT[publish-tester.yml<br/>Publish Tester Image]
-        PC[publish-connect.yml<br/>Publish Connect Image]
-        RC[release-cli.yml<br/>Release CLI Binaries]
+    subgraph Release["Release (Tag)"]
+        RC[release.yml<br/>CLI binaries, Release, tap]
+        PD[publish-docker.yml<br/>Kates image]
+        PT[publish-tester.yml<br/>Tester image]
+        PC[publish-connect.yml<br/>Connect image]
     end
 
     Push --> CI
@@ -48,13 +48,13 @@ graph TB
     Manual --> INT
     Sched --> ML
     Manual --> ML
-    Tag --> PD
-    Manual --> PD
-    Tag --> PT
-    Manual --> PT
-    Tag --> PC
-    Manual --> PC
     Tag --> RC
+    RC -->|"workflow_call"| PD
+    RC -->|"workflow_call"| PT
+    RC -->|"workflow_call"| PC
+    Manual --> PD
+    Manual --> PT
+    Manual --> PC
 
     PD -->|"multi-arch manifests"| Registry["ghcr.io/bmscomp/kates<br/>docker.io/bmscomp/kates"]
     PT --> Registry2["ghcr.io/bmscomp/kates-tester<br/>docker.io/bmscomp/kates-tester"]
@@ -62,23 +62,28 @@ graph TB
     RC -->|"binaries"| GHR["GitHub Release + Homebrew tap"]
 ```
 
-The validation workflows trigger independently — each has its own path filter and there is no chaining between them. The `metrics-live` jobs live inside `ci-kafka-charts.yml` and `ci-mirror-maker2.yml` rather than in a workflow of their own, because they share those workflows' triggers and contracts; what separates them is the `if:` gate that keeps them off the push path.
+The validation workflows trigger independently — each filters its own jobs by path and there is no chaining between them. The `metrics-live` jobs live inside `ci-kafka-charts.yml` and `ci-mirror-maker2.yml` rather than in a workflow of their own, because they share those workflows' triggers and contracts; what separates them is the `if:` gate that keeps them off the push path.
 
 ## Path-Based Change Detection
 
-Several workflows use **path filters** to avoid unnecessary runs. Only changes to relevant source paths trigger the workflow:
+Every validation workflow starts on every push and pull request, and then decides *inside the run* what to do: a first `changes` job uses `dorny/paths-filter` to classify the diff, and each real job carries an `if:` on that classification. A docs-only change starts `ci.yml` and skips every job in it within seconds.
 
-| Workflow | Monitored Paths |
-|----------|----------------|
-| `ci.yml` | `kates/**`, `cli/**`, `charts/**`, `config/**`, `images.env`, `versions.env`, `scripts/check-versions.sh`, the workflow file itself |
-| `ci-kafka-charts.yml` | `charts/kafka-cluster/**`, `charts/connect-cluster/**`, `charts/mirror-maker2/**`, `charts/kafka-common/**`, `charts/strimzi-operator/**`, the checker scripts (`scripts/check-strimzi-crs.py`, `check-strimzi-metrics.sh`, `check-chart-matrix.py`, `check-metric-contract.sh`), `scripts/chart-matrix/**`, `scripts/metric-contract/**`, `images.env`, `versions.env`, the workflow file itself |
-| `ci-mirror-maker2.yml` | `charts/mirror-maker2/**`, `charts/kafka-common/**`, `charts/legacy-kafka/**`, `charts/kafka-cluster/**` (the migration e2e stands a real source cluster up), `Dockerfile.legacy-kafka`, the migration scripts, `scripts/metric-contract/**`, `cli/cmd/migrate*.go`, `cli/pkg/migrate/**`, `cli/internal/podrun/**`, `docs/mirror-maker2-runbook.md` (pull requests only), the workflow file itself |
-| `ci-docker.yml` | `kates/**`, `cli/**`, `images.env`, `versions.env`, the workflow file itself |
-| `integration.yml` | `kates/**`, `cli/**`, `charts/**`, `Makefile`, `images.env`, `versions.env`, the workflow file itself |
+The filters used to be workflow-level `paths:` blocks, and the move is not cosmetic. A workflow that never starts never reports a check, and a required status check that never reports blocks the merge forever — so a path-filtered workflow could not be required by branch protection at all. A job that starts and skips itself counts as passed. Each workflow therefore ends in a **gate** job (`Gate · Backend`, `Gate · Kafka charts`, …) that runs unconditionally, passes when every job it depends on succeeded or was skipped, and fails on any failure or cancellation. The gates are the only checks the `main` ruleset requires; adding or renaming a job inside a workflow never touches branch protection.
 
-`ci.yml`, `ci-docker.yml` and `integration.yml` each carry an explicit `!**/*.md` exclusion, so documentation-only changes, README edits, or tutorial updates do not trigger CI builds — saving compute and reducing noise. `ci-mirror-maker2.yml` is the deliberate exception: its pull-request filter lists `docs/mirror-maker2-runbook.md`, because one of its checks asserts that every `runbook_url` anchor the alerts point at is a real heading in that file, and a heading rename must therefore run the job.
+| Workflow | Filtered on |
+|----------|-------------|
+| `ci.yml` | `code` (`kates/**`, `cli/**`, `images.env`, `versions.env`, the workflow and composite actions), `helm` (`charts/**`, `versions.env`, `scripts/check-versions.sh`, `config/cluster.yaml`), `yaml` (`config/**`) |
+| `ci-kafka-charts.yml` | `charts/kafka-cluster/**`, `charts/connect-cluster/**`, `charts/mirror-maker2/**`, `charts/kafka-common/**`, `charts/strimzi-operator/**`, `charts/monitoring/**`, `charts/kates/**`, `charts/kates-chaos/**`, the checker scripts (`scripts/check-strimzi-crs.py`, `check-strimzi-metrics.sh`, `check-chart-matrix.py`, `check-metric-contract.sh`), `scripts/chart-matrix/**`, `scripts/metric-contract/**`, `dashboards/**`, `images.env`, `versions.env` |
+| `ci-mirror-maker2.yml` | `charts/mirror-maker2/**`, `charts/kafka-common/**`, `charts/legacy-kafka/**`, `charts/kafka-cluster/**` (the migration e2e stands a real source cluster up), `Dockerfile.legacy-kafka`, the migration scripts, `scripts/metric-contract/**`, `cli/cmd/migrate*.go`, `cli/pkg/migrate/**`, `cli/internal/podrun/**`, `docs/mirror-maker2-runbook.md` |
+| `ci-docker.yml` | `kates/**`, `cli/**`, `images.env`, `versions.env` |
+| `integration.yml` | `kates/**`, `cli/**`, `config/**`, `Makefile`, `images.env`, `versions.env` |
+| `lint.yml` | one category per linter: workflows, scripts, Dockerfiles, YAML, Go, Java, the Makefile |
 
-Two workflows do more than filter at the trigger. `ci.yml` filters a second time *inside* the run: a `changes` job uses `dorny/paths-filter` to split the change into `code`, `helm` and `yaml` categories, so a chart-only change skips the Java and Go work entirely. Its `helm` category includes `config/cluster.yaml`, because `scripts/check-versions.sh` asserts the Kind node image tags in that file against `versions.env`. `ci-mirror-maker2.yml` adds `labeled` to its pull-request event types; without it the `test-migration` label would fire nothing and the job it gates would be unreachable on a pull request.
+The `ci.yml`, `ci-docker.yml` and `integration.yml` filters exclude `**/*.md` under the source trees, so a README edit does not trigger a build. `ci-mirror-maker2.yml` is the deliberate exception: its filter lists `docs/mirror-maker2-runbook.md`, because one of its checks asserts that every `runbook_url` anchor the alerts point at is a real heading in that file, and a heading rename must therefore run the job. Scheduled and manual runs have no diff to filter on, and run everything.
+
+`ci.yml`'s `helm` category includes `config/cluster.yaml`, because `scripts/check-versions.sh` asserts the Kind node image tags in that file against `versions.env`. `ci-mirror-maker2.yml` adds `labeled` to its pull-request event types; without it the `test-migration` label would fire nothing and the job it gates would be unreachable on a pull request.
+
+Every workflow also shares three conventions: a `concurrency` group per branch (a new push to a pull request cancels the run it supersedes; pushes to `main` and tags always run to completion), a `timeout-minutes` on every job, and every `uses:` pinned to a commit SHA with the version in a trailing comment, which Dependabot keeps current. The tool versions the workflows install — Helm, kubeconform, the Kyverno CLI, Java, Node, the linters — are declared once in `versions.env` and exported by the `load-versions` composite action; `scripts/check-versions.sh --workflows` fails on a workflow that hardcodes one. Go's version is `cli/go.mod`.
 
 ---
 
@@ -95,7 +100,8 @@ Two workflows do more than filter at the trigger. `ci.yml` filters a second time
 | Job | Runtime | Description |
 |-----|---------|-------------|
 | **Detect Changes** | `dorny/paths-filter` | Splits the run into `code`, `helm` and `yaml` categories. Every job below keys its `if:` off one of them, except Kyverno Policy Validation, which always runs |
-| **Build & Test** | Java 21 (Temurin) | Compiles the Quarkus backend and runs the test suite with `./mvnw verify`, publishes the surefire *and* failsafe JUnit reports as a check, uploads the JaCoCo report, and scans dependencies with Trivy |
+| **Build & Test** | Java 21 (Temurin) | Compiles the Quarkus backend and runs the test suite with `./mvnw verify`, publishes the surefire *and* failsafe JUnit reports as a check, uploads the JaCoCo report and writes its totals to the run summary |
+| **Dependency CVE scan** | — | Trivy over the Maven tree and `govulncheck` over the Go module, as its own job so a new CVE and a failing test are two different red checks |
 | **CLI Tests** | Go 1.25 | Runs `go test -race` across all CLI packages, then the terminal-compatibility and CLI style harnesses |
 | **Helm Lint** | Helm v3.17.0 | Lints, renders and schema-validates every chart under `charts/`, and runs the repository's cross-file consistency checks |
 | **Kyverno Policy Validation** | Kyverno CLI v1.13.0 | Renders the Kyverno policy templates from the `kates`, `kafka-cluster`, and `kates-chaos` charts and validates them with `kyverno apply` |
@@ -256,7 +262,7 @@ strategy:
 
 ## 5. Integration Tests (`integration.yml`)
 
-**Purpose:** Spins up an ephemeral Kind cluster and validates that the charts, config manifests, and CLI work against a real Kubernetes API — cluster topology, the `kates detect` compatibility gate, chart linting, and server-side dry-runs of the Kafka manifests.
+**Purpose:** Spins up an ephemeral Kind cluster and validates what needs a real Kubernetes API — cluster topology, the `kates detect` compatibility gate, and server-side dry-runs of the Kafka manifests. Chart linting and config parsing are `ci.yml`'s job and are not repeated here.
 
 **Triggers:**
 - Push to `main` branch (paths in the table above)
@@ -271,26 +277,23 @@ The workflow provisions a Kind cluster inside the GitHub Actions runner via `hel
 |-----------|---------|---------|
 | Kind | `versions.env` `KIND_VERSION` | Ephemeral Kubernetes cluster with three zone-labelled nodes |
 | kubectl | `versions.env` `KUBECTL_VERSION` | Applies and dry-runs manifests against the cluster |
-| Helm | v3.17.0 | Lints every chart under `charts/` |
-| Go | 1.25 | Builds the `kates` CLI from source for the compatibility gate |
+| Helm | `versions.env` `HELM_VERSION` | Available for the manifests that need it |
+| Go | `cli/go.mod` | Builds the `kates` CLI from source for the compatibility gate |
 
-The Kind and kubectl pins are **not** declared in the workflow. A first step greps them out of `versions.env` into `$GITHUB_ENV`, which fails the step if either is missing — a silently empty `KIND_VERSION` would request a download URL with a hole in it and install a 404. The node image is deliberately left out of the action's inputs too: `config/cluster.yaml` names it per node, `scripts/check-versions.sh` asserts that file against `versions.env`, and passing the image as a flag as well would create a second source of truth that silently wins over the file.
+The pins are **not** declared in the workflow. The `load-versions` composite action exports them from `versions.env` into `$GITHUB_ENV`, and fails if one is missing — a silently empty `KIND_VERSION` would request a download URL with a hole in it and install a 404. The node image is deliberately left out of the action's inputs too: `config/cluster.yaml` names it per node, `scripts/check-versions.sh` asserts that file against `versions.env`, and passing the image as a flag as well would create a second source of truth that silently wins over the file.
 
 ### Validation Steps
 
 1. **Cluster readiness** — waits for all Kind nodes to reach `Ready`
 2. **Topology check** — verifies one node exists per zone (`alpha`, `sigma`, `gamma`)
 3. **CI gate** — builds the CLI and runs `kates detect --fail-on-error --quiet` to confirm the cluster is compatible with a Kafka deployment
-4. **Helm lint** — builds dependencies and lints every chart under `charts/`
-5. **YAML validation** — parses all config files under `config/`
-6. **Manifest dry-runs** — applies the storage classes, creates the namespaces, and server-side dry-runs the Kafka topic and NetworkPolicy manifests
-7. **Monitoring config check** — verifies the Jaeger Helm values files are present
+4. **Manifest dry-runs** — applies the storage classes, creates the namespaces, and server-side dry-runs the Kafka topic and NetworkPolicy manifests
+5. **Monitoring config check** — verifies the Jaeger Helm values files are present
 
 ### Key Details
 
 - The Kafka manifests are validated with `kubectl apply --dry-run=server` — the Strimzi operator is **not** installed, so this checks manifest validity against the API server rather than deploying a running Kafka cluster
-- The lint loop runs `helm dependency build` per chart with `|| true`, so a chart whose dependency cannot be fetched still gets linted. That tolerance is the reason this job does not replace the strict dependency builds in `ci.yml` and `ci-kafka-charts.yml` — it is a smoke test against a live API server, not the chart gate
-- The job has a **30-minute timeout** and posts a per-check results table to the GitHub Actions step summary
+- The job has a **30-minute timeout** and posts a per-check results table to the GitHub Actions step summary, read from each step's real outcome
 - There is no explicit teardown. `helm/kind-action` registers a post step that deletes the cluster it created, on success and on failure alike; a `kind delete` of our own would only race it
 
 ---
@@ -313,11 +316,11 @@ The Kind and kubectl pins are **not** declared in the workflow. A first step gre
 ### Process
 
 1. **Compute the matrix** — the version is derived from the tag; each platform is mapped to a native runner (amd64 → `ubuntu-latest`, arm64 → `ubuntu-24.04-arm`), so no QEMU emulation is used
-2. **Build and push per-architecture images** tagged `sha-<commit>-<arch>-<variant>` to both registries
-3. **Create multi-platform manifests** — `docker manifest create` combines the per-arch images so a single tag resolves to the correct architecture at pull time
-4. **Sign** the release manifests with Cosign keyless signing (`cosign sign --yes`), on tag builds
-5. **Verify** — pulls and inspects the published manifests
-6. **Update charts** — bumps `appVersion` in `charts/kates` and `charts/kates-chaos` on `main` and commits with `[skip ci]`
+2. **Build and push per-architecture images** tagged `sha-<commit>-<arch>-<variant>` to both registries, each with a SLSA provenance and an SPDX SBOM attestation alongside
+3. **Create multi-platform manifests** — `docker buildx imagetools create` combines the per-arch images (attestations included) so a single tag resolves to the correct architecture at pull time
+4. **Verify** — asserts every requested platform is in the merged index, then scans the published image with Trivy (fixable `CRITICAL` findings fail the release)
+5. **Sign** the release manifests with Cosign keyless signing (`cosign sign --yes`), on tag builds. The index digest comes from `docker buildx imagetools inspect`; the previous `docker manifest inspect -v | jq .digest` returned an array for a multi-arch image, so every image from 1.22.0 to 1.23.0 was "skipped" with a warning in a green job
+6. **Update charts** — bumps `appVersion` in `charts/kates` on `main` and commits with `[skip ci]`
 
 ### Image Tags
 
@@ -367,8 +370,8 @@ The tester image is referenced by the Kafka charts' test hooks — `kafka-cluste
 | **Compute Build Matrix** (`meta`) | Derives the version and the image tag from `Dockerfile.connect`, and maps each requested platform to a native runner |
 | **Build Connect (`<arch>`)** | Builds and pushes one single-arch image per platform, tagged `sha-<commit>-<arch>` |
 | **Merge Multi-Arch Manifests** | Combines them with `docker buildx imagetools create` |
-| **Sign Images** | Cosign keyless signing, on tag builds only |
-| **Verify Published Images** | Pulls the image and lists the connector plugins it actually contains |
+| **Verify Published Images** | Asserts every platform is in the index, pulls the image, lists the connector plugins it actually contains, and scans it with Trivy |
+| **Sign Images** | Cosign keyless signing, on tag builds only, after verification |
 | **Update Helm Charts** | Rewrites the image pin in `connect-cluster` on `main`, on tag builds only |
 
 ### Two Details Worth Knowing
@@ -381,12 +384,14 @@ The `update-charts` job is what keeps `charts/connect-cluster` honest: it rewrit
 
 ---
 
-## 9. Release Kates CLI (`release-cli.yml`)
+## 9. Release (`release.yml`)
 
-**Purpose:** Cross-compiles the Kates CLI for all supported platforms and creates a GitHub Release with downloadable binaries.
+**Purpose:** The one workflow a version tag starts. It cross-compiles the Kates CLI for all supported platforms, calls the three image workflows above, and — only once every image is built, verified and signed — creates the GitHub Release, updates the Homebrew tap, and `brew install`s the result on a macOS runner.
 
 **Triggers:**
 - Tag push matching `v*`
+
+The image workflows are *called* (`workflow_call`) rather than triggered by the tag themselves, so a release is one run page with every job on it in dependency order. Before this, four workflows fired on the same tag with nothing between them, and a failed image build left the tap pointing at a version whose image did not exist — with nothing red to show for it.
 
 ### Build Matrix
 
@@ -401,9 +406,11 @@ The `update-charts` job is what keeps `charts/connect-cluster` honest: it rewrit
 
 1. **Cross-compile** — `GOOS` and `GOARCH` target each platform with `CGO_ENABLED=0`; the version, commit, and build date are embedded via `-ldflags`
 2. **Compress** — each binary is compressed with `tar.gz`
-3. **Checksum** — a SHA-256 checksum is generated per artifact, plus an aggregated `checksums.txt`
-4. **Create GitHub Release** — uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
-5. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
+3. **Checksum and attest** — a SHA-256 checksum is generated per artifact, plus an aggregated `checksums.txt`; each tarball also gets a SLSA build-provenance attestation (`gh attestation verify kates-darwin-arm64.tar.gz --repo bmscomp/kates`)
+4. **Publish the images** — `publish-docker.yml`, `publish-connect.yml` and `publish-tester.yml` run as called workflows, in parallel with the CLI build
+5. **Create GitHub Release** — once the binaries and all three images are done: uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
+6. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
+7. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
 
 ### Installation
 
@@ -431,6 +438,7 @@ The following diagram shows how the workflows relate:
 ```mermaid
 graph LR
     subgraph "On Every PR / Push (parallel, path-filtered)"
+        L[lint.yml]
         A[ci.yml]
         A2[ci-kafka-charts.yml]
         A3[ci-mirror-maker2.yml]
@@ -440,28 +448,29 @@ graph LR
 
     subgraph "Weekly / on demand"
         G[metrics-live jobs]
+        S[security.yml rescan]
     end
 
-    subgraph "On Tag v* (parallel)"
+    subgraph "On Tag v*"
+        F[release.yml]
         D[publish-docker.yml]
         E[publish-tester.yml]
         H[publish-connect.yml]
-        F[release-cli.yml]
     end
 
     A2 -.->|"same workflow,<br/>different gate"| G
     A3 -.->|"same workflow,<br/>different gate"| G
-    A -.->|"merge to main + tag"| D
-    B -.->|"merge to main + tag"| E
-    C -.->|"merge to main + tag"| F
-    A2 -.->|"merge to main + tag"| H
+    F -->|"workflow_call"| D
+    F -->|"workflow_call"| E
+    F -->|"workflow_call"| H
+    D -.->|"the tag the chart pins"| S
 ```
 
-**PR / Push flow:** Every pull request and push to `main` runs the validation workflows in parallel. They are not chained — each triggers independently from its own path filter, so a chart-only change may run the chart workflows and nothing else, while a change to `cli/pkg/migrate/` runs `ci.yml`, `integration.yml` and `ci-mirror-maker2.yml`.
+**PR / Push flow:** Every pull request and push to `main` runs the validation workflows in parallel. They are not chained — each classifies the diff on its own, so a chart-only change runs the chart jobs and skips everything else, while a change to `cli/pkg/migrate/` runs jobs in `ci.yml`, `lint.yml`, `integration.yml` and `ci-mirror-maker2.yml`. Each workflow's `Gate ·` job is what branch protection requires.
 
-**Scheduled flow:** The `metrics-live` jobs are gated by an `if:` inside the chart workflows rather than by a separate file, so they share their workflow's paths and checks but run only on the weekly schedule, on a manual dispatch, or (for MirrorMaker 2) on the `test-migration` label.
+**Scheduled flow:** The `metrics-live` jobs are gated by an `if:` inside the chart workflows rather than by a separate file, so they share their workflow's paths and checks but run only on the weekly schedule, on a manual dispatch, or (for MirrorMaker 2) on the `test-migration` label. `security.yml` rescans the image tags the charts currently pin every Tuesday, and `native.yml` builds the native image nightly. A scheduled run that fails opens an issue labelled `ci-failure` (one per workflow, commented on while it stays open) instead of going unnoticed in the Actions tab.
 
-**Release flow:** When a version tag is pushed, the release workflows run in parallel — publishing the Kates Docker images, the tester image, the Connect image, and the CLI binaries.
+**Release flow:** When a version tag is pushed, `release.yml` builds the CLI and calls the three image workflows; the GitHub Release and the Homebrew tap are published only after all of them have verified and signed what they pushed.
 
 ## Environment Secrets
 
@@ -471,7 +480,7 @@ The release workflows require these GitHub repository secrets:
 |--------|---------|---------|
 | `GITHUB_TOKEN` | All workflows | Automatic — used for GHCR login, release creation, and chart-bump commits |
 | `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | `publish-docker.yml`, `publish-tester.yml`, `publish-connect.yml` | Docker Hub login for pushing images |
-| `HOMEBREW_TAP_TOKEN` | `release-cli.yml` | Pushes the updated formula to `bmscomp/homebrew-tap` |
+| `HOMEBREW_TAP_TOKEN` | `release.yml` | Pushes the updated formula to `bmscomp/homebrew-tap` |
 
 ::: {.callout-note}
 `GITHUB_TOKEN` is automatically provided by GitHub Actions; the Docker Hub and Homebrew tap credentials must be configured manually in the repository settings. Image signing uses Cosign **keyless** signing through the workflow's OIDC identity — no signing-key secrets are required.
