@@ -1,0 +1,27 @@
+name: Load toolchain pins
+description: >-
+  Exports the CI toolchain pins from versions.env (HELM_VERSION, KIND_VERSION,
+  JAVA_VERSION, ...) into GITHUB_ENV so later steps can read them from the env
+  context. Fails if a requested pin is missing: an empty version silently
+  becomes "latest" in most setup actions, which is the drift this exists to stop.
+inputs:
+  keys:
+    description: "Space-separated pin names to export (default: every CI toolchain pin)"
+    required: false
+    default: HELM_VERSION KUBECONFORM_VERSION KYVERNO_CLI_VERSION JAVA_VERSION NODE_VERSION ACTIONLINT_VERSION GOLANGCI_LINT_VERSION YAMLLINT_VERSION HADOLINT_VERSION KIND_VERSION KUBECTL_VERSION HELM_UNITTEST_VERSION
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        KEYS: ${{ inputs.keys }}
+      run: |
+        set -euo pipefail
+        for key in ${KEYS}; do
+          line=$(grep -E "^${key}=" versions.env || true)
+          if [ -z "${line}" ]; then
+            echo "::error file=versions.env::${key} is not pinned in versions.env"
+            exit 1
+          fi
+          echo "${line}" | tr -d '"' | tee -a "$GITHUB_ENV"
+        done

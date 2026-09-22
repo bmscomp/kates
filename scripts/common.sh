@@ -92,14 +92,15 @@ get_cluster_domain() {
     echo "${BLUE}----------------------------------------------${NC}" >&2
     echo "" >&2
 
-    local domains=($(echo "$search_line" | sed 's/^search//'))
+    local domains=()
+    read -r -a domains <<< "$(echo "$search_line" | sed 's/^search//')"
     local valid_domains=()
     
     # Priority: Find the entry that starts exactly with "svc."
     for d in "${domains[@]}"; do
         if [[ "$d" == svc.* ]]; then
             local clean="${d#svc.}"
-            if [ -n "$clean" ] && [[ ! " ${valid_domains[@]:-} " =~ " ${clean} " ]]; then
+            if [ -n "$clean" ] && [[ " ${valid_domains[*]:-} " != *" ${clean} "* ]]; then
                 valid_domains+=("$clean")
             fi
         fi
@@ -109,7 +110,7 @@ get_cluster_domain() {
     if [ ${#valid_domains[@]} -eq 0 ]; then
         for d in "${domains[@]}"; do
             local clean=$(echo "$d" | sed -E 's/^[^\.]+\.svc\.//' | sed -E 's/^svc\.//')
-            if [ -n "$clean" ] && [[ ! " ${valid_domains[@]:-} " =~ " ${clean} " ]]; then
+            if [ -n "$clean" ] && [[ " ${valid_domains[*]:-} " != *" ${clean} "* ]]; then
                 valid_domains+=("$clean")
             fi
         done

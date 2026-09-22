@@ -1,24 +1,42 @@
-name: CI — Kafka Connect Image
+name: CI · Connect
 
 on:
   push:
     branches: [main]
-    paths:
-      - "Dockerfile.connect"
-      - ".github/workflows/ci-connect.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "Dockerfile.connect"
-      - ".github/workflows/ci-connect.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        id: filter
+        with:
+          filters: |
+            image:
+              - 'Dockerfile.connect'
+              - 'scripts/connect-smoke-test.sh'
+              - '.github/workflows/ci-connect.yml'
+
   build-validation:
     name: Build Connect (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -30,10 +48,10 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Extract Debezium version
         id: version
@@ -43,7 +61,7 @@ jobs:
           echo "tag=${DBZ%.Final}" >> "$GITHUB_OUTPUT"
 
       - name: Build image (no push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: Dockerfile.connect
@@ -78,3 +96,15 @@ jobs:
           else
             exit "$rc"
           fi
+
+  gate:
+    name: Gate · Connect
+    if: always()
+    needs: [changes, build-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

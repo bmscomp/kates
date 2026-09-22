@@ -1,0 +1,31 @@
+# yamllint for the hand-written YAML: workflows, composite actions, config/ and
+# chart values. Deliberately lenient — this catches broken files and the
+# two or three habits that make diffs noisy (trailing whitespace, missing
+# final newline, inconsistent indentation), not style.
+extends: relaxed
+
+rules:
+  line-length: disable
+  commas: disable
+  document-start: disable
+  truthy: disable
+  comments-indentation: disable
+  comments:
+    min-spaces-from-content: 1
+  indentation:
+    spaces: consistent
+    indent-sequences: consistent
+    check-multi-line-strings: false
+  trailing-spaces: enable
+  new-line-at-end-of-file: enable
+
+ignore:
+  # Vendored upstream bundles (Litmus CRDs, Strimzi Kafka CR examples), kept
+  # byte-for-byte as published.
+  - config/litmus/
+  - config/kafka/kafka.yaml
+  # Helm templates are Go templates, not YAML, until rendered.
+  - "**/templates/"
+  - charts/*/charts/
+  # Book source and rendered output.
+  - docs/book/_book/

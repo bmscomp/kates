@@ -1,49 +1,36 @@
-name: Backend CI
+name: CI · Backend
+
+# Every job is path-filtered by the `changes` job below rather than by a
+# workflow-level `paths:` block. The difference matters for branch protection:
+# a workflow that never starts never reports a check, and a required check that
+# never reports blocks the merge forever. A job that starts and skips itself
+# counts as passed. `gate` is the only job the ruleset requires.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "kates/**"
-      - "cli/**"
-      - "charts/**"
-      - "config/**"
-      - "images.env"
-      - "versions.env"
-      - "scripts/check-versions.sh"
-      - ".github/workflows/ci.yml"
-      - "!**/*.md"
   pull_request:
     branches: [main]
-    paths:
-      - "kates/**"
-      - "cli/**"
-      - "charts/**"
-      - "config/**"
-      - "images.env"
-      - "versions.env"
-      - "scripts/check-versions.sh"
-      - ".github/workflows/ci.yml"
-      - "!**/*.md"
 
 permissions:
   contents: read
-  checks: write
 
-env:
-  JAVA_VERSION: "21"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
       helm: ${{ steps.filter.outputs.helm }}
       yaml: ${{ steps.filter.outputs.yaml }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         id: filter
         with:
           filters: |
@@ -53,6 +40,7 @@ jobs:
               - 'images.env'
               - 'versions.env'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             helm:
               - 'charts/**'
               - 'versions.env'
@@ -68,10 +56,16 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write # action-junit-report publishes a check run
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-java@v4
+      - uses: ./.github/actions/load-versions
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -83,7 +77,7 @@ jobs:
 
       - name: Publish test results
         if: always()
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@3585e9575db828022551b4231f165eb59a0e74e3 # v5.6.2
         with:
           # `mvnw verify` runs surefire (*Test) AND failsafe (*IT). Globbing
           # only surefire meant every integration-test result — including
@@ -96,17 +90,51 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: jacoco-report
           path: kates/target/jacoco-report/
           if-no-files-found: ignore
 
-      # Dependency CVE scan — the pom manually pins kafka-clients/netty for
-      # named CVEs; this catches the next ones instead of relying on memory.
-      # CRITICAL fails the build; HIGH and below are reported only.
-      - name: Dependency CVE scan (Trivy)
-        uses: aquasecurity/trivy-action@v0.36.0
+      # The floor is enforced by jacoco:check in the pom; this puts the number
+      # where a reviewer sees it without downloading the artifact.
+      - name: Coverage summary
+        if: always()
+        run: |
+          xml=kates/target/jacoco-report/jacoco.xml
+          if [ ! -f "${xml}" ]; then
+            echo "no coverage report produced" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 - "${xml}" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          print("### JaCoCo coverage\n")
+          print("| Counter | Covered | Missed | Ratio |")
+          print("|---|---:|---:|---:|")
+          for c in root.findall("counter"):
+              cov, mis = int(c.get("covered")), int(c.get("missed"))
+              total = cov + mis
+              print(f"| {c.get('type').title()} | {cov} | {mis} | {cov/total:.1%} |" if total else f"| {c.get('type').title()} | 0 | 0 | n/a |")
+          PY
+
+  # Dependency CVE scan — the pom manually pins kafka-clients/netty for
+  # named CVEs; this catches the next ones instead of relying on memory.
+  # CRITICAL fails the build; HIGH and below are reported only. Its own job
+  # rather than a tail step of the test job, so a new CVE and a failing test
+  # are two different red checks, and the scan does not wait six minutes for
+  # a build it does not need.
+  dependency-scan:
+    name: Dependency CVE scan
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Maven dependencies (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: kates
@@ -121,17 +149,35 @@ jobs:
           # the reasoning goes unread. Every entry in it carries an expiry.
           trivyignores: .trivyignore.yaml
 
+      # govulncheck rather than a second Trivy pass for the CLI: it reports
+      # only vulnerabilities in functions the binary actually reaches, so a
+      # finding here is a finding, not a transitive module nobody calls.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Go modules (govulncheck)
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          work-dir: cli
+          go-package: ./...
+          go-version-input: ""
+
   helm-lint:
     name: Helm Lint
     needs: changes
     if: needs.changes.outputs.helm == 'true' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.17.0
+          version: ${{ env.HELM_VERSION }}
 
       - name: Lint kates chart
         run: helm lint charts/kates/
@@ -196,18 +242,12 @@ jobs:
       # Helm repos; kates-platform resolves local file:// deps. minio and
       # apicurio-registry vendor their dependencies in-tree, so they are left
       # untouched (their upstream Bitnami repo is deprecated).
+      # mirror-maker2 and connect-cluster come before kates-platform: the
+      # umbrella packages its file:// subcharts as they are on disk.
       - name: Build chart dependencies
-        run: |
-          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-          helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo update
-          # mirror-maker2 and connect-cluster come before kates-platform: the
-          # umbrella packages its file:// subcharts as they are on disk.
-          for chart in kafka-cluster kates-chaos monitoring mirror-maker2 connect-cluster kates-platform; do
-            echo "==> helm dependency build charts/${chart}/"
-            scripts/retry.sh 5 helm dependency build "charts/${chart}/"
-          done
+        uses: ./.github/actions/helm-deps
+        with:
+          charts: kafka-cluster kates-chaos monitoring mirror-maker2 connect-cluster kates-platform
 
       - name: Lint and template all charts
         run: |
@@ -224,13 +264,9 @@ jobs:
           exit ${rc}
 
       - name: Install kubeconform
-        run: |
-          # --fail and retries: a release-asset hiccup once saved an HTML error page
-          # in place of the archive, which tar rejected as "not in gzip format".
-          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/kubeconform.tgz \
-            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
-          tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
-          sudo mv /tmp/kubeconform /usr/local/bin/
+        uses: ./.github/actions/install-tools
+        with:
+          kubeconform: "true"
 
       # Rendered manifests must satisfy the Kubernetes OpenAPI schemas and,
       # for CRs (Strimzi, Litmus, Velero, Kyverno, monitoring), the community
@@ -257,31 +293,33 @@ jobs:
 
   kyverno-policy-test:
     name: Kyverno Policy Validation
+    needs: changes
+    if: needs.changes.outputs.helm == 'true' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.17.0
+          version: ${{ env.HELM_VERSION }}
 
       - name: Install Kyverno CLI
-        run: |
-          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -O "https://github.com/kyverno/kyverno/releases/download/v1.13.0/kyverno-cli_v1.13.0_linux_x86_64.tar.gz"
-          tar -xzf kyverno-cli_*.tar.gz
-          sudo mv kyverno /usr/local/bin/
-          kyverno version
+        uses: ./.github/actions/install-tools
+        with:
+          kyverno: "true"
 
       # kates-chaos depends on litmus-core from the LitmusChaos repo. Only the
       # Helm Lint job added the repo, so `helm dependency build
       # charts/kates-chaos/` in the last step of this job died with "no
       # repository definition for https://litmuschaos.github.io/litmus-helm/"
       # — every run of this job that got that far was red.
-      - name: Add chart repositories
-        run: helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
-
       - name: Fetch chart dependencies
-        run: scripts/retry.sh 5 helm dependency build charts/kates/
+        uses: ./.github/actions/helm-deps
+        with:
+          charts: kates kafka-cluster kates-chaos
 
       - name: Validate kates policies
         run: |
@@ -292,8 +330,11 @@ jobs:
             > /tmp/kates-policies.yaml
           echo "--- Rendered kates policies ---"
           head -5 /tmp/kates-policies.yaml
+          # `|| true` used to follow this: the step could not fail, so the
+          # policies were rendered and never actually applied to anything as
+          # far as CI could tell. The deployment manifest is meant to pass.
           kyverno apply /tmp/kates-policies.yaml \
-            --resource kates/k8s/deployment.yaml 2>&1 || true
+            --resource kates/k8s/deployment.yaml
 
       - name: Validate kates workload policies
         run: |
@@ -306,8 +347,6 @@ jobs:
 
       - name: Validate kafka policies
         run: |
-          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-          scripts/retry.sh 5 helm dependency build charts/kafka-cluster/
           helm template kafka charts/kafka-cluster/ \
             --set kyvernoPolicy.enabled=true \
             --api-versions kyverno.io/v1 \
@@ -317,7 +356,6 @@ jobs:
 
       - name: Validate chaos policies
         run: |
-          scripts/retry.sh 5 helm dependency build charts/kates-chaos/
           helm template chaos charts/kates-chaos/ \
             --set kyvernoPolicy.enabled=true \
             --api-versions kyverno.io/v1 \
@@ -330,8 +368,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.yaml == 'true' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install PyYAML
         run: pip install --quiet pyyaml
@@ -361,17 +400,31 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
       - name: Run Go tests
         working-directory: cli
-        run: go test -p 1 ./... -v -race -count=1
+        run: go test -p 1 ./... -v -race -count=1 -coverprofile=coverage.out
+
+      - name: Coverage summary
+        if: always()
+        working-directory: cli
+        run: |
+          [ -f coverage.out ] || exit 0
+          {
+            echo "### Go coverage"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Runs the REAL binary under the conditions scripts and CI use it in:
       # piped stdout, NO_COLOR, TERM=dumb, --plain, KATES_ASCII, unset locale,
@@ -387,3 +440,15 @@ jobs:
         env:
           GOMEMLIMIT: 2GiB
           GOGC: 50
+
+  gate:
+    name: Gate · Backend
+    if: always()
+    needs: [changes, build-and-test, dependency-scan, helm-lint, kyverno-policy-test, yaml-validation, go-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

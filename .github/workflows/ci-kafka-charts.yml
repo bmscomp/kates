@@ -26,56 +26,8 @@ name: CI — Kafka charts
 on:
   push:
     branches: [main]
-    paths:
-      - "charts/kafka-cluster/**"
-      - "charts/connect-cluster/**"
-      - "charts/mirror-maker2/**"
-      - "charts/kafka-common/**"
-      - "charts/strimzi-operator/**"
-      # Delivers the Kafka and Kates boards; the dashboards job renders it.
-      - "charts/monitoring/**"
-      # Delivers kates-overview and kyverno-security; likewise.
-      - "charts/kates/**"
-      # Delivers kates-chaos-infra; likewise.
-      - "charts/kates-chaos/**"
-      - "scripts/check-strimzi-crs.py"
-      - "scripts/check-strimzi-metrics.sh"
-      - "scripts/check-chart-matrix.py"
-      - "scripts/chart-matrix/**"
-      - "scripts/check-metric-contract.sh"
-      - "scripts/metric-contract/**"
-      - "dashboards/**"
-      - "scripts/gen-dashboards.py"
-      - "scripts/check-dashboards.py"
-      - "images.env"
-      - "versions.env"
-      - ".github/workflows/ci-kafka-charts.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "charts/kafka-cluster/**"
-      - "charts/connect-cluster/**"
-      - "charts/mirror-maker2/**"
-      - "charts/kafka-common/**"
-      - "charts/strimzi-operator/**"
-      # Delivers the Kafka and Kates boards; the dashboards job renders it.
-      - "charts/monitoring/**"
-      # Delivers kates-overview and kyverno-security; likewise.
-      - "charts/kates/**"
-      # Delivers kates-chaos-infra; likewise.
-      - "charts/kates-chaos/**"
-      - "scripts/check-strimzi-crs.py"
-      - "scripts/check-strimzi-metrics.sh"
-      - "scripts/check-chart-matrix.py"
-      - "scripts/chart-matrix/**"
-      - "scripts/check-metric-contract.sh"
-      - "scripts/metric-contract/**"
-      - "dashboards/**"
-      - "scripts/gen-dashboards.py"
-      - "scripts/check-dashboards.py"
-      - "images.env"
-      - "versions.env"
-      - ".github/workflows/ci-kafka-charts.yml"
   workflow_dispatch:
   # metrics-live: weekly, and on demand.
   schedule:
@@ -84,11 +36,51 @@ on:
 permissions:
   contents: read
 
-env:
-  HELM_VERSION: v3.17.0
-  KUBECONFORM_VERSION: v0.6.7
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # Scheduled and manual runs have no diff to filter on: everything runs.
+      charts: ${{ steps.filter.outputs.charts || 'true' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            charts:
+              - 'charts/kafka-cluster/**'
+              - 'charts/connect-cluster/**'
+              - 'charts/mirror-maker2/**'
+              - 'charts/kafka-common/**'
+              - 'charts/strimzi-operator/**'
+              # Delivers the Kafka and Kates boards; the dashboards job renders it.
+              - 'charts/monitoring/**'
+              # Delivers kates-overview and kyverno-security; likewise.
+              - 'charts/kates/**'
+              # Delivers kates-chaos-infra; likewise.
+              - 'charts/kates-chaos/**'
+              - 'scripts/check-strimzi-crs.py'
+              - 'scripts/check-strimzi-metrics.sh'
+              - 'scripts/check-chart-matrix.py'
+              - 'scripts/chart-matrix/**'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'dashboards/**'
+              - 'scripts/gen-dashboards.py'
+              - 'scripts/check-dashboards.py'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-kafka-charts.yml'
+              - '.github/actions/**'
+
   # Every board in dashboards/ is generated, and every chart copy of one is
   # generated from the same source. This job proves both, holds every board to
   # the layout and documentation rules, and puts every query on every board
@@ -98,11 +90,16 @@ jobs:
   # as a dashboards/ copy.
   dashboards:
     name: Dashboards
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -367,19 +364,23 @@ jobs:
   # asserts on the output — including the refusals.
   library:
     name: kafka-common
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
       - name: Install helm-unittest (the pinned version)
         run: |
           set -euo pipefail
-          V=$(grep -E '^HELM_UNITTEST_VERSION=' versions.env | sed -E 's/^[^=]+="?//; s/"$//')
-          helm plugin install https://github.com/helm-unittest/helm-unittest --version "$V"
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}"
 
       - name: Lint and unit-test the library
         run: |
@@ -397,7 +398,10 @@ jobs:
 
   matrix:
     name: ${{ matrix.chart }}
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -407,21 +411,22 @@ jobs:
         # renders is a toggle nothing checks.
         chart: [strimzi-operator, kafka-cluster, connect-cluster, mirror-maker2, monitoring]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Install kubeconform, promtool and PyYAML
+      - name: Install kubeconform
+        uses: ./.github/actions/install-tools
+        with:
+          kubeconform: "true"
+
+      - name: Install promtool and PyYAML
         run: |
           set -euo pipefail
-          # --fail and retries: a release-asset hiccup once saved an HTML error page
-          # in place of the archive, which tar rejected as "not in gzip format".
-          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/kubeconform.tgz \
-            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
-          tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
-          sudo mv /tmp/kubeconform /usr/local/bin/
           PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
           curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
             "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
@@ -469,8 +474,7 @@ jobs:
         if: hashFiles(format('charts/{0}/tests/*_test.yaml', matrix.chart)) != ''
         run: |
           set -euo pipefail
-          V=$(grep -E '^HELM_UNITTEST_VERSION=' versions.env | sed -E 's/^[^=]+="?//; s/"$//')
-          helm plugin install https://github.com/helm-unittest/helm-unittest --version "$V"
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}"
           helm unittest "charts/${{ matrix.chart }}"
 
       - name: The packaged chart carries no unit tests
@@ -493,32 +497,34 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write # notify-scheduled-failure
     strategy:
       fail-fast: false
       matrix:
         chart: [kafka-cluster, connect-cluster]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Load toolchain pins from versions.env
-        run: |
-          set -euo pipefail
-          grep -E '^(KIND_VERSION|KUBECTL_VERSION|STRIMZI_KAFKA_VERSION)=' versions.env | tr -d '"' | tee -a "$GITHUB_ENV"
+      - uses: ./.github/actions/load-versions
+        with:
+          keys: HELM_VERSION KIND_VERSION KUBECTL_VERSION STRIMZI_KAFKA_VERSION
 
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
       - name: Install PyYAML
         run: pip install --quiet pyyaml
 
       - name: Create kind cluster (3-zone topology)
-        uses: helm/kind-action@v1.15.0
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           version: ${{ env.KIND_VERSION }}
           kubectl_version: ${{ env.KUBECTL_VERSION }}
@@ -701,7 +707,7 @@ jobs:
 
       # The captures outlive the job, so a NOTE about an uncatalogued series
       # can be turned into a catalogue entry without re-running the cluster.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: ${{ matrix.chart }}-metrics-scrape
@@ -720,9 +726,27 @@ jobs:
             kubectl -n kafka logs "$p" --all-containers --tail=300 > "/tmp/diag/$(basename "$p").log" 2>&1 || true
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: ${{ matrix.chart }}-metrics-live-diagnostics
           path: /tmp/diag/
           retention-days: 7
+
+      - name: Open an issue for a failed weekly run
+        if: failure() && github.event_name == 'schedule'
+        uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  gate:
+    name: Gate · Kafka charts
+    if: always()
+    needs: [changes, dashboards, library, matrix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

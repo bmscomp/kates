@@ -1,4 +1,4 @@
-name: Publish Helm Charts
+name: Publish · Helm charts
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Packages every chart in charts/ and pushes it to the OCI registry:
@@ -34,6 +34,10 @@ permissions:
   packages: write
   id-token: write # cosign keyless signing
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CHART_REGISTRY: oci://ghcr.io/bmscomp/charts
 
@@ -41,15 +45,18 @@ jobs:
   publish:
     name: Package, Push & Sign Charts
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.17.0
+          version: ${{ env.HELM_VERSION }}
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
 
       - name: Log in to GHCR
         run: |
@@ -61,21 +68,14 @@ jobs:
       # which packages its file:// subcharts as they are on disk. minio and
       # apicurio-registry vendor theirs in-tree and are left alone.
       - name: Build chart dependencies
-        run: |
-          set -euo pipefail
-          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-          helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo update
-          for chart in strimzi-operator kafka-cluster kates-chaos monitoring mirror-maker2 kates-platform; do
-            scripts/retry.sh 5 helm dependency build "charts/${chart}/"
-          done
+        uses: ./.github/actions/helm-deps
+        with:
+          charts: strimzi-operator kafka-cluster kates-chaos monitoring mirror-maker2 kates-platform
 
       - name: Package charts
         run: |
           mkdir -p .build
           for chart in charts/*/; do
-            name=$(basename "${chart}")
             helm package "${chart}" --destination .build/
           done
           ls -1 .build/
