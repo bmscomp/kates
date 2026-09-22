@@ -28,8 +28,8 @@ jobs:
       go: ${{ steps.filter.outputs.go || 'true' }}
       java: ${{ steps.filter.outputs.java || 'true' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         id: filter
         with:
@@ -68,7 +68,7 @@ jobs:
             changed: ${{ needs.changes.outputs.java }}
     steps:
       # A matrix leg cannot skip itself at the job level, so the steps do.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: matrix.changed == 'true'
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

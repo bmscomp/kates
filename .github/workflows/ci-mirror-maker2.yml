@@ -58,8 +58,8 @@ jobs:
       # Scheduled and manual runs have no diff to filter on: everything runs.
       chart: ${{ steps.filter.outputs.chart || 'true' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         id: filter
         with:
@@ -93,7 +93,7 @@ jobs:
       # fetch-depth: 0 for the render-diff step at the end of this job: it has
       # to resolve the commit that last carried a DIFFERENT chart version, and
       # a shallow clone has no history to walk.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -1225,7 +1225,7 @@ jobs:
       matrix:
         source: ${{ github.event.inputs.source_version == '2.8.2' && fromJSON('["2.8.2"]') || github.event.inputs.source_version == '3.9.1' && fromJSON('["3.9.1"]') || fromJSON('["2.8.2","3.9.1"]') }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Same shape as ci-apicurio.yml on purpose: the kind version and kubectl
       # come from versions.env, the node image from config/cluster.yaml, and
@@ -1358,7 +1358,7 @@ jobs:
       contents: read
       issues: write # notify-scheduled-failure
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/load-versions
 
@@ -1493,7 +1493,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/ci-gate
         with:
           needs: ${{ toJSON(needs) }}
