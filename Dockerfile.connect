@@ -6,7 +6,7 @@ FROM quay.io/strimzi/kafka:1.2.0-kafka-4.3.1 AS base
 #
 # Plugin versions are pinned as build args for easy upgrades.
 #
-FROM eclipse-temurin:21-jre-alpine AS download
+FROM eclipse-temurin:25-jre-alpine AS download
 
 ARG DEBEZIUM_VERSION=3.6.2.Final
 ARG APICURIO_VERSION=3.3.0
