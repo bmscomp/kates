@@ -11,6 +11,10 @@ on:
     paths:
       - "docs/book/**"
       - ".github/workflows/book.yml"
+  # The PDF half of this job runs on everything except a pull request, so a
+  # manual run is how it gets exercised without pushing to main. It renders
+  # the PDF but publishes nothing: the upload and deploy stay on push.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,12 +32,40 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2.2.0
-        with:
-          tinytex: ${{ github.event_name == 'push' }}
+        # tinytex is NOT installed through the action's input: that runs inside
+        # the setup step, so a hiccup fetching it fails the whole job before a
+        # single page is rendered. It is installed below instead, where it can
+        # fail without taking the site down with it.
 
-      - name: Install Chromium for mermaid PDF rendering
-        if: github.event_name == 'push'
-        run: quarto install chromium --no-prompt
+      # Both tools serve the PDF and nothing else, so they are best-effort like
+      # the render they feed.
+      #
+      # `quarto install` resolves the latest release through the GitHub API
+      # (getLatestRelease in quarto-cli's src/tools/github.ts), unauthenticated
+      # unless GH_TOKEN is set — and the API answers a shared runner IP with
+      # `403 - Forbidden` often enough to matter: that is what failed the Book
+      # run on main for 4035f59, in the setup step, before the HTML render that
+      # needs none of this. The token moves the call onto this repository's own
+      # rate limit; the retry covers the rest.
+      - name: Install the PDF toolchain — TinyTeX and Chromium (best-effort)
+        id: pdf-toolchain
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          scripts/retry.sh 3 quarto install tool tinytex --no-prompt --log-level warning
+          # What the setup action does after installing TinyTeX on Linux, and
+          # the reason this step cannot just call quarto: without it xelatex
+          # and tlmgr are installed but not on PATH for the render below.
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          scripts/retry.sh 3 quarto install chromium --no-prompt
+
+      - name: Note a degraded PDF build
+        if: github.event_name != 'pull_request' && steps.pdf-toolchain.outcome != 'success'
+        run: |
+          echo "::warning::The PDF toolchain would not install, so the site is published without the PDF and its download link will 404 until the next successful run. The HTML site is unaffected."
 
       # Sources are GitHub-flavored .md so chapters render in the repo file
       # view; Quarto executes mermaid only in .qmd. The script converts
@@ -49,7 +81,9 @@ jobs:
       # outside _book because the HTML render cleans the output dir
       # (observed: run 29367138974 built the PDF, then lost it).
       - name: Render PDF (best-effort)
-        if: github.event_name == 'push'
+        # Skipped outright when the toolchain above did not install, rather
+        # than spending 25 minutes on a render that cannot succeed.
+        if: github.event_name != 'pull_request' && steps.pdf-toolchain.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 25
         run: |
@@ -60,7 +94,7 @@ jobs:
         run: quarto render docs/book --to html
 
       - name: Attach PDF to site
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           if [ -f "$RUNNER_TEMP/kates-definitive-guide.pdf" ]; then
             mv "$RUNNER_TEMP/kates-definitive-guide.pdf" docs/book/_book/
