@@ -16,6 +16,13 @@ book:
   repo-subdir: docs/book
   repo-actions: [edit, issue]
   search: true
+  # Names the PDF *and* the download link below. It belongs here, not under
+  # `format: pdf:` where it sat and was ignored: for a book, the single-file
+  # name comes from this key, so quarto emitted the title-derived
+  # "Kates-—-The-Definitive-Guide.pdf" while the workflow stashed
+  # "kates-definitive-guide.pdf" — which is why every published site has
+  # linked to a PDF that 404s.
+  output-file: kates-definitive-guide
   sidebar:
     logo: assets/kates-wordmark.svg
   downloads: [pdf]
@@ -86,7 +93,6 @@ format:
     mermaid:
       theme: neutral
   pdf:
-    output-file: kates-definitive-guide
     documentclass: scrbook
     papersize: a4
     fontsize: 11pt

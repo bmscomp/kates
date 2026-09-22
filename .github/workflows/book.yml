@@ -80,6 +80,14 @@ jobs:
       # successful run — acceptable degradation. The PDF is stashed
       # outside _book because the HTML render cleans the output dir
       # (observed: run 29367138974 built the PDF, then lost it).
+      #
+      # The stash takes whatever file quarto produced rather than a name
+      # written out here. The two had drifted — quarto wrote
+      # "Kates-—-The-Definitive-Guide.pdf", this moved
+      # "kates-definitive-guide.pdf" — so the mv failed on every run,
+      # continue-on-error swallowed it, and each publish reported "no PDF
+      # this run" after a PDF had built perfectly well. A render that
+      # produces nothing is now an error rather than a silent skip.
       - name: Render PDF (best-effort)
         # Skipped outright when the toolchain above did not install, rather
         # than spending 25 minutes on a render that cannot succeed.
@@ -87,8 +95,16 @@ jobs:
         continue-on-error: true
         timeout-minutes: 25
         run: |
+          set -euo pipefail
           quarto render docs/book --to pdf
-          mv docs/book/_book/kates-definitive-guide.pdf "$RUNNER_TEMP/"
+          pdf=$(find docs/book/_book -maxdepth 1 -name '*.pdf' -print -quit)
+          if [ -z "${pdf}" ]; then
+            echo "::error::quarto rendered without error but produced no PDF"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/book-pdf"
+          mv "${pdf}" "$RUNNER_TEMP/book-pdf/"
+          echo "stashed $(basename "${pdf}")"
 
       - name: Render HTML
         run: quarto render docs/book --to html
@@ -96,12 +112,15 @@ jobs:
       - name: Attach PDF to site
         if: github.event_name != 'pull_request'
         run: |
-          if [ -f "$RUNNER_TEMP/kates-definitive-guide.pdf" ]; then
-            mv "$RUNNER_TEMP/kates-definitive-guide.pdf" docs/book/_book/
-            echo "PDF attached to site output"
-          else
-            echo "No PDF this run (best-effort render failed) — download link will 404"
+          set -euo pipefail
+          shopt -s nullglob
+          pdfs=("$RUNNER_TEMP"/book-pdf/*.pdf)
+          if [ ${#pdfs[@]} -eq 0 ]; then
+            echo "::warning::No PDF this run — the site is published without it and its download link will 404 until the next successful run"
+            exit 0
           fi
+          mv "${pdfs[@]}" docs/book/_book/
+          echo "attached $(basename "${pdfs[0]}") to the site output"
 
       - name: Upload site artifact
         if: github.event_name == 'push'
