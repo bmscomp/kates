@@ -1,4 +1,4 @@
-name: CI — Kafka charts
+name: CI · Kafka charts
 
 # The Strimzi charts (strimzi-operator, kafka-cluster, connect-cluster,
 # mirror-maker2, and the kafka-common library they share) checked the way
