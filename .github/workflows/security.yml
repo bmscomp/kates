@@ -77,7 +77,10 @@ jobs:
             connect)      ref=$(grep -m1 '^image:' "${REF}" | awk '{print $2}' | tr -d '"') ;;
             kates-tester) ref=$(grep -m1 'ghcr.io/bmscomp/kates-tester:' "${REF}" | sed -E 's/.*(ghcr.io\/bmscomp\/kates-tester:[^"]+).*/\1/') ;;
           esac
-          [ -n "${ref}" ] && [[ "${ref}" == *:* ]] || { echo "::error::could not resolve the ${IMAGE} image from ${REF}"; exit 1; }
+          if [ -z "${ref}" ] || [[ "${ref}" != *:* ]]; then
+            echo "::error::could not resolve the ${IMAGE} image from ${REF}"
+            exit 1
+          fi
           echo "ref=${ref}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Scan (Trivy)
