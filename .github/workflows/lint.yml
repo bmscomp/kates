@@ -1,0 +1,218 @@
+name: CI · Lint
+
+# Static checks on the things that are not Java or Go source: the workflows
+# themselves (4,500 lines of YAML, most of it inline bash), the scripts they
+# run, the Dockerfiles, the hand-written YAML, plus the formatters for both
+# codebases. Everything here is seconds, so it runs on every PR and gates.
+#
+# golangci-lint is the one check with a backlog (several hundred errcheck and
+# staticcheck findings). It runs with only-new-issues so a PR is held to the
+# code it touches, and the backlog is paid down file by file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      workflows: ${{ steps.filter.outputs.workflows }}
+      scripts: ${{ steps.filter.outputs.scripts }}
+      dockerfiles: ${{ steps.filter.outputs.dockerfiles }}
+      yaml: ${{ steps.filter.outputs.yaml }}
+      go: ${{ steps.filter.outputs.go }}
+      java: ${{ steps.filter.outputs.java }}
+      makefile: ${{ steps.filter.outputs.makefile }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        id: filter
+        with:
+          filters: |
+            workflows:
+              - '.github/**'
+              - 'versions.env'
+            scripts:
+              - 'scripts/**'
+              - 'kates-ci.sh'
+              - '.github/workflows/lint.yml'
+            dockerfiles:
+              - '**/Dockerfile*'
+              - '.github/workflows/lint.yml'
+            yaml:
+              - '**/*.yml'
+              - '**/*.yaml'
+              - '.yamllint.yaml'
+            go:
+              - 'cli/**'
+              - '.github/workflows/lint.yml'
+            java:
+              - 'kates/**'
+              - '.github/workflows/lint.yml'
+            makefile:
+              - 'Makefile'
+              - '.github/workflows/lint.yml'
+
+  workflows:
+    name: actionlint
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/load-versions
+
+      # actionlint runs shellcheck over every `run:` block (shellcheck ships
+      # on the runner image) and checks expressions, action inputs, runner
+      # labels and the workflow schema.
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          bash <(curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") \
+            "${ACTIONLINT_VERSION}" "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+
+      - name: actionlint
+        run: actionlint -color
+
+      # The pins live in versions.env; a workflow that hardcodes one again
+      # fails here (scripts/check-versions.sh --workflows).
+      - name: No toolchain pin is hardcoded in a workflow
+        run: scripts/check-versions.sh --workflows
+
+  scripts:
+    name: shellcheck
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: shellcheck every script
+        run: |
+          set -euo pipefail
+          shellcheck --version | head -2
+          # -x follows `source`. SC2317 is unavoidable noise for EXIT-trap
+          # cleanup functions; SC2034 (unused variable) and SC2155 (declare
+          # and assign) are informational in sourced libraries and colour
+          # tables, and are excluded rather than fixed across 72 scripts.
+          shellcheck -x -S warning -e SC2317,SC2034,SC2155 scripts/*.sh kates-ci.sh
+
+  dockerfiles:
+    name: hadolint
+    needs: changes
+    if: needs.changes.outputs.dockerfiles == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/load-versions
+      - name: Install hadolint
+        run: |
+          set -euo pipefail
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o "${RUNNER_TEMP}/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          chmod +x "${RUNNER_TEMP}/hadolint"
+          echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+      # Errors fail; warnings (unpinned apt packages, pipes without pipefail)
+      # are printed for the reviewer and tightened one Dockerfile at a time.
+      - name: hadolint
+        run: |
+          hadolint --failure-threshold error \
+            kates/Dockerfile kates/Dockerfile.native \
+            Dockerfile.connect Dockerfile.legacy-kafka tester/Dockerfile
+
+  yaml:
+    name: yamllint
+    needs: changes
+    if: needs.changes.outputs.yaml == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/load-versions
+      - name: Install yamllint
+        run: pip install --quiet "yamllint==${YAMLLINT_VERSION}"
+      # Errors fail; warnings are shown. Scope and ignores are in .yamllint.yaml.
+      - name: yamllint
+        run: yamllint -c .yamllint.yaml -f github .github config charts
+
+  go:
+    name: golangci-lint
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: go vet
+        working-directory: cli
+        run: go vet ./...
+
+      - name: golangci-lint (new issues only)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: cli
+          only-new-issues: true
+
+  java:
+    name: spotless
+    needs: changes
+    if: needs.changes.outputs.java == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      # spotless is configured in the pom but `verify` never ran it.
+      - name: spotless:check
+        working-directory: kates
+        run: ./mvnw -B -ntp -q spotless:check
+
+  makefile:
+    name: make check-help
+    needs: changes
+    if: needs.changes.outputs.makefile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: make check-help
+
+  gate:
+    name: Gate · Lint
+    if: always()
+    needs: [changes, workflows, scripts, dockerfiles, yaml, go, java, makefile]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

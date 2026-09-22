@@ -1,0 +1,28 @@
+name: Fetch Helm chart dependencies
+description: >-
+  Adds the classic Helm repositories the charts depend on and runs
+  `helm dependency build` for each requested chart, in the order given, with
+  the repository's retry wrapper. Order matters for the umbrella: kates-platform
+  packages its file:// subcharts as they are on disk, so their own dependencies
+  have to be built first. minio and apicurio-registry vendor theirs in-tree and
+  are never listed here.
+inputs:
+  charts:
+    description: Space-separated chart directory names under charts/, built in this order
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CHARTS: ${{ inputs.charts }}
+      run: |
+        set -euo pipefail
+        helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+        helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo update
+        for chart in ${CHARTS}; do
+          echo "==> helm dependency build charts/${chart}/"
+          scripts/retry.sh 5 helm dependency build "charts/${chart}/"
+        done

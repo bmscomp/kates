@@ -1,0 +1,24 @@
+name: Log in to Docker Hub and GHCR
+description: The two registry logins every publish job starts with.
+inputs:
+  dockerhub-username:
+    required: true
+  dockerhub-token:
+    required: true
+  github-token:
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Log in to Docker Hub
+      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      with:
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-token }}
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}

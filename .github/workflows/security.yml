@@ -1,0 +1,120 @@
+name: Security
+
+# Two things the per-PR scans cannot do.
+#
+# dependency-review looks at the DIFF of a pull request's dependency manifests
+# and fails when it adds a package with a known high-or-worse vulnerability —
+# Trivy in CI · Backend scans the whole tree and would report the same CVE,
+# but this one says which line introduced it, in the PR.
+#
+# rescan-released checks the images the charts currently pin against today's
+# vulnerability database. A release is scanned when it is built; a CVE
+# published the week after is only found by scanning again.
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Tuesday 06:00 UTC, after the weekend's advisories land.
+    - cron: "0 6 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # the summary comment on failure
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The action needs the repository's dependency graph (Settings →
+      # Code security → Dependency graph), which is a repository setting no
+      # workflow can turn on. Until it is, skip with a warning that says so
+      # rather than failing every pull request with the same message.
+      - name: Is the dependency graph enabled?
+        id: graph
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASEHEAD: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASEHEAD}" > /dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Dependency review skipped: the dependency graph is not enabled for ${GITHUB_REPOSITORY} (Settings → Code security, or: gh api -X PUT repos/${GITHUB_REPOSITORY}/vulnerability-alerts)"
+          fi
+
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: steps.graph.outputs.enabled == 'true'
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  rescan-released:
+    name: Rescan ${{ matrix.image }}
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write # notify-scheduled-failure
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: kates
+            ref: charts/kates/values.yaml
+          - image: connect
+            ref: charts/connect-cluster/values.yaml
+          - image: kates-tester
+            ref: charts/kafka-cluster/values.yaml
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The tag the chart deploys, read from the chart, so this scans what a
+      # `helm install` today would actually run.
+      - name: Resolve the pinned image
+        id: pin
+        env:
+          IMAGE: ${{ matrix.image }}
+          REF: ${{ matrix.ref }}
+        run: |
+          set -euo pipefail
+          case "${IMAGE}" in
+            kates)        tag=$(awk '/repository: ghcr.io\/bmscomp\/kates$/ {getline; print $2}' "${REF}" | tr -d '"'); ref="ghcr.io/bmscomp/kates:${tag}" ;;
+            connect)      ref=$(grep -m1 '^image:' "${REF}" | awk '{print $2}' | tr -d '"') ;;
+            kates-tester) ref=$(grep -m1 'ghcr.io/bmscomp/kates-tester:' "${REF}" | sed -E 's/.*(ghcr.io\/bmscomp\/kates-tester:[^"]+).*/\1/') ;;
+          esac
+          if [ -z "${ref}" ] || [[ "${ref}" != *:* ]]; then
+            echo "::error::could not resolve the ${IMAGE} image from ${REF}"
+            exit 1
+          fi
+          echo "ref=${ref}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Scan (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.pin.outputs.ref }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+
+      - name: Open an issue for a failed weekly scan
+        if: failure() && github.event_name == 'schedule'
+        uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

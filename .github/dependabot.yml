@@ -9,6 +9,19 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
+  # The Connect and legacy-Kafka images (root Dockerfiles) and the tester
+  # image were not covered: only /kates was.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directory: /tester
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
   # Maven dependencies (Quarkus BOM, kafka-clients/netty CVE pins, etc.).
   - package-ecosystem: maven
     directory: /kates
@@ -16,8 +29,20 @@ updates:
       interval: weekly
     open-pull-requests-limit: 10
 
-  # GitHub Actions used across the workflows.
+  # GitHub Actions used across the workflows. Every `uses:` is pinned to a
+  # commit SHA with a `# vX.Y.Z` comment; Dependabot bumps both together.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # One PR per week for the whole set rather than one per action.
+      actions:
+        patterns: ["*"]
+
+  # The Go CLI: go.mod/go.sum were not on Dependabot at all.
+  - package-ecosystem: gomod
+    directory: /cli
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

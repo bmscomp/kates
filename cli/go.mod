@@ -2,6 +2,8 @@ module github.com/bmscomp/kates/cli
 
 go 1.25.7
 
+toolchain go1.27.1
+
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -12,9 +14,9 @@ require (
 	github.com/mattn/go-runewidth v0.0.21
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 	golang.org/x/term v0.40.0
-	golang.org/x/text v0.23.0
+	golang.org/x/text v0.39.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

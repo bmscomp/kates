@@ -1,0 +1,96 @@
+name: Security · CodeQL
+
+# Static analysis of the Go CLI and the Java backend. Minutes, not seconds,
+# so it is not on the merge gate: results land on the Security tab and as PR
+# annotations, and a weekly run picks up new queries.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "45 6 * * 2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.filter.outputs.go || 'true' }}
+      java: ${{ steps.filter.outputs.java || 'true' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'cli/**/*.go'
+              - 'cli/go.mod'
+              - 'cli/go.sum'
+              - '.github/workflows/codeql.yml'
+            java:
+              - 'kates/src/**'
+              - 'kates/pom.xml'
+              - '.github/workflows/codeql.yml'
+
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.java == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: manual
+            changed: ${{ needs.changes.outputs.go }}
+          - language: java-kotlin
+            # CodeQL extracts Java without compiling it; the Quarkus build is
+            # minutes and needs nothing the analysis does not already see.
+            build-mode: none
+            changed: ${{ needs.changes.outputs.java }}
+    steps:
+      # A matrix leg cannot skip itself at the job level, so the steps do.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: matrix.changed == 'true'
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.changed == 'true' && matrix.language == 'go'
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Initialize CodeQL
+        if: matrix.changed == 'true'
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Build the CLI
+        if: matrix.changed == 'true' && matrix.language == 'go'
+        working-directory: cli
+        run: go build ./...
+
+      - name: Perform CodeQL Analysis
+        if: matrix.changed == 'true'
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -1,9 +1,22 @@
-name: Publish Kates Docker Image
+name: Publish · Kates image
+
+# Called by release.yml on every `v*` tag, so a release is one run page with
+# the CLI, the images and the chart bumps on it, in order. Also runnable by
+# hand for a dev build. It no longer triggers on the tag itself: two workflows
+# publishing the same image from the same tag was how a half-released version
+# happened with nothing red to show for it.
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      variant:
+        description: "Image variant to build (jvm, native or both)"
+        type: string
+        default: both
+      platforms:
+        description: "Target platforms"
+        type: string
+        default: linux/amd64,linux/arm64
   workflow_dispatch:
     inputs:
       variant:
@@ -24,11 +37,15 @@ on:
         default: linux/amd64,linux/arm64
 
 permissions:
-  contents: write
+  contents: write # update-charts commits the appVersion bump
   packages: write
+  id-token: write # cosign keyless signing, build provenance
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  GHCR_REGISTRY: ghcr.io
   DOCKERHUB_REPO: bmscomp/kates
   GHCR_REPO: ghcr.io/bmscomp/kates
 
@@ -36,6 +53,7 @@ jobs:
   meta:
     name: Compute Build Matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       variants: ${{ steps.set.outputs.variants }}
       version: ${{ steps.version.outputs.version }}
@@ -48,14 +66,15 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=dev-$(echo ${GITHUB_SHA} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+            echo "version=dev-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set build matrix
         id: set
+        env:
+          VARIANT: ${{ inputs.variant || 'both' }}
+          PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
         run: |
-          VARIANT="${{ inputs.variant || 'both' }}"
-          PLATFORMS="${{ inputs.platforms || 'linux/amd64,linux/arm64' }}"
           if [[ "${VARIANT}" == "both" ]]; then
             echo 'variants=["jvm","native"]' >> "$GITHUB_OUTPUT"
           else
@@ -83,48 +102,46 @@ jobs:
     name: Build ${{ matrix.variant }} (${{ matrix.platform.arch }})
     needs: meta
     runs-on: ${{ matrix.platform.runner }}
+    # The native compile is 15-25 minutes on a 4-core runner.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         variant: ${{ fromJson(needs.meta.outputs.variants) }}
         platform: ${{ fromJson(needs.meta.outputs.platform_matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Set up QEMU (cross-arch)
-        if: false  # Not needed — arm64 builds run on native ARM runners
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: linux/arm64
-
+      # No QEMU: arm64 builds run on native ARM runners.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: ./.github/actions/registry-login
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Select Dockerfile
         id: dockerfile
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
-          if [[ "${{ matrix.variant }}" == "native" ]]; then
+          if [[ "${VARIANT}" == "native" ]]; then
             echo "file=kates/Dockerfile.native" >> "$GITHUB_OUTPUT"
           else
             echo "file=kates/Dockerfile" >> "$GITHUB_OUTPUT"
           fi
 
+      # provenance + sbom: each per-platform push becomes an index carrying a
+      # SLSA provenance and an SPDX SBOM attestation next to the image.
+      # `docker buildx imagetools create` in merge-manifests folds those
+      # attestation manifests into the final index (this is the pattern the
+      # Docker docs give for distributing a multi-platform build across
+      # runners), and `verify` asserts every platform is still present.
       - name: Build and push (single arch)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ${{ steps.dockerfile.outputs.file }}
@@ -135,53 +152,42 @@ jobs:
             ${{ env.GHCR_REPO }}:sha-${{ github.sha }}-${{ matrix.platform.arch }}-${{ matrix.variant }}
           cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ matrix.platform.arch }}
-          provenance: false
-
-      - name: Export digest
-        run: echo "${{ steps.build.outputs.digest }}" > /tmp/digest-${{ matrix.platform.arch }}.txt
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v7
-        with:
-          name: digest-${{ matrix.variant }}-${{ matrix.platform.arch }}
-          path: /tmp/digest-*.txt
-          retention-days: 1
+          provenance: mode=max
+          sbom: true
 
   merge-manifests:
     name: Merge Manifests (${{ matrix.variant }})
     needs: [meta, build-per-platform]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         variant: ${{ fromJson(needs.meta.outputs.variants) }}
     steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: ./.github/actions/registry-login
         with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         # Required by `docker buildx imagetools create` below. buildx ships on
         # ubuntu-latest, but this pins the version rather than inheriting
         # whatever the runner image happens to carry this month.
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Describe this variant
         id: describe
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
           # The two variants share one repository (the suffix is on the TAG),
           # so whichever is pushed last owns the registry page description.
           # Keep both truthful and near-identical; the variant difference is
           # spelled out rather than left to the tag name.
-          if [ "${{ matrix.variant }}" = "native" ]; then
+          if [ "${VARIANT}" = "native" ]; then
             {
               echo 'title=kates (native)'
               echo 'description=Kates backend, GraalVM native build — a Kubernetes-native platform for performance testing, chaos engineering and operational resilience auditing of Apache Kafka clusters. Ahead-of-time compiled for fast start and low memory; bundles the kates CLI. Runs as non-root on port 8080.'
@@ -195,7 +201,7 @@ jobs:
 
       - name: Compute Docker metadata
         id: docker-meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         env:
           # GHCR reads a MULTI-ARCH image's description from the index's
           # annotations, not from the per-platform config labels — labels live
@@ -225,31 +231,14 @@ jobs:
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.version=${{ needs.meta.outputs.version }}
 
-      - name: Collect per-platform image refs
-        id: refs
-        run: |
-          SUFFIX="${{ matrix.variant == 'native' && '-native' || '' }}"
-          PLATFORMS="${{ needs.meta.outputs.platforms }}"
-          SOURCES=""
-          IFS=',' read -ra PLATS <<< "${PLATFORMS}"
-          for p in "${PLATS[@]}"; do
-            p="$(echo "$p" | xargs)"
-            ARCH="${p#*/}"
-            for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
-              TAG="sha-${{ github.sha }}-${ARCH}-${{ matrix.variant }}"
-              if [ -n "${SOURCES}" ]; then SOURCES+=","; fi
-              SOURCES+="${REPO}:${TAG}"
-            done
-          done
-          echo "sources=${SOURCES}" >> "$GITHUB_OUTPUT"
-
       - name: Create and push multi-arch manifests
         env:
           ANNOTATIONS: ${{ steps.docker-meta.outputs.annotations }}
+          TAGS: ${{ steps.docker-meta.outputs.tags }}
+          PLATFORMS: ${{ needs.meta.outputs.platforms }}
+          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
-          PLATFORMS="${{ needs.meta.outputs.platforms }}"
-          TAGS=$(echo '${{ steps.docker-meta.outputs.tags }}')
 
           # metadata-action emits one "index:key=value" per line (the prefix
           # comes from DOCKER_METADATA_ANNOTATIONS_LEVELS). imagetools wants
@@ -262,13 +251,12 @@ jobs:
 
           # Build source image list per registry
           IFS=',' read -ra PLATS <<< "${PLATFORMS}"
-          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
-            SOURCES=""
+          for REPO in "${DOCKERHUB_REPO}" "${GHCR_REPO}"; do
+            SOURCES=()
             for p in "${PLATS[@]}"; do
               p="$(echo "$p" | xargs)"
               ARCH="${p#*/}"
-              TAG="sha-${{ github.sha }}-${ARCH}-${{ matrix.variant }}"
-              SOURCES="${SOURCES} ${REPO}:${TAG}"
+              SOURCES+=("${REPO}:sha-${GITHUB_SHA}-${ARCH}-${VARIANT}")
             done
 
             while IFS= read -r TAG; do
@@ -283,85 +271,118 @@ jobs:
                 # of the same command, so no separate push step is needed.
                 docker buildx imagetools create \
                   "${ANNOTATION_ARGS[@]}" \
-                  -t "${TAG}" ${SOURCES}
+                  -t "${TAG}" "${SOURCES[@]}"
               fi
             done <<< "${TAGS}"
-          done
-
-  sign:
-    name: Sign Images
-    needs: [meta, merge-manifests]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    strategy:
-      matrix:
-        variant: ${{ fromJson(needs.meta.outputs.variants) }}
-    steps:
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Sign images
-        env:
-          VERSION: ${{ needs.meta.outputs.version }}
-          SUFFIX: ${{ matrix.variant == 'native' && '-native' || '' }}
-        run: |
-          # The suffix belongs on the TAG, not the repository: metadata-action
-          # is configured with `flavor: suffix=-native`, so what actually gets
-          # pushed is bmscomp/kates:1.22.0-native. Signing looked for
-          # bmscomp/kates-native:1.22.0, which has never existed, so the native
-          # variant was silently never signed.
-          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
-            IMAGE="${REPO}:${VERSION}${SUFFIX}"
-            DIGEST=$(docker manifest inspect "${IMAGE}" -v 2>/dev/null | jq -r '.digest // empty' || true)
-            if [[ -n "${DIGEST}" ]]; then
-              cosign sign --yes "${REPO}@${DIGEST}"
-            else
-              echo "⚠️ Could not resolve digest for ${IMAGE}, skipping sign"
-            fi
           done
 
   verify:
     name: Verify Published Images
     needs: [meta, merge-manifests]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         variant: ${{ fromJson(needs.meta.outputs.variants) }}
     steps:
-      - name: Pull and inspect
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Every requested platform must be in the merged index. `head -20` of a
+      # manifest used to be the whole check; it could not fail.
+      - name: Every platform is in the index
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          SUFFIX: ${{ matrix.variant == 'native' && '-native' || '' }}
+          PLATFORMS: ${{ needs.meta.outputs.platforms }}
+        run: |
+          set -euo pipefail
+          # Same suffix-on-the-tag rule as the signing step: this looked for a
+          # repository that is never pushed, so the native leg of `verify`
+          # failed and update-charts (which needs it) never ran on a release.
+          for REPO in "${DOCKERHUB_REPO}" "${GHCR_REPO}"; do
+            IMAGE="${REPO}:${VERSION}${SUFFIX}"
+            echo "==> ${IMAGE}"
+            docker buildx imagetools inspect "${IMAGE}" | tee /tmp/inspect.txt
+            IFS=',' read -ra PLATS <<< "${PLATFORMS}"
+            for p in "${PLATS[@]}"; do
+              p="$(echo "$p" | xargs)"
+              grep -qE "^\s*Platform:\s+${p}$" /tmp/inspect.txt \
+                || { echo "::error::${IMAGE} is missing platform ${p}"; exit 1; }
+            done
+          done
+
+      # CRITICAL, fixable CVEs in the image we just published fail the release;
+      # the same policy (and the same ignore file) as the dependency scan in
+      # CI · Backend, applied to the OS layer and everything else the
+      # Dockerfile adds. A weekly rescan of the released image lives in
+      # security.yml.
+      - name: Scan the published image (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.GHCR_REPO }}:${{ needs.meta.outputs.version }}${{ matrix.variant == 'native' && '-native' || '' }}
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+
+  sign:
+    name: Sign Images
+    needs: [meta, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      matrix:
+        variant: ${{ fromJson(needs.meta.outputs.variants) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      - uses: ./.github/actions/registry-login
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign images
         env:
           VERSION: ${{ needs.meta.outputs.version }}
           SUFFIX: ${{ matrix.variant == 'native' && '-native' || '' }}
         run: |
-          # Same suffix-on-the-tag rule as the signing step: this looked for a
-          # repository that is never pushed, so the native leg of `verify`
-          # failed and update-charts (which needs it) never ran on a release.
-          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
+          set -euo pipefail
+          # The suffix belongs on the TAG, not the repository: metadata-action
+          # is configured with `flavor: suffix=-native`, so what actually gets
+          # pushed is bmscomp/kates:1.22.0-native.
+          #
+          # The digest comes from imagetools, which prints the INDEX digest for
+          # a multi-arch image. `docker manifest inspect -v | jq .digest` was
+          # used before: for an index that command returns an ARRAY, jq failed,
+          # the failure was swallowed, and every image since 1.22.0 was
+          # "skipped" with a warning in a green job. Not resolving the digest
+          # is now the failure it always was.
+          for REPO in "${DOCKERHUB_REPO}" "${GHCR_REPO}"; do
             IMAGE="${REPO}:${VERSION}${SUFFIX}"
-            echo "Inspecting ${IMAGE}..."
-            docker manifest inspect "${IMAGE}" | head -20
-            echo "---"
+            DIGEST=$(docker buildx imagetools inspect "${IMAGE}" --format '{{.Manifest.Digest}}')
+            if [[ -z "${DIGEST}" ]]; then
+              echo "::error::could not resolve the digest of ${IMAGE}"
+              exit 1
+            fi
+            echo "signing ${REPO}@${DIGEST} (${IMAGE})"
+            cosign sign --yes "${REPO}@${DIGEST}"
           done
+
   update-charts:
     name: Update Helm Charts
-    needs: [meta, verify]
+    needs: [meta, verify, sign]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -377,7 +398,7 @@ jobs:
           # because an unanchored `s/appVersion: .*/` also rewrites the word
           # wherever it appears in the artifacthub annotation block.
           sed -i "s/^appVersion:.*/appVersion: \"${CLEAN_VERSION}\"/" charts/kates/Chart.yaml
-          awk '/repository: ghcr.io\/bmscomp\/kates/ {print; getline; sub(/tag: .*/, "tag: \"'${CLEAN_VERSION}'\""); print; next} 1' charts/kates/values.yaml > tmp.yaml && mv tmp.yaml charts/kates/values.yaml
+          awk -v v="${CLEAN_VERSION}" '/repository: ghcr.io\/bmscomp\/kates/ {print; getline; sub(/tag: .*/, "tag: \"" v "\""); print; next} 1' charts/kates/values.yaml > tmp.yaml && mv tmp.yaml charts/kates/values.yaml
 
           # charts/kates-chaos is deliberately NOT bumped. Its appVersion
           # tracks the LitmusChaos execution plane the chart deploys (3.28.0).
@@ -385,7 +406,7 @@ jobs:
           # release that does not exist, and broke the README chart table that
           # docs.yml gates — a release should not have to be followed by a
           # repair commit.
-          
+
       - name: Commit and Push
         env:
           VERSION: ${{ needs.meta.outputs.version }}

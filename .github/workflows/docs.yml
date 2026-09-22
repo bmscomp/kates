@@ -1,32 +1,51 @@
-name: Docs
+name: CI · Docs
 
 on:
   push:
     branches: [main]
-    paths:
-      - "README.md"
-      - "docs/**"
-      - "charts/*/Chart.yaml"
-      - "scripts/gen-chart-table.sh"
-      - ".github/workflows/docs.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "README.md"
-      - "docs/**"
-      - "charts/*/Chart.yaml"
-      - "scripts/gen-chart-table.sh"
-      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        id: filter
+        with:
+          filters: |
+            docs:
+              - 'README.md'
+              - 'docs/**'
+              - 'charts/*/Chart.yaml'
+              - 'charts/**/*.md'
+              - 'versions.env'
+              - 'scripts/gen-chart-table.sh'
+              - 'scripts/gen-version-matrix.sh'
+              - 'scripts/check-book-style.sh'
+              - 'scripts/check-mermaid.sh'
+              - '.github/workflows/docs.yml'
+
   readme-chart-table:
     name: README Chart Table Sync
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Verify chart table matches charts/*/Chart.yaml
         run: ./scripts/gen-chart-table.sh --check
 
@@ -38,12 +57,16 @@ jobs:
 
   mermaid:
     name: Mermaid Diagrams Parse
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/load-versions
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
       # A broken diagram used to surface only as a failed PDF render in the
       # Book workflow, naming no file — and not at all for the diagrams in
       # charts/, which never reach Quarto and simply render as an error box on
@@ -53,13 +76,28 @@ jobs:
 
   link-check:
     name: Markdown Link Check
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Check relative links in README and top-level docs
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           # Offline mode validates only local file links (the drift we care
           # about) and never fails on external outages or localhost URLs.
           args: --offline --no-progress --include-fragments README.md "docs/**/*.md"
           fail: true
+
+  gate:
+    name: Gate · Docs
+    if: always()
+    needs: [changes, readme-chart-table, mermaid, link-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

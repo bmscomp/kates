@@ -1,4 +1,4 @@
-name: CI — MirrorMaker 2
+name: CI · MirrorMaker 2
 
 # Two jobs with very different costs.
 #
@@ -22,19 +22,6 @@ name: CI — MirrorMaker 2
 on:
   push:
     branches: [main]
-    paths:
-      - "charts/mirror-maker2/**"
-      - "charts/kafka-common/**"
-      - "charts/legacy-kafka/**"
-      - "Dockerfile.legacy-kafka"
-      - "scripts/test-mm2-migration.sh"
-      - "scripts/build-legacy-kafka-image.sh"
-      - "scripts/check-metric-contract.sh"
-      - "scripts/metric-contract/**"
-      - "cli/cmd/migrate*.go"
-      - "cli/pkg/migrate/**"
-      - "cli/internal/podrun/**"
-      - ".github/workflows/ci-mirror-maker2.yml"
   pull_request:
     branches: [main]
     # `labeled` is here for migration-e2e, and without it that job is
@@ -44,23 +31,6 @@ on:
     # gate below would have read as "on demand" while never being satisfiable
     # on a pull request at all.
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - "charts/mirror-maker2/**"
-      - "charts/kafka-common/**"
-      - "charts/legacy-kafka/**"
-      - "charts/kafka-cluster/**"
-      - "Dockerfile.legacy-kafka"
-      - "scripts/test-mm2-migration.sh"
-      - "scripts/build-legacy-kafka-image.sh"
-      - "scripts/check-metric-contract.sh"
-      - "scripts/metric-contract/**"
-      - "cli/cmd/migrate*.go"
-      - "cli/pkg/migrate/**"
-      - "cli/internal/podrun/**"
-      # The chart job asserts that every runbook_url anchor the alerts point at
-      # is a heading in this file, so a heading rename has to run the job.
-      - "docs/mirror-maker2-runbook.md"
-      - ".github/workflows/ci-mirror-maker2.yml"
   # metrics-live: weekly, and on demand (migration-e2e stays on the label).
   schedule:
     - cron: "30 5 * * 1"
@@ -75,22 +45,61 @@ on:
 permissions:
   contents: read
 
-env:
-  HELM_VERSION: v3.17.0
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # Scheduled and manual runs have no diff to filter on: everything runs.
+      chart: ${{ steps.filter.outputs.chart || 'true' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            chart:
+              - 'charts/mirror-maker2/**'
+              - 'charts/kafka-common/**'
+              - 'charts/legacy-kafka/**'
+              - 'charts/kafka-cluster/**'
+              - 'Dockerfile.legacy-kafka'
+              - 'scripts/test-mm2-migration.sh'
+              - 'scripts/build-legacy-kafka-image.sh'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'cli/cmd/migrate*.go'
+              - 'cli/pkg/migrate/**'
+              - 'cli/internal/podrun/**'
+              # The chart job asserts that every runbook_url anchor the alerts point at
+              # is a heading in this file, so a heading rename has to run the job.
+              - 'docs/mirror-maker2-runbook.md'
+              - '.github/workflows/ci-mirror-maker2.yml'
+              - '.github/actions/**'
+
   chart:
     name: Chart validation
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # fetch-depth: 0 for the render-diff step at the end of this job: it has
       # to resolve the commit that last carried a DIFFERENT chart version, and
       # a shallow clone has no history to walk.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
-      - uses: azure/setup-helm@v5
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -395,15 +404,13 @@ jobs:
             || { echo "::error::default mode did not exclude <alias>.* (loopback would loop)"; exit 1; }
           echo "OK: default policy leaves topic renaming in place and excludes the alias prefix"
 
-      - name: Install kubeconform and PyYAML
-        run: |
-          # --fail and retries: a release-asset hiccup once saved an HTML error page
-          # in place of the archive, which tar rejected as "not in gzip format".
-          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/kubeconform.tgz \
-            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
-          tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
-          sudo mv /tmp/kubeconform /usr/local/bin/
-          pip install --quiet pyyaml
+      - name: Install kubeconform
+        uses: ./.github/actions/install-tools
+        with:
+          kubeconform: "true"
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
 
       - name: Validate against the Strimzi CRD schemas
         run: |
@@ -1202,17 +1209,8 @@ jobs:
           done
           exit $rc
 
-      # The scripts are superseded by `kates migrate` (the e2e job below runs
-      # the CLI) but still ship until that job has been green on the CLI; keep
-      # them honest while they exist.
-      - name: Shellcheck the migration scripts
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          # SC2317 is unavoidable noise for an EXIT-trap cleanup function.
-          shellcheck -x -e SC2317 \
-            scripts/test-mm2-migration.sh \
-            scripts/build-legacy-kafka-image.sh \
-            scripts/mm2-kafka-cli.sh
+      # The migration scripts are shellchecked by CI · Lint with every other
+      # script in scripts/.
 
   migration-e2e:
     name: Migration e2e (Kafka ${{ matrix.source }} → 4.x)
@@ -1227,20 +1225,16 @@ jobs:
       matrix:
         source: ${{ github.event.inputs.source_version == '2.8.2' && fromJSON('["2.8.2"]') || github.event.inputs.source_version == '3.9.1' && fromJSON('["3.9.1"]') || fromJSON('["2.8.2","3.9.1"]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Same shape as ci-apicurio.yml on purpose: the kind version and kubectl
       # come from versions.env, the node image from config/cluster.yaml, and
       # the Kafka cluster from the script `make all` runs locally — so this job
       # exercises the operator chart and the kafka-cluster chart the repo
       # actually ships, not a hand-rolled approximation of them.
-      - name: Load toolchain pins from versions.env
-        run: |
-          set -euo pipefail
-          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
-            | tr -d '"' | tee -a "$GITHUB_ENV"
+      - uses: ./.github/actions/load-versions
 
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -1248,16 +1242,16 @@ jobs:
       - name: Build the chart's kafka-common dependency
         run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
       # kubectl_version is passed explicitly: the action's own default is a
       # newer kubectl that it prepends to PATH, which would silently shadow the
       # pinned one — the exact skew scripts/check-versions.sh exists to catch.
       - name: Create kind cluster (3-zone topology)
-        uses: helm/kind-action@v1.15.0
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           version: ${{ env.KIND_VERSION }}
           kubectl_version: ${{ env.KUBECTL_VERSION }}
@@ -1334,7 +1328,7 @@ jobs:
             done
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: migration-diagnostics-${{ matrix.source }}
@@ -1360,16 +1354,15 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'test-migration')
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      issues: write # notify-scheduled-failure
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Load toolchain pins from versions.env
-        run: |
-          set -euo pipefail
-          grep -E '^(KIND_VERSION|KUBECTL_VERSION)=' versions.env \
-            | tr -d '"' | tee -a "$GITHUB_ENV"
+      - uses: ./.github/actions/load-versions
 
-      - uses: azure/setup-helm@v5
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -1377,13 +1370,13 @@ jobs:
       - name: Build the chart's kafka-common dependency
         run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
       - name: Create kind cluster (3-zone topology)
-        uses: helm/kind-action@v1.15.0
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           version: ${{ env.KIND_VERSION }}
           kubectl_version: ${{ env.KUBECTL_VERSION }}
@@ -1441,7 +1434,7 @@ jobs:
           echo "scraping $pod"
           kubectl -n kafka port-forward "pod/$pod" 9404:9404 > /tmp/port-forward.log 2>&1 &
           sleep 3
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf http://localhost:9404/metrics > /tmp/mm2-metrics.txt || true
             if grep -q '^kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max' /tmp/mm2-metrics.txt; then
               break
@@ -1455,7 +1448,7 @@ jobs:
 
       # The capture outlives the job so a NOTE about an uncatalogued series
       # can be turned into a catalogue entry without re-running the cluster.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: mm2-metrics-scrape
@@ -1480,9 +1473,27 @@ jobs:
             done
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: metrics-live-diagnostics
           path: /tmp/diag/
           retention-days: 7
+
+      - name: Open an issue for a failed weekly run
+        if: failure() && github.event_name == 'schedule'
+        uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  gate:
+    name: Gate · MirrorMaker 2
+    if: always()
+    needs: [changes, chart]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}
