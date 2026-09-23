@@ -397,6 +397,7 @@ public class DisruptionSafetyGuard {
                                             .withNewResourceAttributes()
                                             .withNamespace(spec.targetNamespace())
                                             .withVerb("create")
+                                            .withGroup("networking.k8s.io")
                                             .withResource("networkpolicies")
                                             .endResourceAttributes()
                                             .endSpec()
@@ -414,7 +415,9 @@ public class DisruptionSafetyGuard {
                                             .withNewSpec()
                                             .withNewResourceAttributes()
                                             .withNamespace(spec.targetNamespace())
-                                            .withVerb("update")
+                                            // edit() and rolling().restart() both PATCH
+                                            .withVerb("patch")
+                                            .withGroup("apps")
                                             .withResource("statefulsets")
                                             .endResourceAttributes()
                                             .endSpec()
