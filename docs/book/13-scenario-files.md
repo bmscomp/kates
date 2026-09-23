@@ -165,8 +165,8 @@ graph TD
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `maxRtoMs` | Float | Maximum Recovery Time Objective in milliseconds |
-| `maxRpoMs` | Float | Maximum Recovery Point Objective in milliseconds |
+| `maxRtoMs` | Float | Maximum Recovery Time Objective in milliseconds. If the run reports no RTO, the summary marks the gate *not evaluable* rather than passing it; the exit code is unchanged |
+| `maxRpoMs` | Float | Maximum Recovery Point Objective in milliseconds. RPO is measured from a chaos start time; a run without one reports RPO as not measured, and the summary marks the gate *not evaluable* rather than passing it; the exit code is unchanged |
 
 ### Integrity Gates
 

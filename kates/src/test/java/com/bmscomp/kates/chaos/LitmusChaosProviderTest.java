@@ -47,6 +47,12 @@ class LitmusChaosProviderTest {
                             .withNamespace("kafka")
                             .addToLabels("strimzi.io/component-type", "kafka")
                             .addToLabels("zone", b[1])
+                            .addNewOwnerReference()
+                            .withApiVersion("core.strimzi.io/v1")
+                            .withKind("StrimziPodSet")
+                            .withName("krafter-brokers")
+                            .withUid("podset-uid")
+                            .endOwnerReference()
                             .endMetadata()
                             .build())
                     .create();
@@ -112,6 +118,36 @@ class LitmusChaosProviderTest {
                 .build();
 
         assertThrows(IllegalStateException.class, () -> build(spec));
+    }
+
+    @Test
+    void rollingRestartGoesThroughTheStrimziOperatorNotPodDelete() throws Exception {
+        // Used to run pod-delete with FORCE=true: one pod force-killed.
+        FaultSpec spec = FaultSpec.builder("rolling-restart")
+                .disruptionType(DisruptionType.ROLLING_RESTART)
+                .chaosDurationSec(0)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
+        for (String pod : List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-brokers-2")) {
+            assertEquals(
+                    "true",
+                    client.pods()
+                            .inNamespace("kafka")
+                            .withName(pod)
+                            .get()
+                            .getMetadata()
+                            .getAnnotations()
+                            .get(KubernetesChaosProvider.MANUAL_ROLLING_UPDATE_ANNOTATION),
+                    pod);
+        }
     }
 
     @Test

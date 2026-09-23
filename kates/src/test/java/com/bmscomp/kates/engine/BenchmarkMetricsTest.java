@@ -386,7 +386,7 @@ class BenchmarkMetricsTest {
                 java.time.Duration.ofNanos((long) (producerRtoMs * 1_000_000)),
                 java.time.Duration.ofNanos((long) (consumerRtoMs * 1_000_000)),
                 java.time.Duration.ofNanos((long) (Math.max(producerRtoMs, consumerRtoMs) * 1_000_000)),
-                java.time.Duration.ofNanos((long) (rpoMs * 1_000_000)),
+                rpoMs < 0 ? null : java.time.Duration.ofNanos((long) (rpoMs * 1_000_000)),
                 List.of(),
                 0L,
                 0L,
@@ -445,6 +445,21 @@ class BenchmarkMetricsTest {
         // The recording rules group by these two.
         assertScraped(scrape, "run_id=\"run-i2\"");
         assertScraped(scrape, "test_type=\"CHAOS\"");
+    }
+
+    @Test
+    @DisplayName("an unmeasured RPO publishes NaN, not a negative or a zero")
+    void unmeasuredRpoPublishesNaN() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        BenchmarkMetrics metrics = new BenchmarkMetrics(registry);
+
+        metrics.startRun("run-i7", "CHAOS", "native");
+        // rpoMs -1 is IntegrityResult's "not measured". Divided through it would
+        // publish -0.001s; clamped it would publish 0s, "nothing at risk".
+        metrics.recordIntegrity("run-i7", integrity(2_000, 1_000, -1, 0.0, 0L, 0L));
+
+        assertTrue(Double.isNaN(gaugeValue(registry, "kates.integrity.result.rpo.seconds", "run-i7")));
+        assertEquals(2.0, gaugeValue(registry, "kates.integrity.result.producer.rto.seconds", "run-i7"), 1e-6);
     }
 
     @Test

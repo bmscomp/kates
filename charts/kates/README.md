@@ -67,8 +67,32 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
-| `rbac.create` | `true` | Create ClusterRole/ClusterRoleBinding for Litmus CRD access |
+| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads) |
+| `rbac.directChaos` | `false` | Grant the writes the direct Kubernetes chaos backend makes; see [Chaos permissions](#chaos-permissions) |
 | `rbac.extraRules` | `[]` | Additional RBAC rules to append |
+
+### Chaos permissions
+
+With the default chaos provider, `litmus-crd`, Kates only creates and watches `ChaosEngine`s: Litmus runs every experiment as its own `litmus-admin` service account, and the default ClusterRole covers that. The direct Kubernetes backend (`kubernetes`, or `hybrid` on a cluster without Litmus CRDs) injects the faults itself, so it needs write access the default role does not grant. `rbac.directChaos=true` adds it:
+
+| Resource | Verbs | Used by |
+|----------|-------|---------|
+| `networking.k8s.io` `networkpolicies` | `create`, `delete`, `deletecollection` | `NETWORK_PARTITION` creates a deny-all policy; cleanup and rollback delete by label, startup orphan recovery by name |
+| `apps` `statefulsets` | `patch` | On a Kafka that Strimzi does not manage: `SCALE_DOWN` records the original replica count, `ROLLING_RESTART` restarts the StatefulSet |
+| `apps` `statefulsets/scale` | `get`, `update` | On a Kafka that Strimzi does not manage: `SCALE_DOWN`, its rollback and orphan recovery set replicas |
+| `pods/ephemeralcontainers` | `update` | `CPU_STRESS` and `IO_STRESS` add a stress container to the target pod |
+
+`ROLLING_RESTART` and `SCALE_DOWN` on a Strimzi cluster need none of these. `ROLLING_RESTART` annotates the Kafka pods for the Strimzi Cluster Operator to roll, and `SCALE_DOWN` lowers `spec.replicas` of a KafkaNodePool. Both run on either backend, so the default role grants `patch` on pods and on `kafkanodepools`.
+
+These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with an environment variable:
+
+```yaml
+extraEnv:
+  - name: KATES_CHAOS_PROVIDER
+    value: kubernetes
+rbac:
+  directChaos: true
+```
 
 ### Probes & Lifecycle
 

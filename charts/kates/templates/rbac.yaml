@@ -10,9 +10,12 @@ rules:
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines", "chaosexperiments", "chaosresults"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # patch: ROLLING_RESTART annotates Kafka pods with
+  # strimzi.io/manual-rolling-update for the Strimzi Cluster Operator to roll.
+  # It does so on both chaos backends, so it is not behind rbac.directChaos.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch", "delete"]
+    verbs: ["get", "list", "watch", "delete", "patch"]
   - apiGroups: [""]
     resources: ["pods/log", "nodes", "namespaces", "persistentvolumeclaims", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
@@ -32,8 +35,8 @@ rules:
     resources: ["kafkaconnectors", "kafkatopics"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # patch: SCALE_DOWN lowers a KafkaNodePool's spec.replicas and records the
-  # original count on it; rollback and orphan recovery put it back. Kates does
-  # this itself under every chaos provider, Litmus included.
+  # original count on it; rollback and orphan recovery put it back. It does so
+  # on both chaos backends, so it is not behind rbac.directChaos.
   - apiGroups: ["kafka.strimzi.io"]
     resources: ["kafkanodepools"]
     verbs: ["patch"]
@@ -43,6 +46,30 @@ rules:
   - apiGroups: ["core.strimzi.io"]
     resources: ["strimzipodsets"]
     verbs: ["get", "list"]
+  {{- if .Values.rbac.directChaos }}
+  {{- /*
+    The direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or
+    hybrid on a cluster without Litmus) makes these writes itself. Litmus runs
+    every experiment as its own litmus-admin service account, so a Litmus
+    install needs none of them. Cleanup and rollback delete NetworkPolicies by
+    label, which is deletecollection; SCALE_DOWN PATCHes the StatefulSet and sets
+    replicas through its scale subresource, and ROLLING_RESTART PATCHes a
+    StatefulSet that Strimzi does not manage; CPU_STRESS and
+    IO_STRESS add a container through pods/ephemeralcontainers.
+  */}}
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["patch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets/scale"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["update"]
+  {{- end }}
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}

@@ -1,7 +1,11 @@
 package com.bmscomp.kates.chaos;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -9,18 +13,24 @@ import jakarta.inject.Named;
 
 import io.fabric8.kubernetes.api.model.EphemeralContainer;
 import io.fabric8.kubernetes.api.model.EphemeralContainerBuilder;
+import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.readiness.Readiness;
 import org.eclipse.microprofile.faulttolerance.Retry;
 import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 /**
  * Chaos provider using direct Kubernetes API calls.
- * Supports pod deletion, network policy injection, KafkaNodePool scaling and
- * StatefulSet manipulation without requiring external chaos infrastructure like Litmus.
+ * Supports pod deletion, network policy injection, Strimzi rolling updates,
+ * KafkaNodePool scaling and StatefulSet manipulation without requiring
+ * external chaos infrastructure like Litmus.
  */
 @ApplicationScoped
 @Named("kubernetes")
@@ -43,6 +53,28 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * from one another replica is still running.
      */
     public static final String SCALED_DOWN_AT_ANNOTATION = "kates.io/scaled-down-at";
+
+    /**
+     * Pod annotation the Strimzi Cluster Operator acts on at its next
+     * reconciliation: it restarts the pod through its rolling update. The new
+     * pod does not carry it.
+     */
+    public static final String MANUAL_ROLLING_UPDATE_ANNOTATION = "strimzi.io/manual-rolling-update";
+
+    private static final String STRIMZI_POD_SET = "StrimziPodSet";
+
+    /** How often ROLLING_RESTART checks whether the roll has finished. */
+    long rollPollIntervalMs = 5_000;
+
+    /**
+     * A roll that did not finish within {@code chaosDurationSec}. Not retried:
+     * a retry would annotate the pods again and wait another full budget.
+     */
+    public static class IncompleteRollException extends RuntimeException {
+        public IncompleteRollException(String message) {
+            super(message);
+        }
+    }
 
     /** How often SCALE_DOWN checks whether the Cluster Operator has removed the brokers. */
     long scalePollIntervalMs = 5_000;
@@ -72,12 +104,15 @@ public class KubernetesChaosProvider implements ChaosProvider {
         return "kubernetes";
     }
 
-    @Retry(maxRetries = 3, delay = 1000, abortOn = IncompleteScaleDownException.class)
+    @Retry(
+            maxRetries = 3,
+            delay = 1000,
+            abortOn = {IncompleteRollException.class, IncompleteScaleDownException.class})
     @org.eclipse.microprofile.faulttolerance.CircuitBreaker(
             requestVolumeThreshold = 4,
             failureRatio = 0.5,
             delay = 10000,
-            skipOn = IncompleteScaleDownException.class)
+            skipOn = {IncompleteRollException.class, IncompleteScaleDownException.class})
     public void applyDisruption(FaultSpec spec, String engineName) throws Exception {
         if (spec.disruptionType() == null) {
             throw new IllegalArgumentException("No disruptionType set — use the builder");
@@ -213,26 +248,142 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 .create();
     }
 
-    private void executeRollingRestart(FaultSpec spec) {
-        String selector = ParsedLabelSelector.parse(spec.targetLabel()).toString();
+    /**
+     * Restarts every pod {@code targetLabel} matches (or just {@code targetPod})
+     * one at a time, then waits for the roll to finish so the observation
+     * window starts after it.
+     *
+     * <p>Strimzi runs Kafka pods from StrimziPodSets, not StatefulSets. Their
+     * pods are annotated for the Cluster Operator, which rolls them at its next
+     * reconciliation with its own checks: one pod at a time, each ready again
+     * before the next, and none whose restart would leave a partition under
+     * min.insync.replicas. The pods are annotated rather than their
+     * StrimziPodSets because selectors such as {@code zone=alpha} match pod
+     * labels only. Pods of a StatefulSet (Kafka not run by Strimzi) are rolled
+     * by restarting it.
+     */
+    private void executeRollingRestart(FaultSpec spec) throws InterruptedException {
+        String namespace = spec.targetNamespace();
+        Map<String, String> uids = new LinkedHashMap<>();
+        Set<String> statefulSets = new LinkedHashSet<>();
 
-        LOG.info("ROLLING_RESTART: restarting StatefulSets with label " + selector);
+        for (String podName : PodTargets.resolve(client, spec)) {
+            Pod pod = client.pods().inNamespace(namespace).withName(podName).get();
+            if (pod == null) {
+                throw new IllegalStateException("Pod not found: " + podName);
+            }
+            OwnerReference owner = pod.getMetadata().getOwnerReferences().stream()
+                    .filter(o -> STRIMZI_POD_SET.equals(o.getKind()) || "StatefulSet".equals(o.getKind()))
+                    .findFirst()
+                    .orElse(null);
+            if (owner == null) {
+                LOG.info("ROLLING_RESTART: skipping " + podName + ", not run by a StrimziPodSet or a StatefulSet");
+                continue;
+            }
+            if (STRIMZI_POD_SET.equals(owner.getKind())) {
+                LOG.info("ROLLING_RESTART: annotating " + podName + " for the Strimzi Cluster Operator to roll");
+                client.pods()
+                        .inNamespace(namespace)
+                        .withName(podName)
+                        .edit(p -> new PodBuilder(p)
+                                .editMetadata()
+                                .addToAnnotations(MANUAL_ROLLING_UPDATE_ANNOTATION, "true")
+                                .endMetadata()
+                                .build());
+            } else {
+                statefulSets.add(owner.getName());
+            }
+            uids.put(podName, pod.getMetadata().getUid());
+        }
 
-        client.apps()
-                .statefulSets()
-                .inNamespace(spec.targetNamespace())
-                .withLabelSelector(selector)
-                .list()
-                .getItems()
-                .forEach(ss -> {
-                    LOG.info("Rolling restart: " + ss.getMetadata().getName());
-                    client.apps()
-                            .statefulSets()
-                            .inNamespace(spec.targetNamespace())
-                            .withName(ss.getMetadata().getName())
-                            .rolling()
-                            .restart();
-                });
+        if (uids.isEmpty()) {
+            throw new IllegalStateException("ROLLING_RESTART: no pod matching '" + spec.targetLabel()
+                    + "' in namespace '" + namespace + "' is run by a StrimziPodSet or a StatefulSet");
+        }
+        for (String name : statefulSets) {
+            LOG.info("ROLLING_RESTART: restarting StatefulSet " + name);
+            client.apps()
+                    .statefulSets()
+                    .inNamespace(namespace)
+                    .withName(name)
+                    .rolling()
+                    .restart();
+        }
+
+        awaitRoll(spec, uids);
+    }
+
+    /**
+     * Waits up to {@code chaosDurationSec} for every pod in {@code uids} to be
+     * replaced (same name, new UID) and ready. The Cluster Operator starts the
+     * roll at its next reconciliation, every two minutes by default, so the
+     * budget has to cover that as well as the restarts. {@code chaosDurationSec}
+     * 0 does not wait.
+     *
+     * <p>On timeout the annotation is taken off the pods not yet rolled, so the
+     * operator does not restart them later, in the middle of another step.
+     */
+    private void awaitRoll(FaultSpec spec, Map<String, String> uids) throws InterruptedException {
+        String namespace = spec.targetNamespace();
+        if (spec.chaosDurationSec() <= 0) {
+            LOG.info("ROLLING_RESTART: chaosDurationSec is 0, not waiting for " + uids.keySet() + " to roll");
+            return;
+        }
+
+        long deadline = System.nanoTime() + spec.chaosDurationSec() * 1_000_000_000L;
+        Set<String> pending = new LinkedHashSet<>(uids.keySet());
+        while (true) {
+            pending.removeIf(name -> isReplacedAndReady(namespace, name, uids.get(name)));
+            long remainingMs = (deadline - System.nanoTime()) / 1_000_000L;
+            if (pending.isEmpty() || remainingMs <= 0) {
+                break;
+            }
+            Thread.sleep(Math.min(rollPollIntervalMs, remainingMs));
+        }
+
+        if (pending.isEmpty()) {
+            LOG.info("ROLLING_RESTART: rolled " + uids.keySet());
+            return;
+        }
+        for (String name : pending) {
+            try {
+                removeManualRollingUpdate(namespace, name);
+            } catch (KubernetesClientException e) {
+                LOG.warn("ROLLING_RESTART: could not remove the annotation from " + name, e);
+            }
+        }
+        throw new IncompleteRollException("ROLLING_RESTART: " + (uids.size() - pending.size()) + " of " + uids.size()
+                + " pods rolled within chaosDurationSec=" + spec.chaosDurationSec() + "s; not rolled: " + pending
+                + ". The Cluster Operator rolls at its next reconciliation and holds back a pod whose restart"
+                + " would leave a partition under min.insync.replicas; its log says which.");
+    }
+
+    private boolean isReplacedAndReady(String namespace, String podName, String oldUid) {
+        try {
+            Pod pod = client.pods().inNamespace(namespace).withName(podName).get();
+            return pod != null
+                    && !Objects.equals(oldUid, pod.getMetadata().getUid())
+                    && pod.getMetadata().getDeletionTimestamp() == null
+                    && Readiness.isPodReady(pod);
+        } catch (KubernetesClientException e) {
+            LOG.debug("ROLLING_RESTART: could not read " + podName + ", checking again", e);
+            return false;
+        }
+    }
+
+    /** Takes the annotation off a pod not yet rolled; a replaced pod has none. */
+    private void removeManualRollingUpdate(String namespace, String podName) {
+        var resource = client.pods().inNamespace(namespace).withName(podName);
+        Pod pod = resource.get();
+        if (pod != null
+                && pod.getMetadata().getAnnotations() != null
+                && pod.getMetadata().getAnnotations().containsKey(MANUAL_ROLLING_UPDATE_ANNOTATION)) {
+            resource.edit(p -> new PodBuilder(p)
+                    .editMetadata()
+                    .removeFromAnnotations(MANUAL_ROLLING_UPDATE_ANNOTATION)
+                    .endMetadata()
+                    .build());
+        }
     }
 
     /**
@@ -350,8 +501,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
         pod.getSpec().getEphemeralContainers().add(ec);
 
-        // Use replace to update ephemeral containers (requires k8s 1.25+)
-        podResource.replace(pod);
+        // Ephemeral containers can only be added through the pods/ephemeralcontainers
+        // subresource (k8s 1.25+); the API server rejects a pod update that changes them.
+        client.pods().inNamespace(namespace).resource(pod).ephemeralContainers().replace();
     }
 
     @Override

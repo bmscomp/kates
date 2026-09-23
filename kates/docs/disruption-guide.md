@@ -121,7 +121,7 @@ Kates fills the broker's log directory to a configurable percentage (default 80%
 
 The remaining four disruption types round out the toolkit:
 
-**ROLLING_RESTART** triggers a graceful rolling restart of the Kafka StatefulSet by annotating the pod template. Kubernetes rolls each pod one at a time, waiting for readiness before proceeding. This tests your zero-downtime maintenance posture — does a routine restart cause any client-visible errors?
+**ROLLING_RESTART** annotates every matching Kafka pod with `strimzi.io/manual-rolling-update=true`, and the Strimzi Cluster Operator rolls them at its next reconciliation. It restarts one pod at a time and waits for each to be ready before the next — the same rolling update an upgrade goes through. The step waits up to `chaosDurationSec` for the roll to finish, so observation starts after it. This tests your zero-downtime maintenance posture — does a routine restart cause any client-visible errors? The rolling-restart entry in the [Playbook Catalog](playbook-catalog.md) has the details.
 
 **LEADER_ELECTION** forces a preferred leader election for a specific partition, simulating what happens during partition reassignment or after a broker restart. This tests whether your consumers handle the briefly unavailable partition gracefully.
 
@@ -156,11 +156,17 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 | `cpuCores` | `int` | `1` | CPU cores to stress (CPU_STRESS only) |
 | `envOverrides` | `Map<String,String>` | `{}` | Additional env vars for the chaos engine |
 
+The defaults in this table apply only when Kates builds the `FaultSpec` itself, as it does for each playbook step. A `faultSpec` you post as JSON does not get them. `FaultSpec` is a Java record, so Jackson builds it from exactly the fields you send: an omitted string is `null`, an omitted number is `0` and an omitted flag is `false`. That has three consequences for a JSON plan:
+
+- **Always set `targetNamespace` and `targetLabel`.** Without a label, the dry-run still shows a target pod, but the direct Kubernetes backend refuses to inject the fault (`Empty label selector`) and the step fails.
+- **Set `"targetBrokerId": -1` when you want a random matching pod.** An omitted `targetBrokerId` is `0`, which picks the pod whose name ends in `-0`.
+- **Send every numeric setting the fault relies on**, such as `chaosDurationSec` and `gracePeriodSec`. Both come back as `0` when omitted, not `30`.
+
 ### Leader-Aware Targeting: The Killer Feature
 
 Most chaos engineering tools operate at the infrastructure level — they kill pods, partition networks, or stress CPUs. But they do not understand *what* is running inside those pods. You tell them "kill pod X" and they kill pod X. If you want to kill the leader of a specific Kafka partition, you first need to figure out which pod hosts that leader, which means querying the Kafka AdminClient, parsing the response, and building the right pod name. This is tedious, error-prone, and defeats the purpose of automation.
 
-Kates solves this with leader-aware targeting. When you set `targetTopic` and `targetPartition` in your `FaultSpec`, the `KafkaIntelligenceService` automatically resolves the current leader broker ID by calling `AdminClient.describeTopics()`, then maps that broker ID to the corresponding Kubernetes pod name using the Strimzi naming convention (`{cluster-name}-kafka-{brokerId}`).
+Kates solves this with leader-aware targeting. When you set `targetTopic` and `targetPartition` in your `FaultSpec`, the `KafkaIntelligenceService` automatically resolves the current leader broker ID by calling `AdminClient.describeTopics()`. The orchestrator copies your `FaultSpec` with `targetBrokerId` set to that ID, and the chaos backend picks the pod whose name ends in `-{brokerId}` among the pods `targetLabel` matches in `targetNamespace`. So the namespace and label still decide where Kates looks.
 
 This means you can write experiments like "kill the leader of the `orders` topic, partition 0" without knowing — or caring — which broker that is:
 
@@ -168,6 +174,8 @@ This means you can write experiments like "kill the leader of the `orders` topic
 {
   "experimentName": "kill-orders-leader",
   "disruptionType": "POD_KILL",
+  "targetNamespace": "kafka",
+  "targetLabel": "strimzi.io/component-type=kafka",
   "targetTopic": "orders",
   "targetPartition": 0,
   "chaosDurationSec": 0,
@@ -175,13 +183,13 @@ This means you can write experiments like "kill the leader of the `orders` topic
 }
 ```
 
-This is critical for experiments that are meant to be repeatable. If you hardcode a broker ID, your experiment breaks the moment leadership moves. With leader-aware targeting, the experiment always hits the right broker, regardless of the current cluster state.
+This is critical for experiments that are meant to be repeatable. If you hardcode a broker ID, your experiment breaks the moment leadership moves. With leader-aware targeting, the experiment always hits the right broker, regardless of the current cluster state. The lookup runs when the step starts. If it fails (the topic or partition does not exist, the partition has no leader, or Kafka does not answer), the step keeps the `targetBrokerId` you sent, which is `0` if you left it out.
 
 ## Disruption Plans: Designing Multi-Step Experiments
 
 A single fault injection is useful, but real-world failures are often compound events. A broker crashes, the ISR recovers, and then a second broker crashes before the first one finishes catching up. A network partition isolates the controller, and while the cluster is struggling to elect a new one, a disk fills up on a follower. These cascading failures are exactly what you need to test, and they require multi-step disruption plans.
 
-A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a single fault injection along with its observation parameters. The orchestrator executes each step in order, collecting metrics and grading results as it goes.
+A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a single fault injection along with its observation parameters. The orchestrator executes each step in order and collects metrics as it goes. If the plan has an SLA, it grades the whole plan once, after the last step.
 
 ### Anatomy of a Plan
 
@@ -194,10 +202,8 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
   "isrTrackingTopic": "orders",
   "lagTrackingGroupId": "order-processor",
   "sla": {
-    "maxP99LatencyMs": 200.0,
     "minThroughputRecPerSec": 5000.0,
-    "maxRtoMs": 60000,
-    "maxDataLossPercent": 0.0
+    "maxRtoMs": 60000
   },
   "steps": [
     {
@@ -208,6 +214,8 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
       "faultSpec": {
         "experimentName": "kill-broker-1",
         "disruptionType": "POD_KILL",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/component-type=kafka",
         "targetTopic": "orders",
         "targetPartition": 0,
         "gracePeriodSec": 0
@@ -221,6 +229,8 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
       "faultSpec": {
         "experimentName": "kill-broker-2",
         "disruptionType": "POD_KILL",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/component-type=kafka",
         "targetTopic": "orders",
         "targetPartition": 1,
         "gracePeriodSec": 0
@@ -231,6 +241,8 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
 ```
 
 There are important design decisions embedded in this plan. The `steadyStateSec: 10` on the second step means we only wait 10 seconds after the first broker recovers before killing the second one — putting the cluster under maximum pressure. The `observationWindowSec: 180` on the second step is longer because recovering from two simultaneous broker failures takes more time. And the `maxAffectedBrokers: 2` tells the safety guard that we intentionally want to affect two brokers.
+
+Each `faultSpec` spells out `targetNamespace` and `targetLabel`, because a JSON spec gets no defaults (see the note under the [FaultSpec table](#faultspec-the-language-of-disruption)). The `sla` block sets only thresholds the disruption grader can fail today. [Defining Your SLA](#defining-your-sla) explains why P99 latency and data loss are left out.
 
 ## The 13-Step Execution Pipeline
 
@@ -264,11 +276,12 @@ sequenceDiagram
         Orchestrator->>Intel: stopTrackers()
         Orchestrator->>Prom: capture(postDisruption)
         Prom-->>Orchestrator: impactSnapshot
-        Orchestrator->>Grader: grade(step, sla)
-        Grader-->>Orchestrator: SlaVerdict
     end
 
-    Orchestrator->>Grader: gradeOverall(report)
+    opt Plan has an sla block with a threshold set
+        Orchestrator->>Grader: grade(report, sla)
+        Grader-->>Orchestrator: SlaVerdict
+    end
     Orchestrator-->>Client: DisruptionReport
 ```
 
@@ -292,7 +305,7 @@ Let's walk through each step and understand not just *what* it does, but *why* i
 
 **Steps 10-11: Data Collection.** The trackers are stopped and their collected timelines are attached to the step report. A second Prometheus snapshot is captured for post-disruption comparison.
 
-**Step 12: SLA Grading.** The `SlaGrader` evaluates the step results against the SLA definition and produces a letter grade with detailed violation reports.
+**Step 12: SLA Grading.** Steps are not graded one at a time. After the last step, if the plan's `sla` block sets at least one threshold, the `SlaGrader` checks every step's results against it and attaches a single verdict to the report: a letter grade plus the violations. A plan without one gets no grade. See [SLA Grading](#sla-grading-quantifying-resilience).
 
 **Step 13: Auto-Rollback.** If the step failed and `autoRollback` is enabled, the orchestrator reverses the fault. For pod-level faults, this is typically a no-op (Kubernetes restarts the pod automatically). For infrastructure-level faults (network partition, CPU stress), the provider actively removes the injected fault.
 
@@ -365,59 +378,69 @@ When `autoRollback` is enabled (the default), faults are automatically reversed 
 
 ## SLA Grading: Quantifying Resilience
 
-After each disruption step, the `SlaGrader` evaluates the cluster's behavior against your declared SLA thresholds and produces a letter grade. This transforms a complex set of metrics into a single, actionable signal: did the cluster meet your resilience requirements?
+When a plan's `sla` block sets at least one threshold, the `SlaGrader` grades the whole plan once, after its last step. The report carries the result as `slaVerdict`. It holds a letter grade, the list of violations, the number of checks that ran (`totalChecks`) and passed (`passedChecks`), and the thresholds it could not evaluate, each with the reason (`unevaluated`). A plan with no `sla` block, or one whose thresholds are all unset, gets no verdict. The grade turns a complex set of metrics into a single signal: did the cluster meet your resilience requirements?
 
 ### Defining Your SLA
 
-An `SlaDefinition` contains up to 9 thresholds:
+The `sla` block is an `SlaDefinition`, the same class a test scenario uses for its SLA. It has nine thresholds, and you set only the ones you care about; unset thresholds are ignored. For each step of a disruption plan, though, the grader has only two sources: the Prometheus snapshot Kates takes when the step's observation window ends, and the step's pod recovery time. So only four of the nine are graded:
 
-| Metric | Field | What It Measures |
-|--------|-------|------------------|
-| P99 latency | `maxP99LatencyMs` | Worst acceptable tail latency |
-| P95 latency | `maxP95LatencyMs` | Worst acceptable 95th percentile latency |
-| Average latency | `maxAvgLatencyMs` | Worst acceptable mean latency |
-| Maximum latency | `maxMaxLatencyMs` | Absolute worst-case latency |
-| Throughput | `minThroughputRecPerSec` | Minimum acceptable throughput |
-| Error rate | `maxErrorPercent` | Maximum acceptable error percentage |
-| RTO | `maxRtoMs` | Recovery Time Objective — maximum recovery time |
-| RPO (data loss) | `maxDataLossPercent` | Recovery Point Objective — maximum data loss |
-| Consumer lag | `maxConsumerLagRecords` | Maximum acceptable consumer lag |
+| Field | Type | What the disruption grader compares it with | Severity of a miss |
+|-------|------|---------------------------------------------|--------------------|
+| `minThroughputRecPerSec` | `Double` | Messages produced per second from the step's Prometheus snapshot, as a rate over the last minute of the observation window (see the caveats below) | `CRITICAL` below half the minimum, `WARNING` otherwise |
+| `maxRtoMs` | `Long` | Time from fault injection until every Kafka pod is Ready again, from the pod watcher rather than Prometheus. Measured only for steps with `requireRecovery: true`. A step whose pods never all come back Ready has no time to compare and adds no check | `CRITICAL` above twice the limit, `WARNING` otherwise |
+| `maxP99LatencyMs` | `Double` | P99 produce request time from the step's Prometheus snapshot (see the caveats below) | `CRITICAL` above twice the limit, `WARNING` otherwise |
+| `maxAvgLatencyMs` | `Double` | Average produce request time from the step's Prometheus snapshot (see the caveats below) | `WARNING` |
+| `maxP999LatencyMs` | `Double` | Not evaluated: the snapshot has no P99.9 latency | — |
+| `maxErrorRate` | `Double` | Not evaluated: the snapshot has no error rate | — |
+| `maxDataLossPercent` | `Double` | Not evaluated: a plan runs no workload, so no data loss is measured | — |
+| `minRecordsProcessed` | `Long` | Not evaluated: a plan runs no workload, so no records are counted | — |
+| `maxRpoMs` | `Long` | Not evaluated: a plan runs no workload, so no RPO is measured | — |
 
-You do not need to specify all 9. Only the metrics you set are evaluated — unset metrics are ignored. This lets you focus on the metrics that matter most to your use case.
+A plan that sets any of the last five still runs. Validation warns about each one, dry-run included, and the verdict lists it under `unevaluated` instead of counting it as passed. These five belong in a test scenario's SLA, where the load test itself supplies errors, P99.9 latency, record counts and data integrity. For data loss and RPO under a fault, run a resilience test (`kates resilience run`) with an INTEGRITY workload. A disruption plan runs no load test of its own. For the same reason, `minThroughputRecPerSec` measures whatever else is producing to the cluster, so keep a workload running for the whole plan. With no producer, every throughput check is a `CRITICAL` miss.
+
+The Prometheus queries behind the throughput and latency checks have catches of their own on a cluster that uses the Strimzi JMX exporter rules shipped in Kates' `kafka-cluster` chart:
+
+- **Throughput** is `sum(rate(kafka_server_brokertopicmetrics_messagesin_total[1m]))`, with no label filter. Those rules export one broker-wide series and one series per topic, so the sum is about twice the real rate. It also counts any other Kafka cluster the same Prometheus scrapes. Set the minimum with that in mind.
+- **P99 latency** is `histogram_quantile` over `kafka_network_requestmetrics_totaltimems_bucket`. The rules export that metric as one gauge per quantile, with no `_bucket` series, so the query returns nothing and the value reads `0`.
+- **Average latency** is the mean of the `kafka_network_requestmetrics_totaltimems` Produce series divided by 1000, so it reads about a thousandth of the real value in milliseconds.
+
+Neither latency check can fail on such a cluster. Use `maxRtoMs`, plus `minThroughputRecPerSec` with the doubling in mind.
+
+The latency and throughput checks need the step's Prometheus snapshot. A step without one adds no checks for them. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails. If no step has a snapshot, those thresholds go under `unevaluated`, and so does `maxRtoMs` when no step measured a recovery time. When nothing could be checked at all, the grade is `-`, not `A`.
+
+One gap remains. A step whose pods never all come back Ready adds no `maxRtoMs` check, so if another step recovered in time, the plan can still grade `A`. Read each step's `timeToAllReady` alongside the grade.
 
 ### The Grading Algorithm
 
-The grader classifies each violation by severity:
-
-| Severity | Condition | Meaning |
-|----------|-----------|---------|
-| `CRITICAL` | Actual value > 5× the threshold | Catastrophic miss — system fundamentally failed |
-| `MAJOR` | Actual value > 2× the threshold | Significant miss — system degraded badly |
-| `WARNING` | Threshold exceeded within 2× | Minor miss — system struggled but coped |
-
-Then it maps the violations to a letter grade:
+The grader runs each threshold you set once per step, so a two-step plan with two thresholds makes four checks. Each miss is a violation with a severity of `WARNING` or `CRITICAL`, as the table above shows. The grade then depends on whether any violation is critical and on the fraction of checks that failed:
 
 ```mermaid
 flowchart TD
-    Start["Count violations"] --> Empty{"Zero violations?"}
-    Empty -- Yes --> A["Grade A: Passed all SLA thresholds"]
-    Empty -- No --> Critical{"Any CRITICAL?"}
-    Critical -- Yes --> F["Grade F: Catastrophic failure"]
-    Critical -- No --> Count{"Warning count"}
-    Count -- "≤ 1" --> B["Grade B: Minor degradation"]
-    Count -- "2-3" --> C["Grade C: Moderate degradation"]
-    Count -- "> 3" --> D["Grade D: Significant degradation"]
+    Start["Run every check"] --> Ran{"Any checks ran?"}
+    Ran -- No --> None["Grade -: nothing evaluated"]
+    Ran -- Yes --> Empty{"Any violations?"}
+    Empty -- No --> A["Grade A: every check passed"]
+    Empty -- Yes --> Critical{"Any CRITICAL?"}
+    Critical -- Yes --> F["Grade F"]
+    Critical -- No --> Fraction{"Failed checks ÷ total checks"}
+    Fraction -- "25% or less" --> B["Grade B"]
+    Fraction -- "over 25%, up to 50%" --> C["Grade C"]
+    Fraction -- "over 50%" --> D["Grade D"]
 ```
 
 ### Worked Examples
 
-Consider an SLA with `maxP99LatencyMs: 100`, `minThroughputRecPerSec: 10000`, `maxErrorPercent: 1.0`:
+Consider a two-step plan with `minThroughputRecPerSec: 10000` and `maxRtoMs: 60000`. That makes four checks: throughput and recovery time for each step.
 
-**Scenario 1 — Grade A.** P99 latency: 45ms, throughput: 15,000 rec/s, error rate: 0.2%. Every metric is within its threshold. The cluster handled the disruption without any measurable degradation. This is the ideal outcome — it means your cluster is genuinely resilient to this type of failure.
+**Scenario 1 — Grade A.** Both steps recover in 40 seconds and hold 15,000 rec/s. Every check passes. The cluster handled both faults without breaching a threshold, which is the outcome you want: it is resilient to this type of failure.
 
-**Scenario 2 — Grade B.** P99 latency: 120ms (1.2× threshold, WARNING), throughput: 12,000 rec/s, error rate: 0.5%. One minor violation. The cluster briefly degraded but recovered quickly. This usually indicates that leader election or a consumer rebalance caused a temporary latency spike, which is expected behavior.
+**Scenario 2 — Grade B.** The second step drops to 8,000 rec/s. That is above half the minimum, so the miss is a `WARNING`. One failed check out of four is 25%, which is not over 25%, so the grade is B. A brief dip like this often comes from the leader election or client reconnects that follow the fault.
 
-**Scenario 3 — Grade F.** P99 latency: 800ms (8× threshold, CRITICAL), throughput: 2,000 rec/s (5× below threshold, CRITICAL), error rate: 12% (12× threshold, CRITICAL). Three critical violations. The cluster fundamentally failed to handle the disruption. This usually means the configured `min.insync.replicas` is too low, the replication factor is insufficient, or the cluster does not have enough brokers to survive the failure.
+**Scenario 3 — Grade C.** Both steps drop to 8,000 rec/s. Two warnings out of four checks is 50%: over 25%, but not over 50%.
+
+**Scenario 4 — Grade D.** Both steps drop to 8,000 rec/s, and the second step takes 90 seconds to recover. 90 seconds is over the limit but under twice the limit, so all three misses are warnings. Three out of four is 75%.
+
+**Scenario 5 — Grade F.** One step takes 150 seconds to recover, more than twice the 60-second limit. That miss is `CRITICAL`, so the grade is F whatever the other checks show. A single critical miss is enough, because it means the cluster was far outside the SLA for at least one fault. When throughput is the critical miss, check whether `min.insync.replicas`, the replication factor and the broker count can absorb the failure.
 
 ## Chaos Providers: Pluggable Fault Injection
 
@@ -489,7 +512,6 @@ curl -X POST 'http://localhost:8080/api/disruptions?dryRun=true' \
     "autoRollback": true,
     "isrTrackingTopic": "disruption-tutorial",
     "sla": {
-      "maxP99LatencyMs": 500.0,
       "maxRtoMs": 60000
     },
     "steps": [{
@@ -500,6 +522,8 @@ curl -X POST 'http://localhost:8080/api/disruptions?dryRun=true' \
       "faultSpec": {
         "experimentName": "tutorial-kill",
         "disruptionType": "POD_KILL",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/component-type=kafka",
         "targetTopic": "disruption-tutorial",
         "targetPartition": 0,
         "gracePeriodSec": 0
@@ -508,11 +532,13 @@ curl -X POST 'http://localhost:8080/api/disruptions?dryRun=true' \
   }'
 ```
 
-Check the response — it should show which pod would be killed and confirm that RBAC permissions are sufficient.
+Check the response. `wouldSucceed` should be `true`, and the step's `warnings` should not mention RBAC. The step's `resolvedLeaderId` is the broker whose pod would be killed. Its `targetPod` does not reflect that lookup: it shows the pod for the `targetBrokerId` in the plan, which is `0` here because the plan leaves it out.
+
+The `sla` block sets only `maxRtoMs`. The LOAD test from Step 2 has finished by now, so a throughput minimum would fail for lack of traffic, and the latency thresholds cannot fail on the chart's metrics (see [Defining Your SLA](#defining-your-sla)).
 
 ### Step 4: Execute the Disruption
 
-Remove `?dryRun=true` and run the same request for real. The response will take about 2.5 minutes (30s steady state + 120s observation window + processing time):
+Save the JSON body from Step 3 as `tutorial-plan.json`, then post it without `?dryRun=true`. Kates validates the plan and answers at once with `202 Accepted`, the report `id` and `"status": "RUNNING"`. The plan runs in the background for about 2.5 minutes (30s steady state + 120s observation window + recovery):
 
 ```bash
 curl -X POST http://localhost:8080/api/disruptions \
@@ -520,17 +546,24 @@ curl -X POST http://localhost:8080/api/disruptions \
   -d @tutorial-plan.json | jq
 ```
 
+A `422` means the safety guard rejected the plan, and its `validationWarnings` say why. A `409` means another plan is already running against the cluster.
+
 ### Step 5: Read the Report
 
-The response is a `DisruptionReport` containing:
+Poll the report until its `status` is no longer `RUNNING`:
 
-- **Overall grade** — how well the cluster handled the disruption
-- **Per-step results** — ISR timeline, lag timeline, Prometheus deltas, SLA grade
-- **Chaos outcome** — what the provider did and whether it succeeded
-- **SLA violations** — which thresholds were exceeded and by how much
+```bash
+curl -s http://localhost:8080/api/disruptions/<id> | jq '.status'
+```
+
+`COMPLETED` means every step's chaos outcome was a pass, and `PARTIAL` means at least one was not. The full `DisruptionReport` contains:
+
+- **`stepReports`**: for each step, the chaos outcome, the pod timeline, recovery times, ISR and lag metrics, and the Prometheus snapshots and deltas
+- **`summary`**: worst recovery time, worst ISR recovery, peak consumer lag and whether the SLA was violated
+- **`slaVerdict`**: the grade, each violation with its threshold and actual value, `totalChecks`/`passedChecks`, and any `unevaluated` thresholds. It is present only because the plan has an `sla` block.
 
 Look at the ISR timeline first. You should see the ISR shrink from 3 replicas to 2 shortly after the kill, then expand back to 3 once the broker restarts. The time between shrink and expand is your cluster's ISR recovery time.
 
-Then look at the SLA grade. A Grade A means the cluster handled the broker kill without any measurable degradation. A Grade B or C means there was some impact but within acceptable bounds. A Grade F means the cluster fundamentally failed to recover — and you have just discovered a critical resilience gap before it could affect production.
+Then look at the SLA verdict. This plan makes one check, the step's recovery time. A Grade A means every Kafka pod was Ready again within 60 seconds. A single warning is 100% of the checks, so a recovery between 60 and 120 seconds grades D, and anything slower grades F. An F means you have just discovered a resilience gap before it could affect production. A grade of `-` means nothing was checked. The step has no recovery time, either because it failed or because the pods never all came back Ready, and `unevaluated` lists `maxRtoMs`. The step report shows which it was.
 
 That is the value of chaos engineering: knowledge you cannot get any other way.
