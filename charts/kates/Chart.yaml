@@ -2,9 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: rbac.directChaos adds the write rules the direct Kubernetes chaos
-# backend needs. It defaults to false, so the default ClusterRole is unchanged.
-version: 0.10.0
+# Patch: the default ClusterRole may patch pods. ROLLING_RESTART annotates
+# Kafka pods for the Strimzi Cluster Operator on either chaos backend, so the
+# permission cannot wait for rbac.directChaos. Other defaults are unchanged.
+version: 0.10.1
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +29,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The default ClusterRole grants patch on pods. ROLLING_RESTART now annotates each Kafka pod it restarts with strimzi.io/manual-rolling-update and lets the Strimzi Cluster Operator roll them; it used to restart StatefulSets, which Strimzi does not create, so it restarted nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus has no rolling restart experiment), so the rule is not behind rbac.directChaos"
     - kind: added
       description: "rbac.directChaos (default false) grants the writes the direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or hybrid without Litmus) makes itself: create, delete and deletecollection on networkpolicies; patch on statefulsets; get and update on statefulsets/scale; update on pods/ephemeralcontainers. The ClusterRole granted only get and list on NetworkPolicies and StatefulSets, and nothing on ephemeral containers, so every NETWORK_PARTITION, SCALE_DOWN, ROLLING_RESTART, CPU_STRESS and IO_STRESS on that backend was refused, along with its cleanup, rollback and startup orphan recovery. Litmus runs its experiments as litmus-admin and needs none of this, so the default ClusterRole is unchanged"
     - kind: fixed

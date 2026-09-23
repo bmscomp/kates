@@ -247,39 +247,48 @@ Rolling restarts are the most common operational event in a Kafka cluster's life
 - **Readiness probe timing.** The next broker should not restart until the previous one is fully ready. If readiness probes are too lenient, two brokers may be down simultaneously.
 - **Replication catch-up.** After a broker restarts, it needs to catch up on messages it missed. During this window, the ISR is short by one member.
 
-This playbook validates that your StatefulSet rolling restart strategy, combined with your Strimzi operator configuration, actually achieves zero-downtime.
+This playbook validates that the rolling update your Strimzi Cluster Operator performs on every upgrade, combined with your broker and client configuration, actually achieves zero downtime.
 
 ### The Playbook
 
 ```yaml
 name: rolling-restart
-description: Trigger a graceful rolling restart of the Kafka StatefulSet
-category: operational
-steps:
-  - name: restart-statefulset
-    faultSpec:
-      experimentName: rolling-restart-sim
-      disruptionType: ROLLING_RESTART
-      targetLabel: "strimzi.io/component-type=kafka"
-      targetNamespace: kafka
-      chaosDurationSec: 300
-      gracePeriodSec: 60
-    steadyStateSec: 30
-    observationWindowSec: 300
-    requireRecovery: true
-sla:
-  maxP99LatencyMs: 200.0
-  minThroughputRecPerSec: 8000.0
-  maxErrorPercent: 0.0
+description: "Restart every Kafka pod one at a time through the Strimzi Cluster Operator"
+category: operations
 maxAffectedBrokers: 1
 autoRollback: false
+steps:
+  - name: rolling-restart-brokers
+    faultSpec:
+      experimentName: rolling-restart-sts
+      disruptionType: ROLLING_RESTART
+      targetLabel: "strimzi.io/component-type=kafka"
+      chaosDurationSec: 600
+    steadyStateSec: 30
+    observationWindowSec: 180
+    requireRecovery: true
 ```
+
+### How Kates Restarts the Brokers
+
+Strimzi runs Kafka pods from StrimziPodSets, not StatefulSets, so there is no StatefulSet to restart. Kates annotates every pod the selector matches with `strimzi.io/manual-rolling-update=true` and leaves the restart to the Cluster Operator, which acts on the annotation at its next reconciliation (every two minutes by default; `fullReconciliationIntervalMs` in the `strimzi-operator` chart). The operator runs its normal rolling update: one pod at a time, each ready again before the next, and no restart that would leave a partition under `min.insync.replicas`. The playbook tests the same procedure an upgrade uses, not an imitation of it. Kates annotates pods rather than their StrimziPodSets because selectors such as `zone=alpha` match pod labels only.
+
+The step waits for the roll to finish before the observation window opens. It is done when every annotated pod has been replaced by a new pod that is ready. `chaosDurationSec` is the budget for that wait, including the wait for the next reconciliation, and the step returns as soon as the roll completes. If the budget runs out, the step fails and Kates removes the annotation from the pods not yet rolled, so the operator does not restart them later during another experiment. The Cluster Operator's log says why it held a pod back. With `chaosDurationSec: 0` the step does not wait at all, and the dry run warns that the observation window overlaps the roll.
+
+A few other details:
+
+- **A rolling restart restarts every matching pod.** `targetAll` is implied and `targetBrokerId` is ignored. Set `targetPod` to restart a single pod.
+- **The grace period is not `gracePeriodSec`.** Each broker gets its node pool's `terminationGracePeriodSeconds`, 30 seconds unless the pool sets it.
+- **Non-Strimzi Kafka is rolled differently.** A pod run by a StatefulSet is rolled by restarting its StatefulSet. Matching pods that belong to neither a StrimziPodSet nor a StatefulSet are skipped.
+- **Both backends run it the same way.** The Litmus backend hands `ROLLING_RESTART` to the Kubernetes API, because Litmus `pod-delete` kills pods rather than rolling them.
+- **The safety guard counts it as one broker** against `maxAffectedBrokers`, because the operator takes brokers down one at a time. The dry run still lists every pod it restarts.
+- **The service account needs `patch` on pods.** The `kates` chart's ClusterRole grants it.
 
 ### What to Look For
 
-The critical question is: does `maxErrorPercent: 0.0` pass? If it does, your rolling restart is truly zero-downtime — no client-visible errors at any point during the restart. If it fails, you need to investigate your controlled shutdown settings, readiness probe configuration, or producer retry policies.
+The critical question is whether clients see any errors while the brokers roll. If the error rate stays at zero, your rolling restart is truly zero-downtime. If it does not, investigate your controlled shutdown settings, readiness probe configuration, or producer retry policies.
 
-The `autoRollback: false` setting is deliberate — you do not want to undo a rolling restart midway through, as that would leave the cluster in a partially updated state.
+The `autoRollback: false` setting is deliberate. A finished roll has nothing to undo, and an unfinished one is already stopped by the step itself.
 
 ---
 

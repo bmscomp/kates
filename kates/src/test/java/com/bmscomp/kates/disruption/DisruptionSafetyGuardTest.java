@@ -219,6 +219,48 @@ class DisruptionSafetyGuardTest {
         assertTrue(guard.validatePlan(plan(1, consumers)).safe());
     }
 
+    private static FaultSpec rollingRestart(String selector, int chaosDurationSec) {
+        return FaultSpec.builder("roll")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.ROLLING_RESTART)
+                .chaosDurationSec(chaosDurationSec)
+                .build();
+    }
+
+    @Test
+    void rollingRestartCountsOneBrokerAtATime() {
+        createZonedBrokers();
+
+        // The built-in playbook: every broker, maxAffectedBrokers 1.
+        var result = guard.validatePlan(plan(1, rollingRestart("strimzi.io/component-type=kafka", 600)));
+
+        assertTrue(result.safe(), result.errors().toString());
+    }
+
+    @Test
+    void dryRunListsEveryBrokerARollingRestartRestarts() {
+        createZonedBrokers();
+
+        var all = guard.dryRun(plan(1, rollingRestart("strimzi.io/component-type=kafka", 600)))
+                .steps()
+                .getFirst();
+        // Used to list one broker (the random or broker-id pick) and then
+        // every broker again, whatever the selector.
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-brokers-2", "krafter-brokers-3"),
+                all.affectedPods().stream().sorted().toList());
+        assertTrue(all.warnings().isEmpty(), all.warnings().toString());
+
+        var zone =
+                guard.dryRun(plan(1, rollingRestart("zone=alpha", 0))).steps().getFirst();
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1"),
+                zone.affectedPods().stream().sorted().toList());
+        assertTrue(
+                zone.warnings().getFirst().contains("does not wait"),
+                zone.warnings().toString());
+    }
+
     @Test
     void dryRunListsTheZoneAndFlagsASelectorThatHitsNoBroker() {
         createZonedBrokers();

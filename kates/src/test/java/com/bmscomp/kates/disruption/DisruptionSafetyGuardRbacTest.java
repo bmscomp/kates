@@ -42,7 +42,8 @@ class DisruptionSafetyGuardRbacTest {
     @CsvSource({
         "NETWORK_PARTITION, create, networking.k8s.io, networkpolicies",
         "SCALE_DOWN,        patch,  apps,              statefulsets",
-        "ROLLING_RESTART,   patch,  apps,              statefulsets",
+        // Annotates the pods for the Strimzi Cluster Operator; no group is the core group.
+        "ROLLING_RESTART,   patch,  ,                  pods",
     })
     void asksForTheVerbAndGroupTheProviderUses(DisruptionType type, String verb, String group, String resource)
             throws InterruptedException {
