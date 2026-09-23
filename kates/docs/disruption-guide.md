@@ -140,8 +140,9 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 | `experimentName` | `String` | (required) | Unique name for tracking and reporting |
 | `disruptionType` | `DisruptionType` | — | Which of the 10 fault types to inject |
 | `targetNamespace` | `String` | `"kafka"` | Kubernetes namespace containing the target pods |
-| `targetLabel` | `String` | `"strimzi.io/component-type=kafka"` | Label selector to identify target pods |
+| `targetLabel` | `String` | `"strimzi.io/component-type=kafka"` | Kubernetes label selector (`kubectl -l` syntax) for the target pods |
 | `targetPod` | `String` | `""` | Specific pod name (overrides label selector) |
+| `targetAll` | `boolean` | `false` | Hit every pod `targetLabel` matches instead of one (overrides `targetBrokerId`) |
 | `targetBrokerId` | `int` | `-1` | Kafka broker ID to target |
 | `targetTopic` | `String` | `""` | Topic for leader-aware targeting |
 | `targetPartition` | `int` | `0` | Partition for leader-aware targeting |

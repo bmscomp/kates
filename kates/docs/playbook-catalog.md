@@ -42,26 +42,31 @@ The subtlety is in the recovery. When the AZ comes back online and the broker re
 
 ```yaml
 name: az-failure
-description: Simulate availability zone failure by killing all brokers in a zone
+description: "Simulate an availability zone failure by killing every Kafka pod in zone alpha"
 category: infrastructure
-steps:
-  - name: kill-zone-brokers
-    faultSpec:
-      experimentName: az-failure-sim
-      disruptionType: POD_KILL
-      targetLabel: "topology.kubernetes.io/zone=zone-a"
-      targetNamespace: kafka
-      gracePeriodSec: 0
-    steadyStateSec: 30
-    observationWindowSec: 300
-    requireRecovery: true
-sla:
-  maxP99LatencyMs: 500.0
-  minThroughputRecPerSec: 5000.0
-  maxRtoMs: 120000
 maxAffectedBrokers: 3
 autoRollback: true
+steps:
+  - name: kill-zone-alpha
+    faultSpec:
+      experimentName: az-failure-alpha
+      disruptionType: POD_KILL
+      targetLabel: "strimzi.io/component-type=kafka,zone=alpha"
+      targetAll: true
+      chaosDurationSec: 30
+      gracePeriodSec: 0
+    steadyStateSec: 30
+    observationWindowSec: 120
+    requireRecovery: true
 ```
+
+### How the Zone Is Targeted
+
+`topology.kubernetes.io/zone` is a *node* label; Kubernetes does not copy it onto the pods scheduled there, so a pod selector on it matches nothing. The playbook selects on the pod label `zone: alpha` instead, which the `kafka-cluster` chart puts on every pod of a node pool pinned with `zone:` — `kates detect --generate-values` pins one broker pool to each of the lab's `alpha`, `sigma` and `gamma` zones. `targetLabel` is a full Kubernetes label selector, so both requirements must hold.
+
+`targetAll: true` is what makes this a zone failure: without it, a label-targeted fault hits one random pod the selector matches. With it, every matching pod is killed, and the safety guard counts each one against `maxAffectedBrokers` — a zone holding more than three Kafka pods is rejected before anything is killed. The direct Kubernetes backend kills them all at once. The Litmus backend hands them to `pod-delete` as one `TARGET_PODS` list, which it runs with `SEQUENCE=serial`, so it deletes them one at a time.
+
+If your pools spread across zones without a `zone:` pin, no pod carries the label: the dry run warns that the selector matches no broker pod and the step fails with `No pods found matching label selector`. To fail another zone, post the same step to `POST /api/disruptions` with the selector changed; built-in playbooks take no parameters.
 
 ### What to Look For
 
@@ -71,7 +76,7 @@ When you run this playbook, pay attention to these indicators:
 
 **Write availability.** If `min.insync.replicas=2` and the ISR shrinks to 2, writes continue. If it shrinks to 1, writes are rejected. This is the critical moment: does your cluster maintain write availability during an AZ failure?
 
-**Recovery time.** The 300-second observation window gives the brokers time to restart and catch up. Look at how long it takes for the ISR to fully recover. For a lightly loaded cluster, this might take 30-60 seconds. For a cluster handling 100,000+ messages/second, it could take several minutes as the restarting brokers replicate missed data.
+**Recovery time.** The 120-second observation window gives the brokers time to restart and catch up. Look at how long it takes for the ISR to fully recover. For a lightly loaded cluster, this might take 30-60 seconds. For a cluster handling 100,000+ messages/second, it could take several minutes as the restarting brokers replicate missed data.
 
 **The SLA grade** captures all of this into a single letter. An A means the cluster handled the AZ failure without noticeable impact. A B or C means there was degradation but within acceptable bounds. An F means the cluster's AZ resilience is fundamentally broken and needs architectural changes.
 

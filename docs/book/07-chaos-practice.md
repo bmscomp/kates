@@ -98,6 +98,23 @@ graph TD
 
 The `HybridChaosProvider` (selected with `kates.chaos.provider=hybrid`) picks its backend once, at startup: it checks whether the Litmus CRDs (`chaosengines.litmuschaos.io`) exist in the cluster. If they do, it delegates **all** fault injection to the `LitmusChaosProvider`; otherwise it falls back to the direct `KubernetesChaosProvider`. There is no per-type routing — a single delegate handles every disruption for the lifetime of the process.
 
+### Targeting Pods
+
+A fault's `targetLabel` is a Kubernetes label selector, in the syntax `kubectl -l` takes: comma-separated requirements that must all hold, such as `strimzi.io/component-type=kafka,zone=alpha`, `zone in (alpha,sigma)`, `zone!=gamma` or `!zone`. A malformed or empty selector is rejected before anything is disrupted.
+
+A pod-level fault hits one pod unless told otherwise. The first of these that applies decides which pods:
+
+1. `targetPod`, when set.
+2. Every pod the selector matches, when `targetAll: true`.
+3. The pod named `<anything>-<targetBrokerId>`, when `targetBrokerId` is set (falling back to the first match if no pod has that ordinal).
+4. Otherwise, one matching pod at random.
+
+Both backends resolve the pods the same way: the Kubernetes backend applies the fault to each of them, and the Litmus backend passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
+
+::: {.callout-warning}
+Kates runs Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the Kubernetes backend deletes them all at once.
+:::
+
 ## Built-In Playbooks
 
 Kates ships with a set of built-in playbooks located in `kates/src/main/resources/playbooks/` — that directory is the source of truth for the YAML shown below. Each playbook is a YAML file that defines a complete disruption scenario with safety parameters, fault steps, and observation windows.
@@ -196,37 +213,42 @@ steps:
 
 ### az-failure
 
-Simulates a full availability zone failure by killing all brokers in one rack. This is the most aggressive built-in playbook — it sets `maxAffectedBrokers: 3` because an entire AZ may host multiple brokers. Use this to validate your rack-aware replication strategy.
+Simulates an availability zone failure by killing every Kafka pod in zone `alpha` at once. This is the most aggressive built-in playbook — it sets `maxAffectedBrokers: 3` because an entire AZ may host multiple brokers. Use this to validate your rack-aware replication strategy.
+
+Pods do not carry their node's `topology.kubernetes.io/zone` label, so the playbook selects on the pod label `zone: alpha`. The `kafka-cluster` chart puts that label on every pod of a node pool pinned with `zone:`, and `kates detect --generate-values` pins one broker pool to each of the lab's `alpha`, `sigma` and `gamma` zones. `targetAll: true` makes the step kill every pod the selector matches, not just one of them, and the safety guard counts each of those pods against `maxAffectedBrokers`.
+
+A cluster whose pools spread across zones without a `zone:` pin has no pod with that label. On such a cluster the dry run warns that the selector matches no broker pod, and the step fails instead of silently killing nothing. To fail a different zone, submit the step as your own plan with the selector changed — built-in playbooks take no parameters.
 
 ```mermaid
 graph TB
     subgraph Before["Before AZ Failure"]
-        N1[Node: alpha ✅<br/>Broker 0]
-        N2[Node: sigma ✅<br/>Broker 1]
-        N3[Node: gamma ✅<br/>Broker 2]
+        N1[Zone: alpha ✅<br/>Broker 0]
+        N2[Zone: sigma ✅<br/>Broker 1]
+        N3[Zone: gamma ✅<br/>Broker 2]
     end
     
     subgraph During["During AZ Failure"]
-        N1b[Node: alpha ❌<br/>Broker 0 killed]
-        N2b[Node: sigma ✅<br/>Broker 1]
-        N3b[Node: gamma ✅<br/>Broker 2]
+        N1b[Zone: alpha ❌<br/>every pod killed]
+        N2b[Zone: sigma ✅<br/>Broker 1]
+        N3b[Zone: gamma ✅<br/>Broker 2]
     end
     
-    Before -->|"POD_KILL (zone-a)"| During
+    Before -->|"POD_KILL zone=alpha, targetAll"| During
 ```
 
 ```yaml
 name: az-failure
-description: "Simulate availability zone failure by killing all brokers in one rack"
+description: "Simulate an availability zone failure by killing every Kafka pod in zone alpha"
 category: infrastructure
 maxAffectedBrokers: 3
 autoRollback: true
 steps:
-  - name: kill-rack-0-brokers
+  - name: kill-zone-alpha
     faultSpec:
-      experimentName: az-failure-rack-0
+      experimentName: az-failure-alpha
       disruptionType: POD_KILL
-      targetLabel: "strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a"
+      targetLabel: "strimzi.io/component-type=kafka,zone=alpha"
+      targetAll: true
       chaosDurationSec: 30
       gracePeriodSec: 0
     steadyStateSec: 30
@@ -343,6 +365,8 @@ graph TD
     V3 -->|"Yes, but only one"| WARN["⚠ Execute with warning:<br/>only 1 broker remains"]
     V3 -->|Yes| EXECUTE["✅ Execute"]
 ```
+
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
 
 The guard also emits per-step warnings — for example, `SCALE_DOWN` without `autoRollback`, or a `NETWORK_PARTITION` with no duration (the NetworkPolicy would persist until cleanup).
 

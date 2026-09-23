@@ -100,14 +100,10 @@ public class K8sPodWatcher {
     public WatchSession startWatching(String namespace, String labelSelector) {
         WatchSession session = new WatchSession();
 
-        String[] parts = labelSelector.split("=", 2);
-        String labelKey = parts[0];
-        String labelValue = parts.length > 1 ? parts[1] : "";
+        String selector = ParsedLabelSelector.parse(labelSelector).toString();
 
-        var podList = client.pods()
-                .inNamespace(namespace)
-                .withLabel(labelKey, labelValue)
-                .list();
+        var podList =
+                client.pods().inNamespace(namespace).withLabelSelector(selector).list();
 
         int expectedPods = podList.getItems().size();
         for (Pod pod : podList.getItems()) {
@@ -122,7 +118,7 @@ public class K8sPodWatcher {
 
         Watch watch = client.pods()
                 .inNamespace(namespace)
-                .withLabel(labelKey, labelValue)
+                .withLabelSelector(selector)
                 .watch(new Watcher<>() {
                     @Override
                     public void eventReceived(Action action, Pod pod) {

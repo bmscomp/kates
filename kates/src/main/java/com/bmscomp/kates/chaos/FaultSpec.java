@@ -9,12 +9,17 @@ import java.util.Map;
  * <p>For Kubernetes-aware disruptions, set {@code disruptionType} and the
  * corresponding parameters (targetBrokerId, networkLatencyMs, etc.).
  * Legacy callers using only {@code experimentName} continue to work unchanged.
+ *
+ * <p>{@code targetLabel} is a Kubernetes label selector ({@link ParsedLabelSelector}).
+ * A pod-scoped fault hits one pod it matches unless {@code targetAll} is set;
+ * {@link PodTargets} has the full precedence.
  */
 public record FaultSpec(
         String experimentName,
         String targetNamespace,
         String targetLabel,
         String targetPod,
+        boolean targetAll,
         int chaosDurationSec,
         int delayBeforeSec,
         Map<String, String> envOverrides,
@@ -38,6 +43,7 @@ public record FaultSpec(
         private String targetNamespace = "kafka";
         private String targetLabel = "strimzi.io/component-type=kafka";
         private String targetPod = "";
+        private boolean targetAll = false;
         private int chaosDurationSec = 30;
         private int delayBeforeSec = 0;
         private Map<String, String> envOverrides = Map.of();
@@ -69,6 +75,11 @@ public record FaultSpec(
 
         public Builder targetPod(String v) {
             this.targetPod = v;
+            return this;
+        }
+
+        public Builder targetAll(boolean v) {
+            this.targetAll = v;
             return this;
         }
 
@@ -148,6 +159,7 @@ public record FaultSpec(
                     targetNamespace,
                     targetLabel,
                     targetPod,
+                    targetAll,
                     chaosDurationSec,
                     delayBeforeSec,
                     Map.copyOf(envOverrides),

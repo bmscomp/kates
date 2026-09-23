@@ -1,8 +1,13 @@
 package com.bmscomp.kates.disruption;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
+import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -35,6 +40,8 @@ class DisruptionSafetyGuardTest {
     void setup() {
         guard = new DisruptionSafetyGuard();
         guard.kubeClient = client;
+        guard.kafkaNamespace = "kafka";
+        guard.kafkaLabel = "strimzi.io/component-type=kafka";
     }
 
     @Test
@@ -103,5 +110,133 @@ class DisruptionSafetyGuardTest {
                 .withName("kafka2")
                 .get();
         assertEquals(1, after.getSpec().getReplicas());
+    }
+
+    // ── Blast-radius counting for multi-pod targets ─────────────────────────
+
+    /** Two brokers in zone alpha, one each in sigma and gamma, as the chart labels them. */
+    private void createZonedBrokers() {
+        String[][] brokers = {
+            {"krafter-brokers-0", "alpha"}, {"krafter-brokers-1", "alpha"},
+            {"krafter-brokers-2", "sigma"}, {"krafter-brokers-3", "gamma"}
+        };
+        for (String[] b : brokers) {
+            client.pods()
+                    .inNamespace("kafka")
+                    .resource(new PodBuilder()
+                            .withNewMetadata()
+                            .withName(b[0])
+                            .withNamespace("kafka")
+                            .addToLabels("strimzi.io/component-type", "kafka")
+                            .addToLabels("zone", b[1])
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
+    }
+
+    private static DisruptionPlan plan(int maxAffectedBrokers, FaultSpec... specs) {
+        DisruptionPlan plan = new DisruptionPlan();
+        plan.setMaxAffectedBrokers(maxAffectedBrokers);
+        int i = 0;
+        for (FaultSpec spec : specs) {
+            plan.getSteps().add(new DisruptionPlan.DisruptionStep("step-" + i++, spec, 0, 0, false));
+        }
+        return plan;
+    }
+
+    private static FaultSpec zoneKill(String selector) {
+        return FaultSpec.builder("az")
+                .targetLabel(selector)
+                .targetAll(true)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+    }
+
+    @Test
+    void targetAllCountsEveryBrokerOfTheZone() {
+        createZonedBrokers();
+
+        var result = guard.validatePlan(plan(1, zoneKill("strimzi.io/component-type=kafka,zone=alpha")));
+
+        // Counted as ONE broker before targetAll existed, so this passed.
+        assertFalse(result.safe());
+        assertEquals(List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"), result.errors());
+        assertTrue(guard.validatePlan(plan(2, zoneKill("strimzi.io/component-type=kafka,zone=alpha")))
+                .safe());
+    }
+
+    @Test
+    void targetAllOverEveryBrokerIsRejected() {
+        createZonedBrokers();
+
+        var result = guard.validatePlan(plan(-1, zoneKill("zone in (alpha,sigma,gamma)")));
+
+        assertFalse(result.safe());
+        assertTrue(
+                result.errors().getFirst().startsWith("Plan would affect ALL 4 brokers"),
+                result.errors().toString());
+    }
+
+    @Test
+    void stepsTargetingTheSameBrokersCountThemOnce() {
+        createZonedBrokers();
+
+        FaultSpec killOne = FaultSpec.builder("kill-1")
+                .targetBrokerId(1)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+        var result = guard.validatePlan(plan(2, zoneKill("zone=alpha"), killOne));
+
+        assertTrue(result.safe(), result.errors().toString());
+    }
+
+    @Test
+    void malformedSelectorRejectsThePlan() {
+        createZonedBrokers();
+
+        var result = guard.validatePlan(plan(-1, zoneKill("zone in (alpha")));
+
+        assertFalse(result.safe());
+        assertTrue(
+                result.errors().getFirst().startsWith("Step 'step-0': Invalid label selector"),
+                result.errors().toString());
+    }
+
+    @Test
+    void faultInAnotherNamespaceAffectsNoBroker() {
+        createZonedBrokers();
+
+        FaultSpec consumers = FaultSpec.builder("consumers")
+                .targetNamespace("default")
+                .targetLabel("strimzi.io/component-type=kafka")
+                .targetAll(true)
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(60)
+                .build();
+
+        assertTrue(guard.validatePlan(plan(1, consumers)).safe());
+    }
+
+    @Test
+    void dryRunListsTheZoneAndFlagsASelectorThatHitsNoBroker() {
+        createZonedBrokers();
+
+        var fixed = guard.dryRun(plan(3, zoneKill("strimzi.io/component-type=kafka,zone=alpha")));
+        var step = fixed.steps().getFirst();
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1"),
+                step.affectedPods().stream().sorted().toList());
+        assertTrue(step.warnings().isEmpty(), step.warnings().toString());
+
+        // The pre-fix az-failure selector: the dry run used to report a
+        // "(random selection)" broker for it; it hits nothing.
+        var old = guard.dryRun(plan(3, zoneKill("strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a")));
+        var oldStep = old.steps().getFirst();
+        assertTrue(oldStep.affectedPods().isEmpty());
+        assertNull(oldStep.targetPod());
+        assertTrue(
+                oldStep.warnings().getFirst().contains("matches no broker pod"),
+                oldStep.warnings().toString());
     }
 }

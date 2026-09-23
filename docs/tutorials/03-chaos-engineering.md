@@ -231,7 +231,7 @@ graph LR
 
 ### az-failure
 
-Simulates a full availability zone failure — drains a Kubernetes node:
+Simulates a full availability zone failure — kills every Kafka pod labelled `zone=alpha` at once (`targetAll: true`):
 
 ```mermaid
 graph TB
@@ -239,9 +239,9 @@ graph TB
         N1[alpha ✅] & N2[sigma ✅] & N3[gamma ✅]
     end
     subgraph After
-        N1b[alpha ❌ DRAINED] & N2b[sigma ✅] & N3b[gamma ✅]
+        N1b[alpha ❌ KILLED] & N2b[sigma ✅] & N3b[gamma ✅]
     end
-    Before -->|"NODE_DRAIN"| After
+    Before -->|"POD_KILL"| After
 ```
 
 ### rolling-restart

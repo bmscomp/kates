@@ -93,6 +93,9 @@ public class DisruptionPlaybookCatalog {
                     if (ps.faultSpec.gracePeriodSec != null) {
                         fb.gracePeriodSec(ps.faultSpec.gracePeriodSec);
                     }
+                    if (ps.faultSpec.targetAll != null) {
+                        fb.targetAll(ps.faultSpec.targetAll);
+                    }
                     if (ps.faultSpec.targetBrokerId != null) {
                         fb.targetBrokerId(ps.faultSpec.targetBrokerId);
                     }
@@ -139,6 +142,7 @@ public class DisruptionPlaybookCatalog {
         public String disruptionType;
         public String targetLabel;
         public String targetNamespace;
+        public Boolean targetAll;
         public Integer targetBrokerId;
         public String targetTopic;
         public Integer targetPartition;

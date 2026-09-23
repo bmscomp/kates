@@ -128,7 +128,7 @@ Kates ships with a catalog of pre-built disruption playbooks loaded from YAML re
 
 | Playbook | Category | Description |
 |----------|----------|-------------|
-| `az-failure` | Infrastructure | Simulates an availability zone failure by draining a node |
+| `az-failure` | Infrastructure | Simulates an availability zone failure by killing every Kafka pod in one zone |
 | `split-brain` | Network | Creates a network partition between broker pods |
 | `storage-pressure` | Storage | Fills disk on a broker to trigger segment rotation and log cleanup |
 | `rolling-restart` | Operations | Performs a rolling restart of all broker pods |

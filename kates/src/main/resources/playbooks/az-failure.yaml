@@ -1,14 +1,19 @@
 name: az-failure
-description: "Simulate availability zone failure by killing all brokers in one rack"
+description: "Simulate an availability zone failure by killing every Kafka pod in zone alpha"
 category: infrastructure
+# Pods carry no node topology labels, so the zone comes from the pod label
+# `zone: <zone>` the kafka-cluster chart puts on pools pinned with `zone:`
+# (what `kates detect` generates for the lab's alpha/sigma/gamma nodes). Pools
+# spread by topology alone have no such label and match nothing here.
 maxAffectedBrokers: 3
 autoRollback: true
 steps:
-  - name: kill-rack-0-brokers
+  - name: kill-zone-alpha
     faultSpec:
-      experimentName: az-failure-rack-0
+      experimentName: az-failure-alpha
       disruptionType: POD_KILL
-      targetLabel: "strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a"
+      targetLabel: "strimzi.io/component-type=kafka,zone=alpha"
+      targetAll: true
       chaosDurationSec: 30
       gracePeriodSec: 0
     steadyStateSec: 30
