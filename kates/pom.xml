@@ -17,11 +17,11 @@
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.20.6</quarkus.platform.version>
         <surefire-plugin.version>3.6.0</surefire-plugin.version>
-        <kafka.version>3.9.0</kafka.version>
-        <lz4.version>1.8.0</lz4.version>
+        <kafka.version>3.9.2</kafka.version>
+        <lz4.version>1.11.3</lz4.version>
         <snappy.version>1.1.10.8</snappy.version>
         <zstd.version>1.5.7-18</zstd.version>
-        <netty.version>4.1.132.Final</netty.version>
+        <netty.version>4.1.138.Final</netty.version>
         <spotless.version>3.10.2</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
     </properties>
@@ -35,7 +35,8 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Override Quarkus-managed kafka-clients to fix CVE-2026-33557 (CRITICAL) + CVE-2026-35554 -->
+            <!-- Override Quarkus-managed kafka-clients to fix CVE-2026-33557 (CRITICAL) + CVE-2026-35554,
+                 GHSA-5qcv-4rpc-jp93, GHSA-wf66-mphr-4c4r (fixed in 3.9.2) -->
             <dependency>
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
@@ -48,7 +49,10 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Override Quarkus-managed Netty to fix CVE-2026-33871 + CVE-2026-33870 -->
+            <!-- Override Quarkus-managed Netty to fix CVE-2026-33871 + CVE-2026-33870 and the
+                 4.1.135-4.1.137 codec-http/http2 advisories (SPDY, HTTP/2, CORS). Only the two
+                 codec modules move: netty-handler and friends stay on the platform's version
+                 because moving them breaks the native image (see .trivyignore.yaml). -->
             <dependency>
                 <groupId>io.netty</groupId>
                 <artifactId>netty-codec-http</artifactId>
@@ -58,6 +62,15 @@
                 <groupId>io.netty</groupId>
                 <artifactId>netty-codec-http2</artifactId>
                 <version>${netty.version}</version>
+            </dependency>
+            <!-- org.lz4:lz4-java is abandoned (1.8.1 is a relocation stub); the maintained fork
+                 keeps the net.jpountz packages. Managed here so the copy quarkus-messaging-kafka
+                 pulls in resolves to the patched release too (GHSA-cmp6-m4wj-q63q,
+                 GHSA-xx22-p4ch-683r, GHSA-vqf4-7m7x-wgfc). -->
+            <dependency>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>${lz4.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -140,9 +153,8 @@
             <artifactId>quarkus-kafka-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.lz4</groupId>
+            <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>${lz4.version}</version>
         </dependency>
         <dependency>
             <groupId>org.xerial.snappy</groupId>
