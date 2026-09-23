@@ -193,8 +193,8 @@ type IntegrityResult struct {
 	LostRanges          []LostRange      `json:"lostRanges,omitempty"`
 	ProducerRtoMs       float64          `json:"producerRtoMs,omitempty"`
 	ConsumerRtoMs       float64          `json:"consumerRtoMs,omitempty"`
-	MaxRtoMs            float64          `json:"maxRtoMs,omitempty"`
-	RpoMs               float64          `json:"rpoMs,omitempty"`
+	MaxRtoMs            *float64         `json:"maxRtoMs,omitempty"`
+	RpoMs               *float64         `json:"rpoMs,omitempty"`
 	OutOfOrderCount     int64            `json:"outOfOrderCount"`
 	CrcFailures         int64            `json:"crcFailures"`
 	OrderingVerified    bool             `json:"orderingVerified"`
@@ -203,6 +203,26 @@ type IntegrityResult struct {
 	TransactionsEnabled bool             `json:"transactionsEnabled"`
 	Verdict             string           `json:"verdict,omitempty"`
 	Timeline            []IntegrityEvent `json:"timeline,omitempty"`
+}
+
+// MeasuredMaxRtoMs returns the worst RTO and whether the run reported one. A
+// missing key (a backend that predates the field) is not a zero RTO.
+func (ir *IntegrityResult) MeasuredMaxRtoMs() (float64, bool) {
+	return measuredMs(ir.MaxRtoMs)
+}
+
+// MeasuredRpoMs returns the RPO and whether it was measured. The backend sends
+// -1 when it had no chaos start to measure from, and an older backend sends
+// nothing; neither is a zero RPO, and neither may pass a maxRpoMs gate.
+func (ir *IntegrityResult) MeasuredRpoMs() (float64, bool) {
+	return measuredMs(ir.RpoMs)
+}
+
+func measuredMs(v *float64) (float64, bool) {
+	if v == nil || *v < 0 {
+		return 0, false
+	}
+	return *v, true
 }
 
 type IntegrityEvent struct {
