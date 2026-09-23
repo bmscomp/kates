@@ -252,23 +252,7 @@ public class DisruptionOrchestrator {
                     targetedLeader = leaderId;
                     LOG.info("  Auto-targeting leader broker " + leaderId + " for " + spec.targetTopic() + "-"
                             + spec.targetPartition());
-                    spec = FaultSpec.builder(spec.experimentName())
-                            .targetNamespace(spec.targetNamespace())
-                            .targetLabel(spec.targetLabel())
-                            .targetPod(spec.targetPod())
-                            .targetAll(spec.targetAll())
-                            .chaosDurationSec(spec.chaosDurationSec())
-                            .delayBeforeSec(spec.delayBeforeSec())
-                            .envOverrides(spec.envOverrides())
-                            .disruptionType(spec.disruptionType())
-                            .targetBrokerId(leaderId)
-                            .networkLatencyMs(spec.networkLatencyMs())
-                            .fillPercentage(spec.fillPercentage())
-                            .cpuCores(spec.cpuCores())
-                            .gracePeriodSec(spec.gracePeriodSec())
-                            .targetTopic(spec.targetTopic())
-                            .targetPartition(spec.targetPartition())
-                            .build();
+                    spec = spec.toBuilder().targetBrokerId(leaderId).build();
                 }
             }
 

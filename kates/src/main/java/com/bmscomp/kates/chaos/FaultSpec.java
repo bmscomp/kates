@@ -38,6 +38,33 @@ public record FaultSpec(
         return new Builder(experimentName);
     }
 
+    /**
+     * A builder holding every component of this spec, for a copy that changes
+     * a few of them. A spec deserialized from JSON has null collections where
+     * the request omitted them; the copy has empty ones.
+     */
+    public Builder toBuilder() {
+        return new Builder(experimentName)
+                .targetNamespace(targetNamespace)
+                .targetLabel(targetLabel)
+                .targetPod(targetPod)
+                .targetAll(targetAll)
+                .chaosDurationSec(chaosDurationSec)
+                .delayBeforeSec(delayBeforeSec)
+                .envOverrides(envOverrides != null ? envOverrides : Map.of())
+                .disruptionType(disruptionType)
+                .targetBrokerId(targetBrokerId)
+                .networkLatencyMs(networkLatencyMs)
+                .fillPercentage(fillPercentage)
+                .cpuCores(cpuCores)
+                .memoryMb(memoryMb)
+                .ioWorkers(ioWorkers)
+                .gracePeriodSec(gracePeriodSec)
+                .targetTopic(targetTopic)
+                .targetPartition(targetPartition)
+                .probes(probes != null ? probes : java.util.List.of());
+    }
+
     public static class Builder {
         private final String experimentName;
         private String targetNamespace = "kafka";
