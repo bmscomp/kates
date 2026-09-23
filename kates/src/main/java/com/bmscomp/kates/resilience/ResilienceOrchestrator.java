@@ -101,6 +101,13 @@ public class ResilienceOrchestrator {
                         probes, request.getChaosSpec().targetNamespace(), chaosActive, duringChaosResults);
             }
 
+            // An integrity task measures RPO back from this instant. Marked
+            // before the trigger because the task may finish verifying before
+            // the fault's future completes; skipped for noop, which injects
+            // nothing, so RPO is reported as not measured rather than zero.
+            if (chaosCoordinator.injectsFaults()) {
+                testOrchestrator.markChaosStart(run.getId(), System.nanoTime());
+            }
             CompletableFuture<ChaosOutcome> chaosFuture = chaosCoordinator.triggerFault(request.getChaosSpec());
 
             // 5. Wait for chaos to complete

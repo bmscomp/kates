@@ -108,6 +108,15 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         }
     }
 
+    /** The first fault wins: RPO is measured from the moment the cluster first broke. */
+    @Override
+    public void markChaosStart(BenchmarkHandle handle, long chaosStartNanos) {
+        WorkerState state = resolve(handle);
+        if (state != null && chaosStartNanos > 0) {
+            state.chaosStartNanos.compareAndSet(-1, chaosStartNanos);
+        }
+    }
+
     /**
      * The worker behind a handle, from the live map or from the handle itself.
      *
@@ -287,8 +296,14 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
         LOG.info("Integrity: consume complete. Running reconciliation...");
 
+        // -1 unless a resilience run marked its fault while this task ran; RPO
+        // is then reported as not measured rather than as a zero.
         state.integrityResult = state.verifier.verify(
-                -1, task.isEnableCrc(), true, task.isEnableIdempotence(), task.isEnableTransactions());
+                state.chaosStartNanos.get(),
+                task.isEnableCrc(),
+                true,
+                task.isEnableIdempotence(),
+                task.isEnableTransactions());
     }
 
     private void runProducer(BenchmarkTask task, WorkerState state) {
@@ -507,6 +522,8 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         final AtomicLong recordsProcessed = new AtomicLong();
         final AtomicLong errors = new AtomicLong();
         final AtomicBoolean stopRequested = new AtomicBoolean();
+        /** {@link System#nanoTime()} of the first fault injected during the run, or -1. */
+        final AtomicLong chaosStartNanos = new AtomicLong(-1);
         /**
          * Scoped to the TASK, not "global". Micrometer dedups gauges on
          * name+tags, so the old shared id meant only the very first worker in
