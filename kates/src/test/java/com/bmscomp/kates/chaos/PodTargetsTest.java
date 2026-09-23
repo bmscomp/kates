@@ -53,8 +53,7 @@ class PodTargetsTest {
     }
 
     @Test
-    void targetAllOutranksTheBrokerIdAJsonSpecDefaultsTo() {
-        // A FaultSpec deserialized from JSON without targetBrokerId holds 0.
+    void targetAllOutranksABrokerId() {
         FaultSpec spec =
                 FaultSpec.builder("x").targetAll(true).targetBrokerId(0).build();
         assertEquals(

@@ -33,6 +33,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.resilience.ResilienceScenarios.Scenario.class,
             com.bmscomp.kates.chaos.ProbeResult.class,
             com.bmscomp.kates.chaos.ProbeSpec.class,
+            // Jackson reads ProbeSpec and FaultSpec through their builders.
+            com.bmscomp.kates.chaos.ProbeSpec.Builder.class,
             com.bmscomp.kates.chaos.ChaosOutcome.class,
             com.bmscomp.kates.chaos.CompoundChaosOrchestrator.ProviderOutcome.class,
             com.bmscomp.kates.chaos.CompoundChaosOrchestrator.CompoundFault.class,
@@ -88,6 +90,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.disruption.LagSnapshot.Metrics.class,
             com.bmscomp.kates.disruption.LagSnapshot.Entry.class,
             com.bmscomp.kates.chaos.FaultSpec.class,
+            com.bmscomp.kates.chaos.FaultSpec.Builder.class,
             com.bmscomp.kates.chaos.DisruptionType.class,
             com.bmscomp.kates.disruption.IsrSnapshot.class,
             com.bmscomp.kates.disruption.LagSnapshot.class,
