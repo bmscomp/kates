@@ -65,9 +65,46 @@ public class DisruptionSafetyGuard {
             List<String> errors) {}
 
     /**
+     * A step's fault as the orchestrator will run it. A leader-aware step
+     * ({@code targetTopic} set) hits the partition's leader: the orchestrator
+     * looks it up when the step starts and sets {@code targetBrokerId} to it.
+     * Checking the spec as posted counted, and previewed, the broker of
+     * whatever {@code targetBrokerId} it carried instead. The leader can move
+     * before the step runs, so this is the best estimate available now. A
+     * failed lookup leaves the spec as posted, as it does in the orchestrator.
+     */
+    private record TargetedStep(
+            DisruptionPlan.DisruptionStep step, FaultSpec spec, Integer leader, boolean lookupFailed) {}
+
+    private List<TargetedStep> targeted(DisruptionPlan plan) {
+        List<TargetedStep> targeted = new ArrayList<>();
+        for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
+            FaultSpec spec = step.faultSpec();
+            if (spec.targetTopic() == null || spec.targetTopic().isEmpty()) {
+                targeted.add(new TargetedStep(step, spec, null, false));
+                continue;
+            }
+            int leaderId = intelligence.resolveLeaderBrokerId(spec.targetTopic(), spec.targetPartition());
+            targeted.add(
+                    leaderId >= 0
+                            ? new TargetedStep(
+                                    step,
+                                    spec.toBuilder().targetBrokerId(leaderId).build(),
+                                    leaderId,
+                                    false)
+                            : new TargetedStep(step, spec, null, true));
+        }
+        return targeted;
+    }
+
+    /**
      * Validates a disruption plan against safety constraints before execution.
      */
     public ValidationResult validatePlan(DisruptionPlan plan) {
+        return validatePlan(plan, targeted(plan));
+    }
+
+    private ValidationResult validatePlan(DisruptionPlan plan, List<TargetedStep> targeted) {
         List<String> warnings = new ArrayList<>();
         List<String> errors = new ArrayList<>();
 
@@ -87,8 +124,9 @@ public class DisruptionSafetyGuard {
 
         Set<String> affectedBrokers = new HashSet<>();
 
-        for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
-            FaultSpec spec = step.faultSpec();
+        for (TargetedStep t : targeted) {
+            DisruptionPlan.DisruptionStep step = t.step();
+            FaultSpec spec = t.spec();
 
             try {
                 List<String> hit = affectedBrokers(spec, brokerPods);
@@ -148,24 +186,20 @@ public class DisruptionSafetyGuard {
             return new DryRunResult(false, 0, List.of(), warnings, errors);
         }
 
-        ValidationResult validation = validatePlan(plan);
+        List<TargetedStep> targeted = targeted(plan);
+        ValidationResult validation = validatePlan(plan, targeted);
         warnings.addAll(validation.warnings());
         errors.addAll(validation.errors());
 
-        for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
-            FaultSpec spec = step.faultSpec();
+        for (TargetedStep t : targeted) {
+            DisruptionPlan.DisruptionStep step = t.step();
+            FaultSpec spec = t.spec();
             List<String> stepWarnings = new ArrayList<>();
             List<String> affected = new ArrayList<>();
-            Integer resolvedLeader = null;
+            Integer resolvedLeader = t.leader();
 
-            if (spec.targetTopic() != null && !spec.targetTopic().isEmpty()) {
-                int leaderId = intelligence.resolveLeaderBrokerId(spec.targetTopic(), spec.targetPartition());
-                if (leaderId >= 0) {
-                    resolvedLeader = leaderId;
-                } else {
-                    stepWarnings.add(
-                            "Could not resolve leader for " + spec.targetTopic() + "-" + spec.targetPartition());
-                }
+            if (t.lookupFailed()) {
+                stepWarnings.add("Could not resolve leader for " + spec.targetTopic() + "-" + spec.targetPartition());
             }
 
             String targetPod = null;

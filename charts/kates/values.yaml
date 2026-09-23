@@ -54,7 +54,7 @@ rbac:
   create: true
   # -- Grant the writes the direct Kubernetes chaos backend makes itself
   # (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus): NetworkPolicies,
-  # StatefulSet patch and scale, and pod ephemeral containers. Litmus runs its
+  # StatefulSet scaling, and pod ephemeral containers. Litmus runs its
   # experiments as litmus-admin and needs none of this.
   directChaos: false
   # -- Extra RBAC rules (e.g. for Litmus Chaos integration)

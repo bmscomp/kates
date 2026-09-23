@@ -2,6 +2,7 @@ package com.bmscomp.kates.chaos;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 class ProbeSpecTest {
@@ -55,5 +56,14 @@ class ProbeSpecTest {
         ProbeSpec a = ProbeSpec.builder("probe-a").build();
         ProbeSpec b = ProbeSpec.builder("probe-b").build();
         assertNotEquals(a, b);
+    }
+
+    @Test
+    void jsonGetsTheBuilderDefaults() throws Exception {
+        // Read through the canonical constructor, type, mode and comparator
+        // were null and both intervals 0.
+        ProbeSpec posted = new ObjectMapper().readValue("{\"name\":\"isr\",\"command\":\"echo ok\"}", ProbeSpec.class);
+
+        assertEquals(ProbeSpec.builder("isr").command("echo ok").build(), posted);
     }
 }
