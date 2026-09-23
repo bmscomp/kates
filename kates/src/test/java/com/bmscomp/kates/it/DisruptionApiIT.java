@@ -320,7 +320,7 @@ class DisruptionApiIT {
         // The grade has to live inside the report JSON as well as in the
         // entity column: the list endpoint reads the column, but /{id}/compare
         // reads the deserialised report's SLA verdict and falls back to "-".
-        report.setSlaVerdict(new SlaGrader.SlaVerdict(grade, slaViolated, List.of(), steps, passed));
+        report.setSlaVerdict(new SlaGrader.SlaVerdict(grade, slaViolated, List.of(), steps, passed, List.of()));
 
         String id = UUID.randomUUID().toString();
         reports.save(new DisruptionReportEntity(

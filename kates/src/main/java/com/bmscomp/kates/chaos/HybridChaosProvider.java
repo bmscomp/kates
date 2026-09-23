@@ -61,6 +61,11 @@ public class HybridChaosProvider implements ChaosProvider {
     }
 
     @Override
+    public String id() {
+        return "hybrid";
+    }
+
+    @Override
     public String name() {
         return "hybrid(" + delegateName + ")";
     }

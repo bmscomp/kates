@@ -1,9 +1,18 @@
 package com.bmscomp.kates.chaos;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
+
 /**
  * Generic descriptor for an assertion/probe to be evaluated during chaos.
  * Maps to backend-specific probes (like Litmus cmdProbe or k8sProbe).
+ *
+ * <p>JSON is read through the {@link Builder}, as for {@link FaultSpec}, so an
+ * omitted field gets the builder's default rather than {@code null} or {@code 0}.
  */
+@JsonDeserialize(builder = ProbeSpec.Builder.class)
 public record ProbeSpec(
         String name,
         String type,
@@ -18,6 +27,7 @@ public record ProbeSpec(
         return new Builder(name);
     }
 
+    @JsonPOJOBuilder(withPrefix = "")
     public static class Builder {
         private final String name;
         private String type = "cmdProbe";
@@ -28,7 +38,8 @@ public record ProbeSpec(
         private int intervalSec = 10;
         private int timeoutSec = 30;
 
-        private Builder(String name) {
+        @JsonCreator
+        private Builder(@JsonProperty("name") String name) {
             this.name = name;
         }
 
