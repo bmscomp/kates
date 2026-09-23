@@ -9,6 +9,8 @@ import jakarta.inject.Named;
 
 import io.fabric8.kubernetes.api.model.EphemeralContainer;
 import io.fabric8.kubernetes.api.model.EphemeralContainerBuilder;
+import io.fabric8.kubernetes.api.model.apps.StatefulSet;
+import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.eclipse.microprofile.faulttolerance.Retry;
@@ -17,8 +19,8 @@ import org.jboss.logging.Logger;
 
 /**
  * Chaos provider using direct Kubernetes API calls.
- * Supports pod deletion, network policy injection, and StatefulSet manipulation
- * without requiring external chaos infrastructure like Litmus.
+ * Supports pod deletion, network policy injection, KafkaNodePool scaling and
+ * StatefulSet manipulation without requiring external chaos infrastructure like Litmus.
  */
 @ApplicationScoped
 @Named("kubernetes")
@@ -27,10 +29,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
     private static final Logger LOG = Logger.getLogger(KubernetesChaosProvider.class);
 
     /**
-     * Annotation stamped on a StatefulSet the first time SCALE_DOWN reduces it,
-     * recording the ORIGINAL replica count. Rollback restores from this value —
-     * reading {@code spec.replicas} at rollback time only ever sees the already
-     * reduced count, so without the snapshot the restore is a silent no-op.
+     * Annotation stamped on a KafkaNodePool or StatefulSet the first time
+     * SCALE_DOWN reduces it, recording the ORIGINAL replica count. Rollback
+     * restores from this value — reading {@code spec.replicas} at rollback time
+     * only ever sees the already reduced count, so without the snapshot the
+     * restore is a silent no-op.
      */
     public static final String ORIGINAL_REPLICAS_ANNOTATION = "kates.io/original-replicas";
 
@@ -40,6 +43,20 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * from one another replica is still running.
      */
     public static final String SCALED_DOWN_AT_ANNOTATION = "kates.io/scaled-down-at";
+
+    /** How often SCALE_DOWN checks whether the Cluster Operator has removed the brokers. */
+    long scalePollIntervalMs = 5_000;
+
+    /**
+     * A scale-down the Strimzi Cluster Operator held back or did not finish
+     * within {@code chaosDurationSec}; the node pools have their replicas back.
+     * Not retried: a retry would lower them again and wait another full budget.
+     */
+    public static class IncompleteScaleDownException extends RuntimeException {
+        public IncompleteScaleDownException(String message) {
+            super(message);
+        }
+    }
 
     @Inject
     KubernetesClient client;
@@ -55,11 +72,12 @@ public class KubernetesChaosProvider implements ChaosProvider {
         return "kubernetes";
     }
 
-    @Retry(maxRetries = 3, delay = 1000)
+    @Retry(maxRetries = 3, delay = 1000, abortOn = IncompleteScaleDownException.class)
     @org.eclipse.microprofile.faulttolerance.CircuitBreaker(
             requestVolumeThreshold = 4,
             failureRatio = 0.5,
-            delay = 10000)
+            delay = 10000,
+            skipOn = IncompleteScaleDownException.class)
     public void applyDisruption(FaultSpec spec, String engineName) throws Exception {
         if (spec.disruptionType() == null) {
             throw new IllegalArgumentException("No disruptionType set — use the builder");
@@ -217,43 +235,71 @@ public class KubernetesChaosProvider implements ChaosProvider {
                 });
     }
 
-    private void executeScaleDown(FaultSpec spec) {
-        client.apps()
+    /**
+     * Removes one broker from each workload the step selects
+     * ({@link ScaleDownTargets}): a KafkaNodePool loses one replica through the
+     * Strimzi Cluster Operator ({@link NodePoolScaleDown}), a StatefulSet (Kafka
+     * not run by Strimzi) is scaled down by one, but never below one replica.
+     * Each records its original replica count for rollback.
+     */
+    private void executeScaleDown(FaultSpec spec) throws InterruptedException {
+        ScaleDownTargets.Targets targets = ScaleDownTargets.resolve(client, spec);
+        targets.skipped().forEach(reason -> LOG.info("SCALE_DOWN: skipping, " + reason));
+        if (targets.isEmpty()) {
+            throw new IllegalStateException(
+                    "SCALE_DOWN: nothing to scale down, " + String.join("; ", targets.skipped()));
+        }
+
+        if (!targets.pools().isEmpty()) {
+            new NodePoolScaleDown(client, scalePollIntervalMs).run(spec, targets.pools());
+        }
+        int scaled = 0;
+        for (String name : targets.statefulSets()) {
+            if (scaleDownStatefulSet(spec.targetNamespace(), name)) {
+                scaled++;
+            }
+        }
+        if (targets.pools().isEmpty() && scaled == 0) {
+            throw new IllegalStateException("SCALE_DOWN: nothing to scale down, StatefulSet(s) "
+                    + targets.statefulSets() + " have one replica, and SCALE_DOWN leaves the last one");
+        }
+    }
+
+    private boolean scaleDownStatefulSet(String namespace, String name) {
+        StatefulSet ss = client.apps()
                 .statefulSets()
-                .inNamespace(spec.targetNamespace())
-                .withLabelSelector(ParsedLabelSelector.parse(spec.targetLabel()).toString())
-                .list()
-                .getItems()
-                .forEach(ss -> {
-                    int current = ss.getSpec().getReplicas();
-                    int target = Math.max(1, current - 1);
-                    String name = ss.getMetadata().getName();
-                    // Snapshot the ORIGINAL replica count once, before reducing.
-                    // A second SCALE_DOWN step must NOT overwrite it with the
-                    // already-reduced value, so only stamp when absent.
-                    Map<String, String> annotations = ss.getMetadata().getAnnotations();
-                    boolean alreadySnapshotted =
-                            annotations != null && annotations.containsKey(ORIGINAL_REPLICAS_ANNOTATION);
-                    if (!alreadySnapshotted) {
-                        String scaledDownAt = String.valueOf(System.currentTimeMillis());
-                        client.apps()
-                                .statefulSets()
-                                .inNamespace(spec.targetNamespace())
-                                .withName(name)
-                                .edit(s -> new io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder(s)
-                                        .editMetadata()
-                                        .addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
-                                        .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt)
-                                        .endMetadata()
-                                        .build());
-                    }
-                    LOG.info("SCALE_DOWN: " + name + " from " + current + " → " + target);
-                    client.apps()
-                            .statefulSets()
-                            .inNamespace(spec.targetNamespace())
-                            .withName(name)
-                            .scale(target);
-                });
+                .inNamespace(namespace)
+                .withName(name)
+                .get();
+        if (ss == null) {
+            throw new IllegalStateException("StatefulSet not found: " + name);
+        }
+        int current = ss.getSpec().getReplicas() != null ? ss.getSpec().getReplicas() : 1;
+        if (current <= 1) {
+            LOG.info("SCALE_DOWN: StatefulSet " + name + " has one replica, leaving it");
+            return false;
+        }
+        // Snapshot the ORIGINAL replica count once, before reducing.
+        // A second SCALE_DOWN step must NOT overwrite it with the
+        // already-reduced value, so only stamp when absent.
+        Map<String, String> annotations = ss.getMetadata().getAnnotations();
+        boolean alreadySnapshotted = annotations != null && annotations.containsKey(ORIGINAL_REPLICAS_ANNOTATION);
+        if (!alreadySnapshotted) {
+            String scaledDownAt = String.valueOf(System.currentTimeMillis());
+            client.apps()
+                    .statefulSets()
+                    .inNamespace(namespace)
+                    .withName(name)
+                    .edit(s -> new StatefulSetBuilder(s)
+                            .editMetadata()
+                            .addToAnnotations(ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(current))
+                            .addToAnnotations(SCALED_DOWN_AT_ANNOTATION, scaledDownAt)
+                            .endMetadata()
+                            .build());
+        }
+        LOG.info("SCALE_DOWN: StatefulSet " + name + " from " + current + " → " + (current - 1));
+        client.apps().statefulSets().inNamespace(namespace).withName(name).scale(current - 1);
+        return true;
     }
 
     private void executeCpuStress(FaultSpec spec) {

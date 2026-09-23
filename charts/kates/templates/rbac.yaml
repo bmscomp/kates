@@ -31,6 +31,12 @@ rules:
   - apiGroups: ["kafka.strimzi.io"]
     resources: ["kafkaconnectors", "kafkatopics"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # patch: SCALE_DOWN lowers a KafkaNodePool's spec.replicas and records the
+  # original count on it; rollback and orphan recovery put it back. Kates does
+  # this itself under every chaos provider, Litmus included.
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkanodepools"]
+    verbs: ["patch"]
   - apiGroups: ["monitoring.coreos.com"]
     resources: ["podmonitors", "prometheusrules"]
     verbs: ["get", "list"]

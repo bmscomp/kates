@@ -66,14 +66,14 @@ The `KubernetesChaosProvider` implements these disruptions against the Kubernete
 | `POD_DELETE` | Delete pod with configurable grace period | Graceful shutdown, broker flushes and shuts down |
 | `ROLLING_RESTART` | Rolling restart of the matching StatefulSets | Simulates operator-managed rolling updates |
 | `LEADER_ELECTION` | Resolve the partition leader, then force-delete its pod | Forces leader election for targeted partition |
-| `SCALE_DOWN` | Scale the matching StatefulSets down by one replica | Reduces broker count |
+| `SCALE_DOWN` | Lower `spec.replicas` by one on the KafkaNodePool of each matching broker, then wait for the Strimzi Cluster Operator to remove a broker; on a Kafka that Strimzi doesn't run, scale its StatefulSet down by one | One broker fewer per node pool, until rollback puts it back |
 | `NETWORK_PARTITION` | Deny-all NetworkPolicy applied to the target pod | Isolates a broker from the cluster network |
 | `CPU_STRESS` | Stress ephemeral container injected into the pod | Saturates CPU on the broker pod |
 | `IO_STRESS` | Stress ephemeral container injected into the pod | Injects disk I/O pressure on broker storage |
 
 ### LitmusChaos Integration
 
-When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). Five types are only available through Litmus:
+When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type but one to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). The exception is `SCALE_DOWN`: `pod-delete` kills a broker that its StrimziPodSet brings straight back, so the Litmus backend hands the step to the `KubernetesChaosProvider`, and it runs the same way on both. Five types are only available through Litmus:
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
@@ -109,11 +109,25 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 3. The pod named `<anything>-<targetBrokerId>`, when `targetBrokerId` is set (falling back to the first match if no pod has that ordinal).
 4. Otherwise, one matching pod at random.
 
+`SCALE_DOWN` picks workloads, not pods, so only the first rule and the selector apply to it: see [Scaling Down a Node Pool](#scaling-down-a-node-pool).
+
 Both backends resolve the pods the same way: the Kubernetes backend applies the fault to each of them, and the Litmus backend passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
 
 ::: {.callout-warning}
 Kates runs Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the Kubernetes backend deletes them all at once.
 :::
+
+### Scaling Down a Node Pool
+
+Strimzi runs Kafka pods from StrimziPodSets and creates no StatefulSet, so `SCALE_DOWN` removes a broker the way you would by hand: it lowers `spec.replicas` of the broker's KafkaNodePool by one, and the Cluster Operator removes the pool's highest node ID. The pools come from the pods the step selects: `targetPod` if it's set, otherwise every pod `targetLabel` matches. Each pool with a selected pod loses one broker, so `strimzi.io/pool-name=brokers-sigma` takes one broker out of `brokers-sigma`, and `strimzi.io/component-type=kafka` takes one out of every broker pool. `targetAll` and `targetBrokerId` don't apply. `targetPod` only picks its pool, and Strimzi still removes the pool's highest node ID. Strimzi scales down only broker-only pools, so the step skips pools with the controller role, and it refuses to remove the last broker of a cluster.
+
+The operator reconciles as soon as the pool changes, but it holds back the removal of a broker that still hosts partition replicas. If the `Kafka` resource has a `remove-brokers` auto-rebalance, as the `kafka-cluster` chart configures by default, Cruise Control moves the replicas off first, and the operator removes the broker once it's empty. The step waits for this: `chaosDurationSec` is the budget for the whole removal, draining included, and the step returns as soon as the broker pod is gone. Draining can't finish when the brokers left can't hold every replica, such as a topic with replication factor 3 on a cluster going from three brokers to two.
+
+A held-back scale-down doesn't go away: the lowered `spec.replicas` stays on the pool, and the operator removes the broker whenever it becomes empty, which could be in the middle of a later step. So when the operator holds the removal back and nothing drains the broker, or the budget runs out, the step fails and Kates gives every pool it lowered its replicas back. With `chaosDurationSec: 0` the step doesn't wait, and it can't tell a removed broker from a held-back one. To remove a broker that still hosts replicas, which is what you do to test losing a broker for good, set `strimzi.io/skip-broker-scaledown-check: "true"` on the `Kafka` resource yourself. Strimzi then removes it with its replicas, and its partitions run on the replicas left.
+
+A step that succeeds leaves the pool one broker short. Kates records the original count on the pool in the `kates.io/original-replicas` annotation, and `autoRollback` restores it from there when the step fails its recovery check, as does orphan recovery when Kates restarts. On a scale-up Strimzi gives the new broker the lowest free node ID, unless the pool sets `strimzi.io/next-node-ids`. That's normally the ID it removed, so the broker comes back with its old volume when the pool keeps its claims (`deleteClaim: false`). The Kates service account needs `patch` on `kafkanodepools`, which the `kates` chart grants.
+
+On a Kafka that Strimzi doesn't run, the step scales down the StatefulSet of each selected pod by one, but never below one replica, and returns without waiting.
 
 ## Built-In Playbooks
 
@@ -366,7 +380,7 @@ graph TD
     V3 -->|Yes| EXECUTE["✅ Execute"]
 ```
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
 
 The guard also emits per-step warnings — for example, `SCALE_DOWN` without `autoRollback`, or a `NETWORK_PARTITION` with no duration (the NetworkPolicy would persist until cleanup).
 

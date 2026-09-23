@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -30,6 +31,10 @@ class LitmusChaosProviderTest {
     void setup() {
         provider = new LitmusChaosProvider();
         provider.client = client;
+        provider.kubernetes = new KubernetesChaosProvider();
+        provider.kubernetes.client = client;
+        provider.kubernetes.self = provider.kubernetes;
+        provider.kubernetes.executor = new com.bmscomp.kates.engine.KatesExecutor();
         String[][] brokers = {
             {"krafter-brokers-0", "alpha"}, {"krafter-brokers-1", "alpha"}, {"krafter-brokers-2", "sigma"}
         };
@@ -107,6 +112,30 @@ class LitmusChaosProviderTest {
                 .build();
 
         assertThrows(IllegalStateException.class, () -> build(spec));
+    }
+
+    @Test
+    void scaleDownLowersTheNodePoolInsteadOfDeletingAPod() throws Exception {
+        // Used to run pod-delete with FORCE=true: one pod killed, and brought
+        // straight back by its StrimziPodSet.
+        StrimziTestCluster cluster = new StrimziTestCluster(server, client)
+                .pool("controllers", "controller", 0, 1, 2)
+                .pool("brokers", "broker", 3, 4, 5);
+        FaultSpec spec = FaultSpec.builder("scale-down")
+                .targetLabel("strimzi.io/pool-name=brokers")
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .chaosDurationSec(0)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(2, cluster.replicas("brokers"));
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
     }
 
     @Test

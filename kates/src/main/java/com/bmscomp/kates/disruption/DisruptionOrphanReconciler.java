@@ -1,13 +1,11 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.List;
-import java.util.Map;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 
-import io.fabric8.kubernetes.api.model.apps.StatefulSet;
-import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.quarkus.runtime.StartupEvent;
@@ -15,12 +13,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
+import com.bmscomp.kates.chaos.ScaleDownSnapshots;
 
 /**
  * Cleans up faults abandoned by a previous process.
  *
  * <p>Disruptions inject real cluster state — NetworkPolicies that partition
- * brokers, StatefulSets scaled below their intended size — and previously that
+ * brokers, KafkaNodePools and StatefulSets scaled below their intended size — and previously that
  * state was only ever undone by the in-process rollback path. If the pod was
  * killed mid-plan (deploy, OOM, node drain), the partition or the missing
  * brokers simply stayed, with nothing left running that knew to clean them up.
@@ -79,13 +78,13 @@ public class DisruptionOrphanReconciler {
     private void reconcile() {
         try {
             int policies = reconcileNetworkPolicies();
-            int scaled = reconcileScaledDownStatefulSets();
+            ScaleDownSnapshots.Restored scaled = reconcileScaleDowns();
             int reports = markInterruptedReports();
-            if (policies + scaled + reports > 0) {
+            if (policies + scaled.total() + reports > 0) {
                 LOG.warnf(
-                        "Orphan recovery: removed %d NetworkPolicy(ies), restored %d StatefulSet(s), "
-                                + "marked %d report(s) INTERRUPTED",
-                        policies, scaled, reports);
+                        "Orphan recovery: removed %d NetworkPolicy(ies), restored %d KafkaNodePool(s) and %d"
+                                + " StatefulSet(s), marked %d report(s) INTERRUPTED",
+                        policies, scaled.nodePools(), scaled.statefulSets(), reports);
             }
         } catch (Exception e) {
             // Never block startup on cleanup — the API must come up either way.
@@ -130,77 +129,14 @@ public class DisruptionOrphanReconciler {
     }
 
     /**
-     * Restores StatefulSets still carrying a scale-down snapshot. The snapshot
-     * annotation written at SCALE_DOWN time is the durable record of the
-     * original size — it survives the pod that created it, which is exactly what
-     * makes recovery possible here.
+     * Restores KafkaNodePools and StatefulSets still carrying a scale-down
+     * snapshot. The snapshot annotation written at SCALE_DOWN time is the
+     * durable record of the original size — it survives the pod that created
+     * it, which is exactly what makes recovery possible here.
      */
-    private int reconcileScaledDownStatefulSets() {
+    ScaleDownSnapshots.Restored reconcileScaleDowns() {
         long cutoff = System.currentTimeMillis() - minAgeSec * 1000L;
-        int restored = 0;
-        try {
-            List<StatefulSet> sets = kubeClient
-                    .apps()
-                    .statefulSets()
-                    .inNamespace(kafkaNamespace)
-                    .list()
-                    .getItems();
-            for (StatefulSet ss : sets) {
-                Map<String, String> annotations = ss.getMetadata().getAnnotations();
-                if (annotations == null) {
-                    continue;
-                }
-                String snapshot = annotations.get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION);
-                if (snapshot == null) {
-                    continue;
-                }
-                if (!isScaleDownOlderThan(annotations, ss, cutoff)) {
-                    continue;
-                }
-
-                String name = ss.getMetadata().getName();
-                int original;
-                try {
-                    original = Integer.parseInt(snapshot);
-                } catch (NumberFormatException e) {
-                    LOG.warnf("Orphan recovery: unparseable replica snapshot '%s' on %s", snapshot, name);
-                    continue;
-                }
-                int current = ss.getSpec().getReplicas() != null ? ss.getSpec().getReplicas() : original;
-                if (current < original) {
-                    LOG.warnf("Orphan recovery: restoring %s from %d → %d", name, current, original);
-                    kubeClient
-                            .apps()
-                            .statefulSets()
-                            .inNamespace(kafkaNamespace)
-                            .withName(name)
-                            .scale(original);
-                    restored++;
-                }
-                clearSnapshot(name);
-            }
-        } catch (Exception e) {
-            LOG.warnf("Could not reconcile orphaned scale-downs: %s", e.getMessage());
-        }
-        return restored;
-    }
-
-    private void clearSnapshot(String name) {
-        try {
-            kubeClient
-                    .apps()
-                    .statefulSets()
-                    .inNamespace(kafkaNamespace)
-                    .withName(name)
-                    .edit(s -> new StatefulSetBuilder(s)
-                            .editMetadata()
-                            .removeFromAnnotations(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION)
-                            .removeFromAnnotations(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION)
-                            .endMetadata()
-                            .build());
-        } catch (Exception e) {
-            LOG.debugf("Could not clear scale-down snapshot on %s: %s", name, e.getMessage());
-        }
+        return ScaleDownSnapshots.restore(kubeClient, kafkaNamespace, meta -> isScaleDownOlderThan(meta, cutoff));
     }
 
     /**
@@ -221,8 +157,8 @@ public class DisruptionOrphanReconciler {
         return marked;
     }
 
-    private boolean isScaleDownOlderThan(Map<String, String> annotations, StatefulSet ss, long cutoff) {
-        String stamp = annotations.get(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION);
+    private boolean isScaleDownOlderThan(ObjectMeta meta, long cutoff) {
+        String stamp = meta.getAnnotations().get(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION);
         if (stamp != null) {
             try {
                 return Long.parseLong(stamp) < cutoff;
@@ -232,7 +168,7 @@ public class DisruptionOrphanReconciler {
         }
         // Snapshot written before the timestamp annotation existed: fall back to
         // the object's own age, which is at least as old as the scale-down.
-        return isOlderThan(ss.getMetadata().getCreationTimestamp(), cutoff);
+        return isOlderThan(meta.getCreationTimestamp(), cutoff);
     }
 
     private boolean isOlderThan(String k8sTimestamp, long cutoffMs) {

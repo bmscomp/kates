@@ -125,7 +125,9 @@ The remaining four disruption types round out the toolkit:
 
 **LEADER_ELECTION** forces a preferred leader election for a specific partition, simulating what happens during partition reassignment or after a broker restart. This tests whether your consumers handle the briefly unavailable partition gracefully.
 
-**SCALE_DOWN** reduces the replica count of the Kafka StatefulSet. This is a more extreme version of killing a broker — the pod is not just restarted, it is permanently removed (until you scale back up). This tests your cluster's behavior when it permanently loses capacity.
+**SCALE_DOWN** removes a broker from each KafkaNodePool its selector reaches: it lowers the pool's `spec.replicas` by one, and the Strimzi Cluster Operator removes the pool's highest node ID. This is a more extreme version of killing a broker — the pod is not just restarted, it is removed until rollback scales the pool back up. This tests your cluster's behavior when it permanently loses capacity.
+
+Strimzi only scales down broker-only pools, and holds back the removal of a broker that still hosts partition replicas. With a `remove-brokers` auto-rebalance on the `Kafka` resource, Cruise Control moves them off first. The step waits up to `chaosDurationSec` for the broker to be gone. If the operator holds the removal back and nothing drains the broker, or the time runs out, the step fails and Kates puts the pool's replicas back, so the broker is not removed later, in the middle of another step. To remove a broker together with its replicas, set `strimzi.io/skip-broker-scaledown-check: "true"` on the `Kafka` resource. Kates records the original count on the pool (`kates.io/original-replicas`), and rollback and startup orphan recovery restore it from there. On a Kafka not run by Strimzi, the step scales down the StatefulSet of the selected pods instead, never below one replica.
 
 **NODE_DRAIN** drains an entire Kubernetes node, evicting all pods including potentially multiple brokers. This simulates an availability zone failure and tests whether your cluster survives losing multiple brokers simultaneously.
 

@@ -15,6 +15,8 @@ import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.ParsedLabelSelector;
 import com.bmscomp.kates.chaos.PodTargets;
+import com.bmscomp.kates.chaos.ScaleDownSnapshots;
+import com.bmscomp.kates.chaos.ScaleDownTargets;
 
 /**
  * Safety layer for disruption tests. Validates blast radius, performs dry-run
@@ -95,8 +97,9 @@ public class DisruptionSafetyGuard {
             }
 
             if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
-                warnings.add("Step '" + step.name()
-                        + "': SCALE_DOWN reduces StatefulSet replicas — autoRollback recommended");
+                warnings.add("Step '" + step.name() + "': SCALE_DOWN removes a broker from each KafkaNodePool or"
+                        + " StatefulSet it selects and leaves it removed — autoRollback recommended, which restores"
+                        + " it when the step fails its recovery check");
             }
 
             if (spec.disruptionType() == DisruptionType.NETWORK_PARTITION && spec.chaosDurationSec() <= 0) {
@@ -163,7 +166,9 @@ public class DisruptionSafetyGuard {
             String targetPod = null;
             try {
                 List<String> hit = affectedBrokers(spec, brokerPods);
-                if (hit.isEmpty()) {
+                if (hit.isEmpty() && spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+                    stepWarnings.add("SCALE_DOWN removes no broker in namespace '" + kafkaNamespace + "'");
+                } else if (hit.isEmpty()) {
                     stepWarnings.add("targetLabel '" + spec.targetLabel() + "' matches no broker pod in namespace '"
                             + kafkaNamespace + "' — this step disrupts no broker");
                 } else {
@@ -174,9 +179,12 @@ public class DisruptionSafetyGuard {
                 stepWarnings.add(e.getMessage());
             }
 
-            if (spec.disruptionType() == DisruptionType.ROLLING_RESTART
-                    || spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+            if (spec.disruptionType() == DisruptionType.ROLLING_RESTART) {
                 brokerPods.forEach(p -> affected.add(p.getMetadata().getName()));
+            }
+
+            if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+                stepWarnings.addAll(scaleDownWarnings(spec, brokerPods, affected));
             }
 
             boolean canExecute = checkRbacPermissions(spec);
@@ -245,7 +253,7 @@ public class DisruptionSafetyGuard {
                             .delete();
                 }
                 case SCALE_DOWN -> {
-                    LOG.info("ROLLBACK: restoring StatefulSet replica count");
+                    LOG.info("ROLLBACK: restoring scaled-down KafkaNodePools and StatefulSets");
                     restoreReplicaCount(spec);
                 }
                 default ->
@@ -257,67 +265,17 @@ public class DisruptionSafetyGuard {
         }
     }
 
+    /**
+     * Gives every KafkaNodePool and StatefulSet in the step's namespace that
+     * still carries a scale-down snapshot its original replica count back, and
+     * clears the snapshot so a later scale-down captures a fresh baseline. The
+     * snapshot is what makes this work: {@code spec.replicas} only holds the
+     * reduced count by now. It also finds a node pool scaled down to zero,
+     * which has no pod left for the step's selector to match.
+     */
     @Retry(maxRetries = 3, delay = 2000)
     void restoreReplicaCount(FaultSpec spec) {
-        kubeClient
-                .apps()
-                .statefulSets()
-                .inNamespace(spec.targetNamespace())
-                .withLabelSelector(ParsedLabelSelector.parse(spec.targetLabel()).toString())
-                .list()
-                .getItems()
-                .forEach(ss -> {
-                    String name = ss.getMetadata().getName();
-                    Map<String, String> annotations = ss.getMetadata().getAnnotations();
-                    String snapshot = annotations != null
-                            ? annotations.get(
-                                    com.bmscomp.kates.chaos.KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION)
-                            : null;
-                    int current = ss.getSpec().getReplicas();
-                    // Prefer the snapshot stamped at scale-down. status/spec.replicas
-                    // both reflect the reduced count at rollback time, so falling back
-                    // to them can only restore to the reduced value — the original bug.
-                    int desired;
-                    if (snapshot != null) {
-                        try {
-                            desired = Integer.parseInt(snapshot);
-                        } catch (NumberFormatException e) {
-                            desired = current;
-                        }
-                    } else {
-                        desired = ss.getStatus() != null && ss.getStatus().getReplicas() != null
-                                ? ss.getStatus().getReplicas()
-                                : current;
-                    }
-                    if (current < desired) {
-                        LOG.info("Restoring " + name + " from " + current + " → " + desired);
-                        kubeClient
-                                .apps()
-                                .statefulSets()
-                                .inNamespace(spec.targetNamespace())
-                                .withName(name)
-                                .scale(desired);
-                    }
-                    // Clear the snapshot so a later scale-down re-captures a fresh
-                    // baseline instead of restoring to a stale count.
-                    if (snapshot != null) {
-                        kubeClient
-                                .apps()
-                                .statefulSets()
-                                .inNamespace(spec.targetNamespace())
-                                .withName(name)
-                                .edit(s -> new io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder(s)
-                                        .editMetadata()
-                                        .removeFromAnnotations(
-                                                com.bmscomp.kates.chaos.KubernetesChaosProvider
-                                                        .ORIGINAL_REPLICAS_ANNOTATION)
-                                        .removeFromAnnotations(
-                                                com.bmscomp.kates.chaos.KubernetesChaosProvider
-                                                        .SCALED_DOWN_AT_ANNOTATION)
-                                        .endMetadata()
-                                        .build());
-                    }
-                });
+        ScaleDownSnapshots.restore(kubeClient, spec.targetNamespace(), meta -> true);
     }
 
     @Retry(maxRetries = 3, delay = 2000)
@@ -340,10 +298,18 @@ public class DisruptionSafetyGuard {
      * chaos backends use ({@link PodTargets}) among the brokers its selector
      * matches, so a {@code targetAll} step counts every one of them. A random
      * pick is counted as one broker, marked since the actual pod is not known yet.
+     * A {@code SCALE_DOWN} step counts the broker each KafkaNodePool or
+     * StatefulSet it selects will lose ({@link ScaleDownTargets}).
      *
      * @throws IllegalArgumentException when {@code targetLabel} is not a valid selector
      */
     List<String> affectedBrokers(FaultSpec spec, List<Pod> brokerPods) {
+        if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+            if (spec.targetNamespace() != null && !spec.targetNamespace().equals(kafkaNamespace)) {
+                return List.of();
+            }
+            return ScaleDownTargets.preview(spec, brokerPods).removedPods();
+        }
         PodTargets.Mode mode = PodTargets.mode(spec);
         if (mode == PodTargets.Mode.NAMED_POD) {
             return List.of(spec.targetPod());
@@ -364,6 +330,72 @@ public class DisruptionSafetyGuard {
                     : List.of(matching.getFirst().getMetadata().getName() + " (random selection)");
         }
         return PodTargets.select(spec, matching);
+    }
+
+    /** What the dry run says about a SCALE_DOWN step, beyond the brokers it removes. */
+    private List<String> scaleDownWarnings(FaultSpec spec, List<Pod> brokerPods, List<String> removed) {
+        List<String> warnings = new ArrayList<>();
+        boolean nodePools = false;
+        if (spec.targetNamespace() == null || spec.targetNamespace().equals(kafkaNamespace)) {
+            try {
+                ScaleDownTargets.Preview preview = ScaleDownTargets.preview(spec, brokerPods);
+                warnings.addAll(preview.notes());
+                nodePools = !preview.targets().pools().isEmpty();
+            } catch (IllegalArgumentException e) {
+                // A malformed selector: the step already carries the parse error.
+            }
+        }
+        boolean namedPod = spec.targetPod() != null && !spec.targetPod().isEmpty();
+        if (namedPod && !removed.isEmpty() && !removed.contains(spec.targetPod())) {
+            warnings.add("targetPod " + spec.targetPod() + " only picks the node pool or StatefulSet that runs it,"
+                    + " which loses its highest-numbered broker: " + String.join(",", removed) + ", not "
+                    + spec.targetPod());
+        }
+        if (nodePools && spec.chaosDurationSec() <= 0) {
+            warnings.add("chaosDurationSec is 0 — the step does not wait for the Cluster Operator, so it cannot"
+                    + " tell a removed broker from a scale-down Strimzi holds back, which then stays pending"
+                    + " until rollback");
+        }
+        return warnings;
+    }
+
+    /**
+     * SCALE_DOWN patches the KafkaNodePools it selects. On StatefulSets it
+     * patches the snapshot on, and sets the replicas through the scale
+     * subresource.
+     */
+    private boolean canScaleDown(FaultSpec spec) {
+        ScaleDownTargets.Targets targets;
+        try {
+            targets = ScaleDownTargets.resolve(kubeClient, spec);
+        } catch (RuntimeException e) {
+            return true; // Selects nothing to scale: the step's other warnings say so.
+        }
+        String namespace = spec.targetNamespace();
+        return (targets.pools().isEmpty() || allowed(namespace, "patch", "kafka.strimzi.io", "kafkanodepools", null))
+                && (targets.statefulSets().isEmpty()
+                        || (allowed(namespace, "patch", "apps", "statefulsets", null)
+                                && allowed(namespace, "update", "apps", "statefulsets", "scale")));
+    }
+
+    private boolean allowed(String namespace, String verb, String group, String resource, String subresource) {
+        return kubeClient
+                .authorization()
+                .v1()
+                .selfSubjectAccessReview()
+                .create(new io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder()
+                        .withNewSpec()
+                        .withNewResourceAttributes()
+                        .withNamespace(namespace)
+                        .withVerb(verb)
+                        .withGroup(group)
+                        .withResource(resource)
+                        .withSubresource(subresource)
+                        .endResourceAttributes()
+                        .endSpec()
+                        .build())
+                .getStatus()
+                .getAllowed();
     }
 
     @Retry(maxRetries = 2, delay = 1000)
@@ -408,7 +440,8 @@ public class DisruptionSafetyGuard {
                                             .build())
                             .getStatus()
                             .getAllowed();
-                case SCALE_DOWN, ROLLING_RESTART ->
+                case SCALE_DOWN -> canScaleDown(spec);
+                case ROLLING_RESTART ->
                     kubeClient
                             .authorization()
                             .v1()

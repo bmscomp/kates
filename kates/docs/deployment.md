@@ -239,6 +239,9 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments/scale", "statefulsets/scale"]
     verbs: ["get", "patch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkanodepools"]
+    verbs: ["get", "list", "patch"]
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines", "chaosresults", "chaosexperiments"]
     verbs: ["get", "list", "create", "delete", "watch"]
@@ -267,7 +270,8 @@ The permissions break down as follows:
 |-----------|---------|---------|
 | `pods/get,list,watch,delete` | `K8sPodWatcher`, `KubernetesChaosProvider` | Watch pod events during disruptions, kill pods for `POD_KILL`/`POD_DELETE` |
 | `pods/log` | `DisruptionOrchestrator` | Capture pod logs for post-mortem analysis |
-| `deployments,statefulsets/get,list,patch` | `KubernetesChaosProvider` | Scale deployments for `SCALE_DOWN`, restart for `ROLLING_RESTART` |
+| `kafkanodepools/get,list,patch` | `KubernetesChaosProvider`, `DisruptionSafetyGuard` | Lower a node pool's replicas for `SCALE_DOWN` on Strimzi; rollback and orphan recovery put them back |
+| `deployments,statefulsets/get,list,patch` | `KubernetesChaosProvider` | Scale a non-Strimzi StatefulSet for `SCALE_DOWN`, restart for `ROLLING_RESTART` |
 | `deployments/scale,statefulsets/scale` | `DisruptionSafetyGuard` | Read current replica count for auto-rollback |
 | `chaosengines,chaosresults,chaosexperiments` | `LitmusChaosProvider` | Create and manage Litmus chaos experiments |
 | `events/get,list,watch` | `DisruptionEventBus` | Watch Kubernetes events for disruption correlation |
