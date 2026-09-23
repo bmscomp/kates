@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -o /kates .
 
 # Stage 2: Build the Java application
-FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk@sha256:da9d3a4f7650db39b918fc5a2c3da76556fb8cc8e5f3767cdea0bb409286951a AS builder
+FROM --platform=$BUILDPLATFORM eclipse-temurin:24-jdk@sha256:7493205ffe6caa8074fa8a06a276bb1c5ac41d3dd0fd43a0db66d7f776e80b3e AS builder
 WORKDIR /build
 
 COPY kates/pom.xml .
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.m2 \
   ./mvnw package -DskipTests -Dnet.bytebuddy.experimental=true -B
 
 # Stage 3: Runtime — Java app + CLI on PATH
-FROM eclipse-temurin:21-jre@sha256:273396ed5998598ed1091e8d72711c2d36980a0e65103859c55a4e977a41ffd3
+FROM eclipse-temurin:24-jre@sha256:8cb2387a28af84cf0db0948d9c67d4480192f4e567027a3963f145d218e8b4f2
 WORKDIR /app
 
 COPY --from=builder /build/target/quarkus-app/ ./
