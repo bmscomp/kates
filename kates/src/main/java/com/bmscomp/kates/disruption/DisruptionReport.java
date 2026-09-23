@@ -29,6 +29,15 @@ public class DisruptionReport {
     private List<String> validationWarnings;
     private SlaGrader.SlaVerdict slaVerdict;
 
+    /**
+     * @param unmeasuredMetrics the post-disruption metrics Prometheus returned
+     *     no data for; their {@code postDisruptionMetrics} fields hold 0, which
+     *     is not a measurement
+     * @param unrecoveredAfter set when the step waited for recovery and a pod
+     *     that went down after the fault was still not Ready when Kates
+     *     stopped waiting: the time from the fault to then, a lower bound on
+     *     its recovery time
+     */
     public record StepReport(
             String stepName,
             DisruptionType disruptionType,
@@ -44,7 +53,9 @@ public class DisruptionReport {
             IsrSnapshot.Metrics isrMetrics,
             LagSnapshot.Metrics lagMetrics,
             boolean rolledBack,
-            String rollbackReason) {}
+            String rollbackReason,
+            List<String> unmeasuredMetrics,
+            Duration unrecoveredAfter) {}
 
     public record DisruptionSummary(
             int totalSteps,

@@ -27,10 +27,14 @@ class SlaGraderTest {
         return new ReportSummary(0L, 900, 900, 0.9, 20, 0, 0, p99LatencyMs, 0, 0, 0L, 0, 60_000);
     }
 
-    private static DisruptionReport report(ReportSummary post, Duration timeToAllReady) {
-        DisruptionReport report = new DisruptionReport();
-        report.setStepReports(List.of(new DisruptionReport.StepReport(
-                "kill-leader",
+    private static DisruptionReport.StepReport step(
+            String name,
+            ReportSummary post,
+            Duration timeToAllReady,
+            List<String> unmeasuredMetrics,
+            Duration unrecoveredAfter) {
+        return new DisruptionReport.StepReport(
+                name,
                 DisruptionType.POD_KILL,
                 null,
                 List.of(),
@@ -44,8 +48,19 @@ class SlaGraderTest {
                 null,
                 null,
                 false,
-                null)));
+                null,
+                unmeasuredMetrics,
+                unrecoveredAfter);
+    }
+
+    private static DisruptionReport report(DisruptionReport.StepReport... steps) {
+        DisruptionReport report = new DisruptionReport();
+        report.setStepReports(List.of(steps));
         return report;
+    }
+
+    private static DisruptionReport report(ReportSummary post, Duration timeToAllReady) {
+        return report(step("kill-leader", post, timeToAllReady, List.of(), null));
     }
 
     private static List<String> fields(SlaGrader.SlaVerdict verdict) {
@@ -138,6 +153,98 @@ class SlaGraderTest {
         assertEquals("A", verdict.grade());
         assertEquals(2, verdict.totalChecks());
         assertTrue(verdict.unevaluated().isEmpty());
+    }
+
+    @Test
+    void averageLatencyIsNotEvaluated() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxAvgLatencyMs(10.0);
+
+        // The capture's average was a mean of the per-quantile gauges divided
+        // by 1000; Kafka's exporter publishes no mean to read.
+        SlaGrader.SlaVerdict verdict = grader.grade(report(prometheusSummary(40), Duration.ofSeconds(20)), sla);
+
+        assertEquals(SlaGrader.NOT_GRADED, verdict.grade());
+        assertEquals(0, verdict.totalChecks());
+        assertEquals(List.of("maxAvgLatencyMs"), fields(verdict));
+    }
+
+    @Test
+    void aMetricPrometheusReturnedNothingForIsNotComparedAgainstZero() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxP99LatencyMs(100.0);
+        sla.setMinThroughputRecPerSec(500.0);
+        ReportSummary empty = new ReportSummary(0L, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0L, 0, 60_000);
+
+        // Empty results used to read 0: p99 always passed, throughput always
+        // failed critically.
+        SlaGrader.SlaVerdict verdict = grader.grade(
+                report(step(
+                        "kill-leader",
+                        empty,
+                        null,
+                        List.of(PrometheusMetricsCapture.P99_LATENCY, PrometheusMetricsCapture.THROUGHPUT),
+                        null)),
+                sla);
+
+        assertEquals(SlaGrader.NOT_GRADED, verdict.grade());
+        assertEquals(0, verdict.totalChecks());
+        assertEquals(List.of("maxP99LatencyMs", "minThroughputRecPerSec"), fields(verdict));
+        assertTrue(
+                verdict.unevaluated().getFirst().contains("Prometheus returned no data"),
+                verdict.unevaluated().getFirst());
+    }
+
+    @Test
+    void aStepWhosePodsNeverCameBackFailsTheRecoveryTime() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxRtoMs(60_000L);
+
+        // No time-to-all-ready, so this used to add no check and grade "-".
+        SlaGrader.SlaVerdict verdict =
+                grader.grade(report(step("kill-leader", null, null, null, Duration.ofSeconds(330))), sla);
+
+        assertEquals("F", verdict.grade());
+        assertEquals(1, verdict.totalChecks());
+        SlaGrader.SlaViolation miss = verdict.violations().getFirst();
+        assertEquals("rtoMs", miss.metricName());
+        assertEquals(330_000, miss.actual());
+        assertEquals("CRITICAL", miss.severity());
+        assertTrue(verdict.unevaluated().isEmpty());
+    }
+
+    @Test
+    void anUnrecoveredStepCutShortOfTheLimitIsNotEvaluated() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxRtoMs(600_000L);
+
+        // Kates stopped waiting at 330s; the limit is 600s, so the step could
+        // still have recovered in time.
+        SlaGrader.SlaVerdict verdict =
+                grader.grade(report(step("kill-leader", null, null, null, Duration.ofSeconds(330))), sla);
+
+        assertEquals(SlaGrader.NOT_GRADED, verdict.grade());
+        assertEquals(List.of("maxRtoMs"), fields(verdict));
+        assertTrue(
+                verdict.unevaluated().getFirst().contains("step 'kill-leader'"),
+                verdict.unevaluated().getFirst());
+    }
+
+    @Test
+    void anUnrecoveredStepIsCheckedNextToARecoveredOne() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxRtoMs(60_000L);
+
+        SlaGrader.SlaVerdict verdict = grader.grade(
+                report(
+                        step("kill-first", null, Duration.ofSeconds(20), null, null),
+                        step("kill-second", null, null, null, Duration.ofSeconds(330))),
+                sla);
+
+        // The recovered step alone used to grade the plan A.
+        assertEquals("F", verdict.grade());
+        assertEquals(2, verdict.totalChecks());
+        assertEquals(1, verdict.passedChecks());
     }
 
     @Test

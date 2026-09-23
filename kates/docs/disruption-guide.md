@@ -196,6 +196,7 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
   "isrTrackingTopic": "orders",
   "lagTrackingGroupId": "order-processor",
   "sla": {
+    "maxP99LatencyMs": 200.0,
     "minThroughputRecPerSec": 5000.0,
     "maxRtoMs": 60000
   },
@@ -236,7 +237,7 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
 
 There are important design decisions embedded in this plan. The `steadyStateSec: 10` on the second step means we only wait 10 seconds after the first broker recovers before killing the second one — putting the cluster under maximum pressure. The `observationWindowSec: 180` on the second step is longer because recovering from two simultaneous broker failures takes more time. And the `maxAffectedBrokers: 2` tells the safety guard that we intentionally want to affect two brokers.
 
-Each `faultSpec` spells out `targetNamespace` and `targetLabel`. They are the defaults, but naming them makes the plan say which pods it can touch. The `sla` block sets only thresholds the disruption grader can fail today. [Defining Your SLA](#defining-your-sla) explains why P99 latency and data loss are left out.
+Each `faultSpec` spells out `targetNamespace` and `targetLabel`. They are the defaults, but naming them makes the plan say which pods it can touch. The `sla` block sets only thresholds a disruption plan can measure. [Defining Your SLA](#defining-your-sla) explains why data loss and error rate are left out.
 
 ## The 13-Step Execution Pipeline
 
@@ -376,33 +377,27 @@ When a plan's `sla` block sets at least one threshold, the `SlaGrader` grades th
 
 ### Defining Your SLA
 
-The `sla` block is an `SlaDefinition`, the same class a test scenario uses for its SLA. It has nine thresholds, and you set only the ones you care about; unset thresholds are ignored. For each step of a disruption plan, though, the grader has only two sources: the Prometheus snapshot Kates takes when the step's observation window ends, and the step's pod recovery time. So only four of the nine are graded:
+The `sla` block is an `SlaDefinition`, the same class a test scenario uses for its SLA. It has nine thresholds, and you set only the ones you care about; unset thresholds are ignored. For each step of a disruption plan, though, the grader has only two sources: the Prometheus snapshot Kates takes when the step's observation window ends, and the step's pod recovery time. So only three of the nine are graded:
 
 | Field | Type | What the disruption grader compares it with | Severity of a miss |
 |-------|------|---------------------------------------------|--------------------|
-| `minThroughputRecPerSec` | `Double` | Messages produced per second from the step's Prometheus snapshot, as a rate over the last minute of the observation window (see the caveats below) | `CRITICAL` below half the minimum, `WARNING` otherwise |
-| `maxRtoMs` | `Long` | Time from fault injection until every Kafka pod is Ready again, from the pod watcher rather than Prometheus. Measured only for steps with `requireRecovery: true`. A step whose pods never all come back Ready has no time to compare and adds no check | `CRITICAL` above twice the limit, `WARNING` otherwise |
-| `maxP99LatencyMs` | `Double` | P99 produce request time from the step's Prometheus snapshot (see the caveats below) | `CRITICAL` above twice the limit, `WARNING` otherwise |
-| `maxAvgLatencyMs` | `Double` | Average produce request time from the step's Prometheus snapshot (see the caveats below) | `WARNING` |
+| `minThroughputRecPerSec` | `Double` | Messages produced per second across the cluster's brokers, from the step's Prometheus snapshot: a rate over the last minute of the observation window | `CRITICAL` below half the minimum, `WARNING` otherwise |
+| `maxRtoMs` | `Long` | Time from fault injection until every Kafka pod is Ready again, from the pod watcher rather than Prometheus. Measured only for steps with `requireRecovery: true` in which a pod went down. A step whose pods had not all come back when Kates stopped waiting counts too (see below) | `CRITICAL` above twice the limit, `WARNING` otherwise |
+| `maxP99LatencyMs` | `Double` | P99 produce request time of the slowest broker, in milliseconds, from the step's Prometheus snapshot | `CRITICAL` above twice the limit, `WARNING` otherwise |
+| `maxAvgLatencyMs` | `Double` | Not evaluated: Kafka's exporter publishes latency percentiles and a count, not a mean | — |
 | `maxP999LatencyMs` | `Double` | Not evaluated: the snapshot has no P99.9 latency | — |
 | `maxErrorRate` | `Double` | Not evaluated: the snapshot has no error rate | — |
 | `maxDataLossPercent` | `Double` | Not evaluated: a plan runs no workload, so no data loss is measured | — |
 | `minRecordsProcessed` | `Long` | Not evaluated: a plan runs no workload, so no records are counted | — |
 | `maxRpoMs` | `Long` | Not evaluated: a plan runs no workload, so no RPO is measured | — |
 
-A plan that sets any of the last five still runs. Validation warns about each one, dry-run included, and the verdict lists it under `unevaluated` instead of counting it as passed. These five belong in a test scenario's SLA, where the load test itself supplies errors, P99.9 latency, record counts and data integrity. For data loss and RPO under a fault, run a resilience test (`kates resilience run`) with an INTEGRITY workload. A disruption plan runs no load test of its own. For the same reason, `minThroughputRecPerSec` measures whatever else is producing to the cluster, so keep a workload running for the whole plan. With no producer, every throughput check is a `CRITICAL` miss.
+A plan that sets any of the last six still runs. Validation warns about each one, dry-run included, and the verdict lists it under `unevaluated` instead of counting it as passed. These six belong in a test scenario's SLA, where the load test itself supplies average and P99.9 latency, errors, record counts and data integrity. For data loss and RPO under a fault, run a resilience test (`kates resilience run`) with an INTEGRITY workload. A disruption plan runs no load test of its own. For the same reason, `minThroughputRecPerSec` measures whatever else is producing to the cluster, so keep a workload running for the whole plan. With no producer, every throughput check is a `CRITICAL` miss.
 
-The Prometheus queries behind the throughput and latency checks have catches of their own on a cluster that uses the Strimzi JMX exporter rules shipped in Kates' `kafka-cluster` chart:
-
-- **Throughput** is `sum(rate(kafka_server_brokertopicmetrics_messagesin_total[1m]))`, with no label filter. Those rules export one broker-wide series and one series per topic, so the sum is about twice the real rate. It also counts any other Kafka cluster the same Prometheus scrapes. Set the minimum with that in mind.
-- **P99 latency** is `histogram_quantile` over `kafka_network_requestmetrics_totaltimems_bucket`. The rules export that metric as one gauge per quantile, with no `_bucket` series, so the query returns nothing and the value reads `0`.
-- **Average latency** is the mean of the `kafka_network_requestmetrics_totaltimems` Produce series divided by 1000, so it reads about a thousandth of the real value in milliseconds.
-
-Neither latency check can fail on such a cluster. Use `maxRtoMs`, plus `minThroughputRecPerSec` with the doubling in mind.
+The Prometheus queries read only Kates' own cluster. They match the `namespace` and `strimzi_io_cluster` labels against `kates.chaos.kafka.namespace` and `kates.chaos.kafka.cluster`. The PodMonitors in Kates' `kafka-cluster` chart attach both labels, as Strimzi's example PodMonitor does. When Prometheus returns no data for a metric, the step lists it under `unmeasuredMetrics` and adds no check for it, rather than comparing the threshold against `0`. If no step measured it, the threshold goes under `unevaluated`.
 
 The latency and throughput checks need the step's Prometheus snapshot. A step without one adds no checks for them. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails. If no step has a snapshot, those thresholds go under `unevaluated`, and so does `maxRtoMs` when no step measured a recovery time. When nothing could be checked at all, the grade is `-`, not `A`.
 
-One gap remains. A step whose pods never all come back Ready adds no `maxRtoMs` check, so if another step recovered in time, the plan can still grade `A`. Read each step's `timeToAllReady` alongside the grade.
+A step whose pods had not all come back when Kates stopped waiting has no recovery time, only a lower bound: the step report's `unrecoveredAfter`, the time from the fault until Kates gave up. Kates waits `kates.chaos.recovery.timeout-sec` (300 seconds by default), plus a minute after an auto-rollback. When `unrecoveredAfter` is past `maxRtoMs`, the step is a `CRITICAL` miss. When it is not, Kates cannot tell whether the step would have recovered in time, so `maxRtoMs` goes under `unevaluated` for that step. Raise the timeout above the limit.
 
 ### The Grading Algorithm
 
@@ -528,7 +523,7 @@ curl -X POST 'http://localhost:8080/api/disruptions?dryRun=true' \
 
 Check the response. `wouldSucceed` should be `true`, and the step's `warnings` should not mention RBAC. The step's `resolvedLeaderId` is the partition's current leader, and `targetPod` is that broker's pod, the one that would be killed. The leader can still move before the step runs.
 
-The `sla` block sets only `maxRtoMs`. The LOAD test from Step 2 has finished by now, so a throughput minimum would fail for lack of traffic, and the latency thresholds cannot fail on the chart's metrics (see [Defining Your SLA](#defining-your-sla)).
+The `sla` block sets only `maxRtoMs`. The LOAD test from Step 2 has finished by now, so throughput and latency thresholds would measure an idle cluster, and a throughput minimum would fail for lack of traffic (see [Defining Your SLA](#defining-your-sla)).
 
 ### Step 4: Execute the Disruption
 
@@ -558,6 +553,6 @@ curl -s http://localhost:8080/api/disruptions/<id> | jq '.status'
 
 Look at the ISR timeline first. You should see the ISR shrink from 3 replicas to 2 shortly after the kill, then expand back to 3 once the broker restarts. The time between shrink and expand is your cluster's ISR recovery time.
 
-Then look at the SLA verdict. This plan makes one check, the step's recovery time. A Grade A means every Kafka pod was Ready again within 60 seconds. A single warning is 100% of the checks, so a recovery between 60 and 120 seconds grades D, and anything slower grades F. An F means you have just discovered a resilience gap before it could affect production. A grade of `-` means nothing was checked. The step has no recovery time, either because it failed or because the pods never all came back Ready, and `unevaluated` lists `maxRtoMs`. The step report shows which it was.
+Then look at the SLA verdict. This plan makes one check, the step's recovery time. A Grade A means every Kafka pod was Ready again within 60 seconds. A single warning is 100% of the checks, so a recovery between 60 and 120 seconds grades D, and anything slower grades F. A broker that had not come back when Kates stopped waiting is an F too, and the step report's `unrecoveredAfter` says how long Kates waited. An F means you have just discovered a resilience gap before it could affect production. A grade of `-` means nothing was checked: the step failed before it recorded a recovery time, and `unevaluated` lists `maxRtoMs` with the reason.
 
 That is the value of chaos engineering: knowledge you cannot get any other way.
