@@ -435,13 +435,13 @@ Every disruption report includes an **SLA grade** — a structured verdict on wh
 ```mermaid
 graph TD
     subgraph Metrics["Post-Disruption Metrics (per step)"]
-        M1[Avg / P99 Latency]
+        M1[P99 Latency]
         M2[Throughput]
         M4["Recovery Time (RTO)"]
     end
     
     subgraph Thresholds["SLA Thresholds (plan's sla block)"]
-        T1[maxAvgLatencyMs<br/>maxP99LatencyMs]
+        T1[maxP99LatencyMs]
         T2[minThroughputRecPerSec]
         T4[maxRtoMs]
     end
@@ -456,15 +456,15 @@ graph TD
     Thresholds --> Verdict
 ```
 
-The grader runs each threshold once per step, after the last step has finished, so a two-step plan with two thresholds makes four checks. Each miss is a violation classified `WARNING` or `CRITICAL`. P99 latency or recovery time above twice the limit, or throughput below half the minimum, is `CRITICAL`, and any other miss, including every average-latency miss, is a `WARNING`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+The grader runs each threshold once per step, after the last step has finished, so a two-step plan with two thresholds makes four checks. Each miss is a violation classified `WARNING` or `CRITICAL`. P99 latency or recovery time above twice the limit, or throughput below half the minimum, is `CRITICAL`, and any other miss is a `WARNING`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
 
-A plan runs no workload of its own, and its Prometheus capture has no P99.9 latency or error rate. So `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the verdict lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and RPO come from an INTEGRITY workload, not from a plan: a resilience test (`kates resilience run`) whose workload is an INTEGRITY test reports both in its integrity result.
+A plan runs no workload of its own, its Prometheus capture has no P99.9 latency or error rate, and Kafka's exporter publishes latency percentiles but no mean. So `maxAvgLatencyMs`, `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the verdict lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and RPO come from an INTEGRITY workload, not from a plan: a resilience test (`kates resilience run`) whose workload is an INTEGRITY test reports both in its integrity result.
 
 The checks that do run have limits of their own:
 
 - Latency and throughput come from the step's Prometheus snapshot, taken when its observation window ends. A step without one adds no checks for them. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails. Recovery time comes from the pod watcher and is checked either way.
-- A step whose pods never all come back Ready has no recovery time, so it adds no `maxRtoMs` check. If another step did recover, the plan can still grade `A`, so read each step's `timeToAllReady`.
-- With the metrics rules of the `kafka-cluster` chart, the P99 query finds no `_bucket` series and reads `0`, and the average latency is divided by 1000. Neither latency check can fail. The throughput sum counts the broker-wide series and the per-topic series, so it reads about twice the real rate.
+- A step whose pods had not all come back when Kates stopped waiting has no recovery time, only the time it waited (`unrecoveredAfter`). Past `maxRtoMs` that is a `CRITICAL` miss. Within it, Kates cannot tell whether the step would have recovered in time, and `maxRtoMs` is listed as unevaluated for that step.
+- The queries read only this cluster's series, by the `namespace` and `strimzi_io_cluster` labels the `kafka-cluster` chart's PodMonitors attach. A metric Prometheus returns no data for adds no check and is listed in the step's `unmeasuredMetrics`, instead of reading `0`.
 
 ### CI/CD Integration
 

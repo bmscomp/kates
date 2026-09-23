@@ -52,11 +52,17 @@ public class SlaGrader {
      * figure, and the Prometheus capture has no p99.9 or error rate — it fills
      * both with a hard-coded 0. Each of these used to be skipped or compared
      * against that 0, so a plan whose SLA declared only these passed with an A.
+     * Nor is there an average latency: Kafka's JMX exporter rules publish a
+     * request-time histogram as percentiles and a count, with no sum or mean.
      */
     public static List<String> unevaluableConstraints(SlaDefinition sla) {
         List<String> unevaluable = new ArrayList<>();
         if (sla == null) {
             return unevaluable;
+        }
+        if (sla.getMaxAvgLatencyMs() != null) {
+            unevaluable.add("maxAvgLatencyMs: the Prometheus capture has no average latency"
+                    + " (Kafka's exporter publishes percentiles and a count, not a mean)");
         }
         if (sla.getMaxDataLossPercent() != null) {
             unevaluable.add("maxDataLossPercent: a disruption plan runs no workload, so no data loss is measured");
@@ -89,6 +95,9 @@ public class SlaGrader {
         int totalChecks = 0;
         boolean anyPostMetrics = false;
         boolean anyRecovery = false;
+        boolean rtoIndeterminate = false;
+        boolean p99Measured = false;
+        boolean throughputMeasured = false;
 
         for (DisruptionReport.StepReport step : report.getStepReports()) {
             // Recovery time comes from the pod watcher, not Prometheus, so it is
@@ -105,13 +114,31 @@ public class SlaGrader {
                             rtoMs,
                             rtoMs > sla.getMaxRtoMs() * 2 ? "CRITICAL" : "WARNING"));
                 }
+            } else if (sla.getMaxRtoMs() != null && step.unrecoveredAfter() != null) {
+                // Pods went down and had not all come back when Kates stopped
+                // waiting. This used to add no check, so a step that never
+                // recovered could not fail the SLA.
+                long waitedMs = step.unrecoveredAfter().toMillis();
+                if (waitedMs > sla.getMaxRtoMs()) {
+                    anyRecovery = true;
+                    totalChecks++;
+                    violations.add(
+                            new SlaViolation("rtoMs", "max", sla.getMaxRtoMs().doubleValue(), waitedMs, "CRITICAL"));
+                } else {
+                    rtoIndeterminate = true;
+                    unevaluated.add("maxRtoMs: step '" + step.stepName() + "' had not recovered when Kates stopped"
+                            + " waiting after " + waitedMs + "ms, within the limit;"
+                            + " raise kates.chaos.recovery.timeout-sec above it");
+                }
             }
 
             ReportSummary post = step.postDisruptionMetrics();
             if (post == null) continue;
             anyPostMetrics = true;
+            List<String> unmeasured = step.unmeasuredMetrics() != null ? step.unmeasuredMetrics() : List.of();
 
-            if (sla.getMaxP99LatencyMs() != null) {
+            if (sla.getMaxP99LatencyMs() != null && !unmeasured.contains(PrometheusMetricsCapture.P99_LATENCY)) {
+                p99Measured = true;
                 totalChecks++;
                 if (post.p99LatencyMs() > sla.getMaxP99LatencyMs()) {
                     violations.add(new SlaViolation(
@@ -123,15 +150,8 @@ public class SlaGrader {
                 }
             }
 
-            if (sla.getMaxAvgLatencyMs() != null) {
-                totalChecks++;
-                if (post.avgLatencyMs() > sla.getMaxAvgLatencyMs()) {
-                    violations.add(new SlaViolation(
-                            "avgLatencyMs", "max", sla.getMaxAvgLatencyMs(), post.avgLatencyMs(), "WARNING"));
-                }
-            }
-
-            if (sla.getMinThroughputRecPerSec() != null) {
+            if (sla.getMinThroughputRecPerSec() != null && !unmeasured.contains(PrometheusMetricsCapture.THROUGHPUT)) {
+                throughputMeasured = true;
                 totalChecks++;
                 if (post.avgThroughputRecPerSec() < sla.getMinThroughputRecPerSec()) {
                     violations.add(new SlaViolation(
@@ -146,15 +166,17 @@ public class SlaGrader {
             }
         }
 
-        if (!anyPostMetrics) {
-            String noMetrics = ": no step captured post-disruption metrics"
-                    + " (Prometheus unreachable, or observationWindowSec is 0)";
-            if (sla.getMaxP99LatencyMs() != null) unevaluated.add("maxP99LatencyMs" + noMetrics);
-            if (sla.getMaxAvgLatencyMs() != null) unevaluated.add("maxAvgLatencyMs" + noMetrics);
-            if (sla.getMinThroughputRecPerSec() != null) unevaluated.add("minThroughputRecPerSec" + noMetrics);
+        String noData = anyPostMetrics
+                ? ": Prometheus returned no data for it in any step (check that the brokers' metrics are scraped"
+                        + " with the namespace and strimzi_io_cluster labels)"
+                : ": no step captured post-disruption metrics (Prometheus unreachable, or observationWindowSec is 0)";
+        if (sla.getMaxP99LatencyMs() != null && !p99Measured) unevaluated.add("maxP99LatencyMs" + noData);
+        if (sla.getMinThroughputRecPerSec() != null && !throughputMeasured) {
+            unevaluated.add("minThroughputRecPerSec" + noData);
         }
-        if (sla.getMaxRtoMs() != null && !anyRecovery) {
-            unevaluated.add("maxRtoMs: no step measured a recovery time (requireRecovery is off, or the step failed)");
+        if (sla.getMaxRtoMs() != null && !anyRecovery && !rtoIndeterminate) {
+            unevaluated.add("maxRtoMs: no step measured a recovery time (requireRecovery is off, no pod went"
+                    + " NotReady, or the step failed)");
         }
 
         int passedChecks = totalChecks - violations.size();
