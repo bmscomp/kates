@@ -14,6 +14,11 @@ import com.bmscomp.kates.engine.AckTracker;
  * <p>Tracks both producer-side and consumer-side RTO for a complete picture
  * of recovery time from the perspective of both writers and readers.
  *
+ * <p>{@code rpo} is how far back before the fault acknowledged writes were
+ * lost. It is {@code null} when the run did not know when a fault started —
+ * a plain INTEGRITY run, or one a separate disruption was injected into —
+ * because there is no point to measure back from.
+ *
  * <p><b>The millisecond accessors and {@link #verdict()} are part of the wire
  * format.</b> Jackson serializes a record's components and nothing else, so
  * without {@code @JsonProperty} the JSON carried only the {@code Duration}
@@ -58,13 +63,7 @@ public record IntegrityResult(
         return maxRto != null ? maxRto.toNanos() / 1_000_000.0 : 0;
     }
 
-    /**
-     * RPO in milliseconds, or {@code -1} when RPO was not measured ({@code rpo}
-     * is null because the verifier had no chaos start time to measure from).
-     * Negative means "unknown", never "nothing at risk" — the convention
-     * {@code SlaEvaluator} and the CLI both use to skip an RPO constraint
-     * rather than pass it.
-     */
+    /** RPO in milliseconds, or -1 when it was not measured (SLA checks and the CLI skip negatives). */
     @JsonProperty("rpoMs")
     public double rpoMs() {
         return rpo != null ? rpo.toNanos() / 1_000_000.0 : -1;

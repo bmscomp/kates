@@ -810,6 +810,20 @@ public class TestOrchestrator {
         fireEvent(run, TestLifecycleEvent.EventKind.STOPPING);
     }
 
+    /**
+     * Tells a run's live tasks that a fault was injected at
+     * {@code chaosStartNanos} ({@link System#nanoTime()} in this JVM), so an
+     * integrity task can measure RPO from it. Tasks that have already finished
+     * are past the point where it could change their result.
+     */
+    public void markChaosStart(String runId, long chaosStartNanos) {
+        for (BenchmarkHandle handle : activeHandles.getOrDefault(runId, List.of())) {
+            resolveBackend(handle.backendName())
+                    .asSuccess()
+                    .ifPresent(backend -> backend.markChaosStart(handle, chaosStartNanos));
+        }
+    }
+
     public List<String> availableBackends() {
         return backends.stream().map(BenchmarkBackend::name).sorted().toList();
     }

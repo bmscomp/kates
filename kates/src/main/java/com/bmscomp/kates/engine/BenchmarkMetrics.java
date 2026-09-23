@@ -320,9 +320,9 @@ public class BenchmarkMetrics {
             producerRtoSeconds = r.producerRtoMs() / 1000.0;
             consumerRtoSeconds = r.consumerRtoMs() / 1000.0;
             maxRtoSeconds = r.maxRtoMs() / 1000.0;
-            // An unmeasured RPO (-1 ms) publishes NaN, not -0.001 or 0: an empty
-            // panel reads "not measured", and NaN never trips KafkaRPOExceedsSLA.
-            rpoSeconds = r.rpoMs() >= 0 ? r.rpoMs() / 1000.0 : Double.NaN;
+            // NaN, not -0.001, when no fault was marked: the series then has no
+            // value rather than one an RPO alert could compare against.
+            rpoSeconds = r.rpo() != null ? r.rpoMs() / 1000.0 : Double.NaN;
             dataLossPercent = r.dataLossPercent();
             lostRecords = r.lostRecords();
             duplicateRecords = r.duplicateRecords();

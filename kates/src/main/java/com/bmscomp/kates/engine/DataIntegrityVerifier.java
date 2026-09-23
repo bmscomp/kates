@@ -99,7 +99,8 @@ public class DataIntegrityVerifier {
     /**
      * Performs the reconciliation and returns the integrity result.
      *
-     * @param chaosStartNanos monotonic nano timestamp for RPO computation. Pass -1 if no chaos.
+     * @param chaosStartNanos {@link System#nanoTime()} when the fault was injected, from
+     *     this JVM. Pass -1 if no fault was injected, which leaves RPO unmeasured.
      * @param crcVerified whether CRC checking was enabled
      * @param orderingVerified whether ordering checking was enabled
      * @param idempotenceEnabled whether idempotent producer was used
@@ -140,16 +141,7 @@ public class DataIntegrityVerifier {
 
         Duration maxRto = producerRto.compareTo(consumerRto) >= 0 ? producerRto : consumerRto;
 
-        // RPO. Null when there is no chaos start to measure from: a zero here
-        // would read as "measured, nothing at risk" and pass any maxRpoMs gate.
-        Duration rpo = null;
-        if (chaosStartNanos > 0 && ackTracker.getLastAckedSendNanos() > 0) {
-            rpo = Duration.ZERO;
-            long rpoNanos = chaosStartNanos - ackTracker.getLastAckedSendNanos();
-            if (rpoNanos > 0) {
-                rpo = Duration.ofNanos(rpoNanos);
-            }
-        }
+        Duration rpo = computeRpo(chaosStartNanos, lostSet);
 
         long totalSent = ackTracker.getTotalSent();
         double lossPercent = totalSent > 0 ? (double) lostCount / totalSent * 100.0 : 0.0;
@@ -190,7 +182,7 @@ public class DataIntegrityVerifier {
                 crcFailures.get(),
                 producerRto,
                 consumerRto,
-                rpo,
+                rpo != null ? rpo : "not measured",
                 lossPercent,
                 failureWindows.size(),
                 result.verdict()));
@@ -203,6 +195,35 @@ public class DataIntegrityVerifier {
      */
     public IntegrityResult verify(long chaosStartNanos) {
         return verify(chaosStartNanos, false, false, false, false);
+    }
+
+    /**
+     * How far back before the fault acknowledged writes were lost: the fault's
+     * start minus the send time of the oldest acknowledged record that was
+     * never consumed. Zero when none was lost, or when the oldest loss was sent
+     * after the fault began (that loss is still counted in data loss).
+     *
+     * <p>This used to subtract the newest acknowledged send of the whole run.
+     * Any producer that recovered had acks after the fault, which made the
+     * result negative and clamped it to zero, so RPO read zero with or without
+     * a fault and with or without loss.
+     *
+     * @return {@code null} when there is no fault to measure from, or the
+     *     oldest lost record cannot be placed in time
+     */
+    private Duration computeRpo(long chaosStartNanos, BitSet lostSet) {
+        if (chaosStartNanos <= 0) {
+            return null;
+        }
+        int oldestLost = lostSet.nextSetBit(0);
+        if (oldestLost < 0) {
+            return Duration.ZERO;
+        }
+        long sentAtOrBefore = ackTracker.sendTimeAtOrBefore(oldestLost);
+        if (sentAtOrBefore <= 0) {
+            return null;
+        }
+        return sentAtOrBefore < chaosStartNanos ? Duration.ofNanos(chaosStartNanos - sentAtOrBefore) : Duration.ZERO;
     }
 
     private List<LostRange> computeLostRanges(BitSet lostSet) {

@@ -430,19 +430,15 @@ Every disruption report includes an **SLA grade** — a structured verdict on wh
 ```mermaid
 graph TD
     subgraph Metrics["Post-Disruption Metrics (per step)"]
-        M1[Avg / P99 / P999 Latency]
+        M1[Avg / P99 Latency]
         M2[Throughput]
-        M3[Error Rate]
         M4["Recovery Time (RTO)"]
-        M5[Data Loss %]
     end
     
     subgraph Thresholds["SLA Thresholds (plan's sla block)"]
-        T1[maxAvgLatencyMs<br/>maxP99LatencyMs<br/>maxP999LatencyMs]
+        T1[maxAvgLatencyMs<br/>maxP99LatencyMs]
         T2[minThroughputRecPerSec]
-        T3[maxErrorRate]
         T4[maxRtoMs]
-        T5[maxDataLossPercent]
     end
     
     subgraph Verdict["Letter Grade"]
@@ -455,7 +451,9 @@ graph TD
     Thresholds --> Verdict
 ```
 
-Each violation is classified `WARNING` or `CRITICAL` — a breach far past its threshold (for example, P99 latency or recovery time at more than twice the limit, throughput below half the minimum, or any data loss over the cap) is `CRITICAL`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+Each violation is classified `WARNING` or `CRITICAL` — a breach far past its threshold (for example, P99 latency or recovery time at more than twice the limit, or throughput below half the minimum) is `CRITICAL`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+
+A plan runs no workload of its own, and its Prometheus capture has no P99.9 latency or error rate. So `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the verdict lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and RPO come from an INTEGRITY workload, not from a plan: a resilience test (`kates resilience run`) whose workload is an INTEGRITY test reports both in its integrity result.
 
 ### CI/CD Integration
 
