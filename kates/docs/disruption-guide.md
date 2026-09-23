@@ -376,25 +376,25 @@ When `autoRollback` is enabled (the default), faults are automatically reversed 
 
 ## SLA Grading: Quantifying Resilience
 
-When a plan's `sla` block sets at least one threshold, the `SlaGrader` grades the whole plan once, after its last step. The report carries the result as `slaVerdict`: a letter grade, the list of violations, and the number of checks that ran (`totalChecks`) and passed (`passedChecks`). A plan with no `sla` block, or one whose thresholds are all unset, gets no verdict. The grade turns a complex set of metrics into a single signal: did the cluster meet your resilience requirements?
+When a plan's `sla` block sets at least one threshold, the `SlaGrader` grades the whole plan once, after its last step. The report carries the result as `slaVerdict`. It holds a letter grade, the list of violations, the number of checks that ran (`totalChecks`) and passed (`passedChecks`), and the thresholds it could not evaluate, each with the reason (`unevaluated`). A plan with no `sla` block, or one whose thresholds are all unset, gets no verdict. The grade turns a complex set of metrics into a single signal: did the cluster meet your resilience requirements?
 
 ### Defining Your SLA
 
-The `sla` block is an `SlaDefinition`, the same class a test scenario uses for its SLA. It has nine thresholds, and you set only the ones you care about; unset thresholds are ignored. For each step of a disruption plan, though, the grader reads only two sources: the Prometheus snapshot Kates takes when the step's observation window ends, and the step's pod recovery time. So only some of the nine can fail:
+The `sla` block is an `SlaDefinition`, the same class a test scenario uses for its SLA. It has nine thresholds, and you set only the ones you care about; unset thresholds are ignored. For each step of a disruption plan, though, the grader has only two sources: the Prometheus snapshot Kates takes when the step's observation window ends, and the step's pod recovery time. So only four of the nine are graded:
 
 | Field | Type | What the disruption grader compares it with | Severity of a miss |
 |-------|------|---------------------------------------------|--------------------|
-| `minThroughputRecPerSec` | `Double` | Messages produced per second from Prometheus, as a rate over the last minute of the observation window (see the caveats below) | `CRITICAL` below half the minimum, `WARNING` otherwise |
-| `maxRtoMs` | `Long` | Time from fault injection until every Kafka pod is Ready again. Measured only for steps with `requireRecovery: true`. If the pods never all come back Ready, there is no time to compare and no check runs | `CRITICAL` above twice the limit, `WARNING` otherwise |
-| `maxP99LatencyMs` | `Double` | P99 produce request time from Prometheus (see the caveats below) | `CRITICAL` above twice the limit, `WARNING` otherwise |
-| `maxAvgLatencyMs` | `Double` | Average produce request time from Prometheus (see the caveats below) | `WARNING` |
-| `maxP999LatencyMs` | `Double` | Nothing. The snapshot has no P99.9, so the value is `0` and the check always passes | `WARNING` |
-| `maxErrorRate` | `Double` | Nothing. The snapshot has no error rate, so the value is `0` and the check always passes | `CRITICAL` above five times the limit, `WARNING` otherwise |
-| `maxDataLossPercent` | `Double` | Nothing. The grader looks for a `dataLossPercent` impact delta, which the Prometheus capture never produces, so no check runs | `CRITICAL` |
-| `minRecordsProcessed` | `Long` | Not read by the disruption grader | — |
-| `maxRpoMs` | `Long` | Not read by the disruption grader | — |
+| `minThroughputRecPerSec` | `Double` | Messages produced per second from the step's Prometheus snapshot, as a rate over the last minute of the observation window (see the caveats below) | `CRITICAL` below half the minimum, `WARNING` otherwise |
+| `maxRtoMs` | `Long` | Time from fault injection until every Kafka pod is Ready again, from the pod watcher rather than Prometheus. Measured only for steps with `requireRecovery: true`. A step whose pods never all come back Ready has no time to compare and adds no check | `CRITICAL` above twice the limit, `WARNING` otherwise |
+| `maxP99LatencyMs` | `Double` | P99 produce request time from the step's Prometheus snapshot (see the caveats below) | `CRITICAL` above twice the limit, `WARNING` otherwise |
+| `maxAvgLatencyMs` | `Double` | Average produce request time from the step's Prometheus snapshot (see the caveats below) | `WARNING` |
+| `maxP999LatencyMs` | `Double` | Not evaluated: the snapshot has no P99.9 latency | — |
+| `maxErrorRate` | `Double` | Not evaluated: the snapshot has no error rate | — |
+| `maxDataLossPercent` | `Double` | Not evaluated: a plan runs no workload, so no data loss is measured | — |
+| `minRecordsProcessed` | `Long` | Not evaluated: a plan runs no workload, so no records are counted | — |
+| `maxRpoMs` | `Long` | Not evaluated: a plan runs no workload, so no RPO is measured | — |
 
-The last five do work in a test scenario's SLA, where the load test itself supplies errors, P99.9 latency, record counts and data integrity. A disruption plan runs no load test of its own. For the same reason, `minThroughputRecPerSec` measures whatever else is producing to the cluster, so keep a workload running for the whole plan. With no producer, every throughput check is a `CRITICAL` miss.
+A plan that sets any of the last five still runs. Validation warns about each one, dry-run included, and the verdict lists it under `unevaluated` instead of counting it as passed. These five belong in a test scenario's SLA, where the load test itself supplies errors, P99.9 latency, record counts and data integrity. For data loss and RPO under a fault, run a resilience test (`kates resilience run`) with an INTEGRITY workload. A disruption plan runs no load test of its own. For the same reason, `minThroughputRecPerSec` measures whatever else is producing to the cluster, so keep a workload running for the whole plan. With no producer, every throughput check is a `CRITICAL` miss.
 
 The Prometheus queries behind the throughput and latency checks have catches of their own on a cluster that uses the Strimzi JMX exporter rules shipped in Kates' `kafka-cluster` chart:
 
@@ -404,15 +404,19 @@ The Prometheus queries behind the throughput and latency checks have catches of 
 
 Neither latency check can fail on such a cluster. Use `maxRtoMs`, plus `minThroughputRecPerSec` with the doubling in mind.
 
-Every check also needs the step to have a Prometheus snapshot. A step without one contributes no checks at all, not even `maxRtoMs`. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails. When no check runs at all, the verdict is `A` with `totalChecks: 0`. That covers a plan where no step has a snapshot, and a plan whose only threshold is `maxRtoMs` when the pods never came back. Look at `totalChecks` before you trust an `A`.
+The latency and throughput checks need the step's Prometheus snapshot. A step without one adds no checks for them. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails. If no step has a snapshot, those thresholds go under `unevaluated`, and so does `maxRtoMs` when no step measured a recovery time. When nothing could be checked at all, the grade is `-`, not `A`.
+
+One gap remains. A step whose pods never all come back Ready adds no `maxRtoMs` check, so if another step recovered in time, the plan can still grade `A`. Read each step's `timeToAllReady` alongside the grade.
 
 ### The Grading Algorithm
 
-The grader runs each threshold you set once per step, so a two-step plan with two thresholds makes four checks. (`maxDataLossPercent` would be the exception, checked once for the whole plan.) Each miss is a violation with a severity of `WARNING` or `CRITICAL`, as the table above shows. The grade then depends on whether any violation is critical and on the fraction of checks that failed:
+The grader runs each threshold you set once per step, so a two-step plan with two thresholds makes four checks. Each miss is a violation with a severity of `WARNING` or `CRITICAL`, as the table above shows. The grade then depends on whether any violation is critical and on the fraction of checks that failed:
 
 ```mermaid
 flowchart TD
-    Start["Run every check"] --> Empty{"Any violations?"}
+    Start["Run every check"] --> Ran{"Any checks ran?"}
+    Ran -- No --> None["Grade -: nothing evaluated"]
+    Ran -- Yes --> Empty{"Any violations?"}
     Empty -- No --> A["Grade A: every check passed"]
     Empty -- Yes --> Critical{"Any CRITICAL?"}
     Critical -- Yes --> F["Grade F"]
@@ -554,10 +558,10 @@ curl -s http://localhost:8080/api/disruptions/<id> | jq '.status'
 
 - **`stepReports`**: for each step, the chaos outcome, the pod timeline, recovery times, ISR and lag metrics, and the Prometheus snapshots and deltas
 - **`summary`**: worst recovery time, worst ISR recovery, peak consumer lag and whether the SLA was violated
-- **`slaVerdict`**: the grade, each violation with its threshold and actual value, and `totalChecks`/`passedChecks`. It is present only because the plan has an `sla` block.
+- **`slaVerdict`**: the grade, each violation with its threshold and actual value, `totalChecks`/`passedChecks`, and any `unevaluated` thresholds. It is present only because the plan has an `sla` block.
 
 Look at the ISR timeline first. You should see the ISR shrink from 3 replicas to 2 shortly after the kill, then expand back to 3 once the broker restarts. The time between shrink and expand is your cluster's ISR recovery time.
 
-Then look at the SLA verdict. This plan makes one check, the step's recovery time. A Grade A means every Kafka pod was Ready again within 60 seconds. A single warning is 100% of the checks, so a recovery between 60 and 120 seconds grades D, and anything slower grades F. An F means you have just discovered a resilience gap before it could affect production. If `totalChecks` is `0`, nothing was checked and the `A` means nothing. Either the step had no Prometheus snapshot, or the pods never all came back Ready, so there was no recovery time to compare. In that case, read `timeToAllReady` in the step report.
+Then look at the SLA verdict. This plan makes one check, the step's recovery time. A Grade A means every Kafka pod was Ready again within 60 seconds. A single warning is 100% of the checks, so a recovery between 60 and 120 seconds grades D, and anything slower grades F. An F means you have just discovered a resilience gap before it could affect production. A grade of `-` means nothing was checked. The step has no recovery time, either because it failed or because the pods never all came back Ready, and `unevaluated` lists `maxRtoMs`. The step report shows which it was.
 
 That is the value of chaos engineering: knowledge you cannot get any other way.
