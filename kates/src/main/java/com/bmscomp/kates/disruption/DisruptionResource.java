@@ -363,7 +363,7 @@ public class DisruptionResource {
             case DISK_FILL -> "Fill broker log directory to simulate storage pressure";
             case ROLLING_RESTART -> "Trigger StatefulSet rolling restart";
             case LEADER_ELECTION -> "Kill the controller broker to force leader election";
-            case SCALE_DOWN -> "Reduce StatefulSet replica count";
+            case SCALE_DOWN -> "Remove one broker from each selected KafkaNodePool (or StatefulSet)";
             case NODE_DRAIN -> "Drain the Kubernetes node hosting a broker";
         };
     }

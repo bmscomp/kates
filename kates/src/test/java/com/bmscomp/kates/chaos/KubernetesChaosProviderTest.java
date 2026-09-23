@@ -151,6 +151,7 @@ public class KubernetesChaosProviderTest {
 
     @Test
     void testScaleDownSnapshotsOriginalReplicas() throws ExecutionException, InterruptedException, TimeoutException {
+        // A Kafka not run by Strimzi: pods of a StatefulSet.
         StatefulSet ss = new StatefulSetBuilder()
                 .withNewMetadata()
                 .withName("kafka")
@@ -162,6 +163,24 @@ public class KubernetesChaosProviderTest {
                 .endSpec()
                 .build();
         client.apps().statefulSets().inNamespace("default").resource(ss).create();
+        for (int i = 0; i < 3; i++) {
+            client.pods()
+                    .inNamespace("default")
+                    .resource(new PodBuilder()
+                            .withNewMetadata()
+                            .withName("kafka-" + i)
+                            .withNamespace("default")
+                            .addToLabels("app", "kafka")
+                            .addNewOwnerReference()
+                            .withApiVersion("apps/v1")
+                            .withKind("StatefulSet")
+                            .withName("kafka")
+                            .withUid("sts-uid")
+                            .endOwnerReference()
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
 
         FaultSpec spec = FaultSpec.builder("scale-down")
                 .targetNamespace("default")
@@ -170,7 +189,7 @@ public class KubernetesChaosProviderTest {
                 .build();
 
         // First SCALE_DOWN: 3 → 2, and the ORIGINAL count (3) is snapshotted.
-        provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
         StatefulSet after = client.apps()
                 .statefulSets()
                 .inNamespace("default")
@@ -183,7 +202,7 @@ public class KubernetesChaosProviderTest {
                 "original replica count snapshotted for rollback");
 
         // Second SCALE_DOWN: 2 → 1, snapshot must NOT be overwritten with 2.
-        provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
         StatefulSet after2 = client.apps()
                 .statefulSets()
                 .inNamespace("default")
@@ -194,6 +213,170 @@ public class KubernetesChaosProviderTest {
                 "3",
                 after2.getMetadata().getAnnotations().get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION),
                 "snapshot preserved across repeated scale-downs");
+
+        // Third: the last replica stays, and the step says so instead of passing.
+        ChaosOutcome third = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+        assertFalse(third.isPass());
+        assertTrue(third.failureReason().contains("one replica"), third.failureReason());
+    }
+
+    // ── SCALE_DOWN on Strimzi: KafkaNodePools ──────────────────────────────
+
+    private static FaultSpec scaleDown(String selector, int chaosDurationSec) {
+        return FaultSpec.builder("scale-down")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .chaosDurationSec(chaosDurationSec)
+                .build();
+    }
+
+    private StrimziTestCluster strimzi() {
+        provider.scalePollIntervalMs = 20;
+        return new StrimziTestCluster(server, client)
+                .pool("controllers", "controller", 0, 1, 2)
+                .pool("brokers", "broker", 3, 4, 5);
+    }
+
+    @Test
+    void scaleDownLowersTheNodePoolAndWaitsForTheOperatorToRemoveTheBroker() throws Exception {
+        StrimziTestCluster cluster = strimzi().kafka(false);
+
+        // Used to look for StatefulSets, which Strimzi does not create, and
+        // "succeed" having scaled nothing.
+        try (var operator = cluster.operator(pool -> true)) {
+            ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/pool-name=brokers", 10))
+                    .get(15, TimeUnit.SECONDS);
+
+            assertTrue(outcome.isPass(), outcome.failureReason());
+            assertFalse(
+                    cluster.pods().contains("krafter-brokers-5"),
+                    "the step returned once the broker with the highest node ID was gone");
+        }
+        assertEquals(2, cluster.replicas("brokers"));
+        assertEquals("3", cluster.annotations("brokers").get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION));
+        assertTrue(cluster.annotations("brokers").containsKey(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION));
+    }
+
+    @Test
+    void scaleDownTakesTheNodePoolsOfTheBrokersTheSelectorMatchesAndLeavesTheControllers() throws Exception {
+        StrimziTestCluster cluster = strimzi().pool("brokers-sigma", "broker", 6, 7);
+
+        ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/component-type=kafka", 0))
+                .get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(2, cluster.replicas("brokers"));
+        assertEquals(1, cluster.replicas("brokers-sigma"), "one broker from each pool, not one in all");
+        assertEquals(3, cluster.replicas("controllers"), "Strimzi scales down broker-only pools only");
+    }
+
+    @Test
+    void scaleDownTheOperatorHoldsBackFailsAtOnceAndGivesTheReplicasBack() throws Exception {
+        StrimziTestCluster cluster = strimzi().kafka(false);
+
+        // The brokers still host partition replicas and nothing moves them off.
+        try (var operator = cluster.operator(pool -> false)) {
+            ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/pool-name=brokers", 60))
+                    .get(5, TimeUnit.SECONDS);
+
+            assertFalse(outcome.isPass());
+            assertTrue(outcome.failureReason().contains("held back"), outcome.failureReason());
+            assertTrue(outcome.failureReason().contains("skip-broker-scaledown-check"), outcome.failureReason());
+        }
+        // Left lowered, the scale-down would go through whenever the broker empties.
+        assertEquals(3, cluster.replicas("brokers"));
+        assertFalse(cluster.annotations("brokers").containsKey(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION));
+        assertTrue(cluster.pods().contains("krafter-brokers-5"));
+    }
+
+    @Test
+    void scaleDownWaitsWhileCruiseControlDrainsTheBroker() throws Exception {
+        StrimziTestCluster cluster = strimzi().kafka(true);
+        long drainedAt = System.nanoTime() + 300_000_000L;
+
+        // Held back at first, as Strimzi does while the remove-brokers
+        // auto-rebalance moves the replicas off; removed once they are.
+        try (var operator = cluster.operator(pool -> System.nanoTime() > drainedAt)) {
+            ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/pool-name=brokers", 10))
+                    .get(15, TimeUnit.SECONDS);
+
+            assertTrue(outcome.isPass(), outcome.failureReason());
+        }
+        assertEquals(2, cluster.replicas("brokers"));
+        assertFalse(cluster.pods().contains("krafter-brokers-5"));
+    }
+
+    @Test
+    void scaleDownNotFinishedInTimeFailsAndGivesTheReplicasBack() throws Exception {
+        StrimziTestCluster cluster = strimzi().kafka(true);
+
+        // No Cluster Operator reconciles the change.
+        ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/pool-name=brokers", 1))
+                .get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(
+                outcome.failureReason().contains("not finished within chaosDurationSec=1s"), outcome.failureReason());
+        assertEquals(3, cluster.replicas("brokers"));
+        assertFalse(cluster.annotations("brokers").containsKey(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION));
+    }
+
+    @Test
+    void secondScaleDownKeepsTheOriginalSnapshot() throws Exception {
+        StrimziTestCluster cluster = strimzi().kafka(false);
+
+        try (var operator = cluster.operator(pool -> true)) {
+            FaultSpec spec = scaleDown("strimzi.io/pool-name=brokers", 10);
+            assertTrue(provider.triggerFault(spec).get(15, TimeUnit.SECONDS).isPass());
+            assertTrue(provider.triggerFault(spec).get(15, TimeUnit.SECONDS).isPass());
+        }
+        assertEquals(1, cluster.replicas("brokers"));
+        assertEquals(
+                "3",
+                cluster.annotations("brokers").get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION),
+                "rollback restores the count before the first step, not the second");
+    }
+
+    @Test
+    void scaleDownDoesNotAddToAChangeTheOperatorHasNotFinished() throws Exception {
+        StrimziTestCluster cluster = strimzi();
+        FaultSpec spec = scaleDown("strimzi.io/pool-name=brokers", 0);
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
+
+        // No operator ran: the pool still lists three nodes for two replicas.
+        ChaosOutcome second = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(second.isPass());
+        assertTrue(second.failureReason().contains("already changing size"), second.failureReason());
+        assertEquals(2, cluster.replicas("brokers"));
+    }
+
+    @Test
+    void scaleDownRefusesToRemoveTheLastBrokerOfTheCluster() throws Exception {
+        StrimziTestCluster cluster = new StrimziTestCluster(server, client)
+                .pool("controllers", "controller", 0, 1, 2)
+                .pool("brokers-alpha", "broker", 3)
+                .pool("brokers-sigma", "broker", 4);
+
+        ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/broker-role=true", 0))
+                .get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("last broker of Kafka cluster krafter"), outcome.failureReason());
+        assertEquals(1, cluster.replicas("brokers-alpha"));
+        assertEquals(1, cluster.replicas("brokers-sigma"));
+    }
+
+    @Test
+    void scaleDownOfAControllerPoolFails() throws Exception {
+        StrimziTestCluster cluster = strimzi();
+
+        ChaosOutcome outcome = provider.triggerFault(scaleDown("strimzi.io/pool-name=controllers", 0))
+                .get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("runs KRaft controllers"), outcome.failureReason());
+        assertEquals(3, cluster.replicas("controllers"));
     }
 
     private void createZonedBrokers() {

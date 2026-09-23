@@ -104,7 +104,7 @@ Output:
   │ DISK_FILL          │ Fill broker log directory to simulate storage pressure        │
   │ ROLLING_RESTART    │ Trigger StatefulSet rolling restart                           │
   │ LEADER_ELECTION    │ Kill the controller broker to force leader election           │
-  │ SCALE_DOWN         │ Reduce StatefulSet replica count                              │
+  │ SCALE_DOWN         │ Remove a broker from each selected KafkaNodePool              │
   │ NODE_DRAIN         │ Drain the Kubernetes node hosting a broker                    │
   └────────────────────┴──────────────────────────────────────────────────────────────┘
 ```

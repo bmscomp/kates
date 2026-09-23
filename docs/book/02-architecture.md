@@ -211,7 +211,7 @@ graph TB
 | `DISK_FILL` | Fill the broker's persistent volume | Litmus `disk-fill` |
 | `ROLLING_RESTART` | Restart all brokers sequentially | Kubernetes rolling update |
 | `LEADER_ELECTION` | Force leader re-election for a partition | Kill the current leader broker |
-| `SCALE_DOWN` | Reduce the number of broker replicas | Kubernetes API — scale StatefulSet down by one replica |
+| `SCALE_DOWN` | Reduce the number of broker replicas | Kubernetes API — lower the KafkaNodePool's replicas by one (a StatefulSet's, without Strimzi) |
 | `NODE_DRAIN` | Drain a Kubernetes node | Litmus `node-drain` |
 
 ### Safety Guardrails

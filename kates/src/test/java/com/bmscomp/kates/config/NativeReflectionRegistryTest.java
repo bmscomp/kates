@@ -71,6 +71,13 @@ class NativeReflectionRegistryTest {
             "com.bmscomp.kates.chaos.ParsedLabelSelector",
             "com.bmscomp.kates.chaos.ParsedLabelSelector$Requirement",
             "com.bmscomp.kates.chaos.PodTargets",
+            "com.bmscomp.kates.chaos.ScaleDownTargets",
+            "com.bmscomp.kates.chaos.ScaleDownTargets$Pool",
+            "com.bmscomp.kates.chaos.ScaleDownTargets$Targets",
+            "com.bmscomp.kates.chaos.ScaleDownTargets$Preview",
+            // SCALE_DOWN rollback and orphan recovery; the count only reaches a log line.
+            "com.bmscomp.kates.chaos.ScaleDownSnapshots",
+            "com.bmscomp.kates.chaos.ScaleDownSnapshots$Restored",
             "com.bmscomp.kates.resilience.ResilienceScenarios",
             "com.bmscomp.kates.api.OpenApiConfig");
 
