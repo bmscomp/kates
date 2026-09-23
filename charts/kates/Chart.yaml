@@ -2,10 +2,9 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.23.0 — the release whose
-# backend publishes the Agroal pool meters and the HTTP latency buckets the
-# Kates boards read. Templates and defaults are otherwise unchanged.
-version: 0.9.2
+# Minor: rbac.directChaos adds the write rules the direct Kubernetes chaos
+# backend needs. It defaults to false, so the default ClusterRole is unchanged.
+version: 0.10.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -29,6 +28,10 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.directChaos (default false) grants the writes the direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or hybrid without Litmus) makes itself: create, delete and deletecollection on networkpolicies; patch on statefulsets; get and update on statefulsets/scale; update on pods/ephemeralcontainers. The ClusterRole granted only get and list on NetworkPolicies and StatefulSets, and nothing on ephemeral containers, so every NETWORK_PARTITION, SCALE_DOWN, ROLLING_RESTART, CPU_STRESS and IO_STRESS on that backend was refused, along with its cleanup, rollback and startup orphan recovery. Litmus runs its experiments as litmus-admin and needs none of this, so the default ClusterRole is unchanged"
+    - kind: fixed
+      description: "CPU_STRESS and IO_STRESS on the direct backend replaced the whole pod to add their ephemeral container, which the API server rejects; they now write through the pods/ephemeralcontainers subresource. That takes an image newer than 1.23.0: on 1.23.0 the two faults fail even with rbac.directChaos=true"
     - kind: changed
       description: "appVersion 1.23.0. The image publishes the Agroal pool meters (quarkus.datasource.metrics.enabled) and the HTTP latency histogram buckets (HttpLatencyHistogram) that Kates — Application Health and KATES — Overview read, and counts a task's failure on the poll that sees it, so kates_benchmark_errors_total moves during a run. A 1.22.0 image publishes none of that, and the pool row and the latency percentiles are empty on it"
     - kind: fixed

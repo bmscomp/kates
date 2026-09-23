@@ -67,8 +67,30 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
-| `rbac.create` | `true` | Create ClusterRole/ClusterRoleBinding for Litmus CRD access |
+| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads) |
+| `rbac.directChaos` | `false` | Grant the writes the direct Kubernetes chaos backend makes; see [Chaos permissions](#chaos-permissions) |
 | `rbac.extraRules` | `[]` | Additional RBAC rules to append |
+
+### Chaos permissions
+
+With the default chaos provider, `litmus-crd`, Kates only creates and watches `ChaosEngine`s: Litmus runs every experiment as its own `litmus-admin` service account, and the default ClusterRole covers that. The direct Kubernetes backend (`kubernetes`, or `hybrid` on a cluster without Litmus CRDs) injects the faults itself, so it needs write access the default role does not grant. `rbac.directChaos=true` adds it:
+
+| Resource | Verbs | Used by |
+|----------|-------|---------|
+| `networking.k8s.io` `networkpolicies` | `create`, `delete`, `deletecollection` | `NETWORK_PARTITION` creates a deny-all policy; cleanup and rollback delete by label, startup orphan recovery by name |
+| `apps` `statefulsets` | `patch` | `SCALE_DOWN` records the original replica count, `ROLLING_RESTART` restarts |
+| `apps` `statefulsets/scale` | `get`, `update` | `SCALE_DOWN`, its rollback and orphan recovery set replicas |
+| `pods/ephemeralcontainers` | `update` | `CPU_STRESS` and `IO_STRESS` add a stress container to the target pod |
+
+These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with an environment variable:
+
+```yaml
+extraEnv:
+  - name: KATES_CHAOS_PROVIDER
+    value: kubernetes
+rbac:
+  directChaos: true
+```
 
 ### Probes & Lifecycle
 
