@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/go-pdf/fpdf v0.9.0
-	github.com/mattn/go-runewidth v0.0.24
+	github.com/mattn/go-runewidth v0.0.30
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.23.0
