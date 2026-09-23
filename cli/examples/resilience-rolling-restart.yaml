@@ -1,14 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Resilience Test: ROLLING_RESTART — Simulated Rolling Upgrade
+# Resilience Test: ROLLING_RESTART — Strimzi Rolling Update
 # ─────────────────────────────────────────────────────────────────────────────
-# Restarts all 3 broker pools one pod at a time with a 30s inter-restart delay,
-# mimicking Strimzi's rolling update during a version upgrade or config change.
-# The drain-cleaner path ensures controlled shutdown between restarts.
+# Annotates every Kafka pod of the cluster with strimzi.io/manual-rolling-update
+# and lets the Strimzi Cluster Operator roll them, one pod at a time, exactly
+# as it does for a version upgrade or config change. Pods the selector matches
+# that no StrimziPodSet runs (entity operator, exporter) are skipped.
 #
 # Hypothesis:
-#   Each broker restart triggers a brief leader transfer. With 30s between
-#   restarts and acks=all, producers survive the full rolling restart with
-#   0 errors. ISR never drops below 2/3 (min.insync.replicas satisfied).
+#   Each broker restart triggers a brief leader transfer. The operator waits
+#   for each broker to be ready before the next, so with acks=all producers
+#   survive the full rolling restart with 0 errors. ISR never drops below 2/3
+#   (min.insync.replicas satisfied).
 #
 # Usage:
 #   kates resilience run -f cli/examples/resilience-rolling-restart.yaml
@@ -39,11 +41,8 @@ chaosSpec:
   disruptionType: ROLLING_RESTART
   targetNamespace: kafka
   targetLabel: "strimzi.io/cluster=krafter"
-  chaosDurationSec: 180      # 3 brokers × ~60s each
+  chaosDurationSec: 300      # wait for the roll: next reconciliation (≤2 min) + restarts
   delayBeforeSec: 0
-  gracePeriodSec: 30         # 30s between each broker restart
-  envOverrides:
-    RESTART_INTERVAL_SEC: "30"
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 120

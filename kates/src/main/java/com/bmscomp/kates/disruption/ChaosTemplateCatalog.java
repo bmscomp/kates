@@ -161,16 +161,17 @@ public class ChaosTemplateCatalog {
     }
 
     private DisruptionPlan rollingRestartZeroDowntime(Map<String, Object> ov) {
-        DisruptionPlan plan =
-                basePlan("Rolling Restart (Zero-Downtime)", "Sequentially restart all brokers with grace period");
+        DisruptionPlan plan = basePlan(
+                "Rolling Restart (Zero-Downtime)",
+                "Restart all brokers one at a time through the Strimzi Cluster Operator");
         plan.setMaxAffectedBrokers(-1);
 
         plan.setSteps(List.of(new DisruptionPlan.DisruptionStep(
                 "rolling-restart",
                 FaultSpec.builder("rolling-restart")
                         .disruptionType(DisruptionType.ROLLING_RESTART)
-                        .gracePeriodSec(intOr(ov, "gracePeriodSec", 60))
-                        .chaosDurationSec(0)
+                        // How long to wait for the roll to finish before observing.
+                        .chaosDurationSec(intOr(ov, "chaosDurationSec", 300))
                         .build(),
                 60,
                 120,

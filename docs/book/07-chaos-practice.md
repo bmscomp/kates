@@ -64,7 +64,7 @@ The `KubernetesChaosProvider` implements these disruptions against the Kubernete
 |------|---------------|--------|
 | `POD_KILL` | Delete pod with grace period 0 | Immediate broker termination, simulates SIGKILL |
 | `POD_DELETE` | Delete pod with configurable grace period | Graceful shutdown, broker flushes and shuts down |
-| `ROLLING_RESTART` | Rolling restart of the matching StatefulSets | Simulates operator-managed rolling updates |
+| `ROLLING_RESTART` | Annotate every matching pod with `strimzi.io/manual-rolling-update`, then wait for the Strimzi Cluster Operator to roll them | The operator's own rolling update: one broker at a time, each ready again before the next |
 | `LEADER_ELECTION` | Resolve the partition leader, then force-delete its pod | Forces leader election for targeted partition |
 | `SCALE_DOWN` | Scale the matching StatefulSets down by one replica | Reduces broker count |
 | `NETWORK_PARTITION` | Deny-all NetworkPolicy applied to the target pod | Isolates a broker from the cluster network |
@@ -73,7 +73,7 @@ The `KubernetesChaosProvider` implements these disruptions against the Kubernete
 
 ### LitmusChaos Integration
 
-When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). Five types are only available through Litmus:
+When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type but one to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). The exception is `ROLLING_RESTART`: no Litmus experiment does a rolling restart, so the Litmus backend hands it to the `KubernetesChaosProvider` and it runs the same way on both. Five types are only available through Litmus:
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
@@ -108,6 +108,8 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 2. Every pod the selector matches, when `targetAll: true`.
 3. The pod named `<anything>-<targetBrokerId>`, when `targetBrokerId` is set (falling back to the first match if no pod has that ordinal).
 4. Otherwise, one matching pod at random.
+
+`ROLLING_RESTART` always takes every pod the selector matches, as if `targetAll` were set, unless `targetPod` names one: a rolling restart restarts all of them, one at a time.
 
 Both backends resolve the pods the same way: the Kubernetes backend applies the fault to each of them, and the Litmus backend passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
 
@@ -258,11 +260,13 @@ steps:
 
 ### rolling-restart
 
-Tests the Strimzi rolling update procedure — brokers restart one at a time with readiness gates. The `ROLLING_RESTART` disruption type orchestrates sequential pod deletions with a 30-second grace period, waiting for each broker to become ready before proceeding. Note that `autoRollback` is `false` because rolling restarts are expected to complete naturally.
+Tests the Strimzi rolling update procedure, the one an upgrade or a configuration change goes through. Strimzi runs Kafka pods from StrimziPodSets, not StatefulSets, so Kates does not restart the pods itself: it annotates every pod the selector matches with `strimzi.io/manual-rolling-update=true`, and the Cluster Operator rolls them at its next reconciliation, every two minutes by default. The operator restarts one pod at a time, waits for it to be ready before the next, and holds back any pod whose restart would leave a partition under `min.insync.replicas`.
+
+The step then waits for the roll to finish: every annotated pod replaced by a new one that is ready. `chaosDurationSec` is the budget for that wait, covering the wait for the next reconciliation as well as the restarts. It is not a fault duration, and the step returns as soon as the roll is done, so the observation window starts after the last restart. If the budget runs out, the step fails and Kates removes the annotation from the pods not yet rolled, so the operator does not restart them later, in the middle of another step. `gracePeriodSec` plays no part: each broker gets its node pool's `terminationGracePeriodSeconds`, 30 seconds by default. `maxAffectedBrokers: 1` holds because the safety guard counts a rolling restart as one broker, and `autoRollback` is `false` because there is nothing to undo.
 
 ```yaml
 name: rolling-restart
-description: "Trigger a graceful rolling restart of the Kafka StatefulSet"
+description: "Restart every Kafka pod one at a time through the Strimzi Cluster Operator"
 category: operations
 maxAffectedBrokers: 1
 autoRollback: false
@@ -272,12 +276,13 @@ steps:
       experimentName: rolling-restart-sts
       disruptionType: ROLLING_RESTART
       targetLabel: "strimzi.io/component-type=kafka"
-      chaosDurationSec: 300
-      gracePeriodSec: 30
+      chaosDurationSec: 600
     steadyStateSec: 30
     observationWindowSec: 180
     requireRecovery: true
 ```
+
+A pod run by a StatefulSet, as in a Kafka that Strimzi does not manage, is rolled by restarting its StatefulSet instead. Kates skips matching pods that belong to neither, and fails the step if nothing is left to roll. Both backends run this the same way, because Litmus has no rolling restart experiment. The Kates service account needs `patch` on pods for the annotation.
 
 ### consumer-isolation
 
@@ -366,7 +371,7 @@ graph TD
     V3 -->|Yes| EXECUTE["✅ Execute"]
 ```
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
 
 The guard also emits per-step warnings — for example, `SCALE_DOWN` without `autoRollback`, or a `NETWORK_PARTITION` with no duration (the NetworkPolicy would persist until cleanup).
 

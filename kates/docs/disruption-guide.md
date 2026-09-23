@@ -121,7 +121,7 @@ Kates fills the broker's log directory to a configurable percentage (default 80%
 
 The remaining four disruption types round out the toolkit:
 
-**ROLLING_RESTART** triggers a graceful rolling restart of the Kafka StatefulSet by annotating the pod template. Kubernetes rolls each pod one at a time, waiting for readiness before proceeding. This tests your zero-downtime maintenance posture — does a routine restart cause any client-visible errors?
+**ROLLING_RESTART** annotates every matching Kafka pod with `strimzi.io/manual-rolling-update=true`, and the Strimzi Cluster Operator rolls them at its next reconciliation. It restarts one pod at a time and waits for each to be ready before the next — the same rolling update an upgrade goes through. The step waits up to `chaosDurationSec` for the roll to finish, so observation starts after it. This tests your zero-downtime maintenance posture — does a routine restart cause any client-visible errors? The rolling-restart entry in the [Playbook Catalog](playbook-catalog.md) has the details.
 
 **LEADER_ELECTION** forces a preferred leader election for a specific partition, simulating what happens during partition reassignment or after a broker restart. This tests whether your consumers handle the briefly unavailable partition gracefully.
 

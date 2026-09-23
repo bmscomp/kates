@@ -1,6 +1,12 @@
 name: rolling-restart
-description: "Trigger a graceful rolling restart of the Kafka StatefulSet"
+description: "Restart every Kafka pod one at a time through the Strimzi Cluster Operator"
 category: operations
+# ROLLING_RESTART annotates each matching pod with strimzi.io/manual-rolling-update;
+# the Cluster Operator rolls them at its next reconciliation (every two minutes
+# by default), one at a time, with its own readiness and min.insync.replicas
+# checks. chaosDurationSec is how long the step waits for the roll to finish
+# before the observation window starts, not how long it lasts. The grace
+# period is the node pool's terminationGracePeriodSeconds, not gracePeriodSec.
 maxAffectedBrokers: 1
 autoRollback: false
 steps:
@@ -9,8 +15,7 @@ steps:
       experimentName: rolling-restart-sts
       disruptionType: ROLLING_RESTART
       targetLabel: "strimzi.io/component-type=kafka"
-      chaosDurationSec: 300
-      gracePeriodSec: 30
+      chaosDurationSec: 600
     steadyStateSec: 30
     observationWindowSec: 180
     requireRecovery: true
