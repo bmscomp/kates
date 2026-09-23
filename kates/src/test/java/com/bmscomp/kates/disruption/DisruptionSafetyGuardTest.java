@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
+import com.bmscomp.kates.domain.SlaDefinition;
 
 /**
  * Pins the SCALE_DOWN rollback fix (P0-4). The original guard derived the
@@ -238,5 +239,26 @@ class DisruptionSafetyGuardTest {
         assertTrue(
                 oldStep.warnings().getFirst().contains("matches no broker pod"),
                 oldStep.warnings().toString());
+    }
+
+    @Test
+    void slaGatesAPlanCannotEvaluateAreFlaggedBeforeAnyFault() {
+        createZonedBrokers();
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxDataLossPercent(0.0);
+        sla.setMaxRpoMs(0L);
+        sla.setMaxP99LatencyMs(100.0);
+        DisruptionPlan plan = plan(-1);
+        plan.setSla(sla);
+
+        DisruptionSafetyGuard.ValidationResult result = guard.validatePlan(plan);
+
+        // A warning, not a rejection: plans carrying these fields ran before.
+        assertTrue(result.safe());
+        List<String> slaWarnings =
+                result.warnings().stream().filter(w -> w.startsWith("SLA ")).toList();
+        assertEquals(2, slaWarnings.size(), "p99 is evaluable, the other two are not: " + slaWarnings);
+        assertTrue(slaWarnings.get(0).contains("maxDataLossPercent"), slaWarnings.get(0));
+        assertTrue(slaWarnings.get(1).contains("maxRpoMs"), slaWarnings.get(1));
     }
 }

@@ -11,6 +11,11 @@ import com.bmscomp.kates.engine.AckTracker;
  *
  * <p>Tracks both producer-side and consumer-side RTO for a complete picture
  * of recovery time from the perspective of both writers and readers.
+ *
+ * <p>{@code rpo} is how far back before the fault acknowledged writes were
+ * lost. It is {@code null} when the run did not know when a fault started —
+ * a plain INTEGRITY run, or one a separate disruption was injected into —
+ * because there is no point to measure back from.
  */
 public record IntegrityResult(
         long totalSent,
@@ -44,8 +49,9 @@ public record IntegrityResult(
         return maxRto != null ? maxRto.toNanos() / 1_000_000.0 : 0;
     }
 
+    /** RPO in milliseconds, or -1 when it was not measured (SLA checks skip negatives). */
     public double rpoMs() {
-        return rpo != null ? rpo.toNanos() / 1_000_000.0 : 0;
+        return rpo != null ? rpo.toNanos() / 1_000_000.0 : -1;
     }
 
     public String verdict() {

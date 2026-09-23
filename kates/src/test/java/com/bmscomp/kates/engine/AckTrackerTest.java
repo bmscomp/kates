@@ -45,10 +45,44 @@ class AckTrackerTest {
 
         tracker.recordAcked(1, 5_000L);
         // Acks complete out of order across partitions and retries; an older
-        // timestamp landing later must not become "last acked" and overstate RPO.
+        // timestamp landing later must not become "last acked".
         tracker.recordAcked(0, 1_000L);
 
         assertEquals(5_000L, tracker.getLastAckedSendNanos());
+    }
+
+    @Test
+    void sendTimeLookupReadsTheNearestSampleAtOrBelow() {
+        AckTracker tracker = new AckTracker(1_000);
+        for (int seq = 0; seq < 1_000; seq++) {
+            tracker.recordSent(seq, 1_000L + seq);
+        }
+
+        // One sample per stride; anything between two samples reads the one
+        // below it, which is never later than its own send.
+        assertEquals(1_000L, tracker.sendTimeAtOrBefore(0));
+        assertEquals(1_000L, tracker.sendTimeAtOrBefore(AckTracker.SEND_TIME_STRIDE - 1));
+        assertEquals(1_000L + AckTracker.SEND_TIME_STRIDE, tracker.sendTimeAtOrBefore(AckTracker.SEND_TIME_STRIDE));
+        assertEquals(1_000L + 960, tracker.sendTimeAtOrBefore(999));
+
+        assertEquals(-1, tracker.sendTimeAtOrBefore(-1));
+        assertEquals(-1, tracker.sendTimeAtOrBefore(1_000), "beyond the tracked range");
+
+        tracker.release();
+        assertEquals(-1, tracker.sendTimeAtOrBefore(64), "released with the bitset");
+    }
+
+    @Test
+    void sendTimesAreRecordedAcrossTheWholeCapRange() {
+        AckTracker tracker = new AckTracker(1_000_000_000L);
+        long last = 1_000_000_000L - AckTracker.SEND_TIME_STRIDE;
+
+        tracker.recordSent(0, 7L);
+        tracker.recordSent(last, 9L);
+
+        assertEquals(7L, tracker.sendTimeAtOrBefore(1));
+        assertEquals(9L, tracker.sendTimeAtOrBefore(999_999_999L));
+        assertEquals(-1, tracker.sendTimeAtOrBefore(500_000_000L), "never sent, so nothing to report");
     }
 
     @Test

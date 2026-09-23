@@ -1,5 +1,7 @@
 package com.bmscomp.kates.chaos;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -10,30 +12,37 @@ import org.jboss.logging.Logger;
 
 /**
  * CDI coordinator that delegates to the configured {@link ChaosProvider}.
- * Provider selection is driven by {@code kates.chaos.provider} config property.
+ * Provider selection is driven by {@code kates.chaos.provider} config property,
+ * matched against {@link ChaosProvider#id()}.
  *
- * <p>Falls back to the {@code noop} provider if the configured provider is unavailable.
+ * <p>Falls back to the {@code noop} provider if the configured provider is
+ * unknown or unavailable, and logs that at ERROR: noop skips every experiment,
+ * so a fallback turns every chaos run into one that injected nothing.
  */
 @ApplicationScoped
 public class ChaosCoordinator {
 
     private static final Logger LOG = Logger.getLogger(ChaosCoordinator.class);
 
+    private static final String NOOP = "noop";
+
     private final ChaosProvider activeProvider;
 
     @Inject
     public ChaosCoordinator(
             Instance<ChaosProvider> providers,
-            @ConfigProperty(name = "kates.chaos.provider", defaultValue = "noop") String providerName) {
+            @ConfigProperty(name = "kates.chaos.provider", defaultValue = NOOP) String providerName) {
 
         ChaosProvider selected = null;
         ChaosProvider fallback = null;
+        List<String> known = new ArrayList<>();
 
         for (ChaosProvider p : providers) {
-            if (p.name().equals(providerName)) {
+            known.add(p.id());
+            if (p.id().equals(providerName)) {
                 selected = p;
             }
-            if (p.name().equals("noop")) {
+            if (p.id().equals(NOOP)) {
                 fallback = p;
             }
         }
@@ -41,13 +50,22 @@ public class ChaosCoordinator {
         if (selected != null && selected.isAvailable()) {
             this.activeProvider = selected;
             LOG.info("Chaos provider: " + selected.name());
+            return;
+        }
+
+        this.activeProvider = fallback != null ? fallback : new NoOpChaosProvider();
+        if (NOOP.equals(providerName)) {
+            LOG.info("Chaos provider: noop");
+        } else if (selected != null) {
+            LOG.errorf(
+                    "Chaos provider '%s' (kates.chaos.provider) is not available; falling back to noop."
+                            + " Fault injection is DISABLED: every chaos experiment will be skipped.",
+                    providerName);
         } else {
-            this.activeProvider = fallback != null ? fallback : new NoOpChaosProvider();
-            if (selected != null) {
-                LOG.warn("Configured chaos provider '" + providerName + "' is not available, falling back to noop");
-            } else {
-                LOG.info("Chaos provider: noop (default)");
-            }
+            LOG.errorf(
+                    "kates.chaos.provider='%s' matches no chaos provider (known: %s); falling back to noop."
+                            + " Fault injection is DISABLED: every chaos experiment will be skipped.",
+                    providerName, known);
         }
     }
 
@@ -63,6 +81,11 @@ public class ChaosCoordinator {
      */
     public String activeProviderName() {
         return activeProvider.name();
+    }
+
+    /** False when the active provider is noop, which skips every experiment. */
+    public boolean injectsFaults() {
+        return !NOOP.equals(activeProvider.id());
     }
 
     /**
