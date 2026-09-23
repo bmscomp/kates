@@ -78,9 +78,11 @@ With the default chaos provider, `litmus-crd`, Kates only creates and watches `C
 | Resource | Verbs | Used by |
 |----------|-------|---------|
 | `networking.k8s.io` `networkpolicies` | `create`, `delete`, `deletecollection` | `NETWORK_PARTITION` creates a deny-all policy; cleanup and rollback delete by label, startup orphan recovery by name |
-| `apps` `statefulsets` | `patch` | `SCALE_DOWN` records the original replica count, `ROLLING_RESTART` restarts |
+| `apps` `statefulsets` | `patch` | `SCALE_DOWN` records the original replica count; `ROLLING_RESTART` restarts a StatefulSet that Strimzi does not manage |
 | `apps` `statefulsets/scale` | `get`, `update` | `SCALE_DOWN`, its rollback and orphan recovery set replicas |
 | `pods/ephemeralcontainers` | `update` | `CPU_STRESS` and `IO_STRESS` add a stress container to the target pod |
+
+`ROLLING_RESTART` on a Strimzi cluster needs none of these: it annotates the Kafka pods for the Strimzi Cluster Operator to roll, on either backend, so the default role grants `patch` on pods.
 
 These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with an environment variable:
 
