@@ -68,8 +68,8 @@ public final class PodTargets {
         return switch (mode(spec)) {
             case NAMED_POD -> List.of(spec.targetPod());
             case ALL -> matching.stream().map(PodTargets::name).toList();
-            // Falls back to the first match when no pod name ends in -<id>:
-            // a JSON FaultSpec that never set targetBrokerId relies on it.
+            // Falls back to the first match when no pod the selector matches
+            // has a name ending in -<id>.
             case BROKER_ID ->
                 matching.isEmpty()
                         ? List.of()
