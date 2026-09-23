@@ -60,6 +60,7 @@
             "type": "object",
             "properties": {
                 "create": { "type": "boolean" },
+                "directChaos": { "type": "boolean" },
                 "extraRules": { "type": "array" }
             }
         },
