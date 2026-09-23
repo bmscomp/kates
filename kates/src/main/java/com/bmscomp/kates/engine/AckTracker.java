@@ -49,6 +49,19 @@ public class AckTracker {
     private static final int WORDS_PER_CHUNK = SEQUENCES_PER_CHUNK >>> 6;
 
     /**
+     * One send timestamp is kept per this many sequences. RPO needs the send
+     * time of the oldest lost record, and a timestamp per record would cost 64
+     * times the acked bitset; one per 64 costs the same as the bitset. Because
+     * the producer assigns sequences and timestamps in the same order, the
+     * sample at or below a sequence is a lower bound on its send time, so RPO
+     * is overstated by at most 63 sends and never understated.
+     */
+    static final int SEND_TIME_STRIDE = 64;
+
+    /** Send-time samples per lazily allocated chunk (512 KB of longs). */
+    private static final int SEND_TIMES_PER_CHUNK = 1 << 16;
+
+    /**
      * Recovered failure windows retained for reporting. A flapping broker can
      * close a window per ack, so this list is bounded; the worst and first RTO
      * are tracked separately and therefore survive eviction.
@@ -78,6 +91,9 @@ public class AckTracker {
     private final int wordCount;
 
     private final long capacity;
+
+    /** Every {@link #SEND_TIME_STRIDE}th send's timestamp, in chunks allocated on first write. */
+    private final AtomicReferenceArray<AtomicLongArray> sendTimeChunks;
 
     private final AtomicLong totalSent = new AtomicLong();
     private final AtomicLong totalAcked = new AtomicLong();
@@ -123,33 +139,71 @@ public class AckTracker {
         int chunkCount = (int) ((words + WORDS_PER_CHUNK - 1) / WORDS_PER_CHUNK);
         // Only the chunk table is allocated up front: ~2 KB even at the 1e9 cap.
         this.chunks = new AtomicReferenceArray<>(Math.max(1, chunkCount));
+        long samples = (this.capacity + SEND_TIME_STRIDE - 1) / SEND_TIME_STRIDE;
+        this.sendTimeChunks = new AtomicReferenceArray<>(
+                (int) Math.max(1, (samples + SEND_TIMES_PER_CHUNK - 1) / SEND_TIMES_PER_CHUNK));
     }
 
     /**
      * Called when a record is sent (before ack).
      *
-     * <p>The send timestamp is no longer stored per sequence — it is handed
-     * back in {@link #recordAcked(long, long)} by the callback that already
-     * holds it, which removes an entire per-record map.
+     * <p>The send timestamp is not stored per sequence — only every
+     * {@link #SEND_TIME_STRIDE}th one is, which is enough to place a lost
+     * record in time (see {@link #sendTimeAtOrBefore(long)}).
      */
     public void recordSent(long sequence, long timestampNanos) {
         totalSent.incrementAndGet();
+        if (sequence >= 0 && sequence < capacity && sequence % SEND_TIME_STRIDE == 0) {
+            long sample = sequence / SEND_TIME_STRIDE;
+            AtomicLongArray chunk = sendTimeChunkForWrite((int) (sample / SEND_TIMES_PER_CHUNK));
+            if (chunk != null) {
+                chunk.set((int) (sample % SEND_TIMES_PER_CHUNK), timestampNanos);
+            }
+        }
+    }
+
+    /**
+     * A lower bound on when {@code sequence} was sent: the recorded send time
+     * of the nearest sampled sequence at or below it, or -1 when none was
+     * recorded (outside the tracked range, or released).
+     */
+    public long sendTimeAtOrBefore(long sequence) {
+        if (sequence < 0 || sequence >= capacity) {
+            return -1;
+        }
+        long sample = sequence / SEND_TIME_STRIDE;
+        AtomicLongArray chunk = sendTimeChunks.get((int) (sample / SEND_TIMES_PER_CHUNK));
+        long nanos = chunk == null ? 0 : chunk.get((int) (sample % SEND_TIMES_PER_CHUNK));
+        return nanos > 0 ? nanos : -1;
+    }
+
+    private AtomicLongArray sendTimeChunkForWrite(int chunkIndex) {
+        if (released) {
+            return null;
+        }
+        AtomicLongArray chunk = sendTimeChunks.get(chunkIndex);
+        if (chunk != null) {
+            return chunk;
+        }
+        long samples = (capacity + SEND_TIME_STRIDE - 1) / SEND_TIME_STRIDE;
+        int size = (int) Math.min(SEND_TIMES_PER_CHUNK, samples - (long) chunkIndex * SEND_TIMES_PER_CHUNK);
+        AtomicLongArray created = new AtomicLongArray(Math.max(1, size));
+        return sendTimeChunks.compareAndSet(chunkIndex, null, created) ? created : sendTimeChunks.get(chunkIndex);
     }
 
     /**
      * Called in the producer callback on successful ack.
      * Atomically closes an active failure window if one exists.
      *
-     * @param sendTimestampNanos when the record was handed to the producer;
-     *     drives the RPO calculation.
+     * @param sendTimestampNanos when the record was handed to the producer.
      */
     public void recordAcked(long sequence, long sendTimestampNanos) {
         setAcked(sequence);
         totalAcked.incrementAndGet();
 
         // Acks complete out of order across partitions and retries, so a plain
-        // write could leave an OLDER send timestamp as "last acked" and overstate
-        // RPO. Keep the maximum instead.
+        // write could leave an OLDER send timestamp as "last acked". Keep the
+        // maximum instead.
         long candidate = sendTimestampNanos > 0 ? sendTimestampNanos : System.nanoTime();
         long current;
         do {
@@ -190,7 +244,7 @@ public class AckTracker {
         } while (durationNanos > currentMax && !maxRtoNanosSeen.compareAndSet(currentMax, durationNanos));
     }
 
-    /** Ack without a known send timestamp (RPO falls back to "now"). */
+    /** Ack without a known send timestamp ("last acked" falls back to "now"). */
     public void recordAcked(long sequence) {
         recordAcked(sequence, -1);
     }
@@ -339,14 +393,18 @@ public class AckTracker {
     }
 
     /**
-     * Drops the per-sequence bitset once the run is over. Counters, failure
-     * windows and RTO/RPO stay readable; only the memory goes away. Called on
-     * the worker's terminal path so a finished run stops holding its bitset.
+     * Drops the per-sequence bitset and send-time samples once the run is
+     * over. Counters, failure windows and RTO stay readable; only the memory
+     * goes away. Called on the worker's terminal path, after verification, so
+     * a finished run stops holding either.
      */
     public void release() {
         released = true;
         for (int i = 0; i < chunks.length(); i++) {
             chunks.set(i, null);
+        }
+        for (int i = 0; i < sendTimeChunks.length(); i++) {
+            sendTimeChunks.set(i, null);
         }
     }
 

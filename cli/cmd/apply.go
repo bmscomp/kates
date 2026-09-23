@@ -133,6 +133,7 @@ var testApplyCmd = &cobra.Command{
 		output.SubHeader("Summary")
 		rows := make([][]string, 0, len(results))
 		hasViolation := false
+		hasUnevaluable := false
 		hasFailure := false
 		for _, r := range results {
 			extra := ""
@@ -140,9 +141,16 @@ var testApplyCmd = &cobra.Command{
 				extra = r.err
 			} else if r.validate != nil && r.testRun != nil {
 				violations := validateSLAs(r.testRun, r.validate)
+				notes := violations
+				if unevaluable := unevaluableSLAs(r.testRun, r.validate); len(unevaluable) > 0 {
+					notes = append(notes, "not evaluable: "+strings.Join(unevaluable, ", "))
+					hasUnevaluable = true
+				}
 				if len(violations) > 0 {
-					extra = strings.Join(violations, "; ")
 					hasViolation = true
+				}
+				if len(notes) > 0 {
+					extra = strings.Join(notes, "; ")
 				} else {
 					extra = "✓ SLA Pass"
 				}
@@ -154,6 +162,10 @@ var testApplyCmd = &cobra.Command{
 		}
 		output.Table([]string{"Scenario", "ID", "Status", "Note"}, rows)
 
+		if hasUnevaluable {
+			fmt.Println()
+			output.Warn("Some SLA gates were not evaluated: the run did not measure what they check")
+		}
 		if hasViolation {
 			fmt.Println()
 			output.Error("One or more SLA gates violated")
@@ -298,11 +310,13 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 			if v.MaxDataLoss >= 0 && ir.DataLossPercent > v.MaxDataLoss {
 				violations = append(violations, fmt.Sprintf("dataLoss=%.4f%% > %.4f%%", ir.DataLossPercent, v.MaxDataLoss))
 			}
-			if v.MaxRtoMs > 0 && ir.MaxRtoMs > v.MaxRtoMs {
-				violations = append(violations, fmt.Sprintf("rto=%.0fms > %.0fms", ir.MaxRtoMs, v.MaxRtoMs))
+			// An unmeasured RTO/RPO is skipped here, not passed: unevaluableSLAs
+			// reports the gate so the summary never shows it as green.
+			if rto, ok := ir.MeasuredMaxRtoMs(); ok && v.MaxRtoMs > 0 && rto > v.MaxRtoMs {
+				violations = append(violations, fmt.Sprintf("rto=%.0fms > %.0fms", rto, v.MaxRtoMs))
 			}
-			if v.MaxRpoMs > 0 && ir.RpoMs > v.MaxRpoMs {
-				violations = append(violations, fmt.Sprintf("rpo=%.0fms > %.0fms", ir.RpoMs, v.MaxRpoMs))
+			if rpo, ok := ir.MeasuredRpoMs(); ok && v.MaxRpoMs > 0 && rpo > v.MaxRpoMs {
+				violations = append(violations, fmt.Sprintf("rpo=%.0fms > %.0fms", rpo, v.MaxRpoMs))
 			}
 			if v.MaxOutOfOrder >= 0 && ir.OutOfOrderCount > v.MaxOutOfOrder {
 				violations = append(violations, fmt.Sprintf("outOfOrder=%d > %d", ir.OutOfOrderCount, v.MaxOutOfOrder))
@@ -314,6 +328,33 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 	}
 
 	return violations
+}
+
+// unevaluableSLAs names the declared RTO/RPO gates the run produced no
+// measurement for. Those gates cannot fail, so reporting them as passed would
+// claim a check that never happened.
+func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {
+	rtoMeasured, rpoMeasured := false, false
+	for _, r := range run.Results {
+		if r.Integrity == nil {
+			continue
+		}
+		if _, ok := r.Integrity.MeasuredMaxRtoMs(); ok {
+			rtoMeasured = true
+		}
+		if _, ok := r.Integrity.MeasuredRpoMs(); ok {
+			rpoMeasured = true
+		}
+	}
+
+	var gates []string
+	if v.MaxRtoMs > 0 && !rtoMeasured {
+		gates = append(gates, "maxRtoMs (RTO not measured)")
+	}
+	if v.MaxRpoMs > 0 && !rpoMeasured {
+		gates = append(gates, "maxRpoMs (RPO not measured)")
+	}
+	return gates
 }
 
 type waitModel struct {

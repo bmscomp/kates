@@ -448,7 +448,7 @@ Then poll `GET /api/disruptions/{id}` until the status is terminal:
 
 Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the plan executes, then one of `COMPLETED`, `PARTIAL` (some steps failed), `FAILED`, or `INTERRUPTED` (the process running the plan died; see below). Plans that violate the safety guard are rejected up front and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)). Only one plan may run against a cluster at a time — a `POST` while another plan is in flight returns `409 Conflict`, because concurrent plans race the rollback state stored on the target and can leave the StatefulSet under-scaled.
 
-> **Orphan recovery.** If the Kates pod is killed mid-plan, the injected faults would otherwise persist with nothing left to undo them. On startup Kates removes abandoned `managed-by=kates` NetworkPolicies, restores StatefulSets still carrying a scale-down snapshot, and marks stranded `RUNNING` reports as `INTERRUPTED`. Only faults older than `kates.chaos.orphan-recovery.min-age-sec` (default 900) are touched, so a plan running on another replica is never disturbed.
+> **Orphan recovery.** If the Kates pod is killed mid-plan, the injected faults would otherwise persist with nothing left to undo them. On startup Kates removes abandoned `managed-by=kates` NetworkPolicies, restores KafkaNodePools and StatefulSets still carrying a scale-down snapshot, and marks stranded `RUNNING` reports as `INTERRUPTED`. Only faults older than `kates.chaos.orphan-recovery.min-age-sec` (default 900) are touched, so a plan running on another replica is never disturbed.
 
 **Dry run** — `POST /api/disruptions?dryRun=true` with the same request body returns `200 OK`:
 

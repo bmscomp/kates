@@ -64,16 +64,16 @@ The `KubernetesChaosProvider` implements these disruptions against the Kubernete
 |------|---------------|--------|
 | `POD_KILL` | Delete pod with grace period 0 | Immediate broker termination, simulates SIGKILL |
 | `POD_DELETE` | Delete pod with configurable grace period | Graceful shutdown, broker flushes and shuts down |
-| `ROLLING_RESTART` | Rolling restart of the matching StatefulSets | Simulates operator-managed rolling updates |
+| `ROLLING_RESTART` | Annotate every matching pod with `strimzi.io/manual-rolling-update`, then wait for the Strimzi Cluster Operator to roll them | The operator's own rolling update: one broker at a time, each ready again before the next |
 | `LEADER_ELECTION` | Resolve the partition leader, then force-delete its pod | Forces leader election for targeted partition |
-| `SCALE_DOWN` | Scale the matching StatefulSets down by one replica | Reduces broker count |
+| `SCALE_DOWN` | Lower `spec.replicas` by one on the KafkaNodePool of each matching broker, then wait for the Strimzi Cluster Operator to remove a broker; on a Kafka that Strimzi doesn't run, scale its StatefulSet down by one | One broker fewer per node pool, until rollback puts it back |
 | `NETWORK_PARTITION` | Deny-all NetworkPolicy applied to the target pod | Isolates a broker from the cluster network |
 | `CPU_STRESS` | Stress ephemeral container injected into the pod | Saturates CPU on the broker pod |
 | `IO_STRESS` | Stress ephemeral container injected into the pod | Injects disk I/O pressure on broker storage |
 
 ### LitmusChaos Integration
 
-When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). Five types are only available through Litmus:
+When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption type but two to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). The exceptions are `ROLLING_RESTART`, because no Litmus experiment does a rolling restart, and `SCALE_DOWN`, because `pod-delete` kills a broker that its StrimziPodSet brings straight back. The Litmus backend hands both to the `KubernetesChaosProvider`, so they run the same way on both backends. Five types are only available through Litmus:
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
@@ -109,11 +109,27 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 3. The pod named `<anything>-<targetBrokerId>`, when `targetBrokerId` is set (falling back to the first match if no pod has that ordinal).
 4. Otherwise, one matching pod at random.
 
+`ROLLING_RESTART` always takes every pod the selector matches, as if `targetAll` were set, unless `targetPod` names one: a rolling restart restarts all of them, one at a time.
+
+`SCALE_DOWN` picks workloads, not pods, so only the first rule and the selector apply to it: see [Scaling Down a Node Pool](#scaling-down-a-node-pool).
+
 Both backends resolve the pods the same way: the Kubernetes backend applies the fault to each of them, and the Litmus backend passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
 
 ::: {.callout-warning}
 Kates runs Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the Kubernetes backend deletes them all at once.
 :::
+
+### Scaling Down a Node Pool
+
+Strimzi runs Kafka pods from StrimziPodSets and creates no StatefulSet, so `SCALE_DOWN` removes a broker the way you would by hand: it lowers `spec.replicas` of the broker's KafkaNodePool by one, and the Cluster Operator removes the pool's highest node ID. The pools come from the pods the step selects: `targetPod` if it's set, otherwise every pod `targetLabel` matches. Each pool with a selected pod loses one broker, so `strimzi.io/pool-name=brokers-sigma` takes one broker out of `brokers-sigma`, and `strimzi.io/component-type=kafka` takes one out of every broker pool. `targetAll` and `targetBrokerId` don't apply. `targetPod` only picks its pool, and Strimzi still removes the pool's highest node ID. Strimzi scales down only broker-only pools, so the step skips pools with the controller role, and it refuses to remove the last broker of a cluster.
+
+The operator reconciles as soon as the pool changes, but it holds back the removal of a broker that still hosts partition replicas. If the `Kafka` resource has a `remove-brokers` auto-rebalance, as the `kafka-cluster` chart configures by default, Cruise Control moves the replicas off first, and the operator removes the broker once it's empty. The step waits for this: `chaosDurationSec` is the budget for the whole removal, draining included, and the step returns as soon as the broker pod is gone. Draining can't finish when the brokers left can't hold every replica, such as a topic with replication factor 3 on a cluster going from three brokers to two.
+
+A held-back scale-down doesn't go away: the lowered `spec.replicas` stays on the pool, and the operator removes the broker whenever it becomes empty, which could be in the middle of a later step. So when the operator holds the removal back and nothing drains the broker, or the budget runs out, the step fails and Kates gives every pool it lowered its replicas back. With `chaosDurationSec: 0` the step doesn't wait, and it can't tell a removed broker from a held-back one. To remove a broker that still hosts replicas, which is what you do to test losing a broker for good, set `strimzi.io/skip-broker-scaledown-check: "true"` on the `Kafka` resource yourself. Strimzi then removes it with its replicas, and its partitions run on the replicas left.
+
+A step that succeeds leaves the pool one broker short. Kates records the original count on the pool in the `kates.io/original-replicas` annotation, and `autoRollback` restores it from there when the step fails its recovery check, as does orphan recovery when Kates restarts. On a scale-up Strimzi gives the new broker the lowest free node ID, unless the pool sets `strimzi.io/next-node-ids`. That's normally the ID it removed, so the broker comes back with its old volume when the pool keeps its claims (`deleteClaim: false`). The Kates service account needs `patch` on `kafkanodepools`, which the `kates` chart grants.
+
+On a Kafka that Strimzi doesn't run, the step scales down the StatefulSet of each selected pod by one, but never below one replica, and returns without waiting.
 
 ## Built-In Playbooks
 
@@ -258,11 +274,13 @@ steps:
 
 ### rolling-restart
 
-Tests the Strimzi rolling update procedure — brokers restart one at a time with readiness gates. Note that `autoRollback` is `false` because rolling restarts are expected to complete naturally. The playbook sets no SLA, so its report does not grade client errors during the restart; for that, submit the step as your own plan with an `sla` block.
+Tests the Strimzi rolling update procedure, the one an upgrade or a configuration change goes through. Strimzi runs Kafka pods from StrimziPodSets, not StatefulSets, so Kates does not restart the pods itself: it annotates every pod the selector matches with `strimzi.io/manual-rolling-update=true`, and the Cluster Operator rolls them at its next reconciliation, every two minutes by default. The operator restarts one pod at a time, waits for it to be ready before the next, and holds back any pod whose restart would leave a partition under `min.insync.replicas`.
+
+The step then waits for the roll to finish: every annotated pod replaced by a new one that is ready. `chaosDurationSec` is the budget for that wait, covering the wait for the next reconciliation as well as the restarts. It is not a fault duration, and the step returns as soon as the roll is done, so the observation window starts after the last restart. If the budget runs out, the step fails and Kates removes the annotation from the pods not yet rolled, so the operator does not restart them later, in the middle of another step. `gracePeriodSec` plays no part: each broker gets its node pool's `terminationGracePeriodSeconds`, 30 seconds by default. `maxAffectedBrokers: 1` holds because the safety guard counts a rolling restart as one broker, and `autoRollback` is `false` because there is nothing to undo. Kates does not grade client errors during the roll: the playbook sets no SLA, and a plan's `sla` cannot check `maxErrorRate` (see [SLA Grading](#sla-grading)).
 
 ```yaml
 name: rolling-restart
-description: "Trigger a graceful rolling restart of the Kafka StatefulSet"
+description: "Restart every Kafka pod one at a time through the Strimzi Cluster Operator"
 category: operations
 maxAffectedBrokers: 1
 autoRollback: false
@@ -272,12 +290,13 @@ steps:
       experimentName: rolling-restart-sts
       disruptionType: ROLLING_RESTART
       targetLabel: "strimzi.io/component-type=kafka"
-      chaosDurationSec: 300
-      gracePeriodSec: 30
+      chaosDurationSec: 600
     steadyStateSec: 30
     observationWindowSec: 180
     requireRecovery: true
 ```
+
+A pod run by a StatefulSet, as in a Kafka that Strimzi does not manage, is rolled by restarting its StatefulSet instead. Kates skips matching pods that belong to neither, and fails the step if nothing is left to roll. Both backends run this the same way, because Litmus has no rolling restart experiment. The Kates service account needs `patch` on pods for the annotation.
 
 ### consumer-isolation
 
@@ -368,7 +387,7 @@ graph TD
     V3 -->|Yes| EXECUTE["✅ Execute"]
 ```
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
 
 The guard also emits per-step warnings — for example, `SCALE_DOWN` without `autoRollback`, or a `NETWORK_PARTITION` with no duration (the NetworkPolicy would persist until cleanup).
 
@@ -432,19 +451,15 @@ A disruption report includes an **SLA grade** — a structured verdict on whethe
 ```mermaid
 graph TD
     subgraph Metrics["Post-Disruption Metrics (per step)"]
-        M1[Avg / P99 / P999 Latency]
+        M1[P99 Latency]
         M2[Throughput]
-        M3[Error Rate]
         M4["Recovery Time (RTO)"]
-        M5[Data Loss %]
     end
     
     subgraph Thresholds["SLA Thresholds (plan's sla block)"]
-        T1[maxAvgLatencyMs<br/>maxP99LatencyMs<br/>maxP999LatencyMs]
+        T1[maxP99LatencyMs]
         T2[minThroughputRecPerSec]
-        T3[maxErrorRate]
         T4[maxRtoMs]
-        T5[maxDataLossPercent]
     end
     
     subgraph Verdict["Letter Grade"]
@@ -457,7 +472,15 @@ graph TD
     Thresholds --> Verdict
 ```
 
-Each violation is classified `WARNING` or `CRITICAL` — a breach far past its threshold (for example, P99 latency or recovery time at more than twice the limit, throughput below half the minimum, or any data loss over the cap) is `CRITICAL`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+The grader runs each threshold once per step, after the last step has finished, so a two-step plan with two thresholds makes four checks. Each miss is a violation classified `WARNING` or `CRITICAL`. P99 latency or recovery time above twice the limit, or throughput below half the minimum, is `CRITICAL`, and any other miss is a `WARNING`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+
+A plan runs no workload of its own, its Prometheus capture has no P99.9 latency or error rate, and Kafka's exporter publishes latency percentiles but no mean. So `maxAvgLatencyMs`, `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the verdict lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and RPO come from an INTEGRITY workload, not from a plan: a resilience test (`kates resilience run`) whose workload is an INTEGRITY test reports both in its integrity result.
+
+The checks that do run have limits of their own:
+
+- Latency and throughput come from the step's Prometheus snapshot, taken when its observation window ends. A step without one adds no checks for them. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails. Recovery time comes from the pod watcher and is checked either way.
+- A step whose pods had not all come back when Kates stopped waiting has no recovery time, only the time it waited (`unrecoveredAfter`). Past `maxRtoMs` that is a `CRITICAL` miss. Within it, Kates cannot tell whether the step would have recovered in time, and `maxRtoMs` is listed as unevaluated for that step.
+- The queries read only this cluster's series, by the `namespace` and `strimzi_io_cluster` labels the `kafka-cluster` chart's PodMonitors attach. A metric Prometheus returns no data for adds no check and is listed in the step's `unmeasuredMetrics`, instead of reading `0`.
 
 ### CI/CD Integration
 

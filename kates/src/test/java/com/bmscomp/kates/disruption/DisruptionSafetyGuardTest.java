@@ -4,12 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
+import io.fabric8.kubernetes.api.model.authorization.v1.ResourceAttributes;
+import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReview;
+import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -19,6 +24,8 @@ import org.junit.jupiter.api.Test;
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
+import com.bmscomp.kates.chaos.StrimziTestCluster;
+import com.bmscomp.kates.domain.SlaDefinition;
 
 /**
  * Pins the SCALE_DOWN rollback fix (P0-4). The original guard derived the
@@ -218,6 +225,48 @@ class DisruptionSafetyGuardTest {
         assertTrue(guard.validatePlan(plan(1, consumers)).safe());
     }
 
+    private static FaultSpec rollingRestart(String selector, int chaosDurationSec) {
+        return FaultSpec.builder("roll")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.ROLLING_RESTART)
+                .chaosDurationSec(chaosDurationSec)
+                .build();
+    }
+
+    @Test
+    void rollingRestartCountsOneBrokerAtATime() {
+        createZonedBrokers();
+
+        // The built-in playbook: every broker, maxAffectedBrokers 1.
+        var result = guard.validatePlan(plan(1, rollingRestart("strimzi.io/component-type=kafka", 600)));
+
+        assertTrue(result.safe(), result.errors().toString());
+    }
+
+    @Test
+    void dryRunListsEveryBrokerARollingRestartRestarts() {
+        createZonedBrokers();
+
+        var all = guard.dryRun(plan(1, rollingRestart("strimzi.io/component-type=kafka", 600)))
+                .steps()
+                .getFirst();
+        // Used to list one broker (the random or broker-id pick) and then
+        // every broker again, whatever the selector.
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-brokers-2", "krafter-brokers-3"),
+                all.affectedPods().stream().sorted().toList());
+        assertTrue(all.warnings().isEmpty(), all.warnings().toString());
+
+        var zone =
+                guard.dryRun(plan(1, rollingRestart("zone=alpha", 0))).steps().getFirst();
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1"),
+                zone.affectedPods().stream().sorted().toList());
+        assertTrue(
+                zone.warnings().getFirst().contains("does not wait"),
+                zone.warnings().toString());
+    }
+
     @Test
     void dryRunListsTheZoneAndFlagsASelectorThatHitsNoBroker() {
         createZonedBrokers();
@@ -238,5 +287,247 @@ class DisruptionSafetyGuardTest {
         assertTrue(
                 oldStep.warnings().getFirst().contains("matches no broker pod"),
                 oldStep.warnings().toString());
+    }
+
+    // ── SCALE_DOWN on Strimzi ───────────────────────────────────────────────
+
+    private StrimziTestCluster strimzi() {
+        return new StrimziTestCluster(server, client)
+                .pool("controllers", "controller", 0, 1, 2)
+                .pool("brokers", "broker", 3, 4, 5)
+                .pool("brokers-sigma", "broker", 6);
+    }
+
+    private static FaultSpec scaleDown(String selector) {
+        return FaultSpec.builder("scale-down")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .chaosDurationSec(300)
+                .build();
+    }
+
+    @Test
+    void dryRunNamesTheBrokerEachNodePoolLoses() {
+        strimzi();
+
+        var step = guard.dryRun(plan(-1, scaleDown("strimzi.io/component-type=kafka")))
+                .steps()
+                .getFirst();
+
+        // Used to list every Kafka pod, controllers included, for any SCALE_DOWN.
+        assertEquals(List.of("krafter-brokers-5", "krafter-brokers-sigma-6"), step.affectedPods());
+        assertTrue(
+                step.warnings().stream().anyMatch(w -> w.contains("controllers runs KRaft controllers")),
+                step.warnings().toString());
+    }
+
+    @Test
+    void validatePlanCountsOneBrokerPerNodePool() {
+        strimzi();
+
+        var result = guard.validatePlan(plan(1, scaleDown("strimzi.io/broker-role=true")));
+
+        assertFalse(result.safe());
+        assertEquals(List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"), result.errors());
+        assertTrue(guard.validatePlan(plan(1, scaleDown("strimzi.io/pool-name=brokers")))
+                .safe());
+    }
+
+    @Test
+    void dryRunWarnsThatTargetPodOnlyPicksTheNodePool() {
+        strimzi();
+        FaultSpec spec = scaleDown("strimzi.io/component-type=kafka").toBuilder()
+                .targetPod("krafter-brokers-3")
+                .build();
+
+        var step = guard.dryRun(plan(-1, spec)).steps().getFirst();
+
+        assertEquals(List.of("krafter-brokers-5"), step.affectedPods());
+        assertTrue(
+                step.warnings().stream().anyMatch(w -> w.contains("not krafter-brokers-3")),
+                step.warnings().toString());
+    }
+
+    @Test
+    void dryRunWarnsThatANodePoolScaleDownWithoutABudgetDoesNotWait() {
+        strimzi();
+        FaultSpec spec = scaleDown("strimzi.io/pool-name=brokers").toBuilder()
+                .chaosDurationSec(0)
+                .build();
+
+        var step = guard.dryRun(plan(-1, spec)).steps().getFirst();
+
+        assertTrue(
+                step.warnings().stream().anyMatch(w -> w.startsWith("chaosDurationSec is 0")),
+                step.warnings().toString());
+    }
+
+    @Test
+    void restoreGivesANodePoolScaledToZeroItsReplicasBack() {
+        StrimziTestCluster cluster = strimzi();
+        // brokers-sigma after a SCALE_DOWN from 1 to 0: no pod left for any
+        // selector to find it by.
+        cluster.scaledDown("brokers-sigma", 0);
+
+        guard.restoreReplicaCount(scaleDown("strimzi.io/pool-name=brokers-sigma"));
+
+        assertEquals(1, cluster.replicas("brokers-sigma"));
+        assertTrue(cluster.annotations("brokers-sigma").isEmpty(), "snapshot cleared");
+        assertEquals(3, cluster.replicas("brokers"), "a pool without a snapshot is left alone");
+    }
+
+    /** Answers every access review with allowed, and returns what each one asked. */
+    private List<ResourceAttributes> accessReviews(FaultSpec spec) throws InterruptedException {
+        server.expect()
+                .post()
+                .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
+                .andReturn(
+                        201,
+                        new SelfSubjectAccessReviewBuilder()
+                                .withNewStatus()
+                                .withAllowed(true)
+                                .endStatus()
+                                .build())
+                .always();
+
+        assertTrue(guard.checkRbacPermissions(spec));
+
+        List<ResourceAttributes> asked = new java.util.ArrayList<>();
+        for (int i = server.getRequestCount(); i > 0; i--) {
+            var request = server.takeRequest();
+            if (request.getPath().endsWith("/selfsubjectaccessreviews")) {
+                asked.add(client.getKubernetesSerialization()
+                        .unmarshal(request.getUtf8Body(), SelfSubjectAccessReview.class)
+                        .getSpec()
+                        .getResourceAttributes());
+            }
+        }
+        return asked;
+    }
+
+    private static String review(ResourceAttributes a) {
+        return a.getVerb() + " " + a.getGroup() + "/" + a.getResource()
+                + (a.getSubresource() != null ? "/" + a.getSubresource() : "");
+    }
+
+    @Test
+    void rbacCheckAsksToPatchTheKafkaNodePool() throws InterruptedException {
+        strimzi();
+
+        List<ResourceAttributes> asked = accessReviews(scaleDown("strimzi.io/pool-name=brokers"));
+
+        // Used to ask about updating StatefulSets, which Strimzi does not create.
+        assertEquals(
+                List.of("patch kafka.strimzi.io/kafkanodepools"),
+                asked.stream().map(DisruptionSafetyGuardTest::review).toList());
+        assertEquals("kafka", asked.getFirst().getNamespace());
+    }
+
+    @Test
+    void rbacCheckOnAStatefulSetAsksToPatchItAndSetItsScale() throws InterruptedException {
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("kafka-0")
+                        .withNamespace("kafka")
+                        .addToLabels("app", "kafka")
+                        .addNewOwnerReference()
+                        .withApiVersion("apps/v1")
+                        .withKind("StatefulSet")
+                        .withName("kafka")
+                        .withUid("sts-uid")
+                        .endOwnerReference()
+                        .endMetadata()
+                        .build())
+                .create();
+
+        List<ResourceAttributes> asked = accessReviews(scaleDown("app=kafka"));
+
+        assertEquals(
+                List.of("patch apps/statefulsets", "update apps/statefulsets/scale"),
+                asked.stream().map(DisruptionSafetyGuardTest::review).toList());
+    }
+
+    // ── Leader-aware steps ──────────────────────────────────────────────────
+
+    private static FaultSpec leaderKill(int partition) {
+        return FaultSpec.builder("leader-" + partition)
+                .targetTopic("orders")
+                .targetPartition(partition)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+    }
+
+    private void leaders(int... leaderOfPartition) {
+        guard.intelligence = mock(KafkaIntelligenceService.class);
+        for (int p = 0; p < leaderOfPartition.length; p++) {
+            when(guard.intelligence.resolveLeaderBrokerId("orders", p)).thenReturn(leaderOfPartition[p]);
+        }
+    }
+
+    @Test
+    void dryRunPreviewsTheLeadersPod() {
+        createZonedBrokers();
+        leaders(2);
+
+        var step = guard.dryRun(plan(1, leaderKill(0))).steps().getFirst();
+
+        // It previewed the pod for the spec's own targetBrokerId, here a
+        // random pick, while resolvedLeaderId named the leader.
+        assertEquals(2, step.resolvedLeaderId());
+        assertEquals("krafter-brokers-2", step.targetPod());
+        assertEquals(List.of("krafter-brokers-2"), step.affectedPods());
+    }
+
+    @Test
+    void blastRadiusCountsEachStepsLeader() {
+        createZonedBrokers();
+        leaders(1, 3);
+
+        var result = guard.validatePlan(plan(1, leaderKill(0), leaderKill(1)));
+
+        // Both steps counted as the same random pick, so this passed.
+        assertFalse(result.safe());
+        assertEquals(List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"), result.errors());
+    }
+
+    @Test
+    void aFailedLeaderLookupKeepsTheSpecAsPosted() {
+        createZonedBrokers();
+        leaders(-1);
+
+        var step = guard.dryRun(
+                        plan(1, leaderKill(0).toBuilder().targetBrokerId(3).build()))
+                .steps()
+                .getFirst();
+
+        // What the orchestrator runs when its own lookup fails.
+        assertNull(step.resolvedLeaderId());
+        assertEquals("krafter-brokers-3", step.targetPod());
+        assertTrue(
+                step.warnings().contains("Could not resolve leader for orders-0"),
+                step.warnings().toString());
+    }
+
+    @Test
+    void slaGatesAPlanCannotEvaluateAreFlaggedBeforeAnyFault() {
+        createZonedBrokers();
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxDataLossPercent(0.0);
+        sla.setMaxRpoMs(0L);
+        sla.setMaxP99LatencyMs(100.0);
+        DisruptionPlan plan = plan(-1);
+        plan.setSla(sla);
+
+        DisruptionSafetyGuard.ValidationResult result = guard.validatePlan(plan);
+
+        // A warning, not a rejection: plans carrying these fields ran before.
+        assertTrue(result.safe());
+        List<String> slaWarnings =
+                result.warnings().stream().filter(w -> w.startsWith("SLA ")).toList();
+        assertEquals(2, slaWarnings.size(), "p99 is evaluable, the other two are not: " + slaWarnings);
+        assertTrue(slaWarnings.get(0).contains("maxDataLossPercent"), slaWarnings.get(0));
+        assertTrue(slaWarnings.get(1).contains("maxRpoMs"), slaWarnings.get(1));
     }
 }

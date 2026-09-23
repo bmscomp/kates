@@ -187,11 +187,15 @@ var testGetCmd = &cobra.Command{
 					if ir.ConsumerRtoMs > 0 {
 						output.KeyValue("Consumer RTO", fmt.Sprintf("%.0f ms", ir.ConsumerRtoMs))
 					}
-					if ir.MaxRtoMs > 0 {
-						output.KeyValue("Max RTO", fmt.Sprintf("%.0f ms", ir.MaxRtoMs))
+					if rto, ok := ir.MeasuredMaxRtoMs(); ok && rto > 0 {
+						output.KeyValue("Max RTO", fmt.Sprintf("%.0f ms", rto))
 					}
-					if ir.RpoMs > 0 {
-						output.KeyValue("RPO", fmt.Sprintf("%.0f ms", ir.RpoMs))
+					// A measured zero RPO is shown; an unmeasured one says so
+					// rather than disappearing or reading as zero.
+					if rpo, ok := ir.MeasuredRpoMs(); ok {
+						output.KeyValue("RPO", fmt.Sprintf("%.0f ms", rpo))
+					} else {
+						output.KeyValue("RPO", "not measured")
 					}
 					if ir.CrcVerified {
 						output.KeyValue("CRC Failures", fmtNum(float64(ir.CrcFailures)))
