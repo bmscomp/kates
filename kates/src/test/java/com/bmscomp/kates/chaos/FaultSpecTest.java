@@ -17,6 +17,7 @@ class FaultSpecTest {
         assertEquals("kafka", spec.targetNamespace());
         assertEquals("strimzi.io/component-type=kafka", spec.targetLabel());
         assertEquals("", spec.targetPod());
+        assertFalse(spec.targetAll());
         assertEquals(30, spec.chaosDurationSec());
         assertEquals(0, spec.delayBeforeSec());
         assertTrue(spec.envOverrides().isEmpty());
@@ -41,6 +42,7 @@ class FaultSpecTest {
                 .targetNamespace("test-ns")
                 .targetLabel("app=kafka")
                 .targetPod("broker-0")
+                .targetAll(true)
                 .chaosDurationSec(120)
                 .delayBeforeSec(10)
                 .envOverrides(Map.of("KEY", "VAL"))
@@ -60,6 +62,7 @@ class FaultSpecTest {
         assertEquals("custom", spec.experimentName());
         assertEquals("test-ns", spec.targetNamespace());
         assertEquals("broker-0", spec.targetPod());
+        assertTrue(spec.targetAll());
         assertEquals(120, spec.chaosDurationSec());
         assertEquals(DisruptionType.MEMORY_STRESS, spec.disruptionType());
         assertEquals(1024, spec.memoryMb());

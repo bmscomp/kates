@@ -2,6 +2,7 @@ package com.bmscomp.kates.chaos;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -193,6 +194,82 @@ public class KubernetesChaosProviderTest {
                 "3",
                 after2.getMetadata().getAnnotations().get(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION),
                 "snapshot preserved across repeated scale-downs");
+    }
+
+    private void createZonedBrokers() {
+        String[][] brokers = {
+            {"krafter-brokers-0", "alpha"}, {"krafter-brokers-1", "alpha"}, {"krafter-brokers-2", "sigma"}
+        };
+        for (String[] b : brokers) {
+            client.pods()
+                    .inNamespace("kafka")
+                    .resource(new PodBuilder()
+                            .withNewMetadata()
+                            .withName(b[0])
+                            .withNamespace("kafka")
+                            .addToLabels("strimzi.io/component-type", "kafka")
+                            .addToLabels("zone", b[1])
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
+    }
+
+    private List<String> remainingPods() {
+        return client.pods().inNamespace("kafka").list().getItems().stream()
+                .map(p -> p.getMetadata().getName())
+                .sorted()
+                .toList();
+    }
+
+    @Test
+    void podKillWithTargetAllKillsEveryPodOfTheZone() throws Exception {
+        createZonedBrokers();
+
+        FaultSpec spec = FaultSpec.builder("az-failure")
+                .targetLabel("strimzi.io/component-type=kafka,zone=alpha")
+                .targetAll(true)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(List.of("krafter-brokers-2"), remainingPods(), "both alpha brokers killed, sigma untouched");
+    }
+
+    @Test
+    void podKillWithoutTargetAllKillsOnePod() throws Exception {
+        createZonedBrokers();
+
+        FaultSpec spec = FaultSpec.builder("one-of-zone")
+                .targetLabel("strimzi.io/component-type=kafka,zone=alpha")
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+
+        provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        List<String> remaining = remainingPods();
+        assertEquals(2, remaining.size());
+        assertTrue(remaining.contains("krafter-brokers-2"));
+    }
+
+    @Test
+    void podKillFailsWhenTheSelectorMatchesNoPod() throws Exception {
+        createZonedBrokers();
+
+        // The az-failure selector before the fix: node labels never reach pods.
+        FaultSpec spec = FaultSpec.builder("az-failure-old")
+                .targetLabel("strimzi.io/component-type=kafka,topology.kubernetes.io/zone=zone-a")
+                .targetAll(true)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("No pods found"), outcome.failureReason());
+        assertEquals(3, remainingPods().size());
     }
 
     @Test

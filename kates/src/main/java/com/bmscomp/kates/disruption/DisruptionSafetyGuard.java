@@ -13,6 +13,8 @@ import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.chaos.ParsedLabelSelector;
+import com.bmscomp.kates.chaos.PodTargets;
 
 /**
  * Safety layer for disruption tests. Validates blast radius, performs dry-run
@@ -81,9 +83,10 @@ public class DisruptionSafetyGuard {
         for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
             FaultSpec spec = step.faultSpec();
 
-            String resolved = resolveTargetPod(spec, brokerPods);
-            if (resolved != null) {
-                affectedBrokers.add(resolved);
+            try {
+                affectedBrokers.addAll(affectedBrokers(spec, brokerPods));
+            } catch (IllegalArgumentException e) {
+                errors.add("Step '" + step.name() + "': " + e.getMessage());
             }
 
             if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
@@ -152,9 +155,18 @@ public class DisruptionSafetyGuard {
                 }
             }
 
-            String targetPod = resolveTargetPod(spec, brokerPods);
-            if (targetPod != null) {
-                affected.add(targetPod);
+            String targetPod = null;
+            try {
+                List<String> hit = affectedBrokers(spec, brokerPods);
+                if (hit.isEmpty()) {
+                    stepWarnings.add("targetLabel '" + spec.targetLabel() + "' matches no broker pod in namespace '"
+                            + kafkaNamespace + "' — this step disrupts no broker");
+                } else {
+                    targetPod = String.join(",", hit);
+                    affected.addAll(hit);
+                }
+            } catch (IllegalArgumentException e) {
+                stepWarnings.add(e.getMessage());
             }
 
             if (spec.disruptionType() == DisruptionType.ROLLING_RESTART
@@ -242,15 +254,11 @@ public class DisruptionSafetyGuard {
 
     @Retry(maxRetries = 3, delay = 2000)
     void restoreReplicaCount(FaultSpec spec) {
-        String[] parts = spec.targetLabel().split("=", 2);
-        String labelKey = parts[0];
-        String labelValue = parts.length > 1 ? parts[1] : "";
-
         kubeClient
                 .apps()
                 .statefulSets()
                 .inNamespace(spec.targetNamespace())
-                .withLabel(labelKey, labelValue)
+                .withLabelSelector(ParsedLabelSelector.parse(spec.targetLabel()).toString())
                 .list()
                 .getItems()
                 .forEach(ss -> {
@@ -310,14 +318,10 @@ public class DisruptionSafetyGuard {
     @Retry(maxRetries = 3, delay = 2000)
     List<Pod> listBrokerPods() {
         try {
-            String[] parts = kafkaLabel.split("=", 2);
-            String labelKey = parts[0];
-            String labelValue = parts.length > 1 ? parts[1] : "";
-
             return kubeClient
                     .pods()
                     .inNamespace(kafkaNamespace)
-                    .withLabel(labelKey, labelValue)
+                    .withLabelSelector(ParsedLabelSelector.parse(kafkaLabel).toString())
                     .list()
                     .getItems();
         } catch (Exception e) {
@@ -326,21 +330,35 @@ public class DisruptionSafetyGuard {
         }
     }
 
-    private String resolveTargetPod(FaultSpec spec, List<Pod> brokerPods) {
-        if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
-            return spec.targetPod();
+    /**
+     * The broker pods a step's fault would hit, chosen by the same rules the
+     * chaos backends use ({@link PodTargets}) among the brokers its selector
+     * matches, so a {@code targetAll} step counts every one of them. A random
+     * pick is counted as one broker, marked since the actual pod is not known yet.
+     *
+     * @throws IllegalArgumentException when {@code targetLabel} is not a valid selector
+     */
+    List<String> affectedBrokers(FaultSpec spec, List<Pod> brokerPods) {
+        PodTargets.Mode mode = PodTargets.mode(spec);
+        if (mode == PodTargets.Mode.NAMED_POD) {
+            return List.of(spec.targetPod());
         }
-        if (spec.targetBrokerId() >= 0) {
-            return brokerPods.stream()
-                    .filter(p -> p.getMetadata().getName().endsWith("-" + spec.targetBrokerId()))
-                    .map(p -> p.getMetadata().getName())
-                    .findFirst()
-                    .orElse(null);
+        if (spec.targetNamespace() != null && !spec.targetNamespace().equals(kafkaNamespace)) {
+            return List.of();
         }
-        if (!brokerPods.isEmpty()) {
-            return brokerPods.getFirst().getMetadata().getName() + " (random selection)";
+        List<Pod> matching = brokerPods;
+        if (spec.targetLabel() != null && !spec.targetLabel().isBlank()) {
+            ParsedLabelSelector selector = ParsedLabelSelector.parse(spec.targetLabel());
+            matching = brokerPods.stream()
+                    .filter(p -> selector.matches(p.getMetadata().getLabels()))
+                    .toList();
         }
-        return null;
+        if (mode == PodTargets.Mode.ONE_RANDOM) {
+            return matching.isEmpty()
+                    ? List.of()
+                    : List.of(matching.getFirst().getMetadata().getName() + " (random selection)");
+        }
+        return PodTargets.select(spec, matching);
     }
 
     @Retry(maxRetries = 2, delay = 1000)

@@ -67,6 +67,10 @@ class NativeReflectionRegistryTest {
             "com.bmscomp.kates.chaos.K8sPodWatcher$WatchSession",
             "com.bmscomp.kates.chaos.ProbeRegistry",
             "com.bmscomp.kates.chaos.KafkaProbes",
+            // Fault-targeting helpers; a FaultSpec carries its selector as a string.
+            "com.bmscomp.kates.chaos.ParsedLabelSelector",
+            "com.bmscomp.kates.chaos.ParsedLabelSelector$Requirement",
+            "com.bmscomp.kates.chaos.PodTargets",
             "com.bmscomp.kates.resilience.ResilienceScenarios",
             "com.bmscomp.kates.api.OpenApiConfig");
 

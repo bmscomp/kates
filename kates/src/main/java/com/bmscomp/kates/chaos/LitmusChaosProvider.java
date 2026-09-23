@@ -203,7 +203,7 @@ public class LitmusChaosProvider implements ChaosProvider {
         return spec.experimentName();
     }
 
-    private ChaosEngine buildChaosEngine(FaultSpec spec, String engineName, String experimentName) {
+    ChaosEngine buildChaosEngine(FaultSpec spec, String engineName, String experimentName) {
         ChaosEngine engine = new ChaosEngine();
         engine.getMetadata().setName(engineName);
         engine.getMetadata().setNamespace(spec.targetNamespace());
@@ -226,22 +226,12 @@ public class LitmusChaosProvider implements ChaosProvider {
         List<ChaosEngineSpec.EnvVar> envVars = new ArrayList<>();
         envVars.add(new ChaosEngineSpec.EnvVar("TOTAL_CHAOS_DURATION", String.valueOf(spec.chaosDurationSec())));
 
-        if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
-            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", spec.targetPod()));
-        } else if (spec.targetLabel() != null && !spec.targetLabel().isEmpty()) {
-            String[] parts = spec.targetLabel().split("=", 2);
-            if (parts.length == 2) {
-                var pods = client.pods()
-                        .inNamespace(spec.targetNamespace())
-                        .withLabel(parts[0], parts[1])
-                        .list()
-                        .getItems();
-                if (!pods.isEmpty()) {
-                    int index = (int) (Math.random() * pods.size());
-                    String podName = pods.get(index).getMetadata().getName();
-                    envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", podName));
-                }
-            }
+        // Resolved here, not by Litmus, so targetBrokerId and targetAll mean the
+        // same thing as on the kubernetes backend. node-drain takes TARGET_NODE.
+        boolean hasTarget = (spec.targetPod() != null && !spec.targetPod().isEmpty())
+                || (spec.targetLabel() != null && !spec.targetLabel().isBlank());
+        if (hasTarget && spec.disruptionType() != DisruptionType.NODE_DRAIN) {
+            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", String.join(",", PodTargets.resolve(client, spec))));
         }
 
         if (spec.envOverrides() != null) {

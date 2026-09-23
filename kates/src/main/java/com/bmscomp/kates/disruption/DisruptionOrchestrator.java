@@ -256,6 +256,7 @@ public class DisruptionOrchestrator {
                             .targetNamespace(spec.targetNamespace())
                             .targetLabel(spec.targetLabel())
                             .targetPod(spec.targetPod())
+                            .targetAll(spec.targetAll())
                             .chaosDurationSec(spec.chaosDurationSec())
                             .delayBeforeSec(spec.delayBeforeSec())
                             .envOverrides(spec.envOverrides())

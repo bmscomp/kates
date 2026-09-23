@@ -406,7 +406,7 @@ Returns the list of pre-built disruption playbooks. Each playbook is a curated, 
 [
   {
     "name": "az-failure",
-    "description": "Simulates an availability zone failure by draining a node",
+    "description": "Simulate an availability zone failure by killing every Kafka pod in zone alpha",
     "category": "infrastructure",
     "steps": [ "..." ]
   }

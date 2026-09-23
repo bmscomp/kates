@@ -25,6 +25,7 @@ type ResilienceConfig struct {
 		TargetNamespace  string            `yaml:"targetNamespace,omitempty" json:"targetNamespace,omitempty"`
 		TargetLabel      string            `yaml:"targetLabel,omitempty" json:"targetLabel,omitempty"`
 		TargetPod        string            `yaml:"targetPod,omitempty" json:"targetPod,omitempty"`
+		TargetAll        bool              `yaml:"targetAll,omitempty" json:"targetAll,omitempty"`
 		ChaosDurationSec int               `yaml:"chaosDurationSec,omitempty" json:"chaosDurationSec,omitempty"`
 		DelayBeforeSec   int               `yaml:"delayBeforeSec,omitempty" json:"delayBeforeSec,omitempty"`
 		DisruptionType   string            `yaml:"disruptionType,omitempty" json:"disruptionType,omitempty"`

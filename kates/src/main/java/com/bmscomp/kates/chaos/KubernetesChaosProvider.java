@@ -132,27 +132,34 @@ public class KubernetesChaosProvider implements ChaosProvider {
     }
 
     private void executePodKill(FaultSpec spec) {
-        String podName = resolvePodName(spec);
-        LOG.info("POD_KILL: force-deleting " + podName);
-        client.pods()
-                .inNamespace(spec.targetNamespace())
-                .withName(podName)
-                .withGracePeriod(0)
-                .delete();
+        for (String podName : PodTargets.resolve(client, spec)) {
+            LOG.info("POD_KILL: force-deleting " + podName);
+            client.pods()
+                    .inNamespace(spec.targetNamespace())
+                    .withName(podName)
+                    .withGracePeriod(0)
+                    .delete();
+        }
     }
 
     private void executePodDelete(FaultSpec spec) {
-        String podName = resolvePodName(spec);
-        LOG.info("POD_DELETE: gracefully deleting " + podName + " (grace=" + spec.gracePeriodSec() + "s)");
-        client.pods()
-                .inNamespace(spec.targetNamespace())
-                .withName(podName)
-                .withGracePeriod(spec.gracePeriodSec())
-                .delete();
+        for (String podName : PodTargets.resolve(client, spec)) {
+            LOG.info("POD_DELETE: gracefully deleting " + podName + " (grace=" + spec.gracePeriodSec() + "s)");
+            client.pods()
+                    .inNamespace(spec.targetNamespace())
+                    .withName(podName)
+                    .withGracePeriod(spec.gracePeriodSec())
+                    .delete();
+        }
     }
 
     private void executeNetworkPartition(FaultSpec spec) {
-        String podName = resolvePodName(spec);
+        for (String podName : PodTargets.resolve(client, spec)) {
+            isolatePod(spec, podName);
+        }
+    }
+
+    private void isolatePod(FaultSpec spec, String podName) {
         String policyName = "kates-netpol-" + podName;
 
         LOG.info("NETWORK_PARTITION: applying deny NetworkPolicy for " + podName);
@@ -189,16 +196,14 @@ public class KubernetesChaosProvider implements ChaosProvider {
     }
 
     private void executeRollingRestart(FaultSpec spec) {
-        String[] parts = spec.targetLabel().split("=", 2);
-        String labelKey = parts[0];
-        String labelValue = parts.length > 1 ? parts[1] : "";
+        String selector = ParsedLabelSelector.parse(spec.targetLabel()).toString();
 
-        LOG.info("ROLLING_RESTART: restarting StatefulSets with label " + spec.targetLabel());
+        LOG.info("ROLLING_RESTART: restarting StatefulSets with label " + selector);
 
         client.apps()
                 .statefulSets()
                 .inNamespace(spec.targetNamespace())
-                .withLabel(labelKey, labelValue)
+                .withLabelSelector(selector)
                 .list()
                 .getItems()
                 .forEach(ss -> {
@@ -213,14 +218,10 @@ public class KubernetesChaosProvider implements ChaosProvider {
     }
 
     private void executeScaleDown(FaultSpec spec) {
-        String[] parts = spec.targetLabel().split("=", 2);
-        String labelKey = parts[0];
-        String labelValue = parts.length > 1 ? parts[1] : "";
-
         client.apps()
                 .statefulSets()
                 .inNamespace(spec.targetNamespace())
-                .withLabel(labelKey, labelValue)
+                .withLabelSelector(ParsedLabelSelector.parse(spec.targetLabel()).toString())
                 .list()
                 .getItems()
                 .forEach(ss -> {
@@ -256,33 +257,35 @@ public class KubernetesChaosProvider implements ChaosProvider {
     }
 
     private void executeCpuStress(FaultSpec spec) {
-        String podName = resolvePodName(spec);
-        LOG.info("CPU_STRESS: injecting stress-ng ephemeral container into " + podName);
-        injectEphemeralContainer(
-                spec.targetNamespace(),
-                podName,
-                "chaos-cpu-stress",
-                "polinux/stress",
-                "stress",
-                "--cpu",
-                String.valueOf(spec.cpuCores()),
-                "--timeout",
-                spec.chaosDurationSec() + "s");
+        for (String podName : PodTargets.resolve(client, spec)) {
+            LOG.info("CPU_STRESS: injecting stress-ng ephemeral container into " + podName);
+            injectEphemeralContainer(
+                    spec.targetNamespace(),
+                    podName,
+                    "chaos-cpu-stress",
+                    "polinux/stress",
+                    "stress",
+                    "--cpu",
+                    String.valueOf(spec.cpuCores()),
+                    "--timeout",
+                    spec.chaosDurationSec() + "s");
+        }
     }
 
     private void executeIoStress(FaultSpec spec) {
-        String podName = resolvePodName(spec);
-        LOG.info("IO_STRESS: injecting stress-ng ephemeral container into " + podName);
-        injectEphemeralContainer(
-                spec.targetNamespace(),
-                podName,
-                "chaos-io-stress",
-                "polinux/stress",
-                "stress",
-                "--io",
-                String.valueOf(spec.ioWorkers()),
-                "--timeout",
-                spec.chaosDurationSec() + "s");
+        for (String podName : PodTargets.resolve(client, spec)) {
+            LOG.info("IO_STRESS: injecting stress-ng ephemeral container into " + podName);
+            injectEphemeralContainer(
+                    spec.targetNamespace(),
+                    podName,
+                    "chaos-io-stress",
+                    "polinux/stress",
+                    "stress",
+                    "--io",
+                    String.valueOf(spec.ioWorkers()),
+                    "--timeout",
+                    spec.chaosDurationSec() + "s");
+        }
     }
 
     private void injectEphemeralContainer(
@@ -303,38 +306,6 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
         // Use replace to update ephemeral containers (requires k8s 1.25+)
         podResource.replace(pod);
-    }
-
-    private String resolvePodName(FaultSpec spec) {
-        if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
-            return spec.targetPod();
-        }
-
-        String[] parts = spec.targetLabel().split("=", 2);
-        String labelKey = parts[0];
-        String labelValue = parts.length > 1 ? parts[1] : "";
-
-        var pods = client.pods()
-                .inNamespace(spec.targetNamespace())
-                .withLabel(labelKey, labelValue)
-                .list()
-                .getItems();
-
-        if (pods.isEmpty()) {
-            throw new IllegalStateException("No pods found matching label " + spec.targetLabel());
-        }
-
-        if (spec.targetBrokerId() >= 0) {
-            return pods.stream()
-                    .filter(p -> p.getMetadata().getName().endsWith("-" + spec.targetBrokerId()))
-                    .findFirst()
-                    .orElse(pods.getFirst())
-                    .getMetadata()
-                    .getName();
-        }
-
-        int index = (int) (Math.random() * pods.size());
-        return pods.get(index).getMetadata().getName();
     }
 
     @Override
