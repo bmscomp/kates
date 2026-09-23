@@ -430,19 +430,15 @@ Every disruption report includes an **SLA grade** — a structured verdict on wh
 ```mermaid
 graph TD
     subgraph Metrics["Post-Disruption Metrics (per step)"]
-        M1[Avg / P99 / P999 Latency]
+        M1[Avg / P99 Latency]
         M2[Throughput]
-        M3[Error Rate]
         M4["Recovery Time (RTO)"]
-        M5[Data Loss %]
     end
     
     subgraph Thresholds["SLA Thresholds (plan's sla block)"]
-        T1[maxAvgLatencyMs<br/>maxP99LatencyMs<br/>maxP999LatencyMs]
+        T1[maxAvgLatencyMs<br/>maxP99LatencyMs]
         T2[minThroughputRecPerSec]
-        T3[maxErrorRate]
         T4[maxRtoMs]
-        T5[maxDataLossPercent]
     end
     
     subgraph Verdict["Letter Grade"]
@@ -455,7 +451,15 @@ graph TD
     Thresholds --> Verdict
 ```
 
-Each violation is classified `WARNING` or `CRITICAL` — a breach far past its threshold (for example, P99 latency or recovery time at more than twice the limit, throughput below half the minimum, or any data loss over the cap) is `CRITICAL`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+The grader runs each threshold once per step, after the last step has finished, so a two-step plan with two thresholds makes four checks. Each miss is a violation classified `WARNING` or `CRITICAL`. P99 latency or recovery time above twice the limit, throughput below half the minimum, or an error rate above five times the limit is `CRITICAL`, and any other miss, including every average-latency miss, is a `WARNING`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
+
+Only the thresholds in the diagram are measured. A step's metrics come from a Prometheus snapshot taken when its observation window ends, and that snapshot has no error rate or P99.9 latency. So `maxErrorRate` and `maxP999LatencyMs` always pass, and `maxDataLossPercent`, `minRecordsProcessed` and `maxRpoMs` are never checked. Those fields apply to a test scenario's SLA, where the load test measures them. Some of the checks that do run have limits too:
+
+- A step with no snapshot contributes no checks. That happens when Prometheus is unreachable, when `observationWindowSec` is `0`, or when the step fails.
+- `maxRtoMs` is skipped when the pods never all come back Ready.
+- With the metrics rules of the `kafka-cluster` chart, the P99 query finds no `_bucket` series and reads `0`, and the average latency is divided by 1000. Neither latency check can fail. The throughput sum counts the broker-wide series and the per-topic series, so it reads about twice the real rate.
+
+A verdict with `totalChecks: 0` is an `A` that checked nothing.
 
 ### CI/CD Integration
 
