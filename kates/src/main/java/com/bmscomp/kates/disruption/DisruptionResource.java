@@ -361,7 +361,7 @@ public class DisruptionResource {
             case IO_STRESS -> "Inject disk I/O pressure on broker storage";
             case DNS_ERROR -> "Inject DNS resolution failures on broker pods";
             case DISK_FILL -> "Fill broker log directory to simulate storage pressure";
-            case ROLLING_RESTART -> "Trigger StatefulSet rolling restart";
+            case ROLLING_RESTART -> "Restart brokers one at a time through the Strimzi Cluster Operator";
             case LEADER_ELECTION -> "Kill the controller broker to force leader election";
             case SCALE_DOWN -> "Reduce StatefulSet replica count";
             case NODE_DRAIN -> "Drain the Kubernetes node hosting a broker";

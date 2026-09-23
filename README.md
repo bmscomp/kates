@@ -193,7 +193,7 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
 | [`kates-chaos`](charts/kates-chaos/) | 2.2.1 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
 | [`kates-platform`](charts/kates-platform/) | 0.7.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
-| [`kates`](charts/kates/) | 0.9.2 | 1.23.0 | Kates — Kafka Advanced Testing & Engineering Suite |
+| [`kates`](charts/kates/) | 0.10.1 | 1.23.0 | Kates — Kafka Advanced Testing & Engineering Suite |
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.0 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source that Strimzi 1.1.0 cannot deploy |
 | [`minio`](charts/minio/) | 17.0.22 | 2025.7.23 | MinIO(R) is an object storage server, compatible with Amazon S3 cloud |
 | [`mirror-maker2`](charts/mirror-maker2/) | 0.11.1 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |

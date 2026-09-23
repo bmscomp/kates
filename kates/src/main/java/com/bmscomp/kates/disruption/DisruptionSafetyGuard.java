@@ -127,7 +127,12 @@ public class DisruptionSafetyGuard {
             FaultSpec spec = t.spec();
 
             try {
-                affectedBrokers.addAll(affectedBrokers(spec, brokerPods));
+                List<String> hit = affectedBrokers(spec, brokerPods);
+                // A rolling restart takes its brokers down one at a time.
+                affectedBrokers.addAll(
+                        spec.disruptionType() == DisruptionType.ROLLING_RESTART && !hit.isEmpty()
+                                ? hit.subList(0, 1)
+                                : hit);
             } catch (IllegalArgumentException e) {
                 errors.add("Step '" + step.name() + "': " + e.getMessage());
             }
@@ -208,9 +213,13 @@ public class DisruptionSafetyGuard {
                 stepWarnings.add(e.getMessage());
             }
 
-            if (spec.disruptionType() == DisruptionType.ROLLING_RESTART
-                    || spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+            if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
                 brokerPods.forEach(p -> affected.add(p.getMetadata().getName()));
+            }
+
+            if (spec.disruptionType() == DisruptionType.ROLLING_RESTART && spec.chaosDurationSec() <= 0) {
+                stepWarnings.add("chaosDurationSec is 0 — the step does not wait for the Cluster Operator to"
+                        + " finish the roll, so the observation window overlaps it");
             }
 
             boolean canExecute = checkRbacPermissions(spec);
@@ -436,13 +445,15 @@ public class DisruptionSafetyGuard {
                                             .withNewResourceAttributes()
                                             .withNamespace(spec.targetNamespace())
                                             .withVerb("create")
+                                            .withGroup("networking.k8s.io")
                                             .withResource("networkpolicies")
                                             .endResourceAttributes()
                                             .endSpec()
                                             .build())
                             .getStatus()
                             .getAllowed();
-                case SCALE_DOWN, ROLLING_RESTART ->
+                // Annotates the pods for the Strimzi Cluster Operator to roll.
+                case ROLLING_RESTART ->
                     kubeClient
                             .authorization()
                             .v1()
@@ -453,7 +464,27 @@ public class DisruptionSafetyGuard {
                                             .withNewSpec()
                                             .withNewResourceAttributes()
                                             .withNamespace(spec.targetNamespace())
-                                            .withVerb("update")
+                                            .withVerb("patch")
+                                            .withResource("pods")
+                                            .endResourceAttributes()
+                                            .endSpec()
+                                            .build())
+                            .getStatus()
+                            .getAllowed();
+                case SCALE_DOWN ->
+                    kubeClient
+                            .authorization()
+                            .v1()
+                            .selfSubjectAccessReview()
+                            .create(
+                                    new io.fabric8.kubernetes.api.model.authorization.v1
+                                                    .SelfSubjectAccessReviewBuilder()
+                                            .withNewSpec()
+                                            .withNewResourceAttributes()
+                                            .withNamespace(spec.targetNamespace())
+                                            // edit() and rolling().restart() both PATCH
+                                            .withVerb("patch")
+                                            .withGroup("apps")
                                             .withResource("statefulsets")
                                             .endResourceAttributes()
                                             .endSpec()

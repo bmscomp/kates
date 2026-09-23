@@ -92,7 +92,7 @@ Schema: `testRequest` + `chaosSpec` + `steadyStateSec` + `probes`.
 | `resilience-memory-stress.yaml` | `MEMORY_STRESS` | 500 MB native memory | brokers-sigma |
 | `resilience-io-stress.yaml` | `IO_STRESS` | 80% disk saturation | brokers-alpha |
 | `resilience-dns-error.yaml` | `DNS_ERROR` | CoreDNS failures | all brokers |
-| `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Rolling upgrade, 30s delay | all brokers |
+| `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Strimzi rolling update, one pod at a time | all brokers |
 | `resilience-node-drain.yaml` | `NODE_DRAIN` | Node maintenance eviction | brokers-gamma |
 | `resilience-leader-election.yaml` | `LEADER_ELECTION` | Force re-election all partitions | all brokers |
 | `resilience-scale-down.yaml` | `SCALE_DOWN` | Pool contraction to 0 | brokers-sigma |

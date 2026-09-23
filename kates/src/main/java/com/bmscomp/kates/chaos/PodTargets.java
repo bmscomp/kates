@@ -13,8 +13,13 @@ import io.fabric8.kubernetes.client.KubernetesClient;
  *
  * <p>Precedence: {@code targetPod}; then {@code targetAll}, every pod
  * {@code targetLabel} matches; then {@code targetBrokerId}; then one random
- * matching pod. {@code targetAll} outranks {@code targetBrokerId} because a
- * FaultSpec posted as JSON without {@code targetBrokerId} carries 0, not -1.
+ * matching pod. {@code targetAll} outranks {@code targetBrokerId}, so a broker
+ * ID the spec also carries never narrows it to one pod.
+ *
+ * <p>A {@code ROLLING_RESTART} without {@code targetPod} always takes every
+ * matching pod, as if {@code targetAll} were set: it restarts them one at a
+ * time, so the safety guard counts only one of them against
+ * {@code maxAffectedBrokers}.
  */
 public final class PodTargets {
 
@@ -31,7 +36,7 @@ public final class PodTargets {
         if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
             return Mode.NAMED_POD;
         }
-        if (spec.targetAll()) {
+        if (spec.targetAll() || spec.disruptionType() == DisruptionType.ROLLING_RESTART) {
             return Mode.ALL;
         }
         if (spec.targetBrokerId() >= 0) {

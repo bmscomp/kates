@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
@@ -14,6 +15,7 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
+import io.fabric8.mockwebserver.http.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -88,6 +90,12 @@ public class KubernetesChaosProviderTest {
                 .build();
         client.pods().inNamespace("default").resource(pod).create();
 
+        // Ephemeral containers can only be written through the subresource, which the
+        // CRUD mock does not serve — and it would accept the plain pod update a real
+        // API server rejects. Answer the write here and assert on what was sent.
+        String subresource = "/api/v1/namespaces/default/pods/broker-0/ephemeralcontainers";
+        server.expect().put().withPath(subresource).andReturn(200, pod).once();
+
         FaultSpec spec = FaultSpec.builder("test-cpu-stress")
                 .targetNamespace("default")
                 .targetLabel("app=kafka")
@@ -101,13 +109,14 @@ public class KubernetesChaosProviderTest {
         assertNotNull(outcome);
         assertTrue(outcome.isPass());
 
-        Pod updatedPod =
-                client.pods().inNamespace("default").withName("broker-0").get();
-        assertNotNull(updatedPod);
-        assertEquals(1, updatedPod.getSpec().getEphemeralContainers().size());
+        RecordedRequest write = server.getLastRequest();
+        assertEquals("PUT", write.getMethod());
+        assertEquals(subresource, write.getPath());
+        Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
+        assertEquals(1, sent.getSpec().getEphemeralContainers().size());
         assertEquals(
                 "chaos-cpu-stress",
-                updatedPod.getSpec().getEphemeralContainers().get(0).getName());
+                sent.getSpec().getEphemeralContainers().get(0).getName());
     }
 
     @Test
@@ -127,6 +136,9 @@ public class KubernetesChaosProviderTest {
                 .build();
         client.pods().inNamespace("default").resource(pod).create();
 
+        String subresource = "/api/v1/namespaces/default/pods/broker-1/ephemeralcontainers";
+        server.expect().put().withPath(subresource).andReturn(200, pod).once();
+
         FaultSpec spec = FaultSpec.builder("test-io-stress")
                 .targetNamespace("default")
                 .targetLabel("app=kafka2")
@@ -140,13 +152,14 @@ public class KubernetesChaosProviderTest {
         assertNotNull(outcome);
         assertTrue(outcome.isPass());
 
-        Pod updatedPod =
-                client.pods().inNamespace("default").withName("broker-1").get();
-        assertNotNull(updatedPod);
-        assertEquals(1, updatedPod.getSpec().getEphemeralContainers().size());
+        RecordedRequest write = server.getLastRequest();
+        assertEquals("PUT", write.getMethod());
+        assertEquals(subresource, write.getPath());
+        Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
+        assertEquals(1, sent.getSpec().getEphemeralContainers().size());
         assertEquals(
                 "chaos-io-stress",
-                updatedPod.getSpec().getEphemeralContainers().get(0).getName());
+                sent.getSpec().getEphemeralContainers().get(0).getName());
     }
 
     @Test
@@ -201,18 +214,208 @@ public class KubernetesChaosProviderTest {
             {"krafter-brokers-0", "alpha"}, {"krafter-brokers-1", "alpha"}, {"krafter-brokers-2", "sigma"}
         };
         for (String[] b : brokers) {
-            client.pods()
-                    .inNamespace("kafka")
-                    .resource(new PodBuilder()
-                            .withNewMetadata()
-                            .withName(b[0])
-                            .withNamespace("kafka")
-                            .addToLabels("strimzi.io/component-type", "kafka")
-                            .addToLabels("zone", b[1])
-                            .endMetadata()
-                            .build())
-                    .create();
+            client.pods().inNamespace("kafka").resource(broker(b[0], b[1])).create();
         }
+    }
+
+    /** A broker pod as Strimzi runs it: owned by a StrimziPodSet. The mock server assigns its UID. */
+    private static Pod broker(String name, String zone) {
+        return new PodBuilder()
+                .withNewMetadata()
+                .withName(name)
+                .withNamespace("kafka")
+                .addToLabels("strimzi.io/component-type", "kafka")
+                .addToLabels("zone", zone)
+                .addNewOwnerReference()
+                .withApiVersion("core.strimzi.io/v1")
+                .withKind("StrimziPodSet")
+                .withName("krafter-brokers")
+                .withUid("podset-uid")
+                .endOwnerReference()
+                .endMetadata()
+                .withNewStatus()
+                .withPhase("Running")
+                .addNewCondition()
+                .withType("Ready")
+                .withStatus("True")
+                .endCondition()
+                .endStatus()
+                .build();
+    }
+
+    private List<String> uids() {
+        return client.pods().inNamespace("kafka").list().getItems().stream()
+                .map(p -> p.getMetadata().getUid())
+                .toList();
+    }
+
+    private boolean annotatedForRoll(String podName) {
+        var annotations = client.pods()
+                .inNamespace("kafka")
+                .withName(podName)
+                .get()
+                .getMetadata()
+                .getAnnotations();
+        return annotations != null
+                && "true".equals(annotations.get(KubernetesChaosProvider.MANUAL_ROLLING_UPDATE_ANNOTATION));
+    }
+
+    private static FaultSpec rollingRestart(String selector, int chaosDurationSec) {
+        return FaultSpec.builder("rolling-restart")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.ROLLING_RESTART)
+                .chaosDurationSec(chaosDurationSec)
+                .build();
+    }
+
+    @Test
+    void rollingRestartAnnotatesEveryStrimziPodTheSelectorMatches() throws Exception {
+        createZonedBrokers();
+
+        // Used to look for StatefulSets, which Strimzi does not create, and
+        // "succeed" having restarted nothing.
+        ChaosOutcome outcome = provider.triggerFault(rollingRestart("strimzi.io/component-type=kafka,zone=alpha", 0))
+                .get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertTrue(annotatedForRoll("krafter-brokers-0"));
+        assertTrue(annotatedForRoll("krafter-brokers-1"), "every matching pod, not one at random");
+        assertFalse(annotatedForRoll("krafter-brokers-2"));
+    }
+
+    @Test
+    void rollingRestartWaitsForTheOperatorToReplaceEveryPod() throws Exception {
+        createZonedBrokers();
+        provider.rollPollIntervalMs = 20;
+        List<String> before = uids();
+
+        // Stands in for the Cluster Operator: replaces each annotated pod, one
+        // at a time, with a new pod of the same name and no annotation.
+        AtomicBoolean done = new AtomicBoolean();
+        Thread operator = new Thread(() -> {
+            while (!done.get()) {
+                client.pods().inNamespace("kafka").list().getItems().stream()
+                        .filter(p -> annotatedForRoll(p.getMetadata().getName()))
+                        .findFirst()
+                        .ifPresent(p -> {
+                            String name = p.getMetadata().getName();
+                            client.pods().inNamespace("kafka").withName(name).delete();
+                            client.pods()
+                                    .inNamespace("kafka")
+                                    .resource(broker(
+                                            name, p.getMetadata().getLabels().get("zone")))
+                                    .create();
+                        });
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        });
+        operator.start();
+        try {
+            ChaosOutcome outcome = provider.triggerFault(rollingRestart("strimzi.io/component-type=kafka", 10))
+                    .get(15, TimeUnit.SECONDS);
+
+            assertTrue(outcome.isPass(), outcome.failureReason());
+            List<String> after = uids();
+            assertEquals(3, after.size());
+            assertTrue(
+                    after.stream().noneMatch(before::contains),
+                    "the step returned only once every pod had been replaced");
+        } finally {
+            done.set(true);
+            operator.join();
+        }
+    }
+
+    @Test
+    void rollingRestartThatDoesNotFinishFailsAndWithdrawsTheAnnotation() throws Exception {
+        createZonedBrokers();
+        provider.rollPollIntervalMs = 20;
+
+        // Nothing rolls the pods: the Cluster Operator is down, or holds them back.
+        ChaosOutcome outcome = provider.triggerFault(rollingRestart("strimzi.io/component-type=kafka,zone=alpha", 1))
+                .get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("0 of 2 pods rolled"), outcome.failureReason());
+        assertFalse(annotatedForRoll("krafter-brokers-0"), "not left for the operator to roll during a later step");
+        assertFalse(annotatedForRoll("krafter-brokers-1"));
+    }
+
+    @Test
+    void rollingRestartFailsWhenNoMatchingPodIsRunByAPodSetOrStatefulSet() throws Exception {
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("bare")
+                        .withNamespace("kafka")
+                        .addToLabels("app", "bare")
+                        .endMetadata()
+                        .build())
+                .create();
+
+        ChaosOutcome outcome =
+                provider.triggerFault(rollingRestart("app=bare", 0)).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertTrue(outcome.failureReason().contains("StrimziPodSet or a StatefulSet"), outcome.failureReason());
+    }
+
+    @Test
+    void rollingRestartRestartsTheStatefulSetOfAKafkaNotRunByStrimzi() throws Exception {
+        StatefulSet ss = new StatefulSetBuilder()
+                .withNewMetadata()
+                .withName("kafka")
+                .withNamespace("kafka")
+                .endMetadata()
+                .withNewSpec()
+                .withReplicas(1)
+                .withNewTemplate()
+                .withNewMetadata()
+                .addToLabels("app", "kafka")
+                .endMetadata()
+                .endTemplate()
+                .endSpec()
+                .build();
+        client.apps().statefulSets().inNamespace("kafka").resource(ss).create();
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("kafka-0")
+                        .withNamespace("kafka")
+                        .addToLabels("app", "kafka")
+                        .addNewOwnerReference()
+                        .withApiVersion("apps/v1")
+                        .withKind("StatefulSet")
+                        .withName("kafka")
+                        .withUid("sts-uid")
+                        .endOwnerReference()
+                        .endMetadata()
+                        .build())
+                .create();
+
+        ChaosOutcome outcome =
+                provider.triggerFault(rollingRestart("app=kafka", 0)).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        StatefulSet after = client.apps()
+                .statefulSets()
+                .inNamespace("kafka")
+                .withName("kafka")
+                .get();
+        assertTrue(
+                after.getSpec()
+                        .getTemplate()
+                        .getMetadata()
+                        .getAnnotations()
+                        .containsKey("kubectl.kubernetes.io/restartedAt"),
+                "pod template stamped, so the StatefulSet controller rolls the pods");
+        assertFalse(annotatedForRoll("kafka-0"), "the Strimzi annotation is for StrimziPodSet pods only");
     }
 
     private List<String> remainingPods() {
