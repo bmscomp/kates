@@ -104,6 +104,47 @@ class DataIntegrityVerifierTest {
     }
 
     @Test
+    void rpoIsNotMeasuredWithoutAChaosStart() {
+        AckTracker tracker = new AckTracker();
+        tracker.recordSent(0, 1_000L);
+        tracker.recordAcked(0, 1_000L);
+        DataIntegrityVerifier verifier = new DataIntegrityVerifier(tracker);
+        verifier.recordConsumed(0);
+
+        IntegrityResult result = verifier.verify(-1);
+
+        // Not zero: a zero RPO would pass any maxRpoMs gate it was never measured against.
+        assertNull(result.rpo());
+        assertEquals(-1.0, result.rpoMs(), 0.0);
+    }
+
+    @Test
+    void rpoIsMeasuredFromTheChaosStart() {
+        AckTracker tracker = new AckTracker();
+        tracker.recordSent(0, 1_000_000L);
+        tracker.recordAcked(0, 1_000_000L);
+        DataIntegrityVerifier verifier = new DataIntegrityVerifier(tracker);
+        verifier.recordConsumed(0);
+
+        IntegrityResult result = verifier.verify(251_000_000L);
+
+        assertEquals(250.0, result.rpoMs(), 1e-9);
+    }
+
+    @Test
+    void rpoIsZeroWhenTheLastAckFollowsTheChaosStart() {
+        AckTracker tracker = new AckTracker();
+        tracker.recordSent(0, 5_000_000L);
+        tracker.recordAcked(0, 5_000_000L);
+        DataIntegrityVerifier verifier = new DataIntegrityVerifier(tracker);
+        verifier.recordConsumed(0);
+
+        IntegrityResult result = verifier.verify(1_000_000L);
+
+        assertEquals(0.0, result.rpoMs(), 0.0);
+    }
+
+    @Test
     void legacyVerifyOverloadWorks() {
         AckTracker tracker = trackerWithAcked(3);
         DataIntegrityVerifier verifier = new DataIntegrityVerifier(tracker);

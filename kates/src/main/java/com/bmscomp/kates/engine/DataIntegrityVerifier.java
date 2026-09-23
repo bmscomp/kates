@@ -140,9 +140,11 @@ public class DataIntegrityVerifier {
 
         Duration maxRto = producerRto.compareTo(consumerRto) >= 0 ? producerRto : consumerRto;
 
-        // RPO
-        Duration rpo = Duration.ZERO;
+        // RPO. Null when there is no chaos start to measure from: a zero here
+        // would read as "measured, nothing at risk" and pass any maxRpoMs gate.
+        Duration rpo = null;
         if (chaosStartNanos > 0 && ackTracker.getLastAckedSendNanos() > 0) {
+            rpo = Duration.ZERO;
             long rpoNanos = chaosStartNanos - ackTracker.getLastAckedSendNanos();
             if (rpoNanos > 0) {
                 rpo = Duration.ofNanos(rpoNanos);

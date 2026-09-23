@@ -413,7 +413,7 @@ public class ReportGenerator {
                                 .append(String.format("%.0f", ir.consumerRtoMs()))
                                 .append(" |\n");
                         sb.append("| RPO (ms) | ")
-                                .append(String.format("%.0f", ir.rpoMs()))
+                                .append(ir.rpoMs() >= 0 ? String.format("%.0f", ir.rpoMs()) : "not measured")
                                 .append(" |\n");
                         sb.append("| CRC Verified | ").append(ir.crcVerified()).append(" |\n");
                         sb.append("| CRC Failures | ").append(ir.crcFailures()).append(" |\n");
