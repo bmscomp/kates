@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 
@@ -281,6 +283,67 @@ class DisruptionSafetyGuardTest {
         assertTrue(
                 oldStep.warnings().getFirst().contains("matches no broker pod"),
                 oldStep.warnings().toString());
+    }
+
+    // ── Leader-aware steps ──────────────────────────────────────────────────
+
+    private static FaultSpec leaderKill(int partition) {
+        return FaultSpec.builder("leader-" + partition)
+                .targetTopic("orders")
+                .targetPartition(partition)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+    }
+
+    private void leaders(int... leaderOfPartition) {
+        guard.intelligence = mock(KafkaIntelligenceService.class);
+        for (int p = 0; p < leaderOfPartition.length; p++) {
+            when(guard.intelligence.resolveLeaderBrokerId("orders", p)).thenReturn(leaderOfPartition[p]);
+        }
+    }
+
+    @Test
+    void dryRunPreviewsTheLeadersPod() {
+        createZonedBrokers();
+        leaders(2);
+
+        var step = guard.dryRun(plan(1, leaderKill(0))).steps().getFirst();
+
+        // It previewed the pod for the spec's own targetBrokerId, here a
+        // random pick, while resolvedLeaderId named the leader.
+        assertEquals(2, step.resolvedLeaderId());
+        assertEquals("krafter-brokers-2", step.targetPod());
+        assertEquals(List.of("krafter-brokers-2"), step.affectedPods());
+    }
+
+    @Test
+    void blastRadiusCountsEachStepsLeader() {
+        createZonedBrokers();
+        leaders(1, 3);
+
+        var result = guard.validatePlan(plan(1, leaderKill(0), leaderKill(1)));
+
+        // Both steps counted as the same random pick, so this passed.
+        assertFalse(result.safe());
+        assertEquals(List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"), result.errors());
+    }
+
+    @Test
+    void aFailedLeaderLookupKeepsTheSpecAsPosted() {
+        createZonedBrokers();
+        leaders(-1);
+
+        var step = guard.dryRun(
+                        plan(1, leaderKill(0).toBuilder().targetBrokerId(3).build()))
+                .steps()
+                .getFirst();
+
+        // What the orchestrator runs when its own lookup fails.
+        assertNull(step.resolvedLeaderId());
+        assertEquals("krafter-brokers-3", step.targetPod());
+        assertTrue(
+                step.warnings().contains("Could not resolve leader for orders-0"),
+                step.warnings().toString());
     }
 
     @Test

@@ -159,21 +159,100 @@ class FaultSpecTest {
     }
 
     @Test
-    void toBuilderAcceptsASpecDeserializedFromJson() throws Exception {
-        // POST /api/disruptions leaves omitted collections null. The old
-        // copy passed them to Map.copyOf, which threw.
-        FaultSpec posted = new ObjectMapper()
-                .readValue(
-                        "{\"experimentName\":\"leader\",\"disruptionType\":\"POD_KILL\",\"targetTopic\":\"orders\"}",
-                        FaultSpec.class);
-        assertNull(posted.envOverrides());
-        assertNull(posted.probes());
+    void toBuilderAcceptsNullCollections() {
+        // The canonical constructor takes nulls. The old copy passed them to
+        // Map.copyOf, which threw.
+        FaultSpec spec = new FaultSpec(
+                "leader",
+                "kafka",
+                "app=kafka",
+                "",
+                false,
+                30,
+                0,
+                null,
+                DisruptionType.POD_KILL,
+                -1,
+                100,
+                80,
+                1,
+                500,
+                2,
+                30,
+                "orders",
+                0,
+                null);
 
-        FaultSpec copy = posted.toBuilder().targetBrokerId(2).build();
+        FaultSpec copy = spec.toBuilder().targetBrokerId(2).build();
 
         assertEquals(2, copy.targetBrokerId());
         assertEquals("orders", copy.targetTopic());
         assertTrue(copy.envOverrides().isEmpty());
         assertTrue(copy.probes().isEmpty());
+    }
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    @Test
+    void jsonGetsTheBuilderDefaults() throws Exception {
+        // Read through the canonical constructor, this spec had no namespace
+        // or label selector (so the Kubernetes backend refused it), targeted
+        // broker 0 rather than a random pod, and had a zero duration.
+        FaultSpec posted = JSON.readValue(
+                "{\"experimentName\":\"leader\",\"disruptionType\":\"POD_KILL\",\"targetTopic\":\"orders\"}",
+                FaultSpec.class);
+
+        assertEquals(
+                FaultSpec.builder("leader")
+                        .disruptionType(DisruptionType.POD_KILL)
+                        .targetTopic("orders")
+                        .build(),
+                posted);
+    }
+
+    @Test
+    void jsonValuesOverrideTheDefaultsEvenWhenZero() throws Exception {
+        FaultSpec posted = JSON.readValue(
+                "{\"targetBrokerId\":0,\"chaosDurationSec\":0,\"gracePeriodSec\":0,\"targetAll\":true,"
+                        + "\"experimentName\":\"x\",\"targetLabel\":\"app=kafka\"}",
+                FaultSpec.class);
+
+        assertEquals(0, posted.targetBrokerId());
+        assertEquals(0, posted.chaosDurationSec());
+        assertEquals(0, posted.gracePeriodSec());
+        assertTrue(posted.targetAll());
+        assertEquals("app=kafka", posted.targetLabel());
+        assertEquals("kafka", posted.targetNamespace());
+    }
+
+    @Test
+    void jsonNullCollectionsAreEmpty() throws Exception {
+        FaultSpec posted =
+                JSON.readValue("{\"experimentName\":\"x\",\"envOverrides\":null,\"probes\":null}", FaultSpec.class);
+
+        assertTrue(posted.envOverrides().isEmpty());
+        assertTrue(posted.probes().isEmpty());
+    }
+
+    @Test
+    void jsonRoundTripPreservesEveryComponent() throws Exception {
+        FaultSpec spec = everyComponentOverridden();
+
+        assertEquals(spec, JSON.readValue(JSON.writeValueAsString(spec), FaultSpec.class));
+    }
+
+    @Test
+    void aPlanStepsFaultSpecGetsTheDefaults() throws Exception {
+        // The path POST /api/disruptions takes: the spec nested in a plan step.
+        com.bmscomp.kates.disruption.DisruptionPlan plan = JSON.readValue(
+                "{\"name\":\"p\",\"steps\":[{\"name\":\"s\",\"faultSpec\":"
+                        + "{\"experimentName\":\"kill\",\"disruptionType\":\"POD_KILL\"}}]}",
+                com.bmscomp.kates.disruption.DisruptionPlan.class);
+
+        FaultSpec spec = plan.getSteps().getFirst().faultSpec();
+        assertEquals("kafka", spec.targetNamespace());
+        assertEquals("strimzi.io/component-type=kafka", spec.targetLabel());
+        assertEquals(-1, spec.targetBrokerId());
+        assertEquals(30, spec.chaosDurationSec());
     }
 }

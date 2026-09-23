@@ -13,8 +13,8 @@ import io.fabric8.kubernetes.client.KubernetesClient;
  *
  * <p>Precedence: {@code targetPod}; then {@code targetAll}, every pod
  * {@code targetLabel} matches; then {@code targetBrokerId}; then one random
- * matching pod. {@code targetAll} outranks {@code targetBrokerId} because a
- * FaultSpec posted as JSON without {@code targetBrokerId} carries 0, not -1.
+ * matching pod. {@code targetAll} outranks {@code targetBrokerId}, so a broker
+ * ID the spec also carries never narrows it to one pod.
  *
  * <p>A {@code ROLLING_RESTART} without {@code targetPod} always takes every
  * matching pod, as if {@code targetAll} were set: it restarts them one at a
@@ -73,8 +73,8 @@ public final class PodTargets {
         return switch (mode(spec)) {
             case NAMED_POD -> List.of(spec.targetPod());
             case ALL -> matching.stream().map(PodTargets::name).toList();
-            // Falls back to the first match when no pod name ends in -<id>:
-            // a JSON FaultSpec that never set targetBrokerId relies on it.
+            // Falls back to the first match when no pod the selector matches
+            // has a name ending in -<id>.
             case BROKER_ID ->
                 matching.isEmpty()
                         ? List.of()

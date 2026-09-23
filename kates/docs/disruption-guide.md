@@ -154,11 +154,7 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 | `cpuCores` | `int` | `1` | CPU cores to stress (CPU_STRESS only) |
 | `envOverrides` | `Map<String,String>` | `{}` | Additional env vars for the chaos engine |
 
-The defaults in this table apply only when Kates builds the `FaultSpec` itself, as it does for each playbook step. A `faultSpec` you post as JSON does not get them. `FaultSpec` is a Java record, so Jackson builds it from exactly the fields you send: an omitted string is `null`, an omitted number is `0` and an omitted flag is `false`. That has three consequences for a JSON plan:
-
-- **Always set `targetNamespace` and `targetLabel`.** Without a label, the dry-run still shows a target pod, but the direct Kubernetes backend refuses to inject the fault (`Empty label selector`) and the step fails.
-- **Set `"targetBrokerId": -1` when you want a random matching pod.** An omitted `targetBrokerId` is `0`, which picks the pod whose name ends in `-0`.
-- **Send every numeric setting the fault relies on**, such as `chaosDurationSec` and `gracePeriodSec`. Both come back as `0` when omitted, not `30`.
+The defaults apply to a `faultSpec` posted as JSON as well as to a playbook step: a field the JSON leaves out gets the value in this table, and a field it sets, `0` included, keeps that value. So an omitted `targetBrokerId` means one random matching pod, and `"targetBrokerId": 0` means the pod whose name ends in `-0`. The same holds for each entry of `probes`.
 
 ### Leader-Aware Targeting: The Killer Feature
 
@@ -181,7 +177,7 @@ This means you can write experiments like "kill the leader of the `orders` topic
 }
 ```
 
-This is critical for experiments that are meant to be repeatable. If you hardcode a broker ID, your experiment breaks the moment leadership moves. With leader-aware targeting, the experiment always hits the right broker, regardless of the current cluster state. The lookup runs when the step starts. If it fails (the topic or partition does not exist, the partition has no leader, or Kafka does not answer), the step keeps the `targetBrokerId` you sent, which is `0` if you left it out.
+This is critical for experiments that are meant to be repeatable. If you hardcode a broker ID, your experiment breaks the moment leadership moves. With leader-aware targeting, the experiment always hits the right broker, regardless of the current cluster state. The lookup runs when the step starts. If it fails (the topic or partition does not exist, the partition has no leader, or Kafka does not answer), the step keeps the `targetBrokerId` you sent, which is `-1`, one random matching pod, if you left it out.
 
 ## Disruption Plans: Designing Multi-Step Experiments
 
@@ -240,7 +236,7 @@ A `DisruptionPlan` is a sequence of `DisruptionStep` objects, each describing a 
 
 There are important design decisions embedded in this plan. The `steadyStateSec: 10` on the second step means we only wait 10 seconds after the first broker recovers before killing the second one — putting the cluster under maximum pressure. The `observationWindowSec: 180` on the second step is longer because recovering from two simultaneous broker failures takes more time. And the `maxAffectedBrokers: 2` tells the safety guard that we intentionally want to affect two brokers.
 
-Each `faultSpec` spells out `targetNamespace` and `targetLabel`, because a JSON spec gets no defaults (see the note under the [FaultSpec table](#faultspec-the-language-of-disruption)). The `sla` block sets only thresholds the disruption grader can fail today. [Defining Your SLA](#defining-your-sla) explains why P99 latency and data loss are left out.
+Each `faultSpec` spells out `targetNamespace` and `targetLabel`. They are the defaults, but naming them makes the plan say which pods it can touch. The `sla` block sets only thresholds the disruption grader can fail today. [Defining Your SLA](#defining-your-sla) explains why P99 latency and data loss are left out.
 
 ## The 13-Step Execution Pipeline
 
@@ -530,7 +526,7 @@ curl -X POST 'http://localhost:8080/api/disruptions?dryRun=true' \
   }'
 ```
 
-Check the response. `wouldSucceed` should be `true`, and the step's `warnings` should not mention RBAC. The step's `resolvedLeaderId` is the broker whose pod would be killed. Its `targetPod` does not reflect that lookup: it shows the pod for the `targetBrokerId` in the plan, which is `0` here because the plan leaves it out.
+Check the response. `wouldSucceed` should be `true`, and the step's `warnings` should not mention RBAC. The step's `resolvedLeaderId` is the partition's current leader, and `targetPod` is that broker's pod, the one that would be killed. The leader can still move before the step runs.
 
 The `sla` block sets only `maxRtoMs`. The LOAD test from Step 2 has finished by now, so a throughput minimum would fail for lack of traffic, and the latency thresholds cannot fail on the chart's metrics (see [Defining Your SLA](#defining-your-sla)).
 
