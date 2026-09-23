@@ -13,7 +13,7 @@ Every version the platform pins, in one place. This table is generated from the 
 | cert-manager | v1.17.1 | `versions.env` |
 | Java (backend) | 21 | `kates/pom.xml` |
 | Quarkus | 3.20.6 | `kates/pom.xml` |
-| Go (CLI) | 1.25.7 | `cli/go.mod` |
+| Go (CLI) | 1.26.0 | `cli/go.mod` |
 | `apicurio-registry` chart | 0.4.0 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
 | `connect-cluster` chart | 2.1.2 (app 4.3.1) | `charts/connect-cluster/Chart.yaml` |
 | `headlamp` chart | 0.2.0 (app 0.40.1) | `charts/headlamp/Chart.yaml` |
