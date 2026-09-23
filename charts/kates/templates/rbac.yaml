@@ -25,6 +25,12 @@ rules:
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments"]
     verbs: ["get", "list"]
+  # patch: ROLLING_RESTART restarts a StatefulSet that Strimzi does not manage
+  # (charts/legacy-kafka runs Kafka that way). Like the pod annotation above,
+  # it runs on both chaos backends, so it is not behind rbac.directChaos.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["patch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list"]
@@ -52,17 +58,14 @@ rules:
     hybrid on a cluster without Litmus) makes these writes itself. Litmus runs
     every experiment as its own litmus-admin service account, so a Litmus
     install needs none of them. Cleanup and rollback delete NetworkPolicies by
-    label, which is deletecollection; SCALE_DOWN PATCHes the StatefulSet and sets
-    replicas through its scale subresource, and ROLLING_RESTART PATCHes a
-    StatefulSet that Strimzi does not manage; CPU_STRESS and
-    IO_STRESS add a container through pods/ephemeralcontainers.
+    label, which is deletecollection; on a Kafka that Strimzi does not manage,
+    SCALE_DOWN sets replicas through the StatefulSet's scale subresource (its
+    PATCH on the StatefulSet is granted above, for ROLLING_RESTART); CPU_STRESS
+    and IO_STRESS add a container through pods/ephemeralcontainers.
   */}}
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["create", "delete", "deletecollection"]
-  - apiGroups: ["apps"]
-    resources: ["statefulsets"]
-    verbs: ["patch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets/scale"]
     verbs: ["get", "update"]

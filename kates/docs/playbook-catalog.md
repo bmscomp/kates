@@ -282,7 +282,7 @@ A few other details:
 - **Non-Strimzi Kafka is rolled differently.** A pod run by a StatefulSet is rolled by restarting its StatefulSet. Matching pods that belong to neither a StrimziPodSet nor a StatefulSet are skipped.
 - **Both backends run it the same way.** The Litmus backend hands `ROLLING_RESTART` to the Kubernetes API, because Litmus `pod-delete` kills pods rather than rolling them.
 - **The safety guard counts it as one broker** against `maxAffectedBrokers`, because the operator takes brokers down one at a time. The dry run still lists every pod it restarts.
-- **The service account needs `patch` on pods.** The `kates` chart's ClusterRole grants it.
+- **The service account needs `patch` on pods, and on StatefulSets to roll a Kafka that Strimzi does not manage.** The `kates` chart's ClusterRole grants both.
 
 ### What to Look For
 

@@ -54,7 +54,8 @@ class PodTargetsTest {
 
     @Test
     void rollingRestartTakesEveryMatchingPodUnlessOneIsNamed() {
-        // The JSON default targetBrokerId (0) must not shrink a roll to broker 0.
+        // A targetBrokerId, such as the 0 a JSON spec held before it got the
+        // builder defaults, must not shrink a roll to one broker.
         FaultSpec roll = FaultSpec.builder("x")
                 .targetBrokerId(0)
                 .disruptionType(DisruptionType.ROLLING_RESTART)
@@ -68,8 +69,7 @@ class PodTargetsTest {
     }
 
     @Test
-    void targetAllOutranksTheBrokerIdAJsonSpecDefaultsTo() {
-        // A FaultSpec deserialized from JSON without targetBrokerId holds 0.
+    void targetAllOutranksABrokerId() {
         FaultSpec spec =
                 FaultSpec.builder("x").targetAll(true).targetBrokerId(0).build();
         assertEquals(
