@@ -69,6 +69,11 @@ public class DisruptionSafetyGuard {
         List<String> warnings = new ArrayList<>();
         List<String> errors = new ArrayList<>();
 
+        // Not a safety issue, but this runs before any fault (and on dry runs),
+        // which is when a gate that can never fire is worth pointing out.
+        SlaGrader.unevaluableConstraints(plan.getSla())
+                .forEach(c -> warnings.add("SLA " + c + ". It will be reported as not evaluated, not as passed."));
+
         List<Pod> brokerPods = listBrokerPods();
         int totalBrokers = brokerPods.size();
 

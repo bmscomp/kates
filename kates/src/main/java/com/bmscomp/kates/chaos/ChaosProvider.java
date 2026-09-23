@@ -22,6 +22,18 @@ public interface ChaosProvider {
     String name();
 
     /**
+     * The {@code kates.chaos.provider} value that selects this provider.
+     *
+     * <p>Defaults to {@link #name()}. A provider whose name carries runtime
+     * detail must override it: the hybrid provider reports itself as
+     * {@code hybrid(litmus-crd)}, a string no one can put in config, and while
+     * selection compared against {@code name()} it could never be chosen.
+     */
+    default String id() {
+        return name();
+    }
+
+    /**
      * Triggers a fault injection asynchronously.
      * The returned future resolves when the chaos experiment completes.
      */
