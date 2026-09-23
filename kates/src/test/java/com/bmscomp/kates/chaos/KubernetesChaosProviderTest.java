@@ -14,6 +14,7 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
+import io.fabric8.mockwebserver.http.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -88,6 +89,12 @@ public class KubernetesChaosProviderTest {
                 .build();
         client.pods().inNamespace("default").resource(pod).create();
 
+        // Ephemeral containers can only be written through the subresource, which the
+        // CRUD mock does not serve — and it would accept the plain pod update a real
+        // API server rejects. Answer the write here and assert on what was sent.
+        String subresource = "/api/v1/namespaces/default/pods/broker-0/ephemeralcontainers";
+        server.expect().put().withPath(subresource).andReturn(200, pod).once();
+
         FaultSpec spec = FaultSpec.builder("test-cpu-stress")
                 .targetNamespace("default")
                 .targetLabel("app=kafka")
@@ -101,13 +108,14 @@ public class KubernetesChaosProviderTest {
         assertNotNull(outcome);
         assertTrue(outcome.isPass());
 
-        Pod updatedPod =
-                client.pods().inNamespace("default").withName("broker-0").get();
-        assertNotNull(updatedPod);
-        assertEquals(1, updatedPod.getSpec().getEphemeralContainers().size());
+        RecordedRequest write = server.getLastRequest();
+        assertEquals("PUT", write.getMethod());
+        assertEquals(subresource, write.getPath());
+        Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
+        assertEquals(1, sent.getSpec().getEphemeralContainers().size());
         assertEquals(
                 "chaos-cpu-stress",
-                updatedPod.getSpec().getEphemeralContainers().get(0).getName());
+                sent.getSpec().getEphemeralContainers().get(0).getName());
     }
 
     @Test
@@ -127,6 +135,9 @@ public class KubernetesChaosProviderTest {
                 .build();
         client.pods().inNamespace("default").resource(pod).create();
 
+        String subresource = "/api/v1/namespaces/default/pods/broker-1/ephemeralcontainers";
+        server.expect().put().withPath(subresource).andReturn(200, pod).once();
+
         FaultSpec spec = FaultSpec.builder("test-io-stress")
                 .targetNamespace("default")
                 .targetLabel("app=kafka2")
@@ -140,13 +151,14 @@ public class KubernetesChaosProviderTest {
         assertNotNull(outcome);
         assertTrue(outcome.isPass());
 
-        Pod updatedPod =
-                client.pods().inNamespace("default").withName("broker-1").get();
-        assertNotNull(updatedPod);
-        assertEquals(1, updatedPod.getSpec().getEphemeralContainers().size());
+        RecordedRequest write = server.getLastRequest();
+        assertEquals("PUT", write.getMethod());
+        assertEquals(subresource, write.getPath());
+        Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
+        assertEquals(1, sent.getSpec().getEphemeralContainers().size());
         assertEquals(
                 "chaos-io-stress",
-                updatedPod.getSpec().getEphemeralContainers().get(0).getName());
+                sent.getSpec().getEphemeralContainers().get(0).getName());
     }
 
     @Test

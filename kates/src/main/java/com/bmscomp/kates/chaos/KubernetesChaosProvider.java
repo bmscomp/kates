@@ -304,8 +304,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
         pod.getSpec().getEphemeralContainers().add(ec);
 
-        // Use replace to update ephemeral containers (requires k8s 1.25+)
-        podResource.replace(pod);
+        // Ephemeral containers can only be added through the pods/ephemeralcontainers
+        // subresource (k8s 1.25+); the API server rejects a pod update that changes them.
+        client.pods().inNamespace(namespace).resource(pod).ephemeralContainers().replace();
     }
 
     @Override
