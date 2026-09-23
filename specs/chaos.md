@@ -3,7 +3,7 @@
 |                     |                                                                                                                                                                                                                            |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Document**        | `specs/chaos.md`                                                                                                                                                                                                           |
-| **Status**          | Draft for review                                                                                                                                                                                                           |
+| **Status**          | Draft for review. Revised 2026-09-23 with a research baseline (Part IV)                                                                                                                                                    |
 | **Date**            | 2026-09-22                                                                                                                                                                                                                 |
 | **Scope**           | A Rust-built, Strimzi-native chaos engine for Apache Kafka that replaces the LitmusChaos execution plane in Kates                                                                                                          |
 | **Replaces**        | `charts/kates-chaos` → `litmus-core` 3.28 subchart, `LitmusChaosProvider`, `chaos/litmus/*` models, `config/litmus/**`, Litmus images in `images.env`                                                                      |
@@ -51,11 +51,25 @@
 27. [Definition of done](#27-definition-of-done)
 28. [Risks, open questions, decision log](#28-risks-open-questions-decision-log)
 
+**Part IV — Research-informed extensions**
+
+29. [Research baseline](#29-research-baseline)
+30. [Gray failure and fail-slow faults](#30-gray-failure-and-fail-slow-faults)
+31. [Partial partitions first](#31-partial-partitions-first)
+32. [Timing-targeted and chained faults](#32-timing-targeted-and-chained-faults)
+33. [Metastability experiments](#33-metastability-experiments)
+34. [Durability and storage faults](#34-durability-and-storage-faults)
+35. [Correctness oracles and reproducible schedules](#35-correctness-oracles-and-reproducible-schedules)
+36. [Chaos for the control plane: operators and the engine itself](#36-chaos-for-the-control-plane-operators-and-the-engine-itself)
+37. [AI-assisted chaos engineering](#37-ai-assisted-chaos-engineering)
+38. [Kafka 4.x protocol coverage](#38-kafka-4x-protocol-coverage)
+
 **Appendices**
 
 A. [Parity matrix](#appendix-a--parity-matrix)
 B. [Example resources](#appendix-b--example-resources)
 C. [Kafka and Strimzi settings that govern expected timings](#appendix-c--kafka-and-strimzi-settings-that-govern-expected-timings)
+D. [References](#appendix-d--references)
 
 ---
 
@@ -439,7 +453,7 @@ spec:
 status:
   observedGeneration: 1
   phase: Completed            # §13
-  verdict: Pass               # Pass | Fail | Aborted | Error   (set on terminal phases)
+  verdict: Pass               # Pass | Fail | Aborted | Error | Inconclusive (§35)
   reason: ""                  # machine-readable, e.g. NoTargets, BlastRadius, Quarantined
   message: ""
   seed: 1583920113            # RNG seed for One/Count/Percent selection
@@ -551,6 +565,9 @@ spec:
     sharedFilesystemPolicy: Budget     # Budget | Refuse | Allow   (§11.5.4)
     maxBytes: 5Gi
   quarantine: []                       # clusters blocked after RevertFailed (§15.8)
+  destructive: false                   # storage faults on labelled test pools only (§34)
+  approval:
+    requiredFor: [agent]               # agent-proposed faults wait in PendingApproval (§37)
 status:
   controller: { leader: kates-chaos-controller-7d9f-xk2p, version: 0.1.0 }
   supportedFaults: [PodKill, PodDelete, …]
@@ -640,6 +657,8 @@ Resolution runs in the controller **at injection time** — after `timing.delay`
 | `IoStress`         | Degraded                         | Agent              | `IO_STRESS`                                                      | M4        |
 | `DiskFill`         | Degraded → Unavailable when full | Agent              | `DISK_FILL`                                                      | M4        |
 | `DiskThrottle`     | Degraded                         | Agent              | `DISK_THROTTLE` (new)                                            | M4        |
+
+Part IV adds research-driven fault types (`NetworkGrudge`, `LoseUnfsyncedWrites`, `FileCorruption`, `SyscallError`, `ObjectStoreFault`) and modifiers (`timing.pattern`, `timing.trigger`); see §30–§34.
 
 Every fault below is described with the same headings: **Intent**, **Expected Kafka behaviour**, **Mechanism**, **Parameters**, **Revert**, **`injectedAt` means**, and **Pitfalls and guards**.
 
@@ -1033,27 +1052,29 @@ A flapping operator makes results meaningless. The dev cluster's operator had re
               └───────────┘
 ```
 
-| Phase          | Entered when                                      | Controller does                                                                                                                                     | Leaves when                                                                                                   |
-| -------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `Pending`      | Object created                                    | Adds finalizer `chaos.kates.io/revert`; sets `deadline = creationTimestamp + delay + duration (or repeat window, or rollout timeout) + revertGrace` | Next reconcile                                                                                                |
-| `Accepted`     | Policy and static validation pass                 | Condition `Accepted=True`                                                                                                                           | Immediately                                                                                                   |
-| `Scheduled`    | Waiting for `delay` and the cluster Lease (§15.6) | Requeues at `notBefore`; holds or waits for the Lease                                                                                               | `delay` elapsed and Lease held → `Resolving`. Lease not obtained before `deadline` → `Rejected(ClusterBusy)`. |
-| `Resolving`    | —                                                 | Preflight (§15.3), target resolution (§10), blast radius (§15.4), `Before` checks (§16)                                                             | All pass → `Injecting`. Otherwise → `Rejected` or `Failed`.                                                   |
-| `Injecting`    | —                                                 | `operator.mode: Pause` handling; journal + API mutations, or creates `ChaosInjection`s; waits for every target to report applied                    | All targets applied → `Active`. Any target fails → `Reverting` with `verdict: Error`.                         |
-| `Active`       | —                                                 | `During`/`Throughout` checks; `abortOn` every 2 s; `repeat` scheduling                                                                              | See diagram                                                                                                   |
-| `Reverting`    | —                                                 | Executes the undo journal in reverse order; deletes `ChaosInjection`s and waits for their finalizers; unpauses the operator                         | All undo done → `Verifying`. An undo fails after retries → `RevertFailed`.                                    |
-| `Verifying`    | —                                                 | `After` checks until they pass or their `within` elapses                                                                                            | → `Completed` with a verdict                                                                                  |
-| `Completed`    | —                                                 | Releases the Lease if last of the run; sets TTL timer                                                                                               | TTL → object deleted                                                                                          |
-| `RevertFailed` | —                                                 | Emits a Warning event, adds the cluster to `ChaosPolicy.spec.quarantine`, raises `kates_chaos_quarantined`                                          | Human action only (§15.8)                                                                                     |
+| Phase             | Entered when                                                                       | Controller does                                                                                                                                     | Leaves when                                                                                                   |
+| ----------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `Pending`         | Object created                                                                     | Adds finalizer `chaos.kates.io/revert`; sets `deadline = creationTimestamp + delay + duration (or repeat window, or rollout timeout) + revertGrace` | Next reconcile                                                                                                |
+| `Accepted`        | Policy and static validation pass                                                  | Condition `Accepted=True`                                                                                                                           | Immediately                                                                                                   |
+| `Scheduled`       | Waiting for `delay` and the cluster Lease (§15.6)                                  | Requeues at `notBefore`; holds or waits for the Lease                                                                                               | `delay` elapsed and Lease held → `Resolving`. Lease not obtained before `deadline` → `Rejected(ClusterBusy)`. |
+| `Resolving`       | —                                                                                  | Preflight (§15.3), target resolution (§10), blast radius (§15.4), `Before` checks (§16)                                                             | All pass → `Injecting`. Otherwise → `Rejected` or `Failed`.                                                   |
+| `Injecting`       | —                                                                                  | `operator.mode: Pause` handling; journal + API mutations, or creates `ChaosInjection`s; waits for every target to report applied                    | All targets applied → `Active`. Any target fails → `Reverting` with `verdict: Error`.                         |
+| `Active`          | —                                                                                  | `During`/`Throughout` checks; `abortOn` every 2 s; `repeat` scheduling                                                                              | See diagram                                                                                                   |
+| `Reverting`       | —                                                                                  | Executes the undo journal in reverse order; deletes `ChaosInjection`s and waits for their finalizers; unpauses the operator                         | All undo done → `Verifying`. An undo fails after retries → `RevertFailed`.                                    |
+| `Verifying`       | —                                                                                  | `After` checks until they pass or their `within` elapses                                                                                            | → `Completed` with a verdict                                                                                  |
+| `Completed`       | —                                                                                  | Releases the Lease if last of the run; sets TTL timer                                                                                               | TTL → object deleted                                                                                          |
+| `RevertFailed`    | —                                                                                  | Emits a Warning event, adds the cluster to `ChaosPolicy.spec.quarantine`, raises `kates_chaos_quarantined`                                          | Human action only (§15.8)                                                                                     |
+| `PendingApproval` | An agent proposed the fault and `ChaosPolicy.spec.approval` requires a human (§37) | Nothing until approved; the deadline still runs                                                                                                     | Approved → `Accepted`. Rejected or deadline passed → `Rejected`                                               |
 
 ### 13.2 Verdict rules
 
-| Verdict   | Condition                                                                                                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Pass`    | Injected on all targets, reverted cleanly, and every check met its expectation (`minPassRatio`, `After … within`).                                                                    |
-| `Fail`    | Injected and reverted cleanly, but at least one check missed its expectation. *The fault worked and the cluster did not meet the hypothesis.* This is a finding, not an engine error. |
-| `Aborted` | Stopped early by `abortOn`, `spec.abort`, deletion, freeze, or deadline. `failStep` names the trigger.                                                                                |
-| `Error`   | The engine could not do what was asked: injection failed on a target, or a check could not be evaluated for reasons other than the cluster's state.                                   |
+| Verdict        | Condition                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Pass`         | Injected on all targets, reverted cleanly, and every check met its expectation (`minPassRatio`, `After … within`).                                                                    |
+| `Fail`         | Injected and reverted cleanly, but at least one check missed its expectation. *The fault worked and the cluster did not meet the hypothesis.* This is a finding, not an engine error. |
+| `Aborted`      | Stopped early by `abortOn`, `spec.abort`, deletion, freeze, or deadline. `failStep` names the trigger.                                                                                |
+| `Error`        | The engine could not do what was asked: injection failed on a target, or a check could not be evaluated for reasons other than the cluster's state.                                   |
+| `Inconclusive` | Every `always` and `eventually` assertion held, but at least one `sometimes` assertion never fired: the fault didn't produce the condition it was meant to test (§35).                |
 
 ### 13.3 Abort and deletion semantics
 
@@ -2258,22 +2279,24 @@ Measured on Kind and enforced in the nightly run:
 
 ### 24.2 Milestones at a glance
 
-| M      | Name                             | Delivers                                                                                                                                                                                  | Depends on             | Effort (indicative) |
-| ------ | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------- |
-| **M0** | Foundations and spikes           | Seven spikes answered; `chaos/` workspace, CI, crdgen, image build skeleton                                                                                                               | —                      | 2 wk                |
-| **M1** | Controller core + first faults   | CRDs, policy, lifecycle, journal, finalizers, Lease, deadlines; `PodKill`, `PodDelete` with Kubernetes selectors; `KatesChaosProvider`; Java-only defect fixes                            | M0                     | 4 wk                |
-| **M2** | Kafka awareness                  | Kafka client; `leaderOf`/`activeController`/`coordinatorOf`; per-partition blast radius; checks; `abortOn`; `RollingRestart`, `BrokerHoldDown`, `NodeDrain`; `repeat`                     | M1                     | 4 wk                |
-| **M3** | Agent + network + process faults | Agent runtime, CRI lookup, netns executor, journal, timers, sweep, capabilities; `ContainerKill`, `ProcessPause`, `NetworkPartition`, `NetworkLatency`, `NetworkLoss`, `NetworkBandwidth` | M1 (parallel with M2)  | 5 wk                |
-| **M4** | Resource faults + DNS            | `CpuStress`, `MemoryStress`, `IoStress`, `DiskFill`, `DiskThrottle`, `DnsError`                                                                                                           | M3                     | 3 wk                |
-| **M5** | Zone outage + cut-over           | `ZoneOutage`; default engine switch; CLI; dashboards; docs; chart 3.0.0 release                                                                                                           | M2, M4                 | 3 wk                |
-| **M6** | Litmus removal                   | Delete Litmus code, config, images, chart path                                                                                                                                            | M5 + one minor release | 1 wk                |
+| M      | Name                             | Delivers                                                                                                                                                                                                                                      | Depends on                         | Effort (indicative) |
+| ------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------- |
+| **M0** | Foundations and spikes           | Seven spikes answered; `chaos/` workspace, CI, crdgen, image build skeleton                                                                                                                                                                   | —                                  | 2 wk                |
+| **M1** | Controller core + first faults   | CRDs, policy, lifecycle, journal, finalizers, Lease, deadlines; `PodKill`, `PodDelete` with Kubernetes selectors; `KatesChaosProvider`; Java-only defect fixes                                                                                | M0                                 | 4 wk                |
+| **M2** | Kafka awareness                  | Kafka client; `leaderOf`/`activeController`/`coordinatorOf`; per-partition blast radius; checks; `abortOn`; `RollingRestart`, `BrokerHoldDown`, `NodeDrain`; `repeat`                                                                         | M1                                 | 4 wk                |
+| **M3** | Agent + network + process faults | Agent runtime, CRI lookup, netns executor, journal, timers, sweep, capabilities; `ContainerKill`, `ProcessPause`, `NetworkPartition`, `NetworkLatency`, `NetworkLoss`, `NetworkBandwidth`                                                     | M1 (parallel with M2)              | 5 wk                |
+| **M4** | Resource faults + DNS            | `CpuStress`, `MemoryStress`, `IoStress`, `DiskFill`, `DiskThrottle`, `DnsError`                                                                                                                                                               | M3                                 | 3 wk                |
+| **M5** | Zone outage + cut-over           | `ZoneOutage`; default engine switch; CLI; dashboards; docs; chart 3.0.0 release                                                                                                                                                               | M2, M4                             | 3 wk                |
+| **M6** | Litmus removal                   | Delete Litmus code, config, images, chart path                                                                                                                                                                                                | M5 + one minor release             | 1 wk                |
+| **M7** | Research extensions (Part IV)    | `timing.pattern`, differential checks, `NetworkGrudge`, triggers and chains, metastability template, assertion kinds and `Inconclusive`, seeded and shrinkable schedules, operator-targeted faults, test-pool storage faults, agent interface | M5 (WP7.1–7.3 can move into M3/M4) | 8–10 wk             |
 
 **Critical path:** M0 → M1 → M3 → M4 → M5. M2 runs in parallel with M3 when two engineers are available (stream R on M2, stream A on M3).
 
-| Staffing      | Total      |
-| ------------- | ---------- |
-| One engineer  | ≈ 22 weeks |
-| Two engineers | ≈ 15 weeks |
+| Staffing                | Total                                  |
+| ----------------------- | -------------------------------------- |
+| One engineer            | ≈ 22 weeks                             |
+| Two engineers           | ≈ 15 weeks                             |
+| M7, research extensions | + 8–10 weeks, largely parallel with M6 |
 
 The M1 exit alone fixes D3, D5, D9, D10, D11, D12, and D13 for Kates users, because the Java fixes ship there. That makes M1 worth delivering even if later milestones are re-planned.
 
@@ -2301,15 +2324,19 @@ Each work package lists its **tasks**, **deliverables** (paths), **tests**, and 
 
 **WP0.1 Spikes.** Each spike produces a short written finding in `specs/chaos-spikes.md` (throwaway code lives on a scratch branch):
 
-| Spike  | Question                                                                                                                                                                                                                                                                                    | Method                                                                            | Affects                     |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------- |
-| **S1** | Does the StrimziPodSet controller recreate a deleted pod while the parent `Kafka` has `strimzi.io/pause-reconciliation: "true"`? What does the operator do with manual-rolling-update on an unready pod?                                                                                    | Strimzi 1.2 on Kind: pause, delete pod, observe for 5 min; repeat with annotation | §11.2.6 strategy set, §12.3 |
-| **S2** | Can a `kafka-protocol`-based client do mTLS, Metadata, DescribeQuorum (via broker forwarding), ListPartitionReassignments, DescribeConfigs, and Produce(acks=-1) against Kafka 4.3.1, and build as static musl for amd64 and arm64?                                                         | Prototype in `kates-chaos-kafka`; `cargo zigbuild`                                | §20.7 decision              |
-| **S3** | In a broker pod's netns on Kind: does the thread-scoped `setns` executor work; do `prio`+`netem`+`u32` shape only matched traffic; does an nft drop without `ct established accept` stall existing Kafka connections; does a socket created in the netns serve DNS through an nft redirect? | Manual prototype on `kind-panda`                                                  | §11.3                       |
-| **S4** | What is the minimal privilege set for the agent on containerd with `RuntimeDefault` seccomp: host cgroupns `setns`, CRI `ContainerStatus` PID lookup, `/proc/<pid>/root` access?                                                                                                            | DaemonSet prototype, capability bisection                                         | §21.2                       |
-| **S5** | `cgroup.freeze` on a Strimzi broker: does kubelet's liveness restart happen at the predicted time; does SIGKILL reach frozen tasks; is `io` enabled in the parents' `cgroup.subtree_control` so `io.max` works?                                                                             | Manual on `kind-panda`                                                            | §11.2.4, §11.5.6            |
-| **S6** | Shared filesystem detection and kubelet eviction thresholds: `f_fsid` comparison from the agent; reading `evictionHard` (node `configz` needs `nodes/proxy`, else a `ChaosPolicy` override)                                                                                                 | Prototype                                                                         | §11.5.4                     |
-| **S7** | How does the Cluster Operator react when a broker is cut off from it (9091, 8443), and when a broker is killed mid-reconciliation?                                                                                                                                                          | Kind; operator logs; Kafka CR conditions                                          | §12.1, peer defaults        |
+| Spike   | Question                                                                                                                                                                                                                                                                                    | Method                                                                            | Affects                     |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------- |
+| **S1**  | Does the StrimziPodSet controller recreate a deleted pod while the parent `Kafka` has `strimzi.io/pause-reconciliation: "true"`? What does the operator do with manual-rolling-update on an unready pod?                                                                                    | Strimzi 1.2 on Kind: pause, delete pod, observe for 5 min; repeat with annotation | §11.2.6 strategy set, §12.3 |
+| **S2**  | Can a `kafka-protocol`-based client do mTLS, Metadata, DescribeQuorum (via broker forwarding), ListPartitionReassignments, DescribeConfigs, and Produce(acks=-1) against Kafka 4.3.1, and build as static musl for amd64 and arm64?                                                         | Prototype in `kates-chaos-kafka`; `cargo zigbuild`                                | §20.7 decision              |
+| **S3**  | In a broker pod's netns on Kind: does the thread-scoped `setns` executor work; do `prio`+`netem`+`u32` shape only matched traffic; does an nft drop without `ct established accept` stall existing Kafka connections; does a socket created in the netns serve DNS through an nft redirect? | Manual prototype on `kind-panda`                                                  | §11.3                       |
+| **S4**  | What is the minimal privilege set for the agent on containerd with `RuntimeDefault` seccomp: host cgroupns `setns`, CRI `ContainerStatus` PID lookup, `/proc/<pid>/root` access?                                                                                                            | DaemonSet prototype, capability bisection                                         | §21.2                       |
+| **S5**  | `cgroup.freeze` on a Strimzi broker: does kubelet's liveness restart happen at the predicted time; does SIGKILL reach frozen tasks; is `io` enabled in the parents' `cgroup.subtree_control` so `io.max` works?                                                                             | Manual on `kind-panda`                                                            | §11.2.4, §11.5.6            |
+| **S6**  | Shared filesystem detection and kubelet eviction thresholds: `f_fsid` comparison from the agent; reading `evictionHard` (node `configz` needs `nodes/proxy`, else a `ChaosPolicy` override)                                                                                                 | Prototype                                                                         | §11.5.4                     |
+| **S7**  | How does the Cluster Operator react when a broker is cut off from it (9091, 8443), and when a broker is killed mid-reconciliation?                                                                                                                                                          | Kind; operator logs; Kafka CR conditions                                          | §12.1, peer defaults        |
+| **S8**  | Can `write`/`fsync` errors be injected on the dev kernel: `CONFIG_BPF_KPROBE_OVERRIDE` and error-injectable functions for eBPF, or only through FUSE?                                                                                                                                       | Kernel config and a probe on `kind-panda`                                         | §34 (`SyscallError`)        |
+| **S9**  | Can a Strimzi `KafkaNodePool` mount its data directory through LazyFS (FUSE, `/dev/fuse`) via the pod template?                                                                                                                                                                             | Test pool on Kind                                                                 | §34 (test pools, LazyFS)    |
+| **S10** | Is Eligible Leader Replicas (KIP-966) enabled on Kafka 4.3.1, and does `DescribeTopicPartitions` return ELR fields?                                                                                                                                                                         | Kafka protocol probe                                                              | §15.4, §38                  |
+| **S11** | Does Strimzi 1.2 support dynamic controller quorum changes (KIP-853)?                                                                                                                                                                                                                       | Strimzi docs and a test on Kind                                                   | §38                         |
 
 **WP0.2 Workspace and CI.**
 - Tasks: create `chaos/` workspace with all crates as empty libs or bins; `rust-toolchain.toml`; `deny.toml`; `xtask` with `crdgen`; `ci-chaos.yml` (fmt, clippy, test, deny, crdgen check); Dockerfiles; Dependabot cargo entry; `.gitignore` for `chaos/target`.
@@ -2442,11 +2469,28 @@ Each work package lists its **tasks**, **deliverables** (paths), **tests**, and 
 - Every row of Appendix A is green.
 - The provider conformance suite passes.
 
+### M7 — Research extensions (8–10 weeks, after M5; WP7.1–7.3 may move earlier)
+
+Part IV turned into work. The first three packages are small and can be pulled into M3/M4 without changing their exit criteria.
+
+- **WP7.1 Fine-grained degradation.** `timing.pattern` (Steady, Flapping, Periodic, Random) for every degraded-class node fault, journaled per cycle; *one slow follower* and *slow link to the active controller* templates. **Exit:** a flapping replication link produces repeated ISR shrink/expand on Kind, and revert leaves no artifact.
+- **WP7.2 Differential checks.** The `Differential` check kind and `status.observations.grayWindows[]`; Kates reports gray-failure time next to the SLA grade. **Exit:** an injected client-side partition (clients cut, brokers healthy) is reported as a gray window.
+- **WP7.3 Assertion kinds.** `always`, `eventually`, `sometimes` on every check; the `Inconclusive` verdict. **Exit:** a fault whose `sometimes` assertion is made impossible (e.g. ISR shrink on a topic with RF 1) ends `Inconclusive`, not `Pass`.
+- **WP7.4 `NetworkGrudge` and the partial-partition library.** Shapes, per-partition blast radius, and the five Kafka templates of §31. **Exit:** *controller majorities-ring* and *broker ↛ active controller* run end-to-end with clean revert.
+- **WP7.5 Triggers and chains.** `timing.trigger` for the transitions in §32; `startWhen` in Kates plans; state-coverage recording. **Exit:** "kill the new leader right after election" hits the newly elected leader in 20/20 runs.
+- **WP7.6 Metastability template and sweeps.** Open-loop load requirement in the worker; trigger → remove → observe; grid sweeps; time-series export. **Exit:** a sweep produces a recovery-time surface for one candidate loop of §33.
+- **WP7.7 Schedules.** `ChaosSchedule` with seed, recorded realisation, replay, delta-debugging shrinker, ε-greedy novelty. **Exit:** a failing seeded run replays, and shrinks to a smaller fault set that still fails.
+- **WP7.8 Control-plane chaos.** `Operator` target class; operator faults with Acto-style checks; Sieve-style self-tests for the engine controller. **Exit:** the §36 checks pass or produce a filed finding.
+- **WP7.9 Storage faults on test pools** (after S8, S9). `LoseUnfsyncedWrites`, `FileCorruption`, `SyscallError`, `ObjectStoreFault` (L4); `destructive` policy gate; `chaos-storage` pool in the kafka-cluster chart. **Exit:** a coordinated un-fsynced loss on a test pool is quantified by the history checker, and every fault is refused on unlabelled pools.
+- **WP7.10 Agent interface and benchmark pack.** MCP server (topology, dry-run, propose, explain, abort), `PendingApproval`, and a scenario pack with ground truth. **Exit:** an agent-proposed fault cannot run without approval, and the pack scores one reference agent.
+
 ### M6 — Litmus removal (1 week, one minor release after M5)
 
 - Delete `LitmusChaosProvider`, `chaos/litmus/*`, `config/litmus/**`, the Litmus branch of `HybridChaosProvider`, `templates/litmus/*`, the `litmus-core` dependency, Litmus images and versions, `litmuschaos.io` RBAC in `charts/kates`, and Makefile `litmus*` targets.
 - Update `gen-version-matrix.sh`, `load-images-to-kind.sh`, and the chart table.
 - **Exit:** `grep -ri litmus` finds only the changelog and the migration guide.
+
+M7 is listed before M6 above because it follows M5 directly, while M6 waits for the next minor release.
 
 ---
 
@@ -2499,6 +2543,16 @@ Titles follow the conventional-commit style already used on `main`.
 | 35  | `docs(book): chaos engine chapters and migration guide`                                               | D      | M5        |
 | 36  | `chore(release): kates-chaos 3.0.0 with engine=kates by default`                                      | P      | M5        |
 | 37  | `chore(chaos): remove LitmusChaos`                                                                    | all    | M6        |
+| 38  | `feat(chaos): flapping degradation patterns` (WP7.1)                                                  | A      | M7        |
+| 39  | `feat(chaos): differential gray-failure checks` (WP7.2)                                               | R      | M7        |
+| 40  | `feat(chaos): always/eventually/sometimes assertions and the Inconclusive verdict` (WP7.3)            | R      | M7        |
+| 41  | `feat(chaos): NetworkGrudge and the Kafka partial-partition library` (WP7.4)                          | A/R    | M7        |
+| 42  | `feat(chaos): state-transition triggers and chained faults` (WP7.5)                                   | R/J    | M7        |
+| 43  | `feat(disruption): metastability template and parameter sweeps` (WP7.6)                               | J      | M7        |
+| 44  | `feat(disruption): seeded, replayable, shrinkable chaos schedules` (WP7.7)                            | J/R    | M7        |
+| 45  | `feat(chaos): operator-targeted faults and engine self-tests` (WP7.8)                                 | R      | M7        |
+| 46  | `feat(chaos): storage faults on labelled test pools` (WP7.9)                                          | A/P    | M7        |
+| 47  | `feat(kates): guarded agent interface and SRE benchmark pack` (WP7.10)                                | J      | M7        |
 
 PRs 2–8 are independent of the engine and can merge first. They improve today's behaviour immediately and shrink the later diffs.
 
@@ -2538,16 +2592,20 @@ PRs 2–8 are independent of the engine and can merge first. They improve today'
 
 ### 28.1 Risks
 
-| ID  | Risk                                                                                                      | Likelihood      | Impact | Mitigation                                                                                                                      |
-| --- | --------------------------------------------------------------------------------------------------------- | --------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| R1  | The agent is root on every Kubernetes node                                                                | certain         | high   | Capabilities not privileged; own namespace; re-validation; no listener; signed minimal image; opt-in install                    |
-| R2  | Kernel feature variance (no IFB or flower on linuxkit; Bottlerocket/COS differences)                      | high            | medium | Per-node capability report; faults rejected up front as `Unsupported`; u32 everywhere                                           |
-| R3  | Pure-Rust Kafka client effort exceeds estimate                                                            | medium          | medium | S2 spike; narrow request set; `rdkafka` fallback for produce/fetch                                                              |
-| R4  | Strimzi behaviour changes between minor versions (PodSet controller, pause semantics, KafkaRoller checks) | medium          | medium | E2E pinned to the Strimzi version in `versions.env`; `chart-matrix` job extended to the engine; §12 behaviours covered by tests |
-| R5  | A third language in the repository                                                                        | certain         | low    | The engine is a separate deployable behind a CRD contract; path-filtered CI; Java and Go contributors never need Rust           |
-| R6  | Seccomp `RuntimeDefault` blocks `setns` on some runtimes                                                  | medium          | medium | S4; ship a custom seccomp profile in the chart                                                                                  |
-| R7  | Shared-filesystem environments (local-path, hostPath) make disk and IO faults leak beyond the target      | certain on Kind | high   | Budget mode default, eviction guard, `sharedDevice` flag, explicit opt-in for full fills                                        |
-| R8  | Operator instability confounds results (observed: 197 restarts in 47 h)                                   | observed        | medium | Operator-stability preflight; `externalRestarts` in reports; investigate the operator restarts separately                       |
+| ID  | Risk                                                                                                      | Likelihood            | Impact | Mitigation                                                                                                                      |
+| --- | --------------------------------------------------------------------------------------------------------- | --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | The agent is root on every Kubernetes node                                                                | certain               | high   | Capabilities not privileged; own namespace; re-validation; no listener; signed minimal image; opt-in install                    |
+| R2  | Kernel feature variance (no IFB or flower on linuxkit; Bottlerocket/COS differences)                      | high                  | medium | Per-node capability report; faults rejected up front as `Unsupported`; u32 everywhere                                           |
+| R3  | Pure-Rust Kafka client effort exceeds estimate                                                            | medium                | medium | S2 spike; narrow request set; `rdkafka` fallback for produce/fetch                                                              |
+| R4  | Strimzi behaviour changes between minor versions (PodSet controller, pause semantics, KafkaRoller checks) | medium                | medium | E2E pinned to the Strimzi version in `versions.env`; `chart-matrix` job extended to the engine; §12 behaviours covered by tests |
+| R5  | A third language in the repository                                                                        | certain               | low    | The engine is a separate deployable behind a CRD contract; path-filtered CI; Java and Go contributors never need Rust           |
+| R6  | Seccomp `RuntimeDefault` blocks `setns` on some runtimes                                                  | medium                | medium | S4; ship a custom seccomp profile in the chart                                                                                  |
+| R7  | Shared-filesystem environments (local-path, hostPath) make disk and IO faults leak beyond the target      | certain on Kind       | high   | Budget mode default, eviction guard, `sharedDevice` flag, explicit opt-in for full fills                                        |
+| R8  | Operator instability confounds results (observed: 197 restarts in 47 h)                                   | observed              | medium | Operator-stability preflight; `externalRestarts` in reports; investigate the operator restarts separately                       |
+| R9  | Storage faults cause permanent data loss                                                                  | certain on test pools | high   | `destructive` policy, pool label, blast radius counts lost replicas, never on unlabelled pools                                  |
+| R10 | Agent-proposed faults bypass human judgement                                                              | medium                | high   | `PendingApproval`; agents cannot skip layers 2–8; full audit via annotations and events                                         |
+| R11 | 1 s state sampling misses short protocol windows                                                          | certain               | medium | Documented limit; code-level tools remain complementary (§32)                                                                   |
+| R12 | Closed-loop load hides metastability                                                                      | high                  | medium | Open-loop load is a requirement of the metastability template (§33)                                                             |
 
 ### 28.2 Open questions
 
@@ -2559,6 +2617,10 @@ PRs 2–8 are independent of the engine and can merge first. They improve today'
 | Q4  | Should `requireOptIn` default to true on generic (non-Kind) installs?                                     | Product             | true                                                   |
 | Q5  | Should the engine support SASL/SCRAM in v1 for clusters without a TLS listener?                           | Demand              | mTLS only                                              |
 | Q6  | Should `ChaosFault` also be usable standalone (without Kates) as a public API?                            | Product             | Yes, it already is; documentation deferred to after M5 |
+| Q7  | Is ELR (KIP-966) active on Kafka 4.3.1?                                                                   | S10                 | Blast radius ignores ELR                               |
+| Q8  | Does Strimzi 1.2 support dynamic controller quorum changes?                                               | S11                 | Membership-change faults deferred                      |
+| Q9  | FUSE or eBPF for storage faults?                                                                          | S8, S9              | FUSE on test pools                                     |
+| Q10 | Should the Kafka SRE benchmark pack be published outside Kates?                                           | Product             | Internal first                                         |
 
 ### 28.3 Decision log
 
@@ -2578,32 +2640,344 @@ PRs 2–8 are independent of the engine and can merge first. They improve today'
 | ADR-12 | Namespace work on fresh OS threads, never tokio threads                    | `setns` is per thread; pooled threads must not leak namespaces     | §20.6         |
 | ADR-13 | Engine never edits Strimzi specs; two annotations only, admission-enforced | Cooperate with the operator (P2)                                   | §12.2         |
 | ADR-14 | Fault types are mechanisms; Kafka semantics live in selectors              | Small catalog, rich combinations (P7)                              | §6, §10       |
+| ADR-15 | Partial partitions are the default network experiments                     | Catastrophic and easy to trigger in 12 systems [R4]                | §31           |
+| ADR-16 | Fine-grained, flapping degradation alongside steady faults                 | Fail-slow bugs need fine granularity [R3]                          | §30           |
+| ADR-17 | `sometimes` assertions and the `Inconclusive` verdict                      | A fault that didn't bite must not read as `Pass` [R15]             | §35           |
+| ADR-18 | Opaque-box state triggers, not code instrumentation                        | Keep real binaries; approximate abstract states [R5]               | §32           |
+| ADR-19 | Destructive storage faults only on labelled test pools                     | Coordinated loss and corruption are permanent [R11]                | §34           |
+| ADR-20 | Agents propose; the deterministic safety model decides                     | Keep LLM output out of the safety path [R22]–[R24]                 | §37           |
+
+---
+
+# Part IV — Research-informed extensions
+
+Parts I–III describe an engine that injects faults correctly and safely. This part asks a different question: **which faults, in which shapes, at which moments, checked by which oracles, actually find the failures that hurt Kafka clusters?** It draws on published research and industry practice up to 2026-09-23. Each section states what was found and where (sources are numbered [R*n*] and listed in Appendix D), then what changes in the engine and in Kates.
+
+Where the spec reasons from a finding to Kafka and has not seen that result published for Kafka, it says so and marks the claim as a **hypothesis to test**, not a fact.
+
+## 29. Research baseline
+
+| #   | Finding                                                                                                                                                                                                                                                                                                                             | Source            | Consequence for Kates                                                 | Section |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------- | ------- |
+| F1  | Gray failures, where a component's own health view disagrees with what its clients experience, cause major outages that fail-stop testing misses.                                                                                                                                                                                   | [R1]              | Checks that compare internal health with client-observed health       | §30     |
+| F2  | Fail-slow hardware (degraded but working disks, NICs, memory) is common. A study of 48 real incidents found that it makes timeout and synchronisation code vulnerable, and that **fine-grained** slowness is needed to trigger the bugs. Kafka was one of the three systems tested; six new bugs were found.                        | [R2], [R3]        | Intermittent and fine-grained degradation patterns                    | §30     |
+| F3  | Partial network partitions, which cut some node pairs but not others, cause catastrophic failures such as data loss in 12 popular systems. They manifest easily, often by partially partitioning a single node.                                                                                                                     | [R4]              | Partial partitions become the default network experiments             | §31     |
+| F4  | Many partial-failure bugs need a subtle fault at a rare moment. Injecting at inferred "abstract states" found 20 new bugs with a median time of 58 minutes.                                                                                                                                                                         | [R5]              | Faults triggered by observed Kafka state transitions                  | §32     |
+| F5  | Self-sustaining cascades arise from chains of individually harmless faults. Stitching single-fault propagations together found 15 such bugs in five systems.                                                                                                                                                                        | [R6]              | Chained faults                                                        | §32     |
+| F6  | Metastable failures persist after their trigger is removed. They're common: 22 were studied across 11 organisations, and at least 4 of 15 major AWS outages in a decade were metastable. Formal models show recovery time **surges as parameters approach metastable regions**, and learned models can predict metastability early. | [R7]–[R10], [R28] | Trigger → remove → observe experiments, with parameter sweeps         | §33     |
+| F7  | Durability claims fail under coordinated crashes when acknowledgements precede fsync. Corruption on a *minority* of nodes cascaded into cluster-wide loss in NATS 2.12.1.                                                                                                                                                           | [R11]             | Storage faults on dedicated test pools                                | §34     |
+| F8  | Mishandled non-fatal errors dominate catastrophic failures, and almost all studied failures reproduce with **three or fewer nodes**. Transient errors from a single cloud-service call can break correctness.                                                                                                                       | [R12], [R13]      | Syscall-error and object-store faults                                 | §34     |
+| F9  | History-based checking finds anomalies metrics cannot: torn transactions, aborted reads, and lost writes in Kafka-compatible systems. Deterministic simulation of Kafka found an upstream ordering bug (KAFKA-19880).                                                                                                               | [R14]–[R16]       | Correctness oracles; `always` / `eventually` / `sometimes` assertions | §35     |
+| F10 | Feedback-guided fault scheduling beats random scheduling: +54 % distinct states, and bugs found 1.87× faster than Jepsen.                                                                                                                                                                                                           | [R17]             | Seeded, novelty-guided, replayable schedules                          | §35     |
+| F11 | Kubernetes controllers and operators hide many reliability bugs: 46 in 10 controllers, 56 across operators. Faults in etcd state cause cluster-wide failures, half of them through dependency-tracking fields.                                                                                                                      | [R18]–[R20]       | Chaos aimed at the Strimzi operator, and at the engine itself         | §36     |
+| F12 | In open-source practice, network faults (44.85 %) and instance termination (29.96 %) make up 74.81 % of injected faults. Application-level faults are only 2.57 %.                                                                                                                                                                  | [R21]             | Kates' edge is Kafka-level faults and checks                          | §36     |
+| F13 | LLM agents can run full chaos-engineering cycles on Kubernetes, and fault-injection benchmarks now evaluate AI SRE agents, including on metastable and correlated failures.                                                                                                                                                         | [R22]–[R24]       | A guarded agent interface; Kates as a Kafka SRE-agent benchmark       | §37     |
+| F14 | Kafka 4.x changed the protocols that faults exercise: new consumer groups, share groups (production-ready in 4.2), transactions v2 with stricter marker validation in 4.2, and dynamic KRaft quorum with auto-join in 4.2.                                                                                                          | [R25]–[R27]       | A protocol-coverage matrix                                            | §38     |
+
+## 30. Gray failure and fail-slow faults
+
+**Findings.** A gray failure is one the system's own detectors don't see. The component reports itself healthy while its clients suffer ([R1], "differential observability"). Fail-slow hardware is its most common cause ([R2]). The ATC'25 study [R3] analysed 48 real fail-slow incidents and found two things:
+
+- degraded hardware makes high-level software mechanisms vulnerable, especially synchronisation and timeouts;
+- the slowness must be **fine-grained** (intermittent, per-operation, per-peer) to trigger the bugs.
+
+Its tool found six new bugs across ZooKeeper, Kafka and HDFS.
+
+Steady `DiskThrottle` or `NetworkLatency` for 60 s is the coarse version of this. The research says the bugs live in the fine-grained version.
+
+**Engine changes.**
+
+1. **`timing.pattern`** applies to every degraded-class node fault:
+
+   ```yaml
+   timing:
+     duration: 10m
+     pattern:
+       mode: Flapping          # Steady (default) | Flapping | Periodic | Random
+       on: 3s                  # fault applied
+       off: 7s                 # fault reverted
+       jitterPercent: 30       # randomise on/off lengths (seeded)
+   ```
+
+   The agent applies and reverts on the schedule and journals each cycle. Revert is already idempotent. A flapping slow disk or flapping replication link is the canonical fail-slow reproduction: it keeps a follower hovering at the `replica.lag.time.max.ms` boundary, repeatedly shrinking and expanding the ISR.
+2. **Finer-grained targeting** for the existing network faults: a single peer, a single port class, one direction. The peer model in §11.3.1 already supports this. The catalog gains templates such as *one slow follower* and *slow link to the active controller only*.
+3. **A `Differential` check** turns gray failure into a first-class finding:
+
+   ```yaml
+   checks:
+     - name: gray-failure
+       differential:
+         internal: [KafkaReady, { check: UnderReplicatedPartitions, max: 0 }, { podsReady: Broker }]
+         external: [{ check: ProduceAck, acks: All, timeout: 2s }, { check: EndToEnd, timeout: 5s }]
+       phase: Throughout
+       interval: 2s
+   ```
+
+   Every interval in which all *internal* checks pass while any *external* check fails is recorded in `status.observations.grayWindows[]`. Kates reports the total duration next to the SLA grade. A cluster that says "Ready" while clients can't write is exactly what operators most need to know about.
+4. **Disk latency, as opposed to throughput throttling**, needs per-I/O delay. Local-path volumes offer no block device to wrap with dm-delay, so this moves to the FUSE-based test pool in §34.
+
+## 31. Partial partitions first
+
+**Findings.** Across 12 popular systems, partial network partitions, where some nodes can talk and others cannot, caused catastrophic failures including data loss. They manifested easily, often by partially partitioning **a single node** [R4].
+
+Full isolation, the fault most tools inject by default, is the *easier* case for consensus systems. It's the one they were designed for.
+
+Scale is not the obstacle: in a study of 198 production failures, almost all required three or fewer nodes to reproduce [R12]. The three-zone Kind topology is enough to find these bugs, provided the partitions are partial.
+
+**Engine changes.**
+
+1. **`NetworkGrudge`** is a new fault type. It declares an arbitrary directed "who cannot reach whom" graph over a set of Kafka nodes and peer classes. The controller compiles it into per-target nftables rules (§11.3.2), one `ChaosInjection` per affected pod.
+
+   ```yaml
+   spec:
+     type: NetworkGrudge
+     target: { role: Any, mode: All }
+     params:
+       shape: MajoritiesRing    # IsolateOne | CleanSplit | MajoritiesRing | Bridge | Custom
+       among: Controllers       # Controllers | Brokers | All
+       custom: []               # for Custom: [{from: nodeId|class, to: nodeId|class}]
+   ```
+
+   The shape names follow Jepsen's vocabulary ([R14]; `jepsen.nemesis.combined`) so results are comparable.
+2. **A canonical library of Kafka partial partitions** replaces full isolation as the default in Kates' templates:
+
+   | Template | Shape | What it exercises |
+   |---|---|---|
+   | *Broker ↛ active controller* | one broker loses only the control plane | Fencing while clients still reach the broker |
+   | *Controller majorities-ring* | each controller sees a different majority | KRaft leader election stability, epoch churn |
+   | *Leader bridge* | the leader reaches the controllers and one follower, but not the other | ISR shrink to exactly `min.insync.replicas`, follower truncation |
+   | *Client half-view* | clients reach only some brokers | Metadata refresh, `NOT_LEADER_OR_FOLLOWER` retry paths |
+   | *Operator split* | the Cluster Operator loses one broker | Operator decisions on a partial view (§36) |
+
+3. **Blast radius** (§15.4) evaluates grudges per partition. A broker is "unavailable" for a partition if it can't reach that partition's leader (as a follower) or the controller quorum (as a leader).
+
+## 32. Timing-targeted and chained faults
+
+**Findings.** Partial-failure bugs often need a subtle fault at a rare moment. Legolas [R5] instruments code to find "abstract states" and injects faults when the system enters them. Its budgeted round-robin over states found 20 new bugs with a median time of 58 minutes. CSnake [R6] shows that self-sustaining cascading failures come from **chains** of faults, where each fault's consequence triggers the next.
+
+**What an opaque-box engine can take from this.** The engine can't instrument Kafka's code, and doing so would give up the "real binaries" property. But Kafka exposes its abstract state through its protocol: leader epochs, ISR membership, controller epoch, group generation, reassignment state. Strimzi exposes the rest through Kubernetes: pod phase, roll in progress. The engine samples these at 1 s resolution, which is coarser than code hooks but enough to hit the protocol moments that matter.
+
+**Engine changes.**
+
+1. **`timing.trigger`** holds a fault in `Scheduled` until an observed transition occurs, then injects:
+
+   ```yaml
+   timing:
+     trigger:
+       on: LeaderChanged          # see table
+       args: { topic: orders, partition: 0 }
+       delay: 0s                  # after the transition is observed
+       within: 10m                # give up (Rejected: TriggerNotObserved) after this
+       maxFirings: 3              # with repeat semantics
+   ```
+
+   | Trigger | Observed via | Example experiment |
+   |---|---|---|
+   | `LeaderChanged` | Metadata leader epoch | Kill the *new* leader immediately after an election |
+   | `IsrShrunk` / `IsrExpanded` | Metadata ISR | Kill the leader the moment the ISR reaches `min.insync.replicas` |
+   | `ControllerChanged` | `DescribeQuorum` leader/epoch | Partition the new active controller during its first seconds |
+   | `GroupRebalancing` | `DescribeGroups` / `ConsumerGroupDescribe` | Kill the group coordinator mid-rebalance |
+   | `ReassignmentStarted` | `ListPartitionReassignments` | Kill a source or destination replica mid-move |
+   | `PodReady` | Pod watch | Crash a broker **during recovery**, right after it becomes Ready |
+   | `OperatorRolling` | StrimziPodSet `currentPods < pods` | Inject while Strimzi rolls the cluster |
+
+2. **Chained faults.** A Kates plan step gains `startWhen: {fault: <step>, observation: leaderMovedAt | isrShrunkAt | recoveredAt}`, so fault B starts when fault A's *effect* is observed rather than after a fixed delay. That is CSnake's causal chaining, done at the scenario level.
+3. **State coverage.** The controller records every distinct abstract-state tuple it observes during a run: (leader-epoch changes, ISR size, controller epoch, group generation, pod phase). It reports the count in `status.observations.stateCoverage`. This is the feedback signal for §35 (novelty-guided scheduling).
+
+The limit, stated plainly: 1 s sampling cannot hit windows shorter than a second. Code-level tools like Legolas remain complementary for Kafka developers. Kates targets Kafka *operators*.
+
+## 33. Metastability experiments
+
+**Findings.** A metastable failure is a self-sustaining collapse. A transient trigger, such as a load spike or a fault, pushes the system into a bad state it cannot leave even after the trigger is gone [R7], [R8]. It's a recurring cause of severe outages: at least 4 of 15 major AWS outages in a decade were metastable [R8]. Recent work builds analysis tools [R28] and formalises the phenomenon [R9]:
+
+- recovery times **surge as system parameters approach metastable regions**;
+- learned models predict metastability early (the dominant eigenvalue of a learned dynamics model gives warning from ~10 % of the trajectory) [R10];
+- new AI-SRE benchmarks include metastable scenarios because they are among the hardest to diagnose [R24].
+
+**Why this needs its own experiment shape.** Everything in Parts I–III measures *recovery while the system is healthy again*. Metastability is precisely the case where the fault is gone and the system still does not recover. It can only be observed if the experiment removes the trigger while **offered load continues unchanged**.
+
+That makes it a requirement on Kates' load generator: **metastability experiments require open-loop load** (arrivals at a fixed rate regardless of latency). A closed-loop generator slows down when the system slows down. That removes the load amplification that sustains a metastable state, and so hides the failure.
+
+**Hypotheses to test for Kafka.** These are candidate sustaining loops, not published Kafka results:
+
+| Candidate loop           | Trigger                                  | Sustaining mechanism (hypothesis)                                                                                         |
+| ------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Retry amplification      | Leader slow or paused                    | Producers time out and retry; retries add load to the recovering leader and keep it slow                                  |
+| Rebalance storm          | Coordinator restart under many consumers | Rebalances exceed timeouts and trigger further rebalances (classic protocol; KIP-848 was designed to reduce this)         |
+| Catch-up saturation      | `BrokerHoldDown` for minutes             | A returning follower's catch-up saturates the leader's disk or network, slowing produce and causing more followers to lag |
+| Request-queue saturation | Latency spike                            | Full request queues (`num.io.threads=8` on the dev cluster) cause client timeouts and retries that keep the queues full   |
+
+**Kates changes.**
+
+1. **A metastability template:**
+   1. hold baseline open-loop load `L`;
+   2. apply trigger `T` (a fault, or a load spike of ×`k`) for `d`;
+   3. remove the trigger;
+   4. observe for `W`.
+
+   The step verdict is `Metastable` if throughput or p99 does not return within `ε` of baseline inside `W` with **no intervention**.
+2. **Parameter sweeps.** Run the template over a grid of (`L`, fault intensity or `k`, `d`) and plot recovery time over the grid. The region where recovery time diverges is the finding [R9]. This reuses the seeded schedule machinery (§35) and the SLA grader.
+3. **Early-warning export** (optional, research-grade): export the per-second time series with each run so offline models [R10] can be fitted. The engine only has to keep the data.
+
+## 34. Durability and storage faults
+
+**Findings.**
+
+- **Jepsen, NATS 2.12.1 (2025)** [R11]:
+  - the default configuration acknowledged writes before fsyncing them, which let simulated power failures lose about 131,000 acknowledged messages;
+  - coordinated OS crashes of several nodes deleted whole streams;
+  - bit flips or truncation of data files on **one or two nodes out of five** cascaded into loss of hundreds of thousands of acknowledged messages;
+  - snapshot corruption on a minority caused streams to be treated as orphaned and deleted.
+- **Error handling** is where catastrophic failures hide: most come from mishandling non-fatal, explicitly signalled errors [R12].
+- **Transient cloud-service errors** from a single REST call can break application correctness. Rainmaker found 73 such bugs [R13].
+
+**Kafka relevance.** Kafka's default durability model rests on replication, not per-message fsync: acknowledged data survives because other replicas hold it, while each broker's log is flushed by the OS on its own schedule. A **coordinated** loss of un-fsynced data on every replica of a partition is outside what replication protects against. With RF 3 and rack-aware placement, that means power loss in all three zones at once.
+
+Whether and how much acknowledged data Kafka then loses is an empirical question this engine can answer. It's a documented trade-off, not a bug, but it is a number operators need.
+
+**Engine changes.** All of these are *destructive* and run only on dedicated test pools.
+
+1. **Test-pool gating.**
+   - A `KafkaNodePool` opts in with the label `chaos.kates.io/storage-faults: "true"`.
+   - `ChaosPolicy.spec.destructive: true` must also be set.
+   - The fault is refused on any other pool.
+   - The kafka-cluster chart gains an optional `chaos-storage` pool whose pod template mounts the data directory through a FUSE layer (LazyFS [R11]). That requires `/dev/fuse` and the privileges FUSE needs.
+2. **`LoseUnfsyncedWrites`.** Kill the target containers (`ContainerKill`), then drop every write that was never fsynced, through the FUSE layer. Combined with `target.mode: All` on a partition's replica set, it is a coordinated power loss. The Jepsen-style checker (§35) quantifies lost acknowledged records.
+3. **`FileCorruption`.** On a held-down broker (§11.2.6): `mode: BitFlip | Truncate`, `file: Segment | Index | TimeIndex | LeaderEpochCheckpoint | MetadataSnapshot`; then restart. It exercises CRC validation and log recovery. Following the NATS finding, it is run on a **minority** of replicas or KRaft voters by default, and the check is that the corruption **does not propagate** beyond the corrupted replicas.
+4. **`SyscallError`.** Return `EIO`, `ENOSPC` or `EDQUOT` from `write`/`fsync` on the log directory with a given probability. Two mechanisms, chosen by spike S8:
+   - the same FUSE layer (portable, test pool only);
+   - eBPF error injection via `bpf_override_return`, where the kernel is built with `CONFIG_BPF_KPROBE_OVERRIDE` and the target function allows error injection.
+
+   The kernel capabilities could not be checked while writing this section, so the capability report (§14.3) gains `errorInjection` and `fuse` flags.
+5. **`ObjectStoreFault`** for tiered storage and object-store-backed designs. The repository already ships a MinIO chart.
+   - **v1:** L4 faults (latency, loss, partition) toward a new peer class, `ObjectStore`, resolved from the tiered-storage configuration.
+   - **v2:** L7 transient errors (HTTP 503 `SlowDown`, 500, connection resets) through an agent-hosted HTTP fault proxy inside the target's netns, bound the same way as the DNS responder (§11.3.6). Only plain-HTTP in-cluster endpoints qualify, because TLS endpoints can't be intercepted without breaking TLS.
+6. **Blast radius** treats corrupted or un-fsynced-loss replicas as *lost* for the partitions they hold, not merely unavailable.
+
+## 35. Correctness oracles and reproducible schedules
+
+**Findings.**
+
+- **History checking.** Jepsen's history-based checking found torn transactions, aborted reads and lost writes in Kafka-compatible systems and in Kafka itself [R14], and durability loss in NATS [R11].
+- **Deterministic simulation.** Antithesis ran Diskless Kafka (KIP-1150) through about 2,200 logical hours of simulated faults [R15]. It asserted that "the test never hangs", that "every message written is read", and that messages are never out of order and offsets are never duplicated. It found an **upstream Kafka** bug: the first batch from an idempotent producer could be delivered out of order (KAFKA-19880). Deterministic simulation is now used for whole Kafka-compatible services [R16].
+- **Guided scheduling.** Mallory [R17] replaces Jepsen's random fault schedule with a policy guided by happens-before summaries. It explores 54.27 % more distinct states in 24 h and finds bugs 1.87× faster.
+
+**Engine and Kates changes.**
+
+1. **History-based checking** becomes a first-class output. The worker records operations with offsets and definite or indeterminate outcomes, and the checker implements the Jepsen Kafka anomaly taxonomy. This is specified separately in `specs/verification.md`. The minimum checks that must run on every chaos experiment against Kafka 4.3.1:
+   - lost and unseen writes;
+   - duplicates and inconsistent offsets;
+   - non-monotonic sends and polls (covers KAFKA-19880);
+   - aborted reads and torn transactions (does transactions v2 [R26] close KAFKA-17754 on this version?);
+   - consumer-offset behaviour after aborted transactions (KAFKA-17582).
+2. **Three assertion kinds**, after [R15]. Every check declares one:
+
+   | Kind | Meaning | Example |
+   |---|---|---|
+   | `always` | Safety: must hold at every evaluation | No offline partitions; no acknowledged record lost |
+   | `eventually` | Liveness: must hold after healing | Every acknowledged record is read in the final-read phase |
+   | `sometimes` | Reachability: must hold **at least once** | The ISR of `orders-0` reached exactly 1; the leader changed |
+
+   `sometimes` assertions prove the experiment did what it meant to. A partition that never shrank an ISR tested nothing about ISR shrink.
+3. **A new verdict, `Inconclusive`** (added to §13.2), for runs where every `always` and `eventually` assertion passed but some `sometimes` assertion never fired. Without it, a fault that silently failed to bite reads as `Pass`, which is false confidence.
+4. **Seeded, replayable, minimisable schedules.** A `ChaosSchedule` holds a seed, a menu of fault templates, pacing, and a duration. It is a Kates plan type that emits `ChaosFault`s.
+   - The *realised* schedule is recorded, so any run can be replayed exactly (modulo Kafka's own nondeterminism).
+   - When a run fails, Kates can **shrink** the recorded schedule by delta-debugging: repeatedly removing faults while the failure still reproduces, to find a minimal fault set.
+5. **Novelty-guided scheduling.** The schedule generator prefers faults that produced new abstract states (§32 (state coverage)) in earlier runs. It uses a simple ε-greedy policy first; Mallory's Q-learning [R17] is the upgrade path once state-coverage data exists.
+6. **External deterministic runs** (optional). The images Kates builds can be submitted to a deterministic-simulation service [R15] for the protocol-level checks. The in-cluster engine is not deterministic and does not try to be.
+
+## 36. Chaos for the control plane: operators and the engine itself
+
+**Findings.**
+
+- **Controller testing.** Sieve [R18] injected faults into Kubernetes controllers deterministically and found 46 serious bugs in 10 popular controllers. The bug classes include acting on stale state, missing intermediate states, and crashing between steps. Acto [R19] found 56 unknown bugs across every Kubernetes operator it evaluated, testing that operators reconcile to the desired state, recover from error states, and tolerate misoperations.
+- **Control-plane state faults.** Faults injected into etcd-held state caused cluster-wide failures in 3 % of injections, and 51 % of those came from fields tracking dependencies between objects [R20].
+- **Practice gap.** In open-source chaos engineering, 74.81 % of injected faults are network faults or instance terminations, and only 2.57 % are application-level [R21].
+
+**Consequences.** The Strimzi Cluster Operator is part of the system under test, not background. And the engine is itself a controller, subject to the same bug classes.
+
+**Engine changes.**
+
+1. **An `Operator` target class.** Selectors can target the Strimzi Cluster Operator and Entity Operator pods:
+   - kill the operator during a roll (`trigger: OperatorRolling`);
+   - partition it from the API server, so it acts on a stale view;
+   - partition it from one broker's 9091/8443, so it has a partial view of the cluster.
+
+   The checks: no restart the engine didn't cause (`externalRestarts`), no roll that breaks `min.insync.replicas`, and convergence to `Ready` after healing. These are Acto's three correctness properties applied to Strimzi.
+2. **Application-level faults are Kates' differentiator** [R21]. Kafka-protocol checks and Kafka-aware selectors already go beyond network and kill faults. The worker adds **client-side faults**:
+   - a consumer that stalls past `max.poll.interval.ms`;
+   - a producer that crashes mid-transaction;
+   - a consumer that never commits.
+3. **Sieve-style self-tests for the engine** extend §23.3:
+   - delay and reorder watch events to the controller through an API-server proxy in e2e;
+   - restart the controller at every phase boundary and every journal step.
+
+   The assertion is the §14 invariant: no fault outlives its intent.
+4. **Dependency-field robustness** [R20]. Garbage collection of `ChaosInjection` relies on `ownerReferences`. The agent's local deadline already makes revert independent of garbage collection. The `ChaosPolicy` sweep additionally reverts any injection whose owner no longer exists.
+
+## 37. AI-assisted chaos engineering
+
+**Findings.**
+
+- **Autonomous chaos engineering.** ChaosEater [R22] runs complete chaos-engineering cycles on Kubernetes with LLM agents (hypothesis, experiment, analysis, improvement) at low time and money cost.
+- **Benchmarks for AI SRE agents** now use fault injection as ground truth:
+  - AIOpsLab [R23]: 86 incident scenarios on live Kubernetes, covering detection, localisation, root cause and mitigation.
+  - SREGym [R24]: 90 problems including metastable and correlated failures. Frontier agents differ by up to 40 % across failure types.
+
+**Kates changes.**
+
+1. **A guarded agent interface.**
+   - An MCP server in Kates exposes: topology, `dry-run` (blast-radius preview), `propose` (creates a `ChaosFault` annotated `chaos.kates.io/proposed-by: agent`), `explain` (status, journal, checks), and `abort`.
+   - Agent-proposed faults stop in a new `PendingApproval` phase until a human approves, as configured by `ChaosPolicy.spec.approval.requiredFor: [agent]`.
+   - Agents never bypass safety layers 2–8 (§15). The deterministic safety model stays the authority; the agent only proposes.
+2. **Kates as a Kafka SRE-agent benchmark.** Every `ChaosFault` carries exact ground truth: targets, mechanism, `injectedAt`, `revertedAt`. A scenario pack of Kafka incidents built from the templates in §31–§34 can score an agent's detection latency, localisation accuracy and mitigation. None of the benchmarks above focuses on a stateful streaming system.
+3. **Hypothesis suggestions.** An agent may draft `ChaosFault` or plan YAML from the cluster topology. Drafts are schema-validated and dry-run before a human sees them.
+
+## 38. Kafka 4.x protocol coverage
+
+The dev cluster runs Kafka 4.3.1. These protocol changes in the 4.x line alter what faults exercise and what checks must assert:
+
+| Feature                                                             | Status (source)                                                                                              | Faults to run                                                                                               | Checks                                                                                                            |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| New consumer group protocol (KIP-848)                               | GA in 4.0 [R25]                                                                                              | Coordinator kill mid-reconciliation; coordinator partition                                                  | Group reaches `Stable`; rebalance duration; compare with the classic protocol                                     |
+| Share groups (KIP-932)                                              | Preview in 4.1; production-ready in 4.2 [R25], [R27]. Enabled on the dev cluster (`group.share.enable=true`) | Kill the share coordinator (`coordinatorOf{type: Share}`); crash a consumer while it holds acquired records | Every record acknowledged exactly once or redelivered after the acquisition lock expires; delivery counts bounded |
+| Transactions v2 (KIP-890) and stricter marker validation (KIP-1228) | v2 in 4.0 [R26]; KIP-1228 in 4.2 [R27]                                                                       | Pauses and partitions during `EndTxn` (the KAFKA-17754 scenario [R14])                                      | No torn transactions, aborted reads or lost transactional writes (§35 (history checks))                           |
+| Eligible Leader Replicas (KIP-966)                                  | Preview in 4.0 [R26]; status in 4.3.1 to be confirmed (spike S10)                                            | Leader failure while ISR < `min.insync.replicas`                                                            | Election from ELR without data loss. Blast radius must read ELR from `DescribeTopicPartitions`                    |
+| Dynamic KRaft quorum (KIP-853) and voter auto-join (KIP-1186)       | KIP-1186 in 4.2 [R27]; Strimzi support to be confirmed (spike S11)                                           | Add or remove a voter during chaos                                                                          | Quorum keeps a leader; no metadata divergence                                                                     |
+| Kafka Streams rebalance protocol (KIP-1071)                         | In 4.2 [R27]                                                                                                 | Coordinator faults with Streams workloads                                                                   | Task assignment converges                                                                                         |
+| Idempotent producer ordering (KAFKA-19880)                          | Upstream bug found by deterministic simulation [R15]                                                         | Leader faults at producer start                                                                             | No out-of-order first batch (§35 (history checks))                                                                |
+| Tiered and object-store storage (KIP-405; KIP-1150 proposal)        | [R15]                                                                                                        | `ObjectStoreFault` (§34 (`ObjectStoreFault`))                                                               | Remote reads eventually succeed; no local-log deletion before upload                                              |
 
 ---
 
 ## Appendix A — Parity matrix
 
-| `DisruptionType`    | Litmus today                               | `kubernetes` provider today | Kates engine                                     | Milestone |
-| ------------------- | ------------------------------------------ | --------------------------- | ------------------------------------------------ | --------- |
-| `POD_KILL`          | ✔ random pod unless `targetPod`            | ✔ (controller-prone, D5)    | `PodKill`, role-aware                            | M1        |
-| `POD_DELETE`        | ✔                                          | ✔                           | `PodDelete`                                      | M1        |
-| `LEADER_ELECTION`   | ✖ random pod (D3)                          | ✔ via `targetBrokerId` (D5) | `PodKill` + `leaderOf`, re-resolved at injection | M2        |
-| `ROLLING_RESTART`   | ✖ single delete (D4)                       | ✖ no-op on Strimzi (D4)     | `RollingRestart` Sequential / Strimzi            | M2        |
-| `SCALE_DOWN`        | ✖ single delete (D4)                       | ✖ no-op on Strimzi (D4)     | `BrokerHoldDown`                                 | M2        |
-| `NODE_DRAIN`        | ✔                                          | ✖                           | `NodeDrain`, PDB-aware                           | M2        |
-| `NETWORK_PARTITION` | ✔                                          | ✔ CNI-dependent             | `NetworkPartition`, peer-selective, asymmetric   | M3        |
-| `NETWORK_LATENCY`   | ✖ not installed                            | ✖                           | `NetworkLatency`, peer and port selective        | M3        |
-| `CPU_STRESS`        | ✔                                          | ✖ rejected (D6)             | `CpuStress` in the target cgroup                 | M4        |
-| `MEMORY_STRESS`     | ✔                                          | ✖                           | `MemoryStress`, page-cache aware, OOM-guarded    | M4        |
-| `IO_STRESS`         | ✔ (param mis-mapped)                       | ✖ rejected (D6)             | `IoStress` on the data volume, bounded           | M4        |
-| `DISK_FILL`         | ✖ not installed; unsafe on shared FS (D14) | ✖                           | `DiskFill` with budgets and eviction guard       | M4        |
-| `DNS_ERROR`         | ✔ (hostnames via `targetTopic`)            | ✖                           | `DnsError`, typed hostnames                      | M4        |
-| `CONTAINER_KILL`    | —                                          | —                           | `ContainerKill`                                  | M3        |
-| `PROCESS_PAUSE`     | —                                          | —                           | `ProcessPause`                                   | M3        |
-| `NETWORK_LOSS`      | —                                          | —                           | `NetworkLoss`                                    | M3        |
-| `NETWORK_BANDWIDTH` | —                                          | —                           | `NetworkBandwidth`                               | M3        |
-| `DISK_THROTTLE`     | —                                          | —                           | `DiskThrottle`                                   | M4        |
-| `ZONE_OUTAGE`       | — (D12)                                    | —                           | `ZoneOutage`                                     | M5        |
+| `DisruptionType`        | Litmus today                               | `kubernetes` provider today | Kates engine                                     | Milestone |
+| ----------------------- | ------------------------------------------ | --------------------------- | ------------------------------------------------ | --------- |
+| `POD_KILL`              | ✔ random pod unless `targetPod`            | ✔ (controller-prone, D5)    | `PodKill`, role-aware                            | M1        |
+| `POD_DELETE`            | ✔                                          | ✔                           | `PodDelete`                                      | M1        |
+| `LEADER_ELECTION`       | ✖ random pod (D3)                          | ✔ via `targetBrokerId` (D5) | `PodKill` + `leaderOf`, re-resolved at injection | M2        |
+| `ROLLING_RESTART`       | ✖ single delete (D4)                       | ✖ no-op on Strimzi (D4)     | `RollingRestart` Sequential / Strimzi            | M2        |
+| `SCALE_DOWN`            | ✖ single delete (D4)                       | ✖ no-op on Strimzi (D4)     | `BrokerHoldDown`                                 | M2        |
+| `NODE_DRAIN`            | ✔                                          | ✖                           | `NodeDrain`, PDB-aware                           | M2        |
+| `NETWORK_PARTITION`     | ✔                                          | ✔ CNI-dependent             | `NetworkPartition`, peer-selective, asymmetric   | M3        |
+| `NETWORK_LATENCY`       | ✖ not installed                            | ✖                           | `NetworkLatency`, peer and port selective        | M3        |
+| `CPU_STRESS`            | ✔                                          | ✖ rejected (D6)             | `CpuStress` in the target cgroup                 | M4        |
+| `MEMORY_STRESS`         | ✔                                          | ✖                           | `MemoryStress`, page-cache aware, OOM-guarded    | M4        |
+| `IO_STRESS`             | ✔ (param mis-mapped)                       | ✖ rejected (D6)             | `IoStress` on the data volume, bounded           | M4        |
+| `DISK_FILL`             | ✖ not installed; unsafe on shared FS (D14) | ✖                           | `DiskFill` with budgets and eviction guard       | M4        |
+| `DNS_ERROR`             | ✔ (hostnames via `targetTopic`)            | ✖                           | `DnsError`, typed hostnames                      | M4        |
+| `CONTAINER_KILL`        | —                                          | —                           | `ContainerKill`                                  | M3        |
+| `PROCESS_PAUSE`         | —                                          | —                           | `ProcessPause`                                   | M3        |
+| `NETWORK_LOSS`          | —                                          | —                           | `NetworkLoss`                                    | M3        |
+| `NETWORK_BANDWIDTH`     | —                                          | —                           | `NetworkBandwidth`                               | M3        |
+| `DISK_THROTTLE`         | —                                          | —                           | `DiskThrottle`                                   | M4        |
+| `ZONE_OUTAGE`           | — (D12)                                    | —                           | `ZoneOutage`                                     | M5        |
+| `NETWORK_GRUDGE`        | —                                          | —                           | `NetworkGrudge`                                  | M7        |
+| `LOSE_UNFSYNCED_WRITES` | —                                          | —                           | `LoseUnfsyncedWrites` (test pools)               | M7        |
+| `FILE_CORRUPTION`       | —                                          | —                           | `FileCorruption` (test pools)                    | M7        |
+| `SYSCALL_ERROR`         | —                                          | —                           | `SyscallError` (test pools)                      | M7        |
+| `OBJECT_STORE_FAULT`    | —                                          | —                           | `ObjectStoreFault`                               | M7        |
 
 ---
 
@@ -2748,3 +3122,40 @@ spec:
 | `terminationGracePeriodSeconds`                                            | 30                | 30                                                 | Controlled-shutdown budget for `PodDelete`                                                                                                |
 | `STRIMZI_FULL_RECONCILIATION_INTERVAL_MS` (operator)                       | 120000            | default                                            | When `strimzi.io/manual-rolling-update` is acted on                                                                                       |
 | PDB `krafter-kafka`                                                        | Strimzi-generated | `minAvailable: 5` of 6                             | Eviction-based faults: one Kafka pod at a time                                                                                            |
+
+---
+
+## Appendix D — References
+
+Sources for Part IV, as retrieved on 2026-09-23. Jepsen's library (`jepsen.nemesis.combined`, `jepsen.lazyfs`, `jepsen.tests.kafka`) is at https://github.com/jepsen-io/jepsen.
+
+| Ref   | Work                                                                                                                                            | Link                                                                                                                                                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [R1]  | P. Huang et al., *Gray Failure: The Achilles' Heel of Cloud-Scale Systems*, HotOS 2017                                                          | <https://www.microsoft.com/en-us/research/publication/gray-failure-achilles-heel-cloud-scale-systems/>                                                 |
+| [R2]  | H. S. Gunawi et al., *Fail-Slow at Scale: Evidence of Hardware Performance Faults in Large Production Systems*, FAST 2018                       | <https://www.usenix.org/conference/fast18/presentation/gunawi>                                                                                         |
+| [R3]  | G. Dong et al., *Understanding and Detecting Fail-Slow Hardware Failure Bugs in Cloud Systems*, USENIX ATC 2025                                 | <https://www.usenix.org/conference/atc25/presentation/dong>                                                                                            |
+| [R4]  | M. Alfatafta et al., *Toward a Generic Fault Tolerance Technique for Partial Network Partitioning*, OSDI 2020                                   | <https://www.usenix.org/conference/osdi20/presentation/alfatafta>                                                                                      |
+| [R5]  | H. Wu, J. Pan, P. Huang, *Efficient Exposure of Partial Failure Bugs in Distributed Systems with Inferred Abstract States* (Legolas), NSDI 2024 | <https://www.usenix.org/conference/nsdi24/presentation/wu-haoze>                                                                                       |
+| [R6]  | S. Qian, L. Tan, Y. Zhang, *CSnake: Detecting Self-Sustaining Cascading Failure via Causal Stitching of Fault Propagations*, EuroSys 2026       | <https://arxiv.org/abs/2509.26529>                                                                                                                     |
+| [R7]  | N. Bronson et al., *Metastable Failures in Distributed Systems*, HotOS 2021                                                                     | <https://dl.acm.org/doi/10.1145/3458336.3465286>                                                                                                       |
+| [R8]  | L. Huang et al., *Metastable Failures in the Wild*, OSDI 2022                                                                                   | <https://www.usenix.org/conference/osdi22/presentation/huang-lexiang>                                                                                  |
+| [R9]  | P. Alvaro et al., *Formal Analysis of Metastable Failures in Software Systems*, arXiv 2025                                                      | <https://arxiv.org/abs/2510.03551>                                                                                                                     |
+| [R10] | R. Majumdar et al., *Learning Metastable Dynamics*, HSCC 2026 (arXiv, September 2026)                                                           | <https://arxiv.org/abs/2609.14712>                                                                                                                     |
+| [R11] | Jepsen, *NATS 2.12.1* analysis, 2025                                                                                                            | <https://jepsen.io/analyses/nats-2.12.1>                                                                                                               |
+| [R12] | D. Yuan et al., *Simple Testing Can Prevent Most Critical Failures*, OSDI 2014                                                                  | <https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan>                                                                        |
+| [R13] | Y. Chen et al., *Push-Button Reliability Testing for Cloud-Backed Applications with Rainmaker*, NSDI 2023                                       | <https://www.usenix.org/conference/nsdi23/presentation/chen-yinfang>                                                                                   |
+| [R14] | Jepsen, *Bufstream 0.1.0* analysis, 2024                                                                                                        | <https://jepsen.io/analyses/bufstream-0.1.0>                                                                                                           |
+| [R15] | Aiven, *Deterministic Simulation Testing in Diskless Apache Kafka*                                                                              | <https://aiven.io/blog/deterministic-simulation-testing-in-diskless-apache-kafka>                                                                      |
+| [R16] | WarpStream, *Deterministic Simulation Testing for Our Entire SaaS*                                                                              | <https://www.warpstream.com/blog/deterministic-simulation-testing-for-our-entire-saas>                                                                 |
+| [R17] | R. Meng et al., *Greybox Fuzzing of Distributed Systems* (Mallory), CCS 2023                                                                    | <https://arxiv.org/abs/2305.02601>                                                                                                                     |
+| [R18] | X. Sun et al., *Automatic Reliability Testing for Cluster Management Controllers* (Sieve), OSDI 2022                                            | <https://www.usenix.org/conference/osdi22/presentation/sun>                                                                                            |
+| [R19] | J. T. Gu et al., *Acto: Automatic End-to-End Testing for Operation Correctness of Cloud System Management*, SOSP 2023                           | <https://dl.acm.org/doi/10.1145/3600006.3613161>                                                                                                       |
+| [R20] | M. Barletta et al., *Mutiny! How does Kubernetes fail, and what can we do about it?*, DSN 2024                                                  | <https://arxiv.org/abs/2404.11169>                                                                                                                     |
+| [R21] | J. Owotogbe et al., *Chaos Engineering in the Wild: Findings from GitHub*, arXiv 2025 (revised 2026)                                            | <https://arxiv.org/abs/2505.13654>                                                                                                                     |
+| [R22] | D. Kikuta et al., *ChaosEater: Fully Automating Chaos Engineering with Large Language Models*, ASE 2025 (NIER)                                  | <https://arxiv.org/abs/2501.11107>                                                                                                                     |
+| [R23] | Y. Chen et al., *AIOpsLab: A Holistic Framework to Evaluate AI Agents for Enabling Autonomous Clouds*, MLSys 2025                               | <https://proceedings.mlsys.org/paper_files/paper/2025/hash/d1f9e4a9f109b6e8b75ed362736f22ec-Abstract-Conference.html>                                  |
+| [R24] | J. Clark et al., *SREGym: A Live Benchmark for AI SRE Agents with High-Fidelity Failure Scenarios*, arXiv 2026                                  | <https://arxiv.org/abs/2605.07161>                                                                                                                     |
+| [R25] | Apache Kafka, *4.0.0 release announcement* (2025); Factor House, *Kafka 4.1 release*                                                            | <https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/>, <https://factorhouse.io/articles/kafka-4-1-release-announcement/> |
+| [R26] | Confluent, *Apache Kafka 4.0 release*                                                                                                           | <https://www.confluent.io/blog/latest-apache-kafka-release/>                                                                                           |
+| [R27] | Apache Kafka, *4.2.0 release announcement*, 2026                                                                                                | <https://kafka.apache.org/blog/2026/02/17/apache-kafka-4.2.0-release-announcement/>                                                                    |
+| [R28] | R. Isaacs et al., *Analyzing Metastable Failures*, HotOS 2025                                                                                   | <https://dl.acm.org/doi/10.1145/3713082.3730380>                                                                                                       |
