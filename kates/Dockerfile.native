@@ -59,6 +59,11 @@ RUN --mount=type=cache,target=/root/.m2 \
 #   lz4-java      net/jpountz/util/linux/aarch64/liblz4-java.so
 #   snappy-java   org/xerial/snappy/native/Linux/aarch64/libsnappyjava.so
 #
+# lz4-java is resolved from the maintained at.yawk.lz4 fork (org.lz4 is
+# abandoned; its 1.8.1 is a relocation stub with no jar). The fork keeps the
+# net/jpountz layout, but the loop below looks it up by Maven path, so the
+# coordinates there must follow the groupId in pom.xml.
+#
 # The previous version hardcoded those three paths and chained `jar xf` calls
 # with `||` fallbacks. That silently produced an image with no lz4: `jar xf`
 # EXITS 0 when the path you asked for is not in the archive and extracts
@@ -88,7 +93,7 @@ RUN --mount=type=cache,target=/root/.m2 \
   esac; \
   echo "=== Extracting compression JNI libs (arch=$ARCH, also matching $ARCH_ALT) ==="; \
   mkdir -p /build/native-libs /tmp/jni; \
-  for coords in com/github/luben/zstd-jni org/lz4/lz4-java org/xerial/snappy/snappy-java; do \
+  for coords in com/github/luben/zstd-jni at/yawk/lz4/lz4-java org/xerial/snappy/snappy-java; do \
     JAR="$(find "/root/.m2/repository/${coords}" -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' | sort -V | tail -1)"; \
     [ -n "$JAR" ] || { echo "FATAL: no jar found under ${coords} — did dependency resolution run?"; exit 1; }; \
     ( cd /tmp/jni && jar xf "$JAR" ); \
