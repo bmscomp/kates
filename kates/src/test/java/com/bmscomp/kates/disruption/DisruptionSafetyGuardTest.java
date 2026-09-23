@@ -2,7 +2,6 @@ package com.bmscomp.kates.disruption;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -224,6 +223,48 @@ class DisruptionSafetyGuardTest {
         assertTrue(guard.validatePlan(plan(1, consumers)).safe());
     }
 
+    private static FaultSpec rollingRestart(String selector, int chaosDurationSec) {
+        return FaultSpec.builder("roll")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.ROLLING_RESTART)
+                .chaosDurationSec(chaosDurationSec)
+                .build();
+    }
+
+    @Test
+    void rollingRestartCountsOneBrokerAtATime() {
+        createZonedBrokers();
+
+        // The built-in playbook: every broker, maxAffectedBrokers 1.
+        var result = guard.validatePlan(plan(1, rollingRestart("strimzi.io/component-type=kafka", 600)));
+
+        assertTrue(result.safe(), result.errors().toString());
+    }
+
+    @Test
+    void dryRunListsEveryBrokerARollingRestartRestarts() {
+        createZonedBrokers();
+
+        var all = guard.dryRun(plan(1, rollingRestart("strimzi.io/component-type=kafka", 600)))
+                .steps()
+                .getFirst();
+        // Used to list one broker (the random or broker-id pick) and then
+        // every broker again, whatever the selector.
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-brokers-2", "krafter-brokers-3"),
+                all.affectedPods().stream().sorted().toList());
+        assertTrue(all.warnings().isEmpty(), all.warnings().toString());
+
+        var zone =
+                guard.dryRun(plan(1, rollingRestart("zone=alpha", 0))).steps().getFirst();
+        assertEquals(
+                List.of("krafter-brokers-0", "krafter-brokers-1"),
+                zone.affectedPods().stream().sorted().toList());
+        assertTrue(
+                zone.warnings().getFirst().contains("does not wait"),
+                zone.warnings().toString());
+    }
+
     @Test
     void dryRunListsTheZoneAndFlagsASelectorThatHitsNoBroker() {
         createZonedBrokers();
@@ -333,9 +374,8 @@ class DisruptionSafetyGuardTest {
         assertEquals(3, cluster.replicas("brokers"), "a pool without a snapshot is left alone");
     }
 
-    @Test
-    void rbacCheckAsksToPatchTheKafkaNodePool() throws InterruptedException {
-        strimzi();
+    /** Answers every access review with allowed, and returns what each one asked. */
+    private List<ResourceAttributes> accessReviews(FaultSpec spec) throws InterruptedException {
         server.expect()
                 .post()
                 .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
@@ -346,24 +386,65 @@ class DisruptionSafetyGuardTest {
                                 .withAllowed(true)
                                 .endStatus()
                                 .build())
-                .once();
+                .always();
 
-        assertTrue(guard.checkRbacPermissions(scaleDown("strimzi.io/pool-name=brokers")));
+        assertTrue(guard.checkRbacPermissions(spec));
 
-        ResourceAttributes asked = null;
-        for (int i = server.getRequestCount(); i > 0 && asked == null; i--) {
+        List<ResourceAttributes> asked = new java.util.ArrayList<>();
+        for (int i = server.getRequestCount(); i > 0; i--) {
             var request = server.takeRequest();
             if (request.getPath().endsWith("/selfsubjectaccessreviews")) {
-                asked = client.getKubernetesSerialization()
+                asked.add(client.getKubernetesSerialization()
                         .unmarshal(request.getUtf8Body(), SelfSubjectAccessReview.class)
                         .getSpec()
-                        .getResourceAttributes();
+                        .getResourceAttributes());
             }
         }
-        assertNotNull(asked, "no access review sent");
-        assertEquals("patch", asked.getVerb());
-        assertEquals("kafka.strimzi.io", asked.getGroup());
-        assertEquals("kafkanodepools", asked.getResource());
+        return asked;
+    }
+
+    private static String review(ResourceAttributes a) {
+        return a.getVerb() + " " + a.getGroup() + "/" + a.getResource()
+                + (a.getSubresource() != null ? "/" + a.getSubresource() : "");
+    }
+
+    @Test
+    void rbacCheckAsksToPatchTheKafkaNodePool() throws InterruptedException {
+        strimzi();
+
+        List<ResourceAttributes> asked = accessReviews(scaleDown("strimzi.io/pool-name=brokers"));
+
+        // Used to ask about updating StatefulSets, which Strimzi does not create.
+        assertEquals(
+                List.of("patch kafka.strimzi.io/kafkanodepools"),
+                asked.stream().map(DisruptionSafetyGuardTest::review).toList());
+        assertEquals("kafka", asked.getFirst().getNamespace());
+    }
+
+    @Test
+    void rbacCheckOnAStatefulSetAsksToPatchItAndSetItsScale() throws InterruptedException {
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("kafka-0")
+                        .withNamespace("kafka")
+                        .addToLabels("app", "kafka")
+                        .addNewOwnerReference()
+                        .withApiVersion("apps/v1")
+                        .withKind("StatefulSet")
+                        .withName("kafka")
+                        .withUid("sts-uid")
+                        .endOwnerReference()
+                        .endMetadata()
+                        .build())
+                .create();
+
+        List<ResourceAttributes> asked = accessReviews(scaleDown("app=kafka"));
+
+        assertEquals(
+                List.of("patch apps/statefulsets", "update apps/statefulsets/scale"),
+                asked.stream().map(DisruptionSafetyGuardTest::review).toList());
     }
 
     @Test

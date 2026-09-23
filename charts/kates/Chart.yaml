@@ -2,9 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: the ClusterRole may patch KafkaNodePools, which SCALE_DOWN needs to
-# remove a broker on Strimzi. Defaults are unchanged.
-version: 0.9.3
+# Patch: the default ClusterRole may patch KafkaNodePools. SCALE_DOWN lowers a
+# node pool's replicas on either chaos backend, so the permission cannot wait
+# for rbac.directChaos. Other defaults are unchanged.
+version: 0.10.2
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -29,7 +30,13 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: changed
-      description: "The ClusterRole grants patch on kafkanodepools. SCALE_DOWN now removes a broker by lowering spec.replicas of its KafkaNodePool, and rollback and orphan recovery put the count back; it used to scale StatefulSets, which Strimzi does not create, so it removed nothing and its rollback restored nothing"
+      description: "The default ClusterRole grants patch on kafkanodepools. SCALE_DOWN now removes a broker by lowering spec.replicas of its KafkaNodePool, and rollback and orphan recovery put the count back; it used to scale StatefulSets, which Strimzi does not create, so it removed nothing and its rollback restored nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus pod-delete only kills a pod its StrimziPodSet recreates), so the rule is not behind rbac.directChaos"
+    - kind: changed
+      description: "The default ClusterRole grants patch on pods. ROLLING_RESTART now annotates each Kafka pod it restarts with strimzi.io/manual-rolling-update and lets the Strimzi Cluster Operator roll them; it used to restart StatefulSets, which Strimzi does not create, so it restarted nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus has no rolling restart experiment), so the rule is not behind rbac.directChaos"
+    - kind: added
+      description: "rbac.directChaos (default false) grants the writes the direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or hybrid without Litmus) makes itself: create, delete and deletecollection on networkpolicies; patch on statefulsets; get and update on statefulsets/scale; update on pods/ephemeralcontainers. The ClusterRole granted only get and list on NetworkPolicies and StatefulSets, and nothing on ephemeral containers, so every NETWORK_PARTITION, SCALE_DOWN, ROLLING_RESTART, CPU_STRESS and IO_STRESS on that backend was refused, along with its cleanup, rollback and startup orphan recovery. Litmus runs its experiments as litmus-admin and needs none of this, so the default ClusterRole is unchanged"
+    - kind: fixed
+      description: "CPU_STRESS and IO_STRESS on the direct backend replaced the whole pod to add their ephemeral container, which the API server rejects; they now write through the pods/ephemeralcontainers subresource. That takes an image newer than 1.23.0: on 1.23.0 the two faults fail even with rbac.directChaos=true"
     - kind: changed
       description: "appVersion 1.23.0. The image publishes the Agroal pool meters (quarkus.datasource.metrics.enabled) and the HTTP latency histogram buckets (HttpLatencyHistogram) that Kates — Application Health and KATES — Overview read, and counts a task's failure on the poll that sees it, so kates_benchmark_errors_total moves during a run. A 1.22.0 image publishes none of that, and the pool row and the latency percentiles are empty on it"
     - kind: fixed
