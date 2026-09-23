@@ -41,7 +41,8 @@ class DisruptionSafetyGuardRbacTest {
     @ParameterizedTest
     @CsvSource({
         "NETWORK_PARTITION, create, networking.k8s.io, networkpolicies",
-        "SCALE_DOWN,        patch,  apps,              statefulsets",
+        // SCALE_DOWN asks about the node pools or StatefulSets its selector
+        // reaches, so DisruptionSafetyGuardTest covers it with pods to resolve.
         // Annotates the pods for the Strimzi Cluster Operator; no group is the core group.
         "ROLLING_RESTART,   patch,  ,                  pods",
     })

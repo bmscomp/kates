@@ -2,10 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: the default ClusterRole may patch StatefulSets. ROLLING_RESTART
-# restarts one that Strimzi does not manage on either chaos backend, so the
-# permission cannot wait for rbac.directChaos. Other defaults are unchanged.
-version: 0.10.2
+# Patch: the default ClusterRole may patch KafkaNodePools. SCALE_DOWN lowers a
+# node pool's replicas on either chaos backend, so the permission cannot wait
+# for rbac.directChaos. Other defaults are unchanged.
+version: 0.10.3
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -29,6 +29,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The default ClusterRole grants patch on kafkanodepools. SCALE_DOWN now removes a broker by lowering spec.replicas of its KafkaNodePool, and rollback and orphan recovery put the count back; it used to scale StatefulSets, which Strimzi does not create, so it removed nothing and its rollback restored nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus pod-delete only kills a pod its StrimziPodSet recreates), so the rule is not behind rbac.directChaos"
     - kind: fixed
       description: "The default ClusterRole grants patch on statefulsets, which only rbac.directChaos granted before. ROLLING_RESTART on a StatefulSet that Strimzi does not manage (charts/legacy-kafka runs Kafka and ZooKeeper that way) restarts the StatefulSet with the Kates service account on both chaos backends, like the pod annotation below, so on a default install that restart was refused. rbac.directChaos no longer carries the rule; SCALE_DOWN, which also patches the StatefulSet, is covered by the default one"
     - kind: changed

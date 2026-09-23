@@ -12,6 +12,9 @@ import java.util.List;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
+import io.fabric8.kubernetes.api.model.authorization.v1.ResourceAttributes;
+import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReview;
+import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
+import com.bmscomp.kates.chaos.StrimziTestCluster;
 import com.bmscomp.kates.domain.SlaDefinition;
 
 /**
@@ -283,6 +287,166 @@ class DisruptionSafetyGuardTest {
         assertTrue(
                 oldStep.warnings().getFirst().contains("matches no broker pod"),
                 oldStep.warnings().toString());
+    }
+
+    // ── SCALE_DOWN on Strimzi ───────────────────────────────────────────────
+
+    private StrimziTestCluster strimzi() {
+        return new StrimziTestCluster(server, client)
+                .pool("controllers", "controller", 0, 1, 2)
+                .pool("brokers", "broker", 3, 4, 5)
+                .pool("brokers-sigma", "broker", 6);
+    }
+
+    private static FaultSpec scaleDown(String selector) {
+        return FaultSpec.builder("scale-down")
+                .targetLabel(selector)
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .chaosDurationSec(300)
+                .build();
+    }
+
+    @Test
+    void dryRunNamesTheBrokerEachNodePoolLoses() {
+        strimzi();
+
+        var step = guard.dryRun(plan(-1, scaleDown("strimzi.io/component-type=kafka")))
+                .steps()
+                .getFirst();
+
+        // Used to list every Kafka pod, controllers included, for any SCALE_DOWN.
+        assertEquals(List.of("krafter-brokers-5", "krafter-brokers-sigma-6"), step.affectedPods());
+        assertTrue(
+                step.warnings().stream().anyMatch(w -> w.contains("controllers runs KRaft controllers")),
+                step.warnings().toString());
+    }
+
+    @Test
+    void validatePlanCountsOneBrokerPerNodePool() {
+        strimzi();
+
+        var result = guard.validatePlan(plan(1, scaleDown("strimzi.io/broker-role=true")));
+
+        assertFalse(result.safe());
+        assertEquals(List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"), result.errors());
+        assertTrue(guard.validatePlan(plan(1, scaleDown("strimzi.io/pool-name=brokers")))
+                .safe());
+    }
+
+    @Test
+    void dryRunWarnsThatTargetPodOnlyPicksTheNodePool() {
+        strimzi();
+        FaultSpec spec = scaleDown("strimzi.io/component-type=kafka").toBuilder()
+                .targetPod("krafter-brokers-3")
+                .build();
+
+        var step = guard.dryRun(plan(-1, spec)).steps().getFirst();
+
+        assertEquals(List.of("krafter-brokers-5"), step.affectedPods());
+        assertTrue(
+                step.warnings().stream().anyMatch(w -> w.contains("not krafter-brokers-3")),
+                step.warnings().toString());
+    }
+
+    @Test
+    void dryRunWarnsThatANodePoolScaleDownWithoutABudgetDoesNotWait() {
+        strimzi();
+        FaultSpec spec = scaleDown("strimzi.io/pool-name=brokers").toBuilder()
+                .chaosDurationSec(0)
+                .build();
+
+        var step = guard.dryRun(plan(-1, spec)).steps().getFirst();
+
+        assertTrue(
+                step.warnings().stream().anyMatch(w -> w.startsWith("chaosDurationSec is 0")),
+                step.warnings().toString());
+    }
+
+    @Test
+    void restoreGivesANodePoolScaledToZeroItsReplicasBack() {
+        StrimziTestCluster cluster = strimzi();
+        // brokers-sigma after a SCALE_DOWN from 1 to 0: no pod left for any
+        // selector to find it by.
+        cluster.scaledDown("brokers-sigma", 0);
+
+        guard.restoreReplicaCount(scaleDown("strimzi.io/pool-name=brokers-sigma"));
+
+        assertEquals(1, cluster.replicas("brokers-sigma"));
+        assertTrue(cluster.annotations("brokers-sigma").isEmpty(), "snapshot cleared");
+        assertEquals(3, cluster.replicas("brokers"), "a pool without a snapshot is left alone");
+    }
+
+    /** Answers every access review with allowed, and returns what each one asked. */
+    private List<ResourceAttributes> accessReviews(FaultSpec spec) throws InterruptedException {
+        server.expect()
+                .post()
+                .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
+                .andReturn(
+                        201,
+                        new SelfSubjectAccessReviewBuilder()
+                                .withNewStatus()
+                                .withAllowed(true)
+                                .endStatus()
+                                .build())
+                .always();
+
+        assertTrue(guard.checkRbacPermissions(spec));
+
+        List<ResourceAttributes> asked = new java.util.ArrayList<>();
+        for (int i = server.getRequestCount(); i > 0; i--) {
+            var request = server.takeRequest();
+            if (request.getPath().endsWith("/selfsubjectaccessreviews")) {
+                asked.add(client.getKubernetesSerialization()
+                        .unmarshal(request.getUtf8Body(), SelfSubjectAccessReview.class)
+                        .getSpec()
+                        .getResourceAttributes());
+            }
+        }
+        return asked;
+    }
+
+    private static String review(ResourceAttributes a) {
+        return a.getVerb() + " " + a.getGroup() + "/" + a.getResource()
+                + (a.getSubresource() != null ? "/" + a.getSubresource() : "");
+    }
+
+    @Test
+    void rbacCheckAsksToPatchTheKafkaNodePool() throws InterruptedException {
+        strimzi();
+
+        List<ResourceAttributes> asked = accessReviews(scaleDown("strimzi.io/pool-name=brokers"));
+
+        // Used to ask about updating StatefulSets, which Strimzi does not create.
+        assertEquals(
+                List.of("patch kafka.strimzi.io/kafkanodepools"),
+                asked.stream().map(DisruptionSafetyGuardTest::review).toList());
+        assertEquals("kafka", asked.getFirst().getNamespace());
+    }
+
+    @Test
+    void rbacCheckOnAStatefulSetAsksToPatchItAndSetItsScale() throws InterruptedException {
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("kafka-0")
+                        .withNamespace("kafka")
+                        .addToLabels("app", "kafka")
+                        .addNewOwnerReference()
+                        .withApiVersion("apps/v1")
+                        .withKind("StatefulSet")
+                        .withName("kafka")
+                        .withUid("sts-uid")
+                        .endOwnerReference()
+                        .endMetadata()
+                        .build())
+                .create();
+
+        List<ResourceAttributes> asked = accessReviews(scaleDown("app=kafka"));
+
+        assertEquals(
+                List.of("patch apps/statefulsets", "update apps/statefulsets/scale"),
+                asked.stream().map(DisruptionSafetyGuardTest::review).toList());
     }
 
     // ── Leader-aware steps ──────────────────────────────────────────────────

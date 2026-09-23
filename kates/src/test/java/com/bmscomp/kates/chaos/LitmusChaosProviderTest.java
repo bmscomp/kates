@@ -151,6 +151,30 @@ class LitmusChaosProviderTest {
     }
 
     @Test
+    void scaleDownLowersTheNodePoolInsteadOfDeletingAPod() throws Exception {
+        // Used to run pod-delete with FORCE=true: one pod killed, and brought
+        // straight back by its StrimziPodSet.
+        StrimziTestCluster cluster = new StrimziTestCluster(server, client)
+                .pool("controllers", "controller", 0, 1, 2)
+                .pool("brokers", "broker", 3, 4, 5);
+        FaultSpec spec = FaultSpec.builder("scale-down")
+                .targetLabel("strimzi.io/pool-name=brokers")
+                .disruptionType(DisruptionType.SCALE_DOWN)
+                .chaosDurationSec(0)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(2, cluster.replicas("brokers"));
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
+    }
+
+    @Test
     void nodeDrainTakesNoTargetPods() {
         FaultSpec spec = FaultSpec.builder("drain")
                 .disruptionType(DisruptionType.NODE_DRAIN)

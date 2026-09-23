@@ -78,10 +78,10 @@ With the default chaos provider, `litmus-crd`, Kates only creates and watches `C
 | Resource | Verbs | Used by |
 |----------|-------|---------|
 | `networking.k8s.io` `networkpolicies` | `create`, `delete`, `deletecollection` | `NETWORK_PARTITION` creates a deny-all policy; cleanup and rollback delete by label, startup orphan recovery by name |
-| `apps` `statefulsets/scale` | `get`, `update` | `SCALE_DOWN`, its rollback and orphan recovery set replicas |
+| `apps` `statefulsets/scale` | `get`, `update` | On a Kafka that Strimzi does not manage: `SCALE_DOWN`, its rollback and orphan recovery set replicas |
 | `pods/ephemeralcontainers` | `update` | `CPU_STRESS` and `IO_STRESS` add a stress container to the target pod |
 
-`ROLLING_RESTART` needs none of these, on either backend. On a Strimzi cluster it annotates the Kafka pods for the Strimzi Cluster Operator to roll, and on a plain StatefulSet, such as `charts/legacy-kafka`, it restarts the StatefulSet. So the default role grants `patch` on pods and on StatefulSets. `SCALE_DOWN` also patches the StatefulSet, to record its original replica count.
+`ROLLING_RESTART` needs none of these, on either backend, and neither does `SCALE_DOWN` on a Strimzi cluster. On a Strimzi cluster `ROLLING_RESTART` annotates the Kafka pods for the Strimzi Cluster Operator to roll, and on a plain StatefulSet, such as `charts/legacy-kafka`, it restarts the StatefulSet. `SCALE_DOWN` lowers `spec.replicas` of a KafkaNodePool. Both run on either backend, so the default role grants `patch` on pods, on StatefulSets and on `kafkanodepools`. On a Kafka that Strimzi does not manage, `SCALE_DOWN` also patches the StatefulSet, to record its original replica count.
 
 These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with an environment variable:
 

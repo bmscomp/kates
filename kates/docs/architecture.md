@@ -274,7 +274,7 @@ For each `DisruptionStep` in the plan, the `DisruptionOrchestrator` executes the
 
 **11. ISR and Lag Metric Aggregation** — The ISR tracker computes time-to-full-ISR (how long it took for all partitions to return to their full replica count). The lag tracker computes time-to-lag-recovery (how long it took for consumer lag to return to baseline).
 
-**12. Auto-Rollback** — If the step failed and `autoRollback` is enabled, the `DisruptionSafetyGuard` automatically reverses the fault. For `SCALE_DOWN` faults, it restores the deployment's replica count. For other faults, it relies on the chaos provider's cleanup mechanism.
+**12. Auto-Rollback** — If the step failed and `autoRollback` is enabled, the `DisruptionSafetyGuard` automatically reverses the fault. For `SCALE_DOWN` faults, it restores the replica count recorded on each scaled-down KafkaNodePool or StatefulSet. For other faults, it relies on the chaos provider's cleanup mechanism.
 
 **13. Step Report** — All of this data is packaged into a `StepReport` record: the chaos outcome, pod timeline, recovery durations, pre/post metrics, impact deltas, ISR metrics, lag metrics, and rollback status.
 

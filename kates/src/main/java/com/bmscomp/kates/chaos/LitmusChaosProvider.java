@@ -34,8 +34,7 @@ public class LitmusChaosProvider implements ChaosProvider {
             Map.entry(DisruptionType.NETWORK_LATENCY, "pod-network-latency"),
             Map.entry(DisruptionType.NODE_DRAIN, "node-drain"),
             // Leader election is triggered by deleting the current partition leader pod
-            Map.entry(DisruptionType.LEADER_ELECTION, "pod-delete"),
-            Map.entry(DisruptionType.SCALE_DOWN, "pod-delete"));
+            Map.entry(DisruptionType.LEADER_ELECTION, "pod-delete"));
 
     @Inject
     KubernetesClient client;
@@ -55,9 +54,11 @@ public class LitmusChaosProvider implements ChaosProvider {
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
         // No Litmus experiment does a rolling restart (pod-delete kills pods
-        // without waiting for them to come back), so it goes through the
+        // without waiting for them to come back) or removes a broker (its
+        // StrimziPodSet recreates a deleted pod at once). Both go through the
         // Strimzi Cluster Operator on the Kubernetes API whichever backend runs.
-        if (spec.disruptionType() == DisruptionType.ROLLING_RESTART) {
+        if (spec.disruptionType() == DisruptionType.ROLLING_RESTART
+                || spec.disruptionType() == DisruptionType.SCALE_DOWN) {
             return kubernetes.triggerFault(spec);
         }
 
@@ -259,7 +260,7 @@ public class LitmusChaosProvider implements ChaosProvider {
                 // Setting FORCE=true performs an immediate delete (skip graceful termination)
                 // and SEQUENCE=serial avoids the parallel-mode workload-based pod status check
                 // that triggers the StrimziPodSet lookup failure.
-                case POD_KILL, POD_DELETE, LEADER_ELECTION, SCALE_DOWN -> {
+                case POD_KILL, POD_DELETE, LEADER_ELECTION -> {
                     envVars.add(new ChaosEngineSpec.EnvVar("FORCE", "true"));
                     envVars.add(new ChaosEngineSpec.EnvVar("SEQUENCE", "serial"));
                 }
