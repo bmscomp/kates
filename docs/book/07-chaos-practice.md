@@ -137,7 +137,7 @@ Kates ships with a set of built-in playbooks located in `kates/src/main/resource
 
 ### leader-cascade
 
-Kills partition leaders sequentially to test cascading election recovery. This is the most common chaos test — it validates that your cluster can handle back-to-back leader elections without data loss.
+Kills partition leaders sequentially to test cascading election recovery. This is the most common chaos test — it validates that your cluster can handle back-to-back leader elections without data loss. Each step looks up the current leader of a `__consumer_offsets` partition when it starts and kills that broker's pod.
 
 ```mermaid
 sequenceDiagram
@@ -146,14 +146,14 @@ sequenceDiagram
     participant Broker1 as Broker 1 (Leader P1)
     participant Cluster
     
+    Kates->>Kates: Wait 30s steady state
     Kates->>Broker0: POD_KILL (step 1)
     Note over Cluster: Leader election for P0
-    Kates->>Kates: Wait 30s steady state
     Kates->>Kates: Observe 60s recovery window
     
-    Kates->>Broker1: POD_KILL (step 2)
-    Note over Cluster: Leader election for P1<br/>(while P0 still recovering)
     Kates->>Kates: Wait 15s steady state
+    Kates->>Broker1: POD_KILL (step 2)
+    Note over Cluster: Leader election for P1<br/>(Broker 0 may still be catching up)
     Kates->>Kates: Observe 60s recovery window
 ```
 
@@ -191,21 +191,21 @@ steps:
 
 ### split-brain
 
-Isolates a broker via network partition to test cluster consensus under split-brain conditions. Uses LitmusChaos `NETWORK_PARTITION` to completely block traffic between the targeted broker and all other cluster members.
+Isolates node 0 via network partition to test cluster consensus under split-brain conditions. For 60 seconds, all traffic between it and the other cluster members is blocked — by a deny-all NetworkPolicy on the pod with the direct Kubernetes backend, or by the Litmus `pod-network-partition` experiment. The playbook does not look up the active controller: `targetBrokerId: 0` picks the pod whose name ends in `-0`, which is the active controller only if node 0 leads the metadata quorum at the time.
 
 ```mermaid
 graph LR
     subgraph Majority["Quorum Majority"]
-        B0[Broker 0]
         B1[Broker 1]
-    end
-    
-    subgraph Isolated["Isolated"]
         B2[Broker 2]
     end
     
-    B0 ---|"Normal<br/>communication"| B1
-    B2 -.-|"NETWORK_PARTITION<br/>❌ blocked"| Majority
+    subgraph Isolated["Isolated"]
+        B0[Broker 0]
+    end
+    
+    B1 ---|"Normal<br/>communication"| B2
+    B0 -.-|"NETWORK_PARTITION<br/>❌ blocked"| Majority
 ```
 
 ```yaml
@@ -276,7 +276,7 @@ steps:
 
 Tests the Strimzi rolling update procedure, the one an upgrade or a configuration change goes through. Strimzi runs Kafka pods from StrimziPodSets, not StatefulSets, so Kates does not restart the pods itself: it annotates every pod the selector matches with `strimzi.io/manual-rolling-update=true`, and the Cluster Operator rolls them at its next reconciliation, every two minutes by default. The operator restarts one pod at a time, waits for it to be ready before the next, and holds back any pod whose restart would leave a partition under `min.insync.replicas`.
 
-The step then waits for the roll to finish: every annotated pod replaced by a new one that is ready. `chaosDurationSec` is the budget for that wait, covering the wait for the next reconciliation as well as the restarts. It is not a fault duration, and the step returns as soon as the roll is done, so the observation window starts after the last restart. If the budget runs out, the step fails and Kates removes the annotation from the pods not yet rolled, so the operator does not restart them later, in the middle of another step. `gracePeriodSec` plays no part: each broker gets its node pool's `terminationGracePeriodSeconds`, 30 seconds by default. `maxAffectedBrokers: 1` holds because the safety guard counts a rolling restart as one broker, and `autoRollback` is `false` because there is nothing to undo.
+The step then waits for the roll to finish: every annotated pod replaced by a new one that is ready. `chaosDurationSec` is the budget for that wait, covering the wait for the next reconciliation as well as the restarts. It is not a fault duration, and the step returns as soon as the roll is done, so the observation window starts after the last restart. If the budget runs out, the step fails and Kates removes the annotation from the pods not yet rolled, so the operator does not restart them later, in the middle of another step. `gracePeriodSec` plays no part: each broker gets its node pool's `terminationGracePeriodSeconds`, 30 seconds by default. `maxAffectedBrokers: 1` holds because the safety guard counts a rolling restart as one broker, and `autoRollback` is `false` because there is nothing to undo. Kates does not grade client errors during the roll: the playbook sets no SLA, and a plan's `sla` cannot check `maxErrorRate` (see [SLA Grading](#sla-grading)).
 
 ```yaml
 name: rolling-restart
@@ -300,7 +300,7 @@ A pod run by a StatefulSet, as in a Kafka that Strimzi does not manage, is rolle
 
 ### consumer-isolation
 
-Isolates consumer pods from Kafka brokers via network partition to test consumer group rebalancing behavior. Note that `maxAffectedBrokers: -1` because this playbook targets consumers, not brokers — the `-1` disables the broker safety check.
+Isolates consumer pods from Kafka brokers via network partition to test consumer group rebalancing behavior. It targets pods labelled `app=kafka-consumer` in the `kates` namespace, which Kates does not deploy — label your own consumer that way. Note that `maxAffectedBrokers: -1` because this playbook targets consumers, not brokers: the safety guard enforces the cap only when it is greater than zero, so `-1` (like `0`) switches it off. The guard's other checks still apply.
 
 ```yaml
 name: consumer-isolation
@@ -354,7 +354,7 @@ All playbooks share this structure:
 | `name` | String | Playbook identifier |
 | `description` | String | Human-readable purpose |
 | `category` | String | Classification: `kafka`, `network`, `infrastructure`, `operations`, `storage` |
-| `maxAffectedBrokers` | Integer | Safety limit (-1 = no limit, used for non-broker targets) |
+| `maxAffectedBrokers` | Integer | Safety limit, enforced only when > 0 (default -1; -1 or 0 = no limit, used for non-broker targets) |
 | `autoRollback` | Boolean | Whether to auto-restore on health degradation |
 | `isrTrackingTopic` | String | Topic to monitor for ISR health (optional) |
 | `steps` | List | Ordered list of fault injection steps |
@@ -368,6 +368,8 @@ Each step contains:
 | `steadyStateSec` | Integer | Seconds of steady-state collection before fault |
 | `observationWindowSec` | Integer | Seconds to observe after fault injection |
 | `requireRecovery` | Boolean | Whether to wait for cluster recovery before next step |
+
+These are the only keys the loader accepts, along with the `faultSpec` fields the playbooks above use; any other key, such as an `sla` block, makes the file fail to load, and Kates leaves it out of the catalog. SLA thresholds and consumer-lag tracking (`lagTrackingGroupId`) need a plan posted to `POST /api/disruptions`. The catalog also loads only the playbooks named in the `PLAYBOOK_NAMES` array of `DisruptionPlaybookCatalog`, so a new playbook file needs its name added there and a rebuild of Kates.
 
 ## Safety Guardrails
 
@@ -444,7 +446,7 @@ For consumer-facing tests, Kates tracks consumer group lag:
 
 ## SLA Grading
 
-Every disruption report includes an **SLA grade** — a structured verdict on whether the cluster met its resilience targets. The thresholds are not built in: you define them in the plan's `sla` block (an `SlaDefinition`), and the `SlaGrader` checks each step's post-disruption metrics against them. A plan with no SLA constraints grades `A` with zero checks.
+A disruption report includes an **SLA grade** — a structured verdict on whether the cluster met its resilience targets — when its plan defines those targets. The thresholds are not built in: you define them in the plan's `sla` block (an `SlaDefinition`), and the `SlaGrader` checks each step's post-disruption metrics against them. A plan with no SLA constraints gets no grade, and neither does a built-in playbook, which cannot carry an `sla` block.
 
 ```mermaid
 graph TD
